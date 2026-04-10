@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+.turbo/
+.next/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+
+# mobile / expo
+.expo/
+web-build/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# misc
+.DS_Store
+*.log
+
+# IDE
+.idea/
+.vscode/*.log
