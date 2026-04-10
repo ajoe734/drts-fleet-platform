@@ -1,0 +1,2 @@
+plate_no,partner_code,partner_type,contract_type,operating_area_code,service_scope,start_at,end_at,status
+ABC-1234,PARTNER_JOHN_OWNER,individual_owner,dispatch_delegate,TAIPEI_CITY,standard_taxi,2025-01-01T00:00:00+08:00,2025-12-31T23:59:59+08:00,active

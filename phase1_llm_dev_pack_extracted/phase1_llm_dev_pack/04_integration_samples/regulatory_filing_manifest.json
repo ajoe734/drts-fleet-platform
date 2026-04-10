@@ -1,0 +1,37 @@
+{
+  "package_id": "PKG-202605-0001",
+  "package_type": "monthly_report",
+  "generated_at": "2026-05-01T03:10:00Z",
+  "items": [
+    {
+      "name": "vehicle_roster.csv",
+      "sha256": "abc123",
+      "rows": 150
+    },
+    {
+      "name": "driver_roster.csv",
+      "sha256": "def456",
+      "rows": 180
+    },
+    {
+      "name": "contract_roster.csv",
+      "sha256": "ghi789",
+      "rows": 155
+    },
+    {
+      "name": "insurance_roster.csv",
+      "sha256": "jkl012",
+      "rows": 150
+    },
+    {
+      "name": "dispatch_statistics.csv",
+      "sha256": "mno345",
+      "rows": 1
+    },
+    {
+      "name": "complaint_statistics.csv",
+      "sha256": "pqr678",
+      "rows": 1
+    }
+  ]
+}

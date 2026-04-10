@@ -1,0 +1,18 @@
+{
+  "platform": "partner_a",
+  "external_order_id": "PA-778811",
+  "service_code": "taxi_standard",
+  "pickup": {
+    "lat": 24.264,
+    "lng": 120.525,
+    "address": "台中市梧棲區中二路一段9號"
+  },
+  "dropoff": {
+    "lat": 24.347,
+    "lng": 120.586,
+    "address": "台中市大安區興安路378號"
+  },
+  "accept_timeout_sec": 15,
+  "estimated_fare_minor": 135000,
+  "passenger_alias": "PAX-0021"
+}

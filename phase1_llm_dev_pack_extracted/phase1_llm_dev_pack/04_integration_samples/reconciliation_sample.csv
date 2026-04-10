@@ -1,0 +1,3 @@
+external_order_id,platform,result,completed_at,reported_fare_minor,local_mirror_status
+PA-778811,partner_a,completed,2026-04-10T09:42:00Z,135000,completed_synced
+PA-778812,partner_a,lost_race,2026-04-10T09:03:05Z,0,lost_race

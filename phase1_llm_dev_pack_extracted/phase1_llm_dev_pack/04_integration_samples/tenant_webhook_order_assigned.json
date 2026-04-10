@@ -1,0 +1,13 @@
+{
+  "event": "order.assigned",
+  "delivery_id": "WD-20260410-0001",
+  "occurred_at": "2026-04-10T09:04:00Z",
+  "tenant_id": "0f2a1cc5-bdca-4681-b9b6-5e93fe4d83fa",
+  "data": {
+    "order_id": "cc0af2b6-c038-4d61-8f4f-ae0fd41381e1",
+    "order_no": "O-20260410-000001",
+    "vehicle_id": "d04d7368-df30-4c1c-a0e8-f69aa18a92f3",
+    "driver_alias": "DRV-001",
+    "eta_minutes": 6
+  }
+}

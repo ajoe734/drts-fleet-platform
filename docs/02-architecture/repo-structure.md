@@ -9,6 +9,9 @@ This repository uses a `pnpm` workspace with `turborepo`.
 - `docs/`: project context, architecture notes, and runbooks
 - `infra/`: development infrastructure and GitHub-oriented placeholders
 - `scripts/`: local automation entrypoints
+- root Phase 1 reference files: SA, PRD, service contracts, migration plan, OpenAPI
+- root architecture and planning docs: canonical map, target architecture, roadmap, work breakdown
+- extracted Phase 1 reference bundles: `phase1_db_migration_extracted/`, `phase1_llm_dev_pack_extracted/`
 
 ## Applications
 
@@ -20,9 +23,16 @@ This repository uses a `pnpm` workspace with `turborepo`.
 
 ## Shared Packages
 
+- `packages/contracts`: canonical TypeScript envelopes, enums, and DTO placeholders
 - `packages/shared-types`: cross-surface placeholder types
+- `packages/shared-test-fixtures`: stable acceptance and scenario fixture helpers
 - `packages/eslint-config`: shared flat-config ESLint presets
 - `packages/tsconfig`: shared TypeScript baselines
 - `packages/ui-web`: minimal shared web UI placeholders
+
+## API Structure Notes
+
+- `apps/api/src/modules/README.md` documents the intended backend domain boundaries before feature modules are built out
+- `infra/migrations/` and `infra/seeds/` are the repo landing zones for reviewed schema artifacts
 
 When a new app or package is added, this document must be updated in the same change.

@@ -1,6 +1,6 @@
 # LLM Onboarding
 
-This file is the first-stop onboarding guide for any LLM working inside `Portable Orchestrator Bundle`.
+This file is the first-stop onboarding guide for any LLM working inside `drts-fleet-platform`.
 
 ## 1. Read Order
 
@@ -9,9 +9,15 @@ Start with these files in order:
 1. `AI_COLLABORATION_GUIDE.md`
 2. `current-work.md`
 3. `ai-status.json`
-4. `ai-activity-log.jsonl` when you need recent history
+4. `CANONICAL_DOCUMENT_MAP.md`
+5. `TARGET_ARCHITECTURE.md`
+6. `ROADMAP.md`
+7. `DEVELOPMENT_WORKBREAKDOWN.md`
+8. `phase1_prd_detailed_v1.md`
+9. `phase1_service_contracts_v1.md`
+10. `ai-activity-log.jsonl` when you need recent history
 
-If the repo later adds project-specific architecture, backlog, or policy docs, `AI_COLLABORATION_GUIDE.md` and `ai-status.json` should be updated to point at them explicitly.
+Current mode is `architect_bootstrap`. Until a human approves the work breakdown, supervisor and auto workers are not used for development task fan-out.
 
 ## 2. First Prompt
 
@@ -78,11 +84,13 @@ bash scripts/run-supervisor.sh --verbose
 bash scripts/run-dashboard.sh
 ```
 
-## 7. First Smoke Test
+You may start the runtime before consensus for dashboard visibility, but do not seed development tasks until the repo leaves `architect_bootstrap`.
+
+## 7. First Smoke Test After Consensus
 
 ```bash
-AI_NAME=Codex TASK_PHASE="Foundation" TASK_SUMMARY_ZH="建立第一個遷移後任務。" ./scripts/ai-status.sh assign DEMO-001 Codex Claude "First migrated task"
-AI_NAME=Codex ./scripts/ai-status.sh start DEMO-001 "Started the first migrated task"
+AI_NAME=Codex TASK_PHASE="Wave 0" TASK_SUMMARY_ZH="建立第一個共識後任務。" ./scripts/ai-status.sh assign DEMO-001 Codex Claude "First supervisor-managed task"
+AI_NAME=Codex ./scripts/ai-status.sh start DEMO-001 "Started the first supervisor-managed task"
 ./scripts/sync-state.sh
 ```
 

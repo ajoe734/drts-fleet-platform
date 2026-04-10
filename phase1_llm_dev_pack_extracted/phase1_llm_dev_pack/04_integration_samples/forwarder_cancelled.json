@@ -1,0 +1,7 @@
+{
+  "platform": "partner_a",
+  "external_order_id": "PA-778811",
+  "result": "cancelled_by_platform",
+  "cancel_reason": "passenger_cancelled",
+  "cancelled_at": "2026-04-10T09:04:00Z"
+}

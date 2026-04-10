@@ -1,0 +1,9 @@
+{
+  "call_id": "CALL-20260410-000120",
+  "call_type": "booking",
+  "caller_phone": "0911222333",
+  "agent_id": "AGENT-0088",
+  "started_at": "2026-04-10T08:58:00Z",
+  "queue": "booking_hotline",
+  "tenant_hint": null
+}

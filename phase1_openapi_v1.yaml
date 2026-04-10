@@ -1,0 +1,5195 @@
+openapi: 3.0.3
+info:
+  title: Hybrid Fleet Platform API - Phase 1
+  version: 1.0.0
+  description: "Phase 1 OpenAPI draft aligned to SA / PRD / SD. Scope: Fleet Management Core + Dispatch Compliance Core."
+servers:
+  - url: https://api.example.com
+    description: Production
+  - url: https://sandbox-api.example.com
+    description: Sandbox
+security:
+  - BearerAuth: []
+tags:
+  - name: Auth
+    description: Identity, MFA, token, principal
+  - name: PassengerOrders
+    description: Passenger App/Web owned orders
+  - name: TenantBookings
+    description: Tenant/partner bookings
+  - name: TenantDirectory
+    description: Passengers, address books, tenant users/roles
+  - name: TenantWebhooks
+    description: Tenant API keys and webhook endpoints
+  - name: TenantBilling
+    description: Tenant billing profile and invoices
+  - name: CallCenter
+    description: CTI, call sessions, phone orders, callbacks
+  - name: Dispatch
+    description: Dispatch jobs, ETA, assignment, queue
+  - name: Forwarder
+    description: Third-party platform adapter and forwarded orders
+  - name: Driver
+    description: Driver App tasks, shifts, earnings, payouts
+  - name: Operations
+    description: Ops dashboard, revenue, maintenance, incidents
+  - name: RegulatoryVehicles
+    description: Vehicles, exclusivity, placards
+  - name: RegulatoryDrivers
+    description: Drivers, certifications, training
+  - name: Contracts
+    description: Vehicle contracts and service scope
+  - name: Insurance
+    description: Insurance policies
+  - name: Complaints
+    description: Complaint cases and dispute workflow
+  - name: DriverBilling
+    description: Driver fee plans, statements, reimbursements
+  - name: PublicDisclosure
+    description: Public info CMS and placards
+  - name: Reports
+    description: Reports and exports
+  - name: FilingPackages
+    description: Regulatory filing package generation
+  - name: Notifications
+    description: Notifications and subscriptions
+  - name: Audit
+    description: Immutable audit log
+  - name: AdminTenants
+    description: Platform tenant governance
+  - name: AdminUsers
+    description: Platform users and roles
+  - name: AdminPricing
+    description: Pricing/split template governance
+  - name: AdminPayments
+    description: Payments/acquiring governance
+  - name: AdminSwitchboard
+    description: External route/switchboard governance
+  - name: AdminFlags
+    description: Feature flags and rollout controls
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    TenantApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    WebhookSignature:
+      type: apiKey
+      in: header
+      name: X-Signature
+  parameters:
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BookingId:
+      name: bookingId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VehicleId:
+      name: vehicleId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DriverId:
+      name: driverId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CaseNo:
+      name: caseNo
+      in: path
+      required: true
+      schema:
+        type: string
+    CallId:
+      name: callId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReportJobId:
+      name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PackageId:
+      name: packageId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  headers:
+    RequestId:
+      schema:
+        type: string
+      description: Traceable request id
+    IdempotencyKey:
+      schema:
+        type: string
+      description: Idempotent request key
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    AcceptedJob:
+      description: Accepted
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/AsyncJobAccepted"
+  schemas:
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        requestId:
+          type: string
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        totalItems:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+    AsyncJobAccepted:
+      type: object
+      required:
+        - jobId
+        - status
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+        pollUrl:
+          type: string
+        webhookExpected:
+          type: boolean
+    Principal:
+      type: object
+      properties:
+        principalId:
+          type: string
+          format: uuid
+        realm:
+          type: string
+          enum:
+            - admin
+            - tenant
+            - driver
+            - ops
+        tenantId:
+          type: string
+          format: uuid
+          nullable: true
+        roles:
+          type: array
+          items:
+            type: string
+        scopes:
+          type: array
+          items:
+            type: string
+    TokenResponse:
+      type: object
+      required:
+        - accessToken
+        - expiresIn
+        - principal
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresIn:
+          type: integer
+        mfaRequired:
+          type: boolean
+          default: false
+        principal:
+          $ref: "#/components/schemas/Principal"
+    Address:
+      type: object
+      properties:
+        addressText:
+          type: string
+        lat:
+          type: number
+          format: double
+        lng:
+          type: number
+          format: double
+        placeId:
+          type: string
+        manualGeocode:
+          type: boolean
+          default: false
+    Passenger:
+      type: object
+      properties:
+        passengerId:
+          type: string
+          format: uuid
+        fullName:
+          type: string
+        employeeNo:
+          type: string
+        departmentName:
+          type: string
+        mobile:
+          type: string
+        email:
+          type: string
+          format: email
+        activeFlag:
+          type: boolean
+    Order:
+      type: object
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        orderNo:
+          type: string
+        orderDomain:
+          type: string
+          enum:
+            - owned
+            - forwarded
+        orderSource:
+          type: string
+          enum:
+            - phone
+            - web
+            - app
+            - api
+            - concierge
+            - external_platform
+        serviceBucket:
+          type: string
+          enum:
+            - standard_taxi
+            - business_dispatch
+            - av_pilot
+        dispatchSemantics:
+          type: string
+          enum:
+            - realtime
+            - reservation
+            - queue
+            - forwarder_broadcast
+        tenantId:
+          type: string
+          format: uuid
+          nullable: true
+        pickup:
+          $ref: "#/components/schemas/Address"
+        dropoff:
+          $ref: "#/components/schemas/Address"
+        scheduledAt:
+          type: string
+          format: date-time
+          nullable: true
+        currentStatus:
+          type: string
+        etaMinutes:
+          type: integer
+          nullable: true
+        callId:
+          type: string
+          format: uuid
+          nullable: true
+        recordingId:
+          type: string
+          nullable: true
+    OrderCreateRequest:
+      type: object
+      required:
+        - pickup
+        - dropoff
+        - passengerContact
+      properties:
+        pickup:
+          $ref: "#/components/schemas/Address"
+        dropoff:
+          $ref: "#/components/schemas/Address"
+        scheduledAt:
+          type: string
+          format: date-time
+        productHint:
+          type: string
+        specialRequirements:
+          type: array
+          items:
+            type: string
+        paymentMethod:
+          type: string
+        passengerContact:
+          type: object
+          required:
+            - name
+            - mobile
+          properties:
+            name:
+              type: string
+            mobile:
+              type: string
+            email:
+              type: string
+              format: email
+        note:
+          type: string
+          maxLength: 500
+    Booking:
+      type: object
+      properties:
+        bookingId:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        bookingType:
+          type: string
+          enum:
+            - oneway
+            - roundtrip
+            - recurring
+        reservationWindowStart:
+          type: string
+          format: date-time
+        reservationWindowEnd:
+          type: string
+          format: date-time
+        recurrenceRule:
+          type: string
+          nullable: true
+        modifiableUntil:
+          type: string
+          format: date-time
+          nullable: true
+        cancelableUntil:
+          type: string
+          format: date-time
+          nullable: true
+    TenantBookingCreateRequest:
+      type: object
+      required:
+        - scheduledAt
+        - pickup
+        - dropoff
+        - passenger
+        - bookingType
+      properties:
+        bookingType:
+          type: string
+          enum:
+            - oneway
+            - roundtrip
+            - recurring
+        scheduledAt:
+          type: string
+          format: date-time
+        reservationWindowEnd:
+          type: string
+          format: date-time
+        pickup:
+          $ref: "#/components/schemas/Address"
+        dropoff:
+          $ref: "#/components/schemas/Address"
+        passenger:
+          oneOf:
+            - type: object
+              required:
+                - passengerId
+              properties:
+                passengerId:
+                  type: string
+                  format: uuid
+            - type: object
+              required:
+                - fullName
+                - mobile
+              properties:
+                fullName:
+                  type: string
+                mobile:
+                  type: string
+                departmentName:
+                  type: string
+        vehicleForm:
+          type: string
+        costCenter:
+          type: string
+        partnerSubtype:
+          type: string
+          enum:
+            - enterprise_dispatch
+            - credit_card_airport_transfer
+        onsiteContact:
+          type: string
+        flightRef:
+          type: string
+        note:
+          type: string
+          maxLength: 1000
+    DispatchJob:
+      type: object
+      properties:
+        dispatchJobId:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        dispatchMode:
+          type: string
+          enum:
+            - realtime
+            - reservation
+            - queue
+            - forwarder
+        status:
+          type: string
+        priorityScore:
+          type: number
+        serviceAreaCheckResult:
+          type: string
+        lastAttemptAt:
+          type: string
+          format: date-time
+          nullable: true
+    CandidateVehicle:
+      type: object
+      properties:
+        vehicleId:
+          type: string
+          format: uuid
+        driverId:
+          type: string
+          format: uuid
+          nullable: true
+        plateNo:
+          type: string
+        driverName:
+          type: string
+          nullable: true
+        distanceKm:
+          type: number
+        etaMinutes:
+          type: integer
+        dispatchable:
+          type: boolean
+        reasonIfRejected:
+          type: string
+          nullable: true
+    AssignDispatchRequest:
+      type: object
+      required:
+        - dispatchJobId
+        - vehicleId
+      properties:
+        dispatchJobId:
+          type: string
+          format: uuid
+        vehicleId:
+          type: string
+          format: uuid
+        driverId:
+          type: string
+          format: uuid
+        manualOverrideReason:
+          type: string
+          maxLength: 500
+    CallSession:
+      type: object
+      properties:
+        callId:
+          type: string
+          format: uuid
+        callType:
+          type: string
+          enum:
+            - booking
+            - complaint
+            - callback
+            - lost_and_found
+            - general_inquiry
+        callerPhone:
+          type: string
+        agentId:
+          type: string
+          format: uuid
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true
+        recordingId:
+          type: string
+          nullable: true
+        linkedOrderId:
+          type: string
+          format: uuid
+          nullable: true
+        linkedCaseNo:
+          type: string
+          nullable: true
+        agentIdentityAnnounced:
+          type: boolean
+    PhoneOrderCreateRequest:
+      allOf:
+        - $ref: "#/components/schemas/OrderCreateRequest"
+        - type: object
+          required:
+            - callId
+            - agentId
+          properties:
+            callId:
+              type: string
+              format: uuid
+            agentId:
+              type: string
+              format: uuid
+    ComplaintCase:
+      type: object
+      properties:
+        caseNo:
+          type: string
+        caseSource:
+          type: string
+          enum:
+            - phone
+            - web
+            - app
+            - portal
+            - internal
+        relatedOrderId:
+          type: string
+          format: uuid
+          nullable: true
+        relatedCallId:
+          type: string
+          format: uuid
+          nullable: true
+        category:
+          type: string
+        severity:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical
+        receivedAt:
+          type: string
+          format: date-time
+        assigneeId:
+          type: string
+          format: uuid
+          nullable: true
+        slaDueAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+        resolutionCode:
+          type: string
+          nullable: true
+        resolutionNote:
+          type: string
+          nullable: true
+    ComplaintCreateRequest:
+      type: object
+      required:
+        - caseSource
+        - category
+        - severity
+      properties:
+        caseSource:
+          type: string
+          enum:
+            - phone
+            - web
+            - app
+            - portal
+            - internal
+        relatedOrderId:
+          type: string
+          format: uuid
+        relatedCallId:
+          type: string
+          format: uuid
+        category:
+          type: string
+        severity:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - critical
+        description:
+          type: string
+          maxLength: 2000
+    Vehicle:
+      type: object
+      properties:
+        vehicleId:
+          type: string
+          format: uuid
+        plateNo:
+          type: string
+        vin:
+          type: string
+        vehicleForm:
+          type: string
+          enum:
+            - sedan
+            - wagon
+            - mpv
+            - accessible
+            - other
+        licenseClass:
+          type: string
+          enum:
+            - taxi
+            - rental
+            - multi_taxi
+            - other
+        energyType:
+          type: string
+          enum:
+            - fuel
+            - ev
+            - hybrid
+            - other
+        operatingAreaId:
+          type: string
+          format: uuid
+        dispatchableFlag:
+          type: boolean
+        currentStatus:
+          type: string
+        latestReviewStatus:
+          type: string
+    VehicleCreateRequest:
+      type: object
+      required:
+        - plateNo
+        - vin
+        - vehicleForm
+        - licenseClass
+        - operatingAreaId
+      properties:
+        plateNo:
+          type: string
+        vin:
+          type: string
+        vehicleForm:
+          type: string
+          enum:
+            - sedan
+            - wagon
+            - mpv
+            - accessible
+            - other
+        licenseClass:
+          type: string
+          enum:
+            - taxi
+            - rental
+            - multi_taxi
+            - other
+        energyType:
+          type: string
+          enum:
+            - fuel
+            - ev
+            - hybrid
+            - other
+        operatingAreaId:
+          type: string
+          format: uuid
+        ownerPartnerId:
+          type: string
+          format: uuid
+        dispatchPartnerId:
+          type: string
+          format: uuid
+        serviceTags:
+          type: array
+          items:
+            type: string
+    Driver:
+      type: object
+      properties:
+        driverId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        mobile:
+          type: string
+        status:
+          type: string
+        boundVehicleId:
+          type: string
+          format: uuid
+          nullable: true
+        serviceRating:
+          type: number
+        complaintCount:
+          type: integer
+    DriverCreateRequest:
+      type: object
+      required:
+        - name
+        - mobile
+      properties:
+        name:
+          type: string
+        mobile:
+          type: string
+        occupationalLicenseNo:
+          type: string
+        occupationalLicenseExpiry:
+          type: string
+          format: date
+        taxiRegistrationNo:
+          type: string
+        taxiRegistrationExpiry:
+          type: string
+          format: date
+        boundVehicleId:
+          type: string
+          format: uuid
+    VehicleContract:
+      type: object
+      properties:
+        contractId:
+          type: string
+          format: uuid
+        vehicleId:
+          type: string
+          format: uuid
+        partnerId:
+          type: string
+          format: uuid
+        partnerType:
+          type: string
+        contractType:
+          type: string
+        serviceScope:
+          type: string
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+    InsurancePolicy:
+      type: object
+      properties:
+        policyId:
+          type: string
+          format: uuid
+        vehicleId:
+          type: string
+          format: uuid
+        policyNo:
+          type: string
+        insuranceType:
+          type: string
+        insurerName:
+          type: string
+        coverageAmount:
+          type: number
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+    DriverTask:
+      type: object
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        orderId:
+          type: string
+          format: uuid
+        serviceBucket:
+          type: string
+        status:
+          type: string
+        pickup:
+          $ref: "#/components/schemas/Address"
+        dropoff:
+          $ref: "#/components/schemas/Address"
+        scheduledAt:
+          type: string
+          format: date-time
+          nullable: true
+        etaMinutes:
+          type: integer
+          nullable: true
+        sourceBadge:
+          type: string
+    TaskActionResponse:
+      type: object
+      properties:
+        taskId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+    Incident:
+      type: object
+      properties:
+        incidentId:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum:
+            - driver
+            - ops
+            - system
+        vehicleId:
+          type: string
+          format: uuid
+        type:
+          type: string
+        severity:
+          type: string
+        status:
+          type: string
+        description:
+          type: string
+    IncidentCreateRequest:
+      type: object
+      required:
+        - vehicleId
+        - type
+        - severity
+      properties:
+        vehicleId:
+          type: string
+          format: uuid
+        type:
+          type: string
+        severity:
+          type: string
+        description:
+          type: string
+        attachments:
+          type: array
+          items:
+            type: string
+            format: uri
+    DriverStatement:
+      type: object
+      properties:
+        statementId:
+          type: string
+          format: uuid
+        driverId:
+          type: string
+          format: uuid
+        periodMonth:
+          type: string
+          pattern: ^\d{4}-\d{2}$
+        grossEarning:
+          type: number
+        serviceFee:
+          type: number
+        subsidyAmount:
+          type: number
+        netAmount:
+          type: number
+        payoutStatus:
+          type: string
+    TenantInvoice:
+      type: object
+      properties:
+        invoiceId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+          format: uuid
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        amount:
+          type: number
+        status:
+          type: string
+        pdfUrl:
+          type: string
+          format: uri
+          nullable: true
+    Notification:
+      type: object
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+        type:
+          type: string
+        title:
+          type: string
+        link:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        read:
+          type: boolean
+    ReportJob:
+      type: object
+      properties:
+        jobId:
+          type: string
+          format: uuid
+        jobType:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - completed
+            - failed
+            - expired
+        artifactUrl:
+          type: string
+          format: uri
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    ReportJobCreateRequest:
+      type: object
+      required:
+        - jobType
+        - format
+      properties:
+        jobType:
+          type: string
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        format:
+          type: string
+          enum:
+            - csv
+            - xlsx
+            - pdf
+            - zip
+        filters:
+          type: object
+          additionalProperties: true
+        recipients:
+          type: array
+          items:
+            type: string
+            format: email
+    FilingPackage:
+      type: object
+      properties:
+        packageId:
+          type: string
+          format: uuid
+        packageType:
+          type: string
+          enum:
+            - filing
+            - monthly_report
+            - audit_request
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - completed
+            - failed
+        artifactZipUrl:
+          type: string
+          format: uri
+          nullable: true
+        artifactPdfUrl:
+          type: string
+          format: uri
+          nullable: true
+        generatedAt:
+          type: string
+          format: date-time
+          nullable: true
+    PublicInfoVersion:
+      type: object
+      properties:
+        publicInfoVersionId:
+          type: string
+          format: uuid
+        bookingPhone:
+          type: string
+        complaintPhone:
+          type: string
+        callRateText:
+          type: string
+        fareStandardText:
+          type: string
+        paymentMethodText:
+          type: string
+        status:
+          type: string
+          enum:
+            - draft
+            - published
+            - retired
+        effectiveFrom:
+          type: string
+          format: date-time
+paths:
+  /api/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Login
+      description: Login for admin/tenant/ops realms.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - loginId
+                - password
+              properties:
+                loginId:
+                  type: string
+                password:
+                  type: string
+                rememberMe:
+                  type: boolean
+                  default: false
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/auth/mfa/verify:
+    post:
+      tags:
+        - Auth
+      summary: Verify MFA challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - challengeId
+                - otp
+              properties:
+                challengeId:
+                  type: string
+                otp:
+                  type: string
+                  pattern: ^\d{6}$
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/auth/refresh:
+    post:
+      tags:
+        - Auth
+      summary: Refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/me:
+    get:
+      tags:
+        - Auth
+      summary: Get current principal
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Principal"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/passenger/orders:
+    post:
+      tags:
+        - PassengerOrders
+      summary: Create passenger order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderCreateRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags:
+        - PassengerOrders
+      summary: List passenger orders
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Order"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/passenger/orders/{orderId}:
+    get:
+      tags:
+        - PassengerOrders
+      summary: Get passenger order
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/passenger/orders/{orderId}/cancel:
+    post:
+      tags:
+        - PassengerOrders
+      summary: Cancel passenger order
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/home:
+    get:
+      tags:
+        - TenantBookings
+      summary: Get tenant home view
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kpis:
+                    type: object
+                    additionalProperties: true
+                  notifications:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Notification"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/bookings:
+    post:
+      tags:
+        - TenantBookings
+      summary: Create tenant booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantBookingCreateRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags:
+        - TenantBookings
+      summary: List tenant bookings
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Booking"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/bookings/{bookingId}:
+    get:
+      tags:
+        - TenantBookings
+      summary: Get tenant booking
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    put:
+      tags:
+        - TenantBookings
+      summary: Update tenant booking
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantBookingCreateRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    delete:
+      tags:
+        - TenantBookings
+      summary: Cancel tenant booking
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      responses:
+        "204":
+          description: Success
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/passengers:
+    post:
+      tags:
+        - TenantDirectory
+      summary: Create tenant passenger
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fullName
+              properties:
+                fullName:
+                  type: string
+                employeeNo:
+                  type: string
+                departmentName:
+                  type: string
+                mobile:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Passenger"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags:
+        - TenantDirectory
+      summary: List tenant passengers
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Passenger"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/addresses:
+    post:
+      tags:
+        - TenantDirectory
+      summary: Create address book entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - addressName
+                - addressText
+              properties:
+                addressName:
+                  type: string
+                addressText:
+                  type: string
+                lat:
+                  type: number
+                lng:
+                  type: number
+                tags:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  addressId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags:
+        - TenantDirectory
+      summary: List address book entries
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/users:
+    get:
+      tags:
+        - TenantDirectory
+      summary: List tenant users
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - TenantDirectory
+      summary: Invite tenant user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - role
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/roles:
+    get:
+      tags:
+        - TenantDirectory
+      summary: List tenant roles
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/apiKeys:
+    post:
+      tags:
+        - TenantWebhooks
+      summary: Create tenant API key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - scopes
+              properties:
+                name:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keyId:
+                    type: string
+                    format: uuid
+                  keyValue:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/apiKeys/{keyId}/rotate:
+    post:
+      tags:
+        - TenantWebhooks
+      summary: Rotate tenant API key
+      parameters:
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keyId:
+                    type: string
+                    format: uuid
+                  keyValue:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/webhooks:
+    post:
+      tags:
+        - TenantWebhooks
+      summary: Create tenant webhook endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+                - secret
+                - events
+              properties:
+                url:
+                  type: string
+                  format: uri
+                secret:
+                  type: string
+                events:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhookId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/webhooks/test:
+    post:
+      tags:
+        - TenantWebhooks
+      summary: Send test webhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - webhookId
+              properties:
+                webhookId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deliveryId:
+                    type: string
+                    format: uuid
+                  httpStatus:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/webhooks/deliveries:
+    get:
+      tags:
+        - TenantWebhooks
+      summary: List webhook deliveries
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/billing/profile:
+    post:
+      tags:
+        - TenantBilling
+      summary: Update tenant billing profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - invoiceTitle
+                - email
+              properties:
+                invoiceTitle:
+                  type: string
+                taxId:
+                  type: string
+                address:
+                  type: string
+                contactName:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/invoices:
+    get:
+      tags:
+        - TenantBilling
+      summary: List tenant invoices
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TenantInvoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/invoices/{invoiceId}:
+    get:
+      tags:
+        - TenantBilling
+      summary: Get tenant invoice
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantInvoice"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/notifications:
+    post:
+      tags:
+        - TenantBilling
+      summary: Update tenant notifications
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subscriptions:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/sla:
+    post:
+      tags:
+        - TenantBilling
+      summary: Update tenant SLA profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                waitThresholdMin:
+                  type: integer
+                arrivalThresholdMin:
+                  type: integer
+                completionThresholdMin:
+                  type: integer
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/audit:
+    get:
+      tags:
+        - Audit
+      summary: List tenant audit trail
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/calls:
+    post:
+      tags:
+        - CallCenter
+      summary: Create / open call session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - callType
+                - callerPhone
+              properties:
+                callType:
+                  type: string
+                  enum:
+                    - booking
+                    - complaint
+                    - callback
+                    - lost_and_found
+                    - general_inquiry
+                callerPhone:
+                  type: string
+                agentId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/calls/{callId}:
+    get:
+      tags:
+        - CallCenter
+      summary: Get call session
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/calls/{callId}/close:
+    post:
+      tags:
+        - CallCenter
+      summary: Close call session
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                endedAt:
+                  type: string
+                  format: date-time
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/calls/{callId}/recording:
+    post:
+      tags:
+        - CallCenter
+      summary: Attach call recording index
+      parameters:
+        - $ref: "#/components/parameters/CallId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - recordingId
+              properties:
+                recordingId:
+                  type: string
+                providerRecordingRef:
+                  type: string
+                recordingUrl:
+                  type: string
+                  format: uri
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CallSession"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/call-center/orders:
+    post:
+      tags:
+        - CallCenter
+      summary: Create order from call center
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhoneOrderCreateRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/callbacks:
+    post:
+      tags:
+        - CallCenter
+      summary: Create callback task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - callId
+              properties:
+                callId:
+                  type: string
+                  format: uuid
+                scheduledAt:
+                  type: string
+                  format: date-time
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  callbackTaskId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/orders/{orderId}/classify:
+    post:
+      tags:
+        - Dispatch
+      summary: Classify owned order
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/orders/{orderId}/dispatch:
+    post:
+      tags:
+        - Dispatch
+      summary: Request dispatch for owned order
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchJob"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/orders/{orderId}/redispatch:
+    post:
+      tags:
+        - Dispatch
+      summary: Request redispatch
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchJob"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/orders/{orderId}/eta:
+    get:
+      tags:
+        - Dispatch
+      summary: Get order ETA
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId:
+                    type: string
+                    format: uuid
+                  etaMinutes:
+                    type: integer
+                  calculatedAt:
+                    type: string
+                    format: date-time
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/dispatch/tasks:
+    get:
+      tags:
+        - Dispatch
+      summary: List pending dispatch tasks
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DispatchJob"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/dispatch/tasks/{dispatchJobId}/candidates:
+    get:
+      tags:
+        - Dispatch
+      summary: List candidate vehicles
+      parameters:
+        - name: dispatchJobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CandidateVehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/dispatch/assign:
+    post:
+      tags:
+        - Dispatch
+      summary: Assign vehicle to dispatch job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignDispatchRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assignmentId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/dispatch/queue/check-in:
+    post:
+      tags:
+        - Dispatch
+      summary: Check in queue vehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - vehicleId
+                - siteId
+              properties:
+                vehicleId:
+                  type: string
+                  format: uuid
+                siteId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queueEntryId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/dispatch/queue/check-out:
+    post:
+      tags:
+        - Dispatch
+      summary: Check out queue vehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - vehicleId
+                - siteId
+              properties:
+                vehicleId:
+                  type: string
+                  format: uuid
+                siteId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/forwarder/orders/inbound:
+    post:
+      tags:
+        - Forwarder
+      summary: Ingest inbound external order
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - platformCode
+                - externalOrderId
+              properties:
+                platformCode:
+                  type: string
+                externalOrderId:
+                  type: string
+                payload:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mirrorOrderId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/forwarder/orders:
+    get:
+      tags:
+        - Forwarder
+      summary: List forwarded orders
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Order"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/forwarder/orders/{orderId}/accept:
+    post:
+      tags:
+        - Forwarder
+      summary: Relay driver accept to platform
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - driverId
+              properties:
+                driverId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/forwarder/orders/{orderId}/sync-status:
+    post:
+      tags:
+        - Forwarder
+      summary: Sync native status update
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - nativeStatus
+              properties:
+                nativeStatus:
+                  type: string
+                payload:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/forwarder/adapters/health:
+    get:
+      tags:
+        - Forwarder
+      summary: Get adapter health
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/login:
+    post:
+      tags:
+        - Driver
+      summary: Driver OTP / SSO login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - mobile
+              properties:
+                mobile:
+                  type: string
+                otp:
+                  type: string
+                ssoProvider:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/tasks:
+    get:
+      tags:
+        - Driver
+      summary: List driver tasks
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DriverTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/tasks/{taskId}:
+    get:
+      tags:
+        - Driver
+      summary: Get driver task detail
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriverTask"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/tasks/{taskId}/accept:
+    post:
+      tags:
+        - Driver
+      summary: Accept task
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/tasks/{taskId}/reject:
+    post:
+      tags:
+        - Driver
+      summary: Reject task
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/tasks/{taskId}/depart:
+    post:
+      tags:
+        - Driver
+      summary: Depart to pickup
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/tasks/{taskId}/arrived_pickup:
+    post:
+      tags:
+        - Driver
+      summary: Mark arrived at pickup
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/tasks/{taskId}/start:
+    post:
+      tags:
+        - Driver
+      summary: Start trip
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/tasks/{taskId}/complete:
+    post:
+      tags:
+        - Driver
+      summary: Complete trip
+      parameters:
+        - $ref: "#/components/parameters/TaskId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskActionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/incidents:
+    post:
+      tags:
+        - Driver
+      summary: Create driver incident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IncidentCreateRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags:
+        - Operations
+      summary: List incidents
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Incident"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/clock_in:
+    post:
+      tags:
+        - Driver
+      summary: Clock in driver
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - vehicleId
+              properties:
+                vehicleId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  clockedAt:
+                    type: string
+                    format: date-time
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/clock_out:
+    post:
+      tags:
+        - Driver
+      summary: Clock out driver
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  clockedAt:
+                    type: string
+                    format: date-time
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/shifts:
+    get:
+      tags:
+        - Driver
+      summary: List driver shifts
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/earnings:
+    get:
+      tags:
+        - Driver
+      summary: Get driver earnings
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  summary:
+                    type: object
+                    additionalProperties: true
+                  statements:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DriverStatement"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/payouts:
+    post:
+      tags:
+        - Driver
+      summary: Request driver payout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - amount
+              properties:
+                amount:
+                  type: number
+                bankAccountId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  payoutRequestId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/profile:
+    get:
+      tags:
+        - Driver
+      summary: Get driver profile
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  driver:
+                    $ref: "#/components/schemas/Driver"
+                  settings:
+                    type: object
+                    additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/lessons:
+    get:
+      tags:
+        - Driver
+      summary: List academy lessons
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver/quiz:
+    post:
+      tags:
+        - Driver
+      summary: Submit lesson quiz
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - lessonId
+                - answers
+              properties:
+                lessonId:
+                  type: string
+                  format: uuid
+                answers:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  passed:
+                    type: boolean
+                  score:
+                    type: number
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/dashboard:
+    get:
+      tags:
+        - Operations
+      summary: Get dashboard
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kpis:
+                    type: object
+                    additionalProperties: true
+                  alerts:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/revenue/summary:
+    get:
+      tags:
+        - Operations
+      summary: Get revenue summary
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalRevenue:
+                    type: number
+                  tripCount:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/revenue/trend:
+    get:
+      tags:
+        - Operations
+      summary: Get revenue trend
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  points:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/revenue/list:
+    get:
+      tags:
+        - Operations
+      summary: List revenue entries
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/revenue/export:
+    post:
+      tags:
+        - Operations
+      summary: Create revenue export job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportJobCreateRequest"
+      responses:
+        "202":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsyncJobAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/maintenance_records:
+    get:
+      tags:
+        - Operations
+      summary: List maintenance records
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - Operations
+      summary: Create maintenance record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - vehicleId
+                - maintenanceDate
+                - type
+              properties:
+                vehicleId:
+                  type: string
+                  format: uuid
+                maintenanceDate:
+                  type: string
+                  format: date
+                odometerKm:
+                  type: number
+                type:
+                  type: string
+                description:
+                  type: string
+                cost:
+                  type: number
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  maintenanceRecordId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/incidents/{incidentId}:
+    put:
+      tags:
+        - Operations
+      summary: Update incident
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                assigneeId:
+                  type: string
+                  format: uuid
+                note:
+                  type: string
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/energy/overview:
+    get:
+      tags:
+        - Operations
+      summary: Get energy overview
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vehicles:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/energy/schedules:
+    post:
+      tags:
+        - Operations
+      summary: Create energy schedule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - vehicleId
+                - startAt
+                - endAt
+              properties:
+                vehicleId:
+                  type: string
+                  format: uuid
+                startAt:
+                  type: string
+                  format: date-time
+                endAt:
+                  type: string
+                  format: date-time
+                stationId:
+                  type: string
+                targetSoc:
+                  type: integer
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scheduleId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/vehicles:
+    post:
+      tags:
+        - RegulatoryVehicles
+      summary: Create vehicle
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VehicleCreateRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags:
+        - RegulatoryVehicles
+      summary: List vehicles
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Vehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/vehicles/{vehicleId}:
+    get:
+      tags:
+        - RegulatoryVehicles
+      summary: Get vehicle
+      parameters:
+        - $ref: "#/components/parameters/VehicleId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/vehicles/{vehicleId}/submit-review:
+    post:
+      tags:
+        - RegulatoryVehicles
+      summary: Submit vehicle onboarding review
+      parameters:
+        - $ref: "#/components/parameters/VehicleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/vehicles/{vehicleId}/activate:
+    post:
+      tags:
+        - RegulatoryVehicles
+      summary: Activate vehicle
+      parameters:
+        - $ref: "#/components/parameters/VehicleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/vehicles/{vehicleId}/terminate:
+    post:
+      tags:
+        - RegulatoryVehicles
+      summary: Terminate vehicle
+      parameters:
+        - $ref: "#/components/parameters/VehicleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/vehicles/{vehicleId}/exclusivity:
+    post:
+      tags:
+        - RegulatoryVehicles
+      summary: Submit exclusivity review
+      parameters:
+        - $ref: "#/components/parameters/VehicleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - effectiveStart
+              properties:
+                effectiveStart:
+                  type: string
+                  format: date
+                effectiveEnd:
+                  type: string
+                  format: date
+                declarationFileId:
+                  type: string
+                  format: uuid
+                exclusiveProviderName:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reviewStatus:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/placards/render:
+    post:
+      tags:
+        - RegulatoryVehicles
+      summary: Generate placard
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - vehicleId
+              properties:
+                vehicleId:
+                  type: string
+                  format: uuid
+                publicInfoVersionId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  placardVersionId:
+                    type: string
+                    format: uuid
+                  fileUrl:
+                    type: string
+                    format: uri
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/drivers:
+    post:
+      tags:
+        - RegulatoryDrivers
+      summary: Create driver
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverCreateRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Driver"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags:
+        - RegulatoryDrivers
+      summary: List drivers
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Driver"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/drivers/{driverId}:
+    get:
+      tags:
+        - RegulatoryDrivers
+      summary: Get driver
+      parameters:
+        - $ref: "#/components/parameters/DriverId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Driver"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/drivers/{driverId}/training-records:
+    post:
+      tags:
+        - RegulatoryDrivers
+      summary: Add training record
+      parameters:
+        - $ref: "#/components/parameters/DriverId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - trainingType
+                - completedAt
+              properties:
+                trainingType:
+                  type: string
+                completedAt:
+                  type: string
+                  format: date-time
+                score:
+                  type: number
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recordId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/contracts:
+    post:
+      tags:
+        - Contracts
+      summary: Create vehicle contract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - vehicleId
+                - partnerId
+                - partnerType
+                - contractType
+                - serviceScope
+                - startAt
+                - endAt
+              properties:
+                vehicleId:
+                  type: string
+                  format: uuid
+                partnerId:
+                  type: string
+                  format: uuid
+                partnerType:
+                  type: string
+                contractType:
+                  type: string
+                serviceScope:
+                  type: string
+                startAt:
+                  type: string
+                  format: date-time
+                endAt:
+                  type: string
+                  format: date-time
+                operatingAreaId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VehicleContract"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags:
+        - Contracts
+      summary: List contracts
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/VehicleContract"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reg/insurance-policies:
+    post:
+      tags:
+        - Insurance
+      summary: Create insurance policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - vehicleId
+                - policyNo
+                - insuranceType
+                - insurerName
+                - coverageAmount
+                - startAt
+                - endAt
+              properties:
+                vehicleId:
+                  type: string
+                  format: uuid
+                policyNo:
+                  type: string
+                insuranceType:
+                  type: string
+                insurerName:
+                  type: string
+                coverageAmount:
+                  type: number
+                startAt:
+                  type: string
+                  format: date-time
+                endAt:
+                  type: string
+                  format: date-time
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InsurancePolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags:
+        - Insurance
+      summary: List insurance policies
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InsurancePolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/complaints:
+    post:
+      tags:
+        - Complaints
+      summary: Create complaint case
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComplaintCreateRequest"
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplaintCase"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    get:
+      tags:
+        - Complaints
+      summary: List complaint cases
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ComplaintCase"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/complaints/{caseNo}:
+    get:
+      tags:
+        - Complaints
+      summary: Get complaint case
+      parameters:
+        - $ref: "#/components/parameters/CaseNo"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplaintCase"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/complaints/{caseNo}/assign:
+    post:
+      tags:
+        - Complaints
+      summary: Assign complaint case
+      parameters:
+        - $ref: "#/components/parameters/CaseNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - assigneeId
+              properties:
+                assigneeId:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplaintCase"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/complaints/{caseNo}/comment:
+    post:
+      tags:
+        - Complaints
+      summary: Add complaint timeline comment
+      parameters:
+        - $ref: "#/components/parameters/CaseNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - comment
+              properties:
+                comment:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/complaints/{caseNo}/resolve:
+    post:
+      tags:
+        - Complaints
+      summary: Resolve complaint case
+      parameters:
+        - $ref: "#/components/parameters/CaseNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - resolutionCode
+                - resolutionNote
+              properties:
+                resolutionCode:
+                  type: string
+                resolutionNote:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplaintCase"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/complaints/{caseNo}/reopen:
+    post:
+      tags:
+        - Complaints
+      summary: Reopen complaint case
+      parameters:
+        - $ref: "#/components/parameters/CaseNo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - reason
+              properties:
+                reason:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComplaintCase"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver-fee-plans:
+    get:
+      tags:
+        - DriverBilling
+      summary: List driver fee plans
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - DriverBilling
+      summary: Create driver fee plan draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - planName
+                - effectiveFrom
+                - calculationMethod
+              properties:
+                planName:
+                  type: string
+                effectiveFrom:
+                  type: string
+                  format: date
+                effectiveTo:
+                  type: string
+                  format: date
+                calculationMethod:
+                  type: string
+                ruleJson:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  planId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver-fee-plans/{planId}/publish:
+    post:
+      tags:
+        - DriverBilling
+      summary: Publish driver fee plan
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver-statements:
+    get:
+      tags:
+        - DriverBilling
+      summary: List driver statements
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DriverStatement"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver-statements/generate:
+    post:
+      tags:
+        - DriverBilling
+      summary: Generate driver statements
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - periodMonth
+              properties:
+                periodMonth:
+                  type: string
+                  pattern: ^\d{4}-\d{2}$
+      responses:
+        "202":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsyncJobAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/driver-reimbursements:
+    post:
+      tags:
+        - DriverBilling
+      summary: Create reimbursement batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - periodMonth
+              properties:
+                periodMonth:
+                  type: string
+                  pattern: ^\d{4}-\d{2}$
+                note:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batchId:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/public-info:
+    get:
+      tags:
+        - PublicDisclosure
+      summary: List public info versions
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PublicInfoVersion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - PublicDisclosure
+      summary: Create public info draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - bookingPhone
+                - complaintPhone
+                - fareStandardText
+                - paymentMethodText
+              properties:
+                bookingPhone:
+                  type: string
+                complaintPhone:
+                  type: string
+                callRateText:
+                  type: string
+                fareStandardText:
+                  type: string
+                paymentMethodText:
+                  type: string
+                effectiveFrom:
+                  type: string
+                  format: date-time
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicInfoVersion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/public-info/{publicInfoVersionId}/publish:
+    post:
+      tags:
+        - PublicDisclosure
+      summary: Publish public info version
+      parameters:
+        - name: publicInfoVersionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicInfoVersion"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reports/jobs:
+    post:
+      tags:
+        - Reports
+      summary: Create report job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportJobCreateRequest"
+      responses:
+        "202":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsyncJobAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/reports/{jobId}:
+    get:
+      tags:
+        - Reports
+      summary: Get report job
+      parameters:
+        - $ref: "#/components/parameters/ReportJobId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportJob"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/filing-packages/generate:
+    post:
+      tags:
+        - FilingPackages
+      summary: Generate filing package
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - packageType
+              properties:
+                packageType:
+                  type: string
+                  enum:
+                    - filing
+                    - monthly_report
+                    - audit_request
+                scope:
+                  type: object
+                  additionalProperties: true
+                period:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "202":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsyncJobAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/filing-packages/{packageId}:
+    get:
+      tags:
+        - FilingPackages
+      summary: Get filing package
+      parameters:
+        - $ref: "#/components/parameters/PackageId"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FilingPackage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/notifications:
+    get:
+      tags:
+        - Notifications
+      summary: List notifications
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Notification"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/notifications/read:
+    post:
+      tags:
+        - Notifications
+      summary: Mark notifications as read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - notificationIds
+              properties:
+                notificationIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/audit:
+    get:
+      tags:
+        - Audit
+      summary: List audit logs
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/admin/login:
+    post:
+      tags:
+        - AdminUsers
+      summary: Admin login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/admin/tenants:
+    get:
+      tags:
+        - AdminTenants
+      summary: List tenants
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - AdminTenants
+      summary: Create tenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - tenantCode
+                - tenantName
+                - tenantType
+              properties:
+                tenantCode:
+                  type: string
+                tenantName:
+                  type: string
+                tenantType:
+                  type: string
+                status:
+                  type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tenantId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/admin/users:
+    get:
+      tags:
+        - AdminUsers
+      summary: List platform users
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - AdminUsers
+      summary: Create platform user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - email
+                - role
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                scopes:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  userId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/admin/pricing:
+    get:
+      tags:
+        - AdminPricing
+      summary: List pricing templates
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - AdminPricing
+      summary: Create pricing template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - effectiveFrom
+              properties:
+                name:
+                  type: string
+                effectiveFrom:
+                  type: string
+                  format: date
+                rules:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pricingTemplateId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/admin/pricing/{pricingTemplateId}/publish:
+    post:
+      tags:
+        - AdminPricing
+      summary: Publish pricing template
+      parameters:
+        - name: pricingTemplateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/admin/split:
+    post:
+      tags:
+        - AdminPricing
+      summary: Create split template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - ratios
+              properties:
+                name:
+                  type: string
+                ratios:
+                  type: object
+                  additionalProperties:
+                    type: number
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  splitTemplateId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/admin/payments/routes:
+    get:
+      tags:
+        - AdminPayments
+      summary: List payment routes
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - AdminPayments
+      summary: Create payment route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - provider
+                - routeName
+              properties:
+                provider:
+                  type: string
+                routeName:
+                  type: string
+                config:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  paymentRouteId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/admin/switchboard/routes:
+    get:
+      tags:
+        - AdminSwitchboard
+      summary: List switchboard routes
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - AdminSwitchboard
+      summary: Create switchboard route
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - targetType
+              properties:
+                name:
+                  type: string
+                targetType:
+                  type: string
+                conditions:
+                  type: object
+                  additionalProperties: true
+                target:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  routeId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/admin/flags:
+    get:
+      tags:
+        - AdminFlags
+      summary: List feature flags
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - AdminFlags
+      summary: Create feature flag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - flagKey
+              properties:
+                flagKey:
+                  type: string
+                variants:
+                  type: array
+                  items:
+                    type: string
+                targets:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "201":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  flagId:
+                    type: string
+                    format: uuid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"

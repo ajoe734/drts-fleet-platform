@@ -1,6 +1,6 @@
 # Orchestrator Quickstart
 
-This repo has been bootstrapped with the reusable supervisor + auto-worker + dashboard bundle.
+This repo contains the reusable supervisor + auto-worker + dashboard bundle, but Phase 1 development work should remain in `architect_bootstrap` mode until the work breakdown has human-approved consensus.
 
 ## 1. Prepare local LLM/IDE integration
 
@@ -28,16 +28,23 @@ Dashboard:
 bash scripts/run-dashboard.sh
 ```
 
-## 3. Seed the first task
+## 3. Use the runtime before consensus
+
+- Use the dashboard and status mirrors for visibility only.
+- Do not seed development tasks into the supervisor yet.
+- Build or revise `CANONICAL_DOCUMENT_MAP.md`, `TARGET_ARCHITECTURE.md`, `ROADMAP.md`, and `DEVELOPMENT_WORKBREAKDOWN.md` first.
+
+## 4. Switch to supervisor-managed execution after consensus
+
+Only after the work breakdown is explicitly approved should you seed the first task:
 
 ```bash
-AI_NAME=Codex ./scripts/ai-status.sh assign DEMO-001 Codex Claude "First migrated task"
-AI_NAME=Codex TASK_PHASE="Foundation" TASK_SUMMARY_ZH="把新 repo 的第一個協作任務建立起來。" ./scripts/ai-status.sh assign DEMO-001 Codex Claude "First migrated task"
-AI_NAME=Codex ./scripts/ai-status.sh start DEMO-001 "Started the first migrated task"
+AI_NAME=Codex TASK_PHASE="Wave 0" TASK_SUMMARY_ZH="建立第一個共識後任務。" ./scripts/ai-status.sh assign DEMO-001 Codex Claude "First supervisor-managed task"
+AI_NAME=Codex ./scripts/ai-status.sh start DEMO-001 "Started the first supervisor-managed task"
 ./scripts/sync-state.sh
 ```
 
-## 4. Print the current first prompt
+## 5. Print the current first prompt
 
 The repo-aware prompt is generated from `ai-status.json`:
 
@@ -45,8 +52,8 @@ The repo-aware prompt is generated from `ai-status.json`:
 python3 scripts/ai_status.py prompt
 ```
 
-If you add project-specific docs later, update `AI_COLLABORATION_GUIDE.md`, `FOR_*.md`, and `ai-status.json` canonical layers so the prompt stays aligned with the new repo.
+If the canonical document layers change, update `AI_COLLABORATION_GUIDE.md`, `FOR_*.md`, and `ai-status.json` together so the prompt stays aligned with the repo.
 
-## 5. Optional GitHub bus
+## 6. Optional GitHub bus
 
 The bootstrap leaves GitHub bus disabled by default. When you are ready, update `.orchestrator/config.local.json` with your repo details and enable `github_bus.enabled`.

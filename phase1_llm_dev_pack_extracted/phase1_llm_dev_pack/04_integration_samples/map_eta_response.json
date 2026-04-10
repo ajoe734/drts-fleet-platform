@@ -1,0 +1,11 @@
+{
+  "pickup": {
+    "lat": 24.2651,
+    "lng": 120.5243
+  },
+  "candidate_vehicle_id": "d04d7368-df30-4c1c-a0e8-f69aa18a92f3",
+  "distance_m": 4100,
+  "duration_sec": 480,
+  "traffic_model": "best_guess",
+  "calculated_at": "2026-04-10T09:00:00Z"
+}

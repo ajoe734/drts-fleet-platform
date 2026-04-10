@@ -1,8 +1,10 @@
 {
-  "project": "portable-orchestrator-bundle",
-  "sprint": "2026-04-10-bootstrap",
-  "objective": "Stand up a shared multi-LLM delivery system with a supervisor, auto workers, and a live dashboard.",
-  "updated_at": "2026-04-10T14:16:26Z",
+  "project": "drts-fleet-platform",
+  "execution_mode": "architect_bootstrap",
+  "consensus_status": "pending",
+  "sprint": "2026-04-10-phase1-architecture-bootstrap",
+  "objective": "Establish the DRTS Phase 1 canonical architecture, document hierarchy, and work breakdown before supervisor-managed auto-worker execution.",
+  "updated_at": "2026-04-10T15:20:59Z",
   "canonical_document_layers": {
     "L0 Collaboration & State": [
       "AI_COLLABORATION_GUIDE.md",
@@ -10,54 +12,106 @@
       "ai-activity-log.jsonl",
       "current-work.md"
     ],
-    "L1 Runtime & Dashboard": ["docs-site/index.html"]
+    "L1 Local Architecture & Planning": [
+      "CANONICAL_DOCUMENT_MAP.md",
+      "TARGET_ARCHITECTURE.md",
+      "ROADMAP.md",
+      "DEVELOPMENT_WORKBREAKDOWN.md",
+      "PHASE1_DECISION_LEDGER.md",
+      "PHASE1_OPEN_QUESTIONS.md",
+      "LLM_ONBOARDING.md",
+      "ORCHESTRATOR_QUICKSTART.md"
+    ],
+    "L2 Phase 1 Canonical Specs": [
+      "phase1_system_analysis_v1.md",
+      "phase1_prd_detailed_v1.md",
+      "phase1_service_contracts_v1.md",
+      "phase1_migration_plan_v1.md",
+      "phase1_openapi_v1.yaml"
+    ],
+    "L3 Execution Constraints & Reference Bundles": [
+      "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/README.md",
+      "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/00_source_of_truth_and_glossary.md",
+      "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/01_decision_tables.md",
+      "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/02_acceptance_scenarios_gherkin.md",
+      "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/03_api_examples_and_error_contracts.md",
+      "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/05_engineering_conventions_and_ai_dev_playbook.md",
+      "phase1_db_migration_extracted/README.md",
+      "phase1_db_migration_extracted/seeds/templates/README.md",
+      "docs/02-architecture/repo-structure.md"
+    ]
   },
   "canonical_files": [
     "AI_COLLABORATION_GUIDE.md",
     "ai-status.json",
     "ai-activity-log.jsonl",
     "current-work.md",
-    "docs-site/index.html"
+    "CANONICAL_DOCUMENT_MAP.md",
+    "TARGET_ARCHITECTURE.md",
+    "ROADMAP.md",
+    "DEVELOPMENT_WORKBREAKDOWN.md",
+    "PHASE1_DECISION_LEDGER.md",
+    "PHASE1_OPEN_QUESTIONS.md",
+    "LLM_ONBOARDING.md",
+    "ORCHESTRATOR_QUICKSTART.md",
+    "phase1_system_analysis_v1.md",
+    "phase1_prd_detailed_v1.md",
+    "phase1_service_contracts_v1.md",
+    "phase1_migration_plan_v1.md",
+    "phase1_openapi_v1.yaml",
+    "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/README.md",
+    "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/00_source_of_truth_and_glossary.md",
+    "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/01_decision_tables.md",
+    "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/02_acceptance_scenarios_gherkin.md",
+    "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/03_api_examples_and_error_contracts.md",
+    "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/05_engineering_conventions_and_ai_dev_playbook.md",
+    "phase1_db_migration_extracted/README.md",
+    "phase1_db_migration_extracted/seeds/templates/README.md",
+    "docs/02-architecture/repo-structure.md"
   ],
   "agents": [
     {
       "name": "Claude",
-      "capability_lane": ["execution", "control-plane", "governance-review"],
+      "capability_lane": [
+        "governance-review",
+        "architecture-arbitration",
+        "control-plane"
+      ],
       "status": "idle",
       "current_task_ids": [],
-      "branch": "feat/claude-execution-control",
+      "branch": "feat/claude-governance-review",
       "next": "",
       "last_update": null
     },
     {
       "name": "Gemini",
-      "capability_lane": ["gcp", "ci-cd", "runtime-packaging", "worker-ops"],
+      "capability_lane": ["runtime-packaging", "ci-cd", "infra", "worker-ops"],
       "status": "idle",
       "current_task_ids": [],
-      "branch": "feat/gemini-research-runtime",
+      "branch": "feat/gemini-runtime-infra",
       "next": "",
       "last_update": null
     },
     {
       "name": "Codex",
-      "capability_lane": [
-        "integration",
-        "status-system",
-        "schema",
-        "acceptance"
-      ],
+      "capability_lane": ["contracts", "schema", "state-system", "acceptance"],
       "status": "idle",
       "current_task_ids": [],
-      "branch": "feat/codex-collab-system",
+      "branch": "feat/codex-phase1-architecture",
       "next": "",
       "last_update": null
     },
     {
       "name": "Qwen",
-      "capability_lane": ["integration", "schema", "acceptance", "code-agent"],
+      "capability_lane": [
+        "integration",
+        "api-implementation",
+        "adapter-execution",
+        "acceptance"
+      ],
       "status": "idle",
       "current_task_ids": [],
-      "branch": "feat/qwen-code-agent",
+      "branch": "feat/qwen-integration-slices",
       "next": "",
       "last_update": null
     },
@@ -71,7 +125,7 @@
       ],
       "status": "idle",
       "current_task_ids": [],
-      "branch": "feat/copilot-research-critique",
+      "branch": "feat/copilot-spec-critique",
       "next": "",
       "last_update": null
     }
@@ -81,10 +135,10 @@
   "blockers": [],
   "workload": {
     "Claude": 15,
-    "Gemini": 30,
+    "Gemini": 20,
     "Codex": 30,
-    "Qwen": 15,
-    "Copilot": 25
+    "Qwen": 20,
+    "Copilot": 15
   },
   "workload_summary": {
     "Claude": {

@@ -1,7 +1,7 @@
 {
   "version": 2,
   "initialized_at": "2026-04-10T14:14:44Z",
-  "last_scan_at": "2026-04-10T14:15:02Z",
+  "last_scan_at": "2026-04-10T14:16:43Z",
   "tasks": {},
   "pending_handoff_keys": [],
   "seen_event_keys": {},
@@ -19,8 +19,8 @@
     "last_ratio": 0.0
   },
   "supervisor": {
-    "pid": 175803,
-    "started_at": "2026-04-10T14:14:44Z",
-    "last_heartbeat_at": "2026-04-10T14:15:02Z"
+    "pid": 176247,
+    "started_at": "2026-04-10T14:16:26Z",
+    "last_heartbeat_at": "2026-04-10T14:16:43Z"
   }
 }

@@ -49,7 +49,9 @@ drts-fleet-platform/
     ops-console-web/
     driver-app/
   packages/
+    contracts/
     shared-types/
+    shared-test-fixtures/
     eslint-config/
     tsconfig/
     ui-web/
@@ -77,6 +79,12 @@ drts-fleet-platform/
   README.md
   docker-compose.dev.yml
   drts-fleet-platform.code-workspace
+  CANONICAL_DOCUMENT_MAP.md
+  TARGET_ARCHITECTURE.md
+  ROADMAP.md
+  DEVELOPMENT_WORKBREAKDOWN.md
+  PHASE1_DECISION_LEDGER.md
+  PHASE1_OPEN_QUESTIONS.md
   package.json
   pnpm-workspace.yaml
   turbo.json
@@ -106,6 +114,10 @@ drts-fleet-platform/
 - Added orchestrator control-plane docs, scripts, dashboard assets, and supervisor runtime files
 - Merged bundle-specific VS Code agent settings into the existing workspace settings
 - Added root package scripts and VS Code tasks for orchestrator setup, supervisor, dashboard, and tests
+- Added tracked Phase 1 source files and extracted reference bundles to the repository
+- Specialized the collaboration control plane from portable bundle defaults to DRTS Phase 1 architecture mode
+- Added canonical document map, target architecture, roadmap, decision ledger, open questions, and work breakdown docs
+- Added repo landing zones for contracts, shared test fixtures, migrations, and seeds
 
 ## Verification Results
 
@@ -135,7 +147,7 @@ drts-fleet-platform/
 - GitHub remote creation was not executed because `gh` is not installed
 - GitHub owner is still `REPLACE_ME`, so remote creation remains intentionally blocked
 - No cloud deployment, production secrets, production schema, or domain workflows were added
-- Portable orchestrator seed state still describes the source bundle project in `ai-status.json`; runtime works, but canonical project metadata has not yet been repo-specialized through an approved migration path
+- Implementation task allocation through supervisor and auto workers is intentionally deferred until the work breakdown is human-approved
 
 ## Manual Follow-up Needed
 
@@ -151,9 +163,6 @@ drts-fleet-platform/
 - If the remote repo already exists instead:
   - `git remote add origin git@github.com:$GITHUB_OWNER/drts-fleet-platform.git`
   - `git push -u origin main`
-- If you want the orchestrator canonical metadata to match this repo instead of the imported seed bundle:
-  - decide the target project/sprint/objective text
-  - add a supported migration path to `scripts/ai_status.py` or approve a one-time seed-state rewrite
 - If you want non-Codex workers to run automatically instead of inbox fallback:
   - authenticate the installed CLIs (`claude`, `gemini`, `copilot`, `qwen`) on this machine
 

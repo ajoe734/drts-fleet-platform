@@ -1,0 +1,10 @@
+{
+  "invoice_id": "INV-202604-00021",
+  "tenant_id": "0f2a1cc5-bdca-4681-b9b6-5e93fe4d83fa",
+  "period_month": "2026-04",
+  "amount_minor": 1250000,
+  "currency": "NTD",
+  "status": "issued",
+  "pdf_url": "https://billing.example.com/invoices/INV-202604-00021.pdf",
+  "issued_at": "2026-05-01T01:00:00Z"
+}
