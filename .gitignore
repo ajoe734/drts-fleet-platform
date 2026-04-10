@@ -36,6 +36,7 @@ __pycache__/
 
 # orchestrator runtime
 .orchestrator/approval-queue.lock
+.orchestrator/backups/
 .orchestrator/claude-approval-broker.mcp.json
 .orchestrator/provider_capabilities.json
 .orchestrator/state.json
