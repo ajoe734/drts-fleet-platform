@@ -1,0 +1,153 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pwd)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(rg *)",
+      "Bash(cat *)",
+      "Bash(sed *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git show*)",
+      "Bash(git push *)",
+      "Bash(gh issue comment *)",
+      "Bash(gh pr create *)",
+      "Bash(bash scripts/ai-status.sh *)",
+      "Bash(AI_NAME=* bash scripts/ai-status.sh *)",
+      "Bash(AI_NAME=* bash */scripts/ai-status.sh *)",
+      "Bash(bash */scripts/ai-status.sh *)",
+      "Bash(python3 scripts/ai_status.py *)",
+      "Bash(python3 */scripts/ai_status.py *)",
+      "Bash(cd * && python3 scripts/ai_status.py *)",
+      "Bash(cd * && python3 */scripts/ai_status.py *)",
+      "Bash(cd * && bash scripts/ai-status.sh *)",
+      "Bash(cd * && bash */scripts/ai-status.sh *)",
+      "Bash(python3 -m unittest discover *)",
+      "Bash(cd * && python3 -m unittest discover *)",
+      "Bash(python3 -m pytest*)",
+      "Bash(cd * && python3 -m pytest*)",
+      "Bash(pytest*)",
+      "Bash(cd * && pytest*)",
+      "Bash(apt-get install*python3-pytest*)",
+      "Bash(apt install*python3-pytest*)",
+      "Bash(python3 -m pip install*pytest*)",
+      "Bash(pip install*pytest*)",
+      "Bash(pip3 install*pytest*)",
+      "Bash(npm test*)",
+      "Bash(cd * && npm test*)",
+      "Bash(npm run test*)",
+      "Bash(cd * && npm run test*)",
+      "Bash(cargo test*)",
+      "Bash(cd * && cargo test*)",
+      "Bash(go test*)",
+      "Bash(cd * && go test*)",
+      "Bash(python3 -m py_compile *)",
+      "Bash(cd * && python3 -m py_compile *)",
+      "Bash(python3 */smoke_test.py*)",
+      "Bash(cd * && python3 smoke_test.py*)",
+      "Bash(AI_NAME=* python3 scripts/ai_status.py *)",
+      "Bash(AI_NAME=* python3 */scripts/ai_status.py *)",
+      "Bash(AI_NAME=* cd * && python3 scripts/ai_status.py *)",
+      "Bash(AI_NAME=* cd * && python3 */scripts/ai_status.py *)"
+    ],
+    "ask": [
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(apt *)",
+      "Bash(npm install *)",
+      "Bash(pip install *)",
+      "Bash(docker *)"
+    ],
+    "deny": [
+      "Bash(git reset --hard*)",
+      "Bash(git checkout -- *)",
+      "Bash(sudo *)",
+      "Bash(rm -rf /*)",
+      "Bash(chmod 777 *)"
+    ],
+    "defaultMode": "acceptEdits",
+    "disableBypassPermissionsMode": "disable"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/edna/workspace/drts-fleet-platform/.orchestrator/permission_broker.py hook PreToolUse",
+            "shell": "bash"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/edna/workspace/drts-fleet-platform/.orchestrator/permission_broker.py hook PermissionRequest",
+            "shell": "bash"
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/edna/workspace/drts-fleet-platform/.orchestrator/permission_broker.py hook PermissionDenied",
+            "shell": "bash"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/edna/workspace/drts-fleet-platform/.orchestrator/permission_broker.py hook PostToolUse",
+            "shell": "bash"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/edna/workspace/drts-fleet-platform/.orchestrator/permission_broker.py hook SessionStart",
+            "shell": "bash"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/edna/workspace/drts-fleet-platform/.orchestrator/permission_broker.py hook SessionEnd",
+            "shell": "bash"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /home/edna/workspace/drts-fleet-platform/.orchestrator/permission_broker.py hook Stop",
+            "shell": "bash"
+          }
+        ]
+      }
+    ]
+  }
+}

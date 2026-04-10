@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-04-10T14:14:23Z",
+  "files": [
+    {
+      "target_path": "/home/edna/workspace/drts-fleet-platform/.vscode/settings.json",
+      "existed": true,
+      "backup_file": "01-settings.json"
+    },
+    {
+      "target_path": "/home/edna/workspace/drts-fleet-platform/.claude/settings.local.json",
+      "existed": false,
+      "backup_file": null
+    },
+    {
+      "target_path": "/home/edna/.gemini/settings.json",
+      "existed": false,
+      "backup_file": null
+    }
+  ]
+}

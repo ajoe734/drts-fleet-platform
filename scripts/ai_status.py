@@ -1,0 +1,1293 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import sys
+from copy import deepcopy
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+STATUS_FILE = ROOT / "ai-status.json"
+LOG_FILE = ROOT / "ai-activity-log.jsonl"
+CURRENT_WORK_FILE = ROOT / "current-work.md"
+DOCS_SITE_DIR = ROOT / "docs-site"
+
+KNOWN_AGENTS = {
+    "Claude": {
+        "capability_lane": ["execution", "control-plane", "governance-review"],
+        "default_branch": "feat/claude-execution-control",
+        "target_workload": 15,
+    },
+    "Gemini": {
+        "capability_lane": ["gcp", "ci-cd", "runtime-packaging", "worker-ops"],
+        "default_branch": "feat/gemini-research-runtime",
+        "target_workload": 30,
+    },
+    "Codex": {
+        "capability_lane": ["integration", "status-system", "schema", "acceptance"],
+        "default_branch": "feat/codex-collab-system",
+        "target_workload": 30,
+    },
+    "Qwen": {
+        "capability_lane": ["integration", "schema", "acceptance", "code-agent"],
+        "default_branch": "feat/qwen-code-agent",
+        "target_workload": 15,
+    },
+    "Copilot": {
+        "capability_lane": ["research-ingest", "external-search", "spec-review", "critique"],
+        "default_branch": "feat/copilot-research-critique",
+        "target_workload": 25,
+    },
+}
+
+AGENT_ALIASES = {
+    "qwen": "Qwen",
+    "qwen coder": "Qwen",
+    "qwen2.5-coder": "Qwen",
+    "qwen3": "Qwen",
+    "千問": "Qwen",
+    "grok": "Copilot",
+    "copilot": "Copilot",
+    "copilot host": "Copilot",
+    "copilot_host": "Copilot",
+}
+
+STATUS_LABELS = {
+    "todo": "todo",
+    "in_progress": "in_progress",
+    "review": "review",
+    "review_approved": "review_approved",
+    "blocked": "blocked",
+    "done": "done",
+}
+
+DEPENDENCY_DONE_STATUSES = {"done"}
+EXTERNAL_TASK_PREFIXES = {"OC", "RS", "LP", "OSS", "SPIKE"}
+FIRST_PROMPT_PRIORITY = [
+    "AI_COLLABORATION_GUIDE.md",
+    "current-work.md",
+    "ai-status.json",
+    "TARGET_ARCHITECTURE.md",
+    "CANONICAL_DOCUMENT_MAP.md",
+    "ROADMAP.md",
+    "DEVELOPMENT_WORKBREAKDOWN.md",
+]
+OPTIONAL_CURRENT_WORK_REFERENCES = (
+    ("CANONICAL_DOCUMENT_MAP.md", "Canonical map"),
+    ("DEVELOPMENT_WORKBREAKDOWN.md", "Full backlog"),
+)
+
+
+def default_canonical_document_layers() -> dict[str, list[str]]:
+    return {
+        "L0 Collaboration & State": [
+            "AI_COLLABORATION_GUIDE.md",
+            "ai-status.json",
+            "ai-activity-log.jsonl",
+            "current-work.md",
+        ],
+        "L1 Platform Architecture & Policy": [
+            "TARGET_ARCHITECTURE.md",
+            "OPENCLAW_RUNTIME_CONTRACT.md",
+            "PERSONA_RUNTIME_MODEL.md",
+            "BINDING_AND_DEPLOYMENT_SEMANTICS.md",
+            "PAPER_CANARY_LIVE_POLICY.md",
+            "ROLLBACK_AND_POSITION_SEMANTICS.md",
+            "LINEAGE_AND_TELEMETRY_STORAGE_DECISIONS.md",
+            "EVOLUTION_REVIEW_AND_THRESHOLDS.md",
+            "CROSS_SERVICE_CONSISTENCY_AND_SAGA_POLICY.md",
+            "KILL_SWITCH_AND_SAFE_MODE_EXECUTION_POLICY.md",
+            "MULTI_PERSONA_AGGREGATION_AND_CONFLICT_RESOLUTION.md",
+            "TELEMETRY_INGEST_AND_STORAGE_ARCHITECTURE.md",
+            "DATABASE_OWNERSHIP_AND_SHARED_CLUSTER_POLICY.md",
+            "EVENT_ORDERING_AND_DELIVERY_GUARANTEES.md",
+            "EVOLUTION_COOLDOWN_AND_CONVERGENCE_POLICY.md",
+            "BFF_HA_AND_CONTROL_PLANE_RESILIENCE.md",
+            "LOOP_TRIGGER_AND_CONCURRENCY_POLICY.md",
+        ],
+        "L2 Planning & Execution": [
+            "CANONICAL_DOCUMENT_MAP.md",
+            "ROADMAP.md",
+            "DEVELOPMENT_WORKBREAKDOWN.md",
+            "OSS_INTEGRATION_CHECKLIST.md",
+        ],
+        "L3 Supporting Design & Migration": [
+            "CANONICAL_CONTRACT_MIGRATION_DECISION.md",
+            "WORK_REBASELINE.md",
+            "Pantheon_總索引版系統分析文件.md",
+            "Pantheon_資料表_Schema_設計版.md",
+            "Pantheon_API_Service_Contract_設計版.md",
+        ],
+    }
+
+
+def flatten_canonical_document_layers(layers: dict[str, list[str]]) -> list[str]:
+    flattened: list[str] = []
+    for documents in layers.values():
+        for document in documents:
+            if document not in flattened:
+                flattened.append(document)
+    return flattened
+
+
+def sync_canonical_document_metadata(state: dict[str, Any]) -> None:
+    layers = state.get("canonical_document_layers")
+    if not isinstance(layers, dict) or not layers:
+        layers = default_canonical_document_layers()
+    else:
+        normalized_layers: dict[str, list[str]] = {}
+        for key, value in layers.items():
+            if isinstance(value, list):
+                normalized_layers[str(key)] = [str(item) for item in value]
+        if not normalized_layers:
+            normalized_layers = default_canonical_document_layers()
+        layers = normalized_layers
+    state["canonical_document_layers"] = layers
+    state["canonical_files"] = flatten_canonical_document_layers(layers)
+
+
+def canonical_file_set(state: dict[str, Any]) -> set[str]:
+    sync_canonical_document_metadata(state)
+    return {
+        str(item)
+        for item in state.get("canonical_files", [])
+        if str(item).strip()
+    }
+
+
+def canonical_tier_labels(state: dict[str, Any]) -> list[str]:
+    sync_canonical_document_metadata(state)
+    layers = state.get("canonical_document_layers", {})
+    return [f"`{name}`" for name in layers]
+
+
+def human_join(items: list[str]) -> str:
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f"{items[0]} and {items[1]}"
+    return f"{', '.join(items[:-1])}, and {items[-1]}"
+
+
+def build_onboarding_prompt(state: dict[str, Any]) -> str:
+    canonical_files = canonical_file_set(state)
+    prompt_files = [item for item in FIRST_PROMPT_PRIORITY if item in canonical_files]
+    if not prompt_files:
+        prompt_files = FIRST_PROMPT_PRIORITY[:3]
+
+    parts = [f"Read {human_join(prompt_files)} first."]
+    if "ai-activity-log.jsonl" in canonical_files:
+        parts.append("Use ai-activity-log.jsonl when you need recent history.")
+    parts.append("Treat generated views as derived from machine-readable state.")
+    parts.append("Follow the canonical lifecycle todo -> in_progress -> review -> review_approved -> done.")
+    parts.append("Use scripts/ai-status.sh for every state change.")
+    return " ".join(parts)
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def canonical_agent_name(name: str | None) -> str:
+    if name is None:
+        return ""
+    trimmed = str(name).strip()
+    if not trimmed:
+        return ""
+    canonical_by_lower = {agent.lower(): agent for agent in KNOWN_AGENTS}
+    lowered = trimmed.lower()
+    if lowered in canonical_by_lower:
+        return canonical_by_lower[lowered]
+    alias_target = AGENT_ALIASES.get(lowered)
+    if alias_target:
+        return alias_target
+    return trimmed
+
+
+def current_actor(default: str = "Codex") -> str:
+    return canonical_agent_name(os.environ.get("AI_NAME", default))
+
+
+def default_state() -> dict[str, Any]:
+    timestamp = iso_now()
+    canonical_layers = default_canonical_document_layers()
+    return {
+        "project": "pantheon",
+        "sprint": "2026-04-09-canonical-adoption-platform-plan",
+        "objective": (
+            "Adopt the layered canonical document system, align architecture and planning truth, and publish the "
+            "full Pantheon platform backlog without overwriting historical collaboration records."
+        ),
+        "updated_at": timestamp,
+        "canonical_document_layers": canonical_layers,
+        "canonical_files": flatten_canonical_document_layers(canonical_layers),
+        "agents": [
+            {
+                "name": name,
+                "capability_lane": meta["capability_lane"],
+                "status": "idle",
+                "current_task_ids": [],
+                "branch": meta["default_branch"],
+                "next": "",
+                "last_update": None,
+            }
+            for name, meta in KNOWN_AGENTS.items()
+        ],
+        "tasks": [
+            {
+                "id": "OPS-001",
+                "title": "Canonicalize collaboration rules",
+                "phase": "Foundation",
+                "owner": "Codex",
+                "reviewer": "Claude",
+                "status": "done",
+                "depends_on": [],
+                "artifacts": ["AI_COLLABORATION_GUIDE.md", "current-work.md"],
+                "acceptance": [
+                    "canonical rules defined",
+                    "current-work reduced to sprint snapshot",
+                ],
+                "next": "Keep guide stable while downstream work starts",
+                "last_update": timestamp,
+            },
+            {
+                "id": "OPS-002",
+                "title": "Build JSON status pipeline",
+                "phase": "Foundation",
+                "owner": "Codex",
+                "reviewer": "Gemini",
+                "status": "done",
+                "depends_on": ["OPS-001"],
+                "artifacts": ["ai-status.json", "ai-activity-log.jsonl", "scripts/ai-status.sh"],
+                "acceptance": [
+                    "state updates through script",
+                    "history append-only",
+                    "current-work regenerated from JSON state",
+                ],
+                "next": "Use script-driven updates only",
+                "last_update": timestamp,
+            },
+            {
+                "id": "OPS-003",
+                "title": "Build collaboration dashboard",
+                "phase": "Foundation",
+                "owner": "Codex",
+                "reviewer": "Claude",
+                "status": "done",
+                "depends_on": ["OPS-002"],
+                "artifacts": ["docs-site/index.html", "docs-site/script.js", "docs-site/style.css"],
+                "acceptance": [
+                    "dashboard renders workload",
+                    "dashboard renders board, blockers, handoffs, recent activity",
+                ],
+                "next": "Collect visual feedback and adjust layout if needed",
+                "last_update": timestamp,
+            },
+            {
+                "id": "P1-001",
+                "title": "Define SignalStoreClient contract",
+                "phase": "Phase 1",
+                "owner": "Codex",
+                "reviewer": "Gemini",
+                "status": "todo",
+                "depends_on": [],
+                "artifacts": ["services/signal-store/client.py"],
+                "acceptance": [
+                    "interface documented",
+                    "example payload added",
+                    "consumer assumptions listed",
+                ],
+                "next": "Lock interface for downstream work",
+                "last_update": None,
+            },
+            {
+                "id": "P2-001",
+                "title": "Define signal JSON schema",
+                "phase": "Phase 2",
+                "owner": "Gemini",
+                "reviewer": "Claude",
+                "status": "todo",
+                "depends_on": ["P1-001"],
+                "artifacts": ["services/research/schema.json"],
+                "acceptance": [
+                    "payload keys documented",
+                    "worker contract references same schema",
+                ],
+                "next": "Publish worker payload contract",
+                "last_update": None,
+            },
+            {
+                "id": "P3-001",
+                "title": "Wire LEAN runtime signal consumer",
+                "phase": "Phase 3",
+                "owner": "Claude",
+                "reviewer": "Gemini",
+                "status": "todo",
+                "depends_on": ["P1-001", "P2-001"],
+                "artifacts": ["services/execution/lean-runtime/"],
+                "acceptance": [
+                    "runtime can consume signal payload",
+                    "broker config edge documented",
+                ],
+                "next": "Connect signal intake to execution plane",
+                "last_update": None,
+            },
+            {
+                "id": "P4-001",
+                "title": "Draft control-plane routing contract",
+                "phase": "Phase 4",
+                "owner": "Claude",
+                "reviewer": "Codex",
+                "status": "todo",
+                "depends_on": ["P2-001"],
+                "artifacts": ["services/control-plane/router/"],
+                "acceptance": [
+                    "router contract documented",
+                    "monitoring handoff documented",
+                ],
+                "next": "Define router and monitoring handoff",
+                "last_update": None,
+            },
+        ],
+        "handoffs": [],
+        "blockers": [],
+        "workload": {name: meta["target_workload"] for name, meta in KNOWN_AGENTS.items()},
+    }
+
+
+def load_state() -> dict[str, Any]:
+    if not STATUS_FILE.exists() or STATUS_FILE.read_text(encoding="utf-8").strip() == "":
+        return default_state()
+    state = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+    sync_canonical_document_metadata(state)
+    normalize_state_agents(state)
+    return state
+
+
+def load_logs() -> list[dict[str, Any]]:
+    if not LOG_FILE.exists():
+        return []
+    logs: list[dict[str, Any]] = []
+    for line_no, line in enumerate(LOG_FILE.read_text(encoding="utf-8").splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            logs.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            print(
+                f"Warning: skipping malformed ai-activity-log.jsonl line {line_no}: {exc}",
+                file=sys.stderr,
+            )
+    return logs
+
+
+def save_state(state: dict[str, Any]) -> None:
+    STATUS_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def append_log(entry: dict[str, Any]) -> None:
+    with LOG_FILE.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def ensure_agent(name: str) -> dict[str, Any]:
+    canonical = canonical_agent_name(name)
+    if canonical not in KNOWN_AGENTS:
+        raise SystemExit(f"Unknown agent: {name}")
+    return KNOWN_AGENTS[canonical]
+
+
+def get_agent(state: dict[str, Any], name: str) -> dict[str, Any]:
+    name = canonical_agent_name(name)
+    ensure_agent(name)
+    for agent in state["agents"]:
+        if agent["name"] == name:
+            return agent
+    meta = KNOWN_AGENTS[name]
+    agent = {
+        "name": name,
+        "capability_lane": meta["capability_lane"],
+        "status": "idle",
+        "current_task_ids": [],
+        "branch": meta["default_branch"],
+        "next": "",
+        "last_update": None,
+    }
+    state["agents"].append(agent)
+    return agent
+
+
+def get_task(state: dict[str, Any], task_id: str) -> dict[str, Any] | None:
+    for task in state["tasks"]:
+        if task["id"] == task_id:
+            return task
+    return None
+
+
+def parse_csv_env(name: str) -> list[str]:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def parse_delimited_env(name: str, delimiter: str = "||") -> list[str]:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return []
+    return [item.strip() for item in value.split(delimiter) if item.strip()]
+
+
+def parse_json_env(name: str) -> dict[str, Any]:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return {}
+    payload = json.loads(value)
+    if not isinstance(payload, dict):
+        raise SystemExit(f"{name} must decode to a JSON object")
+    return payload
+
+
+def parse_bool_env(name: str) -> bool | None:
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise SystemExit(f"{name} must be a boolean-like string")
+
+
+def task_metadata_from_env() -> dict[str, Any]:
+    metadata = parse_json_env("TASK_METADATA_JSON")
+    explicit_fields = {
+        "task_class": os.environ.get("TASK_CLASS", "").strip() or None,
+        "helper_parent": os.environ.get("TASK_HELPER_PARENT", "").strip() or None,
+        "helper_kind": os.environ.get("TASK_HELPER_KIND", "").strip() or None,
+        "auto_created_by": os.environ.get("TASK_AUTO_CREATED_BY", "").strip() or None,
+    }
+    for key, value in explicit_fields.items():
+        if value is not None:
+            metadata[key] = value
+
+    for env_name, field_name in (
+        ("TASK_AUTO_GENERATED", "auto_generated"),
+        ("TASK_MUTATES_CANONICAL", "mutates_canonical"),
+    ):
+        parsed = parse_bool_env(env_name)
+        if parsed is not None:
+            metadata[field_name] = parsed
+
+    return metadata
+
+
+def dependency_is_satisfied(task_map: dict[str, dict[str, Any]], dep_id: str) -> bool:
+    dependency = task_map.get(dep_id)
+    if dependency is None:
+        return True
+    return dependency.get("status") in DEPENDENCY_DONE_STATUSES
+
+
+def ensure_review_finalize_handoff(
+    state: dict[str, Any],
+    task: dict[str, Any],
+    *,
+    from_agent: str,
+    timestamp: str,
+    message: str | None = None,
+) -> None:
+    owner = canonical_agent_name(task.get("owner"))
+    if not owner:
+        return
+    pending_owner_handoff = next(
+        (
+            handoff
+            for handoff in state.get("handoffs", [])
+            if handoff.get("task_id") == task.get("id")
+            and handoff.get("to") == owner
+            and handoff.get("status") != "done"
+        ),
+        None,
+    )
+    if pending_owner_handoff:
+        if message:
+            pending_owner_handoff["message"] = message
+        return
+
+    state.setdefault("handoffs", []).append(
+        {
+            "task_id": task.get("id"),
+            "from": canonical_agent_name(from_agent),
+            "to": owner,
+            "message": message or "Review approved. Owner must finalize this task to move it from review_approved to done.",
+            "status": "pending",
+            "created_at": timestamp,
+        }
+    )
+
+
+def validate_state(state: dict[str, Any]) -> None:
+    sync_canonical_document_metadata(state)
+    normalize_state_agents(state)
+    for task in state["tasks"]:
+        ensure_agent(task["owner"])
+        ensure_agent(task["reviewer"])
+        if task["owner"] == task["reviewer"]:
+            raise SystemExit(f"Task {task['id']} has identical owner and reviewer")
+        if task["status"] == "blocked" and not task.get("waiting_for"):
+            raise SystemExit(f"Blocked task {task['id']} is missing waiting_for")
+
+    for blocker in state.get("blockers", []):
+        ensure_agent(blocker["owner"])
+        ensure_agent(blocker["waiting_for"])
+
+    for handoff in state.get("handoffs", []):
+        ensure_agent(handoff["from"])
+        ensure_agent(handoff["to"])
+
+
+def normalize_state_agents(state: dict[str, Any]) -> None:
+    for task in state.get("tasks", []):
+        task["owner"] = canonical_agent_name(task.get("owner"))
+        task["reviewer"] = canonical_agent_name(task.get("reviewer"))
+        if task.get("waiting_for"):
+            task["waiting_for"] = canonical_agent_name(task.get("waiting_for"))
+
+    for blocker in state.get("blockers", []):
+        blocker["owner"] = canonical_agent_name(blocker.get("owner"))
+        blocker["waiting_for"] = canonical_agent_name(blocker.get("waiting_for"))
+
+    for handoff in state.get("handoffs", []):
+        handoff["from"] = canonical_agent_name(handoff.get("from"))
+        handoff["to"] = canonical_agent_name(handoff.get("to"))
+
+    for agent in state.get("agents", []):
+        agent["name"] = canonical_agent_name(agent.get("name"))
+
+
+def recompute_agents(state: dict[str, Any]) -> None:
+    deduped_agents: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for agent in state.get("agents", []):
+        name = agent.get("name")
+        if not name or name in seen_names:
+            continue
+        deduped_agents.append(agent)
+        seen_names.add(name)
+    state["agents"] = deduped_agents
+
+    by_owner: dict[str, list[dict[str, Any]]] = {name: [] for name in KNOWN_AGENTS}
+    task_map = {task["id"]: task for task in state["tasks"]}
+    for task in state["tasks"]:
+        by_owner.setdefault(task["owner"], []).append(task)
+
+    for name in KNOWN_AGENTS:
+        agent = get_agent(state, name)
+        owned = by_owner.get(name, [])
+        active = [task for task in owned if task["status"] in {"in_progress", "review", "blocked"}]
+        approved = [task for task in owned if task["status"] == "review_approved"]
+        queued = [task for task in owned if task["status"] == "todo"]
+        ready = [
+            task
+            for task in queued
+            if all(dependency_is_satisfied(task_map, dep_id) for dep_id in task.get("depends_on", []))
+        ]
+        waiting = [task for task in queued if task not in ready]
+
+        if any(task["status"] == "blocked" for task in active):
+            agent["status"] = "blocked"
+            agent["current_task_ids"] = [task["id"] for task in active]
+        elif any(task["status"] == "in_progress" for task in active):
+            agent["status"] = "working"
+            agent["current_task_ids"] = [task["id"] for task in active]
+        elif any(task["status"] == "review" for task in active):
+            agent["status"] = "reviewing"
+            agent["current_task_ids"] = [task["id"] for task in active]
+        elif approved:
+            agent["status"] = "finalize"
+            agent["current_task_ids"] = [task["id"] for task in approved]
+        elif ready:
+            agent["status"] = "ready"
+            agent["current_task_ids"] = [task["id"] for task in ready]
+        elif waiting:
+            agent["status"] = "waiting"
+            agent["current_task_ids"] = [task["id"] for task in waiting[:3]]
+        else:
+            agent["status"] = "idle"
+            agent["current_task_ids"] = []
+
+        if active:
+            latest = sorted(
+                active,
+                key=lambda task: task.get("last_update") or "",
+                reverse=True,
+            )[0]
+            agent["next"] = latest.get("next", "")
+            agent["last_update"] = latest.get("last_update")
+        elif approved:
+            agent["next"] = approved[0].get("next", "")
+            agent["last_update"] = approved[0].get("last_update")
+        elif ready:
+            agent["next"] = ready[0].get("next", "")
+            agent["last_update"] = ready[0].get("last_update")
+        elif waiting:
+            agent["next"] = waiting[0].get("next", "")
+            if not agent.get("last_update"):
+                agent["last_update"] = waiting[0].get("last_update")
+        elif queued:
+            agent["next"] = queued[0].get("next", "")
+        elif not agent.get("last_update"):
+            agent["last_update"] = None
+
+
+def recompute_workload(state: dict[str, Any]) -> None:
+    summary: dict[str, dict[str, int]] = {}
+    for name in KNOWN_AGENTS:
+        summary[name] = {
+            "total": 0,
+            "active": 0,
+            "blocked": 0,
+            "done": 0,
+            "review": 0,
+            "review_approved": 0,
+            "todo": 0,
+        }
+
+    for task in state["tasks"]:
+        owner = task["owner"]
+        bucket = summary[owner]
+        bucket["total"] += 1
+        bucket[task["status"] if task["status"] in bucket else "todo"] += 1
+        if task["status"] in {"in_progress", "review", "blocked"}:
+            bucket["active"] += 1
+
+    state["workload"] = {name: KNOWN_AGENTS[name]["target_workload"] for name in KNOWN_AGENTS}
+    state["workload_summary"] = summary
+
+
+def task_delivery_layer(task: dict[str, Any]) -> str:
+    explicit = str(task.get("delivery_layer") or "").strip().lower()
+    if explicit in {"primary", "project"}:
+        return "primary"
+    if explicit in {"external", "upstream"}:
+        return "external"
+    prefix = task["id"].split("-", 1)[0]
+    if prefix in EXTERNAL_TASK_PREFIXES:
+        return "external"
+    return "primary"
+
+
+def display_task_title(task: dict[str, Any]) -> str:
+    title = str(task.get("title") or "")
+    if task.get("task_class") != "sidecar":
+        return title
+
+    markers = ["[Sidecar]"]
+    if task.get("auto_generated"):
+        markers.append("[Auto]")
+    if task.get("helper_parent"):
+        markers.append(f"[Parent {task['helper_parent']}]")
+    marker_text = " ".join(markers)
+    if title:
+        return f"{marker_text} {title}"
+    return marker_text
+
+
+def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> None:
+    def cell(value: Any) -> str:
+        text = "-" if value is None or value == "" else str(value)
+        return text.replace("|", "\\|").replace("\n", "<br>")
+
+    def append_layer_table(lines: list[str], tasks: list[dict[str, Any]]) -> None:
+        lines.extend(
+            [
+                "| ID | Phase | Task | Owner | Status | Depends On | 中文說明 |",
+                "|---|---|---|---|---|---|---|",
+            ]
+        )
+        if not tasks:
+            lines.append("| _(none)_ | - | - | - | - | - | - |")
+            return
+        for task in tasks:
+            depends = ", ".join(f"`{item}`" for item in task.get("depends_on", [])) or "-"
+            lines.append(
+                "| `{id}` | {phase} | {title} | {owner} | {status} | {depends} | {summary} |".format(
+                    id=cell(task["id"]),
+                    phase=cell(task["phase"]),
+                    title=cell(display_task_title(task)),
+                    owner=cell(task["owner"]),
+                    status=cell(task["status"]),
+                    depends=cell(depends),
+                    summary=cell(task.get("summary_zh") or "-"),
+                )
+            )
+
+    current_logs = logs[-20:]
+    canonical_files = canonical_file_set(state)
+    tier_labels = canonical_tier_labels(state)
+    active_tasks = [task for task in state["tasks"] if task.get("status") != "done"]
+    primary_tasks = [task for task in active_tasks if task_delivery_layer(task) == "primary"]
+    external_tasks = [task for task in active_tasks if task_delivery_layer(task) == "external"]
+    current_sprint_lines = [
+        f"- Sprint: `{state['sprint']}`",
+        "- Canonical files: " + ", ".join(f"`{item}`" for item in state["canonical_files"]),
+        "- Canonical tiers: " + (", ".join(tier_labels) if tier_labels else "-"),
+    ]
+    for path, label in OPTIONAL_CURRENT_WORK_REFERENCES:
+        if path in canonical_files:
+            current_sprint_lines.append(f"- {label}: `{path}`")
+    current_sprint_lines.append("- Dashboard: `docs-site/index.html`")
+
+    lines: list[str] = [
+        "# Current Work",
+        "",
+        "This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.",
+        "Do not treat this file as the machine-readable source of truth.",
+        "",
+        f"Last updated: {state['updated_at']}",
+        "",
+        "## Objective",
+        "",
+        state["objective"],
+        "",
+        "## Current Sprint",
+        "",
+        *current_sprint_lines,
+        "",
+        "## Active Slices",
+        "",
+    ]
+
+    for agent in state["agents"]:
+        next_text = agent.get("next") or "No active assignment"
+        lines.append(f"- `{agent['name']}`: {', '.join(agent['capability_lane'])}; next: {next_text}")
+
+    lines.extend(
+        [
+            "",
+            "## Delivery Layers",
+            "",
+            "### Primary Project Work",
+            "",
+        ]
+    )
+    append_layer_table(lines, primary_tasks)
+    lines.extend(
+        [
+            "",
+            "### External / Upstream Integration Work",
+            "",
+        ]
+    )
+    append_layer_table(lines, external_tasks)
+
+    lines.extend(["", "## Task Board", "", "| ID | Phase | Task | 中文說明 | Owner | Reviewer | Status | Depends On | Last Update | Next |", "|---|---|---|---|---|---|---|---|---|---|"])
+
+    for task in state["tasks"]:
+        depends = ", ".join(f"`{item}`" for item in task.get("depends_on", [])) or "-"
+        lines.append(
+            "| `{id}` | {phase} | {title} | {summary} | {owner} | {reviewer} | {status} | {depends} | {last_update} | {next} |".format(
+                id=cell(task["id"]),
+                phase=cell(task["phase"]),
+                title=cell(display_task_title(task)),
+                summary=cell(task.get("summary_zh") or "-"),
+                owner=cell(task["owner"]),
+                reviewer=cell(task["reviewer"]),
+                status=cell(task["status"]),
+                depends=cell(depends),
+                last_update=cell(task.get("last_update") or "-"),
+                next=cell(task.get("next") or "-"),
+            )
+        )
+
+    lines.extend(["", "## Handoff Queue", "", "| Task | From | To | Message | Status | Created At |", "|---|---|---|---|---|---|"])
+    pending_handoffs = [handoff for handoff in state.get("handoffs", []) if handoff.get("status") != "done"]
+    if pending_handoffs:
+        for handoff in pending_handoffs:
+            lines.append(
+                f"| `{handoff['task_id']}` | {handoff['from']} | {handoff['to']} | {handoff['message']} | {handoff['status']} | {handoff['created_at']} |"
+            )
+    else:
+        lines.append("| _(none)_ | - | - | - | - | - |")
+
+    lines.extend(["", "## Blockers", "", "| Task | Owner | Waiting For | Message | Status |", "|---|---|---|---|---|"])
+    open_blockers = [blocker for blocker in state.get("blockers", []) if blocker.get("status") == "open"]
+    if open_blockers:
+        for blocker in open_blockers:
+            lines.append(
+                f"| `{blocker['task_id']}` | {blocker['owner']} | {blocker['waiting_for']} | {blocker['message']} | {blocker['status']} |"
+            )
+    else:
+        lines.append("| _(none)_ | - | - | - | - |")
+
+    lines.extend(["", "## Review Notes", "", "| Task | Reviewer | 修正重點 | Review File |", "|---|---|---|---|"])
+    review_tasks = [task for task in state["tasks"] if task.get("review_notes_zh")]
+    if review_tasks:
+        for task in review_tasks:
+            note_html = "<br>".join(task.get("review_notes_zh", []))
+            lines.append(
+                f"| `{task['id']}` | {cell(task['reviewer'])} | {cell(note_html)} | {cell(task.get('review_file') or '-')} |"
+            )
+    else:
+        lines.append("| _(none)_ | - | - | - |")
+
+    lines.extend(["", "## Latest Checkpoints", ""])
+    if current_logs:
+        for entry in current_logs:
+            task_id = f" `{entry['task_id']}`" if entry.get("task_id") else ""
+            lines.append(f"- {entry['ts']} {entry['agent']}:{task_id} {entry['message']}")
+    else:
+        lines.append("- No checkpoints yet.")
+
+    CURRENT_WORK_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def sync_docs_site() -> None:
+    DOCS_SITE_DIR.mkdir(parents=True, exist_ok=True)
+    mirror_files = [
+        STATUS_FILE,
+        LOG_FILE,
+        CURRENT_WORK_FILE,
+        ROOT / ".orchestrator" / "state.json",
+        ROOT / ".orchestrator" / "approval-queue.json",
+    ]
+    rename_map = {
+        "state.json": "orchestrator-state.json",
+        "approval-queue.json": "approval-queue.json",
+    }
+    for path in mirror_files:
+        if path.exists():
+            target_name = rename_map.get(path.name, path.name)
+            shutil.copy2(path, DOCS_SITE_DIR / target_name)
+
+
+def sync_all(state: dict[str, Any]) -> None:
+    sync_canonical_document_metadata(state)
+    normalize_state_agents(state)
+    validate_state(state)
+    normalize_handoffs(state)
+    recompute_agents(state)
+    recompute_workload(state)
+    state["updated_at"] = iso_now()
+    save_state(state)
+    logs = load_logs()
+    write_current_work(state, logs)
+    sync_docs_site()
+
+
+def mark_blockers_resolved(state: dict[str, Any], task_id: str) -> None:
+    for blocker in state.get("blockers", []):
+        if blocker["task_id"] == task_id and blocker["status"] == "open":
+            blocker["status"] = "resolved"
+            blocker["resolved_at"] = iso_now()
+
+
+def mark_handoffs_done(state: dict[str, Any], task_id: str) -> None:
+    for handoff in state.get("handoffs", []):
+        if handoff["task_id"] == task_id and handoff["status"] != "done":
+            handoff["status"] = "done"
+            handoff["resolved_at"] = iso_now()
+
+
+def mark_handoffs_done_for_actor(state: dict[str, Any], task_id: str, actor: str) -> None:
+    for handoff in state.get("handoffs", []):
+        if handoff["task_id"] == task_id and handoff.get("to") == actor and handoff["status"] != "done":
+            handoff["status"] = "done"
+            handoff["resolved_at"] = iso_now()
+
+
+def normalize_handoffs(state: dict[str, Any]) -> None:
+    task_map = {task["id"]: task for task in state["tasks"]}
+    pending_by_task: dict[str, list[dict[str, Any]]] = {}
+    for handoff in state.get("handoffs", []):
+        if handoff.get("status") == "done":
+            continue
+        pending_by_task.setdefault(handoff["task_id"], []).append(handoff)
+
+    for task_id, pending in pending_by_task.items():
+        task = task_map.get(task_id)
+        if task:
+            task_status = task.get("status")
+            if task_status in {"in_progress", "blocked", "done"}:
+                for handoff in pending:
+                    handoff["status"] = "done"
+                    handoff["resolved_at"] = iso_now()
+                continue
+            if task_status == "review_approved":
+                owner = canonical_agent_name(task.get("owner"))
+                owner_handoffs = [handoff for handoff in pending if handoff.get("to") == owner]
+                for handoff in pending:
+                    if handoff not in owner_handoffs:
+                        handoff["status"] = "done"
+                        handoff["resolved_at"] = iso_now()
+                if not owner_handoffs:
+                    ensure_review_finalize_handoff(
+                        state,
+                        task,
+                        from_agent=canonical_agent_name(task.get("reviewer")),
+                        timestamp=iso_now(),
+                        message=task.get("next"),
+                    )
+                continue
+
+        for handoff in pending[:-1]:
+            handoff["status"] = "done"
+            handoff["resolved_at"] = iso_now()
+
+    for task in state.get("tasks", []):
+        if task.get("status") != "review_approved":
+            continue
+        task_id = task.get("id")
+        owner = canonical_agent_name(task.get("owner"))
+        pending = [
+            handoff
+            for handoff in state.get("handoffs", [])
+            if handoff.get("task_id") == task_id and handoff.get("status") != "done"
+        ]
+        owner_handoffs = [handoff for handoff in pending if handoff.get("to") == owner]
+        for handoff in pending:
+            if handoff not in owner_handoffs:
+                handoff["status"] = "done"
+                handoff["resolved_at"] = iso_now()
+        if not owner_handoffs:
+            ensure_review_finalize_handoff(
+                state,
+                task,
+                from_agent=canonical_agent_name(task.get("reviewer")),
+                timestamp=iso_now(),
+                message=task.get("next"),
+            )
+
+
+def command_assign(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 3:
+        raise SystemExit("Usage: assign <task-id> <owner> <reviewer> [title]")
+    task_id, owner, reviewer = args[0], canonical_agent_name(args[1]), canonical_agent_name(args[2])
+    title = args[3] if len(args) > 3 else os.environ.get("TASK_TITLE")
+    summary_zh = os.environ.get("TASK_SUMMARY_ZH")
+    metadata = task_metadata_from_env()
+    ensure_agent(owner)
+    ensure_agent(reviewer)
+    if owner == reviewer:
+        raise SystemExit("Reviewer cannot equal owner")
+
+    task = get_task(state, task_id)
+    timestamp = iso_now()
+    if task is None:
+        task = {
+            "id": task_id,
+            "title": title,
+            "summary_zh": summary_zh,
+            "phase": os.environ.get("TASK_PHASE", "Unassigned"),
+            "owner": owner,
+            "reviewer": reviewer,
+            "status": "todo",
+            "depends_on": parse_csv_env("TASK_DEPENDS_ON"),
+            "artifacts": parse_csv_env("TASK_ARTIFACTS"),
+            "acceptance": parse_csv_env("TASK_ACCEPTANCE"),
+            "next": "Assignment created",
+            "last_update": timestamp,
+        }
+        task.update(metadata)
+        state["tasks"].append(task)
+    else:
+        task["owner"] = owner
+        task["reviewer"] = reviewer
+        if title:
+            task["title"] = title
+        if summary_zh:
+            task["summary_zh"] = summary_zh
+        if metadata:
+            task.update(metadata)
+        task["last_update"] = timestamp
+        task["next"] = "Ownership updated"
+
+    agent = get_agent(state, owner)
+    if os.environ.get("TASK_BRANCH"):
+        agent["branch"] = os.environ["TASK_BRANCH"]
+
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": current_actor(),
+            "type": "assign",
+            "task_id": task_id,
+            "message": f"Assigned {task_id} to {owner} with reviewer {reviewer}",
+        }
+    )
+
+
+def command_start(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: start <task-id> <message>")
+    task_id, message = args[0], args[1]
+    actor = current_actor()
+    ensure_agent(actor)
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if task.get("owner") != actor:
+        raise SystemExit(f"Only the owner ({task.get('owner')}) can start {task_id}")
+    timestamp = iso_now()
+    task["status"] = "in_progress"
+    task["last_update"] = timestamp
+    task["next"] = message
+    mark_handoffs_done_for_actor(state, task_id, actor)
+    mark_blockers_resolved(state, task_id)
+    append_log({"ts": timestamp, "agent": actor, "type": "start", "task_id": task_id, "message": message})
+
+
+def command_progress(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: progress <task-id> <message>")
+    task_id, message = args[0], args[1]
+    actor = current_actor()
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if task.get("owner") != actor:
+        raise SystemExit(f"Only the owner ({task.get('owner')}) can progress {task_id}")
+    timestamp = iso_now()
+    if task["status"] in {"todo", "review_approved"}:
+        task["status"] = "in_progress"
+    task["last_update"] = timestamp
+    task["next"] = message
+    mark_handoffs_done_for_actor(state, task_id, actor)
+    append_log({"ts": timestamp, "agent": actor, "type": "progress", "task_id": task_id, "message": message})
+
+
+def command_note(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: note <task-id> <message>")
+    task_id, message = args[0], args[1]
+    actor = current_actor()
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    timestamp = iso_now()
+    task["last_update"] = timestamp
+    task["next"] = message
+    append_log({"ts": timestamp, "agent": actor, "type": "note", "task_id": task_id, "message": message})
+
+
+def command_reopen(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: reopen <task-id> <message>")
+    task_id, message = args[0], args[1]
+    actor = current_actor()
+    ensure_agent(actor)
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    owner = canonical_agent_name(task.get("owner"))
+    reviewer = canonical_agent_name(task.get("reviewer"))
+    if actor not in {owner, reviewer}:
+        raise SystemExit(f"Only the owner ({owner}) or reviewer ({reviewer}) can reopen {task_id}")
+    timestamp = iso_now()
+    task["status"] = "in_progress"
+    task["last_update"] = timestamp
+    task["next"] = message
+    task.pop("waiting_for", None)
+    mark_blockers_resolved(state, task_id)
+    mark_handoffs_done(state, task_id)
+    if actor == reviewer and owner and owner != reviewer:
+        state.setdefault("handoffs", []).append(
+            {
+                "task_id": task_id,
+                "from": reviewer,
+                "to": owner,
+                "message": message,
+                "status": "pending",
+                "created_at": timestamp,
+            }
+        )
+    append_log({"ts": timestamp, "agent": actor, "type": "reopen", "task_id": task_id, "message": message})
+
+
+def command_handoff(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 3:
+        raise SystemExit("Usage: handoff <task-id> <to-agent> <message>")
+    task_id, to_agent, message = args[0], canonical_agent_name(args[1]), args[2]
+    actor = current_actor()
+    ensure_agent(actor)
+    ensure_agent(to_agent)
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if task.get("owner") != actor:
+        raise SystemExit(f"Only the owner ({task.get('owner')}) can hand off {task_id} for review")
+    if task.get("reviewer") != to_agent:
+        raise SystemExit(
+            f"{task_id} handoff target must match the assigned reviewer ({task.get('reviewer')}); reassign reviewer first if needed"
+        )
+    timestamp = iso_now()
+    task["status"] = "review"
+    task["last_update"] = timestamp
+    task["next"] = message
+    mark_handoffs_done_for_actor(state, task_id, actor)
+    mark_blockers_resolved(state, task_id)
+    state.setdefault("handoffs", []).append(
+        {
+            "task_id": task_id,
+            "from": actor,
+            "to": to_agent,
+            "message": message,
+            "status": "pending",
+            "created_at": timestamp,
+        }
+    )
+    append_log({"ts": timestamp, "agent": actor, "type": "handoff", "task_id": task_id, "message": f"Handoff to {to_agent}: {message}"})
+
+
+def command_blocker(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 3:
+        raise SystemExit("Usage: blocker <task-id> <message> <waiting-for>")
+    task_id, message, waiting_for = args[0], args[1], canonical_agent_name(args[2])
+    actor = current_actor()
+    ensure_agent(actor)
+    ensure_agent(waiting_for)
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if task.get("owner") != actor:
+        raise SystemExit(f"Only the owner ({task.get('owner')}) can block {task_id}")
+    timestamp = iso_now()
+    task["status"] = "blocked"
+    task["waiting_for"] = waiting_for
+    task["last_update"] = timestamp
+    task["next"] = message
+    mark_handoffs_done_for_actor(state, task_id, actor)
+    state.setdefault("blockers", []).append(
+        {
+            "task_id": task_id,
+            "owner": actor,
+            "waiting_for": waiting_for,
+            "message": message,
+            "status": "open",
+            "created_at": timestamp,
+        }
+    )
+    append_log({"ts": timestamp, "agent": actor, "type": "blocker", "task_id": task_id, "message": f"Blocked on {waiting_for}: {message}"})
+
+
+def command_done(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: done <task-id> <message>")
+    task_id, message = args[0], args[1]
+    actor = current_actor()
+    ensure_agent(actor)
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if task.get("owner") != actor:
+        raise SystemExit(f"Only the owner ({task.get('owner')}) can finalize {task_id} to done")
+    if task.get("status") != "review_approved":
+        raise SystemExit(f"{task_id} must be review_approved before it can move to done")
+    timestamp = iso_now()
+    task["status"] = "done"
+    task["last_update"] = timestamp
+    task["next"] = message
+    task.pop("waiting_for", None)
+    mark_blockers_resolved(state, task_id)
+    mark_handoffs_done(state, task_id)
+    append_log({"ts": timestamp, "agent": actor, "type": "done", "task_id": task_id, "message": message})
+
+
+def command_approve(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 2:
+        raise SystemExit("Usage: approve <task-id> <message>")
+    task_id, message = args[0], args[1]
+    actor = current_actor()
+    ensure_agent(actor)
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    if task.get("reviewer") != actor:
+        raise SystemExit(f"Only the reviewer ({task.get('reviewer')}) can approve {task_id}")
+    if task.get("status") != "review":
+        raise SystemExit(f"{task_id} must be in review before it can move to review_approved")
+
+    timestamp = iso_now()
+    task["status"] = "review_approved"
+    task["last_update"] = timestamp
+    task["next"] = message
+    task.pop("waiting_for", None)
+
+    review_notes = parse_delimited_env("REVIEW_NOTES_ZH")
+    if review_notes:
+        task["review_notes_zh"] = review_notes
+
+    review_file = os.environ.get("REVIEW_FILE", "").strip()
+    if review_file:
+        task["review_file"] = review_file
+
+    mark_blockers_resolved(state, task_id)
+    mark_handoffs_done_for_actor(state, task_id, actor)
+    ensure_review_finalize_handoff(
+        state,
+        task,
+        from_agent=actor,
+        timestamp=timestamp,
+        message=message,
+    )
+    append_log({"ts": timestamp, "agent": actor, "type": "review_approved", "task_id": task_id, "message": message})
+
+
+def command_sync(state: dict[str, Any], _args: list[str]) -> None:
+    return None
+
+
+def command_prompt(state: dict[str, Any], _args: list[str]) -> None:
+    print(build_onboarding_prompt(state))
+
+
+def main(argv: list[str]) -> int:
+    state = load_state()
+    command = argv[1] if len(argv) > 1 else "sync"
+    args = argv[2:]
+
+    read_only_commands = {
+        "prompt": command_prompt,
+    }
+
+    commands = {
+        "assign": command_assign,
+        "start": command_start,
+        "progress": command_progress,
+        "note": command_note,
+        "reopen": command_reopen,
+        "handoff": command_handoff,
+        "blocker": command_blocker,
+        "done": command_done,
+        "approve": command_approve,
+        "sync": command_sync,
+    }
+
+    if command in read_only_commands:
+        read_only_commands[command](state, args)
+        return 0
+
+    if command not in commands:
+        raise SystemExit(f"Unknown command: {command}")
+
+    state_before = deepcopy(state)
+    commands[command](state, args)
+    try:
+        sync_all(state)
+    except Exception:
+        save_state(state_before)
+        raise
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))

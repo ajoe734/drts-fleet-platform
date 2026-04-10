@@ -1,0 +1,136 @@
+{
+  "project": "portable-orchestrator-bundle",
+  "sprint": "2026-04-10-bootstrap",
+  "objective": "Stand up a shared multi-LLM delivery system with a supervisor, auto workers, and a live dashboard.",
+  "updated_at": "2026-04-10T14:16:26Z",
+  "canonical_document_layers": {
+    "L0 Collaboration & State": [
+      "AI_COLLABORATION_GUIDE.md",
+      "ai-status.json",
+      "ai-activity-log.jsonl",
+      "current-work.md"
+    ],
+    "L1 Runtime & Dashboard": ["docs-site/index.html"]
+  },
+  "canonical_files": [
+    "AI_COLLABORATION_GUIDE.md",
+    "ai-status.json",
+    "ai-activity-log.jsonl",
+    "current-work.md",
+    "docs-site/index.html"
+  ],
+  "agents": [
+    {
+      "name": "Claude",
+      "capability_lane": ["execution", "control-plane", "governance-review"],
+      "status": "idle",
+      "current_task_ids": [],
+      "branch": "feat/claude-execution-control",
+      "next": "",
+      "last_update": null
+    },
+    {
+      "name": "Gemini",
+      "capability_lane": ["gcp", "ci-cd", "runtime-packaging", "worker-ops"],
+      "status": "idle",
+      "current_task_ids": [],
+      "branch": "feat/gemini-research-runtime",
+      "next": "",
+      "last_update": null
+    },
+    {
+      "name": "Codex",
+      "capability_lane": [
+        "integration",
+        "status-system",
+        "schema",
+        "acceptance"
+      ],
+      "status": "idle",
+      "current_task_ids": [],
+      "branch": "feat/codex-collab-system",
+      "next": "",
+      "last_update": null
+    },
+    {
+      "name": "Qwen",
+      "capability_lane": ["integration", "schema", "acceptance", "code-agent"],
+      "status": "idle",
+      "current_task_ids": [],
+      "branch": "feat/qwen-code-agent",
+      "next": "",
+      "last_update": null
+    },
+    {
+      "name": "Copilot",
+      "capability_lane": [
+        "research-ingest",
+        "external-search",
+        "spec-review",
+        "critique"
+      ],
+      "status": "idle",
+      "current_task_ids": [],
+      "branch": "feat/copilot-research-critique",
+      "next": "",
+      "last_update": null
+    }
+  ],
+  "tasks": [],
+  "handoffs": [],
+  "blockers": [],
+  "workload": {
+    "Claude": 15,
+    "Gemini": 30,
+    "Codex": 30,
+    "Qwen": 15,
+    "Copilot": 25
+  },
+  "workload_summary": {
+    "Claude": {
+      "total": 0,
+      "active": 0,
+      "blocked": 0,
+      "done": 0,
+      "review": 0,
+      "review_approved": 0,
+      "todo": 0
+    },
+    "Gemini": {
+      "total": 0,
+      "active": 0,
+      "blocked": 0,
+      "done": 0,
+      "review": 0,
+      "review_approved": 0,
+      "todo": 0
+    },
+    "Codex": {
+      "total": 0,
+      "active": 0,
+      "blocked": 0,
+      "done": 0,
+      "review": 0,
+      "review_approved": 0,
+      "todo": 0
+    },
+    "Qwen": {
+      "total": 0,
+      "active": 0,
+      "blocked": 0,
+      "done": 0,
+      "review": 0,
+      "review_approved": 0,
+      "todo": 0
+    },
+    "Copilot": {
+      "total": 0,
+      "active": 0,
+      "blocked": 0,
+      "done": 0,
+      "review": 0,
+      "review_approved": 0,
+      "todo": 0
+    }
+  }
+}

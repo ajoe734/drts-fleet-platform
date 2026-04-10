@@ -102,6 +102,10 @@ drts-fleet-platform/
 - Added docs skeleton, ADR, local development runbook, and Codex rules
 - Added local bootstrap, up/down, and check scripts
 - Added Husky and lint-staged skeleton
+- Unpacked and integrated the portable orchestrator bundle into the repository root
+- Added orchestrator control-plane docs, scripts, dashboard assets, and supervisor runtime files
+- Merged bundle-specific VS Code agent settings into the existing workspace settings
+- Added root package scripts and VS Code tasks for orchestrator setup, supervisor, dashboard, and tests
 
 ## Verification Results
 
@@ -118,12 +122,20 @@ drts-fleet-platform/
 - Platform admin smoke check: `/tenants`, `/fleet`, `/pricing`, `/audit` returned HTTP 200
 - Ops console smoke check: `/dashboard`, `/dispatch`, `/incidents`, `/reports` returned HTTP 200
 - Driver app smoke check: `expo start --offline --port 8081` initialized Metro successfully
+- `python3 .orchestrator/doctor.py`: passed
+- `bash scripts/setup-llm-cli.sh`: passed
+- `bash scripts/run-supervisor.sh --verbose`: supervisor heartbeat verified
+- `bash scripts/run-dashboard.sh`: dashboard served successfully at `http://127.0.0.1:4173/index.html`
+- Dashboard live endpoints: `/ai-status.json` and `/orchestrator-state.json` returned HTTP 200
+- `python3 scripts/ai_status.py prompt`: passed
+- `python3 -m unittest discover -s .orchestrator -p 'test_*.py'`: passed (`63` tests)
 
 ## Uncompleted Items
 
 - GitHub remote creation was not executed because `gh` is not installed
 - GitHub owner is still `REPLACE_ME`, so remote creation remains intentionally blocked
 - No cloud deployment, production secrets, production schema, or domain workflows were added
+- Portable orchestrator seed state still describes the source bundle project in `ai-status.json`; runtime works, but canonical project metadata has not yet been repo-specialized through an approved migration path
 
 ## Manual Follow-up Needed
 
@@ -139,9 +151,16 @@ drts-fleet-platform/
 - If the remote repo already exists instead:
   - `git remote add origin git@github.com:$GITHUB_OWNER/drts-fleet-platform.git`
   - `git push -u origin main`
+- If you want the orchestrator canonical metadata to match this repo instead of the imported seed bundle:
+  - decide the target project/sprint/objective text
+  - add a supported migration path to `scripts/ai_status.py` or approve a one-time seed-state rewrite
+- If you want non-Codex workers to run automatically instead of inbox fallback:
+  - authenticate the installed CLIs (`claude`, `gemini`, `copilot`, `qwen`) on this machine
 
 ## Notes
 
 - `pnpm install` reports ignored build scripts for `@nestjs/core`, `esbuild`, and `sharp`; current bootstrap verification still passed without approving them
 - Expo was pinned to the stable `create-expo-app` baseline (`54.0.33`) instead of the newer registry latest to favor bootstrap stability
 - The repository contains scaffolding only; business logic, schema design, and autonomous-driving runtime work remain deferred
+- The orchestrator bundle itself uses only Python standard-library modules in the committed code path, so no extra Python package installation was required
+- Generated local orchestrator/runtime files with machine-specific paths are ignored in git: `.claude/settings.local.json`, `.orchestrator/state.json`, `.orchestrator/provider_capabilities.json`, and `.orchestrator/claude-approval-broker.mcp.json`

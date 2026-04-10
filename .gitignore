@@ -20,13 +20,22 @@ web-build/
 .env
 .env.local
 .env.*.local
+.claude/settings.local.json
 
 # misc
 .DS_Store
 *.log
 portable-orchestrator-bundle-*.tar.gz
+__pycache__/
+*.pyc
 
 # IDE
 .idea/
 .vscode/*.log
 .husky/_/
+
+# orchestrator runtime
+.orchestrator/approval-queue.lock
+.orchestrator/claude-approval-broker.mcp.json
+.orchestrator/provider_capabilities.json
+.orchestrator/state.json

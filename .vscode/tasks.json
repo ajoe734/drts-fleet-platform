@@ -32,6 +32,21 @@
       "label": "Run Tenant Portal",
       "type": "shell",
       "command": "pnpm dev:tenant"
+    },
+    {
+      "label": "Orchestrator Setup",
+      "type": "shell",
+      "command": "pnpm orchestrator:setup"
+    },
+    {
+      "label": "Orchestrator Supervisor",
+      "type": "shell",
+      "command": "pnpm orchestrator:supervisor"
+    },
+    {
+      "label": "Orchestrator Dashboard",
+      "type": "shell",
+      "command": "pnpm orchestrator:dashboard"
     }
   ]
 }

@@ -1,0 +1,18 @@
+{
+  "bundle": "portable-orchestrator",
+  "version": "2026-04-10T13:27:16Z",
+  "source_repo": "/home/ajoe734/code/pantheon",
+  "project_name": "Portable Orchestrator Bundle",
+  "portable_dirs": [".orchestrator", "docs-site"],
+  "portable_scripts": [
+    "scripts/ai_status.py",
+    "scripts/ai-status.sh",
+    "scripts/sync-state.sh",
+    "scripts/dashboard_server.py",
+    "scripts/launch-docs-site.sh",
+    "scripts/orchestrator_bundle.py",
+    "scripts/run-supervisor.sh",
+    "scripts/run-dashboard.sh",
+    "scripts/setup-llm-cli.sh"
+  ]
+}
