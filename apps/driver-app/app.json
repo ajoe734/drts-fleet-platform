@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "DRTS Driver App",
+    "slug": "drts-driver-app",
+    "scheme": "drts-driver",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "plugins": ["expo-router"]
+  }
+}

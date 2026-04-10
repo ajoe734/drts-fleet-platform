@@ -1,0 +1,37 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Install Dependencies",
+      "type": "shell",
+      "command": "pnpm install",
+      "group": "build"
+    },
+    {
+      "label": "Bootstrap Check",
+      "type": "shell",
+      "command": "./scripts/check.sh",
+      "group": "test"
+    },
+    {
+      "label": "Dev Infra Up",
+      "type": "shell",
+      "command": "./scripts/dev-up.sh"
+    },
+    {
+      "label": "Dev Infra Down",
+      "type": "shell",
+      "command": "./scripts/dev-down.sh"
+    },
+    {
+      "label": "Run API",
+      "type": "shell",
+      "command": "pnpm dev:api"
+    },
+    {
+      "label": "Run Tenant Portal",
+      "type": "shell",
+      "command": "pnpm dev:tenant"
+    }
+  ]
+}

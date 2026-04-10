@@ -1,0 +1,9 @@
+model = "gpt-5"
+reasoning_effort = "medium"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[repo]
+protect_default_branch = true
+allow_secret_generation = false
+allow_repo_rename = false

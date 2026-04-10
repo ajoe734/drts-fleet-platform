@@ -10,6 +10,7 @@ build/
 coverage/
 playwright-report/
 test-results/
+*.tsbuildinfo
 
 # mobile / expo
 .expo/
@@ -23,7 +24,9 @@ web-build/
 # misc
 .DS_Store
 *.log
+portable-orchestrator-bundle-*.tar.gz
 
 # IDE
 .idea/
 .vscode/*.log
+.husky/_/
