@@ -72,7 +72,17 @@ def _pid_is_alive(pid: Any) -> bool:
         value = int(pid)
     except (TypeError, ValueError):
         return False
-    return os.path.exists(f"/proc/{value}")
+    stat_path = f"/proc/{value}/stat"
+    if not os.path.exists(stat_path):
+        return False
+    try:
+        with open(stat_path, "r", encoding="utf-8", errors="ignore") as handle:
+            parts = handle.read().split()
+    except OSError:
+        return False
+    if len(parts) >= 3 and parts[2] == "Z":
+        return False
+    return True
 
 
 def _orphaned_worker_note(item: dict[str, Any], workers: dict[str, Any]) -> str | None:

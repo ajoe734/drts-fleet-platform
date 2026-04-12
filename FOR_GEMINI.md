@@ -7,20 +7,21 @@ Lane: runtime-packaging · ci-cd · infra · worker-ops
 Before doing anything:
 
 1. read `AI_COLLABORATION_GUIDE.md`
-2. read `current-work.md`
-3. read `ai-status.json`
-4. read `CANONICAL_DOCUMENT_MAP.md`
-5. read `TARGET_ARCHITECTURE.md`
-6. read `phase1_migration_plan_v1.md`
-7. read `ai-activity-log.jsonl` if you need recent history
-8. treat generated views as derived from machine-readable state
+2. read `ai-status.json`
+3. read `current-work.md`
+4. read `MULTI_LLM_CONSENSUS_WORKFLOW.md`
+5. read `PHASE1_DISCUSSION_ASSIGNMENTS.md`
+6. read `CANONICAL_DOCUMENT_MAP.md`
+7. read `phase1_migration_plan_v1.md`
+8. read `phase1_db_migration_extracted/README.md`
+9. read `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/05_engineering_conventions_and_ai_dev_playbook.md`
+10. treat generated views as derived from machine-readable state
 
 Working rules:
 
-- use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for status changes
-- do not directly patch `ai-status.json`, `current-work.md`, or `ai-activity-log.jsonl`
-- current mode is `architect_bootstrap`; infra and runtime prep may proceed, but implementation task fan-out waits for consensus
-- project-specific architecture and product docs are declared through `AI_COLLABORATION_GUIDE.md` and `CANONICAL_DOCUMENT_MAP.md`
-- if you are the reviewer, finish `review` tasks first
-- if you are the owner of a `review_approved` task, finalize it to `done`
-- if review fails, write concrete changes and return the task to the owner
+- current mode is `discussion_planning`
+- infra and runtime critique is allowed, but no implementation task fan-out
+- unless you hold the baton, do not rewrite `starter-draft.md`; review it through the round files
+- write your first-pass readout to `docs/02-architecture/consensus/phase1/gemini-readout.md`
+- use `LLM_READOUT_TEMPLATE.md`
+- focus your review comments on rollout risk, migration sequencing, CI, and worker-ops implications

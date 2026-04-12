@@ -1,8 +1,8 @@
 # Orchestrator Quickstart
 
-This repo contains the reusable supervisor + auto-worker + dashboard bundle, but Phase 1 development work should remain in `architect_bootstrap` mode until the work breakdown has human-approved consensus.
+This repo contains the reusable supervisor + auto-worker + dashboard bundle, and DRTS Phase 1 currently starts in `discussion_planning` mode.
 
-## 1. Prepare local LLM/IDE integration
+## 1. Prepare local LLM and IDE integration
 
 ```bash
 bash scripts/setup-llm-cli.sh
@@ -28,23 +28,49 @@ Dashboard:
 bash scripts/run-dashboard.sh
 ```
 
-## 3. Use the runtime before consensus
-
-- Use the dashboard and status mirrors for visibility only.
-- Do not seed development tasks into the supervisor yet.
-- Build or revise `CANONICAL_DOCUMENT_MAP.md`, `TARGET_ARCHITECTURE.md`, `ROADMAP.md`, and `DEVELOPMENT_WORKBREAKDOWN.md` first.
-
-## 4. Switch to supervisor-managed execution after consensus
-
-Only after the work breakdown is explicitly approved should you seed the first task:
+Temporary public dashboard URL:
 
 ```bash
-AI_NAME=Codex TASK_PHASE="Wave 0" TASK_SUMMARY_ZH="建立第一個共識後任務。" ./scripts/ai-status.sh assign DEMO-001 Codex Claude "First supervisor-managed task"
+bash scripts/run-dashboard-tunnel.sh
+```
+
+Public dashboard on a VM:
+
+```bash
+HOST=0.0.0.0 bash scripts/run-dashboard.sh
+```
+
+## 3. Use the runtime in discussion mode
+
+Before consensus:
+
+- use the dashboard and status mirrors for visibility only
+- use `python3 scripts/ai_status.py prompt` to generate the shared first prompt
+- let the supervisor pick a starter lane to update `starter-draft.md`
+- write lane readouts and cited review rounds under `docs/02-architecture/consensus/phase1/`
+- track baton ownership in `baton-log.md` and `supervisor-queue.md`
+- do not seed implementation tasks into the supervisor
+
+## 4. Use the same runtime in implementation mode
+
+After the consensus packet is accepted:
+
+- switch the active mode to `supervisor_managed_execution`
+- start seeding implementation tasks from the accepted work arrangement
+- keep the same supervisor process running
+- if execution finds unresolved semantics, route the affected slice back to discussion mode
+
+## 5. Switch to supervisor-managed execution after consensus
+
+Only after the consensus packet is explicitly accepted should you seed the first implementation task:
+
+```bash
+AI_NAME=Codex TASK_PHASE="Wave 1" TASK_SUMMARY_ZH="從共識封包切出第一個實作任務。" ./scripts/ai-status.sh assign DEMO-001 Codex Claude "First supervisor-managed task"
 AI_NAME=Codex ./scripts/ai-status.sh start DEMO-001 "Started the first supervisor-managed task"
 ./scripts/sync-state.sh
 ```
 
-## 5. Print the current first prompt
+## 6. Keep the prompt and workflow aligned
 
 The repo-aware prompt is generated from `ai-status.json`:
 
@@ -52,8 +78,10 @@ The repo-aware prompt is generated from `ai-status.json`:
 python3 scripts/ai_status.py prompt
 ```
 
-If the canonical document layers change, update `AI_COLLABORATION_GUIDE.md`, `FOR_*.md`, and `ai-status.json` together so the prompt stays aligned with the repo.
+If the canonical document layers or discussion workflow change, update these files together:
 
-## 6. Optional GitHub bus
-
-The bootstrap leaves GitHub bus disabled by default. When you are ready, update `.orchestrator/config.local.json` with your repo details and enable `github_bus.enabled`.
+- `AI_COLLABORATION_GUIDE.md`
+- `CANONICAL_DOCUMENT_MAP.md`
+- `ai-status.json`
+- `MULTI_LLM_CONSENSUS_WORKFLOW.md`
+- `PHASE1_DISCUSSION_ASSIGNMENTS.md`

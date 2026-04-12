@@ -969,6 +969,70 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
 
+    def test_dead_worker_for_open_task_can_be_reassigned(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {
+                "qwen": {"id": "qwen", "display_name": "Qwen"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+                "claude": {"id": "claude", "display_name": "Claude"},
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "EX-002",
+                    "provider": "qwen",
+                    "agent_id": "qwen",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 999999,
+                    "last_event_at": "2026-04-06T09:00:00Z",
+                }
+            },
+        }
+        status = {"tasks": [{"id": "EX-002", "status": "in_progress", "owner": "Qwen", "reviewer": "Codex"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(
+                supervisor,
+                "maybe_reassign_task_after_worker_failure",
+                return_value="Claude",
+            ) as maybe_reassign,
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "reassigned")
+        self.assertEqual(worker["reassigned_to"], "Claude")
+        self.assertEqual(worker["last_error"], "Worker exited before the task reached a terminal status.")
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+        maybe_reassign.assert_called_once_with(
+            config,
+            worker,
+            "Worker exited before the task reached a terminal status.",
+            terminal=True,
+        )
+        write_activity_log.assert_not_called()
+
     def test_dead_waiting_approval_worker_is_failed_and_approval_is_resolved(self) -> None:
         config = {
             "schema": {
@@ -1276,6 +1340,73 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         terminate_worker_pid.assert_called_once_with(1234)
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
+
+    def test_stalled_worker_can_be_reassigned_after_extended_stall(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {
+                "review_statuses": ["review"],
+                "owned_statuses": ["todo", "in_progress"],
+                "active_worker_statuses": ["running", "waiting_approval", "suspended_approval", "manual_pending", "retry_backoff", "stalled"],
+            },
+            "providers": {},
+            "agents": {
+                "qwen": {"id": "qwen", "display_name": "Qwen"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+                "claude": {"id": "claude", "display_name": "Claude"},
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "FB-004",
+                    "provider": "qwen",
+                    "agent_id": "qwen",
+                    "status": "stalled",
+                    "queue_event_id": "evt-1",
+                    "pid": 1234,
+                    "last_event_at": "2026-04-06T14:00:00Z",
+                }
+            },
+        }
+        status = {"tasks": [{"id": "FB-004", "status": "in_progress", "owner": "Qwen", "reviewer": "Codex"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+            mock.patch.object(supervisor, "update_from_log", side_effect=lambda *_args, **_kwargs: None),
+            mock.patch.object(supervisor, "terminate_worker_pid") as terminate_worker_pid,
+            mock.patch.object(
+                supervisor,
+                "maybe_reassign_task_after_worker_failure",
+                return_value="Claude",
+            ) as maybe_reassign,
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "reassigned")
+        self.assertEqual(worker["reassigned_to"], "Claude")
+        self.assertIn("terminated for redispatch", worker["last_error"])
+        terminate_worker_pid.assert_called_once_with(1234)
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+        maybe_reassign.assert_called_once()
+        self.assertIn("terminated for redispatch", maybe_reassign.call_args.args[2])
+        self.assertEqual(maybe_reassign.call_args.kwargs, {"terminal": True})
+        write_activity_log.assert_not_called()
 
     def test_alive_worker_is_superseded_after_reassignment(self) -> None:
         config = {

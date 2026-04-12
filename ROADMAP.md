@@ -1,8 +1,10 @@
 # Roadmap
 
+Status: seed delivery-order proposal for multi-LLM review. This file is not the final execution plan yet.
+
 ## Summary
 
-This roadmap describes the intended delivery order for Phase 1. It is not the supervisor task board yet. It is the wave order that later task assignment must follow.
+This roadmap is the current proposal for Phase 1 delivery order. It is not the supervisor task board yet, and it should be challenged against the canonical product truth during the consensus workflow.
 
 ## Wave 0: Canonical Architecture Bootstrap
 

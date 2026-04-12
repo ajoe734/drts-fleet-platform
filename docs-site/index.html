@@ -4,10 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>協作看板</title>
-    <link rel="stylesheet" href="./style.css?v=20260407-0020" />
+    <link rel="stylesheet" href="./style.css?v=20260411-0001" />
   </head>
   <body>
     <div class="shell">
+
+      <!-- Hero -->
       <header class="hero">
         <div class="hero-copy-block">
           <p id="project-badge" class="eyebrow">Project Runtime</p>
@@ -15,6 +17,7 @@
           <p id="objective" class="hero-copy">正在載入目標...</p>
         </div>
         <div class="hero-actions">
+          <span id="mode-badge" class="mode-badge">載入中...</span>
           <button id="refresh-button" class="primary-button" type="button">重新整理</button>
           <div class="hero-meta">
             <span class="chip">資料更新</span>
@@ -23,87 +26,121 @@
         </div>
       </header>
 
+      <!-- Progress bar -->
+      <section class="progress-strip">
+        <p id="progress-label" class="progress-label"></p>
+        <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+      </section>
+
+      <!-- Overview metrics -->
       <section class="overview-strip">
         <div id="overview-metrics" class="overview-grid"></div>
       </section>
 
-      <main class="dashboard-grid">
-        <section class="panel runtime-panel">
-          <div class="panel-head">
-            <div>
-              <p class="panel-kicker">Runtime</p>
-              <h2>Supervisor 與 Queue</h2>
+      <!-- ── Discussion Planning Section ── -->
+      <section class="mode-section" id="discussion-section">
+        <details id="discussion-details">
+          <summary class="mode-section-summary">
+            <div class="mode-section-label">
+              <p class="panel-kicker">Discussion Planning</p>
+              <h2>討論規劃工作區</h2>
             </div>
+            <p class="mode-section-desc">Baton loop 狀態、各 lane readout 進度、review 輪次與 consensus packet。</p>
+          </summary>
+          <div class="discussion-body">
+            <div id="baton-status"></div>
+            <div id="readout-progress"></div>
+            <div id="review-rounds"></div>
+            <div id="consensus-status-panel"></div>
           </div>
-          <div class="panel-body">
-            <div id="system-status" class="runtime-grid"></div>
-            <section class="subpanel">
-              <div class="subpanel-head">
-                <h3>Auto Worker</h3>
-                <p class="subpanel-copy">依執行 lane 分組，拆成進行中、等待處理、已改派 / 已接手、已完成。</p>
-              </div>
-              <div id="worker-history" class="worker-groups"></div>
-            </section>
-          </div>
-        </section>
+        </details>
+      </section>
 
-        <section class="panel work-panel">
-          <div class="panel-head">
-            <div>
-              <p class="panel-kicker">Execution</p>
-              <h2>Agent 與任務</h2>
+      <!-- ── Supervisor Managed Execution Section ── -->
+      <section class="mode-section" id="execution-section">
+        <details id="execution-details" open>
+          <summary class="mode-section-summary">
+            <div class="mode-section-label">
+              <p class="panel-kicker">Supervisor Managed Execution</p>
+              <h2>實作執行追蹤</h2>
             </div>
-          </div>
-          <div class="panel-body">
-            <section class="subpanel">
-              <div class="subpanel-head">
-                <h3>Task Board</h3>
-                <div id="board-summary" class="inline-summary"></div>
-              </div>
-              <div id="task-board" class="board"></div>
-            </section>
-          </div>
-        </section>
+            <p class="mode-section-desc">任務看板、交接佇列、阻塞項目與即時 worker 狀態。</p>
+          </summary>
 
-        <section class="panel coordination-panel">
-          <div class="panel-head">
-            <div>
-              <p class="panel-kicker">Coordination</p>
-              <h2>交接、阻塞與活動</h2>
-            </div>
-          </div>
-          <div class="panel-body">
-            <section class="subpanel">
-              <div class="subpanel-head">
-                <h3>交接佇列</h3>
+          <div class="dashboard-grid">
+
+            <!-- Runtime: Supervisor + Worker -->
+            <section class="panel runtime-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Runtime</p>
+                  <h2>Supervisor 與 Queue</h2>
+                </div>
               </div>
-              <div id="handoff-list" class="stack"></div>
+              <div class="panel-body">
+                <div id="system-status" class="runtime-grid"></div>
+                <section class="subpanel">
+                  <div class="subpanel-head">
+                    <h3>Auto Worker</h3>
+                    <p class="subpanel-copy">依執行 lane 分組，拆成進行中、等待處理、已改派 / 已接手、已完成。</p>
+                  </div>
+                  <div id="worker-history" class="worker-groups"></div>
+                </section>
+              </div>
             </section>
 
-            <section class="subpanel">
-              <div class="subpanel-head">
-                <h3>阻塞項目</h3>
+            <!-- Execution: Task Board -->
+            <section class="panel work-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Execution</p>
+                  <h2>Agent 與任務</h2>
+                </div>
               </div>
-              <div id="blocker-list" class="stack"></div>
+              <div class="panel-body">
+                <section class="subpanel">
+                  <div class="subpanel-head">
+                    <h3>Task Board</h3>
+                    <div id="board-summary" class="inline-summary"></div>
+                  </div>
+                  <div id="task-board" class="board"></div>
+                </section>
+              </div>
             </section>
 
-            <section class="subpanel">
-              <div class="subpanel-head">
-                <h3>Sprint 摘要</h3>
+            <!-- Coordination: Handoff, Blockers, Activity -->
+            <section class="panel coordination-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Coordination</p>
+                  <h2>交接、阻塞與活動</h2>
+                </div>
               </div>
-              <div id="snapshot" class="snapshot"></div>
+              <div class="panel-body">
+                <section class="subpanel">
+                  <div class="subpanel-head"><h3>交接佇列</h3></div>
+                  <div id="handoff-list" class="stack"></div>
+                </section>
+                <section class="subpanel">
+                  <div class="subpanel-head"><h3>阻塞項目</h3></div>
+                  <div id="blocker-list" class="stack"></div>
+                </section>
+                <section class="subpanel">
+                  <div class="subpanel-head"><h3>Sprint 摘要</h3></div>
+                  <div id="snapshot" class="snapshot"></div>
+                </section>
+                <section class="subpanel">
+                  <div class="subpanel-head"><h3>即時活動</h3></div>
+                  <div id="activity-list" class="activity"></div>
+                </section>
+              </div>
             </section>
 
-            <section class="subpanel">
-              <div class="subpanel-head">
-                <h3>即時活動</h3>
-              </div>
-              <div id="activity-list" class="activity"></div>
-            </section>
-          </div>
-        </section>
-      </main>
+          </div><!-- /.dashboard-grid -->
+        </details>
+      </section>
 
+      <!-- ── Insights (always visible) ── -->
       <section class="panel insights-panel">
         <div class="panel-head">
           <div>
@@ -120,7 +157,6 @@
             <div id="dependency-summary" class="mini-grid"></div>
             <div id="dependency-schedule" class="stack"></div>
           </details>
-
           <details class="insight">
             <summary>
               <span>Audit 狀態</span>
@@ -129,7 +165,6 @@
             <div id="audit-status" class="mini-grid"></div>
             <div id="audit-list" class="stack"></div>
           </details>
-
           <details class="insight">
             <summary>
               <span>Review Notes</span>
@@ -137,7 +172,6 @@
             </summary>
             <div id="review-note-list" class="stack"></div>
           </details>
-
           <details class="insight">
             <summary>
               <span>Delivery Layers</span>
@@ -147,8 +181,9 @@
           </details>
         </div>
       </section>
-    </div>
 
-    <script src="./script.js?v=20260407-0020" type="module"></script>
+    </div><!-- /.shell -->
+
+    <script src="./main.js?v=20260411-0001" type="module"></script>
   </body>
 </html>

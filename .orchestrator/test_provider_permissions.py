@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 import permission_broker
-from provider_permissions import ROOT, _verified_claude_hooks
+from provider_permissions import ROOT, _verified_claude_hooks, _verified_claude_policy
 
 
 class ProviderPermissionsTest(unittest.TestCase):
@@ -70,6 +70,31 @@ class ProviderPermissionsTest(unittest.TestCase):
 
         self.assertEqual(permission_broker.classify_command(command), "allow")
 
+    def test_pnpm_test_target_with_tail_is_auto_allowed(self) -> None:
+        command = "pnpm test:unit tests/unit/client-integration.test.ts 2>&1 | tail -30"
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_pnpm_filtered_test_is_auto_allowed(self) -> None:
+        command = "pnpm --filter @drts/api test -- --runInBand 2>&1 | tail -20"
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_pnpm_exec_vitest_is_auto_allowed(self) -> None:
+        command = "pnpm exec vitest run --passWithNoTests 2>&1 | tail -60"
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_pnpm_add_test_dependencies_and_verify_is_auto_allowed(self) -> None:
+        command = "pnpm add -D vitest @testing-library/react 2>&1 | tail -20 && pnpm exec vitest --version"
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_other_pnpm_add_still_requires_review(self) -> None:
+        command = "pnpm add -D tsup 2>&1 | tail -20"
+
+        self.assertEqual(permission_broker.classify_command(command), "defer")
+
     def test_cargo_test_is_auto_allowed(self) -> None:
         command = "cargo test --lib -- --nocapture"
 
@@ -110,6 +135,12 @@ class ProviderPermissionsTest(unittest.TestCase):
         command = f"cd {ROOT} && bash scripts/ai-status.sh sync"
 
         self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_verified_claude_policy_includes_pnpm_test_allow_rules(self) -> None:
+        policy = _verified_claude_policy({})
+
+        self.assertIn("Bash(pnpm test*)", policy["allow"])
+        self.assertIn("Bash(pnpm exec vitest*)", policy["allow"])
 
 
 if __name__ == "__main__":

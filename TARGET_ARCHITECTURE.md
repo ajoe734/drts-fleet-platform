@@ -1,8 +1,10 @@
 # Target Architecture
 
+Status: seed architecture draft for multi-LLM review. This file does not override the canonical Phase 1 specs.
+
 ## Summary
 
-Phase 1 is implemented as a single monorepo with multiple client surfaces and a modular backend host. The immediate goal is not microservice deployment. The immediate goal is to make Phase 1 semantics, contracts, and delivery boundaries explicit enough that later slices can be assigned safely.
+This is the current architecture proposal for discussion. Phase 1 is still expected to be implemented as a single monorepo with multiple client surfaces and a modular backend host, but the proposal must survive the multi-LLM consensus workflow before it becomes the basis for task execution.
 
 ## 1. Runtime Shape
 

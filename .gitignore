@@ -28,6 +28,7 @@ web-build/
 portable-orchestrator-bundle-*.tar.gz
 __pycache__/
 *.pyc
+ai-activity-log.jsonl
 
 # IDE
 .idea/
@@ -35,8 +36,20 @@ __pycache__/
 .husky/_/
 
 # orchestrator runtime
+.llm-inbox/
+.orchestrator/bin/
+.orchestrator/logs/
+.orchestrator/supervisor.pid
+.orchestrator/event-queue.jsonl
+.orchestrator/approval-queue.json
+.orchestrator/github-bus-state.json
+.orchestrator/github-webhook-events.jsonl
+.orchestrator/github-relay-state.json
 .orchestrator/approval-queue.lock
 .orchestrator/backups/
 .orchestrator/claude-approval-broker.mcp.json
 .orchestrator/provider_capabilities.json
 .orchestrator/state.json
+docs-site/approval-queue.json
+docs-site/ai-activity-log.jsonl
+docs-site/orchestrator-state.json

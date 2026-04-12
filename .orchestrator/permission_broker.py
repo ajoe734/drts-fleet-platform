@@ -150,6 +150,30 @@ SAFE_PYTEST_VERIFY_PATTERNS = (
     re.compile(r"^pip3? show pytest(\s|$)"),
 )
 
+SAFE_JS_TEST_PACKAGE_PATTERNS = (
+    re.compile(r"^vitest(?:[@=<>!~].+)?$"),
+    re.compile(r"^@vitest/[A-Za-z0-9._-]+(?:[@=<>!~].+)?$"),
+    re.compile(r"^jest(?:[@=<>!~].+)?$"),
+    re.compile(r"^@types/jest(?:[@=<>!~].+)?$"),
+    re.compile(r"^ts-jest(?:[@=<>!~].+)?$"),
+    re.compile(r"^jest-environment-jsdom(?:[@=<>!~].+)?$"),
+    re.compile(r"^@testing-library/[A-Za-z0-9._-]+(?:[@=<>!~].+)?$"),
+    re.compile(r"^@playwright/test(?:[@=<>!~].+)?$"),
+    re.compile(r"^playwright(?:[@=<>!~].+)?$"),
+    re.compile(r"^cypress(?:[@=<>!~].+)?$"),
+    re.compile(r"^mocha(?:[@=<>!~].+)?$"),
+    re.compile(r"^chai(?:[@=<>!~].+)?$"),
+    re.compile(r"^ava(?:[@=<>!~].+)?$"),
+    re.compile(r"^tap(?:[@=<>!~].+)?$"),
+    re.compile(r"^nyc(?:[@=<>!~].+)?$"),
+    re.compile(r"^supertest(?:[@=<>!~].+)?$"),
+    re.compile(r"^jsdom(?:[@=<>!~].+)?$"),
+)
+
+SAFE_DIRECT_TEST_RUNNERS = {"vitest", "jest"}
+PNPM_OPTION_TAKES_VALUE = {"--filter", "-F", "--dir", "-C"}
+PNPM_STANDALONE_FLAGS = {"-r", "--recursive", "--stream", "--parallel", "--aggregate-output", "-w", "--workspace-root"}
+
 
 def _matches_workspace_script(path_token: str, relative_path: str) -> bool:
     candidate = Path(path_token)
@@ -201,7 +225,9 @@ def classify_command(shell_command: str) -> str:
         return "allow"
     if _is_safe_python_one_liner(shell_command):
         return "allow"
-    if _is_safe_pytest_install_command(shell_command):
+    if _is_safe_test_dependency_install_command(shell_command):
+        return "allow"
+    if _is_safe_test_run_command(shell_command):
         return "allow"
     if _is_safe_workspace_mkdir_command(shell_command):
         return "allow"
@@ -272,19 +298,134 @@ def _is_safe_workspace_mkdir_command(shell_command: str) -> bool:
 
 
 def _is_pytest_package_spec(token: str) -> bool:
-    return bool(re.match(r"^pytest(?:[=<>!~].+)?$", token))
+    return bool(re.match(r"^pytest(?:[-_.A-Za-z0-9]*)(?:[=<>!~].+)?$", token))
 
 
-def _is_safe_pytest_install_command(shell_command: str) -> bool:
+def _strip_workspace_cd_prefix(shell_command: str) -> str:
+    command = shell_command.strip()
+    if not command:
+        return command
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return command
+    if "&&" not in parts:
+        return command
+    amp_index = parts.index("&&")
+    if amp_index != 2 or parts[0] != "cd":
+        return command
+    if not _paths_within_workspace([Path(parts[1])]):
+        return command
+    return " ".join(parts[amp_index + 1 :])
+
+
+def _command_segments(shell_command: str) -> list[str]:
+    command = _strip_workspace_cd_prefix(shell_command)
+    return [segment.strip() for segment in command.split("&&") if segment.strip()]
+
+
+def _primary_shell_fragment(segment: str) -> str:
+    return segment.split("|", 1)[0].strip()
+
+
+def _pnpm_command_index(tokens: list[str]) -> int:
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in PNPM_OPTION_TAKES_VALUE and index + 1 < len(tokens):
+            index += 2
+            continue
+        if any(token.startswith(f"{prefix}=") for prefix in PNPM_OPTION_TAKES_VALUE):
+            index += 1
+            continue
+        if token in PNPM_STANDALONE_FLAGS:
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        break
+    return index
+
+
+def _extract_package_specs(tokens: list[str], start_index: int) -> list[str]:
+    return [
+        token
+        for token in tokens[start_index:]
+        if token and not token.startswith("-") and not re.match(r"^\d?>&\d+$", token)
+    ]
+
+
+def _is_safe_test_package_spec(token: str) -> bool:
+    if _is_pytest_package_spec(token):
+        return True
+    return any(pattern.match(token) for pattern in SAFE_JS_TEST_PACKAGE_PATTERNS)
+
+
+def _is_safe_test_run_segment(segment: str) -> bool:
+    fragment = _primary_shell_fragment(segment)
+    if not fragment:
+        return False
+    try:
+        tokens = shlex.split(fragment)
+    except ValueError:
+        return False
+    if not tokens:
+        return False
+
+    if tokens[0] in SAFE_DIRECT_TEST_RUNNERS:
+        return True
+    if tokens[:2] in (["npx", "vitest"], ["npx", "jest"]):
+        return True
+
+    if tokens[0] == "npm":
+        if len(tokens) >= 2 and tokens[1] == "test":
+            return True
+        if len(tokens) >= 3 and tokens[1] == "run" and tokens[2].startswith("test"):
+            return True
+        if len(tokens) >= 3 and tokens[1] == "exec" and tokens[2] in SAFE_DIRECT_TEST_RUNNERS:
+            return True
+
+    if tokens[0] == "yarn":
+        if len(tokens) >= 2 and (tokens[1].startswith("test") or tokens[1] in SAFE_DIRECT_TEST_RUNNERS):
+            return True
+        if len(tokens) >= 3 and tokens[1] == "run" and (tokens[2].startswith("test") or tokens[2] in SAFE_DIRECT_TEST_RUNNERS):
+            return True
+
+    if tokens[0] == "pnpm":
+        index = _pnpm_command_index(tokens)
+        if index >= len(tokens):
+            return False
+        subcommand = tokens[index]
+        if subcommand.startswith("test"):
+            return True
+        if subcommand == "run" and index + 1 < len(tokens) and tokens[index + 1].startswith("test"):
+            return True
+        if subcommand in SAFE_DIRECT_TEST_RUNNERS:
+            return True
+        if subcommand == "exec" and index + 1 < len(tokens) and tokens[index + 1] in SAFE_DIRECT_TEST_RUNNERS:
+            return True
+
+    return False
+
+
+def _is_safe_test_run_command(shell_command: str) -> bool:
+    segments = _command_segments(shell_command)
+    if not segments:
+        return False
+    return all(_is_safe_test_run_segment(segment) for segment in segments)
+
+
+def _is_safe_test_dependency_install_command(shell_command: str) -> bool:
     command = shell_command.strip()
     if not command:
         return False
 
-    segments = [segment.strip() for segment in command.split("&&")]
+    segments = _command_segments(command)
     if not segments:
         return False
 
-    install_fragment = segments[0].split("|", 1)[0].strip()
+    install_fragment = _primary_shell_fragment(segments[0])
     try:
         tokens = shlex.split(install_fragment)
     except ValueError:
@@ -295,15 +436,24 @@ def _is_safe_pytest_install_command(shell_command: str) -> bool:
         package_tokens = tokens[4:]
     elif tokens[:2] in (["pip", "install"], ["pip3", "install"]):
         package_tokens = tokens[2:]
+    elif tokens[:3] == ["apt-get", "install", "-y"] or tokens[:2] == ["apt-get", "install"] or tokens[:3] == ["apt", "install", "-y"] or tokens[:2] == ["apt", "install"]:
+        package_tokens = tokens[2:] if tokens[1] == "install" else tokens[3:]
+    elif tokens[:2] == ["npm", "install"]:
+        package_tokens = tokens[2:]
+    elif tokens[:2] == ["npm", "add"]:
+        package_tokens = tokens[2:]
+    elif tokens[:2] == ["yarn", "add"]:
+        package_tokens = tokens[2:]
+    elif tokens[:1] == ["pnpm"]:
+        index = _pnpm_command_index(tokens)
+        if index >= len(tokens) or tokens[index] not in {"add", "install"}:
+            return False
+        package_tokens = tokens[index + 1 :]
     else:
         return False
 
-    package_specs = [
-        token
-        for token in package_tokens
-        if not token.startswith("-") and not re.match(r"^\d?>&\d+$", token)
-    ]
-    if not package_specs or not all(_is_pytest_package_spec(token) for token in package_specs):
+    package_specs = _extract_package_specs(package_tokens, 0)
+    if not package_specs or not all(_is_safe_test_package_spec(token) for token in package_specs):
         return False
 
     for remainder in segments[1:]:
@@ -311,6 +461,8 @@ def _is_safe_pytest_install_command(shell_command: str) -> bool:
         if not remainder:
             continue
         if any(pattern.search(remainder) for pattern in SAFE_PYTEST_VERIFY_PATTERNS):
+            continue
+        if _is_safe_test_run_command(remainder):
             continue
         return False
 

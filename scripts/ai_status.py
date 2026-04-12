@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -65,53 +66,52 @@ STATUS_LABELS = {
     "done": "done",
 }
 
+VALID_EXECUTION_MODES = {
+    "discussion_planning",
+    "supervisor_managed_execution",
+}
+
 DEPENDENCY_DONE_STATUSES = {"done"}
 EXTERNAL_TASK_PREFIXES = {"OC", "RS", "LP", "OSS", "SPIKE"}
 FIRST_PROMPT_PRIORITY = [
     "AI_COLLABORATION_GUIDE.md",
     "current-work.md",
     "ai-status.json",
+    "SUPERVISOR_OPERATING_MODEL.md",
+    "MULTI_LLM_CONSENSUS_WORKFLOW.md",
+    "PHASE1_DISCUSSION_ASSIGNMENTS.md",
     "CANONICAL_DOCUMENT_MAP.md",
-    "TARGET_ARCHITECTURE.md",
     "phase1_prd_detailed_v1.md",
+    "phase1_system_analysis_v1.md",
     "phase1_service_contracts_v1.md",
-    "ROADMAP.md",
-    "DEVELOPMENT_WORKBREAKDOWN.md",
+    "phase1_migration_plan_v1.md",
 ]
 OPTIONAL_CURRENT_WORK_REFERENCES = (
+    ("SUPERVISOR_OPERATING_MODEL.md", "Supervisor operating model"),
+    ("MULTI_LLM_CONSENSUS_WORKFLOW.md", "Consensus workflow"),
+    ("PHASE1_DISCUSSION_ASSIGNMENTS.md", "Discussion assignments"),
+    ("LLM_READOUT_TEMPLATE.md", "Readout template"),
+    ("LLM_CROSS_REVIEW_TEMPLATE.md", "Cross-review template"),
+    ("PHASE1_CONSENSUS_PACKET_TEMPLATE.md", "Consensus packet template"),
     ("CANONICAL_DOCUMENT_MAP.md", "Canonical map"),
-    ("TARGET_ARCHITECTURE.md", "Target architecture"),
-    ("DEVELOPMENT_WORKBREAKDOWN.md", "Full backlog"),
     ("PHASE1_OPEN_QUESTIONS.md", "Open questions"),
 )
 
 
 def default_canonical_document_layers() -> dict[str, list[str]]:
     return {
-        "L0 Collaboration & State": [
+        "L0 Collaboration": [
             "AI_COLLABORATION_GUIDE.md",
             "ai-status.json",
-            "ai-activity-log.jsonl",
             "current-work.md",
         ],
-        "L1 Local Architecture & Planning": [
-            "CANONICAL_DOCUMENT_MAP.md",
-            "TARGET_ARCHITECTURE.md",
-            "ROADMAP.md",
-            "DEVELOPMENT_WORKBREAKDOWN.md",
-            "PHASE1_DECISION_LEDGER.md",
-            "PHASE1_OPEN_QUESTIONS.md",
-            "LLM_ONBOARDING.md",
-            "ORCHESTRATOR_QUICKSTART.md",
-        ],
-        "L2 Phase 1 Canonical Specs": [
+        "L1 Product Truth": [
             "phase1_system_analysis_v1.md",
             "phase1_prd_detailed_v1.md",
             "phase1_service_contracts_v1.md",
             "phase1_migration_plan_v1.md",
-            "phase1_openapi_v1.yaml",
         ],
-        "L3 Execution Constraints & Reference Bundles": [
+        "L2 Execution Rules": [
             "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/README.md",
             "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/00_source_of_truth_and_glossary.md",
             "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/01_decision_tables.md",
@@ -119,8 +119,6 @@ def default_canonical_document_layers() -> dict[str, list[str]]:
             "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/03_api_examples_and_error_contracts.md",
             "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/05_engineering_conventions_and_ai_dev_playbook.md",
             "phase1_db_migration_extracted/README.md",
-            "phase1_db_migration_extracted/seeds/templates/README.md",
-            "docs/02-architecture/repo-structure.md",
         ],
     }
 
@@ -177,7 +175,11 @@ def human_join(items: list[str]) -> str:
 
 def build_onboarding_prompt(state: dict[str, Any]) -> str:
     canonical_files = canonical_file_set(state)
-    prompt_files = [item for item in FIRST_PROMPT_PRIORITY if item in canonical_files]
+    prompt_files = [
+        item
+        for item in FIRST_PROMPT_PRIORITY
+        if item in canonical_files or (ROOT / item).exists()
+    ]
     if not prompt_files:
         prompt_files = FIRST_PROMPT_PRIORITY[:3]
 
@@ -185,9 +187,81 @@ def build_onboarding_prompt(state: dict[str, Any]) -> str:
     if "ai-activity-log.jsonl" in canonical_files:
         parts.append("Use ai-activity-log.jsonl when you need recent history.")
     parts.append("Treat generated views as derived from machine-readable state.")
-    parts.append("Follow the canonical lifecycle todo -> in_progress -> review -> review_approved -> done.")
-    parts.append("Use scripts/ai-status.sh for every state change.")
+    if state.get("execution_mode") == "discussion_planning":
+        discussion_artifacts = state.get("discussion_artifacts", {})
+        starter_draft = discussion_artifacts.get(
+            "starter_draft",
+            "docs/02-architecture/consensus/phase1/starter-draft.md",
+        )
+        parts.append(
+            "Before implementation fan-out, submit a structured readout covering non-negotiables, source of truth, "
+            "state machine constraints, open questions, and implementation impact."
+        )
+        parts.append(
+            f"Use {starter_draft} as the shared working draft, "
+            "LLM_READOUT_TEMPLATE.md for your readout, and LLM_CROSS_REVIEW_TEMPLATE.md for cited review rounds."
+        )
+        parts.append("Do not create supervisor tasks until the consensus packet is accepted by the human.")
+    else:
+        parts.append("Follow the canonical lifecycle todo -> in_progress -> review -> review_approved -> done.")
+        parts.append("Use scripts/ai-status.sh for every state change.")
     return " ".join(parts)
+
+
+def task_requires_commit(task: dict[str, Any]) -> bool:
+    if task.get("task_class") == "sidecar":
+        return False
+    if task.get("mutates_canonical") is False:
+        return False
+    return True
+
+
+def git_commit_exists(commit_hash: str) -> bool:
+    if not commit_hash.strip():
+        return False
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"{commit_hash.strip()}^{{commit}}"],
+        cwd=str(ROOT),
+        text=True,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, Any]:
+    commit_required = task_requires_commit(task)
+    no_commit_required = os.environ.get("NO_COMMIT_REQUIRED", "").strip().lower() in {"1", "true", "yes"}
+    commit_hash = os.environ.get("COMMIT_HASH", "").strip()
+    commit_subject = os.environ.get("COMMIT_SUBJECT", "").strip()
+    commit_agent = os.environ.get("COMMIT_AGENT", "").strip() or actor
+    reviewer = canonical_agent_name(task.get("reviewer"))
+
+    if commit_required:
+        if no_commit_required:
+            raise SystemExit("NO_COMMIT_REQUIRED is only allowed for sidecar or non-canonical tasks")
+        if not commit_hash:
+            raise SystemExit("done requires COMMIT_HASH for canonical tasks")
+        if not git_commit_exists(commit_hash):
+            raise SystemExit(f"COMMIT_HASH does not resolve to a local commit: {commit_hash}")
+        if not commit_subject:
+            raise SystemExit("done requires COMMIT_SUBJECT for canonical tasks")
+        return {
+            "commit_hash": commit_hash,
+            "commit_subject": commit_subject,
+            "commit_agent": canonical_agent_name(commit_agent),
+            "commit_reviewer": reviewer,
+            "commit_recorded_at": iso_now(),
+        }
+
+    if no_commit_required:
+        return {
+            "commit_hash": "-",
+            "commit_subject": "no-commit closeout",
+            "commit_agent": canonical_agent_name(commit_agent),
+            "commit_reviewer": reviewer,
+            "commit_recorded_at": iso_now(),
+        }
+    return {}
 
 
 def iso_now() -> str:
@@ -219,16 +293,68 @@ def default_state() -> dict[str, Any]:
     canonical_layers = default_canonical_document_layers()
     return {
         "project": "drts-fleet-platform",
-        "execution_mode": "architect_bootstrap",
-        "consensus_status": "pending",
-        "sprint": "2026-04-10-phase1-architecture-bootstrap",
+        "execution_mode": "discussion_planning",
+        "consensus_status": "workflow_ready",
+        "sprint": "2026-04-10-phase1-multi-llm-consensus",
         "objective": (
-            "Establish the DRTS Phase 1 canonical architecture, document hierarchy, and work breakdown before "
-            "supervisor-managed auto-worker execution."
+            "Run a two-mode supervisor workflow: first discussion and planning over the DRTS Phase 1 specifications, "
+            "then supervisor-managed implementation, with automatic re-entry into discussion when execution finds unresolved design issues."
         ),
         "updated_at": timestamp,
         "canonical_document_layers": canonical_layers,
         "canonical_files": flatten_canonical_document_layers(canonical_layers),
+        "seed_design_files": [
+            "CANONICAL_DOCUMENT_MAP.md",
+            "TARGET_ARCHITECTURE.md",
+            "ROADMAP.md",
+            "DEVELOPMENT_WORKBREAKDOWN.md",
+            "PHASE1_DECISION_LEDGER.md",
+            "PHASE1_OPEN_QUESTIONS.md",
+            "SUPERVISOR_OPERATING_MODEL.md",
+            "MULTI_LLM_CONSENSUS_WORKFLOW.md",
+            "PHASE1_DISCUSSION_ASSIGNMENTS.md",
+            "LLM_READOUT_TEMPLATE.md",
+            "LLM_CROSS_REVIEW_TEMPLATE.md",
+            "PHASE1_CONSENSUS_PACKET_TEMPLATE.md",
+            "docs/02-architecture/consensus/phase1/README.md",
+            "docs/02-architecture/consensus/phase1/consensus-packet.md",
+        ],
+        "discussion_mode": "supervisor_baton_review_loop",
+        "discussion_workspace": "docs/02-architecture/consensus/phase1",
+        "supervisor_modes": {
+            "discussion_planning": {
+                "purpose": "Read canonical specs, debate design, converge on planning, and produce an accepted consensus packet.",
+                "entry_gate": "system analysis plus design and execution references are available in the repo",
+                "exit_gate": "human accepts the consensus packet",
+            },
+            "supervisor_managed_execution": {
+                "purpose": "Assign implementation work to owners and reviewers through the supervisor task lifecycle.",
+                "entry_gate": "accepted consensus packet exists",
+                "exit_gate": "execution discovers unresolved semantics, conflicting contracts, or wave changes that require renewed discussion",
+            },
+        },
+        "mode_transition_rules": [
+            "Supervisor stays running across both modes; only routing policy changes.",
+            "discussion_planning -> supervisor_managed_execution after the consensus packet is accepted by the human.",
+            "supervisor_managed_execution -> discussion_planning when implementation hits unresolved product semantics, contract conflicts, or major planning drift.",
+            "After discussion resolves the issue, the supervisor may resume implementation mode without restarting the control plane.",
+        ],
+        "discussion_artifacts": {
+            "starter_draft": "docs/02-architecture/consensus/phase1/starter-draft.md",
+            "baton_log": "docs/02-architecture/consensus/phase1/baton-log.md",
+            "supervisor_queue": "docs/02-architecture/consensus/phase1/supervisor-queue.md",
+            "review_round_1": "docs/02-architecture/consensus/phase1/review-round-1.md",
+            "review_round_2": "docs/02-architecture/consensus/phase1/review-round-2.md",
+            "consensus_packet": "docs/02-architecture/consensus/phase1/consensus-packet.md",
+        },
+        "discussion_loop": {
+            "supervisor": "Claude",
+            "starter": "Codex",
+            "current_owner": "Codex",
+            "review_order": ["Qwen", "Gemini", "Copilot", "Claude"],
+            "loop_rule": "Only the current owner edits starter-draft.md. Reviewers write cited feedback. Supervisor advances the baton.",
+            "promotion_gate": "human_accepts_consensus_packet",
+        },
         "agents": [
             {
                 "name": name,
@@ -236,7 +362,7 @@ def default_state() -> dict[str, Any]:
                 "status": "idle",
                 "current_task_ids": [],
                 "branch": meta["default_branch"],
-                "next": "",
+                "next": f"Produce docs/02-architecture/consensus/phase1/{name.lower()}-readout.md",
                 "last_update": None,
             }
             for name, meta in KNOWN_AGENTS.items()
@@ -532,8 +658,39 @@ def recompute_agents(state: dict[str, Any]) -> None:
                 agent["last_update"] = waiting[0].get("last_update")
         elif queued:
             agent["next"] = queued[0].get("next", "")
-        elif not agent.get("last_update"):
-            agent["last_update"] = None
+        else:
+            agent["next"] = default_next_for_idle_agent(state, name)
+            if not agent.get("last_update"):
+                agent["last_update"] = None
+
+
+def default_next_for_idle_agent(state: dict[str, Any], agent_name: str) -> str:
+    execution_mode = str(state.get("execution_mode", "")).strip()
+    discussion_loop = state.get("discussion_loop", {}) if isinstance(state.get("discussion_loop"), dict) else {}
+
+    if execution_mode == "discussion_planning":
+        starter = discussion_loop.get("starter")
+        supervisor = discussion_loop.get("supervisor")
+        review_order = discussion_loop.get("review_order")
+        if agent_name == starter:
+            return "Own the starter draft and prepare the next cited discussion synthesis."
+        if agent_name == supervisor:
+            return "Advance the baton, arbitrate cited disagreements, and maintain the consensus packet."
+        if isinstance(review_order, list) and agent_name in review_order:
+            return "Review the current starter draft with citations and queue refinements for the next baton round."
+        return "Read the canonical specs and contribute to the next discussion round."
+
+    if execution_mode == "supervisor_managed_execution":
+        execution_defaults = {
+            "Claude": "Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.",
+            "Gemini": "Pick the next infra, rollout, or runtime slice that is ready for execution review.",
+            "Codex": "Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.",
+            "Qwen": "Pick the next API or integration slice that is unblocked and ready to implement.",
+            "Copilot": "Critique active implementation slices for contradictions, testing gaps, and weak assumptions.",
+        }
+        return execution_defaults.get(agent_name, "Wait for the next execution slice.")
+
+    return ""
 
 
 def recompute_workload(state: dict[str, Any]) -> None:
@@ -621,6 +778,16 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     current_logs = logs[-20:]
     canonical_files = canonical_file_set(state)
     tier_labels = canonical_tier_labels(state)
+    seed_design_files = [str(item) for item in state.get("seed_design_files", []) if str(item).strip()]
+    discussion_mode = str(state.get("discussion_mode", "")).strip()
+    discussion_workspace = str(state.get("discussion_workspace", "")).strip()
+    execution_mode = str(state.get("execution_mode", "")).strip()
+    supervisor_modes = state.get("supervisor_modes", {}) if isinstance(state.get("supervisor_modes"), dict) else {}
+    mode_transition_rules = state.get("mode_transition_rules", [])
+    discussion_loop = state.get("discussion_loop", {}) if isinstance(state.get("discussion_loop"), dict) else {}
+    discussion_artifacts = (
+        state.get("discussion_artifacts", {}) if isinstance(state.get("discussion_artifacts"), dict) else {}
+    )
     active_tasks = [task for task in state["tasks"] if task.get("status") != "done"]
     primary_tasks = [task for task in active_tasks if task_delivery_layer(task) == "primary"]
     external_tasks = [task for task in active_tasks if task_delivery_layer(task) == "external"]
@@ -630,8 +797,37 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
         "- Canonical tiers: " + (", ".join(tier_labels) if tier_labels else "-"),
     ]
     for path, label in OPTIONAL_CURRENT_WORK_REFERENCES:
-        if path in canonical_files:
+        if path in canonical_files or path in seed_design_files:
             current_sprint_lines.append(f"- {label}: `{path}`")
+    if seed_design_files:
+        current_sprint_lines.append("- Seed design files: " + ", ".join(f"`{item}`" for item in seed_design_files))
+    if discussion_mode:
+        current_sprint_lines.append(f"- Discussion mode: `{discussion_mode}`")
+    if execution_mode:
+        current_sprint_lines.append(f"- Active supervisor mode: `{execution_mode}`")
+    if supervisor_modes:
+        current_sprint_lines.append(
+            "- Supported supervisor modes: "
+            + ", ".join(f"`{name}`" for name in supervisor_modes)
+        )
+    if discussion_workspace:
+        current_sprint_lines.append(f"- Discussion workspace: `{discussion_workspace}`")
+    if discussion_loop.get("supervisor"):
+        current_sprint_lines.append(f"- Discussion supervisor: `{discussion_loop['supervisor']}`")
+    if discussion_loop.get("starter"):
+        current_sprint_lines.append(f"- Discussion starter: `{discussion_loop['starter']}`")
+    if discussion_loop.get("current_owner"):
+        current_sprint_lines.append(f"- Current baton owner: `{discussion_loop['current_owner']}`")
+    review_order = discussion_loop.get("review_order")
+    if isinstance(review_order, list) and review_order:
+        current_sprint_lines.append("- Review order: " + ", ".join(f"`{item}`" for item in review_order))
+    if discussion_artifacts:
+        current_sprint_lines.append(
+            "- Discussion artifacts: "
+            + ", ".join(f"`{path}`" for path in discussion_artifacts.values() if str(path).strip())
+        )
+    if isinstance(mode_transition_rules, list) and mode_transition_rules:
+        current_sprint_lines.append("- Mode transitions: " + " | ".join(str(rule) for rule in mode_transition_rules))
     current_sprint_lines.append("- Dashboard: `docs-site/index.html`")
 
     lines: list[str] = [
@@ -726,6 +922,23 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
             )
     else:
         lines.append("| _(none)_ | - | - | - |")
+
+    lines.extend(["", "## Completion Evidence", "", "| Task | Commit | Subject | LLM Agent | Reviewer | Recorded At |", "|---|---|---|---|---|---|"])
+    completion_tasks = [task for task in state["tasks"] if task.get("status") == "done" and task.get("commit_hash")]
+    if completion_tasks:
+        for task in completion_tasks:
+            lines.append(
+                "| `{task_id}` | {commit_hash} | {subject} | {agent} | {reviewer} | {recorded_at} |".format(
+                    task_id=cell(task["id"]),
+                    commit_hash=cell(task.get("commit_hash") or "-"),
+                    subject=cell(task.get("commit_subject") or "-"),
+                    agent=cell(task.get("commit_agent") or "-"),
+                    reviewer=cell(task.get("commit_reviewer") or task.get("reviewer") or "-"),
+                    recorded_at=cell(task.get("commit_recorded_at") or "-"),
+                )
+            )
+    else:
+        lines.append("| _(none)_ | - | - | - | - | - |")
 
     lines.extend(["", "## Latest Checkpoints", ""])
     if current_logs:
@@ -1079,10 +1292,12 @@ def command_done(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can finalize {task_id} to done")
     if task.get("status") != "review_approved":
         raise SystemExit(f"{task_id} must be review_approved before it can move to done")
+    completion_metadata = completion_metadata_from_env(task, actor)
     timestamp = iso_now()
     task["status"] = "done"
     task["last_update"] = timestamp
     task["next"] = message
+    task.update(completion_metadata)
     task.pop("waiting_for", None)
     mark_blockers_resolved(state, task_id)
     mark_handoffs_done(state, task_id)
@@ -1129,6 +1344,31 @@ def command_approve(state: dict[str, Any], args: list[str]) -> None:
     append_log({"ts": timestamp, "agent": actor, "type": "review_approved", "task_id": task_id, "message": message})
 
 
+def command_mode(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) < 1:
+        raise SystemExit("Usage: mode <discussion_planning|supervisor_managed_execution> [message]")
+    mode = args[0].strip()
+    message = args[1] if len(args) > 1 else f"Switched supervisor mode to {mode}"
+    if mode not in VALID_EXECUTION_MODES:
+        raise SystemExit(f"Unsupported execution mode: {mode}")
+
+    timestamp = iso_now()
+    state["execution_mode"] = mode
+    if mode == "supervisor_managed_execution":
+        state["consensus_status"] = "accepted"
+    else:
+        state["consensus_status"] = "workflow_ready"
+
+    append_log(
+        {
+            "ts": timestamp,
+            "agent": current_actor(),
+            "type": "mode",
+            "message": message,
+        }
+    )
+
+
 def command_sync(state: dict[str, Any], _args: list[str]) -> None:
     return None
 
@@ -1156,6 +1396,7 @@ def main(argv: list[str]) -> int:
         "blocker": command_blocker,
         "done": command_done,
         "approve": command_approve,
+        "mode": command_mode,
         "sync": command_sync,
     }
 

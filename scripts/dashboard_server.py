@@ -21,11 +21,28 @@ class NoCacheRequestHandler(SimpleHTTPRequestHandler):
         self.send_header("Expires", "0")
         super().end_headers()
 
+    CONSENSUS_DIR_PREFIX = "/consensus/"
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/__refresh":
             self.handle_refresh()
             return
+        # Serve consensus discussion artifacts from docs/02-architecture/consensus/phase1/
+        if parsed.path.startswith(self.CONSENSUS_DIR_PREFIX) and self.repo_root is not None:
+            filename = parsed.path[len(self.CONSENSUS_DIR_PREFIX):]
+            if filename and "/" not in filename and filename.endswith(".md"):
+                live_path = self.repo_root / "docs" / "02-architecture" / "consensus" / "phase1" / filename
+                if live_path.exists():
+                    self.send_response(200)
+                    self.send_header("Content-type", "text/markdown; charset=utf-8")
+                    self.send_header("Content-Length", str(live_path.stat().st_size))
+                    self.end_headers()
+                    with live_path.open("rb") as source:
+                        shutil.copyfileobj(source, self.wfile)
+                else:
+                    self.send_error(404, f"Consensus file not found: {filename}")
+                return
         live_path = self.live_file_map.get(parsed.path)
         if live_path is not None:
             if not live_path.exists():
@@ -89,7 +106,7 @@ class NoCacheRequestHandler(SimpleHTTPRequestHandler):
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serve local orchestrator dashboard assets without browser caching.")
     parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind. Default: 127.0.0.1")
-    parser.add_argument("--port", type=int, default=4173, help="Port to bind. Default: 4173")
+    parser.add_argument("--port", type=int, default=4174, help="Port to bind. Default: 4174")
     parser.add_argument(
         "--directory",
         default=str(Path(__file__).resolve().parents[1] / "docs-site"),

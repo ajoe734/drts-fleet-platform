@@ -163,10 +163,28 @@ def _gh_auth_ready(binary: str | None) -> bool:
     return bool(_gh_auth_token(binary))
 
 
+def _copilot_plaintext_token() -> str | None:
+    config_dir = Path(os.environ.get("COPILOT_CONFIG_DIR") or (Path.home() / ".copilot"))
+    config_path = config_dir / "config.json"
+    try:
+        payload = json.loads(config_path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    tokens = payload.get("copilot_tokens")
+    if not isinstance(tokens, dict):
+        return None
+    for value in tokens.values():
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _copilot_auth_ready(gh_binary: str | None) -> bool:
     if _gh_auth_token(gh_binary):
         return True
-    return any(os.environ.get(name) for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"))
+    if any(os.environ.get(name) for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")):
+        return True
+    return bool(_copilot_plaintext_token())
 
 
 def _configured_value(settings: dict[str, Any], key: str, env_name: str | None = None) -> str | None:
@@ -258,6 +276,22 @@ def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
         "Bash(cd * && python3 -m pytest*)",
         "Bash(pytest*)",
         "Bash(cd * && pytest*)",
+        "Bash(pnpm test*)",
+        "Bash(cd * && pnpm test*)",
+        "Bash(pnpm run test*)",
+        "Bash(cd * && pnpm run test*)",
+        "Bash(pnpm --filter * test*)",
+        "Bash(pnpm --filter * run test*)",
+        "Bash(pnpm exec vitest*)",
+        "Bash(cd * && pnpm exec vitest*)",
+        "Bash(pnpm vitest*)",
+        "Bash(cd * && pnpm vitest*)",
+        "Bash(vitest*)",
+        "Bash(cd * && vitest*)",
+        "Bash(jest*)",
+        "Bash(cd * && jest*)",
+        "Bash(npx vitest*)",
+        "Bash(cd * && npx vitest*)",
         "Bash(apt-get install*python3-pytest*)",
         "Bash(apt install*python3-pytest*)",
         "Bash(python3 -m pip install*pytest*)",
@@ -714,7 +748,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
                 },
                 "notes": [
                     "The installed Copilot Chat extension exposes background-agent, cloud-agent, and Claude-agent sessions in VS Code.",
-                    "Local worker automation requires the `copilot` CLI plus valid GitHub authentication; cloud delegation requires `gh >= 2.80` plus `gh auth status`.",
+                    "Local worker automation requires the `copilot` CLI plus either `copilot login`, a supported token env var, or `gh auth login`; cloud delegation still requires `gh >= 2.80` plus `gh auth status`.",
                     "The installed Copilot CLI exposes a verified `--model` flag, so Grok routing can be expressed as a Copilot model selection.",
                 ],
             },

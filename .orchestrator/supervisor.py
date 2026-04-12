@@ -544,6 +544,15 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
 def pid_is_alive(pid: int | None) -> bool:
     if not pid:
         return False
+    proc_stat = Path(f"/proc/{pid}/stat")
+    try:
+        stat_text = proc_stat.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        stat_text = ""
+    if stat_text:
+        parts = stat_text.split()
+        if len(parts) >= 3 and parts[2] == "Z":
+            return False
     try:
         os.kill(pid, 0)
     except OSError:
@@ -1124,6 +1133,45 @@ def maybe_trigger_retry_or_fallback(
     return False, False
 
 
+def finalize_terminal_worker_outcome(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    reason: str,
+) -> bool:
+    reassigned_to = maybe_reassign_task_after_worker_failure(
+        config,
+        worker,
+        reason,
+        terminal=True,
+    )
+    if reassigned_to:
+        worker["status"] = "reassigned"
+        worker["reassigned_to"] = reassigned_to
+        worker["last_error"] = reason
+        worker["last_event_at"] = utc_now()
+        finalize_queue_event_record(config, state, worker, "completed")
+        return True
+
+    worker["status"] = "failed"
+    worker["last_event_at"] = utc_now()
+    worker["last_error"] = reason
+    write_activity_log(
+        config,
+        {
+            "type": "worker_failed",
+            "provider": worker.get("provider"),
+            "task_id": worker.get("task_id"),
+            "message": reason,
+            "worker_run_id": worker["run_id"],
+            "pr_url": worker.get("pr_url"),
+            "session_url": worker.get("session_url"),
+        },
+    )
+    finalize_queue_event_record(config, state, worker, "failed", reason)
+    return False
+
+
 def retry_due_workers(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -1589,20 +1637,8 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 stalled_for_seconds = (now - last_dt).total_seconds()
                 if worker.get("status") == "stalled" and stalled_for_seconds >= stall_after * 2:
                     terminate_worker_pid(worker.get("pid"))
-                    worker["status"] = "failed"
-                    worker["last_event_at"] = utc_now()
-                    worker["last_error"] = f"Worker remained stalled for {int(stalled_for_seconds)} seconds and was terminated for redispatch."
-                    write_activity_log(
-                        config,
-                        {
-                            "type": "worker_failed",
-                            "provider": worker.get("provider"),
-                            "task_id": worker.get("task_id"),
-                            "message": worker["last_error"],
-                            "worker_run_id": worker["run_id"],
-                        },
-                    )
-                    finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
+                    reason = f"Worker remained stalled for {int(stalled_for_seconds)} seconds and was terminated for redispatch."
+                    finalize_terminal_worker_outcome(config, state, worker, reason)
                     console_log(
                         f"worker terminated after extended stall: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
                         quiet=SUPERVISOR_LOG_QUIET,
@@ -1650,21 +1686,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 finalize_queue_event_record(config, state, worker, "completed")
                 changed = True
                 continue
-            worker["status"] = "failed"
-            worker["last_event_at"] = utc_now()
-            write_activity_log(
-                config,
-                {
-                    "type": "worker_failed",
-                    "provider": worker.get("provider"),
-                    "task_id": worker.get("task_id"),
-                    "message": failure_reason,
-                    "worker_run_id": worker["run_id"],
-                    "pr_url": worker.get("pr_url"),
-                    "session_url": worker.get("session_url"),
-                },
-            )
-            finalize_queue_event_record(config, state, worker, "failed", failure_reason)
+            finalize_terminal_worker_outcome(config, state, worker, failure_reason)
             changed = True
             continue
 
@@ -1675,22 +1697,12 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 for value in ready_dispatch_settings(config).get("worker_terminal_statuses", ["done", "review_approved"])
             }
             if task_status in redispatch_statuses:
-                worker["status"] = "failed"
-                worker["last_event_at"] = utc_now()
-                worker["last_error"] = "Worker exited before the task reached a terminal status."
-                write_activity_log(
+                finalize_terminal_worker_outcome(
                     config,
-                    {
-                        "type": "worker_failed",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": worker["last_error"],
-                        "worker_run_id": worker["run_id"],
-                        "pr_url": worker.get("pr_url"),
-                        "session_url": worker.get("session_url"),
-                    },
+                    state,
+                    worker,
+                    "Worker exited before the task reached a terminal status.",
                 )
-                finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
             elif task_status in terminal_statuses:
                 worker["status"] = "completed"
                 worker["last_event_at"] = utc_now()
@@ -1708,22 +1720,12 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 )
                 finalize_queue_event_record(config, state, worker, "completed")
             else:
-                worker["status"] = "failed"
-                worker["last_event_at"] = utc_now()
-                worker["last_error"] = "Worker exited before the task reached a terminal status."
-                write_activity_log(
+                finalize_terminal_worker_outcome(
                     config,
-                    {
-                        "type": "worker_failed",
-                        "provider": worker.get("provider"),
-                        "task_id": worker.get("task_id"),
-                        "message": worker["last_error"],
-                        "worker_run_id": worker["run_id"],
-                        "pr_url": worker.get("pr_url"),
-                        "session_url": worker.get("session_url"),
-                    },
+                    state,
+                    worker,
+                    "Worker exited before the task reached a terminal status.",
                 )
-                finalize_queue_event_record(config, state, worker, "failed", worker["last_error"])
             changed = True
     return changed
 

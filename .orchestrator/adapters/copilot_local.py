@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, DeliveryResult
 from adapters.file_inbox import FileInboxAdapter
@@ -24,11 +26,27 @@ def _gh_auth_token() -> str | None:
     return token or None
 
 
+def _copilot_plaintext_token() -> str | None:
+    config_dir = Path(os.environ.get("COPILOT_CONFIG_DIR") or (Path.home() / ".copilot"))
+    config_path = config_dir / "config.json"
+    try:
+        payload = json.loads(config_path.read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    tokens = payload.get("copilot_tokens")
+    if not isinstance(tokens, dict):
+        return None
+    for value in tokens.values():
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def _copilot_auth_ready() -> bool:
     for env_name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
         if os.environ.get(env_name):
             return True
-    return bool(_gh_auth_token())
+    return bool(_gh_auth_token() or _copilot_plaintext_token())
 
 
 class CopilotLocalAdapter(BaseAdapter):

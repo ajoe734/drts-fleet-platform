@@ -280,9 +280,11 @@ Run locally from the repository root only:
 bash scripts/setup-llm-cli.sh
 bash scripts/run-supervisor.sh --verbose
 bash scripts/run-dashboard.sh
+bash scripts/run-dashboard-tunnel.sh
 ```
 
-The dashboard will be served at `http://127.0.0.1:4173/index.html` unless you override `PORT`.
+The dashboard will be served at `http://127.0.0.1:4174/index.html` unless you override `HOST` or `PORT`.
+A temporary public URL can be created with `bash scripts/run-dashboard-tunnel.sh`.
 
 ## 5. Work Order For Every LLM
 
@@ -357,6 +359,11 @@ bash scripts/run-supervisor.sh --verbose
 Dashboard:
 ```bash
 bash scripts/run-dashboard.sh
+```
+
+Temporary public dashboard URL:
+```bash
+bash scripts/run-dashboard-tunnel.sh
 ```
 
 ## 3. Seed the first task
@@ -462,6 +469,7 @@ Run the local collaboration control plane from the repo root:
 ```bash
 bash scripts/run-supervisor.sh --verbose
 bash scripts/run-dashboard.sh
+bash scripts/run-dashboard-tunnel.sh
 ```
 
 ## 7. First Smoke Test

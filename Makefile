@@ -7,6 +7,18 @@ bootstrap:
 check:
 	./scripts/check.sh
 
+db-init:
+	./scripts/db-init-local.sh
+
+db-migrate:
+	./scripts/db-apply.sh
+
+db-seed:
+	./scripts/db-seed.sh all
+
+db-verify:
+	./scripts/db-verify.sh
+
 dev-up:
 	./scripts/dev-up.sh
 

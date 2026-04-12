@@ -1,14 +1,16 @@
 # Development Work Breakdown
 
+Status: seed work-package proposal for multi-LLM review. This file becomes assignable only after consensus.
+
 ## Summary
 
-This file lists the concrete work packages that will later become supervisor tasks. It is intentionally unassigned right now because the repo is still in `architect_bootstrap` mode.
+This file lists the current proposed work packages that may later become supervisor tasks. It is intentionally unassigned because the repo is still in `discussion_planning` mode.
 
 ## Current Rule
 
 - work packages are defined here first
-- human reviews this document
-- only after approval may these slices be converted into `ai-status.json` tasks and assigned to auto workers
+- multiple LLM lanes review and challenge this document against the canonical specs
+- only after the consensus packet is accepted may these slices be converted into `ai-status.json` tasks and assigned to auto workers
 
 ## Work Packages
 
