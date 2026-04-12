@@ -1,16 +1,16 @@
 import Link from "next/link";
-import type { ReportJobRecord } from "@drts/contracts";
+import type { TenantUserRoleRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 
-export default async function ReportsPage() {
+export default async function UsersPage() {
   const client = getTenantClient();
 
-  let jobs: ReportJobRecord[] = [];
+  let users: TenantUserRoleRecord[] = [];
   let error: string | null = null;
 
   try {
-    jobs = await client.listReportJobs();
+    users = await client.listTenantUsers();
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
@@ -18,8 +18,8 @@ export default async function ReportsPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Reports"
-        description={`Fetched from /api/reports/jobs. ${jobs.length} job(s) found.`}
+        title="Users"
+        description={`Fetched from /api/tenant/users. ${users.length} user(s) found.`}
       >
         {error && (
           <div className="error-banner">
@@ -27,26 +27,26 @@ export default async function ReportsPage() {
           </div>
         )}
 
-        {jobs.length > 0 ? (
+        {users.length > 0 ? (
           <div className="data-table">
             <table>
               <thead>
                 <tr>
-                  <th>Job ID</th>
+                  <th>User ID</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
                   <th>Status</th>
-                  <th>Job Type</th>
-                  <th>Format</th>
-                  <th>Created</th>
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((job) => (
-                  <tr key={job.jobId}>
-                    <td>{job.jobId}</td>
-                    <td>{job.status}</td>
-                    <td>{job.jobType}</td>
-                    <td>{job.format}</td>
-                    <td>{new Date(job.createdAt).toLocaleString()}</td>
+                {users.map((user) => (
+                  <tr key={user.userId}>
+                    <td>{user.userId}</td>
+                    <td>{user.displayName}</td>
+                    <td>{user.email}</td>
+                    <td>{user.roleCode}</td>
+                    <td>{user.status}</td>
                   </tr>
                 ))}
               </tbody>
@@ -54,7 +54,7 @@ export default async function ReportsPage() {
           </div>
         ) : (
           <p className="empty-state">
-            No report jobs found. Create one via POST /api/reports/jobs.
+            No users found. Add via tenant partner API.
           </p>
         )}
 

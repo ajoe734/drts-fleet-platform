@@ -1,16 +1,16 @@
 import Link from "next/link";
-import type { ReportJobRecord } from "@drts/contracts";
+import type { TenantApiKeyRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 
-export default async function ReportsPage() {
+export default async function ApiKeysPage() {
   const client = getTenantClient();
 
-  let jobs: ReportJobRecord[] = [];
+  let apiKeys: TenantApiKeyRecord[] = [];
   let error: string | null = null;
 
   try {
-    jobs = await client.listReportJobs();
+    apiKeys = await client.listApiKeys();
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
@@ -18,8 +18,8 @@ export default async function ReportsPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Reports"
-        description={`Fetched from /api/reports/jobs. ${jobs.length} job(s) found.`}
+        title="API Keys"
+        description={`Fetched from /api/tenant/api-keys. ${apiKeys.length} key(s) found.`}
       >
         {error && (
           <div className="error-banner">
@@ -27,26 +27,26 @@ export default async function ReportsPage() {
           </div>
         )}
 
-        {jobs.length > 0 ? (
+        {apiKeys.length > 0 ? (
           <div className="data-table">
             <table>
               <thead>
                 <tr>
-                  <th>Job ID</th>
+                  <th>Key ID</th>
+                  <th>Name</th>
+                  <th>Prefix</th>
+                  <th>Scopes</th>
                   <th>Status</th>
-                  <th>Job Type</th>
-                  <th>Format</th>
-                  <th>Created</th>
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((job) => (
-                  <tr key={job.jobId}>
-                    <td>{job.jobId}</td>
-                    <td>{job.status}</td>
-                    <td>{job.jobType}</td>
-                    <td>{job.format}</td>
-                    <td>{new Date(job.createdAt).toLocaleString()}</td>
+                {apiKeys.map((apiKey) => (
+                  <tr key={apiKey.apiKeyId}>
+                    <td>{apiKey.apiKeyId}</td>
+                    <td>{apiKey.keyName}</td>
+                    <td>{apiKey.keyPrefix}</td>
+                    <td>{apiKey.scopes.join(", ")}</td>
+                    <td>{apiKey.revokedAt ? "❌ Revoked" : "✅ Active"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -54,7 +54,7 @@ export default async function ReportsPage() {
           </div>
         ) : (
           <p className="empty-state">
-            No report jobs found. Create one via POST /api/reports/jobs.
+            No API keys found. Issue via tenant partner API.
           </p>
         )}
 

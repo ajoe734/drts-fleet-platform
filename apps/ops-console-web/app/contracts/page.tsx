@@ -1,16 +1,16 @@
 import Link from "next/link";
-import type { ReportJobRecord } from "@drts/contracts";
+import type { VehicleContractRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 
-export default async function ReportsPage() {
+export default async function ContractsPage() {
   const client = getOpsClient();
 
-  let jobs: ReportJobRecord[] = [];
+  let contracts: VehicleContractRecord[] = [];
   let error: string | null = null;
 
   try {
-    jobs = await client.listReportJobs();
+    contracts = await client.listContracts();
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
@@ -18,34 +18,34 @@ export default async function ReportsPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Reports"
-        description={`Fetched from /api/reports/jobs. ${jobs.length} job(s) found.`}
+        title="Contracts Registry"
+        description={`Fetched from /api/regulatory-registry/contracts. ${contracts.length} contract(s) found.`}
       >
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
           </div>
         )}
-        {jobs.length > 0 ? (
+        {contracts.length > 0 ? (
           <div className="data-table">
             <table>
               <thead>
                 <tr>
-                  <th>Job ID</th>
+                  <th>Contract ID</th>
+                  <th>Vehicle</th>
+                  <th>Partner</th>
+                  <th>Type</th>
                   <th>Status</th>
-                  <th>Job Type</th>
-                  <th>Format</th>
-                  <th>Created</th>
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((job) => (
-                  <tr key={job.jobId}>
-                    <td>{job.jobId}</td>
-                    <td>{job.status}</td>
-                    <td>{job.jobType}</td>
-                    <td>{job.format}</td>
-                    <td>{new Date(job.createdAt).toLocaleString()}</td>
+                {contracts.map((contract) => (
+                  <tr key={contract.contractId}>
+                    <td>{contract.contractId}</td>
+                    <td>{contract.vehicleId}</td>
+                    <td>{contract.partnerId}</td>
+                    <td>{contract.contractType}</td>
+                    <td>{contract.status}</td>
                   </tr>
                 ))}
               </tbody>
@@ -53,7 +53,7 @@ export default async function ReportsPage() {
           </div>
         ) : (
           <p className="empty-state">
-            No report jobs. Create via POST /api/reports/jobs.
+            No contracts registered. Add via regulatory registry.
           </p>
         )}
         <Link className="route-link" href="/">

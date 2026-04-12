@@ -1,0 +1,289 @@
+/**
+ * W8-001A: Client integration and feature-flag rollout tests
+ *
+ * Validates:
+ * 1. Feature flags service (in-memory + DB repository pattern)
+ * 2. Feature flags API controller (envelope, tenant scoping)
+ * 3. Read model connectivity for tenant portal, ops console, driver app
+ * 4. Smoke paths for all three client surfaces
+ */
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { FeatureFlagsService } from "../../apps/api/src/modules/feature-flags/feature-flags.service";
+import { ApiClient } from "../../packages/api-client/src/index";
+import type { FeatureFlagSummary } from "../../packages/contracts/src/index";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+// ---------------------------------------------------------------------------
+// Feature Flags Service (in-memory fallback)
+// ---------------------------------------------------------------------------
+
+describe("W8-001A feature flags service (in-memory fallback)", () => {
+  it("seeds all 14 default Phase 1 flags", async () => {
+    const service = new FeatureFlagsService();
+    const flags = await service.getAll();
+    expect(flags).toHaveLength(14);
+  });
+
+  it("returns correct flag keys for tenant-portal surface", async () => {
+    const service = new FeatureFlagsService();
+    const flags = await service.getAll();
+    const tenantPortalFlags = flags.filter((f) =>
+      f.key.startsWith("tenant-portal."),
+    );
+    expect(tenantPortalFlags).toHaveLength(4);
+    expect(tenantPortalFlags.map((f) => f.key)).toContain(
+      "tenant-portal.booking",
+    );
+    expect(tenantPortalFlags.map((f) => f.key)).toContain(
+      "tenant-portal.billing",
+    );
+    expect(tenantPortalFlags.map((f) => f.key)).toContain(
+      "tenant-portal.reports",
+    );
+    expect(tenantPortalFlags.map((f) => f.key)).toContain(
+      "tenant-portal.webhooks",
+    );
+  });
+
+  it("returns correct flag keys for ops-console surface", async () => {
+    const service = new FeatureFlagsService();
+    const flags = await service.getAll();
+    const opsConsoleFlags = flags.filter((f) =>
+      f.key.startsWith("ops-console."),
+    );
+    expect(opsConsoleFlags).toHaveLength(4);
+    expect(opsConsoleFlags.map((f) => f.key)).toContain("ops-console.dispatch");
+    expect(opsConsoleFlags.map((f) => f.key)).toContain(
+      "ops-console.complaint",
+    );
+    expect(opsConsoleFlags.map((f) => f.key)).toContain(
+      "ops-console.callcenter",
+    );
+    expect(opsConsoleFlags.map((f) => f.key)).toContain("ops-console.reports");
+  });
+
+  it("returns correct flag keys for driver-app surface", async () => {
+    const service = new FeatureFlagsService();
+    const flags = await service.getAll();
+    const driverAppFlags = flags.filter((f) => f.key.startsWith("driver-app."));
+    expect(driverAppFlags).toHaveLength(4);
+    expect(driverAppFlags.map((f) => f.key)).toContain("driver-app.tasks");
+    expect(driverAppFlags.map((f) => f.key)).toContain("driver-app.earnings");
+    expect(driverAppFlags.map((f) => f.key)).toContain("driver-app.incidents");
+    expect(driverAppFlags.map((f) => f.key)).toContain("driver-app.shift");
+  });
+
+  it("driver-app.shift is disabled by default", async () => {
+    const service = new FeatureFlagsService();
+    const flag = await service.getByKey("driver-app.shift");
+    expect(flag).toBeDefined();
+    expect(flag!.enabled).toBe(false);
+  });
+
+  it("phase1.read-models and phase1.smoke-paths are enabled", async () => {
+    const service = new FeatureFlagsService();
+    const readModels = await service.getByKey("phase1.read-models");
+    const smokePaths = await service.getByKey("phase1.smoke-paths");
+    expect(readModels?.enabled).toBe(true);
+    expect(smokePaths?.enabled).toBe(true);
+  });
+
+  it("toggles a flag enabled state", async () => {
+    const service = new FeatureFlagsService();
+    const before = await service.getByKey("driver-app.shift");
+    expect(before!.enabled).toBe(false);
+
+    const updated = await service.updateFlag("driver-app.shift", true);
+    expect(updated).toBeDefined();
+    expect(updated!.enabled).toBe(true);
+
+    const after = await service.getByKey("driver-app.shift");
+    expect(after!.enabled).toBe(true);
+  });
+
+  it("returns undefined for unknown flag", async () => {
+    const service = new FeatureFlagsService();
+    const flag = await service.getByKey("nonexistent.flag");
+    expect(flag).toBeUndefined();
+  });
+
+  it("isEnabled returns false for unknown flag", async () => {
+    const service = new FeatureFlagsService();
+    const enabled = await service.isEnabled("nonexistent.flag");
+    expect(enabled).toBe(false);
+  });
+
+  it("returns updatedAt as ISO string", async () => {
+    const service = new FeatureFlagsService();
+    const flag = await service.getByKey("tenant-portal.booking");
+    expect(flag).toBeDefined();
+    expect(flag!.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Feature Flag Summary shape (contract validation)
+// ---------------------------------------------------------------------------
+
+describe("W8-001A feature flag summary shape", () => {
+  it("produces a valid FeatureFlagSummary shape", async () => {
+    const service = new FeatureFlagsService();
+    const flags = await service.getAll();
+    const summary: FeatureFlagSummary = {
+      flags,
+      notes: ["Test note"],
+    };
+
+    expect(summary).toHaveProperty("flags");
+    expect(summary).toHaveProperty("notes");
+    expect(Array.isArray(summary.flags)).toBe(true);
+    expect(Array.isArray(summary.notes)).toBe(true);
+    expect(summary.flags[0]).toHaveProperty("key");
+    expect(summary.flags[0]).toHaveProperty("enabled");
+    expect(summary.flags[0]).toHaveProperty("description");
+    expect(summary.flags[0]).toHaveProperty("updatedAt");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Read model connectivity smoke checks
+// ---------------------------------------------------------------------------
+
+describe("W8-001A read model connectivity expectations", () => {
+  it("feature flag keys map to client surfaces", async () => {
+    const service = new FeatureFlagsService();
+    const flags = await service.getAll();
+    const flagMap = new Map(flags.map((f) => [f.key, f.enabled]));
+
+    // Tenant portal surface
+    expect(flagMap.get("tenant-portal.booking")).toBe(true);
+    expect(flagMap.get("tenant-portal.billing")).toBe(true);
+
+    // Ops console surface
+    expect(flagMap.get("ops-console.dispatch")).toBe(true);
+    expect(flagMap.get("ops-console.complaint")).toBe(true);
+
+    // Driver app surface
+    expect(flagMap.get("driver-app.tasks")).toBe(true);
+    expect(flagMap.get("driver-app.earnings")).toBe(true);
+
+    // Cross-cutting
+    expect(flagMap.get("phase1.read-models")).toBe(true);
+    expect(flagMap.get("phase1.smoke-paths")).toBe(true);
+  });
+
+  it("supports tenant-scoped flag overrides via service API", async () => {
+    const service = new FeatureFlagsService();
+    const result = await service.upsertTenantOverride(
+      "tenant-portal.booking",
+      "tenant-test-001",
+      false,
+      "Tenant-specific override",
+    );
+    expect(result).toBeDefined();
+    expect(result!.key).toBe("tenant-portal.booking");
+    expect(result!.enabled).toBe(false);
+    expect(result!.tenantId).toBe("tenant-test-001");
+  });
+
+  it("reads tenant-scoped overrides back through getAll, getByKey, and isEnabled", async () => {
+    const service = new FeatureFlagsService();
+
+    await service.upsertTenantOverride(
+      "tenant-portal.booking",
+      "tenant-test-001",
+      false,
+      "Tenant-specific override",
+    );
+
+    const tenantFlags = await service.getAll("tenant-test-001");
+    expect(
+      tenantFlags.find((flag) => flag.key === "tenant-portal.booking")?.enabled,
+    ).toBe(false);
+
+    const scopedFlag = await service.getByKey(
+      "tenant-portal.booking",
+      "tenant-test-001",
+    );
+    expect(scopedFlag?.enabled).toBe(false);
+    expect(scopedFlag?.tenantId).toBe("tenant-test-001");
+
+    expect(
+      await service.isEnabled("tenant-portal.booking", "tenant-test-001"),
+    ).toBe(false);
+    expect(await service.isEnabled("tenant-portal.booking")).toBe(true);
+  });
+});
+
+describe("W8-001A shared api client list handling", () => {
+  it("unwraps `{ items }` list payloads for tenant, ops, and driver surfaces", async () => {
+    const payloadByPath = new Map<string, unknown[]>([
+      ["/api/orders", [{ orderId: "order-001" }]],
+      ["/api/reports/jobs", [{ jobId: "job-001" }]],
+      ["/api/driver-statements", [{ statementId: "stmt-001" }]],
+    ]);
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      const path = new URL(url).pathname;
+
+      return {
+        ok: true,
+        json: async () => ({ data: { items: payloadByPath.get(path) ?? [] } }),
+        text: async () => "",
+      } as Response;
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await expect(client.listOrders()).resolves.toEqual(
+      payloadByPath.get("/api/orders"),
+    );
+    await expect(client.listReportJobs()).resolves.toEqual(
+      payloadByPath.get("/api/reports/jobs"),
+    );
+    await expect(client.listDriverStatements()).resolves.toEqual(
+      payloadByPath.get("/api/driver-statements"),
+    );
+  });
+
+  it("uses the canonical /api/reports/jobs route for report creation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          jobId: "job-accepted-001",
+          status: "queued",
+        },
+      }),
+      text: async () => "",
+    } as Response);
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await client.createReportJob({
+      jobType: "dispatch_recording_index",
+      format: "csv",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/reports/jobs",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});

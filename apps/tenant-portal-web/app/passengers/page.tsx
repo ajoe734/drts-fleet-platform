@@ -1,16 +1,16 @@
 import Link from "next/link";
-import type { ReportJobRecord } from "@drts/contracts";
+import type { TenantPassengerRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 
-export default async function ReportsPage() {
+export default async function PassengersPage() {
   const client = getTenantClient();
 
-  let jobs: ReportJobRecord[] = [];
+  let passengers: TenantPassengerRecord[] = [];
   let error: string | null = null;
 
   try {
-    jobs = await client.listReportJobs();
+    passengers = await client.listPassengers();
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
@@ -18,8 +18,8 @@ export default async function ReportsPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Reports"
-        description={`Fetched from /api/reports/jobs. ${jobs.length} job(s) found.`}
+        title="Passengers"
+        description={`Fetched from /api/tenant/passengers. ${passengers.length} passenger(s) found.`}
       >
         {error && (
           <div className="error-banner">
@@ -27,26 +27,28 @@ export default async function ReportsPage() {
           </div>
         )}
 
-        {jobs.length > 0 ? (
+        {passengers.length > 0 ? (
           <div className="data-table">
             <table>
               <thead>
                 <tr>
-                  <th>Job ID</th>
+                  <th>Passenger ID</th>
+                  <th>Name</th>
+                  <th>Department</th>
+                  <th>Phone</th>
                   <th>Status</th>
-                  <th>Job Type</th>
-                  <th>Format</th>
-                  <th>Created</th>
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((job) => (
-                  <tr key={job.jobId}>
-                    <td>{job.jobId}</td>
-                    <td>{job.status}</td>
-                    <td>{job.jobType}</td>
-                    <td>{job.format}</td>
-                    <td>{new Date(job.createdAt).toLocaleString()}</td>
+                {passengers.map((passenger) => (
+                  <tr key={passenger.passengerId}>
+                    <td>{passenger.passengerId}</td>
+                    <td>{passenger.fullName}</td>
+                    <td>{passenger.departmentName ?? "-"}</td>
+                    <td>{passenger.mobile ?? "-"}</td>
+                    <td>
+                      {passenger.activeFlag ? "✅ Active" : "❌ Inactive"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -54,7 +56,7 @@ export default async function ReportsPage() {
           </div>
         ) : (
           <p className="empty-state">
-            No report jobs found. Create one via POST /api/reports/jobs.
+            No passengers found. Add via tenant partner API.
           </p>
         )}
 

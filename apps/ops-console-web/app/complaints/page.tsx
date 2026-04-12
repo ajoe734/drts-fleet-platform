@@ -2,15 +2,15 @@ import Link from "next/link";
 import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 
-export default async function IncidentsPage() {
+export default async function ComplaintsPage() {
   const client = getOpsClient();
 
-  let incidents: unknown[] = [];
+  let complaints: unknown[] = [];
   let error: string | null = null;
 
   try {
-    const result = await client.listIncidents();
-    incidents = (result as any)?.items ?? result ?? [];
+    const result = await client.listComplaints();
+    complaints = (result as any)?.items ?? result ?? [];
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
@@ -18,40 +18,38 @@ export default async function IncidentsPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Incidents"
-        description="ROC incident tracking surface. Incidents are distinct from complaint cases."
+        title="Complaints"
+        description={`Complaint case management for ops and ROC teams. ${complaints.length} case(s) found.`}
       >
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
           </div>
         )}
-        {incidents.length > 0 ? (
+        {complaints.length > 0 ? (
           <div className="data-table">
             <table>
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Title</th>
+                  <th>Case No</th>
                   <th>Category</th>
                   <th>Severity</th>
                   <th>Status</th>
-                  <th>Reported By</th>
+                  <th>SLA Breach</th>
                   <th>Created</th>
                 </tr>
               </thead>
               <tbody>
-                {incidents.map((inc: any, i: number) => (
+                {complaints.map((c: any, i: number) => (
                   <tr key={i}>
-                    <td>{inc.incidentId ?? "-"}</td>
-                    <td>{inc.title ?? "-"}</td>
-                    <td>{inc.category ?? "-"}</td>
-                    <td>{inc.severity ?? "-"}</td>
-                    <td>{inc.status ?? "-"}</td>
-                    <td>{inc.reportedBy ?? "-"}</td>
+                    <td>{c.caseNo ?? c.id ?? "-"}</td>
+                    <td>{c.category ?? "-"}</td>
+                    <td>{c.severity ?? "-"}</td>
+                    <td>{c.status ?? "-"}</td>
+                    <td>{c.slaBreach ? "⚠️" : "✅"}</td>
                     <td>
-                      {inc.createdAt
-                        ? new Date(inc.createdAt).toLocaleString()
+                      {c.createdAt
+                        ? new Date(c.createdAt).toLocaleString()
                         : "-"}
                     </td>
                   </tr>
@@ -61,8 +59,8 @@ export default async function IncidentsPage() {
           </div>
         ) : (
           <p className="empty-state">
-            No incidents reported. Incidents track safety events and operational
-            escalations.
+            No complaints. Cases are created via driver app, ops, or call center
+            intake.
           </p>
         )}
         <Link className="route-link" href="/">

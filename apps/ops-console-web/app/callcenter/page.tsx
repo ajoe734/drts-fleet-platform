@@ -2,15 +2,15 @@ import Link from "next/link";
 import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 
-export default async function IncidentsPage() {
+export default async function CallcenterPage() {
   const client = getOpsClient();
 
-  let incidents: unknown[] = [];
+  let sessions: unknown[] = [];
   let error: string | null = null;
 
   try {
-    const result = await client.listIncidents();
-    incidents = (result as any)?.items ?? result ?? [];
+    const result = await client.listCallSessions();
+    sessions = (result as any)?.items ?? result ?? [];
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
@@ -18,40 +18,40 @@ export default async function IncidentsPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Incidents"
-        description="ROC incident tracking surface. Incidents are distinct from complaint cases."
+        title="Callcenter"
+        description={`Call session monitoring for ROC and ops teams. ${sessions.length} session(s) found.`}
       >
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
           </div>
         )}
-        {incidents.length > 0 ? (
+        {sessions.length > 0 ? (
           <div className="data-table">
             <table>
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Title</th>
-                  <th>Category</th>
-                  <th>Severity</th>
+                  <th>Call ID</th>
+                  <th>Type</th>
+                  <th>Caller</th>
+                  <th>Agent</th>
                   <th>Status</th>
-                  <th>Reported By</th>
-                  <th>Created</th>
+                  <th>Flags</th>
+                  <th>Started</th>
                 </tr>
               </thead>
               <tbody>
-                {incidents.map((inc: any, i: number) => (
+                {sessions.map((s: any, i: number) => (
                   <tr key={i}>
-                    <td>{inc.incidentId ?? "-"}</td>
-                    <td>{inc.title ?? "-"}</td>
-                    <td>{inc.category ?? "-"}</td>
-                    <td>{inc.severity ?? "-"}</td>
-                    <td>{inc.status ?? "-"}</td>
-                    <td>{inc.reportedBy ?? "-"}</td>
+                    <td>{s.callId ?? "-"}</td>
+                    <td>{s.callType ?? "-"}</td>
+                    <td>{s.callerPhone ?? "-"}</td>
+                    <td>{s.agentId ?? "-"}</td>
+                    <td>{s.status ?? "-"}</td>
+                    <td>{(s.flags ?? []).join(", ") || "-"}</td>
                     <td>
-                      {inc.createdAt
-                        ? new Date(inc.createdAt).toLocaleString()
+                      {s.startedAt
+                        ? new Date(s.startedAt).toLocaleString()
                         : "-"}
                     </td>
                   </tr>
@@ -61,8 +61,8 @@ export default async function IncidentsPage() {
           </div>
         ) : (
           <p className="empty-state">
-            No incidents reported. Incidents track safety events and operational
-            escalations.
+            No call sessions. Sessions are created when ops opens a call center
+            intake.
           </p>
         )}
         <Link className="route-link" href="/">

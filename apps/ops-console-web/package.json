@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@drts/api-client": "workspace:*",
+    "@drts/contracts": "workspace:*",
     "@drts/shared-types": "workspace:*",
     "@drts/ui-web": "workspace:*",
     "next": "^16.2.3",

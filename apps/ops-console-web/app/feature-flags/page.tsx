@@ -1,16 +1,16 @@
 import Link from "next/link";
-import type { ReportJobRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 
-export default async function ReportsPage() {
+export default async function FeatureFlagsPage() {
   const client = getOpsClient();
 
-  let jobs: ReportJobRecord[] = [];
+  let flags: unknown[] = [];
   let error: string | null = null;
 
   try {
-    jobs = await client.listReportJobs();
+    const summary = await client.getFeatureFlags();
+    flags = summary.flags;
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
@@ -18,43 +18,39 @@ export default async function ReportsPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Reports"
-        description={`Fetched from /api/reports/jobs. ${jobs.length} job(s) found.`}
+        title="Feature Flags"
+        description={`Fetched from /api/admin/flags. ${flags.length} flag(s).`}
       >
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
           </div>
         )}
-        {jobs.length > 0 ? (
+        {flags.length > 0 ? (
           <div className="data-table">
             <table>
               <thead>
                 <tr>
-                  <th>Job ID</th>
+                  <th>Key</th>
                   <th>Status</th>
-                  <th>Job Type</th>
-                  <th>Format</th>
-                  <th>Created</th>
+                  <th>Description</th>
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((job) => (
-                  <tr key={job.jobId}>
-                    <td>{job.jobId}</td>
-                    <td>{job.status}</td>
-                    <td>{job.jobType}</td>
-                    <td>{job.format}</td>
-                    <td>{new Date(job.createdAt).toLocaleString()}</td>
+                {flags.map((f: any, i: number) => (
+                  <tr key={i}>
+                    <td>
+                      <code>{f.key}</code>
+                    </td>
+                    <td>{f.enabled ? "✅" : "❌"}</td>
+                    <td>{f.description}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <p className="empty-state">
-            No report jobs. Create via POST /api/reports/jobs.
-          </p>
+          <p className="empty-state">No flags found.</p>
         )}
         <Link className="route-link" href="/">
           <strong>Back to home</strong> Return to ops console overview.
