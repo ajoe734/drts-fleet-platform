@@ -1,0 +1,2 @@
+plate_no,vin,vehicle_form,license_class,energy_type,operating_area_code,owner_partner_code,dispatch_partner_code,current_status,dispatchable_flag,service_tags,contract_start,contract_end
+ABC-1234,VIN00000000000000001,sedan,taxi,fuel,TAIPEI_CITY,PARTNER_JOHN_OWNER,PARTNER_CITYOPCO,active,true,standard,2025-01-01T00:00:00+08:00,2025-12-31T23:59:59+08:00

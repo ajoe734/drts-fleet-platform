@@ -1,0 +1,2 @@
+tenant_code,full_name,employee_no,department_name,mobile,email,active_flag
+TEN_ACME,王小美,E1001,總務部,0911-000-001,xiaomei.wang@acme.example,true

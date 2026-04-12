@@ -7,7 +7,8 @@ export class HealthController {
     return {
       service: "api",
       status: "ok",
-      mode: "bootstrap",
+      mode: "phase1_foundation",
+      executionMode: "supervisor_managed_execution",
       timestamp: new Date().toISOString(),
     };
   }

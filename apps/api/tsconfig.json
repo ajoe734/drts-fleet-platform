@@ -1,7 +1,11 @@
 {
   "extends": "../../packages/tsconfig/nest.json",
   "compilerOptions": {
+    "baseUrl": "../../",
     "outDir": "dist",
+    "paths": {
+      "@drts/contracts": ["packages/contracts/dist/index.d.ts"]
+    },
     "rootDir": "src"
   },
   "include": ["src/**/*.ts"],

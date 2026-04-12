@@ -1,11 +1,15 @@
-# Infra Migrations Landing Zone
+# Infra Migrations
 
-This directory is the long-term repo landing zone for reviewed SQL migrations.
+This directory is now the repo-local canonical path for the adopted Phase 1 SQL migrations.
 
-Current rule:
+Current status:
 
-- imported reference migrations live in `phase1_db_migration_extracted/migrations/`
-- once a migration set is reviewed and adopted for repo execution, it should converge here
-- do not keep two competing schema sources of truth indefinitely
+- `V0001` through `V0010` are copied from the reviewed Phase 1 DB migration bundle.
+- these files are the repo execution path used by `./scripts/db-apply.sh`
+- the extracted bundle remains tracked as imported reference material and provenance, not the primary execution location
 
-Until adoption is complete, treat the extracted bundle as imported reference material and this directory as the intended canonical execution path.
+Rules:
+
+- treat this directory as forward-only schema truth for local execution
+- when a migration changes, add a new versioned file instead of rewriting already-adopted history
+- keep `infra/seeds/` aligned with the schema revisions adopted here
