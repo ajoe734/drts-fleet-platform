@@ -449,11 +449,7 @@ export class ApiClient {
   }
 
   async updateIncident(incidentId: string, command: any) {
-    return this.post(`/api/incidents/${incidentId}`, {
-      // Use raw PATCH body; the server expects UpdateIncidentCommand
-      headers: { "X-HTTP-Method-Override": "PATCH" },
-      body: command,
-    });
+    return this.patch(`/api/incidents/${incidentId}`, { body: command });
   }
 
   async listMaintenance(vehicleId?: string): Promise<MaintenanceRecord[]> {

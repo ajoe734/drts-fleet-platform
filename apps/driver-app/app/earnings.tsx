@@ -98,7 +98,7 @@ export default function EarningsScreen() {
           keyExtractor={(item, i) => item.statementId ?? String(i)}
           renderItem={({ item }) => (
             <View style={styles.card}>
-              <Text style={styles.stmtId}>{item.receiptNo}</Text>
+              <Text style={styles.stmtId}>{item.statementId}</Text>
               <Text style={styles.stmtAmount}>
                 Net: {formatMoney(item.netAmount)}
               </Text>

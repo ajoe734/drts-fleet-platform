@@ -4,7 +4,7 @@
   "consensus_status": "accepted",
   "sprint": "2026-04-10-phase1-multi-llm-consensus",
   "objective": "Run a two-mode supervisor workflow: first discussion and planning over the DRTS Phase 1 specifications, then supervisor-managed implementation, with automatic re-entry into discussion when execution finds unresolved design issues.",
-  "updated_at": "2026-04-11T22:46:12Z",
+  "updated_at": "2026-04-13T17:24:30Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -103,10 +103,10 @@
         "architecture-arbitration",
         "control-plane"
       ],
-      "status": "working",
-      "current_task_ids": ["W8-001E"],
+      "status": "idle",
+      "current_task_ids": [],
       "branch": "feat/claude-governance-review",
-      "next": "Auto-reassigned ownership from Qwen to Claude after repeated Qwen terminal: Worker exited before the task reached a terminal status.",
+      "next": "Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.",
       "last_update": "2026-04-11T14:59:58Z"
     },
     {
@@ -125,7 +125,7 @@
       "current_task_ids": [],
       "branch": "feat/codex-phase1-architecture",
       "next": "Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.",
-      "last_update": "2026-04-11T22:43:41Z"
+      "last_update": "2026-04-13T17:22:21Z"
     },
     {
       "name": "Qwen",
@@ -135,11 +135,11 @@
         "adapter-execution",
         "acceptance"
       ],
-      "status": "idle",
-      "current_task_ids": [],
+      "status": "finalize",
+      "current_task_ids": ["W8-001E"],
       "branch": "feat/qwen-integration-slices",
-      "next": "Pick the next API or integration slice that is unblocked and ready to implement.",
-      "last_update": "2026-04-11T15:09:17Z"
+      "next": "Review approved and returned to the owner for finalization",
+      "last_update": "2026-04-13T17:24:30Z"
     },
     {
       "name": "Copilot",
@@ -460,14 +460,24 @@
       "title": "Ops and driver domain completion",
       "summary_zh": "補齊 ops 與 driver domain 的 Phase 1 目標流程，包含 incident、maintenance、shift/attendance、driver earnings/settings 以及對應 read models 與操作面。",
       "phase": "Wave 8",
-      "owner": "Claude",
+      "owner": "Qwen",
       "reviewer": "Codex",
-      "status": "in_progress",
+      "status": "review_approved",
       "depends_on": ["W7-001A", "W7-001B", "W7-001D"],
       "artifacts": [],
       "acceptance": [],
-      "next": "Auto-reassigned ownership from Qwen to Claude after repeated Qwen terminal: Worker exited before the task reached a terminal status.",
-      "last_update": "2026-04-11T14:59:58Z"
+      "next": "Review approved and returned to the owner for finalization",
+      "last_update": "2026-04-13T17:24:30Z",
+      "evidence_refs": [
+        ".orchestrator/evidence/claude-20260413T171510Z-c5d890a7.json"
+      ],
+      "review_notes_zh": [
+        "1) 單元測試 113/113 全綠（pnpm test:unit）",
+        "2) API client updateIncident 已改用 PATCH；IncidentController 也提供 @Patch（packages/api-client/src/index.ts:451, apps/api/src/modules/incident/incident.controller.ts）",
+        "3) Driver earnings 畫面已改用 statementId 與正確欄位（apps/driver-app/app/earnings.tsx）",
+        "4) Ops Maintenance 欄位映射與回傳型別一致（apps/ops-console-web/app/maintenance/page.tsx）",
+        "5) 備註：root typecheck:root 仍會因測試匯入 Nest 檔案而報 decorators 錯誤；套件內（apps/api）typecheck 皆通過，建議後續於根 tsconfig 開啟 experimentalDecorators 或避免在 tests 直接匯入裝飾器來源──此項不阻擋 W8-001E。"
+      ]
     },
     {
       "id": "W7-001A-SIDECAR-ACCEPTANCE",
@@ -686,6 +696,51 @@
       "helper_kind": "review_packet",
       "mutates_canonical": false,
       "auto_created_by": "supervisor-underutilization"
+    },
+    {
+      "id": "RGP-002",
+      "title": "Produce durable cross-repo authority map",
+      "summary_zh": "整理 drts-fleet-platform 與 tenant-commute-hub 的 authority boundary、contract consumption 規則與禁止權責外溢的說明文件。",
+      "phase": "Wave 9",
+      "owner": "Qwen",
+      "reviewer": "Codex",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": ["docs/02-architecture/authority/rgp-002-authority-map.md"],
+      "acceptance": [
+        "cross-repo authority map 明確列出 source of truth、contract producer / consumer 與 forbidden authority leaks",
+        "文件可被 onboarding 與後續 reopen / annex 工作直接引用",
+        "內容與 accepted consensus packet 中的邊界決議一致"
+      ],
+      "next": "Finalized cross-repo authority map at docs/02-architecture/authority/rgp-002-authority-map.md",
+      "last_update": "2026-04-13T17:17:57Z",
+      "commit_hash": "8a0b682f45b403b48a3abb1f9100415e1d19a092",
+      "commit_subject": "docs(RGP-002): add cross-repo authority map for drts-fleet-platform vs tenant-commute-hub",
+      "commit_agent": "Qwen",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-13T17:17:57Z"
+    },
+    {
+      "id": "RGX-008",
+      "title": "Correct repo-facing status docs to match machine truth",
+      "summary_zh": "修正 README、docs-site onboarding 與 control-plane 狀態文件，讓文件描述與目前 machine truth、accepted planning session 一致。",
+      "phase": "Wave 9",
+      "owner": "Codex",
+      "reviewer": "Qwen",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Owner finalized approved task and closed it",
+      "last_update": "2026-04-13T17:23:17Z",
+      "review_notes_zh": [
+        "審查通過｜README Status 區塊原仍聲稱 discussion_planning 模式，已由 reviewer 修正為 supervisor_managed_execution 並對齊 accepted planning session 20260413T025550Z-repo-gap-reassessment-v3；docs-site mirror 已透過 sync-state 重新生成；current-work.md 無矛盾。回到 Codex 收尾。"
+      ],
+      "commit_hash": "b176593",
+      "commit_subject": "docs(RGX-008): correct README to reflect supervisor_managed_execution mode",
+      "commit_agent": "Codex",
+      "commit_reviewer": "Qwen",
+      "commit_recorded_at": "2026-04-13T17:23:17Z"
     }
   ],
   "handoffs": [
@@ -1345,6 +1400,59 @@
       "status": "done",
       "created_at": "2026-04-11T22:43:41Z",
       "resolved_at": "2026-04-11T22:46:12Z"
+    },
+    {
+      "task_id": "RGP-002",
+      "from": "Qwen",
+      "to": "Codex",
+      "message": "Helper-claimed by Codex while Qwen completes higher-priority work.",
+      "status": "done",
+      "created_at": "2026-04-13T17:16:57Z",
+      "resolved_at": "2026-04-13T17:17:27Z"
+    },
+    {
+      "task_id": "RGP-002",
+      "from": "Qwen",
+      "to": "Codex",
+      "message": "Helper-claimed by Codex while Qwen completes higher-priority work.",
+      "status": "done",
+      "created_at": "2026-04-13T17:17:27Z",
+      "resolved_at": "2026-04-13T17:18:07Z"
+    },
+    {
+      "task_id": "W8-001E",
+      "from": "Qwen",
+      "to": "Codex",
+      "message": "W8-001E ops and driver domain completion ready for review. Fixed: API client verb drift, driver earnings field map, all 28 targeted tests green, 113/113 full suite green, typecheck+lint clean. Modules: incident, maintenance, shift-attendance, driver-settings all wired with PostgreSQL persistence (V0015+V0016).",
+      "status": "done",
+      "created_at": "2026-04-13T17:21:06Z",
+      "resolved_at": "2026-04-13T17:24:30Z"
+    },
+    {
+      "task_id": "RGX-008",
+      "from": "Codex",
+      "to": "Qwen",
+      "message": "Ready for review: README/docs-site/current-work align with focus=execution and accepted session 20260413T025550Z-repo-gap-reassessment-v3; planning-only wording removed; ran sync-state; please approve if acceptable.",
+      "status": "done",
+      "created_at": "2026-04-13T17:22:12Z",
+      "resolved_at": "2026-04-13T17:22:21Z"
+    },
+    {
+      "task_id": "RGX-008",
+      "from": "Qwen",
+      "to": "Codex",
+      "message": "Review approved: README had wrong mode (discussion_planning), fixed by reviewer to supervisor_managed_execution; docs-site mirror regenerated; current-work consistent. Return to Codex for finalization.",
+      "status": "done",
+      "created_at": "2026-04-13T17:22:21Z",
+      "resolved_at": "2026-04-13T17:23:17Z"
+    },
+    {
+      "task_id": "W8-001E",
+      "from": "Codex",
+      "to": "Qwen",
+      "message": "Review approved and returned to the owner for finalization",
+      "status": "pending",
+      "created_at": "2026-04-13T17:24:30Z"
     }
   ],
   "blockers": [],
@@ -1357,13 +1465,13 @@
   },
   "workload_summary": {
     "Claude": {
-      "total": 2,
-      "active": 1,
+      "total": 1,
+      "active": 0,
       "blocked": 0,
       "done": 1,
       "review": 0,
       "review_approved": 0,
-      "todo": 1
+      "todo": 0
     },
     "Gemini": {
       "total": 3,
@@ -1375,21 +1483,21 @@
       "todo": 0
     },
     "Codex": {
-      "total": 12,
+      "total": 13,
       "active": 0,
       "blocked": 0,
-      "done": 12,
+      "done": 13,
       "review": 0,
       "review_approved": 0,
       "todo": 0
     },
     "Qwen": {
-      "total": 7,
+      "total": 9,
       "active": 0,
       "blocked": 0,
-      "done": 7,
+      "done": 8,
       "review": 0,
-      "review_approved": 0,
+      "review_approved": 1,
       "todo": 0
     },
     "Copilot": {
