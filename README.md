@@ -18,17 +18,18 @@ Phase 1 focuses on fleet management and dispatch compliance core. Phase 2 may ad
 
 ## Status
 
-The repo is currently in `discussion_planning` mode.
+The repo is in `supervisor_managed_execution` mode.
+
+The planning session `20260413T025550Z-repo-gap-reassessment-v3` has been accepted by the human gate. Waves 1–8 implementation tasks are complete. Wave 9 execution tasks are now active.
 
 Current working rule:
 
 - the supervisor has two continuous modes: `discussion_planning` and `supervisor_managed_execution`
-- implementation does not start through supervisor or auto workers yet
-- multiple LLM lanes first read the same canonical Phase 1 documents
-- supervisor assigns one starter lane to build the first shared draft
-- each lane submits a structured readout
-- the team runs cited review rounds and baton-based discussion rounds
-- only an accepted consensus packet can unlock supervisor-managed execution
+- the consensus packet for the repo-gap-reassessment-v3 session was accepted on 2026-04-13
+- Wave 9 tasks (Bucket A and Bucket B) are assigned and in progress through the supervisor task lifecycle
+- if implementation discovers unresolved design semantics, the supervisor routes back into `discussion_planning` without restarting the control plane
+
+Dashboard mirror: `docs-site/index.html` (regenerated via `./scripts/sync-state.sh`).
 
 Canonical starting points:
 
