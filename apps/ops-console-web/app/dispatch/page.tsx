@@ -1,15 +1,20 @@
-import type { OwnedOrderRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
+import { DispatchWorkflow } from "./dispatch-workflow";
+import type { OwnedOrderRecord, DispatchJobRecord } from "@drts/contracts";
 
 export default async function DispatchPage() {
   const client = getOpsClient();
 
   let orders: OwnedOrderRecord[] = [];
+  let dispatchJobs: DispatchJobRecord[] = [];
   let error: string | null = null;
 
   try {
-    orders = await client.listOrders();
+    [orders, dispatchJobs] = await Promise.all([
+      client.listOrders(),
+      client.listDispatchJobs(),
+    ]);
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
@@ -17,42 +22,16 @@ export default async function DispatchPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Dispatch"
-        description={`Fetched from /api/orders. ${orders.length} order(s) in system.`}
+        title="Dispatch Workflow"
+        description="Manual dispatch scheduling, candidate selection, and queue handling."
       >
         {error && (
-          <div className="error-banner">
+          <div className="error-banner p-4 bg-red-100 text-red-800 rounded mb-4">
             <strong>Error:</strong> {error}
           </div>
         )}
-        {orders.length > 0 ? (
-          <div className="data-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Order No</th>
-                  <th>Order ID</th>
-                  <th>Service</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order) => (
-                  <tr key={order.orderId}>
-                    <td>{order.orderNo}</td>
-                    <td>{order.orderId}</td>
-                    <td>{order.serviceBucket}</td>
-                    <td>{order.status}</td>
-                    <td>{new Date(order.createdAt).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="empty-state">No orders. Dispatch queue is empty.</p>
-        )}
+
+        <DispatchWorkflow orders={orders} dispatchJobs={dispatchJobs} />
       </AppShellCard>
     </main>
   );
