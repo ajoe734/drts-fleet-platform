@@ -4,7 +4,7 @@
   "consensus_status": "accepted",
   "sprint": "2026-04-10-phase1-multi-llm-consensus",
   "objective": "Run a two-mode supervisor workflow: first discussion and planning over the DRTS Phase 1 specifications, then supervisor-managed implementation, with automatic re-entry into discussion when execution finds unresolved design issues.",
-  "updated_at": "2026-04-13T17:24:30Z",
+  "updated_at": "2026-04-13T17:27:31Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -135,10 +135,10 @@
         "adapter-execution",
         "acceptance"
       ],
-      "status": "finalize",
-      "current_task_ids": ["W8-001E"],
+      "status": "idle",
+      "current_task_ids": [],
       "branch": "feat/qwen-integration-slices",
-      "next": "Review approved and returned to the owner for finalization",
+      "next": "Pick the next API or integration slice that is unblocked and ready to implement.",
       "last_update": "2026-04-13T17:24:30Z"
     },
     {
@@ -462,12 +462,12 @@
       "phase": "Wave 8",
       "owner": "Qwen",
       "reviewer": "Codex",
-      "status": "review_approved",
+      "status": "done",
       "depends_on": ["W7-001A", "W7-001B", "W7-001D"],
       "artifacts": [],
       "acceptance": [],
-      "next": "Review approved and returned to the owner for finalization",
-      "last_update": "2026-04-13T17:24:30Z",
+      "next": "Owner finalized approved task and closed it",
+      "last_update": "2026-04-13T17:27:17Z",
       "evidence_refs": [
         ".orchestrator/evidence/claude-20260413T171510Z-c5d890a7.json"
       ],
@@ -477,7 +477,12 @@
         "3) Driver earnings 畫面已改用 statementId 與正確欄位（apps/driver-app/app/earnings.tsx）",
         "4) Ops Maintenance 欄位映射與回傳型別一致（apps/ops-console-web/app/maintenance/page.tsx）",
         "5) 備註：root typecheck:root 仍會因測試匯入 Nest 檔案而報 decorators 錯誤；套件內（apps/api）typecheck 皆通過，建議後續於根 tsconfig 開啟 experimentalDecorators 或避免在 tests 直接匯入裝飾器來源──此項不阻擋 W8-001E。"
-      ]
+      ],
+      "commit_hash": "0e0960d",
+      "commit_subject": "feat(w8-001e): finalize ops and driver domain completion",
+      "commit_agent": "Qwen",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-13T17:27:17Z"
     },
     {
       "id": "W7-001A-SIDECAR-ACCEPTANCE",
@@ -1451,8 +1456,9 @@
       "from": "Codex",
       "to": "Qwen",
       "message": "Review approved and returned to the owner for finalization",
-      "status": "pending",
-      "created_at": "2026-04-13T17:24:30Z"
+      "status": "done",
+      "created_at": "2026-04-13T17:24:30Z",
+      "resolved_at": "2026-04-13T17:27:17Z"
     }
   ],
   "blockers": [],
@@ -1495,9 +1501,9 @@
       "total": 9,
       "active": 0,
       "blocked": 0,
-      "done": 8,
+      "done": 9,
       "review": 0,
-      "review_approved": 1,
+      "review_approved": 0,
       "todo": 0
     },
     "Copilot": {
