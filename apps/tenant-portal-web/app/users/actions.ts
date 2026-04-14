@@ -71,6 +71,6 @@ export async function updateUserRole(formData: FormData): Promise<void> {
     ...(status ? { status } : {}),
   };
 
-  await client.updateTenantRole(command);
+  await client.updateTenantRole(userId, command);
   revalidatePath("/users");
 }

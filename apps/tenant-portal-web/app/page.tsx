@@ -13,6 +13,7 @@ export default async function HomePage() {
     reports: false,
     webhooks: false,
     directory: false,
+    admin: false,
   };
 
   try {
@@ -34,6 +35,9 @@ export default async function HomePage() {
       directory:
         flags.flags.find((f) => f.key === "phase1.read-models")?.enabled ??
         false,
+      admin:
+        flags.flags.find((f) => f.key === "tenant-portal.admin")?.enabled ??
+        false,
     };
   } catch {
     // If feature flags endpoint is unavailable, default to enabled
@@ -43,6 +47,7 @@ export default async function HomePage() {
       reports: true,
       webhooks: true,
       directory: true,
+      admin: true,
     };
   }
 
@@ -128,13 +133,21 @@ export default async function HomePage() {
                 <strong>Addresses</strong>
                 Tenant address book.
               </Link>
+              <Link className="route-link" href="/api-keys">
+                <strong>API Keys</strong>
+                Tenant API key management.
+              </Link>
+            </>
+          )}
+          {moduleStatus.admin && (
+            <>
               <Link className="route-link" href="/users">
                 <strong>Users</strong>
                 Tenant user management.
               </Link>
-              <Link className="route-link" href="/api-keys">
-                <strong>API Keys</strong>
-                Tenant API key management.
+              <Link className="route-link" href="/audit">
+                <strong>Audit Trail</strong>
+                View tenant audit logs.
               </Link>
             </>
           )}

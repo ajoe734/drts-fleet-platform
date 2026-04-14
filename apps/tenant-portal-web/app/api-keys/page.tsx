@@ -306,7 +306,7 @@ async function rotateApiKey(formData: FormData) {
   if (expiresAt) command.expiresAt = new Date(expiresAt).toISOString();
 
   try {
-    await client.rotateApiKey(command);
+    await client.rotateApiKey(apiKeyId, command);
     revalidatePath("/api-keys");
     redirect(
       `/api-keys?success=${encodeURIComponent(

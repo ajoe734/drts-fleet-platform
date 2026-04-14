@@ -445,8 +445,11 @@ export class ApiClient {
     return this.post("/api/tenant/api-keys", { body: command });
   }
 
-  async rotateApiKey(command: RotateTenantApiKeyCommand) {
-    return this.patch("/api/tenant/api-keys", { body: command });
+  async rotateApiKey(apiKeyId: string, command: RotateTenantApiKeyCommand) {
+    return this.post(
+      `/api/tenant/api-keys/${encodeURIComponent(apiKeyId)}/rotate`,
+      { body: command },
+    );
   }
 
   async listWebhooks(): Promise<TenantWebhookEndpoint[]> {

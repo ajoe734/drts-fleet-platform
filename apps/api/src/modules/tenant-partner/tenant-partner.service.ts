@@ -731,6 +731,39 @@ export class TenantPartnerService implements OnModuleInit {
     );
   }
 
+  deleteWebhookEndpoint(webhookId: string, requestId?: string) {
+    const index = this.webhookEndpoints.findIndex(
+      (w) => w.webhookId === webhookId,
+    );
+    if (index === -1) {
+      return null;
+    }
+    const [removed] = this.webhookEndpoints.splice(index, 1);
+    this.persistChanges(
+      {
+        webhookEndpoints: this.webhookEndpoints.map((w) =>
+          this.cloneStoredWebhookEndpoint(w),
+        ),
+      },
+      "delete_webhook_endpoint",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId: DEMO_TENANT_ID,
+        moduleName: "tenant-partner",
+        actionName: "delete_webhook_endpoint",
+        resourceType: "webhook_endpoint",
+        resourceId: removed.webhookId,
+        oldValuesSummary: this.toWebhookResponse(removed),
+        newValuesSummary: { deleted: true },
+      },
+      requestId,
+    );
+    return { status: "deleted", webhookId };
+  }
+
   createWebhookEndpoint(
     command: CreateTenantWebhookEndpointCommand,
     requestId?: string,
@@ -924,6 +957,12 @@ export class TenantPartnerService implements OnModuleInit {
     );
   }
 
+  listWebhookDeliveriesByWebhook(webhookId: string) {
+    return this.webhookDeliveries
+      .filter((delivery) => delivery.webhookId === webhookId)
+      .map((delivery) => this.toDeliveryResponse(delivery));
+  }
+
   rotateWebhookSecret(command: RotateWebhookSecretCommand, requestId?: string) {
     this.assertNonBlank(command.secret, "secret");
 
@@ -1037,6 +1076,31 @@ export class TenantPartnerService implements OnModuleInit {
     return {
       status: "updated",
     };
+  }
+
+  revokeApiKey(apiKeyId: string, requestId?: string) {
+    const apiKey = this.requireApiKey(apiKeyId);
+    if (!apiKey.revokedAt) {
+      apiKey.revokedAt = new Date().toISOString();
+      this.persistChanges(
+        { apiKeys: [this.cloneStoredApiKey(apiKey)] },
+        "revoke_api_key",
+      );
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId: DEMO_TENANT_ID,
+          moduleName: "tenant-partner",
+          actionName: "revoke_api_key",
+          resourceType: "tenant_api_key",
+          resourceId: apiKey.apiKeyId,
+          newValuesSummary: this.toApiKeyResponse(apiKey),
+        },
+        requestId,
+      );
+    }
+    return { status: "revoked", apiKeyId };
   }
 
   listTenantAudit() {

@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Delete,
+} from "@nestjs/common";
 
 import type {
   CreateTenantUserCommand,
@@ -135,6 +143,17 @@ export class TenantPartnerController {
     );
   }
 
+  @Post("tenant/api-keys/:apiKeyId/revoke")
+  revokeApiKey(
+    @Param("apiKeyId") apiKeyId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.revokeApiKey(apiKeyId, requestId),
+      requestId,
+    );
+  }
+
   @Post("tenant/api-keys/:apiKeyId/rotate")
   rotateApiKey(
     @Param("apiKeyId") apiKeyId: string,
@@ -186,6 +205,19 @@ export class TenantPartnerController {
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.createWebhookEndpoint(command, requestId),
+      requestId,
+    );
+  }
+
+  @Delete("tenant/webhooks/:webhookId")
+  deleteWebhookEndpoint(
+    @Param("webhookId") webhookId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.deleteWebhookEndpoint(webhookId, requestId) ?? {
+        status: "not_found",
+      },
       requestId,
     );
   }
@@ -244,6 +276,20 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(
       {
         items: this.tenantPartnerService.listWebhookDeliveries(),
+      },
+      requestId,
+    );
+  }
+
+  @Get("tenant/webhooks/:webhookId/deliveries")
+  listWebhookDeliveriesByEndpoint(
+    @Param("webhookId") webhookId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      {
+        items:
+          this.tenantPartnerService.listWebhookDeliveriesByWebhook(webhookId),
       },
       requestId,
     );
