@@ -27,12 +27,10 @@ export default async function NewBookingPage() {
     ) as BusinessDispatchSubtype;
     const pickupAddress = (formData.get("pickup") as string) || "";
     const dropoffAddress = (formData.get("dropoff") as string) || "";
-    const windowStartLocal = (formData.get(
-      "reservationWindowStart",
-    ) as string) || "";
-    const windowEndLocal = (formData.get(
-      "reservationWindowEnd",
-    ) as string) || "";
+    const windowStartLocal =
+      (formData.get("reservationWindowStart") as string) || "";
+    const windowEndLocal =
+      (formData.get("reservationWindowEnd") as string) || "";
     const passengerName = (formData.get("passengerName") as string) || "";
     const passengerPhone = (formData.get("passengerPhone") as string) || "";
 
@@ -57,11 +55,6 @@ export default async function NewBookingPage() {
       redirect(`/bookings/new?error=${encodeURIComponent(msg)}`);
     }
   }
-
-  const errorParam = (await import("next/headers")).headers()
-    .get("x-next-url")?.split("?")[1] ?? null;
-
-  const urlSearch = typeof window === "undefined" ? null : window.location;
 
   return (
     <main className="app-grid">
@@ -118,19 +111,33 @@ export default async function NewBookingPage() {
 
           <div className="form-row">
             <label htmlFor="passengerName">Passenger Name</label>
-            <input id="passengerName" name="passengerName" type="text" required />
+            <input
+              id="passengerName"
+              name="passengerName"
+              type="text"
+              required
+            />
           </div>
 
           <div className="form-row">
             <label htmlFor="passengerPhone">Passenger Phone</label>
-            <input id="passengerPhone" name="passengerPhone" type="tel" required />
+            <input
+              id="passengerPhone"
+              name="passengerPhone"
+              type="tel"
+              required
+            />
           </div>
 
           <div className="form-actions" style={{ marginTop: "1rem" }}>
             <button type="submit" className="action-button primary">
               Create Booking
             </button>
-            <Link className="route-link" href="/booking-list" style={{ marginLeft: "0.75rem" }}>
+            <Link
+              className="route-link"
+              href="/booking-list"
+              style={{ marginLeft: "0.75rem" }}
+            >
               <strong>Back to list</strong>
               Return to booking list.
             </Link>
@@ -163,4 +170,3 @@ export default async function NewBookingPage() {
     </main>
   );
 }
-

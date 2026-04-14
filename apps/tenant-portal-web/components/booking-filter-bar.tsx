@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 interface BookingFilterBarProps {
   availableStatuses: OwnedOrderStatus[];
-  currentStatus?: OwnedOrderStatus;
+  currentStatus: OwnedOrderStatus | undefined;
 }
 
 export function BookingFilterBar({

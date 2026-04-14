@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import type { OwnedOrderRecord, OwnedOrderStatus } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
@@ -69,7 +68,7 @@ export default async function BookingListPage({
         {/* Status Filter */}
         <BookingFilterBar
           availableStatuses={ORDER_STATUS_FILTER}
-          currentStatus={statusFilter}
+          currentStatus={statusFilter as OwnedOrderStatus}
         />
 
         {orders.length > 0 ? (

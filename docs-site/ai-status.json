@@ -4,7 +4,7 @@
   "consensus_status": "accepted",
   "sprint": "2026-04-14-phase1-next-wave",
   "objective": "Phase 1 next-wave: 補齊前端 control plane（Platform Admin、Ops Console、Driver App 多平台）、建立 platform_presence/platform_earnings domain、完整 Tenant Portal 整合、staging pipeline。",
-  "updated_at": "2026-04-14T05:15:11Z",
+  "updated_at": "2026-04-14T05:17:36Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -135,11 +135,11 @@
         "adapter-execution",
         "acceptance"
       ],
-      "status": "working",
+      "status": "reviewing",
       "current_task_ids": ["WB-002"],
       "branch": "feat/qwen-integration-slices",
-      "next": "Added API client methods (listDispatchJobs, listDispatchCandidates, assignDispatch, queueCheckIn/Out). Rewrote dispatch-workflow.tsx with queue filter tabs, candidate selection, ETA display, assign/release/redispatch actions, queue state visualization. Typecheck passes.",
-      "last_update": "2026-04-14T05:14:24Z"
+      "next": "Dispatch console implementation complete — ready for Claude review",
+      "last_update": "2026-04-14T05:17:16Z"
     },
     {
       "name": "Copilot",
@@ -149,11 +149,11 @@
         "spec-review",
         "critique"
       ],
-      "status": "ready",
-      "current_task_ids": ["WD-003", "WD-007"],
+      "status": "idle",
+      "current_task_ids": [],
       "branch": "feat/copilot-spec-critique",
-      "next": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
-      "last_update": "2026-04-14T05:14:08Z"
+      "next": "Critique active implementation slices for contradictions, testing gaps, and weak assumptions.",
+      "last_update": "2026-04-14T05:14:29Z"
     }
   ],
   "tasks": [
@@ -331,7 +331,7 @@
       "phase": "Wave B",
       "owner": "Qwen",
       "reviewer": "Claude",
-      "status": "in_progress",
+      "status": "review",
       "depends_on": ["WA-005"],
       "artifacts": [
         "apps/ops-console-web/app/dispatch/page.tsx",
@@ -344,8 +344,8 @@
         "可執行 redispatch / exception_hold 操作",
         "queue 狀態（pending/reserved/exception）可視化"
       ],
-      "next": "Added API client methods (listDispatchJobs, listDispatchCandidates, assignDispatch, queueCheckIn/Out). Rewrote dispatch-workflow.tsx with queue filter tabs, candidate selection, ETA display, assign/release/redispatch actions, queue state visualization. Typecheck passes.",
-      "last_update": "2026-04-14T05:14:24Z",
+      "next": "Dispatch console implementation complete — ready for Claude review",
+      "last_update": "2026-04-14T05:17:16Z",
       "evidence_refs": [
         ".orchestrator/evidence/copilot-20260414T050233Z-37c49a43.json"
       ]
@@ -535,7 +535,7 @@
       "title": "Tenant Portal — Passengers & Address Book",
       "summary_zh": "實作乘客管理與地址簿頁面，CRUD 全走 @drts/api-client。",
       "phase": "Wave D",
-      "owner": "Copilot",
+      "owner": "Codex",
       "reviewer": "Qwen",
       "status": "todo",
       "depends_on": ["WA-005"],
@@ -548,10 +548,11 @@
         "address book CRUD 操作正確",
         "pnpm --filter @drts/tenant-portal-web typecheck"
       ],
-      "next": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
-      "last_update": "2026-04-14T05:14:08Z",
+      "next": "Auto-reassigned ownership from Copilot to Codex after repeated Copilot capacity/quota_exhausted. Copilot quota/capacity failure blocked dispatch.",
+      "last_update": "2026-04-14T05:17:30Z",
       "evidence_refs": [
-        ".orchestrator/evidence/copilot-20260414T050304Z-c1e49add.json"
+        ".orchestrator/evidence/copilot-20260414T050304Z-c1e49add.json",
+        ".orchestrator/evidence/copilot-20260414T051648Z-c8d53abb.json"
       ]
     },
     {
@@ -617,7 +618,7 @@
       "title": "Tenant Portal — Notifications & SLA",
       "summary_zh": "實作通知設定與 SLA profile 管理頁面，串接 tenant-partner notification/SLA API。",
       "phase": "Wave D",
-      "owner": "Copilot",
+      "owner": "Codex",
       "reviewer": "Qwen",
       "status": "todo",
       "depends_on": ["WA-005"],
@@ -630,10 +631,11 @@
         "SLA profile 可查閱與更新",
         "pnpm --filter @drts/tenant-portal-web typecheck"
       ],
-      "next": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
-      "last_update": "2026-04-14T05:14:29Z",
+      "next": "Auto-reassigned ownership from Copilot to Codex after repeated Copilot capacity/quota_exhausted. Copilot quota/capacity failure blocked dispatch.",
+      "last_update": "2026-04-14T05:17:35Z",
       "evidence_refs": [
-        ".orchestrator/evidence/copilot-20260414T050327Z-c6efdd4c.json"
+        ".orchestrator/evidence/copilot-20260414T050327Z-c6efdd4c.json",
+        ".orchestrator/evidence/copilot-20260414T051657Z-a7214e14.json"
       ]
     },
     {
@@ -1656,16 +1658,26 @@
       "from": "Qwen",
       "to": "Copilot",
       "message": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
-      "status": "pending",
-      "created_at": "2026-04-14T05:14:08Z"
+      "status": "done",
+      "created_at": "2026-04-14T05:14:08Z",
+      "resolved_at": "2026-04-14T05:17:30Z"
     },
     {
       "task_id": "WD-007",
       "from": "Qwen",
       "to": "Copilot",
       "message": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
+      "status": "done",
+      "created_at": "2026-04-14T05:14:29Z",
+      "resolved_at": "2026-04-14T05:17:35Z"
+    },
+    {
+      "task_id": "WB-002",
+      "from": "Qwen",
+      "to": "Claude",
+      "message": "Dispatch console implementation complete — ready for Claude review",
       "status": "pending",
-      "created_at": "2026-04-14T05:14:29Z"
+      "created_at": "2026-04-14T05:17:16Z"
     }
   ],
   "blockers": [],
@@ -1696,31 +1708,31 @@
       "todo": 7
     },
     "Codex": {
-      "total": 9,
+      "total": 11,
       "active": 1,
       "blocked": 0,
       "done": 0,
       "review": 0,
       "review_approved": 0,
-      "todo": 9
+      "todo": 11
     },
     "Qwen": {
       "total": 8,
       "active": 1,
       "blocked": 0,
       "done": 1,
-      "review": 0,
+      "review": 1,
       "review_approved": 1,
-      "todo": 6
+      "todo": 5
     },
     "Copilot": {
-      "total": 2,
+      "total": 0,
       "active": 0,
       "blocked": 0,
       "done": 0,
       "review": 0,
       "review_approved": 0,
-      "todo": 2
+      "todo": 0
     }
   },
   "archived_task_ids": [
