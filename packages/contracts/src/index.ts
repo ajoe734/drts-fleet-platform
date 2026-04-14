@@ -734,6 +734,16 @@ export interface DispatchAssignmentRecord {
   updatedAt: string;
 }
 
+export interface WaypointRecord {
+  sequence: number;
+  label: string;
+  address: string;
+  lat: number | null;
+  lng: number | null;
+  arrivedAt: string | null;
+  departedAt: string | null;
+}
+
 export interface DriverTaskRecord {
   taskId: string;
   orderId: string;
@@ -742,6 +752,8 @@ export interface DriverTaskRecord {
   driverId: string;
   vehicleId: string;
   sourcePlatform: string | null;
+  routeProvided: boolean;
+  waypoints: WaypointRecord[];
   status: DriverTaskStatus;
   acceptedAt: string | null;
   departedAt: string | null;
