@@ -288,6 +288,7 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
   );
   for (const agentId of logicalAgents) {
     const pw = workers.filter((w) => w.logical_agent_id === agentId);
+    const retryHistory = pw.filter((w) => w.status === "retried").length;
     const running = pw.filter((w) => w.bucket === "running").length;
     const waiting = pw.filter((w) => w.bucket === "pending").length;
     const transition = pw.filter((w) => w.bucket === "transition").length;
@@ -311,6 +312,7 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
         ${transition ? `<span class="chip">改派 ${transition}</span>` : ""}
         <span class="chip">失敗 ${failed}</span>
         <span class="chip">完成 ${completed}</span>
+        ${retryHistory ? `<span class="chip">retry 史 ${retryHistory}</span>` : ""}
         ${runningTasks.length ? `<span class="chip">任務 ${runningTasks.join(", ")}</span>` : ""}
         ${agent ? `<span class="chip">可開工 ${agent.ready_count || 0}</span><span class="chip">等前置 ${agent.waiting_count || 0}</span>` : ""}
       </div>
@@ -327,6 +329,7 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
       pending: groupWorkers.filter((w) => w.bucket === "pending"),
       transition: groupWorkers.filter((w) => w.bucket === "transition"),
       completed: groupWorkers.filter((w) => w.bucket === "completed"),
+      retried: groupWorkers.filter((w) => w.status === "retried"),
     };
   });
 
@@ -336,7 +339,8 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
         g.running.length ||
         g.pending.length ||
         g.transition.length ||
-        g.completed.length,
+        g.completed.length ||
+        g.retried.length,
     )
   ) {
     historyEl.innerHTML = '<p class="empty">尚無 Worker 記錄。</p>';
@@ -350,7 +354,21 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
         group.pending.length +
         group.transition.length +
         group.completed.length;
-      if (!total) return "";
+      const hiddenRetryNote = group.retried.length
+        ? `<p class="meta-line">已隱藏 ${group.retried.length} 筆 retried worker lineage；這些是舊 run 的 retry 歷史，不是目前待處理項目。</p>`
+        : "";
+      if (!total && !group.retried.length) return "";
+      if (!total && group.retried.length) {
+        return `
+      <section class="worker-group">
+        <div class="worker-group-head">
+          <strong>${agentLabel(group.agentId)}</strong>
+          <span class="chip">現行 0 筆</span>
+          <span class="chip">隱藏 retry 史 ${group.retried.length}</span>
+        </div>
+        ${hiddenRetryNote}
+      </section>`;
+      }
 
       const renderBucket = (label, items, open = true, opts = {}) => {
         if (opts.hideWhenEmpty && !items.length) return "";
@@ -394,8 +412,10 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
       <section class="worker-group">
         <div class="worker-group-head">
           <strong>${agentLabel(group.agentId)}</strong>
-          <span class="chip">共 ${total} 筆</span>
+          <span class="chip">現行 ${total} 筆</span>
+          ${group.retried.length ? `<span class="chip">隱藏 retry 史 ${group.retried.length}</span>` : ""}
         </div>
+        ${hiddenRetryNote}
         <div class="worker-buckets">
           ${renderBucket("進行中", group.running, true)}
           ${renderBucket("等待處理", group.pending, true)}

@@ -65,6 +65,8 @@ export function workerLifecycleBadge(worker) {
   const status = String(worker?.status || "").toLowerCase();
   if (["running", "started"].includes(status))
     return { label: "active", className: "lifecycle-active" };
+  if (status === "retried")
+    return { label: "retried", className: "lifecycle-superseded" };
   if (status === "superseded")
     return { label: "superseded", className: "lifecycle-superseded" };
   if (status === "reassigned")
@@ -81,7 +83,9 @@ export function normalizeWorkerRecords(orchState, status) {
       const logicalAgentId = logicalWorkerAgentId(worker);
       let bucket = "pending";
 
-      if (["superseded", "reassigned"].includes(worker?.status)) {
+      if (worker?.status === "retried") {
+        bucket = "history";
+      } else if (["superseded", "reassigned"].includes(worker?.status)) {
         bucket = "transition";
       } else if (
         terminalTaskStatus(taskStatus) ||
