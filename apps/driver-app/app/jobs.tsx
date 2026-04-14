@@ -22,6 +22,18 @@ function PlatformBadge({ platform }: { platform: string | null }) {
   );
 }
 
+function RouteLockedBadge() {
+  return (
+    <View style={[styles.badge, { backgroundColor: "#fff3e0" }]}>
+      <Text style={[styles.badgeText, { color: "#e65100" }]}>route-locked</Text>
+    </View>
+  );
+}
+
+function isForwardedTask(task: DriverTaskRecord): boolean {
+  return task.sourcePlatform != null;
+}
+
 export default function JobsScreen() {
   const [tasks, setTasks] = useState<DriverTaskRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -100,18 +112,32 @@ export default function JobsScreen() {
         <FlatList
           data={tasks}
           keyExtractor={(item, i) => item.taskId ?? String(i)}
-          renderItem={({ item }) => (
-            <View style={styles.taskCard}>
-              <View style={styles.taskHeader}>
-                <Text style={styles.taskId}>{item.taskId}</Text>
-                <PlatformBadge platform={item.sourcePlatform} />
+          renderItem={({ item }) => {
+            const forwarded = isForwardedTask(item);
+            return (
+              <View style={styles.taskCard}>
+                <View style={styles.taskHeader}>
+                  <Text style={styles.taskId}>{item.taskId}</Text>
+                  <View style={styles.badgeRow}>
+                    {forwarded && <RouteLockedBadge />}
+                    <PlatformBadge platform={item.sourcePlatform} />
+                  </View>
+                </View>
+                <Text style={styles.taskStatus}>
+                  {item.status ?? "unknown"}
+                </Text>
+                {item.orderId && (
+                  <Text style={styles.taskOrder}>Order: {item.orderId}</Text>
+                )}
+                {forwarded && (
+                  <Text style={styles.forwardedNote}>
+                    Dispatched by {item.sourcePlatform}. Rules cannot be
+                    overridden locally.
+                  </Text>
+                )}
               </View>
-              <Text style={styles.taskStatus}>{item.status ?? "unknown"}</Text>
-              {item.orderId && (
-                <Text style={styles.taskOrder}>Order: {item.orderId}</Text>
-              )}
-            </View>
-          )}
+            );
+          }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
@@ -158,5 +184,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginLeft: 8,
   },
+  badgeRow: { flexDirection: "row", alignItems: "center" },
   badgeText: { fontSize: 11, fontWeight: "600" },
+  forwardedNote: {
+    fontSize: 11,
+    color: "#666",
+    marginTop: 6,
+    fontStyle: "italic",
+  },
 });

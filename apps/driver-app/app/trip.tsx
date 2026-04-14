@@ -4,6 +4,29 @@ import { useRouter } from "expo-router";
 import type { DriverTaskRecord } from "@drts/contracts";
 import { getDriverClient } from "@/lib/api-client";
 
+function PlatformBadge({ platform }: { platform: string | null }) {
+  const label = platform ?? "direct";
+  const bgColor = platform ? "#e0f7fa" : "#e8f5e9";
+  const textColor = platform ? "#006064" : "#1b5e20";
+  return (
+    <View style={[styles.badge, { backgroundColor: bgColor }]}>
+      <Text style={[styles.badgeText, { color: textColor }]}>{label}</Text>
+    </View>
+  );
+}
+
+function RouteLockedBadge() {
+  return (
+    <View style={[styles.badge, { backgroundColor: "#fff3e0" }]}>
+      <Text style={[styles.badgeText, { color: "#e65100" }]}>route-locked</Text>
+    </View>
+  );
+}
+
+function isForwardedTask(task: DriverTaskRecord | null): boolean {
+  return task?.sourcePlatform != null;
+}
+
 export default function TripScreen() {
   const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,7 +105,13 @@ export default function TripScreen() {
 
       {taskDetail ? (
         <View style={styles.card}>
-          <Text style={styles.taskId}>Task: {taskDetail.taskId}</Text>
+          <View style={styles.cardHeader}>
+            <Text style={styles.taskId}>Task: {taskDetail.taskId}</Text>
+            <View style={styles.badgeRow}>
+              {isForwardedTask(taskDetail) && <RouteLockedBadge />}
+              <PlatformBadge platform={taskDetail.sourcePlatform} />
+            </View>
+          </View>
           <Text style={styles.taskStatus}>
             Status: {taskDetail.status ?? "unknown"}
           </Text>
@@ -91,34 +120,58 @@ export default function TripScreen() {
               ? `Order: ${taskDetail.orderId}`
               : "No order linked"}
           </Text>
+          {isForwardedTask(taskDetail) && (
+            <Text style={styles.forwardedNote}>
+              Dispatched by {taskDetail.sourcePlatform}. Dispatch rules are
+              managed by the source platform.
+            </Text>
+          )}
         </View>
       ) : (
         <Text style={styles.empty}>No active trip.</Text>
       )}
 
-      <View style={styles.actions}>
-        <Text style={styles.actionLabel} onPress={() => handleAction("accept")}>
-          Accept
-        </Text>
-        <Text style={styles.actionLabel} onPress={() => handleAction("depart")}>
-          Depart
-        </Text>
-        <Text
-          style={styles.actionLabel}
-          onPress={() => handleAction("arrived")}
-        >
-          Arrived
-        </Text>
-        <Text style={styles.actionLabel} onPress={() => handleAction("start")}>
-          Start Trip
-        </Text>
-        <Text
-          style={styles.actionLabel}
-          onPress={() => handleAction("complete")}
-        >
-          Complete
-        </Text>
-      </View>
+      {!isForwardedTask(taskDetail) && taskDetail && (
+        <View style={styles.actions}>
+          <Text
+            style={styles.actionLabel}
+            onPress={() => handleAction("accept")}
+          >
+            Accept
+          </Text>
+          <Text
+            style={styles.actionLabel}
+            onPress={() => handleAction("depart")}
+          >
+            Depart
+          </Text>
+          <Text
+            style={styles.actionLabel}
+            onPress={() => handleAction("arrived")}
+          >
+            Arrived
+          </Text>
+          <Text
+            style={styles.actionLabel}
+            onPress={() => handleAction("start")}
+          >
+            Start Trip
+          </Text>
+          <Text
+            style={styles.actionLabel}
+            onPress={() => handleAction("complete")}
+          >
+            Complete
+          </Text>
+        </View>
+      )}
+      {taskDetail && isForwardedTask(taskDetail) && (
+        <View style={styles.actions}>
+          <Text style={styles.forwardedActionNote}>
+            Actions are managed by {taskDetail.sourcePlatform}.
+          </Text>
+        </View>
+      )}
 
       <View style={styles.footer}>
         <Text style={styles.link} onPress={() => router.push("/incident")}>
@@ -141,9 +194,35 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 16,
   },
-  taskId: { fontSize: 18, fontWeight: "600" },
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 8,
+  },
+  badgeRow: { flexDirection: "row", alignItems: "center", flexShrink: 1 },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginLeft: 4,
+  },
+  badgeText: { fontSize: 11, fontWeight: "600" },
+  taskId: { fontSize: 18, fontWeight: "600", flex: 1 },
   taskStatus: { fontSize: 14, color: "#666", marginTop: 4 },
   taskInfo: { fontSize: 14, color: "#333", marginTop: 8 },
+  forwardedNote: {
+    fontSize: 11,
+    color: "#666",
+    marginTop: 8,
+    fontStyle: "italic",
+  },
+  forwardedActionNote: {
+    fontSize: 13,
+    color: "#666",
+    textAlign: "center",
+    fontStyle: "italic",
+  },
   actions: { marginBottom: 16 },
   actionLabel: {
     color: "#007AFF",
