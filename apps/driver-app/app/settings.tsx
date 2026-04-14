@@ -127,6 +127,9 @@ export default function SettingsScreen() {
         {saving ? "Saving..." : "Save Settings"}
       </Text>
 
+      <View style={styles.section}>
+        <PlatformBinding />
+      </View>
       <View style={styles.footer}>
         <Text style={styles.link} onPress={() => router.push("/earnings")}>
           View Earnings →
