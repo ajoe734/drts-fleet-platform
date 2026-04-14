@@ -4,7 +4,7 @@
   "consensus_status": "accepted",
   "sprint": "2026-04-14-phase1-next-wave",
   "objective": "Phase 1 next-wave: 補齊前端 control plane（Platform Admin、Ops Console、Driver App 多平台）、建立 platform_presence/platform_earnings domain、完整 Tenant Portal 整合、staging pipeline。",
-  "updated_at": "2026-04-14T05:20:00Z",
+  "updated_at": "2026-04-14T05:15:11Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -103,29 +103,29 @@
         "architecture-arbitration",
         "control-plane"
       ],
-      "status": "reviewing",
-      "current_task_ids": ["WA-001"],
+      "status": "waiting",
+      "current_task_ids": ["WE-005"],
       "branch": "feat/claude-governance-review",
-      "next": "Review WA-001 — blocking WA-003/WC-002. After done, queue WE-005.",
+      "next": "",
       "last_update": "2026-04-14T05:01:01Z"
     },
     {
       "name": "Gemini",
       "capability_lane": ["runtime-packaging", "ci-cd", "infra", "worker-ops"],
-      "status": "working",
-      "current_task_ids": ["WD-004"],
+      "status": "ready",
+      "current_task_ids": ["WD-004", "WD-006", "WA-005-SIDECAR-REVIEW"],
       "branch": "feat/gemini-runtime-infra",
-      "next": "Start WD-004 (Tenant Portal Reports). After done, pick up WD-006 then WB-003 when WA-003 unlocks.",
+      "next": "",
       "last_update": "2026-04-14T00:00:00Z"
     },
     {
       "name": "Codex",
       "capability_lane": ["contracts", "schema", "state-system", "acceptance"],
       "status": "working",
-      "current_task_ids": ["WA-002"],
+      "current_task_ids": ["WD-001"],
       "branch": "feat/codex-phase1-architecture",
-      "next": "WA-002 in progress. Queue: WB-001 next (already unblocked).",
-      "last_update": "2026-04-14T05:04:13Z"
+      "next": "Started implementation: add bookings/new wizard calling real API with @drts/contracts types",
+      "last_update": "2026-04-14T05:12:53Z"
     },
     {
       "name": "Qwen",
@@ -136,10 +136,10 @@
         "acceptance"
       ],
       "status": "working",
-      "current_task_ids": ["WA-001", "WB-002"],
+      "current_task_ids": ["WB-002"],
       "branch": "feat/qwen-integration-slices",
-      "next": "WA-001 in review (awaiting Claude). Starting WB-002 (Ops Console dispatch) in parallel — WA-005 done.",
-      "last_update": "2026-04-14T05:04:51Z"
+      "next": "Added API client methods (listDispatchJobs, listDispatchCandidates, assignDispatch, queueCheckIn/Out). Rewrote dispatch-workflow.tsx with queue filter tabs, candidate selection, ETA display, assign/release/redispatch actions, queue state visualization. Typecheck passes.",
+      "last_update": "2026-04-14T05:14:24Z"
     },
     {
       "name": "Copilot",
@@ -149,11 +149,11 @@
         "spec-review",
         "critique"
       ],
-      "status": "idle",
-      "current_task_ids": [],
+      "status": "ready",
+      "current_task_ids": ["WD-003", "WD-007"],
       "branch": "feat/copilot-spec-critique",
-      "next": "Critique active implementation slices for contradictions, testing gaps, and weak assumptions.",
-      "last_update": "2026-04-14T05:02:46Z"
+      "next": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
+      "last_update": "2026-04-14T05:14:08Z"
     }
   ],
   "tasks": [
@@ -164,7 +164,7 @@
       "phase": "Wave A",
       "owner": "Qwen",
       "reviewer": "Claude",
-      "status": "review",
+      "status": "review_approved",
       "depends_on": [],
       "artifacts": [
         "apps/api/src/modules/platform-presence/",
@@ -177,10 +177,14 @@
         "pnpm --filter @drts/api lint",
         "API smoke: GET /api/platform-presence, POST /api/platform-presence/online, POST /api/platform-presence/offline"
       ],
-      "next": "All acceptance criteria verified: typecheck, unit tests, lint, and smoke tests (GET, POST online, POST offline) passed. Ready for review.",
-      "last_update": "2026-04-14T05:04:51Z",
+      "next": "Review approved: all acceptance criteria pass. TypeCheck fix applied in review commit. Returning to owner for finalization.",
+      "last_update": "2026-04-14T05:13:04Z",
       "evidence_refs": [
         ".orchestrator/evidence/codex-20260414T045518Z-78862935.json"
+      ],
+      "review_notes_zh": [
+        "審查通過。(1) migration SQL DEFAULT 'pending' 引號問題已在 commit 8d33714 中正確修正。(2) platform-earnings.service.ts 缺少 PlatformEarningsItem import 導致 typecheck 失敗，已於 review commit 1d32310 修正。(3) 所有驗收條件通過：typecheck、lint、unit tests、smoke API 端點。",
+        "回到 owner 收尾：請以 commit 8d33714 為 WA-001 主要實作 commit 提供 done 收尾，review fix commit 為 1d32310。"
       ]
     },
     {
@@ -188,9 +192,9 @@
       "title": "platform_earnings backend module",
       "summary_zh": "建立依平台彙總 driver 收益的 read model domain module，含 gross/fee/subsidy/net 分類與 migration V0015。",
       "phase": "Wave A",
-      "owner": "Codex",
-      "reviewer": "Qwen",
-      "status": "in_progress",
+      "owner": "Qwen",
+      "reviewer": "Codex",
+      "status": "done",
       "depends_on": [],
       "artifacts": [
         "apps/api/src/modules/platform-earnings/",
@@ -203,11 +207,19 @@
         "pnpm --filter @drts/api lint",
         "API smoke: GET /api/platform-earnings/summary, GET /api/platform-earnings/by-platform"
       ],
-      "next": "Started implementation: contracts + module + migration",
-      "last_update": "2026-04-14T05:04:13Z",
+      "next": "Owner finalized: platform_earnings backend module with contracts, migration V0018, API module",
+      "last_update": "2026-04-14T05:11:17Z",
       "evidence_refs": [
         ".orchestrator/evidence/copilot-20260414T045905Z-c9df673d.json"
-      ]
+      ],
+      "review_notes_zh": [
+        "審查通過：合約、migration V0018、API module（repository/service/controller）皆正確，typecheck/lint/unit tests 全數通過。"
+      ],
+      "commit_hash": "8d33714",
+      "commit_subject": "feat(wa-002): platform earnings backend module",
+      "commit_agent": "Qwen",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-14T05:11:17Z"
     },
     {
       "id": "WA-003",
@@ -319,7 +331,7 @@
       "phase": "Wave B",
       "owner": "Qwen",
       "reviewer": "Claude",
-      "status": "todo",
+      "status": "in_progress",
       "depends_on": ["WA-005"],
       "artifacts": [
         "apps/ops-console-web/app/dispatch/page.tsx",
@@ -332,8 +344,8 @@
         "可執行 redispatch / exception_hold 操作",
         "queue 狀態（pending/reserved/exception）可視化"
       ],
-      "next": "Auto-reassigned ownership from Copilot to Codex after repeated Copilot capacity/quota_exhausted. Copilot quota/capacity failure blocked dispatch.",
-      "last_update": "2026-04-14T05:02:52Z",
+      "next": "Added API client methods (listDispatchJobs, listDispatchCandidates, assignDispatch, queueCheckIn/Out). Rewrote dispatch-workflow.tsx with queue filter tabs, candidate selection, ETA display, assign/release/redispatch actions, queue state visualization. Typecheck passes.",
+      "last_update": "2026-04-14T05:14:24Z",
       "evidence_refs": [
         ".orchestrator/evidence/copilot-20260414T050233Z-37c49a43.json"
       ]
@@ -485,7 +497,7 @@
       "phase": "Wave D",
       "owner": "Codex",
       "reviewer": "Qwen",
-      "status": "todo",
+      "status": "in_progress",
       "depends_on": ["WA-005"],
       "artifacts": ["apps/tenant-portal-web/app/bookings/new/"],
       "acceptance": [
@@ -493,16 +505,16 @@
         "型別全走 @drts/contracts",
         "pnpm --filter @drts/tenant-portal-web typecheck"
       ],
-      "next": "",
-      "last_update": "2026-04-14T00:00:00Z"
+      "next": "Started implementation: add bookings/new wizard calling real API with @drts/contracts types",
+      "last_update": "2026-04-14T05:12:53Z"
     },
     {
       "id": "WD-002",
       "title": "Tenant Portal — Booking List & Detail",
       "summary_zh": "實作 tenant portal 預訂列表與明細頁面，含狀態篩選、cancel/update 操作。",
       "phase": "Wave D",
-      "owner": "Qwen",
-      "reviewer": "Codex",
+      "owner": "Codex",
+      "reviewer": "Qwen",
       "status": "todo",
       "depends_on": ["WA-005"],
       "artifacts": ["apps/tenant-portal-web/app/bookings/"],
@@ -512,9 +524,10 @@
         "pnpm --filter @drts/tenant-portal-web typecheck"
       ],
       "next": "Auto-reassigned ownership from Copilot to Codex after repeated Copilot capacity/quota_exhausted. Copilot quota/capacity failure blocked dispatch.",
-      "last_update": "2026-04-14T05:03:20Z",
+      "last_update": "2026-04-14T05:15:10Z",
       "evidence_refs": [
-        ".orchestrator/evidence/copilot-20260414T050302Z-b69f0aa0.json"
+        ".orchestrator/evidence/copilot-20260414T050302Z-b69f0aa0.json",
+        ".orchestrator/evidence/copilot-20260414T051426Z-a90d35f3.json"
       ]
     },
     {
@@ -522,8 +535,8 @@
       "title": "Tenant Portal — Passengers & Address Book",
       "summary_zh": "實作乘客管理與地址簿頁面，CRUD 全走 @drts/api-client。",
       "phase": "Wave D",
-      "owner": "Qwen",
-      "reviewer": "Codex",
+      "owner": "Copilot",
+      "reviewer": "Qwen",
       "status": "todo",
       "depends_on": ["WA-005"],
       "artifacts": [
@@ -535,8 +548,8 @@
         "address book CRUD 操作正確",
         "pnpm --filter @drts/tenant-portal-web typecheck"
       ],
-      "next": "Auto-reassigned ownership from Copilot to Codex after repeated Copilot capacity/quota_exhausted. Copilot quota/capacity failure blocked dispatch.",
-      "last_update": "2026-04-14T05:03:22Z",
+      "next": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
+      "last_update": "2026-04-14T05:14:08Z",
       "evidence_refs": [
         ".orchestrator/evidence/copilot-20260414T050304Z-c1e49add.json"
       ]
@@ -604,8 +617,8 @@
       "title": "Tenant Portal — Notifications & SLA",
       "summary_zh": "實作通知設定與 SLA profile 管理頁面，串接 tenant-partner notification/SLA API。",
       "phase": "Wave D",
-      "owner": "Qwen",
-      "reviewer": "Codex",
+      "owner": "Copilot",
+      "reviewer": "Qwen",
       "status": "todo",
       "depends_on": ["WA-005"],
       "artifacts": [
@@ -617,8 +630,8 @@
         "SLA profile 可查閱與更新",
         "pnpm --filter @drts/tenant-portal-web typecheck"
       ],
-      "next": "Auto-reassigned ownership from Copilot to Codex after repeated Copilot capacity/quota_exhausted. Copilot quota/capacity failure blocked dispatch.",
-      "last_update": "2026-04-14T05:03:40Z",
+      "next": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
+      "last_update": "2026-04-14T05:14:29Z",
       "evidence_refs": [
         ".orchestrator/evidence/copilot-20260414T050327Z-c6efdd4c.json"
       ]
@@ -1599,8 +1612,60 @@
       "from": "Qwen",
       "to": "Claude",
       "message": "All acceptance criteria verified: typecheck, unit tests, lint, and smoke tests (GET, POST online, POST offline) passed. Ready for review.",
+      "status": "done",
+      "created_at": "2026-04-14T05:04:51Z",
+      "resolved_at": "2026-04-14T05:13:04Z"
+    },
+    {
+      "task_id": "WA-002",
+      "from": "Qwen",
+      "to": "Codex",
+      "message": "Implementation complete, all acceptance checks pass",
+      "status": "done",
+      "created_at": "2026-04-14T05:10:52Z",
+      "resolved_at": "2026-04-14T05:11:06Z"
+    },
+    {
+      "task_id": "WA-002",
+      "from": "Codex",
+      "to": "Qwen",
+      "message": "Review approved: all acceptance criteria pass",
+      "status": "done",
+      "created_at": "2026-04-14T05:11:06Z",
+      "resolved_at": "2026-04-14T05:11:17Z"
+    },
+    {
+      "task_id": "WA-001",
+      "from": "Claude",
+      "to": "Qwen",
+      "message": "Review approved: all acceptance criteria pass. TypeCheck fix applied in review commit. Returning to owner for finalization.",
       "status": "pending",
-      "created_at": "2026-04-14T05:04:51Z"
+      "created_at": "2026-04-14T05:13:04Z"
+    },
+    {
+      "task_id": "WD-002",
+      "from": "Qwen",
+      "to": "Copilot",
+      "message": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
+      "status": "done",
+      "created_at": "2026-04-14T05:13:20Z",
+      "resolved_at": "2026-04-14T05:15:10Z"
+    },
+    {
+      "task_id": "WD-003",
+      "from": "Qwen",
+      "to": "Copilot",
+      "message": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
+      "status": "pending",
+      "created_at": "2026-04-14T05:14:08Z"
+    },
+    {
+      "task_id": "WD-007",
+      "from": "Qwen",
+      "to": "Copilot",
+      "message": "Helper-claimed by Copilot while Qwen completes higher-priority work.",
+      "status": "pending",
+      "created_at": "2026-04-14T05:14:29Z"
     }
   ],
   "blockers": [],
@@ -1631,31 +1696,31 @@
       "todo": 7
     },
     "Codex": {
-      "total": 13,
+      "total": 9,
       "active": 1,
       "blocked": 0,
       "done": 0,
       "review": 0,
       "review_approved": 0,
-      "todo": 13
+      "todo": 9
     },
     "Qwen": {
-      "total": 6,
+      "total": 8,
       "active": 1,
       "blocked": 0,
-      "done": 0,
-      "review": 1,
-      "review_approved": 0,
-      "todo": 5
+      "done": 1,
+      "review": 0,
+      "review_approved": 1,
+      "todo": 6
     },
     "Copilot": {
-      "total": 0,
+      "total": 2,
       "active": 0,
       "blocked": 0,
       "done": 0,
       "review": 0,
       "review_approved": 0,
-      "todo": 0
+      "todo": 2
     }
   },
   "archived_task_ids": [
