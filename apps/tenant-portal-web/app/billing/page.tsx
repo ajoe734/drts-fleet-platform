@@ -58,6 +58,7 @@ export default async function BillingPage() {
                   <th>Amount</th>
                   <th>Billing Period</th>
                   <th>Updated</th>
+                  <th>Download</th>
                 </tr>
               </thead>
               <tbody>
@@ -71,6 +72,19 @@ export default async function BillingPage() {
                       {new Date(invoice.periodEnd).toLocaleDateString()}
                     </td>
                     <td>{new Date(invoice.updatedAt).toLocaleString()}</td>
+                    <td>
+                      {invoice.artifactUrl ? (
+                        <a
+                          href={invoice.artifactUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Download
+                        </a>
+                      ) : (
+                        <span>—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
