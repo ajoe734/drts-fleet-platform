@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import type { MoneyAmount } from "@drts/contracts";
+import type { MoneyAmount, PlatformEarningsItem } from "@drts/contracts";
 import { PlatformEarningsRepository } from "./platform-earnings.repository";
 
 @Injectable()
