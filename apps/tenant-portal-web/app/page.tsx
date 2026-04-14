@@ -138,6 +138,14 @@ export default async function HomePage() {
               </Link>
             </>
           )}
+          <Link className="route-link" href="/notifications">
+            <strong>Notifications</strong>
+            Configure notification preferences.
+          </Link>
+          <Link className="route-link" href="/sla">
+            <strong>SLA Profile</strong>
+            View and update SLA thresholds.
+          </Link>
           <Link className="route-link" href="/feature-flags">
             <strong>Feature Flags</strong>
             View and toggle feature flags.
