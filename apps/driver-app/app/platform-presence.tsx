@@ -7,12 +7,64 @@ import {
   ActivityIndicator,
   RefreshControl,
   TouchableOpacity,
+  Alert,
 } from "react-native";
 import type {
   PlatformPresenceRecord,
   PlatformPresenceSummary,
 } from "@drts/contracts";
 import { getDriverClient } from "@/lib/api-client";
+
+/**
+ * Calculate token expiry urgency level and remaining time display.
+ * Returns: { label, urgency, isExpiring }
+ * - urgent: < 1 hour remaining
+ * - warning: < 24 hours remaining
+ * - safe: >= 24 hours remaining
+ * - expired: token already expired
+ */
+function getTokenExpiryInfo(tokenExpiresAt: string | null): {
+  label: string;
+  urgency: "expired" | "urgent" | "warning" | "safe";
+  isExpiring: boolean;
+} {
+  if (!tokenExpiresAt) {
+    return { label: "No expiry set", urgency: "safe", isExpiring: false };
+  }
+
+  const now = new Date().getTime();
+  const expiresAt = new Date(tokenExpiresAt).getTime();
+  const remainingMs = expiresAt - now;
+
+  if (remainingMs <= 0) {
+    return { label: "Expired", urgency: "expired", isExpiring: true };
+  }
+
+  const remainingMinutes = Math.floor(remainingMs / 60000);
+  const remainingHours = Math.floor(remainingMinutes / 60);
+
+  if (remainingHours < 1) {
+    return {
+      label: `${remainingMinutes}m remaining`,
+      urgency: "urgent",
+      isExpiring: true,
+    };
+  }
+
+  if (remainingHours < 24) {
+    return {
+      label: `${remainingHours}h ${remainingMinutes % 60}m remaining`,
+      urgency: "warning",
+      isExpiring: true,
+    };
+  }
+
+  return {
+    label: `${remainingHours}h remaining`,
+    urgency: "safe",
+    isExpiring: false,
+  };
+}
 
 function StatusIndicator({ status }: { status: string }) {
   const isOnline = status === "online";
@@ -26,9 +78,26 @@ function StatusIndicator({ status }: { status: string }) {
   );
 }
 
-function PresenceCard({ record }: { record: PlatformPresenceRecord }) {
+function PresenceCard({
+  record,
+  onRefresh,
+}: {
+  record: PlatformPresenceRecord;
+  onRefresh: () => void;
+}) {
   const client = getDriverClient();
   const [toggling, setToggling] = useState(false);
+  const [expiryInfo, setExpiryInfo] = useState(() =>
+    getTokenExpiryInfo(record.tokenExpiresAt),
+  );
+
+  // Update countdown every minute
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setExpiryInfo(getTokenExpiryInfo(record.tokenExpiresAt));
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [record.tokenExpiresAt]);
 
   const handleToggle = async () => {
     setToggling(true);
@@ -38,11 +107,44 @@ function PresenceCard({ record }: { record: PlatformPresenceRecord }) {
       } else {
         await client.setPlatformOnline({ platformCode: record.platformCode });
       }
+      await onRefresh();
     } catch (e: any) {
       console.error("Failed to toggle platform presence:", e.message);
+      Alert.alert(
+        "Error",
+        `Failed to toggle ${record.platformCode}: ${e.message}`,
+      );
     } finally {
       setToggling(false);
     }
+  };
+
+  const handleReauth = () => {
+    Alert.alert(
+      "Re-authenticate Platform",
+      `This will start re-authentication for "${record.platformCode}". You will be redirected to complete the process.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Continue",
+          onPress: async () => {
+            try {
+              await client.setPlatformOnline({
+                platformCode: record.platformCode,
+                tokenExpiresAt: null,
+              });
+              await onRefresh();
+              Alert.alert(
+                "Re-auth Started",
+                `Please complete authentication for ${record.platformCode}.`,
+              );
+            } catch (e: any) {
+              Alert.alert("Error", e.message);
+            }
+          },
+        },
+      ],
+    );
   };
 
   const eligibilityColor =
@@ -52,6 +154,15 @@ function PresenceCard({ record }: { record: PlatformPresenceRecord }) {
         ? "#ff9800"
         : "#f44336";
 
+  const expiryColor =
+    expiryInfo.urgency === "expired"
+      ? "#f44336"
+      : expiryInfo.urgency === "urgent"
+        ? "#ff5722"
+        : expiryInfo.urgency === "warning"
+          ? "#ff9800"
+          : "#4caf50";
+
   return (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
@@ -59,19 +170,29 @@ function PresenceCard({ record }: { record: PlatformPresenceRecord }) {
           <StatusIndicator status={record.status} />
           <Text style={styles.platformCode}>{record.platformCode}</Text>
         </View>
-        <TouchableOpacity
-          style={[styles.toggleBtn, toggling && styles.toggleBtnDisabled]}
-          onPress={handleToggle}
-          disabled={toggling}
-        >
-          <Text style={styles.toggleBtnText}>
-            {toggling
-              ? "..."
-              : record.status === "online"
-                ? "Go Offline"
-                : "Go Online"}
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {record.reauthRequired && (
+            <TouchableOpacity
+              style={[styles.iconBtn, styles.reauthBtn]}
+              onPress={handleReauth}
+            >
+              <Text style={styles.iconBtnText}>🔄</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={[styles.toggleBtn, toggling && styles.toggleBtnDisabled]}
+            onPress={handleToggle}
+            disabled={toggling}
+          >
+            <Text style={styles.toggleBtnText}>
+              {toggling
+                ? "..."
+                : record.status === "online"
+                  ? "Offline"
+                  : "Online"}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.cardRow}>
@@ -83,19 +204,19 @@ function PresenceCard({ record }: { record: PlatformPresenceRecord }) {
 
       {record.tokenExpiresAt && (
         <View style={styles.cardRow}>
-          <Text style={styles.cardLabel}>Token expires:</Text>
-          <Text style={styles.cardValue}>
-            {new Date(record.tokenExpiresAt).toLocaleString()}
+          <Text style={styles.cardLabel}>Token:</Text>
+          <Text style={[styles.cardValue, { color: expiryColor }]}>
+            {expiryInfo.label}
           </Text>
         </View>
       )}
 
       {record.reauthRequired && (
-        <View style={styles.cardRow}>
-          <Text style={[styles.cardLabel, { color: "#f44336" }]}>
-            Re-authentication required
+        <TouchableOpacity style={styles.reauthBanner} onPress={handleReauth}>
+          <Text style={styles.reauthBannerText}>
+            ⚠️ Re-authentication required — Tap to continue
           </Text>
-        </View>
+        </TouchableOpacity>
       )}
 
       {record.lastOnlineAt && (
@@ -163,7 +284,9 @@ export default function PlatformPresenceScreen() {
         <FlatList
           data={summary.presences}
           keyExtractor={(item) => item.platformCode}
-          renderItem={({ item }) => <PresenceCard record={item} />}
+          renderItem={({ item }) => (
+            <PresenceCard record={item} onRefresh={onRefresh} />
+          )}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
@@ -203,6 +326,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   platformCode: { fontSize: 16, fontWeight: "600" },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   toggleBtn: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -211,6 +335,32 @@ const styles = StyleSheet.create({
   },
   toggleBtnDisabled: { backgroundColor: "#bdbdbd" },
   toggleBtnText: { color: "#fff", fontSize: 12, fontWeight: "600" },
+  iconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#e0e0e0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  reauthBtn: { backgroundColor: "#fff3e0", borderColor: "#ff9800" },
+  iconBtnText: { fontSize: 16 },
+  reauthBanner: {
+    marginTop: 8,
+    padding: 10,
+    backgroundColor: "#fff3e0",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#ff9800",
+  },
+  reauthBannerText: {
+    color: "#e65100",
+    fontSize: 12,
+    fontWeight: "600",
+    textAlign: "center",
+  },
   cardRow: {
     flexDirection: "row",
     justifyContent: "space-between",
