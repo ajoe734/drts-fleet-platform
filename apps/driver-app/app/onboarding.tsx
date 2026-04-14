@@ -48,19 +48,33 @@ export default function OnboardingScreen() {
   if (flagsOk && identityOk) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Driver App</Text>
+        <Text style={styles.title}>Multi-Platform Workstation</Text>
         <Text style={styles.subtitle}>
           API: {identityStatus} | Feature flags: {flagsStatus}
         </Text>
-        <Text style={styles.link} onPress={() => router.push("/jobs")}>
-          Go to Jobs →
+        <Text style={styles.description}>
+          Manage tasks, earnings, and presence across all connected platforms
+          from a single workspace.
         </Text>
-        <Text
-          style={[styles.link, { marginTop: 8 }]}
-          onPress={() => router.push("/shift")}
-        >
-          Shift & Attendance →
-        </Text>
+
+        <View style={styles.navSection}>
+          <Text style={styles.navLabel}>Quick Access:</Text>
+          <Text style={styles.link} onPress={() => router.push("/jobs")}>
+            Jobs Inbox →
+          </Text>
+          <Text style={styles.link} onPress={() => router.push("/earnings")}>
+            Earnings Dashboard →
+          </Text>
+          <Text
+            style={styles.link}
+            onPress={() => router.push("/platform-presence")}
+          >
+            Platform Presence →
+          </Text>
+          <Text style={styles.link} onPress={() => router.push("/shift")}>
+            Shift & Attendance →
+          </Text>
+        </View>
       </View>
     );
   }
@@ -98,9 +112,28 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     color: "#666",
-    marginBottom: 24,
+    marginBottom: 12,
     textAlign: "center",
   },
-  link: { color: "#007AFF", fontSize: 18, textAlign: "center", marginTop: 16 },
+  description: {
+    fontSize: 14,
+    color: "#444",
+    textAlign: "center",
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  navSection: {
+    padding: 16,
+    backgroundColor: "#f5f5f5",
+    borderRadius: 8,
+  },
+  navLabel: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 12,
+    textAlign: "center",
+    color: "#333",
+  },
+  link: { color: "#007AFF", fontSize: 16, textAlign: "center", marginTop: 12 },
   label: { marginTop: 8, color: "#666" },
 });

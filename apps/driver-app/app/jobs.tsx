@@ -11,6 +11,17 @@ import { useRouter } from "expo-router";
 import type { DriverTaskRecord } from "@drts/contracts";
 import { getDriverClient } from "@/lib/api-client";
 
+function PlatformBadge({ platform }: { platform: string | null }) {
+  const label = platform ?? "direct";
+  const bgColor = platform ? "#e0f7fa" : "#e8f5e9";
+  const textColor = platform ? "#006064" : "#1b5e20";
+  return (
+    <View style={[styles.badge, { backgroundColor: bgColor }]}>
+      <Text style={[styles.badgeText, { color: textColor }]}>{label}</Text>
+    </View>
+  );
+}
+
 export default function JobsScreen() {
   const [tasks, setTasks] = useState<DriverTaskRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +102,10 @@ export default function JobsScreen() {
           keyExtractor={(item, i) => item.taskId ?? String(i)}
           renderItem={({ item }) => (
             <View style={styles.taskCard}>
-              <Text style={styles.taskId}>{item.taskId}</Text>
+              <View style={styles.taskHeader}>
+                <Text style={styles.taskId}>{item.taskId}</Text>
+                <PlatformBadge platform={item.sourcePlatform} />
+              </View>
               <Text style={styles.taskStatus}>{item.status ?? "unknown"}</Text>
               {item.orderId && (
                 <Text style={styles.taskOrder}>Order: {item.orderId}</Text>
@@ -126,10 +140,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#f5f5f5",
     borderRadius: 8,
   },
-  taskId: { fontSize: 16, fontWeight: "600" },
+  taskHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  taskId: { fontSize: 16, fontWeight: "600", flex: 1 },
   taskStatus: { fontSize: 12, color: "#666", marginTop: 4 },
   taskOrder: { fontSize: 12, color: "#333", marginTop: 2 },
   footer: { marginTop: 16, alignItems: "center" },
   link: { color: "#007AFF", fontSize: 16 },
   label: { marginTop: 8, color: "#666" },
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  badgeText: { fontSize: 11, fontWeight: "600" },
 });

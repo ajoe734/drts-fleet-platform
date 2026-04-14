@@ -741,6 +741,7 @@ export interface DriverTaskRecord {
   assignmentId: string;
   driverId: string;
   vehicleId: string;
+  sourcePlatform: string | null;
   status: DriverTaskStatus;
   acceptedAt: string | null;
   departedAt: string | null;

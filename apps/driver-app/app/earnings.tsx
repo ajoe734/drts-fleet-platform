@@ -8,7 +8,11 @@ import {
   RefreshControl,
 } from "react-native";
 import { useRouter } from "expo-router";
-import type { DriverStatementRecord, MoneyAmount } from "@drts/contracts";
+import type {
+  DriverStatementRecord,
+  MoneyAmount,
+  PlatformEarningsItem,
+} from "@drts/contracts";
 import { getDriverClient } from "@/lib/api-client";
 
 function formatMoney(amount: MoneyAmount | null | undefined): string {
@@ -18,8 +22,56 @@ function formatMoney(amount: MoneyAmount | null | undefined): string {
   return `${amount.currency} ${(amount.amountMinor / 100).toFixed(2)}`;
 }
 
+function PlatformEarningsSection({
+  title,
+  items,
+}: {
+  title: string;
+  items: PlatformEarningsItem[];
+}) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {items.length === 0 ? (
+        <Text style={styles.empty}>No earnings data for this platform.</Text>
+      ) : (
+        items.map((item) => (
+          <View key={item.platformCode} style={styles.card}>
+            <Text style={styles.platformHeader}>{item.platformCode}</Text>
+            <View style={styles.earningsRow}>
+              <Text style={styles.earningLabel}>Gross:</Text>
+              <Text style={styles.earningValue}>
+                {formatMoney(item.grossEarning)}
+              </Text>
+            </View>
+            <View style={styles.earningsRow}>
+              <Text style={styles.earningLabel}>Service Fee:</Text>
+              <Text style={styles.earningValue}>
+                {formatMoney(item.serviceFee)}
+              </Text>
+            </View>
+            <View style={styles.earningsRow}>
+              <Text style={styles.earningLabel}>Subsidy:</Text>
+              <Text style={styles.earningValue}>
+                {formatMoney(item.subsidy)}
+              </Text>
+            </View>
+            <View style={[styles.earningsRow, styles.netRow]}>
+              <Text style={styles.netLabel}>Net:</Text>
+              <Text style={styles.netValue}>{formatMoney(item.netAmount)}</Text>
+            </View>
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
 export default function EarningsScreen() {
   const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
+  const [platformEarnings, setPlatformEarnings] = useState<
+    PlatformEarningsItem[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +81,12 @@ export default function EarningsScreen() {
   const loadStatements = async () => {
     const client = getDriverClient();
     try {
-      setStatements(await client.listDriverStatements());
+      const [stmts, earningsResp] = await Promise.all([
+        client.listDriverStatements(),
+        client.getPlatformEarningsByPlatform(),
+      ]);
+      setStatements(stmts);
+      setPlatformEarnings(earningsResp.items);
       setError(null);
     } catch (e: any) {
       setError(e.message);
@@ -85,37 +142,54 @@ export default function EarningsScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>Earnings</Text>
       <Text style={styles.subtitle}>
-        {statements.length} statement(s) found
+        {statements.length} statement(s) | {platformEarnings.length} platform(s)
       </Text>
 
       {error && <Text style={styles.error}>Error: {error}</Text>}
 
-      {statements.length === 0 ? (
-        <Text style={styles.empty}>No earnings data available yet.</Text>
-      ) : (
-        <FlatList
-          data={statements}
-          keyExtractor={(item, i) => item.statementId ?? String(i)}
-          renderItem={({ item }) => (
-            <View style={styles.card}>
-              <Text style={styles.stmtId}>{item.statementId}</Text>
-              <Text style={styles.stmtAmount}>
-                Net: {formatMoney(item.netAmount)}
-              </Text>
-              <Text style={styles.stmtMeta}>
-                Gross: {formatMoney(item.grossEarning)}
-              </Text>
-              <Text style={styles.stmtMeta}>Period: {item.periodMonth}</Text>
-              <Text style={styles.stmtPeriod}>
-                Payout status: {item.payoutStatus}
-              </Text>
-            </View>
-          )}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      <FlatList
+        data={[{ key: "platforms" }, { key: "statements" }]}
+        keyExtractor={(item) => item.key}
+        renderItem={({ item }) => {
+          if (item.key === "platforms") {
+            return (
+              <PlatformEarningsSection
+                title="Per-Platform Earnings"
+                items={platformEarnings}
+              />
+            );
           }
-        />
-      )}
+          // statements section
+          if (statements.length === 0) {
+            return (
+              <Text style={styles.empty}>No earnings data available yet.</Text>
+            );
+          }
+          return (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Statements</Text>
+              {statements.map((s) => (
+                <View key={s.statementId} style={styles.stmtCard}>
+                  <Text style={styles.stmtId}>{s.statementId}</Text>
+                  <Text style={styles.stmtAmount}>
+                    Net: {formatMoney(s.netAmount)}
+                  </Text>
+                  <Text style={styles.stmtMeta}>
+                    Gross: {formatMoney(s.grossEarning)}
+                  </Text>
+                  <Text style={styles.stmtMeta}>Period: {s.periodMonth}</Text>
+                  <Text style={styles.stmtPeriod}>
+                    Payout status: {s.payoutStatus}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          );
+        }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      />
 
       <View style={styles.footer}>
         <Text style={styles.link} onPress={() => router.push("/settings")}>
@@ -133,12 +207,41 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 14, color: "#666", marginBottom: 16 },
   error: { color: "red", marginBottom: 8 },
   empty: { textAlign: "center", color: "#999", marginTop: 32 },
+  section: { marginBottom: 20 },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    marginBottom: 10,
+    color: "#333",
+  },
   card: {
+    padding: 12,
+    marginBottom: 8,
+    backgroundColor: "#e3f2fd",
+    borderRadius: 8,
+  },
+  stmtCard: {
     padding: 12,
     marginBottom: 8,
     backgroundColor: "#f0fff0",
     borderRadius: 8,
   },
+  platformHeader: { fontSize: 16, fontWeight: "600", marginBottom: 6 },
+  earningsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  earningLabel: { fontSize: 13, color: "#555" },
+  earningValue: { fontSize: 13, fontWeight: "500" },
+  netRow: {
+    borderTopWidth: 1,
+    borderTopColor: "#bbb",
+    paddingTop: 6,
+    marginTop: 6,
+  },
+  netLabel: { fontSize: 14, fontWeight: "bold" },
+  netValue: { fontSize: 14, fontWeight: "bold", color: "#2a7" },
   stmtId: { fontSize: 16, fontWeight: "600" },
   stmtAmount: { fontSize: 20, fontWeight: "bold", color: "#2a7", marginTop: 4 },
   stmtMeta: { fontSize: 12, color: "#444", marginTop: 4 },

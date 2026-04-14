@@ -59,6 +59,12 @@ import type {
   AssignDispatchCommand,
   CancelOwnedOrderCommand,
   UpdateTenantBookingCommand,
+  PlatformPresenceSummary,
+  PlatformPresenceRecord,
+  SetPlatformOnlineCommand,
+  SetPlatformOfflineCommand,
+  PlatformEarningsSummary,
+  PlatformEarningsByPlatformResponse,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -339,6 +345,40 @@ export class ApiClient {
 
   async listDriverStatements(): Promise<DriverStatementRecord[]> {
     return this.getList<DriverStatementRecord>("/api/driver-statements");
+  }
+
+  // ── Platform Presence ──
+
+  async getPlatformPresence(): Promise<PlatformPresenceSummary> {
+    return this.get<PlatformPresenceSummary>("/api/platform-presence");
+  }
+
+  async setPlatformOnline(
+    command: SetPlatformOnlineCommand,
+  ): Promise<PlatformPresenceRecord> {
+    return this.post<PlatformPresenceRecord>("/api/platform-presence/online", {
+      body: command,
+    });
+  }
+
+  async setPlatformOffline(
+    command: SetPlatformOfflineCommand,
+  ): Promise<PlatformPresenceRecord> {
+    return this.post<PlatformPresenceRecord>("/api/platform-presence/offline", {
+      body: command,
+    });
+  }
+
+  // ── Platform Earnings ──
+
+  async getPlatformEarningsSummary(): Promise<PlatformEarningsSummary> {
+    return this.get<PlatformEarningsSummary>("/api/platform-earnings/summary");
+  }
+
+  async getPlatformEarningsByPlatform(): Promise<PlatformEarningsByPlatformResponse> {
+    return this.get<PlatformEarningsByPlatformResponse>(
+      "/api/platform-earnings/by-platform",
+    );
   }
 
   // ── Reporting & Filing ──
