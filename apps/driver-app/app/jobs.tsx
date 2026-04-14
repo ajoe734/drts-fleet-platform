@@ -8,24 +8,56 @@ import {
   RefreshControl,
 } from "react-native";
 import { useRouter } from "expo-router";
-import type { DriverTaskRecord } from "@drts/contracts";
+import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
 import { getDriverClient } from "@/lib/api-client";
+import { PlatformTaskBadge } from "@/components/platform-task-badge";
 
-function PlatformBadge({ platform }: { platform: string | null }) {
-  const label = platform ?? "direct";
-  const bgColor = platform ? "#e0f7fa" : "#e8f5e9";
-  const textColor = platform ? "#006064" : "#1b5e20";
+function RouteLockedIcon() {
+  return <Text style={styles.lockIcon}>🔒</Text>;
+}
+
+function FixedPriceBadge() {
   return (
-    <View style={[styles.badge, { backgroundColor: bgColor }]}>
-      <Text style={[styles.badgeText, { color: textColor }]}>{label}</Text>
+    <View style={[styles.badge, { backgroundColor: "#e3f2fd" }]}>
+      <Text style={[styles.badgeText, { color: "#0d47a1" }]}>fixed price</Text>
     </View>
   );
 }
 
-function RouteLockedBadge() {
+function TaskTypeBadge({
+  serviceBucket,
+  businessDispatchSubtype,
+  dispatchSemantics,
+}: {
+  serviceBucket: string | null;
+  businessDispatchSubtype: string | null;
+  dispatchSemantics: string | null;
+}) {
+  let label = "platform_dispatch";
+  let bgColor = "#f3e5f5";
+  let textColor = "#4a148c";
+
+  if (businessDispatchSubtype === "enterprise_dispatch") {
+    label = "enterprise_shuttle";
+    bgColor = "#e8eaf6";
+    textColor = "#1a237e";
+  } else if (businessDispatchSubtype === "credit_card_airport_transfer") {
+    label = "airport_pickup";
+    bgColor = "#e0f2f1";
+    textColor = "#004d40";
+  } else if (dispatchSemantics === "forwarder_broadcast") {
+    label = "auto_assigned";
+    bgColor = "#fff3e0";
+    textColor = "#e65100";
+  } else if (serviceBucket === "standard_taxi") {
+    label = "platform_dispatch";
+    bgColor = "#f3e5f5";
+    textColor = "#4a148c";
+  }
+
   return (
-    <View style={[styles.badge, { backgroundColor: "#fff3e0" }]}>
-      <Text style={[styles.badgeText, { color: "#e65100" }]}>route-locked</Text>
+    <View style={[styles.badge, { backgroundColor: bgColor }]}>
+      <Text style={[styles.badgeText, { color: textColor }]}>{label}</Text>
     </View>
   );
 }
@@ -36,6 +68,9 @@ function isForwardedTask(task: DriverTaskRecord): boolean {
 
 export default function JobsScreen() {
   const [tasks, setTasks] = useState<DriverTaskRecord[]>([]);
+  const [orderMap, setOrderMap] = useState<Record<string, OwnedOrderRecord>>(
+    {},
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +80,36 @@ export default function JobsScreen() {
   const loadTasks = async () => {
     const client = getDriverClient();
     try {
-      setTasks(await client.listDriverTasks());
+      const fetchedTasks = await client.listDriverTasks();
+      setTasks(fetchedTasks);
+
+      // Fetch order details for fixedPrice and task type info
+      const orderPromises = fetchedTasks
+        .filter((t) => t.orderId)
+        .map(
+          async (
+            t,
+          ): Promise<{ orderId: string; order: OwnedOrderRecord | null }> => {
+            try {
+              const order = (await client.getOrder(
+                t.orderId!,
+              )) as OwnedOrderRecord;
+              return { orderId: t.orderId!, order };
+            } catch {
+              return { orderId: t.orderId!, order: null };
+            }
+          },
+        );
+
+      const orderResults = await Promise.all(orderPromises);
+      const newOrderMap: Record<string, OwnedOrderRecord> = {};
+      orderResults.forEach(({ orderId, order }) => {
+        if (order && orderId) {
+          newOrderMap[orderId] = order;
+        }
+      });
+      setOrderMap(newOrderMap);
+
       setError(null);
     } catch (e: any) {
       setError(e.message);
@@ -114,13 +178,26 @@ export default function JobsScreen() {
           keyExtractor={(item, i) => item.taskId ?? String(i)}
           renderItem={({ item }) => {
             const forwarded = isForwardedTask(item);
+            const order = item.orderId ? orderMap[item.orderId] : null;
+            const fixedPrice = order?.fixedPrice ?? false;
+            const serviceBucket = order?.serviceBucket ?? null;
+            const businessDispatchSubtype =
+              order?.businessDispatchSubtype ?? null;
+            const dispatchSemantics = order?.dispatchSemantics ?? null;
+
             return (
               <View style={styles.taskCard}>
                 <View style={styles.taskHeader}>
                   <Text style={styles.taskId}>{item.taskId}</Text>
                   <View style={styles.badgeRow}>
-                    {forwarded && <RouteLockedBadge />}
-                    <PlatformBadge platform={item.sourcePlatform} />
+                    {forwarded && <RouteLockedIcon />}
+                    <PlatformTaskBadge platformCode={item.sourcePlatform} />
+                    <TaskTypeBadge
+                      serviceBucket={serviceBucket}
+                      businessDispatchSubtype={businessDispatchSubtype}
+                      dispatchSemantics={dispatchSemantics}
+                    />
+                    {fixedPrice && <FixedPriceBadge />}
                   </View>
                 </View>
                 <Text style={styles.taskStatus}>
@@ -186,6 +263,7 @@ const styles = StyleSheet.create({
   },
   badgeRow: { flexDirection: "row", alignItems: "center" },
   badgeText: { fontSize: 11, fontWeight: "600" },
+  lockIcon: { marginLeft: 6, fontSize: 12 },
   forwardedNote: {
     fontSize: 11,
     color: "#666",
