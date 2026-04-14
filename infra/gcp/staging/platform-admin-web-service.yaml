@@ -1,0 +1,35 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: drts-platform-admin-web
+  labels:
+    app: drts-platform-admin-web
+    env: staging
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+        run.googleapis.com/cpu-throttling: "true"
+    spec:
+      serviceAccountName: SERVICE_ACCOUNT_PLACEHOLDER
+      containers:
+        - image: IMAGE_PLACEHOLDER
+          name: drts-platform-admin-web
+          ports:
+            - name: http1
+              containerPort: 3002
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3002"
+            - name: NEXT_PUBLIC_API_URL
+              value: API_URL_PLACEHOLDER

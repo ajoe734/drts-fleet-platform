@@ -1,0 +1,35 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: drts-migrate
+  labels:
+    app: drts-migrate
+    env: staging
+spec:
+  template:
+    metadata:
+      annotations:
+        # Cloud SQL Auth Proxy built-in integration — same instance as api-service
+        run.googleapis.com/cloudsql-instances: "CLOUDSQL_INSTANCE_PLACEHOLDER"
+    spec:
+      serviceAccountName: SERVICE_ACCOUNT_PLACEHOLDER
+      # Never retry — if migration fails, fail the deploy
+      maxRetries: 0
+      template:
+        spec:
+          containers:
+            - image: IMAGE_PLACEHOLDER
+              name: migrate
+              resources:
+                limits:
+                  cpu: "1"
+                  memory: 512Mi
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      key: latest
+                      name: drts-staging-db-url
+              # Migration image built from Dockerfile.migrate at repo root.
+              # Includes psql client, python3 (for URL parsing), scripts/, and infra/migrations/.
+              # ENTRYPOINT in the image already runs bash scripts/db-apply.sh.

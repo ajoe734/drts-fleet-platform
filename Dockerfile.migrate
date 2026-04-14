@@ -1,0 +1,24 @@
+# syntax=docker/dockerfile:1.7
+# Migration runner image — bundles psql client + python3 + migration scripts.
+# Used by the Cloud Run Job defined in infra/gcp/staging/migrate-job.yaml.
+# db-apply.sh uses python3 (DATABASE_URL parsing) and psql (execution).
+
+FROM python:3.12-slim
+
+LABEL org.opencontainers.image.source="drts-fleet-platform" \
+      org.opencontainers.image.title="drts-migrate" \
+      org.opencontainers.image.description="DRTS Phase1 DB migration runner"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-client && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY scripts/db-apply.sh  scripts/db-apply.sh
+COPY scripts/db-common.sh scripts/db-common.sh
+COPY infra/migrations/    infra/migrations/
+
+RUN chmod +x scripts/db-apply.sh scripts/db-common.sh
+
+ENTRYPOINT ["bash", "scripts/db-apply.sh"]
