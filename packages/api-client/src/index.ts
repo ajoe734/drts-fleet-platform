@@ -484,8 +484,8 @@ export class ApiClient {
     return this.post("/api/tenant/users", { body: command });
   }
 
-  async updateTenantRole(command: UpdateTenantRoleCommand) {
-    return this.post("/api/tenant/roles", { body: command });
+  async updateTenantRole(userId: string, command: UpdateTenantRoleCommand) {
+    return this.post(`/api/tenant/users/${userId}/role`, { body: command });
   }
 
   async listAuditLogs() {

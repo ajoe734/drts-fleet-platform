@@ -10,6 +10,7 @@ import {
   ScrollView,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { PlatformBinding } from "@/components/platform-binding";
 import { getDriverClient } from "@/lib/api-client";
 
 export default function SettingsScreen() {
