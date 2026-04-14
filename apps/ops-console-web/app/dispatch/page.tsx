@@ -22,8 +22,8 @@ export default async function DispatchPage() {
   return (
     <main className="app-grid">
       <AppShellCard
-        title="Dispatch Workflow"
-        description="Manual dispatch scheduling, candidate selection, and queue handling."
+        title="Dispatch Console"
+        description="Schedule dispatch, candidate selection, queue management, and redispatch handling."
       >
         {error && (
           <div className="error-banner p-4 bg-red-100 text-red-800 rounded mb-4">

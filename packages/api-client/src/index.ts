@@ -54,6 +54,11 @@ import type {
   VehicleRegistryRecord,
   FeatureFlag,
   FeatureFlagSummary,
+  DispatchJobRecord,
+  DispatchCandidate,
+  AssignDispatchCommand,
+  CancelOwnedOrderCommand,
+  UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -198,6 +203,14 @@ export class ApiClient {
     return this.get(`/api/orders/${id}`);
   }
 
+  async cancelOrder(id: string, command: CancelOwnedOrderCommand) {
+    return this.post(`/api/orders/${id}/cancel`, { body: command });
+  }
+
+  async updateOrder(id: string, command: UpdateTenantBookingCommand) {
+    return this.patch(`/api/orders/${id}`, { body: command });
+  }
+
   // ── Owned Mobility: Call Center ──
 
   async createCallCenterOrder(command: CreateCallCenterOrderCommand) {
@@ -218,6 +231,34 @@ export class ApiClient {
 
   async redispatchOrder(orderId: string) {
     return this.post(`/api/orders/${orderId}/redispatch`);
+  }
+
+  async listDispatchJobs(): Promise<DispatchJobRecord[]> {
+    const res = await this.get<ListEnvelope<DispatchJobRecord>>(
+      "/api/dispatch/tasks",
+    );
+    return res.items ?? [];
+  }
+
+  async listDispatchCandidates(
+    dispatchJobId: string,
+  ): Promise<DispatchCandidate[]> {
+    const res = await this.get<ListEnvelope<DispatchCandidate>>(
+      `/api/dispatch/tasks/${dispatchJobId}/candidates`,
+    );
+    return res.items ?? [];
+  }
+
+  async assignDispatch(command: AssignDispatchCommand) {
+    return this.post("/api/dispatch/assign", { body: command });
+  }
+
+  async queueCheckIn(command: { vehicleId: string; siteId: string }) {
+    return this.post("/api/dispatch/queue/check-in", { body: command });
+  }
+
+  async queueCheckOut(command: { vehicleId: string; siteId: string }) {
+    return this.post("/api/dispatch/queue/check-out", { body: command });
   }
 
   // ── Owned Mobility: Driver Tasks ──

@@ -89,10 +89,16 @@ export default async function HomePage() {
         </div>
         <div className="route-list">
           {moduleStatus.booking && (
-            <Link className="route-link" href="/booking-list">
-              <strong>Booking List</strong>
-              View and manage tenant bookings.
-            </Link>
+            <>
+              <Link className="route-link" href="/booking-list">
+                <strong>Booking List</strong>
+                View and manage tenant bookings.
+              </Link>
+              <Link className="route-link" href="/bookings/new">
+                <strong>New Booking</strong>
+                Create a business dispatch reservation.
+              </Link>
+            </>
           )}
           {moduleStatus.billing && (
             <Link className="route-link" href="/billing">
