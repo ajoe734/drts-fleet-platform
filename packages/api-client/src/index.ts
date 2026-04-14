@@ -121,6 +121,13 @@ export class ApiClient {
     return this.request<T>("PATCH", path, options);
   }
 
+  /**
+   * Generic DELETE with envelope unwrapping.
+   */
+  async delete<T>(path: string, options?: RequestOptions): Promise<T> {
+    return this.request<T>("DELETE", path, options);
+  }
+
   private async getList<T>(
     path: string,
     options?: RequestOptions,
@@ -343,8 +350,13 @@ export class ApiClient {
     return this.post("/api/tenant/invoices/generate");
   }
 
-  async listDriverStatements(): Promise<DriverStatementRecord[]> {
-    return this.getList<DriverStatementRecord>("/api/driver-statements");
+  async listDriverStatements(
+    period?: string,
+  ): Promise<DriverStatementRecord[]> {
+    const url = period
+      ? `/api/driver-statements?period=${encodeURIComponent(period)}`
+      : "/api/driver-statements";
+    return this.getList<DriverStatementRecord>(url);
   }
 
   // ── Platform Presence ──
@@ -375,10 +387,13 @@ export class ApiClient {
     return this.get<PlatformEarningsSummary>("/api/platform-earnings/summary");
   }
 
-  async getPlatformEarningsByPlatform(): Promise<PlatformEarningsByPlatformResponse> {
-    return this.get<PlatformEarningsByPlatformResponse>(
-      "/api/platform-earnings/by-platform",
-    );
+  async getPlatformEarningsByPlatform(
+    period?: string,
+  ): Promise<PlatformEarningsByPlatformResponse> {
+    const url = period
+      ? `/api/platform-earnings/by-platform?period=${encodeURIComponent(period)}`
+      : "/api/platform-earnings/by-platform";
+    return this.get<PlatformEarningsByPlatformResponse>(url);
   }
 
   // ── Reporting & Filing ──
@@ -443,6 +458,10 @@ export class ApiClient {
 
   async listNotifications(): Promise<NotificationRecord[]> {
     return this.getList<NotificationRecord>("/api/notifications");
+  }
+
+  async getNotificationPreferences() {
+    return this.get("/api/tenant/notifications");
   }
 
   async updateNotifications(command: UpdateTenantNotificationsCommand) {
@@ -542,6 +561,18 @@ export class ApiClient {
 
   async createMaintenance(command: any) {
     return this.post("/api/maintenance", { body: command });
+  }
+
+  async getMaintenance(maintenanceId: string) {
+    return this.get(`/api/maintenance/${maintenanceId}`);
+  }
+
+  async updateMaintenance(maintenanceId: string, command: any) {
+    return this.patch(`/api/maintenance/${maintenanceId}`, { body: command });
+  }
+
+  async deleteMaintenance(maintenanceId: string) {
+    return this.delete(`/api/maintenance/${maintenanceId}`);
   }
 
   async listShifts(driverId?: string): Promise<ShiftRecord[]> {

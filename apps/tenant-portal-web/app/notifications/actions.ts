@@ -2,7 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { getTenantClient } from "@/lib/api-client";
-import type { TenantNotificationSubscription } from "@drts/contracts";
+import type {
+  TenantNotificationPreferences,
+  TenantNotificationSubscription,
+} from "@drts/contracts";
 
 const EVENT_TYPES = [
   "booking_confirmed",
@@ -28,33 +31,47 @@ export interface PreferenceRow {
   enabled: boolean;
 }
 
+function buildDefaultPreferences(): PreferenceRow[] {
+  const preferences: PreferenceRow[] = [];
+  for (const eventType of EVENT_TYPES) {
+    for (const channel of CHANNELS) {
+      preferences.push({
+        eventType,
+        channel,
+        enabled: false,
+      });
+    }
+  }
+  return preferences;
+}
+
+function preferencesFromApi(
+  apiPrefs: TenantNotificationPreferences,
+): PreferenceRow[] {
+  return apiPrefs.subscriptions.map((sub) => ({
+    eventType: sub.eventType,
+    channel: sub.channel,
+    enabled: sub.enabled,
+  }));
+}
+
 export async function getNotificationPreferences(): Promise<{
   preferences: PreferenceRow[];
   error: string | null;
 }> {
   const client = getTenantClient();
   try {
-    // listNotifications returns NotificationRecord[]; we build a preference
-    // matrix from the full event-type x channel cross product. The API may
-    // return empty or partial data, so we default everything to disabled.
-    await client.listNotifications();
-
-    // Build default preference matrix
-    const preferences: PreferenceRow[] = [];
-    for (const eventType of EVENT_TYPES) {
-      for (const channel of CHANNELS) {
-        preferences.push({
-          eventType,
-          channel,
-          enabled: false,
-        });
-      }
+    const prefs = (await client.getNotificationPreferences()) as
+      | TenantNotificationPreferences
+      | undefined;
+    if (prefs && prefs.subscriptions) {
+      return { preferences: preferencesFromApi(prefs), error: null };
     }
-
-    return { preferences, error: null };
+    // Fallback to defaults if API returns empty/unexpected
+    return { preferences: buildDefaultPreferences(), error: null };
   } catch (e) {
     return {
-      preferences: [],
+      preferences: buildDefaultPreferences(),
       error: e instanceof Error ? e.message : "Unknown error",
     };
   }
