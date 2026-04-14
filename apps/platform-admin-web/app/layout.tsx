@@ -1,17 +1,18 @@
-import type { Metadata } from "next";
+"use client";
+
 import type { ReactNode } from "react";
-
+import { AdminNav } from "@/components/admin-nav";
 import "./globals.css";
-
-export const metadata: Metadata = {
-  title: "Platform Admin",
-  description: "Bootstrap shell for platform-wide administration.",
-};
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <div className="admin-layout">
+          <AdminNav />
+          <main className="admin-content">{children}</main>
+        </div>
+      </body>
     </html>
   );
 }
