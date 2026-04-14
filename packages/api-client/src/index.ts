@@ -41,6 +41,7 @@ import type {
   TenantPassengerRecord,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
+  WebhookDeliveryRecord,
   UpsertTenantPassengerCommand,
   UpsertTenantAddressCommand,
   IssueTenantApiKeyCommand,
@@ -454,6 +455,24 @@ export class ApiClient {
 
   async createWebhookEndpoint(command: CreateTenantWebhookEndpointCommand) {
     return this.post("/api/tenant/webhooks", { body: command });
+  }
+
+  async deleteWebhookEndpoint(webhookId: string) {
+    return this.delete(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`);
+  }
+
+  async listWebhookDeliveries(
+    webhookId: string,
+  ): Promise<WebhookDeliveryRecord[]> {
+    return this.getList<WebhookDeliveryRecord>(
+      `/api/tenant/webhooks/${encodeURIComponent(webhookId)}/deliveries`,
+    );
+  }
+
+  async revokeApiKey(keyId: string) {
+    return this.post(
+      `/api/tenant/api-keys/${encodeURIComponent(keyId)}/revoke`,
+    );
   }
 
   async listNotifications(): Promise<NotificationRecord[]> {
