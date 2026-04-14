@@ -1,0 +1,600 @@
+{
+  "_meta": {
+    "description": "Append-only archive of completed tasks. Do not edit manually. Maintained by ai_status.py archive command.",
+    "source": "ai-status.json",
+    "archived_at": "2026-04-14T00:00:00Z",
+    "sprint": "2026-04-10-phase1-multi-llm-consensus"
+  },
+  "tasks": [
+    {
+      "id": "W1-004A",
+      "title": "Phase 1 foundation audit-notification slice",
+      "summary_zh": "建立 Phase 1 foundation governance API、append-only audit read model、notification read path 與 contracts scaffold。",
+      "phase": "Wave 1",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": [
+        "packages/contracts/src/index.ts",
+        "apps/api/src/modules/foundation/foundation.controller.ts",
+        "apps/api/src/modules/audit-notification/audit-notification.service.ts",
+        "tests/unit/phase1-foundation.test.ts"
+      ],
+      "acceptance": [],
+      "next": "Finalized Phase 1 foundation audit-notification child slice after review approval.",
+      "last_update": "2026-04-10T15:53:15Z",
+      "helper_parent": "W1-004",
+      "helper_kind": "child_slice",
+      "review_notes_zh": [
+        "contracts 與 foundation endpoints 對齊 Phase 1 hard rules",
+        "audit append-only 與 notification read 路徑已 smoke 驗證",
+        "webhook delivery 與 signed-download policy 仍保留在後續 slice"
+      ]
+    },
+    {
+      "id": "W2-002A",
+      "title": "Owned order-dispatch-driver execution loop",
+      "summary_zh": "建立 owned standard_taxi / business_dispatch 的最小可運行 order、dispatch、driver-task API 與 regulatory eligibility baseline。",
+      "phase": "Wave 2",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": [
+        "packages/contracts/src/index.ts",
+        "apps/api/src/modules/owned-mobility/owned-mobility.service.ts",
+        "apps/api/src/modules/owned-mobility/owned-mobility.controller.ts",
+        "apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts",
+        "tests/unit/owned-mobility.test.ts"
+      ],
+      "acceptance": [
+        "pnpm lint",
+        "pnpm typecheck",
+        "pnpm test:unit",
+        "API runtime smoke on /api/orders /api/dispatch /api/driver/tasks"
+      ],
+      "next": "Finalized the owned order-dispatch-driver execution loop after review approval.",
+      "last_update": "2026-04-10T16:08:45Z",
+      "helper_parent": "W2-002",
+      "helper_kind": "child_slice"
+    },
+    {
+      "id": "W3-001A",
+      "title": "Callcenter and CTI correlation baseline",
+      "summary_zh": "建立 call_session、recording callback、pending-recording phone order 與 CTI 關聯基線。",
+      "phase": "Wave 3",
+      "owner": "Qwen",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": [
+        "apps/api/src/modules/callcenter",
+        "apps/api/src/modules/owned-mobility",
+        "tests/unit/callcenter-cti.test.ts"
+      ],
+      "acceptance": [
+        "pnpm lint",
+        "pnpm typecheck",
+        "pnpm test:unit",
+        "CTI/callcenter runtime smoke"
+      ],
+      "next": "Finalized Wave 3 callcenter/CTI baseline after Claude review approval and full repo validation.",
+      "last_update": "2026-04-11T06:01:18Z",
+      "helper_parent": "W3-001",
+      "helper_kind": "child_slice",
+      "review_notes_zh": [
+        "callcenter session, recording callback, phone order pending-to-ready transition all passed unit and HTTP smoke|contracts imports and exactOptionalPropertyTypes issues were normalized on mainline"
+      ],
+      "review_file": "tests/unit/callcenter.test.ts"
+    },
+    {
+      "id": "W3-001B",
+      "title": "Complaint case lifecycle baseline",
+      "summary_zh": "建立 complaint case、timeline、reopen 與 SLA breach 告警基線。",
+      "phase": "Wave 3",
+      "owner": "Gemini",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": [
+        "apps/api/src/modules/complaint",
+        "tests/unit/complaint.test.ts"
+      ],
+      "acceptance": [
+        "pnpm lint",
+        "pnpm typecheck",
+        "pnpm test:unit",
+        "complaint runtime smoke"
+      ],
+      "next": "Finalized Wave 3 complaint baseline after Claude review approval and full repo validation.",
+      "last_update": "2026-04-11T06:01:18Z",
+      "helper_parent": "W3-001",
+      "helper_kind": "child_slice",
+      "review_notes_zh": [
+        "complaint create/list/get/timeline/reopen/sla-breach behavior passed unit and HTTP smoke|SLA breach stays append-only and does not overwrite the primary complaint status"
+      ],
+      "review_file": "tests/unit/complaint.test.ts"
+    },
+    {
+      "id": "W4-001A",
+      "title": "Billing and settlement baseline",
+      "summary_zh": "建立 tenant billing profile、tenant invoice、driver fee plan、driver statement、reimbursement baseline。",
+      "phase": "Wave 4",
+      "owner": "Gemini",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized Wave 4 billing baseline after Claude review approval and full repo/runtime validation.",
+      "last_update": "2026-04-11T06:10:58Z",
+      "review_notes_zh": [
+        "tenant billing profile, invoice generation, driver statements, reimbursement semantics all passed unit and HTTP smoke|mainline review confirmed fee plan immutability and payout data shape are stable for Wave 4 baseline"
+      ],
+      "review_file": "tests/unit/billing-settlement.test.ts"
+    },
+    {
+      "id": "W5-001A",
+      "title": "Reporting and filing baseline",
+      "summary_zh": "建立 report job、artifact、filing package、manifest/hash baseline。",
+      "phase": "Wave 5",
+      "owner": "Qwen",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized Wave 5 reporting/filing baseline after Claude review approval and full repo/runtime validation.",
+      "last_update": "2026-04-11T06:10:58Z",
+      "review_notes_zh": [
+        "report job, dispatch recording index export, filing package manifest/hash all passed unit and HTTP smoke|mainline review added owned mobility feed wiring so SC-034 works through the root app"
+      ],
+      "review_file": "tests/unit/reporting-filing.test.ts"
+    },
+    {
+      "id": "W6-001A",
+      "title": "Forwarder mirror and relay baseline",
+      "summary_zh": "建立 forwarder adapter、inbound mirror、broadcast relay、accept relay、native status sync baseline。",
+      "phase": "Wave 6",
+      "owner": "Qwen",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized Wave 6 forwarder baseline after Claude review approval and full repo/runtime validation.",
+      "last_update": "2026-04-11T06:15:49Z",
+      "review_notes_zh": [
+        "forwarder mirror, broadcast, accept relay, status sync, and adapter health all passed unit and HTTP smoke|mainline review confirmed forwarded lifecycle stays isolated from owned dispatch and does not create owned assignments"
+      ],
+      "review_file": "tests/unit/forwarder.test.ts"
+    },
+    {
+      "id": "W7-001A",
+      "title": "Persistence and migration alignment",
+      "summary_zh": "把 in-memory Phase 1 slices 落到 PostgreSQL、migration packs、repositories，建立 forward-only persistence 真值。",
+      "phase": "Wave 7",
+      "owner": "Codex",
+      "reviewer": "Qwen",
+      "status": "done",
+      "depends_on": [
+        "W1-004A",
+        "W2-002A",
+        "W3-001A",
+        "W3-001B",
+        "W4-001A",
+        "W5-001A",
+        "W6-001A"
+      ],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized Wave 7 persistence and migration alignment after Qwen review approval. All 8 modules import DatabaseModule, register repositories, rehydrate on init, write through to Postgres. 6 non-blocking observations documented. Zero blocking issues. Validated: 12 test files (60 tests), typecheck, lint all passed.",
+      "last_update": "2026-04-11T12:11:58Z"
+    },
+    {
+      "id": "W7-001B",
+      "title": "Auth and RBAC hardening",
+      "summary_zh": "建立 auth middleware、realm/scope/RBAC enforcement，補 platform/tenant/ops/driver 權限邊界。",
+      "phase": "Wave 7",
+      "owner": "Qwen",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": ["W1-004A", "W2-002A"],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized Wave 7 auth and RBAC hardening baseline after Claude review approval and repo-level validation.",
+      "last_update": "2026-04-11T10:05:18Z",
+      "review_notes_zh": [
+        "bootstrap request identity 會解析 actor, realm, roles, scopes 並保護關鍵 API 群組|缺 headers 或 scope 不足時會回傳結構化 auth error envelope|unit suite 與 API lint/typecheck 已通過"
+      ],
+      "review_file": "apps/api/tests/unit/auth-bootstrap.test.ts"
+    },
+    {
+      "id": "W8-001A",
+      "title": "Client integration and feature-flag rollout",
+      "summary_zh": "將 tenant portal、ops console、driver app 接上 Phase 1 API，補 feature flags、read models 與 smoke paths。",
+      "phase": "Wave 8",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": ["W7-001A", "W7-001B", "W7-001C"],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized Wave 8 client integration and feature-flag rollout after Claude review approval. Tenant portal, ops console, and driver app are wired to Phase 1 API/runtime truth; tenant override readback works through getAll/getByKey/isEnabled; centralized getList() envelope unwrapping covers client surfaces; ops callcenter and complaint pages are API-backed; 16/16 client-integration tests passed. Non-blocking cleanup note: redundant .items fallback remains harmless in two ops pages.",
+      "last_update": "2026-04-11T22:46:12Z"
+    },
+    {
+      "id": "W8-001B",
+      "title": "Backfill, UAT, and rollout packs",
+      "summary_zh": "建立 backfill、UAT、pilot、production rollout runbooks 與驗證腳本。",
+      "phase": "Wave 8",
+      "owner": "Codex",
+      "reviewer": "Qwen",
+      "status": "done",
+      "depends_on": ["W7-001A", "W7-001B", "W7-001C"],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized Wave 8 backfill/UAT/rollout packs after Qwen review approval. Revalidated docs/03-runbooks/phase1-rollout.md plus scripts/phase1-rollout-verify.sh, confirmed bash -n clean, and reran root pnpm dry-run entrypoints for backfill, uat, pilot, and production. The repo still documents /api/admin/flags as a manual rollout coordination gap until W8-001A lands.",
+      "last_update": "2026-04-11T12:58:11Z"
+    },
+    {
+      "id": "W7-001C",
+      "title": "Webhook and artifact runtime hardening",
+      "summary_zh": "把 webhook delivery、retry policy、signed download、retention 與 audit evidence 實作成真實 runtime。",
+      "phase": "Wave 7",
+      "owner": "Gemini",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": ["W1-004A", "W5-001A"],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized Wave 7 webhook and artifact runtime hardening baseline after Claude review approval and repo-level validation.",
+      "last_update": "2026-04-11T10:05:18Z",
+      "review_notes_zh": [
+        "webhook endpoint 現在保留 retry policy、rotation history 與 delivery runtime metadata|artifact 與 invoice download 已統一走 controlled signing metadata|targeted unit tests 與 API lint/typecheck 已通過"
+      ],
+      "review_file": "tests/unit/tenant-partner-foundation.test.ts"
+    },
+    {
+      "id": "W7-001D",
+      "title": "Wire contract and async job conformance",
+      "summary_zh": "將 API、webhook、download、report、filing 的 wire contract 正規化為 canonical snake_case，並補齊 async job 邊界與序列化一致性。",
+      "phase": "Wave 7",
+      "owner": "Claude",
+      "reviewer": "Codex",
+      "status": "done",
+      "depends_on": ["W1-004A", "W5-001A", "W7-001C"],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized Wave 7 wire contract and async job conformance after Codex review approval. Global SnakeCaseExceptionFilter wired for guard/service error paths; SnakeCaseInterceptor retained for success responses. Both HTTP wire paths (success + error) now serialize canonical snake_case. Validated: wire-contract-conformance tests, snake-case-runtime tests, pnpm lint, and @drts/api typecheck all passed.",
+      "last_update": "2026-04-11T11:42:07Z",
+      "review_notes_zh": [
+        "補上全域 SnakeCaseExceptionFilter，讓 guard/service 的 HttpException 與 ApiRequestError 也輸出 canonical snake_case",
+        "保留 APP_INTERCEPTOR 處理成功回應，success/error 兩條 HTTP wire path 現在都對齊 W7-001D 目標",
+        "驗證完成：tests/unit/wire-contract-conformance.test.ts、apps/api/tests/unit/snake-case-runtime.test.ts、pnpm run lint、pnpm --filter @drts/api typecheck 全數通過"
+      ],
+      "review_file": "apps/api/tests/unit/snake-case-runtime.test.ts"
+    },
+    {
+      "id": "W8-001C",
+      "title": "Dispatch and booking target-state completion",
+      "summary_zh": "補齊 reservation scheduler、queue/rank、owned order cancel、booking update/cancel 與 business_dispatch 目標流程，讓派單與預約語意符合 Phase 1 規格。",
+      "phase": "Wave 8",
+      "owner": "Codex",
+      "reviewer": "Qwen",
+      "status": "done",
+      "depends_on": ["W7-001A", "W7-001B", "W7-001D"],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized W8-001C dispatch and booking target-state completion after Qwen review approval. Owned-mobility now supports tenant booking list/get/update/cancel with SLA windows, passenger order cancel with dispatch state cleanup, reservation hold + escalation semantics (redispatch_queue vs exception_hold), and dispatch queue check-in/check-out with persisted trace events. Validated with pnpm test:unit (69 tests), pnpm --filter @drts/api typecheck, and targeted eslint on owned-mobility files.",
+      "last_update": "2026-04-11T13:20:33Z"
+    },
+    {
+      "id": "W8-001D",
+      "title": "Tenant, regulatory, and admin source-of-truth completion",
+      "summary_zh": "補齊 tenant/partner、regulatory、platform admin 的 canonical 主資料責任，包含 passenger/address book、tenant roles/api keys、contract/insurance/exclusivity、placard/public-info versioning 等。",
+      "phase": "Wave 8",
+      "owner": "Codex",
+      "reviewer": "Qwen",
+      "status": "done",
+      "depends_on": ["W7-001A", "W7-001B"],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Finalized Wave 8 tenant, regulatory, and admin source-of-truth completion after Qwen review approval and full repo validation. Tenant-partner owns passengers, addresses, tenant users/roles, API keys, webhook metadata, SLA profiles, and audit writes. Regulatory-registry owns contract, insurance, exclusivity runtime truth with eligibility flag updates. Platform-admin owns public-info versioning and placard versioning APIs with immutable publish audit. V0013 snapshot migration added. All 64 unit tests, typecheck, and lint passed.",
+      "last_update": "2026-04-11T12:50:25Z"
+    },
+    {
+      "id": "W8-001E",
+      "title": "Ops and driver domain completion",
+      "summary_zh": "補齊 ops 與 driver domain 的 Phase 1 目標流程，包含 incident、maintenance、shift/attendance、driver earnings/settings 以及對應 read models 與操作面。",
+      "phase": "Wave 8",
+      "owner": "Qwen",
+      "reviewer": "Codex",
+      "status": "done",
+      "depends_on": ["W7-001A", "W7-001B", "W7-001D"],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Owner finalized approved task and closed it",
+      "last_update": "2026-04-13T17:27:17Z",
+      "evidence_refs": [
+        ".orchestrator/evidence/claude-20260413T171510Z-c5d890a7.json"
+      ],
+      "review_notes_zh": [
+        "1) 單元測試 113/113 全綠（pnpm test:unit）",
+        "2) API client updateIncident 已改用 PATCH；IncidentController 也提供 @Patch（packages/api-client/src/index.ts:451, apps/api/src/modules/incident/incident.controller.ts）",
+        "3) Driver earnings 畫面已改用 statementId 與正確欄位（apps/driver-app/app/earnings.tsx）",
+        "4) Ops Maintenance 欄位映射與回傳型別一致（apps/ops-console-web/app/maintenance/page.tsx）",
+        "5) 備註：root typecheck:root 仍會因測試匯入 Nest 檔案而報 decorators 錯誤；套件內（apps/api）typecheck 皆通過，建議後續於根 tsconfig 開啟 experimentalDecorators 或避免在 tests 直接匯入裝飾器來源──此項不阻擋 W8-001E。"
+      ],
+      "commit_hash": "0e0960d",
+      "commit_subject": "feat(w8-001e): finalize ops and driver domain completion",
+      "commit_agent": "Qwen",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-13T17:27:17Z"
+    },
+    {
+      "id": "W7-001A-SIDECAR-ACCEPTANCE",
+      "title": "Prepare W7-001A acceptance packet and dependency map",
+      "summary_zh": "平行支援 W7-001A，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。",
+      "phase": "Wave 7",
+      "owner": "Qwen",
+      "reviewer": "Codex",
+      "status": "done",
+      "depends_on": [
+        "W1-004A",
+        "W2-002A",
+        "W3-001A",
+        "W3-001B",
+        "W4-001A",
+        "W5-001A",
+        "W6-001A"
+      ],
+      "artifacts": ["support/sidecars/W7-001A/W7-001A-SIDECAR-ACCEPTANCE.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Finalized W7-001A acceptance packet: verified migration V0001-V0011, audited persistence gaps, mapped dependencies, and documented execution order for remaining runtime modules. Packet approved as support artifact for parent-task planning.",
+      "last_update": "2026-04-11T11:18:29Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "W7-001A",
+      "helper_kind": "acceptance_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization",
+      "review_notes_zh": [
+        "修正 migration 計數為 V0001–V0011，並標明 V0011 phase1 runtime snapshot tables 已在 repo 生效",
+        "callcenter、complaint、owned-mobility 已有 repository stub，但尚未接入 DatabaseModule 與 service runtime",
+        "product-rule 為靜態 catalog，不列入 W7-001A persistence backlog；W7-001D 目前為 in_progress"
+      ],
+      "review_file": "support/sidecars/W7-001A/W7-001A-SIDECAR-ACCEPTANCE.md"
+    },
+    {
+      "id": "W7-001D-SIDECAR-ACCEPTANCE",
+      "title": "Prepare W7-001D acceptance packet and dependency map",
+      "summary_zh": "平行支援 W7-001D，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。",
+      "phase": "Wave 7",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": ["W1-004A", "W5-001A", "W7-001C"],
+      "artifacts": ["support/sidecars/W7-001D/W7-001D-SIDECAR-ACCEPTANCE.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Closed the obsolete acceptance sidecar after reviewer approval. The parent task already shipped with sufficient evidence, and the stale Copilot inbox fallback no longer needs to stay pending.",
+      "last_update": "2026-04-11T11:55:52Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "W7-001D",
+      "helper_kind": "acceptance_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization"
+    },
+    {
+      "id": "W7-001D-SIDECAR-REVIEW",
+      "title": "Prepare W7-001D review packet and evidence summary",
+      "summary_zh": "平行支援 W7-001D，先整理 review packet、evidence summary 與 reviewer handoff，不改 canonical truth。",
+      "phase": "Wave 7",
+      "owner": "Qwen",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": ["W1-004A", "W5-001A", "W7-001C"],
+      "artifacts": ["support/sidecars/W7-001D/W7-001D-SIDECAR-REVIEW.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Sidecar review packet approved by Claude. All 4 W7-001D deliverables verified correct. Parent W7-001D ready for Codex primary review.",
+      "last_update": "2026-04-11T11:42:17Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "W7-001D",
+      "helper_kind": "review_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization"
+    },
+    {
+      "id": "W7-001A-SIDECAR-REVIEW",
+      "title": "Prepare W7-001A review packet and evidence summary",
+      "summary_zh": "平行支援 W7-001A，先整理 review packet、evidence summary 與 reviewer handoff，不改 canonical truth。",
+      "phase": "Wave 7",
+      "owner": "Qwen",
+      "reviewer": "Codex",
+      "status": "done",
+      "depends_on": [
+        "W1-004A",
+        "W2-002A",
+        "W3-001A",
+        "W3-001B",
+        "W4-001A",
+        "W5-001A",
+        "W6-001A"
+      ],
+      "artifacts": ["support/sidecars/W7-001A/W7-001A-SIDECAR-REVIEW.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Closed W7-001A sidecar review after parent task W7-001A was approved and finalized. Sidecar review packet served its purpose as support artifact.",
+      "last_update": "2026-04-11T12:12:41Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "W7-001A",
+      "helper_kind": "review_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization",
+      "review_notes_zh": [
+        "修正 packet 對 V0012 與 parent reviewer 的過時描述|重新驗證 pnpm test:unit、@drts/api typecheck、pnpm run lint 全數通過|此 sidecar 為 support artifact，未修改 canonical/runtime 檔案"
+      ],
+      "review_file": "support/sidecars/W7-001A/W7-001A-SIDECAR-REVIEW.md"
+    },
+    {
+      "id": "W8-001C-SIDECAR-ACCEPTANCE",
+      "title": "Prepare W8-001C acceptance packet and dependency map",
+      "summary_zh": "平行支援 W8-001C，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。",
+      "phase": "Wave 8",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": ["W7-001A", "W7-001B", "W7-001D"],
+      "artifacts": ["support/sidecars/W8-001C/W8-001C-SIDECAR-ACCEPTANCE.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Closed the obsolete acceptance sidecar after reviewer approval. The stale Copilot inbox fallback no longer needs to remain visible in execution state.",
+      "last_update": "2026-04-11T14:28:13Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "W8-001C",
+      "helper_kind": "acceptance_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization"
+    },
+    {
+      "id": "W8-001A-SIDECAR-ACCEPTANCE",
+      "title": "Prepare W8-001A acceptance packet and dependency map",
+      "summary_zh": "平行支援 W8-001A，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。",
+      "phase": "Wave 8",
+      "owner": "Codex",
+      "reviewer": "Qwen",
+      "status": "done",
+      "depends_on": ["W7-001A", "W7-001B", "W7-001C"],
+      "artifacts": ["support/sidecars/W8-001A/W8-001A-SIDECAR-ACCEPTANCE.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Closed the W8-001A acceptance sidecar after reviewer approval. The packet remains as support evidence while the parent integration task stays active.",
+      "last_update": "2026-04-11T14:28:26Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "W8-001A",
+      "helper_kind": "acceptance_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization"
+    },
+    {
+      "id": "W8-001E-SIDECAR-ACCEPTANCE",
+      "title": "Prepare W8-001E acceptance packet and dependency map",
+      "summary_zh": "平行支援 W8-001E，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。",
+      "phase": "Wave 8",
+      "owner": "Codex",
+      "reviewer": "Qwen",
+      "status": "done",
+      "depends_on": ["W7-001A", "W7-001B", "W7-001D"],
+      "artifacts": ["support/sidecars/W8-001E/W8-001E-SIDECAR-ACCEPTANCE.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Closed the W8-001E acceptance sidecar after reviewer approval. The support packet stays in place, but the helper no longer needs to occupy an active execution lane.",
+      "last_update": "2026-04-11T14:28:31Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "W8-001E",
+      "helper_kind": "acceptance_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization"
+    },
+    {
+      "id": "W8-001A-SIDECAR-REVIEW",
+      "title": "Prepare W8-001A review packet and evidence summary",
+      "summary_zh": "平行支援 W8-001A，先整理 review packet、evidence summary 與 reviewer handoff，不改 canonical truth。",
+      "phase": "Wave 8",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "done",
+      "depends_on": ["W7-001A", "W7-001B", "W7-001C"],
+      "artifacts": ["support/sidecars/W8-001A/W8-001A-SIDECAR-REVIEW.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Closed the W8-001A review sidecar after Claude approval. The packet remains as support evidence that the original rollout blockers were closed; parent W8-001A continues as a separate owner-level closeout decision.",
+      "last_update": "2026-04-11T22:45:18Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "W8-001A",
+      "helper_kind": "review_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization"
+    },
+    {
+      "id": "RGP-002",
+      "title": "Produce durable cross-repo authority map",
+      "summary_zh": "整理 drts-fleet-platform 與 tenant-commute-hub 的 authority boundary、contract consumption 規則與禁止權責外溢的說明文件。",
+      "phase": "Wave 9",
+      "owner": "Qwen",
+      "reviewer": "Codex",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": ["docs/02-architecture/authority/rgp-002-authority-map.md"],
+      "acceptance": [
+        "cross-repo authority map 明確列出 source of truth、contract producer / consumer 與 forbidden authority leaks",
+        "文件可被 onboarding 與後續 reopen / annex 工作直接引用",
+        "內容與 accepted consensus packet 中的邊界決議一致"
+      ],
+      "next": "Finalized cross-repo authority map at docs/02-architecture/authority/rgp-002-authority-map.md",
+      "last_update": "2026-04-13T17:17:57Z",
+      "commit_hash": "8a0b682f45b403b48a3abb1f9100415e1d19a092",
+      "commit_subject": "docs(RGP-002): add cross-repo authority map for drts-fleet-platform vs tenant-commute-hub",
+      "commit_agent": "Qwen",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-13T17:17:57Z"
+    },
+    {
+      "id": "RGX-008",
+      "title": "Correct repo-facing status docs to match machine truth",
+      "summary_zh": "修正 README、docs-site onboarding 與 control-plane 狀態文件，讓文件描述與目前 machine truth、accepted planning session 一致。",
+      "phase": "Wave 9",
+      "owner": "Codex",
+      "reviewer": "Qwen",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": [],
+      "acceptance": [],
+      "next": "Owner finalized approved task and closed it",
+      "last_update": "2026-04-13T17:23:17Z",
+      "review_notes_zh": [
+        "審查通過｜README Status 區塊原仍聲稱 discussion_planning 模式，已由 reviewer 修正為 supervisor_managed_execution 並對齊 accepted planning session 20260413T025550Z-repo-gap-reassessment-v3；docs-site mirror 已透過 sync-state 重新生成；current-work.md 無矛盾。回到 Codex 收尾。"
+      ],
+      "commit_hash": "b176593",
+      "commit_subject": "docs(RGX-008): correct README to reflect supervisor_managed_execution mode",
+      "commit_agent": "Codex",
+      "commit_reviewer": "Qwen",
+      "commit_recorded_at": "2026-04-13T17:23:17Z"
+    }
+  ]
+}

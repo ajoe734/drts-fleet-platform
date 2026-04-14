@@ -2022,7 +2022,7 @@ def build_catalog_sidecar_candidates(
                 continue
             if str(parent.get("status") or "").lower() == "done":
                 continue
-            if any(str(task_map.get(dep, {}).get("status") or "").lower() not in dependency_done_statuses for dep in activation_dependencies):
+            if any((lambda d: d is not None and str(d.get("status") or "").lower() not in dependency_done_statuses)(task_map.get(dep)) for dep in activation_dependencies):
                 continue
             signature = f"{parent_id}:{kind}"
             if signature in existing_signatures:
@@ -2091,7 +2091,7 @@ def build_dynamic_sidecar_candidates(
         activation_dependencies = [
             dep_id
             for dep_id in (parent.get("depends_on") or [])
-            if str(task_map.get(dep_id, {}).get("status") or "").lower() in dependency_done_statuses
+            if task_map.get(dep_id) is None or str(task_map.get(dep_id, {}).get("status") or "").lower() in dependency_done_statuses
         ]
         if kind == "bff_handoff_packet" and parent.get("depends_on") and not activation_dependencies:
             continue
@@ -2194,7 +2194,11 @@ def redispatch_candidate_statuses(config: dict[str, Any]) -> set[str]:
 
 def dependencies_satisfied(task: dict[str, Any], task_map: dict[str, dict[str, Any]], done_statuses: set[str]) -> bool:
     for dep_id in task.get("depends_on", []) or []:
-        dep_status = str(task_map.get(dep_id, {}).get("status") or "").lower()
+        dep = task_map.get(dep_id)
+        if dep is None:
+            # Not in active task_map — treat as archived/done (consistent with ai_status.py)
+            continue
+        dep_status = str(dep.get("status") or "").lower()
         if dep_status not in done_statuses:
             return False
     return True
@@ -2203,7 +2207,8 @@ def dependencies_satisfied(task: dict[str, Any], task_map: dict[str, dict[str, A
 def task_dependency_signature(task: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> str:
     parts: list[str] = []
     for dep_id in task.get("depends_on", []) or []:
-        dep_status = str(task_map.get(dep_id, {}).get("status") or "missing")
+        dep = task_map.get(dep_id)
+        dep_status = str(dep.get("status") or "missing") if dep is not None else "archived"
         parts.append(f"{dep_id}:{dep_status}")
     return "|".join(parts)
 

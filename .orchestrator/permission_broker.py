@@ -89,6 +89,25 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^lsof -i:"),
     re.compile(r"^kill \d+"),
     re.compile(r"^pkill -f supervisor\.py"),
+    # file operations
+    re.compile(r"^cp(\s|$)"),
+    re.compile(r"^mv(\s|$)"),
+    re.compile(r"^mkdir(\s|$)"),
+    re.compile(r"^touch(\s|$)"),
+    re.compile(r"^rm(\s|$)"),
+    # node / pnpm / npx development commands
+    re.compile(r"^node(\s|$)"),
+    re.compile(r"^pnpm(\s|$)"),
+    re.compile(r"^npx(\s|$)"),
+    re.compile(r"^tsc(\s|$)"),
+    re.compile(r"^vitest(\s|$)"),
+    re.compile(r"^jest(\s|$)"),
+    re.compile(r"^cd .+ && pnpm(\s|$)"),
+    re.compile(r"^cd .+ && npx(\s|$)"),
+    re.compile(r"^cd .+ && node(\s|$)"),
+    re.compile(r"^git (add|commit|checkout|fetch|pull|stash)(\s|$)"),
+    re.compile(r"^gh(\s|$)"),
+    re.compile(r"^bash(\s|$)"),
 ]
 DEFER_BASH_PATTERNS = [
     re.compile(r"^git (add|commit|remote set-url|submodule)(\s|$)"),

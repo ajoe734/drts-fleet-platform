@@ -906,6 +906,11 @@ export interface PublicInfoVersionRecord {
   updatedAt: string;
 }
 
+// platform presence contracts
+export * from "./platform-presence";
+// platform earnings contracts
+export * from "./platform-earnings";
+
 export interface CreatePublicInfoVersionCommand {
   title: string;
   callPhone?: string | null;

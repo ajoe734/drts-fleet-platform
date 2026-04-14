@@ -2,6 +2,7 @@
 
 export const DATA_FILES = {
   status: "./ai-status.json",
+  taskArchive: "./ai-task-archive.json",
   activity: "./ai-activity-log.jsonl",
   currentWork: "./current-work.md",
   orchestratorState: "./orchestrator-state.json",

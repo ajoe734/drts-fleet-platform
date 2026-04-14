@@ -18,6 +18,8 @@ import { IncidentModule } from "./modules/incident/incident.module";
 import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
 import { OwnedMobilityModule } from "./modules/owned-mobility/owned-mobility.module";
 import { PlatformAdminModule } from "./modules/platform-admin/platform-admin.module";
+import { PlatformPresenceModule } from "./modules/platform-presence/platform-presence.module";
+import { PlatformEarningsModule } from "./modules/platform-earnings/platform-earnings.module";
 import { ProductRuleModule } from "./modules/product-rule/product-rule.module";
 import { RegulatoryRegistryModule } from "./modules/regulatory-registry/regulatory-registry.module";
 import { ReportingFilingModule } from "./modules/reporting-filing/reporting-filing.module";
@@ -45,6 +47,8 @@ import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.mod
     MaintenanceModule,
     ShiftAttendanceModule,
     DriverSettingsModule,
+    PlatformPresenceModule,
+    PlatformEarningsModule,
   ],
   providers: [
     {
