@@ -6,6 +6,11 @@ set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 SMOKE_API_URL="${SMOKE_API_URL:-http://localhost:3001}"
+# Path prefix prepended to every path passed to http_call.
+# The NestJS app mounts all non-health routes under the global prefix /api
+# (see apps/api/src/main.ts: app.setGlobalPrefix("api", { exclude: ["health"] })).
+# Set to empty string only when the ingress layer already strips the prefix.
+SMOKE_API_PATH_PREFIX="${SMOKE_API_PATH_PREFIX:-/api}"
 SMOKE_AUTH_TOKEN="${SMOKE_AUTH_TOKEN:-}"          # Bearer token — obtain via POST /api/auth/login before running
 SMOKE_TENANT_ID="${SMOKE_TENANT_ID:-tenant-demo-001}"
 SMOKE_DRIVER_ID="${SMOKE_DRIVER_ID:-drv-demo-001}"
@@ -58,7 +63,7 @@ http_call() {
   fi
 
   local raw
-  raw=$(curl "${curl_args[@]}" "${SMOKE_API_URL}${path}" 2>&1)
+  raw=$(curl "${curl_args[@]}" "${SMOKE_API_URL}${SMOKE_API_PATH_PREFIX}${path}" 2>&1)
 
   RESP_STATUS=$(echo "$raw" | grep -o '__HTTP_STATUS__[0-9]*' | sed 's/__HTTP_STATUS__//')
   RESP_BODY=$(echo "$raw" | sed '/^__HTTP_STATUS__/d')
