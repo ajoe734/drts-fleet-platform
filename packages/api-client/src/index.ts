@@ -14,6 +14,8 @@ import type {
   ClockOutCommand,
   ComplaintCaseRecord,
   CreateOwnedOrderCommand,
+  CreatePlatformPricingRuleCommand,
+  CreatePlatformTenantCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
   CreateTenantBookingCommand,
@@ -35,10 +37,12 @@ import type {
   NotificationRecord,
   OwnedOrderRecord,
   PlacardVersionRecord,
+  PlatformAdminTenantRecord,
   PlatformAdminUserRecord,
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
   PlatformPricingRuleRecord,
+  PublishPlatformPricingRuleCommand,
   PublicInfoVersionRecord,
   ReportJobRecord,
   SetPlatformMaintenanceModeCommand,
@@ -55,6 +59,7 @@ import type {
   IssueTenantApiKeyCommand,
   RotateTenantApiKeyCommand,
   UpdatePlatformAdminUserRoleCommand,
+  UpdatePlatformTenantSettingsCommand,
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
   UpdateTenantNotificationsCommand,
@@ -621,6 +626,30 @@ export class ApiClient {
     return this.getList<PlacardVersionRecord>("/api/platform-admin/placards");
   }
 
+  async listPlatformTenants(): Promise<PlatformAdminTenantRecord[]> {
+    return this.getList<PlatformAdminTenantRecord>(
+      "/api/platform-admin/tenants",
+    );
+  }
+
+  async createPlatformTenant(
+    command: CreatePlatformTenantCommand,
+  ): Promise<PlatformAdminTenantRecord> {
+    return this.post<PlatformAdminTenantRecord>("/api/platform-admin/tenants", {
+      body: command,
+    });
+  }
+
+  async updatePlatformTenantSettings(
+    tenantId: string,
+    command: UpdatePlatformTenantSettingsCommand,
+  ): Promise<PlatformAdminTenantRecord> {
+    return this.post<PlatformAdminTenantRecord>(
+      `/api/platform-admin/tenants/${tenantId}/settings`,
+      { body: command },
+    );
+  }
+
   async listPlatformAdminUsers(): Promise<PlatformAdminUserRecord[]> {
     return this.getList<PlatformAdminUserRecord>("/api/platform-admin/users");
   }
@@ -679,6 +708,25 @@ export class ApiClient {
   async listPlatformPricingRules(): Promise<PlatformPricingRuleRecord[]> {
     return this.getList<PlatformPricingRuleRecord>(
       "/api/platform-admin/pricing-rules",
+    );
+  }
+
+  async createPlatformPricingRule(
+    command: CreatePlatformPricingRuleCommand,
+  ): Promise<PlatformPricingRuleRecord> {
+    return this.post<PlatformPricingRuleRecord>(
+      "/api/platform-admin/pricing-rules",
+      { body: command },
+    );
+  }
+
+  async publishPlatformPricingRule(
+    ruleId: string,
+    command: PublishPlatformPricingRuleCommand,
+  ): Promise<PlatformPricingRuleRecord> {
+    return this.post<PlatformPricingRuleRecord>(
+      `/api/platform-admin/pricing-rules/${ruleId}/publish`,
+      { body: command },
     );
   }
 

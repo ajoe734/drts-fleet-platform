@@ -1,5 +1,10 @@
 import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
+import type {
+  CreatePlatformTenantCommand,
+  UpdatePlatformTenantSettingsCommand,
+} from "@drts/contracts";
+
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { TenantsService } from "./tenants.service";
 import type { TenantSummary } from "./tenants.service";
@@ -16,11 +21,21 @@ export class TenantsController {
 
   @Post("tenants")
   create(
-    @Body() body: { name: string; status?: "active" | "inactive" },
+    @Body() body: CreatePlatformTenantCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const created = this.tenants.create(body);
+    const created = this.tenants.create(body, requestId);
     return toApiSuccessEnvelope(created, requestId);
+  }
+
+  @Post("tenants/:tenantId/settings")
+  updateSettings(
+    @Param("tenantId") tenantId: string,
+    @Body() body: UpdatePlatformTenantSettingsCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const updated = this.tenants.updateSettings(tenantId, body, requestId);
+    return toApiSuccessEnvelope(updated, requestId);
   }
 
   @Post("tenants/:tenantId/suspend")
@@ -28,7 +43,7 @@ export class TenantsController {
     @Param("tenantId") tenantId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setStatus(tenantId, "paused");
+    const updated = this.tenants.setStatus(tenantId, "paused", requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 
@@ -37,7 +52,7 @@ export class TenantsController {
     @Param("tenantId") tenantId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const updated = this.tenants.setStatus(tenantId, "active");
+    const updated = this.tenants.setStatus(tenantId, "active", requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 }

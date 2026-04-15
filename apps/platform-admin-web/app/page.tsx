@@ -38,6 +38,11 @@ const ROUTES = [
     desc: "System health monitoring, forwarder adapter status, and quotas",
   },
   {
+    href: "/notices",
+    title: "Notices & Maintenance",
+    desc: "Platform-wide notices, incident broadcasts, and maintenance mode",
+  },
+  {
     href: "/audit",
     title: "Audit Trail",
     desc: "Platform audit log with filtering and record inspection",

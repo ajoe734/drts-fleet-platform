@@ -20,6 +20,7 @@ export default function AuditPage() {
   const [error, setError] = useState<string | null>(null);
   const [filterModule, setFilterModule] = useState<string>("");
   const [filterActorType, setFilterActorType] = useState<string>("");
+  const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -36,6 +37,8 @@ export default function AuditPage() {
           actionName: r.actionName || r.action || "",
           resourceType: r.resourceType || "",
           resourceId: r.resourceId || null,
+          oldValuesSummary: r.oldValuesSummary || undefined,
+          newValuesSummary: r.newValuesSummary || undefined,
           requestId: r.requestId || "",
           createdAt: r.createdAt || "",
         })) || [];
@@ -167,46 +170,126 @@ export default function AuditPage() {
                 <th>Resource</th>
                 <th>Tenant</th>
                 <th>Created</th>
+                <th>Details</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r) => (
-                <tr key={r.auditId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>
-                    {truncate(r.auditId, 12)}
-                  </td>
-                  <td>
-                    <div style={{ fontSize: 12 }}>
-                      <div>{truncate(r.actorId || "system", 16)}</div>
-                      <span
-                        className="admin-badge admin-badge--neutral"
-                        style={{ fontSize: 10 }}
-                      >
-                        {r.actorType}
+                <React.Fragment key={r.auditId}>
+                  <tr>
+                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>
+                      {truncate(r.auditId, 12)}
+                    </td>
+                    <td>
+                      <div style={{ fontSize: 12 }}>
+                        <div>{truncate(r.actorId || "system", 16)}</div>
+                        <span
+                          className="admin-badge admin-badge--neutral"
+                          style={{ fontSize: 10 }}
+                        >
+                          {r.actorType}
+                        </span>
+                      </div>
+                    </td>
+                    <td>{r.moduleName}</td>
+                    <td>
+                      <span className="admin-badge admin-badge--info">
+                        {r.actionName}
                       </span>
-                    </div>
-                  </td>
-                  <td>{r.moduleName}</td>
-                  <td>
-                    <span className="admin-badge admin-badge--info">
-                      {r.actionName}
-                    </span>
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {r.resourceType}
-                    {r.resourceId ? `:${truncate(r.resourceId, 8)}` : ""}
-                  </td>
-                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>
-                    {r.tenantId || "—"}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {formatDateTime(r.createdAt)}
-                  </td>
-                </tr>
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      {r.resourceType}
+                      {r.resourceId ? `:${truncate(r.resourceId, 8)}` : ""}
+                    </td>
+                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>
+                      {r.tenantId || "—"}
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      {formatDateTime(r.createdAt)}
+                    </td>
+                    <td>
+                      {r.oldValuesSummary || r.newValuesSummary ? (
+                        <button
+                          className="admin-btn admin-btn--secondary admin-btn--sm"
+                          type="button"
+                          onClick={() =>
+                            setExpandedAuditId((current) =>
+                              current === r.auditId ? null : r.auditId,
+                            )
+                          }
+                        >
+                          {expandedAuditId === r.auditId ? "Hide" : "View"}
+                        </button>
+                      ) : (
+                        <span style={{ fontSize: 12, color: "#9ca3af" }}>
+                          —
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                  {expandedAuditId === r.auditId && (
+                    <tr>
+                      <td colSpan={8} style={{ background: "#fafafa" }}>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns:
+                              "repeat(auto-fit, minmax(240px, 1fr))",
+                            gap: 12,
+                          }}
+                        >
+                          <AuditValueCard
+                            title="Old Values"
+                            payload={r.oldValuesSummary}
+                          />
+                          <AuditValueCard
+                            title="New Values"
+                            payload={r.newValuesSummary}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
         </div>
+      )}
+    </div>
+  );
+}
+
+function AuditValueCard({
+  title,
+  payload,
+}: {
+  title: string;
+  payload: Record<string, unknown> | undefined;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid #e5e7eb",
+        borderRadius: 10,
+        padding: 12,
+        background: "#fff",
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>{title}</div>
+      {payload ? (
+        <pre
+          style={{
+            margin: 0,
+            fontSize: 12,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {JSON.stringify(payload, null, 2)}
+        </pre>
+      ) : (
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>No values</span>
       )}
     </div>
   );

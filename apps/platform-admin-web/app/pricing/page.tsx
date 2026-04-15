@@ -1,14 +1,34 @@
 /**
  * Pricing & Split Page
- * Platform-level pricing rules and revenue split configuration.
- * Calls /api/platform-admin/pricing-rules — platform authority only.
+ * Platform-level pricing rules, draft creation, and publish workflow.
  */
 
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
-import type { PlatformPricingRuleRecord } from "@drts/contracts";
+import type {
+  CreatePlatformPricingRuleCommand,
+  PlatformPricingRuleRecord,
+} from "@drts/contracts";
+
+type PricingFormState = {
+  ruleName: string;
+  version: string;
+  serviceFeeBps: string;
+  reimbursementMode: "platform_funded" | "mixed";
+  applicableTo: string;
+  notes: string;
+};
+
+const EMPTY_FORM: PricingFormState = {
+  ruleName: "",
+  version: "",
+  serviceFeeBps: "1500",
+  reimbursementMode: "platform_funded",
+  applicableTo: "all",
+  notes: "",
+};
 
 export default function PricingPage() {
   const client = usePlatformAdminClient();
@@ -18,6 +38,10 @@ export default function PricingPage() {
   const [filter, setFilter] = useState<"all" | "active" | "draft" | "archived">(
     "all",
   );
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState<PricingFormState>(EMPTY_FORM);
+  const [creating, setCreating] = useState(false);
+  const [publishingRuleId, setPublishingRuleId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -33,11 +57,53 @@ export default function PricingPage() {
   }, [client]);
 
   useEffect(() => {
-    loadData();
+    void loadData();
   }, [loadData]);
 
-  const filtered =
-    filter === "all" ? rules : rules.filter((r) => r.status === filter);
+  const filtered = useMemo(
+    () =>
+      filter === "all" ? rules : rules.filter((rule) => rule.status === filter),
+    [filter, rules],
+  );
+
+  const handleCreate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setCreating(true);
+    setError(null);
+    try {
+      const command: CreatePlatformPricingRuleCommand = {
+        ruleName: form.ruleName,
+        version: form.version,
+        serviceFeeBps: Number(form.serviceFeeBps),
+        reimbursementMode: form.reimbursementMode,
+        applicableTo: form.applicableTo.trim() || "all",
+        notes: form.notes,
+      };
+      await client.createPlatformPricingRule(command);
+      setForm(EMPTY_FORM);
+      setShowCreate(false);
+      await loadData();
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handlePublish = async (ruleId: string) => {
+    setPublishingRuleId(ruleId);
+    setError(null);
+    try {
+      await client.publishPlatformPricingRule(ruleId, {
+        publishedBy: "platform-admin-web",
+      });
+      await loadData();
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    } finally {
+      setPublishingRuleId(null);
+    }
+  };
 
   if (loading)
     return <div className="admin-empty">Loading pricing rules...</div>;
@@ -47,8 +113,8 @@ export default function PricingPage() {
       <div className="admin-page-header">
         <h1>Pricing &amp; Split</h1>
         <p>
-          Platform-level pricing rules and revenue split configuration for all
-          tenants.
+          Publish tenant pricing templates with auditable version changes and
+          reimbursement policy.
         </p>
       </div>
 
@@ -63,23 +129,170 @@ export default function PricingPage() {
 
       <div className="admin-toolbar">
         <div className="admin-toggle-group">
-          {(["all", "active", "draft", "archived"] as const).map((f) => (
+          {(["all", "active", "draft", "archived"] as const).map((value) => (
             <button
-              key={f}
-              className={`admin-toggle-btn ${filter === f ? "active" : ""}`}
-              onClick={() => setFilter(f)}
+              key={value}
+              className={`admin-toggle-btn ${filter === value ? "active" : ""}`}
+              onClick={() => setFilter(value)}
             >
-              {f.charAt(0).toUpperCase() + f.slice(1)}
-              {f === "all"
+              {value.charAt(0).toUpperCase() + value.slice(1)}
+              {value === "all"
                 ? ` (${rules.length})`
-                : ` (${rules.filter((r) => r.status === f).length})`}
+                : ` (${rules.filter((rule) => rule.status === value).length})`}
             </button>
           ))}
         </div>
-        <button className="admin-btn admin-btn--secondary" onClick={loadData}>
+        <button
+          className="admin-btn admin-btn--primary"
+          onClick={() => setShowCreate((current) => !current)}
+        >
+          {showCreate ? "Cancel" : "New Draft"}
+        </button>
+        <button
+          className="admin-btn admin-btn--secondary"
+          onClick={() => void loadData()}
+        >
           Refresh
         </button>
       </div>
+
+      {showCreate && (
+        <div className="admin-card" style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
+            Create Draft Pricing Rule
+          </h3>
+          <form onSubmit={handleCreate}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: 12,
+                marginBottom: 16,
+              }}
+            >
+              <label>
+                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                  Rule Name
+                </div>
+                <input
+                  value={form.ruleName}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      ruleName: event.target.value,
+                    }))
+                  }
+                  required
+                  placeholder="Standard Service Fee"
+                  style={inputStyle}
+                />
+              </label>
+              <label>
+                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                  Version
+                </div>
+                <input
+                  value={form.version}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      version: event.target.value,
+                    }))
+                  }
+                  required
+                  placeholder="2026.05"
+                  style={inputStyle}
+                />
+              </label>
+              <label>
+                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                  Applicable To
+                </div>
+                <input
+                  value={form.applicableTo}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      applicableTo: event.target.value,
+                    }))
+                  }
+                  placeholder="all or tenant code"
+                  style={inputStyle}
+                />
+              </label>
+              <label>
+                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                  Service Fee (bps)
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  value={form.serviceFeeBps}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      serviceFeeBps: event.target.value,
+                    }))
+                  }
+                  required
+                  style={inputStyle}
+                />
+              </label>
+              <label>
+                <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                  Reimbursement Mode
+                </div>
+                <select
+                  value={form.reimbursementMode}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      reimbursementMode: event.target
+                        .value as PricingFormState["reimbursementMode"],
+                    }))
+                  }
+                  style={inputStyle}
+                >
+                  <option value="platform_funded">Platform Funded</option>
+                  <option value="mixed">Mixed</option>
+                </select>
+              </label>
+            </div>
+
+            <label style={{ display: "block", marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
+                Notes
+              </div>
+              <textarea
+                value={form.notes}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    notes: event.target.value,
+                  }))
+                }
+                rows={3}
+                placeholder="Describe why this pricing update is needed."
+                style={{
+                  ...inputStyle,
+                  minHeight: 96,
+                  resize: "vertical",
+                }}
+              />
+            </label>
+
+            <button
+              type="submit"
+              className="admin-btn admin-btn--primary"
+              disabled={
+                creating || !form.ruleName.trim() || !form.version.trim()
+              }
+            >
+              {creating ? "Creating..." : "Create Draft"}
+            </button>
+          </form>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <div className="admin-card admin-empty">
@@ -92,65 +305,73 @@ export default function PricingPage() {
               <tr>
                 <th>Rule ID</th>
                 <th>Name</th>
+                <th>Version</th>
                 <th>Service Fee</th>
-                <th>Reimbursement Mode</th>
+                <th>Reimbursement</th>
                 <th>Applicable To</th>
                 <th>Status</th>
-                <th>Effective From</th>
-                <th>Effective To</th>
+                <th>Published</th>
+                <th>Notes</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
-                <tr key={r.ruleId}>
+              {filtered.map((rule) => (
+                <tr key={rule.ruleId}>
                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    {r.ruleId}
+                    {rule.ruleId}
                   </td>
-                  <td>{r.ruleName}</td>
+                  <td>{rule.ruleName}</td>
                   <td>
-                    <code
-                      style={{
-                        fontSize: 13,
-                        background: "#f3f4f6",
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                      }}
-                    >
-                      {(r.serviceFeeBps / 100).toFixed(2)}%
-                    </code>
+                    <code>v{rule.version}</code>
                   </td>
+                  <td>{(rule.serviceFeeBps / 100).toFixed(2)}%</td>
                   <td>
                     <span className="admin-badge admin-badge--info">
-                      {r.reimbursementMode}
+                      {rule.reimbursementMode}
                     </span>
                   </td>
                   <td>
-                    {r.applicableTo === "all" ? (
-                      <span style={{ fontSize: 12, color: "#6b7280" }}>
-                        All Tenants
-                      </span>
-                    ) : (
-                      <code style={{ fontSize: 12 }}>{r.applicableTo}</code>
-                    )}
+                    {rule.applicableTo === "all"
+                      ? "All Tenants"
+                      : rule.applicableTo}
                   </td>
                   <td>
                     <span
                       className={`admin-badge ${
-                        r.status === "active"
+                        rule.status === "active"
                           ? "admin-badge--success"
-                          : r.status === "draft"
+                          : rule.status === "draft"
                             ? "admin-badge--warning"
                             : "admin-badge--neutral"
                       }`}
                     >
-                      {r.status}
+                      {rule.status}
                     </span>
                   </td>
                   <td style={{ fontSize: 12 }}>
-                    {formatDateTime(r.effectiveFrom)}
+                    {rule.publishedAt ? formatDateTime(rule.publishedAt) : "—"}
                   </td>
-                  <td style={{ fontSize: 12 }}>
-                    {r.effectiveTo ? formatDateTime(r.effectiveTo) : "—"}
+                  <td style={{ fontSize: 12, maxWidth: 260 }}>
+                    {rule.notes || "—"}
+                  </td>
+                  <td>
+                    {rule.status === "draft" ? (
+                      <button
+                        className="admin-btn admin-btn--primary admin-btn--sm"
+                        onClick={() => void handlePublish(rule.ruleId)}
+                        disabled={publishingRuleId === rule.ruleId}
+                        type="button"
+                      >
+                        {publishingRuleId === rule.ruleId
+                          ? "Publishing..."
+                          : "Publish"}
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 12, color: "#6b7280" }}>
+                        Published by {rule.publishedBy || "system"}
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -161,3 +382,11 @@ export default function PricingPage() {
     </div>
   );
 }
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "8px 12px",
+  border: "1px solid #d1d5db",
+  borderRadius: 8,
+  fontSize: 14,
+};

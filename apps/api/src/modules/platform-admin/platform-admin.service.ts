@@ -4,6 +4,7 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
@@ -13,6 +14,7 @@ import type {
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
   PlatformPricingRuleRecord,
+  PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
   SetPlatformMaintenanceModeCommand,
@@ -100,24 +102,32 @@ const PLATFORM_PRICING_RULES_SEED: PlatformPricingRuleRecord[] = [
   {
     ruleId: "rule-demo-001",
     ruleName: "Standard Service Fee",
+    version: "2026.04",
     serviceFeeBps: 1500,
     reimbursementMode: "platform_funded",
     applicableTo: "all",
     status: "active",
     effectiveFrom: "2026-01-01T00:00:00.000Z",
     effectiveTo: null,
+    publishedBy: "pa-admin-001",
+    publishedAt: "2026-01-01T00:00:00.000Z",
+    notes: "Baseline fee plan for platform-wide enterprise dispatch tenants.",
     createdAt: "2025-12-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
   },
   {
     ruleId: "rule-demo-002",
     ruleName: "Enterprise Discount Tier",
+    version: "2026.03",
     serviceFeeBps: 1000,
     reimbursementMode: "mixed",
     applicableTo: "t_demo",
     status: "active",
     effectiveFrom: "2026-03-01T00:00:00.000Z",
     effectiveTo: null,
+    publishedBy: "pa-admin-001",
+    publishedAt: "2026-03-01T00:00:00.000Z",
+    notes: "Reduced fee schedule for the demo tenant enterprise program.",
     createdAt: "2026-02-15T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
   },
@@ -586,7 +596,138 @@ export class PlatformAdminService implements OnModuleInit {
   // ── Platform Pricing Rules ────────────────────────────────────────────────
 
   listPlatformPricingRules(): PlatformPricingRuleRecord[] {
-    return this.pricingRules.map((r) => ({ ...r }));
+    return this.pricingRules.map((rule) => this.clonePricingRule(rule));
+  }
+
+  createPlatformPricingRule(
+    command: CreatePlatformPricingRuleCommand,
+    requestId?: string,
+  ): PlatformPricingRuleRecord {
+    this.assertNonBlank(command.ruleName, "ruleName");
+    this.assertNonBlank(command.version, "version");
+
+    const duplicate = this.pricingRules.find(
+      (rule) =>
+        rule.ruleName === command.ruleName.trim() &&
+        rule.version === command.version.trim() &&
+        rule.applicableTo === command.applicableTo,
+    );
+    if (duplicate) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PRICING_RULE_VERSION_CONFLICT",
+        "A pricing rule with this version already exists.",
+        {
+          ruleName: command.ruleName,
+          version: command.version,
+          applicableTo: command.applicableTo,
+        },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const rule: PlatformPricingRuleRecord = {
+      ruleId: `rule_${randomUUID()}`,
+      ruleName: command.ruleName.trim(),
+      version: command.version.trim(),
+      serviceFeeBps: command.serviceFeeBps,
+      reimbursementMode: command.reimbursementMode,
+      applicableTo: command.applicableTo,
+      status: "draft",
+      effectiveFrom: this.normalizeNullableText(command.effectiveFrom) ?? now,
+      effectiveTo: null,
+      publishedBy: null,
+      publishedAt: null,
+      notes: this.normalizeNullableText(command.notes),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.pricingRules = [
+      this.clonePricingRule(rule),
+      ...this.pricingRules.map((existing) => this.clonePricingRule(existing)),
+    ];
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "create_platform_pricing_rule",
+        resourceType: "platform_pricing_rule",
+        resourceId: rule.ruleId,
+        newValuesSummary: {
+          ruleName: rule.ruleName,
+          version: rule.version,
+          applicableTo: rule.applicableTo,
+          serviceFeeBps: rule.serviceFeeBps,
+          status: rule.status,
+        },
+      },
+      requestId,
+    );
+    return this.clonePricingRule(rule);
+  }
+
+  publishPlatformPricingRule(
+    ruleId: string,
+    command: PublishPlatformPricingRuleCommand,
+    requestId?: string,
+  ): PlatformPricingRuleRecord {
+    const rule = this.requirePricingRule(ruleId);
+    const previousActive = this.pricingRules.find(
+      (candidate) =>
+        candidate.ruleId !== rule.ruleId &&
+        candidate.ruleName === rule.ruleName &&
+        candidate.applicableTo === rule.applicableTo &&
+        candidate.status === "active",
+    );
+    const publishedAt = new Date().toISOString();
+
+    if (previousActive) {
+      previousActive.status = "archived";
+      previousActive.effectiveTo =
+        this.normalizeNullableText(command.effectiveFrom) ?? publishedAt;
+      previousActive.updatedAt = publishedAt;
+    }
+
+    rule.status = "active";
+    rule.publishedBy = this.normalizeNullableText(command.publishedBy);
+    rule.publishedAt = publishedAt;
+    rule.effectiveFrom =
+      this.normalizeNullableText(command.effectiveFrom) ?? rule.effectiveFrom;
+    rule.effectiveTo = this.normalizeNullableText(command.effectiveTo);
+    rule.updatedAt = publishedAt;
+
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "publish_platform_pricing_rule",
+        resourceType: "platform_pricing_rule",
+        resourceId: rule.ruleId,
+        ...(previousActive
+          ? {
+              oldValuesSummary: {
+                previousRuleId: previousActive.ruleId,
+                previousVersion: previousActive.version,
+                previousStatus: "active",
+              },
+            }
+          : {}),
+        newValuesSummary: {
+          ruleId: rule.ruleId,
+          version: rule.version,
+          publishedAt,
+          applicableTo: rule.applicableTo,
+        },
+      },
+      requestId,
+    );
+
+    return this.clonePricingRule(rule);
   }
 
   // ── Platform Invoices (cross-tenant view) ─────────────────────────────────
@@ -641,6 +782,23 @@ export class PlatformAdminService implements OnModuleInit {
     return version;
   }
 
+  private requirePricingRule(ruleId: string) {
+    const rule = this.pricingRules.find(
+      (candidate) => candidate.ruleId === ruleId,
+    );
+    if (!rule) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PLATFORM_PRICING_RULE_NOT_FOUND",
+        "The platform pricing rule could not be found.",
+        {
+          ruleId,
+        },
+      );
+    }
+    return rule;
+  }
+
   private recordAudit(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
@@ -672,6 +830,14 @@ export class PlatformAdminService implements OnModuleInit {
   ): PlacardVersionRecord {
     return {
       ...placard,
+    };
+  }
+
+  private clonePricingRule(
+    rule: PlatformPricingRuleRecord,
+  ): PlatformPricingRuleRecord {
+    return {
+      ...rule,
     };
   }
 

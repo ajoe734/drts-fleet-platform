@@ -1671,6 +1671,45 @@ export interface UpdateDriverSettingsCommand {
 // Platform Admin — Control-Plane Authority Types
 // ---------------------------------------------------------------------------
 
+export const PLATFORM_TENANT_MODULES = [
+  "enterprise_dispatch",
+  "billing",
+  "reporting",
+  "webhooks",
+] as const;
+export type PlatformTenantModule = (typeof PLATFORM_TENANT_MODULES)[number];
+
+export interface PlatformTenantQuotaSummary {
+  activeDrivers: number;
+  monthlyBookings: number;
+  monthlyApiCalls: number;
+}
+
+export interface PlatformAdminTenantRecord {
+  id: string;
+  code: string;
+  name: string;
+  status: "draft" | "active" | "paused";
+  enabledModules: PlatformTenantModule[];
+  quotas: PlatformTenantQuotaSummary;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePlatformTenantCommand {
+  name: string;
+  code: string;
+  status?: "active" | "inactive";
+  enabledModules?: PlatformTenantModule[];
+  quotas?: Partial<PlatformTenantQuotaSummary>;
+}
+
+export interface UpdatePlatformTenantSettingsCommand {
+  name?: string;
+  enabledModules?: PlatformTenantModule[];
+  quotas?: Partial<PlatformTenantQuotaSummary>;
+}
+
 export type PlatformAdminUserRole =
   | "superadmin"
   | "admin"
@@ -1743,14 +1782,34 @@ export interface SetPlatformMaintenanceModeCommand {
 export interface PlatformPricingRuleRecord {
   ruleId: string;
   ruleName: string;
+  version: string;
   serviceFeeBps: number;
   reimbursementMode: "platform_funded" | "mixed";
   applicableTo: "all" | string;
   status: "active" | "draft" | "archived";
   effectiveFrom: string;
   effectiveTo: string | null;
+  publishedBy: string | null;
+  publishedAt: string | null;
+  notes: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CreatePlatformPricingRuleCommand {
+  ruleName: string;
+  version: string;
+  serviceFeeBps: number;
+  reimbursementMode: "platform_funded" | "mixed";
+  applicableTo: "all" | string;
+  effectiveFrom?: string | null;
+  notes?: string | null;
+}
+
+export interface PublishPlatformPricingRuleCommand {
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+  publishedBy?: string | null;
 }
 
 export interface SetTenantStatusCommand {

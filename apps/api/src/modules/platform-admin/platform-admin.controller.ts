@@ -1,10 +1,12 @@
 import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import type {
+  CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
+  PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   SetPlatformMaintenanceModeCommand,
   UpdatePlatformAdminUserRoleCommand,
@@ -171,6 +173,33 @@ export class PlatformAdminController {
   listPlatformPricingRules(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       { items: this.platformAdminService.listPlatformPricingRules() },
+      requestId,
+    );
+  }
+
+  @Post("pricing-rules")
+  createPlatformPricingRule(
+    @Body() command: CreatePlatformPricingRuleCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.createPlatformPricingRule(command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("pricing-rules/:ruleId/publish")
+  publishPlatformPricingRule(
+    @Param("ruleId") ruleId: string,
+    @Body() command: PublishPlatformPricingRuleCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.publishPlatformPricingRule(
+        ruleId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
