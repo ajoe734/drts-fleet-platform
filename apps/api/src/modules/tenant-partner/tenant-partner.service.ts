@@ -738,7 +738,8 @@ export class TenantPartnerService implements OnModuleInit {
     if (index === -1) {
       return null;
     }
-    const [removed] = this.webhookEndpoints.splice(index, 1);
+    const removed = this.webhookEndpoints[index]!;
+    this.webhookEndpoints.splice(index, 1);
     this.persistChanges(
       {
         webhookEndpoints: this.webhookEndpoints.map((w) =>

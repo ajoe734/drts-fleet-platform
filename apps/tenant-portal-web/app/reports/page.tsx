@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReportJobRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { createReportJob, refreshReports } from "./actions";
 
 export default async function ReportsPage() {
   const client = getTenantClient();
@@ -15,17 +16,60 @@ export default async function ReportsPage() {
     error = e instanceof Error ? e.message : "Unknown error";
   }
 
+  const desc =
+    "Fetched from /api/reports/jobs. " + jobs.length + " job(s) found.";
+
   return (
     <main className="app-grid">
-      <AppShellCard
-        title="Reports"
-        description={`Fetched from /api/reports/jobs. ${jobs.length} job(s) found.`}
-      >
+      <AppShellCard title="Reports" description={desc}>
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
           </div>
         )}
+
+        <form
+          action={createReportJob}
+          method="post"
+          className="form-inline"
+          style={{ marginBottom: 16 }}
+        >
+          <label htmlFor="jobType" style={{ marginRight: 8 }}>
+            Job Type
+          </label>
+          <select
+            id="jobType"
+            name="jobType"
+            defaultValue="dispatch_recording_index"
+            style={{ marginRight: 16 }}
+          >
+            <option value="dispatch_recording_index">
+              dispatch_recording_index
+            </option>
+          </select>
+          <label htmlFor="format" style={{ marginRight: 8 }}>
+            Format
+          </label>
+          <select
+            id="format"
+            name="format"
+            defaultValue="csv"
+            style={{ marginRight: 16 }}
+          >
+            <option value="csv">csv</option>
+            <option value="xlsx">xlsx</option>
+            <option value="pdf">pdf</option>
+            <option value="zip">zip</option>
+          </select>
+          <button type="submit">Create Job</button>
+          <button
+            type="submit"
+            formAction={refreshReports}
+            style={{ marginLeft: 8 }}
+          >
+            Refresh
+          </button>
+        </form>
 
         {jobs.length > 0 ? (
           <div className="data-table">
@@ -36,6 +80,8 @@ export default async function ReportsPage() {
                   <th>Status</th>
                   <th>Job Type</th>
                   <th>Format</th>
+                  <th>Artifact</th>
+                  <th>Expires</th>
                   <th>Created</th>
                 </tr>
               </thead>
@@ -46,6 +92,24 @@ export default async function ReportsPage() {
                     <td>{job.status}</td>
                     <td>{job.jobType}</td>
                     <td>{job.format}</td>
+                    <td>
+                      {job.artifact ? (
+                        <a
+                          href={job.artifact.downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Download
+                        </a>
+                      ) : (
+                        <em>pending</em>
+                      )}
+                    </td>
+                    <td>
+                      {job.artifact
+                        ? new Date(job.artifact.expiresAt).toLocaleString()
+                        : "-"}
+                    </td>
                     <td>{new Date(job.createdAt).toLocaleString()}</td>
                   </tr>
                 ))}

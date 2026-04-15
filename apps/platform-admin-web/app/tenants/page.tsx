@@ -23,11 +23,11 @@ export default function TenantsPage() {
     setLoading(true);
     setError(null);
     try {
-      // Use the tenant partner summary endpoint as the tenant list source
-      const result = await client.get<{ tenants: TenantSummary[] }>(
-        "/api/tenant/summary",
+      // Fetch tenants from platform-admin list endpoint
+      const result = await client.get<{ items: TenantSummary[] }>(
+        "/api/platform-admin/tenants",
       );
-      setTenants(result.tenants || []);
+      setTenants(result.items || []);
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -43,7 +43,7 @@ export default function TenantsPage() {
     e.preventDefault();
     setCreating(true);
     try {
-      await client.post("/api/tenants", {
+      await client.post("/api/platform-admin/tenants", {
         body: { name: formName, status: formStatus },
       });
       setShowCreate(false);

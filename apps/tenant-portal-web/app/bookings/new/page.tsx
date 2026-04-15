@@ -9,18 +9,39 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 
 function toIsoString(localDateTime: string): string {
-  // HTML datetime-local returns local time (no timezone). Interpret as local and convert to ISO.
-  // If empty, return empty string to let backend validate.
   if (!localDateTime) return "";
   const d = new Date(localDateTime);
   return d.toISOString();
 }
 
-export default async function NewBookingPage() {
-  const client = getTenantClient();
+const formStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr",
+  gap: "0.75rem",
+  maxWidth: "640px",
+};
 
+const rowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "180px 1fr",
+  alignItems: "center",
+  gap: "0.5rem",
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  background: "#0d6efd",
+  border: "1px solid #0d6efd",
+  color: "#fff",
+  padding: "0.5rem 0.75rem",
+  borderRadius: "4px",
+  cursor: "pointer",
+};
+
+export default async function NewBookingPage() {
   async function createBooking(formData: FormData) {
     "use server";
+
+    const client = getTenantClient();
 
     const businessDispatchSubtype = formData.get(
       "businessDispatchSubtype",
@@ -62,9 +83,8 @@ export default async function NewBookingPage() {
         title="Booking Wizard"
         description="Create a new business dispatch booking using the real API."
       >
-        {/* Basic required fields per @drts/contracts CreateTenantBookingCommand */}
-        <form action={createBooking} className="form-grid">
-          <div className="form-row">
+        <form action={createBooking} style={formStyle}>
+          <div style={rowStyle}>
             <label htmlFor="businessDispatchSubtype">Subtype</label>
             <select
               id="businessDispatchSubtype"
@@ -79,17 +99,17 @@ export default async function NewBookingPage() {
             </select>
           </div>
 
-          <div className="form-row">
+          <div style={rowStyle}>
             <label htmlFor="pickup">Pickup Address</label>
             <input id="pickup" name="pickup" type="text" required />
           </div>
 
-          <div className="form-row">
+          <div style={rowStyle}>
             <label htmlFor="dropoff">Dropoff Address</label>
             <input id="dropoff" name="dropoff" type="text" required />
           </div>
 
-          <div className="form-row">
+          <div style={rowStyle}>
             <label htmlFor="reservationWindowStart">Window Start</label>
             <input
               id="reservationWindowStart"
@@ -99,7 +119,7 @@ export default async function NewBookingPage() {
             />
           </div>
 
-          <div className="form-row">
+          <div style={rowStyle}>
             <label htmlFor="reservationWindowEnd">Window End</label>
             <input
               id="reservationWindowEnd"
@@ -109,7 +129,7 @@ export default async function NewBookingPage() {
             />
           </div>
 
-          <div className="form-row">
+          <div style={rowStyle}>
             <label htmlFor="passengerName">Passenger Name</label>
             <input
               id="passengerName"
@@ -119,7 +139,7 @@ export default async function NewBookingPage() {
             />
           </div>
 
-          <div className="form-row">
+          <div style={rowStyle}>
             <label htmlFor="passengerPhone">Passenger Phone</label>
             <input
               id="passengerPhone"
@@ -129,43 +149,15 @@ export default async function NewBookingPage() {
             />
           </div>
 
-          <div className="form-actions" style={{ marginTop: "1rem" }}>
-            <button type="submit" className="action-button primary">
+          <div style={{ marginTop: "1rem" }}>
+            <button type="submit" style={primaryButtonStyle}>
               Create Booking
             </button>
-            <Link
-              className="route-link"
-              href="/booking-list"
-              style={{ marginLeft: "0.75rem" }}
-            >
-              <strong>Back to list</strong>
-              Return to booking list.
+            <Link href="/booking-list" style={{ marginLeft: "0.75rem" }}>
+              <strong>Back to list</strong> Return to booking list.
             </Link>
           </div>
         </form>
-
-        <style jsx>{`
-          .form-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 0.75rem;
-            max-width: 640px;
-          }
-          .form-row {
-            display: grid;
-            grid-template-columns: 180px 1fr;
-            align-items: center;
-            gap: 0.5rem;
-          }
-          .action-button.primary {
-            background: #0d6efd;
-            border: 1px solid #0d6efd;
-            color: #fff;
-            padding: 0.5rem 0.75rem;
-            border-radius: 4px;
-            cursor: pointer;
-          }
-        `}</style>
       </AppShellCard>
     </main>
   );

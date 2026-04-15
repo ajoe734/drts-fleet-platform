@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { View, Text, StyleSheet, ActivityIndicator, Alert } from "react-native";
 import { useRouter } from "expo-router";
-import type { DriverTaskRecord } from "@drts/contracts";
+import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
 import { getDriverClient } from "@/lib/api-client";
+import RouteDisplay from "@/components/route-display";
 
 function PlatformBadge({ platform }: { platform: string | null }) {
   const label = platform ?? "direct";
@@ -29,19 +30,30 @@ function isForwardedTask(task: DriverTaskRecord | null): boolean {
 
 export default function TripScreen() {
   const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
+  const [orderDetail, setOrderDetail] = useState<OwnedOrderRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
     const client = getDriverClient();
-    // For demo: try to get the first task, or show empty state
+    // For demo: load first task and its order if present
     client
       .listDriverTasks()
-      .then((tasks) => {
+      .then(async (tasks) => {
         if (tasks.length > 0) {
           const first = tasks[0];
           setTaskDetail(first);
+          if (first.orderId) {
+            try {
+              const order = (await client.getOrder(
+                first.orderId,
+              )) as OwnedOrderRecord;
+              setOrderDetail(order);
+            } catch {
+              // ignore order fetch errors in demo
+            }
+          }
         }
         setLoading(false);
       })
@@ -120,6 +132,7 @@ export default function TripScreen() {
               ? `Order: ${taskDetail.orderId}`
               : "No order linked"}
           </Text>
+          <RouteDisplay task={taskDetail} order={orderDetail} />
           {isForwardedTask(taskDetail) && (
             <Text style={styles.forwardedNote}>
               Dispatched by {taskDetail.sourcePlatform}. Dispatch rules are

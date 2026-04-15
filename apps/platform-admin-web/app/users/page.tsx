@@ -60,7 +60,7 @@ export default function UsersPage() {
 
   const handleUpdateRole = async (userId: string, newRoleCode: string) => {
     try {
-      await client.updateTenantRole({ roleCode: newRoleCode });
+      await client.updateTenantRole(userId, { roleCode: newRoleCode });
       await loadUsers();
     } catch (e: any) {
       setError(e?.message || String(e));
