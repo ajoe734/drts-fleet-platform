@@ -66,3 +66,13 @@ Exit gate:
 - connect web and mobile surfaces to the accepted APIs and read models
 - expand acceptance coverage from MVP regression set to broader operational flows
 - prepare the repo for longer-running supervisor-managed delivery
+
+## Tenant Portal Topology Note
+
+**`apps/tenant-portal-web` is retired as of 2026-04-15 (FBP-007, SUNSET-001-tenant-portal-web).**
+
+- This app was a Phase 1 Wave D scaffolding reference and is no longer a production target.
+- The production tenant UI is `tenant-commute-hub` (external repo), which has been cut over to
+  `drts-fleet-platform` as its BFF/authority (FBP-005, FBP-006).
+- All active rollout and master plan references to a "tenant portal" mean `tenant-commute-hub`.
+- See `docs/02-architecture/authority/fbp-007-tenant-portal-web-sunset.md` for the sunset record.

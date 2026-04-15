@@ -45,7 +45,7 @@ Current implementation stance:
 ### Existing apps
 
 - `apps/api`: backend host and module boundary home
-- `apps/tenant-portal-web`: tenant-facing business dispatch and reports UI
+- `apps/tenant-portal-web`: **RETIRED (SUNSET-001-tenant-portal-web, 2026-04-15)** — frozen reference shell, not a production target. The production tenant UI is `tenant-commute-hub` (external repo). See `docs/02-architecture/authority/fbp-007-tenant-portal-web-sunset.md`.
 - `apps/platform-admin-web`: governance, pricing, regulatory, and filing UI
 - `apps/ops-console-web`: dispatch, callcenter, incidents, complaints, and reports UI
 - `apps/driver-app`: human-driver fulfillment UI
