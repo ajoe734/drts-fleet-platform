@@ -17,7 +17,7 @@ jobs:
       - name: Clone tenant-commute-hub
         run: |
           git clone \
-            https://x-access-token:${{ secrets.TENANT_REPO_PAT }}@github.com/ajoe734/tenant-commute-hub.git \
+            https://x-access-token:${{ secrets.CORE_REPO_PAT }}@github.com/ajoe734/tenant-commute-hub.git \
             /tmp/tenant
 
       - name: Copy outgoing files to tenant .ai-loop/
