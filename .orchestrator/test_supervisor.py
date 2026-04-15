@@ -447,6 +447,197 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(queued_event["target_agent"], "Codex")
         self.assertEqual(queued_event["reason"], "owned_ready_dispatch")
 
+    def test_dispatcher_availability_first_claims_in_progress_when_owner_is_busy(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "helper_claim": {
+                    "enabled": True,
+                    "task_statuses": ["in_progress", "review", "review_approved", "todo"],
+                    "availability_first": True,
+                    "allow_any_idle_lane": True,
+                    "require_assigned_agent_busy": True,
+                }
+            },
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+            },
+            "providers": {},
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "run-busy": {
+                    "run_id": "run-busy",
+                    "task_id": "BUSY-1",
+                    "provider": "copilot",
+                    "agent_id": "copilot",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+        status = {
+            "tasks": [
+                {"id": "BUSY-1", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+                {"id": "REG-100", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        self.assertTrue(changed)
+        persist.assert_called_once()
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], "REG-100")
+        self.assertEqual(kwargs["new_owner"], "Codex")
+        self.assertEqual(kwargs["new_reviewer"], "Claude")
+        self.assertEqual(kwargs["handoff_to"], "Codex")
+        queued_event = queue_delivery_event.call_args.args[1]
+        self.assertEqual(queued_event["task_id"], "REG-100")
+        self.assertEqual(queued_event["target_agent"], "Codex")
+        self.assertEqual(queued_event["reason"], "owned_in_progress_dispatch")
+
+    def test_dispatcher_availability_first_claims_review_approved_when_owner_is_busy(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "helper_claim": {
+                    "enabled": True,
+                    "task_statuses": ["review_approved"],
+                    "availability_first": True,
+                    "allow_any_idle_lane": True,
+                    "require_assigned_agent_busy": True,
+                }
+            },
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+            },
+            "providers": {},
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "run-busy": {
+                    "run_id": "run-busy",
+                    "task_id": "BUSY-2",
+                    "provider": "copilot",
+                    "agent_id": "copilot",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+        status = {
+            "tasks": [
+                {"id": "BUSY-2", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+                {"id": "FIN-100", "status": "review_approved", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        self.assertTrue(changed)
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], "FIN-100")
+        self.assertEqual(kwargs["new_owner"], "Codex")
+        self.assertEqual(kwargs["new_reviewer"], "Claude")
+        queued_event = queue_delivery_event.call_args.args[1]
+        self.assertEqual(queued_event["task_id"], "FIN-100")
+        self.assertEqual(queued_event["target_agent"], "Codex")
+        self.assertEqual(queued_event["reason"], "owned_finalize_dispatch")
+
+    def test_dispatcher_availability_first_claims_review_when_reviewer_is_busy(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "helper_claim": {
+                    "enabled": True,
+                    "task_statuses": ["review"],
+                    "availability_first": True,
+                    "allow_any_idle_lane": True,
+                    "require_assigned_agent_busy": True,
+                }
+            },
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+            },
+            "providers": {},
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "run-busy": {
+                    "run_id": "run-busy",
+                    "task_id": "BUSY-3",
+                    "provider": "copilot",
+                    "agent_id": "copilot",
+                    "status": "running",
+                    "request_snapshot": {"reason": "review_ready_dispatch"},
+                }
+            },
+        }
+        status = {
+            "tasks": [
+                {"id": "BUSY-3", "status": "review", "owner": "Claude", "reviewer": "Copilot", "depends_on": []},
+                {"id": "REV-100", "status": "review", "owner": "Claude", "reviewer": "Copilot", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        self.assertTrue(changed)
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], "REV-100")
+        self.assertEqual(kwargs["new_owner"], "Claude")
+        self.assertEqual(kwargs["new_reviewer"], "Codex")
+        queued_event = queue_delivery_event.call_args.args[1]
+        self.assertEqual(queued_event["task_id"], "REV-100")
+        self.assertEqual(queued_event["target_agent"], "Codex")
+        self.assertEqual(queued_event["reason"], "review_ready_dispatch")
+
     def test_dispatcher_does_not_helper_claim_when_owner_is_not_busy(self) -> None:
         config = {
             "schema": {
@@ -851,6 +1042,108 @@ class UnderutilizationSidecarDispatchTests(unittest.TestCase):
         )
         activity_types = [call.args[1]["type"] for call in write_activity_log.call_args_list]
         self.assertEqual(activity_types, ["sidecar_wave_skipped"])
+
+
+class UnderutilizationMainTaskDispatchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.root = Path(self.tmpdir.name)
+        (self.root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+        (self.root / "activity-log.jsonl").write_text("", encoding="utf-8")
+        (self.root / "event-queue.jsonl").write_text("", encoding="utf-8")
+        self.config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "paths": {
+                "status_file": str(self.root / "ai-status.json"),
+                "activity_log": str(self.root / "activity-log.jsonl"),
+                "event_queue": str(self.root / "event-queue.jsonl"),
+            },
+            "ready_dispatcher": {
+                "active_worker_statuses": [
+                    "running",
+                    "started",
+                    "waiting_approval",
+                    "manual_pending",
+                    "retry_backoff",
+                    "suspended_approval",
+                    "stalled",
+                    "fallback",
+                ],
+                "dependency_done_statuses": ["done"],
+                "helper_claim": {
+                    "enabled": True,
+                    "task_statuses": ["todo", "in_progress", "review", "review_approved"],
+                    "availability_first": True,
+                    "allow_any_idle_lane": True,
+                    "require_assigned_agent_busy": True,
+                },
+            },
+            "underutilization_dispatch": {
+                "enabled": True,
+                "threshold_ratio": 0.5,
+                "continuous_window_seconds": 900,
+                "cooldown_seconds": 900,
+                "max_new_main_tasks_per_wave": 2,
+                "productive_worker_statuses": ["running", "waiting_approval", "suspended_approval", "retry_backoff"],
+            },
+            "agents": {
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+                "qwen": {"id": "qwen", "display_name": "Qwen", "provider": "qwen"},
+            },
+        }
+
+    def test_backfills_main_review_task_to_idle_lane(self) -> None:
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "BUSY-REVIEW",
+                    "agent_id": "codex",
+                    "provider": "codex",
+                    "status": "running",
+                    "request_snapshot": {"reason": "review_ready_dispatch"},
+                }
+            },
+            "underutilization": {
+                "below_threshold_since": "2026-04-10T00:00:00Z",
+                "last_main_task_wave_at": None,
+            },
+        }
+        status = {
+            "tasks": [
+                {"id": "BUSY-REVIEW", "status": "review", "owner": "Claude", "reviewer": "Codex", "depends_on": []},
+                {"id": "MAIN-101", "status": "review", "owner": "Claude", "reviewer": "Codex", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+            mock.patch.object(supervisor, "write_activity_log"),
+            mock.patch.object(supervisor, "utc_now", return_value="2026-04-10T00:16:05Z"),
+        ):
+            changed = supervisor.dispatch_underutilization_main_tasks(self.config, state)
+
+        self.assertTrue(changed)
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], "MAIN-101")
+        self.assertEqual(kwargs["new_owner"], "Claude")
+        self.assertEqual(kwargs["new_reviewer"], "Qwen")
+        queued_event = queue_delivery_event.call_args.args[1]
+        self.assertEqual(queued_event["task_id"], "MAIN-101")
+        self.assertEqual(queued_event["target_agent"], "Qwen")
+        self.assertEqual(queued_event["reason"], "review_ready_dispatch")
 
 
 class PollWorkersRecoveryTests(unittest.TestCase):

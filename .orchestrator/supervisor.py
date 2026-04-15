@@ -926,7 +926,11 @@ def proactive_claim_plan_for_idle_agent(
 
     reassignment_settings = worker_reassignment_settings(config)
     ordered_idle = ordered_idle_agent_names(
-        [name for name in idle_agent_names if name not in {assigned_agent, counterpart_agent}],
+        [
+            name
+            for name in idle_agent_names
+            if name != assigned_agent and (claim_role != "reviewer" or name != counterpart_agent)
+        ],
         agent_loads,
     )
     if claim_role == "reviewer":
@@ -936,7 +940,12 @@ def proactive_claim_plan_for_idle_agent(
     candidate_order = list(fallback_candidates)
     if helper_settings.get("availability_first", True) or helper_settings.get("allow_any_idle_lane", True):
         candidate_order.extend(ordered_idle)
-    best_agent = first_viable_agent(config, candidate_order, exclude={assigned_agent, counterpart_agent}, state=state)
+    best_agent = first_viable_agent(
+        config,
+        candidate_order,
+        exclude={assigned_agent, counterpart_agent} if claim_role == "reviewer" else {assigned_agent},
+        state=state,
+    )
     if best_agent != idle_agent_name:
         return None
 
