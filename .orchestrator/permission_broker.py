@@ -105,7 +105,8 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^cd .+ && pnpm(\s|$)"),
     re.compile(r"^cd .+ && npx(\s|$)"),
     re.compile(r"^cd .+ && node(\s|$)"),
-    re.compile(r"^git (add|commit|checkout|fetch|pull|stash)(\s|$)"),
+    re.compile(r"^git (add|commit|checkout|fetch|pull|stash|clone|ls-remote)(\s|$)"),
+    re.compile(r"^curl(\s|$)"),
     re.compile(r"^gh(\s|$)"),
     re.compile(r"^bash(\s|$)"),
     # general python3 — consistent with node/bash being broadly allowed
@@ -119,7 +120,7 @@ SAFE_BASH_PATTERNS = [
 ]
 DEFER_BASH_PATTERNS = [
     re.compile(r"^git (add|commit|remote set-url|submodule)(\s|$)"),
-    re.compile(r"^(curl|wget)(\s|$)"),
+    re.compile(r"^(curl|wget)(\s|$)"),  # kept for deferred approval by default; override by adding to SAFE above if needed
     re.compile(r"^(apt|apt-get)(\s|$)"),
     re.compile(r"^npm install(\s|$)"),
     re.compile(r"^pip install(\s|$)"),
@@ -568,7 +569,7 @@ def _collect_paths(tool_input: dict[str, Any]) -> list[Path]:
 def _paths_within_workspace(paths: list[Path]) -> bool:
     if not paths:
         return True
-    allowed_roots = [ROOT, ROOT.parent / "pantheon", Path.home() / ".claude", Path.home() / ".codex"]
+    allowed_roots = [ROOT, ROOT.parent / "pantheon", ROOT.parent / "tenant-commute-hub", Path.home() / ".claude", Path.home() / ".codex"]
     for path in paths:
         resolved = path if path.is_absolute() else ROOT / path
         if not any(
