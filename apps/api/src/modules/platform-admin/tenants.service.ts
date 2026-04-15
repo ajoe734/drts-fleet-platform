@@ -1,4 +1,6 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { HttpStatus, Injectable, Logger } from "@nestjs/common";
+
+import { ApiRequestError } from "../../common/api-envelope";
 
 export interface TenantSummary {
   id: string;
@@ -35,5 +37,20 @@ export class TenantsService {
     this.tenants.set(id, created);
     this.logger.log(`Created tenant ${id} (${created.name})`);
     return created;
+  }
+
+  setStatus(tenantId: string, newStatus: "active" | "paused"): TenantSummary {
+    const tenant = this.tenants.get(tenantId);
+    if (!tenant) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "TENANT_NOT_FOUND",
+        "Tenant not found.",
+        { tenantId },
+      );
+    }
+    tenant.status = newStatus;
+    this.logger.log(`Tenant ${tenantId} status set to ${newStatus}`);
+    return { ...tenant };
   }
 }

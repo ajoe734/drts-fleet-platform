@@ -1,6 +1,7 @@
 /**
  * Payments Page
- * Payment records, settlement status, and financial operations.
+ * Platform-wide payment records, settlement status, and financial operations.
+ * Calls /api/platform-admin/invoices — platform authority only.
  */
 
 "use client";
@@ -22,7 +23,7 @@ export default function PaymentsPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await client.listInvoices();
+      const result = await client.listPlatformInvoices();
       setInvoices((result as TenantInvoiceRecord[]) || []);
     } catch (e: any) {
       setError(e?.message || String(e));

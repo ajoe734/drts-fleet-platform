@@ -1,30 +1,42 @@
 /**
  * Users & Roles Management Page
- * Platform user administration and role assignment.
+ * Platform staff user administration and role assignment.
+ * Calls /api/platform-admin/users — platform authority only.
  */
 
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { usePlatformAdminClient } from "@/lib/admin-client";
-import type { TenantUserRoleRecord } from "@drts/contracts";
+import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import type {
+  PlatformAdminUserRecord,
+  PlatformAdminUserRole,
+} from "@drts/contracts";
+
+const ROLE_CODES: PlatformAdminUserRole[] = [
+  "superadmin",
+  "admin",
+  "operator",
+  "viewer",
+];
 
 export default function UsersPage() {
   const client = usePlatformAdminClient();
-  const [users, setUsers] = useState<TenantUserRoleRecord[]>([]);
+  const [users, setUsers] = useState<PlatformAdminUserRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [formEmail, setFormEmail] = useState("");
   const [formDisplayName, setFormDisplayName] = useState("");
-  const [formRoleCode, setFormRoleCode] = useState("viewer");
+  const [formRoleCode, setFormRoleCode] =
+    useState<PlatformAdminUserRole>("operator");
   const [creating, setCreating] = useState(false);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await client.listTenantUsers();
+      const result = await client.listPlatformAdminUsers();
       setUsers(result || []);
     } catch (e: any) {
       setError(e?.message || String(e));
@@ -41,7 +53,7 @@ export default function UsersPage() {
     e.preventDefault();
     setCreating(true);
     try {
-      await client.createTenantUser({
+      await client.createPlatformAdminUser({
         email: formEmail,
         displayName: formDisplayName,
         roleCode: formRoleCode,
@@ -49,7 +61,7 @@ export default function UsersPage() {
       setShowCreate(false);
       setFormEmail("");
       setFormDisplayName("");
-      setFormRoleCode("viewer");
+      setFormRoleCode("operator");
       await loadUsers();
     } catch (e: any) {
       setError(e?.message || String(e));
@@ -58,9 +70,14 @@ export default function UsersPage() {
     }
   };
 
-  const handleUpdateRole = async (userId: string, newRoleCode: string) => {
+  const handleUpdateRole = async (
+    userId: string,
+    newRoleCode: PlatformAdminUserRole,
+  ) => {
     try {
-      await client.updateTenantRole(userId, { roleCode: newRoleCode });
+      await client.updatePlatformAdminUserRole(userId, {
+        roleCode: newRoleCode,
+      });
       await loadUsers();
     } catch (e: any) {
       setError(e?.message || String(e));
@@ -73,7 +90,10 @@ export default function UsersPage() {
     <div>
       <div className="admin-page-header">
         <h1>Users &amp; Roles</h1>
-        <p>Manage platform users, assign roles, and control access scopes.</p>
+        <p>
+          Manage platform staff accounts, assign roles, and control access
+          scopes.
+        </p>
       </div>
 
       {error && (
@@ -90,7 +110,7 @@ export default function UsersPage() {
           className="admin-btn admin-btn--primary"
           onClick={() => setShowCreate(!showCreate)}
         >
-          {showCreate ? "Cancel" : "Add User"}
+          {showCreate ? "Cancel" : "Add Staff User"}
         </button>
         <button className="admin-btn admin-btn--secondary" onClick={loadUsers}>
           Refresh
@@ -100,7 +120,7 @@ export default function UsersPage() {
       {showCreate && (
         <div className="admin-card">
           <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
-            Add Platform User
+            Add Platform Staff User
           </h3>
           <form onSubmit={handleCreate}>
             <div style={{ marginBottom: 12 }}>
@@ -128,7 +148,7 @@ export default function UsersPage() {
                   borderRadius: 8,
                   fontSize: 14,
                 }}
-                placeholder="user@example.com"
+                placeholder="staff@platform.drts"
               />
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -156,7 +176,7 @@ export default function UsersPage() {
                   borderRadius: 8,
                   fontSize: 14,
                 }}
-                placeholder="John Doe"
+                placeholder="Jane Operator"
               />
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -168,11 +188,13 @@ export default function UsersPage() {
                   fontWeight: 500,
                 }}
               >
-                Role Code
+                Role
               </label>
               <select
                 value={formRoleCode}
-                onChange={(e) => setFormRoleCode(e.target.value)}
+                onChange={(e) =>
+                  setFormRoleCode(e.target.value as PlatformAdminUserRole)
+                }
                 style={{
                   padding: "8px 12px",
                   border: "1px solid #d1d5db",
@@ -180,15 +202,19 @@ export default function UsersPage() {
                   fontSize: 14,
                 }}
               >
-                <option value="viewer">viewer</option>
-                <option value="editor">editor</option>
-                <option value="admin">admin</option>
+                {ROLE_CODES.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
               </select>
             </div>
             <button
               type="submit"
               className="admin-btn admin-btn--primary"
-              disabled={creating || !formEmail.trim()}
+              disabled={
+                creating || !formEmail.trim() || !formDisplayName.trim()
+              }
             >
               {creating ? "Adding..." : "Add"}
             </button>
@@ -198,7 +224,7 @@ export default function UsersPage() {
 
       {users.length === 0 ? (
         <div className="admin-card admin-empty">
-          <p>No users found. Add a user to get started.</p>
+          <p>No platform staff users found. Add one to get started.</p>
         </div>
       ) : (
         <div className="admin-card" style={{ overflowX: "auto" }}>
@@ -206,9 +232,10 @@ export default function UsersPage() {
             <thead>
               <tr>
                 <th>User ID</th>
-                <th>Name</th>
-                <th>Role Code</th>
+                <th>Name / Email</th>
+                <th>Role</th>
                 <th>Status</th>
+                <th>Updated</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -218,7 +245,12 @@ export default function UsersPage() {
                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>
                     {u.userId}
                   </td>
-                  <td>{u.displayName || u.email}</td>
+                  <td>
+                    <div style={{ fontSize: 14 }}>{u.displayName}</div>
+                    <div style={{ fontSize: 12, color: "#6b7280" }}>
+                      {u.email}
+                    </div>
+                  </td>
                   <td>
                     <span className="admin-badge admin-badge--info">
                       {u.roleCode}
@@ -237,19 +269,24 @@ export default function UsersPage() {
                       {u.status}
                     </span>
                   </td>
+                  <td style={{ fontSize: 12 }}>
+                    {formatDateTime(u.updatedAt)}
+                  </td>
                   <td>
                     <div style={{ display: "flex", gap: 4 }}>
                       <button
                         className="admin-btn admin-btn--secondary admin-btn--sm"
                         onClick={() => handleUpdateRole(u.userId, "admin")}
+                        disabled={u.roleCode === "admin"}
                       >
                         Make Admin
                       </button>
                       <button
                         className="admin-btn admin-btn--secondary admin-btn--sm"
                         onClick={() => handleUpdateRole(u.userId, "viewer")}
+                        disabled={u.roleCode === "viewer"}
                       >
-                        Demote to Viewer
+                        Viewer
                       </button>
                     </div>
                   </td>

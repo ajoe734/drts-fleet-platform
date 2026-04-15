@@ -1,9 +1,13 @@
 import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import type {
+  CreatePlatformAdminUserCommand,
+  CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
   PublishPublicInfoVersionCommand,
+  SetPlatformMaintenanceModeCommand,
+  UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
@@ -67,6 +71,116 @@ export class PlatformAdminController {
   ) {
     return toApiSuccessEnvelope(
       this.platformAdminService.generatePlacardVersion(command, requestId),
+      requestId,
+    );
+  }
+
+  // ── Platform Admin Users ──────────────────────────────────────────────────
+
+  @Get("users")
+  listPlatformAdminUsers(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      { items: this.platformAdminService.listPlatformAdminUsers() },
+      requestId,
+    );
+  }
+
+  @Post("users")
+  createPlatformAdminUser(
+    @Body() command: CreatePlatformAdminUserCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.createPlatformAdminUser(command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("users/:userId/role")
+  updatePlatformAdminUserRole(
+    @Param("userId") userId: string,
+    @Body() command: UpdatePlatformAdminUserRoleCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.updatePlatformAdminUserRole(
+        userId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  // ── Platform Notices ──────────────────────────────────────────────────────
+
+  @Get("notices")
+  listPlatformNotices(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      { items: this.platformAdminService.listPlatformNotices() },
+      requestId,
+    );
+  }
+
+  @Post("notices")
+  createPlatformNotice(
+    @Body() command: CreatePlatformNoticeCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.createPlatformNotice(command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("notices/:noticeId/resolve")
+  resolveNotice(
+    @Param("noticeId") noticeId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.resolveNotice(noticeId, requestId),
+      requestId,
+    );
+  }
+
+  // ── Maintenance Mode ──────────────────────────────────────────────────────
+
+  @Get("maintenance-mode")
+  getMaintenanceMode(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.getMaintenanceMode(),
+      requestId,
+    );
+  }
+
+  @Post("maintenance-mode")
+  setMaintenanceMode(
+    @Body() command: SetPlatformMaintenanceModeCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.setMaintenanceMode(command, requestId),
+      requestId,
+    );
+  }
+
+  // ── Platform Pricing Rules ────────────────────────────────────────────────
+
+  @Get("pricing-rules")
+  listPlatformPricingRules(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      { items: this.platformAdminService.listPlatformPricingRules() },
+      requestId,
+    );
+  }
+
+  // ── Platform Invoices ────────────────────────────────────────────────────
+
+  @Get("invoices")
+  listPlatformInvoices(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      { items: this.platformAdminService.listPlatformInvoices() },
       requestId,
     );
   }

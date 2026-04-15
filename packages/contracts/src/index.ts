@@ -1666,3 +1666,94 @@ export interface UpdateDriverSettingsCommand {
   maxAcceptRadius?: number | null;
   preferredAreas?: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Platform Admin — Control-Plane Authority Types
+// ---------------------------------------------------------------------------
+
+export type PlatformAdminUserRole =
+  | "superadmin"
+  | "admin"
+  | "operator"
+  | "viewer";
+export type PlatformAdminUserStatus = "active" | "suspended" | "invited";
+
+export interface PlatformAdminUserRecord {
+  userId: string;
+  email: string;
+  displayName: string;
+  roleCode: PlatformAdminUserRole;
+  status: PlatformAdminUserStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePlatformAdminUserCommand {
+  email: string;
+  displayName: string;
+  roleCode: PlatformAdminUserRole;
+}
+
+export interface UpdatePlatformAdminUserRoleCommand {
+  roleCode: PlatformAdminUserRole;
+  status?: PlatformAdminUserStatus;
+}
+
+export type PlatformNoticeSeverity = "info" | "warning" | "critical";
+export type PlatformNoticeStatus = "active" | "resolved" | "scheduled";
+
+export interface PlatformNoticeRecord {
+  noticeId: string;
+  title: string;
+  body: string;
+  severity: PlatformNoticeSeverity;
+  status: PlatformNoticeStatus;
+  targetAudience: "all" | "tenants" | "ops" | "drivers";
+  scheduledAt: string | null;
+  resolvedAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreatePlatformNoticeCommand {
+  title: string;
+  body: string;
+  severity: PlatformNoticeSeverity;
+  targetAudience: "all" | "tenants" | "ops" | "drivers";
+  scheduledAt?: string | null;
+}
+
+export interface PlatformMaintenanceModeRecord {
+  enabled: boolean;
+  reason: string | null;
+  scheduledStart: string | null;
+  scheduledEnd: string | null;
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+export interface SetPlatformMaintenanceModeCommand {
+  enabled: boolean;
+  reason?: string | null;
+  scheduledStart?: string | null;
+  scheduledEnd?: string | null;
+}
+
+export interface PlatformPricingRuleRecord {
+  ruleId: string;
+  ruleName: string;
+  serviceFeeBps: number;
+  reimbursementMode: "platform_funded" | "mixed";
+  applicableTo: "all" | string;
+  status: "active" | "draft" | "archived";
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SetTenantStatusCommand {
+  status: "active" | "paused";
+  reason?: string;
+}

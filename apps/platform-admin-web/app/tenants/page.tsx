@@ -7,7 +7,11 @@
 
 import React, { useState } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
-import type { TenantSummary } from "@drts/shared-types";
+interface TenantSummary {
+  id: string;
+  name: string;
+  status: "draft" | "active" | "paused";
+}
 
 export default function TenantsPage() {
   const client = usePlatformAdminClient();
@@ -172,6 +176,7 @@ export default function TenantsPage() {
                 <th>ID</th>
                 <th>Name</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -186,11 +191,47 @@ export default function TenantsPage() {
                       className={`admin-badge ${
                         t.status === "active"
                           ? "admin-badge--success"
-                          : "admin-badge--neutral"
+                          : t.status === "paused"
+                            ? "admin-badge--danger"
+                            : "admin-badge--neutral"
                       }`}
                     >
                       {t.status}
                     </span>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      {t.status !== "active" && (
+                        <button
+                          className="admin-btn admin-btn--secondary admin-btn--sm"
+                          onClick={async () => {
+                            try {
+                              await client.activateTenant(t.id);
+                              await loadTenants();
+                            } catch (e: any) {
+                              setError(e?.message || String(e));
+                            }
+                          }}
+                        >
+                          Activate
+                        </button>
+                      )}
+                      {t.status === "active" && (
+                        <button
+                          className="admin-btn admin-btn--secondary admin-btn--sm"
+                          onClick={async () => {
+                            try {
+                              await client.suspendTenant(t.id);
+                              await loadTenants();
+                            } catch (e: any) {
+                              setError(e?.message || String(e));
+                            }
+                          }}
+                        >
+                          Suspend
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

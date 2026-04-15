@@ -8,11 +8,14 @@
 import type {
   ApiSuccessEnvelope,
   AttendanceRecord,
+  BookingRecord,
   CallSessionRecord,
   ClockInCommand,
   ClockOutCommand,
   ComplaintCaseRecord,
   CreateOwnedOrderCommand,
+  CreatePlatformAdminUserCommand,
+  CreatePlatformNoticeCommand,
   CreateTenantBookingCommand,
   CreateCallCenterOrderCommand,
   DriverAcceptTaskCommand,
@@ -32,8 +35,13 @@ import type {
   NotificationRecord,
   OwnedOrderRecord,
   PlacardVersionRecord,
+  PlatformAdminUserRecord,
+  PlatformMaintenanceModeRecord,
+  PlatformNoticeRecord,
+  PlatformPricingRuleRecord,
   PublicInfoVersionRecord,
   ReportJobRecord,
+  SetPlatformMaintenanceModeCommand,
   ShiftRecord,
   TenantAddressRecord,
   TenantApiKeyRecord,
@@ -46,6 +54,7 @@ import type {
   UpsertTenantAddressCommand,
   IssueTenantApiKeyCommand,
   RotateTenantApiKeyCommand,
+  UpdatePlatformAdminUserRoleCommand,
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
   UpdateTenantNotificationsCommand,
@@ -84,6 +93,22 @@ export interface RequestOptions {
 
 interface ListEnvelope<T> {
   items: T[];
+}
+
+function createRequestToken(): string {
+  if (
+    typeof globalThis.crypto !== "undefined" &&
+    typeof globalThis.crypto.randomUUID === "function"
+  ) {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function hasHeader(headers: Record<string, string>, key: string): boolean {
+  const target = key.toLowerCase();
+  return Object.keys(headers).some((header) => header.toLowerCase() === target);
 }
 
 export class ApiClient {
@@ -147,12 +172,23 @@ export class ApiClient {
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
     try {
+      const headers = {
+        ...this.defaultHeaders,
+        ...options?.headers,
+      };
+      if (!hasHeader(headers, "x-request-id")) {
+        headers["X-Request-Id"] = createRequestToken();
+      }
+      if (
+        method.toUpperCase() === "POST" &&
+        !hasHeader(headers, "idempotency-key")
+      ) {
+        headers["Idempotency-Key"] = createRequestToken();
+      }
+
       const init: RequestInit = {
         method,
-        headers: {
-          ...this.defaultHeaders,
-          ...options?.headers,
-        },
+        headers,
         signal: controller.signal,
       };
 
@@ -235,6 +271,35 @@ export class ApiClient {
 
   async createTenantBooking(command: CreateTenantBookingCommand) {
     return this.post("/api/tenant/bookings", { body: command });
+  }
+
+  async listTenantBookings(): Promise<BookingRecord[]> {
+    return this.getList<BookingRecord>("/api/tenant/bookings");
+  }
+
+  async getTenantBooking(bookingId: string) {
+    return this.get(`/api/tenant/bookings/${encodeURIComponent(bookingId)}`);
+  }
+
+  async updateTenantBooking(
+    bookingId: string,
+    command: UpdateTenantBookingCommand,
+  ) {
+    return this.request(
+      "PUT",
+      `/api/tenant/bookings/${encodeURIComponent(bookingId)}`,
+      { body: command },
+    );
+  }
+
+  async cancelTenantBooking(
+    bookingId: string,
+    command: CancelOwnedOrderCommand,
+  ) {
+    return this.post(
+      `/api/tenant/bookings/${encodeURIComponent(bookingId)}/cancel`,
+      { body: command },
+    );
   }
 
   // ── Owned Mobility: Dispatch ──
@@ -411,6 +476,18 @@ export class ApiClient {
     return this.get(`/api/reports/${jobId}`);
   }
 
+  async createTenantReportJob(command: CreateReportJobCommand) {
+    return this.post("/api/tenant/reports/jobs", { body: command });
+  }
+
+  async listTenantReportJobs(): Promise<ReportJobRecord[]> {
+    return this.getList<ReportJobRecord>("/api/tenant/reports/jobs");
+  }
+
+  async getTenantReportJob(jobId: string) {
+    return this.get(`/api/tenant/reports/${encodeURIComponent(jobId)}`);
+  }
+
   async generateFilingPackage(command: GenerateFilingPackageCommand) {
     return this.post("/api/filing-packages/generate", { body: command });
   }
@@ -482,6 +559,10 @@ export class ApiClient {
     return this.getList<NotificationRecord>("/api/notifications");
   }
 
+  async listTenantNotificationFeed(): Promise<NotificationRecord[]> {
+    return this.getList<NotificationRecord>("/api/tenant/notifications/feed");
+  }
+
   async getNotificationPreferences() {
     return this.get("/api/tenant/notifications");
   }
@@ -514,6 +595,10 @@ export class ApiClient {
     return this.getList("/api/audit");
   }
 
+  async listTenantAuditLogs() {
+    return this.getList("/api/tenant/audit");
+  }
+
   // ── Forwarder ──
 
   async listForwarderOrders() {
@@ -534,6 +619,79 @@ export class ApiClient {
 
   async listPlacards(): Promise<PlacardVersionRecord[]> {
     return this.getList<PlacardVersionRecord>("/api/platform-admin/placards");
+  }
+
+  async listPlatformAdminUsers(): Promise<PlatformAdminUserRecord[]> {
+    return this.getList<PlatformAdminUserRecord>("/api/platform-admin/users");
+  }
+
+  async createPlatformAdminUser(
+    command: CreatePlatformAdminUserCommand,
+  ): Promise<PlatformAdminUserRecord> {
+    return this.post<PlatformAdminUserRecord>("/api/platform-admin/users", {
+      body: command,
+    });
+  }
+
+  async updatePlatformAdminUserRole(
+    userId: string,
+    command: UpdatePlatformAdminUserRoleCommand,
+  ): Promise<PlatformAdminUserRecord> {
+    return this.post<PlatformAdminUserRecord>(
+      `/api/platform-admin/users/${userId}/role`,
+      { body: command },
+    );
+  }
+
+  async listPlatformNotices(): Promise<PlatformNoticeRecord[]> {
+    return this.getList<PlatformNoticeRecord>("/api/platform-admin/notices");
+  }
+
+  async createPlatformNotice(
+    command: CreatePlatformNoticeCommand,
+  ): Promise<PlatformNoticeRecord> {
+    return this.post<PlatformNoticeRecord>("/api/platform-admin/notices", {
+      body: command,
+    });
+  }
+
+  async resolvePlatformNotice(noticeId: string): Promise<PlatformNoticeRecord> {
+    return this.post<PlatformNoticeRecord>(
+      `/api/platform-admin/notices/${noticeId}/resolve`,
+    );
+  }
+
+  async getMaintenanceMode(): Promise<PlatformMaintenanceModeRecord> {
+    return this.get<PlatformMaintenanceModeRecord>(
+      "/api/platform-admin/maintenance-mode",
+    );
+  }
+
+  async setMaintenanceMode(
+    command: SetPlatformMaintenanceModeCommand,
+  ): Promise<PlatformMaintenanceModeRecord> {
+    return this.post<PlatformMaintenanceModeRecord>(
+      "/api/platform-admin/maintenance-mode",
+      { body: command },
+    );
+  }
+
+  async listPlatformPricingRules(): Promise<PlatformPricingRuleRecord[]> {
+    return this.getList<PlatformPricingRuleRecord>(
+      "/api/platform-admin/pricing-rules",
+    );
+  }
+
+  async listPlatformInvoices(): Promise<TenantInvoiceRecord[]> {
+    return this.getList<TenantInvoiceRecord>("/api/platform-admin/invoices");
+  }
+
+  async suspendTenant(tenantId: string): Promise<unknown> {
+    return this.post(`/api/platform-admin/tenants/${tenantId}/suspend`);
+  }
+
+  async activateTenant(tenantId: string): Promise<unknown> {
+    return this.post(`/api/platform-admin/tenants/${tenantId}/activate`);
   }
 
   // ── Regulatory Registry ──
@@ -643,7 +801,7 @@ export function createTenantClient(
   return new ApiClient({
     baseUrl,
     defaultHeaders: {
-      "x-actor-type": "tenant_user",
+      "x-actor-type": "tenant_admin",
       "x-actor-id": actorId,
       "x-realm": "tenant",
       "x-tenant-id": tenantId,

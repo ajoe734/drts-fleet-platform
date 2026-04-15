@@ -4,11 +4,20 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  CreatePlatformAdminUserCommand,
+  CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
   PlacardVersionRecord,
+  PlatformAdminUserRecord,
+  PlatformMaintenanceModeRecord,
+  PlatformNoticeRecord,
+  PlatformPricingRuleRecord,
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
+  SetPlatformMaintenanceModeCommand,
+  TenantInvoiceRecord,
+  UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -50,6 +59,70 @@ const PLACARD_SEED: PlacardVersionRecord[] = [
   },
 ];
 
+const PLATFORM_ADMIN_USERS_SEED: PlatformAdminUserRecord[] = [
+  {
+    userId: "pa-admin-001",
+    email: "admin@platform.drts",
+    displayName: "Platform Superadmin",
+    roleCode: "superadmin",
+    status: "active",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z",
+  },
+  {
+    userId: "pa-operator-001",
+    email: "ops@platform.drts",
+    displayName: "Ops Operator",
+    roleCode: "operator",
+    status: "active",
+    createdAt: "2026-02-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z",
+  },
+];
+
+const PLATFORM_NOTICES_SEED: PlatformNoticeRecord[] = [
+  {
+    noticeId: "notice-demo-001",
+    title: "Scheduled Maintenance Window",
+    body: "Platform will undergo maintenance from 02:00–04:00 on 2026-04-20. Brief service interruptions expected.",
+    severity: "warning",
+    status: "scheduled",
+    targetAudience: "all",
+    scheduledAt: "2026-04-20T02:00:00.000Z",
+    resolvedAt: null,
+    createdBy: "pa-admin-001",
+    createdAt: "2026-04-15T00:00:00.000Z",
+    updatedAt: "2026-04-15T00:00:00.000Z",
+  },
+];
+
+const PLATFORM_PRICING_RULES_SEED: PlatformPricingRuleRecord[] = [
+  {
+    ruleId: "rule-demo-001",
+    ruleName: "Standard Service Fee",
+    serviceFeeBps: 1500,
+    reimbursementMode: "platform_funded",
+    applicableTo: "all",
+    status: "active",
+    effectiveFrom: "2026-01-01T00:00:00.000Z",
+    effectiveTo: null,
+    createdAt: "2025-12-01T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z",
+  },
+  {
+    ruleId: "rule-demo-002",
+    ruleName: "Enterprise Discount Tier",
+    serviceFeeBps: 1000,
+    reimbursementMode: "mixed",
+    applicableTo: "t_demo",
+    status: "active",
+    effectiveFrom: "2026-03-01T00:00:00.000Z",
+    effectiveTo: null,
+    createdAt: "2026-02-15T00:00:00.000Z",
+    updatedAt: "2026-04-01T00:00:00.000Z",
+  },
+];
+
 @Injectable()
 export class PlatformAdminService implements OnModuleInit {
   private publicInfoVersions = PUBLIC_INFO_SEED.map((version) =>
@@ -59,6 +132,25 @@ export class PlatformAdminService implements OnModuleInit {
   private placardVersions = PLACARD_SEED.map((placard) =>
     this.clonePlacardVersion(placard),
   );
+
+  private platformAdminUsers: PlatformAdminUserRecord[] =
+    PLATFORM_ADMIN_USERS_SEED.map((u) => ({ ...u }));
+
+  private platformNotices: PlatformNoticeRecord[] = PLATFORM_NOTICES_SEED.map(
+    (n) => ({ ...n }),
+  );
+
+  private maintenanceMode: PlatformMaintenanceModeRecord = {
+    enabled: false,
+    reason: null,
+    scheduledStart: null,
+    scheduledEnd: null,
+    updatedBy: null,
+    updatedAt: new Date().toISOString(),
+  };
+
+  private pricingRules: PlatformPricingRuleRecord[] =
+    PLATFORM_PRICING_RULES_SEED.map((r) => ({ ...r }));
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -290,6 +382,246 @@ export class PlatformAdminService implements OnModuleInit {
     );
 
     return this.clonePlacardVersion(placard);
+  }
+
+  // ── Platform Admin Users ──────────────────────────────────────────────────
+
+  listPlatformAdminUsers(): PlatformAdminUserRecord[] {
+    return this.platformAdminUsers.map((u) => ({ ...u }));
+  }
+
+  createPlatformAdminUser(
+    command: CreatePlatformAdminUserCommand,
+    requestId?: string,
+  ): PlatformAdminUserRecord {
+    this.assertNonBlank(command.email, "email");
+    this.assertNonBlank(command.displayName, "displayName");
+    const existing = this.platformAdminUsers.find(
+      (u) => u.email.toLowerCase() === command.email.trim().toLowerCase(),
+    );
+    if (existing) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PLATFORM_USER_EMAIL_CONFLICT",
+        "A platform admin user with this email already exists.",
+        { email: command.email },
+      );
+    }
+    const now = new Date().toISOString();
+    const user: PlatformAdminUserRecord = {
+      userId: `pa_${randomUUID()}`,
+      email: command.email.trim().toLowerCase(),
+      displayName: command.displayName.trim(),
+      roleCode: command.roleCode,
+      status: "invited",
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.platformAdminUsers.push({ ...user });
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "create_platform_admin_user",
+        resourceType: "platform_admin_user",
+        resourceId: user.userId,
+        newValuesSummary: { email: user.email, roleCode: user.roleCode },
+      },
+      requestId,
+    );
+    return { ...user };
+  }
+
+  updatePlatformAdminUserRole(
+    userId: string,
+    command: UpdatePlatformAdminUserRoleCommand,
+    requestId?: string,
+  ): PlatformAdminUserRecord {
+    const user = this.platformAdminUsers.find((u) => u.userId === userId);
+    if (!user) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PLATFORM_USER_NOT_FOUND",
+        "Platform admin user not found.",
+        { userId },
+      );
+    }
+    const oldRole = user.roleCode;
+    user.roleCode = command.roleCode;
+    if (command.status) {
+      user.status = command.status;
+    }
+    user.updatedAt = new Date().toISOString();
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "update_platform_admin_user_role",
+        resourceType: "platform_admin_user",
+        resourceId: userId,
+        oldValuesSummary: { roleCode: oldRole },
+        newValuesSummary: { roleCode: command.roleCode },
+      },
+      requestId,
+    );
+    return { ...user };
+  }
+
+  // ── Platform Notices ──────────────────────────────────────────────────────
+
+  listPlatformNotices(): PlatformNoticeRecord[] {
+    return this.platformNotices.map((n) => ({ ...n }));
+  }
+
+  createPlatformNotice(
+    command: CreatePlatformNoticeCommand,
+    requestId?: string,
+  ): PlatformNoticeRecord {
+    this.assertNonBlank(command.title, "title");
+    this.assertNonBlank(command.body, "body");
+    const now = new Date().toISOString();
+    const notice: PlatformNoticeRecord = {
+      noticeId: `notice_${randomUUID()}`,
+      title: command.title.trim(),
+      body: command.body.trim(),
+      severity: command.severity,
+      status: command.scheduledAt ? "scheduled" : "active",
+      targetAudience: command.targetAudience,
+      scheduledAt: command.scheduledAt ?? null,
+      resolvedAt: null,
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.platformNotices.unshift({ ...notice });
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "create_platform_notice",
+        resourceType: "platform_notice",
+        resourceId: notice.noticeId,
+        newValuesSummary: { title: notice.title, severity: notice.severity },
+      },
+      requestId,
+    );
+    return { ...notice };
+  }
+
+  resolveNotice(noticeId: string, requestId?: string): PlatformNoticeRecord {
+    const notice = this.platformNotices.find((n) => n.noticeId === noticeId);
+    if (!notice) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "NOTICE_NOT_FOUND",
+        "Platform notice not found.",
+        { noticeId },
+      );
+    }
+    notice.status = "resolved";
+    notice.resolvedAt = new Date().toISOString();
+    notice.updatedAt = notice.resolvedAt;
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "resolve_platform_notice",
+        resourceType: "platform_notice",
+        resourceId: noticeId,
+        newValuesSummary: { status: "resolved" },
+      },
+      requestId,
+    );
+    return { ...notice };
+  }
+
+  // ── Maintenance Mode ──────────────────────────────────────────────────────
+
+  getMaintenanceMode(): PlatformMaintenanceModeRecord {
+    return { ...this.maintenanceMode };
+  }
+
+  setMaintenanceMode(
+    command: SetPlatformMaintenanceModeCommand,
+    requestId?: string,
+  ): PlatformMaintenanceModeRecord {
+    const now = new Date().toISOString();
+    this.maintenanceMode = {
+      enabled: command.enabled,
+      reason: command.reason ?? null,
+      scheduledStart: command.scheduledStart ?? null,
+      scheduledEnd: command.scheduledEnd ?? null,
+      updatedBy: null,
+      updatedAt: now,
+    };
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: command.enabled
+          ? "enable_maintenance_mode"
+          : "disable_maintenance_mode",
+        resourceType: "platform_maintenance_mode",
+        resourceId: null,
+        newValuesSummary: {
+          enabled: command.enabled,
+          reason: command.reason ?? null,
+        },
+      },
+      requestId,
+    );
+    return { ...this.maintenanceMode };
+  }
+
+  // ── Platform Pricing Rules ────────────────────────────────────────────────
+
+  listPlatformPricingRules(): PlatformPricingRuleRecord[] {
+    return this.pricingRules.map((r) => ({ ...r }));
+  }
+
+  // ── Platform Invoices (cross-tenant view) ─────────────────────────────────
+
+  listPlatformInvoices(): TenantInvoiceRecord[] {
+    // Returns seeded platform-level invoice overview for demo purposes.
+    const now = new Date().toISOString();
+    return [
+      {
+        invoiceId: "inv-demo-001",
+        tenantId: "t_demo",
+        periodStart: "2026-03-01T00:00:00.000Z",
+        periodEnd: "2026-03-31T23:59:59.000Z",
+        amount: { amountMinor: 25000, currency: "TWD" },
+        status: "paid",
+        artifactUrl: null,
+        pricingVersionSnapshot: "rule-demo-001",
+        lines: [],
+        createdAt: "2026-04-01T00:00:00.000Z",
+        updatedAt: now,
+      },
+      {
+        invoiceId: "inv-demo-002",
+        tenantId: "t_demo",
+        periodStart: "2026-04-01T00:00:00.000Z",
+        periodEnd: "2026-04-30T23:59:59.000Z",
+        amount: { amountMinor: 18500, currency: "TWD" },
+        status: "draft",
+        artifactUrl: null,
+        pricingVersionSnapshot: "rule-demo-001",
+        lines: [],
+        createdAt: "2026-04-15T00:00:00.000Z",
+        updatedAt: now,
+      },
+    ];
   }
 
   private requirePublicInfoVersion(versionId: string) {
