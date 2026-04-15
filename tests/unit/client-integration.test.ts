@@ -227,6 +227,10 @@ describe("W8-001A shared api client list handling", () => {
       ["/api/orders", [{ orderId: "order-001" }]],
       ["/api/reports/jobs", [{ jobId: "job-001" }]],
       ["/api/driver-statements", [{ statementId: "stmt-001" }]],
+      [
+        "/api/tenant/roles",
+        [{ roleCode: "tenant_admin", displayName: "Tenant Admin" }],
+      ],
     ]);
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -258,6 +262,9 @@ describe("W8-001A shared api client list handling", () => {
     await expect(client.listDriverStatements()).resolves.toEqual(
       payloadByPath.get("/api/driver-statements"),
     );
+    await expect(client.listTenantRoles()).resolves.toEqual(
+      payloadByPath.get("/api/tenant/roles"),
+    );
   });
 
   it("uses the canonical /api/reports/jobs route for report creation", async () => {
@@ -284,6 +291,63 @@ describe("W8-001A shared api client list handling", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:3001/api/reports/jobs",
       expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("posts webhook metadata updates to the tenant BFF command path", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        const path = new URL(url).pathname;
+
+        expect(path).toBe("/api/tenant/webhooks/wh_demo_001");
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body))).toEqual({
+          url: "https://tenant.example.com/webhooks/v2",
+          events: ["tenant.billing_profile.updated"],
+          status: "active",
+        });
+
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              webhookId: "wh_demo_001",
+              tenantId: "tenant-demo-001",
+              url: "https://tenant.example.com/webhooks/v2",
+              events: ["tenant.billing_profile.updated"],
+              status: "active",
+              secretVersion: 2,
+              secretPreview: "sha256:deadbeefcafe",
+              createdAt: "2026-04-15T00:00:00Z",
+              updatedAt: "2026-04-15T00:10:00Z",
+            },
+          }),
+          text: async () => "",
+        } as Response;
+      },
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await expect(
+      client.updateWebhookEndpoint("wh_demo_001", {
+        url: "https://tenant.example.com/webhooks/v2",
+        events: ["tenant.billing_profile.updated"],
+        status: "active",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        webhookId: "wh_demo_001",
+        status: "active",
+      }),
     );
   });
 });

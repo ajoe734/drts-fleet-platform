@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import type {
-  TenantWebhookEndpoint,
   CreateTenantWebhookEndpointCommand,
-  WebhookDeliveryRecord,
   NotificationRecord,
+  TenantWebhookEndpoint,
+  UpdateTenantWebhookEndpointCommand,
+  WebhookDeliveryRecord,
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
@@ -14,6 +15,7 @@ export default async function WebhooksPage({
 }: {
   searchParams?: {
     create?: string;
+    edit?: string;
     deliveries?: string;
     error?: string;
     success?: string;
@@ -27,6 +29,7 @@ export default async function WebhooksPage({
   let error: string | null = null;
 
   const createMode = searchParams?.create === "true";
+  const editWebhookId = searchParams?.edit;
   const deliveryWebhookId = searchParams?.deliveries;
   const successMsg = searchParams?.success ?? null;
   const formError = searchParams?.error ?? null;
@@ -45,6 +48,10 @@ export default async function WebhooksPage({
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
+
+  const editingWebhook = editWebhookId
+    ? (webhooks.find((webhook) => webhook.webhookId === editWebhookId) ?? null)
+    : null;
 
   return (
     <main className="app-grid">
@@ -66,6 +73,15 @@ export default async function WebhooksPage({
 
         {createMode ? (
           <CreateWebhookForm formError={formError} />
+        ) : editWebhookId ? (
+          editingWebhook ? (
+            <EditWebhookForm formError={formError} webhook={editingWebhook} />
+          ) : (
+            <div className="error-banner">
+              <strong>Error:</strong> The selected webhook endpoint was not
+              found.
+            </div>
+          )
         ) : deliveryWebhookId ? (
           <DeliveryLogView
             webhookId={deliveryWebhookId}
@@ -142,6 +158,64 @@ function CreateWebhookForm({ formError }: { formError: string | null }) {
   );
 }
 
+function EditWebhookForm({
+  formError,
+  webhook,
+}: {
+  formError: string | null;
+  webhook: TenantWebhookEndpoint;
+}) {
+  return (
+    <div className="form-section">
+      <h3>Edit Webhook Endpoint</h3>
+      {formError && (
+        <div className="error-banner">
+          <strong>Error:</strong> {formError}
+        </div>
+      )}
+      <form action={updateWebhook} className="form-grid">
+        <input type="hidden" name="webhookId" value={webhook.webhookId} />
+        <div className="form-row">
+          <label htmlFor="edit-url">Webhook URL *</label>
+          <input
+            type="url"
+            id="edit-url"
+            name="url"
+            defaultValue={webhook.url}
+            required
+          />
+        </div>
+        <div className="form-row">
+          <label htmlFor="edit-events">Events (comma-separated) *</label>
+          <input
+            type="text"
+            id="edit-events"
+            name="events"
+            defaultValue={webhook.events.join(",")}
+            required
+          />
+        </div>
+        <div className="form-row">
+          <label htmlFor="edit-status">Status *</label>
+          <select
+            id="edit-status"
+            name="status"
+            defaultValue={webhook.status}
+            required
+          >
+            <option value="active">Active</option>
+            <option value="test_pending">Test Pending</option>
+          </select>
+        </div>
+        <div className="form-actions">
+          <button type="submit">Update Endpoint</button>
+          <Link href="/webhooks">Cancel</Link>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function WebhookList({ webhooks }: { webhooks: TenantWebhookEndpoint[] }) {
   return (
     <div className="webhooks-section">
@@ -185,6 +259,10 @@ function WebhookList({ webhooks }: { webhooks: TenantWebhookEndpoint[] }) {
                   <td>
                     <Link href={`/webhooks?deliveries=${webhook.webhookId}`}>
                       Deliveries
+                    </Link>
+                    {" | "}
+                    <Link href={`/webhooks?edit=${webhook.webhookId}`}>
+                      Edit
                     </Link>
                     {" | "}
                     <form action={deleteWebhook} style={{ display: "inline" }}>
@@ -345,6 +423,38 @@ async function createWebhook(formData: FormData) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     redirect(`/webhooks?create=true&error=${encodeURIComponent(msg)}`);
+  }
+}
+
+async function updateWebhook(formData: FormData) {
+  "use server";
+  const client = getTenantClient();
+
+  const webhookId = formData.get("webhookId") as string;
+  const events = String(formData.get("events") ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const command: UpdateTenantWebhookEndpointCommand = {
+    url: formData.get("url") as string,
+    events,
+    status: formData.get("status") as "active" | "test_pending",
+  };
+
+  try {
+    await client.updateWebhookEndpoint(webhookId, command);
+    revalidatePath("/webhooks");
+    redirect(
+      `/webhooks?success=${encodeURIComponent(
+        "Webhook endpoint updated successfully.",
+      )}`,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    redirect(
+      `/webhooks?edit=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(msg)}`,
+    );
   }
 }
 

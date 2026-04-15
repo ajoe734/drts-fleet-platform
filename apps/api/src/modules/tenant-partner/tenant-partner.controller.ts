@@ -15,6 +15,7 @@ import type {
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
   TenantPartnerSummary,
+  UpdateTenantWebhookEndpointCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
@@ -80,6 +81,12 @@ export class TenantPartnerController {
   @Get("tenant/users")
   listTenantUsers(@Headers("x-request-id") requestId?: string) {
     const items = this.tenantPartnerService.listTenantUsers();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/roles")
+  listTenantRoles(@Headers("x-request-id") requestId?: string) {
+    const items = this.tenantPartnerService.listTenantRoles();
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
@@ -191,6 +198,22 @@ export class TenantPartnerController {
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.createWebhookEndpoint(command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("tenant/webhooks/:webhookId")
+  updateWebhookEndpoint(
+    @Param("webhookId") webhookId: string,
+    @Body() command: UpdateTenantWebhookEndpointCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.updateWebhookEndpoint(
+        webhookId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }

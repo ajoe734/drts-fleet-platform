@@ -1,12 +1,31 @@
 import Link from "next/link";
+import type { TenantRoleCatalogRecord } from "@drts/contracts";
 import { getUsers, inviteUser, updateUserRole } from "./actions";
 import { getCurrentRole, isAdmin } from "@/lib/rbac";
 import { AppShellCard } from "@drts/ui-web";
+import { getTenantClient } from "@/lib/api-client";
 
 export default async function UsersPage() {
   const { users, error } = await getUsers();
+  const client = getTenantClient();
   const role = await getCurrentRole();
   const adminAccess = isAdmin(role);
+  let roleCatalog: TenantRoleCatalogRecord[] = [];
+  let roleCatalogError: string | null = null;
+
+  try {
+    roleCatalog = await client.listTenantRoles();
+  } catch (e) {
+    roleCatalogError = e instanceof Error ? e.message : "Unknown error";
+  }
+
+  const combinedError = [error, roleCatalogError].filter(Boolean).join(" | ");
+  const roleLookup = new Map(
+    roleCatalog.map((catalogEntry) => [
+      catalogEntry.roleCode,
+      catalogEntry.displayName,
+    ]),
+  );
 
   return (
     <main className="app-grid">
@@ -18,13 +37,20 @@ export default async function UsersPage() {
             : `Viewing as ${role}. Admin access required to manage users.`
         }
       >
-        {error && (
+        {combinedError && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>Error:</strong> {combinedError}
           </div>
         )}
 
-        {adminAccess && <InviteForm />}
+        {adminAccess && roleCatalog.length > 0 ? (
+          <InviteForm roleCatalog={roleCatalog} />
+        ) : adminAccess ? (
+          <p className="empty-state">
+            Role catalog unavailable. Invite and role-change actions stay
+            disabled until `/api/tenant/roles` responds.
+          </p>
+        ) : null}
 
         {users.length > 0 ? (
           <div className="data-table" style={{ marginTop: "1.5rem" }}>
@@ -45,11 +71,15 @@ export default async function UsersPage() {
                     <td>{user.userId}</td>
                     <td>{user.displayName}</td>
                     <td>{user.email}</td>
-                    <td>{user.roleCode}</td>
+                    <td>{roleLookup.get(user.roleCode) ?? user.roleCode}</td>
                     <td>{user.status}</td>
                     {adminAccess && (
                       <td>
-                        <RoleUpdateForm user={user} />
+                        <RoleUpdateForm
+                          user={user}
+                          roleCatalog={roleCatalog}
+                          disabled={roleCatalog.length === 0}
+                        />
                       </td>
                     )}
                   </tr>
@@ -73,7 +103,11 @@ export default async function UsersPage() {
   );
 }
 
-function InviteForm() {
+function InviteForm({
+  roleCatalog,
+}: {
+  roleCatalog: TenantRoleCatalogRecord[];
+}) {
   return (
     <form action={inviteUser}>
       <div className="data-table">
@@ -109,12 +143,17 @@ function InviteForm() {
               <td>
                 <select
                   name="roleCode"
-                  defaultValue="viewer"
+                  defaultValue={roleCatalog[0]?.roleCode}
                   style={{ width: "100%" }}
                 >
-                  <option value="viewer">Viewer</option>
-                  <option value="operator">Operator</option>
-                  <option value="admin">Admin</option>
+                  {roleCatalog.map((catalogEntry) => (
+                    <option
+                      key={catalogEntry.roleCode}
+                      value={catalogEntry.roleCode}
+                    >
+                      {catalogEntry.displayName}
+                    </option>
+                  ))}
                 </select>
               </td>
               <td>
@@ -132,22 +171,33 @@ function InviteForm() {
 
 function RoleUpdateForm({
   user,
+  roleCatalog,
+  disabled,
 }: {
   user: { userId: string; roleCode: string; status: string };
+  roleCatalog: TenantRoleCatalogRecord[];
+  disabled: boolean;
 }) {
   return (
     <form action={updateUserRole} style={{ display: "flex", gap: "0.5rem" }}>
       <input type="hidden" name="userId" value={user.userId} />
-      <select name="roleCode" defaultValue={user.roleCode}>
-        <option value="viewer">Viewer</option>
-        <option value="operator">Operator</option>
-        <option value="admin">Admin</option>
+      <select
+        name="roleCode"
+        defaultValue={user.roleCode}
+        disabled={disabled || roleCatalog.length === 0}
+      >
+        {roleCatalog.map((catalogEntry) => (
+          <option key={catalogEntry.roleCode} value={catalogEntry.roleCode}>
+            {catalogEntry.displayName}
+          </option>
+        ))}
       </select>
       <select name="status" defaultValue={user.status}>
+        <option value="invited">Invited</option>
         <option value="active">Active</option>
         <option value="suspended">Suspended</option>
       </select>
-      <button type="submit" className="btn-secondary">
+      <button type="submit" className="btn-secondary" disabled={disabled}>
         Update
       </button>
     </form>

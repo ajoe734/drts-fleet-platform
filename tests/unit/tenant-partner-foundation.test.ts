@@ -108,6 +108,43 @@ describe("tenant partner foundation service", () => {
     );
   });
 
+  it("updates webhook metadata through a first-class tenant command path", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const webhook = tenantPartnerService.createWebhookEndpoint(
+      {
+        url: "https://tenant.example.com/webhooks/drts",
+        secret: "local-test-secret",
+        events: ["tenant.sla.threshold_breached"],
+      },
+      "webhook-create-request",
+    );
+
+    const updated = tenantPartnerService.updateWebhookEndpoint(
+      webhook.webhookId,
+      {
+        url: "https://tenant.example.com/webhooks/drts-v2",
+        events: [
+          "tenant.sla.threshold_breached",
+          "tenant.billing_profile.updated",
+        ],
+        status: "test_pending",
+      },
+      "webhook-update-request",
+    );
+
+    expect(updated.url).toBe("https://tenant.example.com/webhooks/drts-v2");
+    expect(updated.events).toEqual([
+      "tenant.sla.threshold_breached",
+      "tenant.billing_profile.updated",
+    ]);
+    expect(updated.status).toBe("test_pending");
+    expect(auditService.listAuditLogs()[0]?.actionName).toBe(
+      "update_webhook_endpoint",
+    );
+  });
+
   it("manages passengers, addresses, tenant roles, and API keys as tenant source-of-truth records", () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
@@ -176,6 +213,38 @@ describe("tenant partner foundation service", () => {
     expect(rotatedApiKey.revokedApiKeyId).toBe(issuedApiKey.apiKey.apiKeyId);
     expect(rotatedApiKey.plaintextKey).toMatch(/^tk_/);
     expect(auditService.listAuditLogs()[0]?.actionName).toBe("rotate_api_key");
+  });
+
+  it("publishes a tenant role catalog and rejects unsupported role assignments", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    expect(
+      tenantPartnerService.listTenantRoles().map((role) => role.roleCode),
+    ).toEqual([
+      "tenant_admin",
+      "tenant_ops_admin",
+      "tenant_finance_admin",
+      "tenant_viewer",
+    ]);
+
+    let thrown: unknown;
+    try {
+      tenantPartnerService.createTenantUser({
+        email: "unsupported@example.com",
+        displayName: "Unsupported Role User",
+        roleCode: "admin",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeDefined();
+    expect(
+      (
+        thrown as { getResponse?: () => { error?: { code?: string } } }
+      ).getResponse?.().error?.code,
+    ).toBe("UNSUPPORTED_TENANT_ROLE");
   });
 
   it("rehydrates persisted tenant settings and writes webhook delivery changes through the repository", async () => {

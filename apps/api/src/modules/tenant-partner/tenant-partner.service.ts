@@ -13,9 +13,12 @@ import type {
   TenantApiKeyIssued,
   TenantNotificationPreferences,
   TenantPassengerRecord,
+  TenantRoleCatalogRecord,
   TenantSlaProfile,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
+  TenantWebhookEndpointStatus,
+  UpdateTenantWebhookEndpointCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
@@ -157,6 +160,37 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     status: "active",
     invitedAt: "2026-04-10T00:00:00.000Z",
     updatedAt: "2026-04-10T00:00:00.000Z",
+  },
+];
+
+const TENANT_ROLE_CATALOG: TenantRoleCatalogRecord[] = [
+  {
+    roleCode: "tenant_admin",
+    displayName: "Tenant Admin",
+    description:
+      "Full tenant-administration access across booking, billing, reporting, webhook, and user-management surfaces.",
+    assignable: true,
+  },
+  {
+    roleCode: "tenant_ops_admin",
+    displayName: "Tenant Ops Admin",
+    description:
+      "Operational management access for booking, passenger directory, address book, and webhook workflows.",
+    assignable: true,
+  },
+  {
+    roleCode: "tenant_finance_admin",
+    displayName: "Tenant Finance Admin",
+    description:
+      "Finance and reporting access for billing profiles, invoices, exports, and audit follow-up.",
+    assignable: true,
+  },
+  {
+    roleCode: "tenant_viewer",
+    displayName: "Tenant Viewer",
+    description:
+      "Read-only access for tenant portal views without write or user-management authority.",
+    assignable: true,
   },
 ];
 
@@ -528,10 +562,15 @@ export class TenantPartnerService implements OnModuleInit {
     return this.userRoles.map((userRole) => this.cloneUserRole(userRole));
   }
 
+  listTenantRoles() {
+    return TENANT_ROLE_CATALOG.map((role) => ({ ...role }));
+  }
+
   createTenantUser(command: CreateTenantUserCommand, requestId?: string) {
     this.assertNonBlank(command.email, "email");
     this.assertNonBlank(command.displayName, "displayName");
     this.assertNonBlank(command.roleCode, "roleCode");
+    this.assertSupportedTenantRoleCode(command.roleCode);
 
     const normalizedEmail = command.email.trim().toLowerCase();
     if (this.userRoles.some((userRole) => userRole.email === normalizedEmail)) {
@@ -589,6 +628,7 @@ export class TenantPartnerService implements OnModuleInit {
     requestId?: string,
   ) {
     this.assertNonBlank(command.roleCode, "roleCode");
+    this.assertSupportedTenantRoleCode(command.roleCode);
 
     const userRole = this.requireTenantUser(userId);
     userRole.roleCode = command.roleCode.trim();
@@ -777,14 +817,16 @@ export class TenantPartnerService implements OnModuleInit {
   ) {
     this.assertNonBlank(command.url, "url");
     this.assertNonBlank(command.secret, "secret");
+    const normalizedEvents = this.normalizeWebhookEvents(command.events);
+    const normalizedUrl = command.url.trim();
 
     const now = new Date().toISOString();
     const secretPreview = this.secretPreview(command.secret);
     const webhookEndpoint: StoredWebhookEndpoint = {
       webhookId: `wh_${randomUUID()}`,
       tenantId: DEMO_TENANT_ID,
-      url: command.url,
-      events: [...command.events],
+      url: normalizedUrl,
+      events: normalizedEvents,
       status: "active",
       secretVersion: 1,
       secretPreview,
@@ -857,6 +899,69 @@ export class TenantPartnerService implements OnModuleInit {
       webhookId: webhookEndpoint.webhookId,
       status: webhookEndpoint.status,
     };
+  }
+
+  updateWebhookEndpoint(
+    webhookId: string,
+    command: UpdateTenantWebhookEndpointCommand,
+    requestId?: string,
+  ) {
+    const endpoint = this.requireWebhookEndpoint(webhookId);
+    const oldValues = this.toWebhookResponse(endpoint);
+
+    let changed = false;
+
+    if (command.url !== undefined) {
+      this.assertNonBlank(command.url, "url");
+      endpoint.url = command.url.trim();
+      changed = true;
+    }
+
+    if (command.events !== undefined) {
+      endpoint.events = this.normalizeWebhookEvents(command.events);
+      changed = true;
+    }
+
+    if (command.status !== undefined) {
+      this.assertSupportedWebhookStatus(command.status);
+      endpoint.status = command.status;
+      changed = true;
+    }
+
+    if (!changed) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "WEBHOOK_UPDATE_EMPTY",
+        "At least one webhook metadata field must be provided.",
+        {
+          webhookId,
+        },
+      );
+    }
+
+    endpoint.updatedAt = new Date().toISOString();
+    this.persistChanges(
+      {
+        webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+      },
+      "update_webhook_endpoint",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId: DEMO_TENANT_ID,
+        moduleName: "tenant-partner",
+        actionName: "update_webhook_endpoint",
+        resourceType: "webhook_endpoint",
+        resourceId: endpoint.webhookId,
+        oldValuesSummary: oldValues,
+        newValuesSummary: this.toWebhookResponse(endpoint),
+      },
+      requestId,
+    );
+
+    return this.toWebhookResponse(endpoint);
   }
 
   sendTestWebhook(command: SendTestWebhookCommand, requestId?: string) {
@@ -1315,6 +1420,23 @@ export class TenantPartnerService implements OnModuleInit {
     return apiKey;
   }
 
+  private requireWebhookEndpoint(webhookId: string) {
+    const endpoint = this.webhookEndpoints.find(
+      (candidate) => candidate.webhookId === webhookId,
+    );
+    if (!endpoint) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "WEBHOOK_NOT_FOUND",
+        "The tenant webhook endpoint could not be found.",
+        {
+          webhookId,
+        },
+      );
+    }
+    return endpoint;
+  }
+
   private recordTenantAudit(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
@@ -1362,6 +1484,56 @@ export class TenantPartnerService implements OnModuleInit {
         },
       );
     }
+  }
+
+  private assertSupportedTenantRoleCode(roleCode: string) {
+    const normalized = roleCode.trim();
+    const supported = TENANT_ROLE_CATALOG.some(
+      (role) => role.roleCode === normalized,
+    );
+
+    if (!supported) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "UNSUPPORTED_TENANT_ROLE",
+        "The tenant role code is not supported.",
+        {
+          roleCode: normalized,
+        },
+      );
+    }
+  }
+
+  private assertSupportedWebhookStatus(status: TenantWebhookEndpointStatus) {
+    if (status === "active" || status === "test_pending") {
+      return;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "UNSUPPORTED_WEBHOOK_STATUS",
+      "The webhook status is not supported.",
+      {
+        status,
+      },
+    );
+  }
+
+  private normalizeWebhookEvents(events: string[]) {
+    const normalized = [...new Set(events.map((event) => event.trim()))].filter(
+      Boolean,
+    );
+
+    if (normalized.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "WEBHOOK_EVENTS_REQUIRED",
+        "At least one webhook event must be provided.",
+        {},
+      );
+    }
+
+    return normalized;
   }
 
   private computeNextAttemptAt(

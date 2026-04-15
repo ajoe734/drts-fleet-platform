@@ -196,16 +196,24 @@ export interface CreateTenantWebhookEndpointCommand {
   events: string[];
 }
 
+export type TenantWebhookEndpointStatus = "active" | "test_pending";
+
 export interface TenantWebhookEndpoint {
   webhookId: string;
   tenantId: string;
   url: string;
   events: string[];
-  status: "active" | "test_pending";
+  status: TenantWebhookEndpointStatus;
   secretVersion: number;
   secretPreview: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface UpdateTenantWebhookEndpointCommand {
+  url?: string;
+  events?: string[];
+  status?: TenantWebhookEndpointStatus;
 }
 
 export interface SendTestWebhookCommand {
@@ -310,6 +318,13 @@ export interface CreateTenantUserCommand {
 export interface UpdateTenantRoleCommand {
   roleCode: string;
   status?: TenantUserRoleStatus;
+}
+
+export interface TenantRoleCatalogRecord {
+  roleCode: string;
+  displayName: string;
+  description: string;
+  assignable: boolean;
 }
 
 export interface TenantApiKeyRecord {
