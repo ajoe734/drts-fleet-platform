@@ -90,17 +90,9 @@ jobs:
           cache-to: type=registry,ref=${{ env.REGISTRY }}/migrate:cache,mode=max
 
       # ── Web apps ─────────────────────────────────────────────
-      - name: Build & push — tenant-portal-web
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: apps/tenant-portal-web/Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/tenant-portal-web:${{ steps.tag.outputs.tag }}
-            ${{ env.REGISTRY }}/tenant-portal-web:latest
-          cache-from: type=registry,ref=${{ env.REGISTRY }}/tenant-portal-web:cache
-          cache-to: type=registry,ref=${{ env.REGISTRY }}/tenant-portal-web:cache,mode=max
+      # tenant-portal-web: RETIRED (SUNSET-001-tenant-portal-web, FBP-007).
+      # Production tenant UI is tenant-commute-hub (external repo).
+      # Build step removed from active pipeline.
 
       - name: Build & push — platform-admin-web
         uses: docker/build-push-action@v5
@@ -229,19 +221,7 @@ jobs:
             --format "value(status.url)")
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy — tenant-portal-web
-        run: |
-          IMAGE="${{ env.REGISTRY }}/tenant-portal-web:${{ needs.build-push.outputs.image_tag }}"
-          gcloud run deploy drts-tenant-portal-web \
-            --region "$REGION" \
-            --image  "$IMAGE" \
-            --port   3000 \
-            --service-account "${{ secrets.WIF_SERVICE_ACCOUNT }}" \
-            --set-env-vars "NODE_ENV=production,PORT=3000,NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
-            --allow-unauthenticated \
-            --min-instances 0 \
-            --max-instances 2 \
-            --project "$PROJECT_ID"
+      # tenant-portal-web deploy step removed — RETIRED (SUNSET-001-tenant-portal-web, FBP-007).
 
       - name: Deploy — platform-admin-web
         run: |
@@ -320,7 +300,7 @@ jobs:
       - name: Print staging URLs
         run: |
           echo "=== Staging deployment complete ==="
-          for SVC in drts-api drts-tenant-portal-web drts-platform-admin-web drts-ops-console-web; do
+          for SVC in drts-api drts-platform-admin-web drts-ops-console-web; do
             URL=$(gcloud run services describe "$SVC" \
               --region "$REGION" \
               --project "$PROJECT_ID" \

@@ -12,18 +12,8 @@ services:
     ports:
       - "3001:3001"
 
-  tenant-portal-web:
-    build:
-      context: .
-      dockerfile: apps/tenant-portal-web/Dockerfile
-    image: drts/tenant-portal-web:local
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
-    ports:
-      - "3000:3000"
-    depends_on:
-      - api
+  # tenant-portal-web: RETIRED (SUNSET-001-tenant-portal-web, FBP-007).
+  # Production tenant UI is tenant-commute-hub (external repo). Service removed from active compose topology.
 
   platform-admin-web:
     build:

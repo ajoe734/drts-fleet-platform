@@ -33,13 +33,16 @@ This decision was fixed in the full-blueprint consensus packet
 
 ## Sunset Rule Execution Checklist
 
-| Step                                                               | Status       | Notes                                                                                                                                                                                  |
-| ------------------------------------------------------------------ | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/tenant-portal-web/README.md` updated with SUNSET notice      | **done**     | Clearly marks the app as retired, non-production, and references this record                                                                                                           |
-| `TARGET_ARCHITECTURE.md` §3 updated                                | **done**     | Entry marked `RETIRED (SUNSET-001-tenant-portal-web, 2026-04-15)`                                                                                                                      |
-| `ROADMAP.md` updated                                               | **done**     | Topology note added under Wave 7 section                                                                                                                                               |
-| Active rollout / master plan (`ai-status.json`, `current-work.md`) | **done**     | FBP-007 task class `execution_cleanup` closes the retire obligation; no task remains that treats this app as a live production target                                                  |
-| Hard-delete decision                                               | **deferred** | The frozen reference shell may be hard-deleted once Wave D scaffolding is no longer needed for historical reference. A fresh task should be opened when the repo is ready for cleanup. |
+| Step                                                                  | Status       | Notes                                                                                                                                                                                  |
+| --------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/tenant-portal-web/README.md` updated with SUNSET notice         | **done**     | Clearly marks the app as retired, non-production, and references this record                                                                                                           |
+| `TARGET_ARCHITECTURE.md` §3 updated                                   | **done**     | Entry marked `RETIRED (SUNSET-001-tenant-portal-web, 2026-04-15)`                                                                                                                      |
+| `ROADMAP.md` updated                                                  | **done**     | Topology note added under Wave 7 section                                                                                                                                               |
+| Active rollout / master plan (`ai-status.json`, `current-work.md`)    | **done**     | FBP-007 task class `execution_cleanup` closes the retire obligation; no task remains that treats this app as a live production target                                                  |
+| Deploy pipeline (`deploy-staging.yml`)                                | **done**     | Build & push step and deploy step for `tenant-portal-web` removed; `drts-tenant-portal-web` removed from staging URL print list                                                        |
+| GCP service spec (`infra/gcp/staging/tenant-portal-web-service.yaml`) | **done**     | SUNSET notice comment added; file retained as frozen reference only; must NOT be applied to any environment                                                                            |
+| Docker compose prod (`docker-compose.prod.yml`)                       | **done**     | `tenant-portal-web` service entry removed from active compose topology                                                                                                                 |
+| Hard-delete decision                                                  | **deferred** | The frozen reference shell may be hard-deleted once Wave D scaffolding is no longer needed for historical reference. A fresh task should be opened when the repo is ready for cleanup. |
 
 ---
 

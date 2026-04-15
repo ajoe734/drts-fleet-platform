@@ -1,3 +1,8 @@
+# RETIRED — SUNSET-001-tenant-portal-web (FBP-007, 2026-04-15)
+# apps/tenant-portal-web is NOT the production tenant UI.
+# Production tenant UI: tenant-commute-hub (external repo).
+# This file is preserved as a frozen reference only; it must NOT be applied to any environment.
+# See: docs/02-architecture/authority/fbp-007-tenant-portal-web-sunset.md
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
