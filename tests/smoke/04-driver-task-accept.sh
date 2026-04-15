@@ -47,4 +47,10 @@ log_ok "POST /driver/tasks/${TASK_ID}/accept → HTTP ${RESP_STATUS}"
 http_call GET "/driver/tasks/${TASK_ID}"
 assert_status "200"
 TASK_STATUS=$(json_get ".data.status")
+
+if [[ "$TASK_STATUS" != "accepted" ]]; then
+  log_fail "Expected task status 'accepted', got '${TASK_STATUS}'"
+  exit 1
+fi
+
 log_ok "GET /driver/tasks/${TASK_ID} → status=${TASK_STATUS}"

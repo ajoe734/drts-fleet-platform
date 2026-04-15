@@ -9,10 +9,10 @@
 # Options:
 #   -u, --api-url URL        API base URL (default: $SMOKE_API_URL or http://localhost:3001)
 #   -t, --token TOKEN        Bearer auth token (default: $SMOKE_AUTH_TOKEN)
-#       --tenant-id ID       Tenant ID used in billing/report fixtures (default: smoke-tenant-01)
-#       --driver-id ID       Driver ID used in dispatch assign (default: smoke-driver-01)
-#       --vehicle-id ID      Vehicle ID used in dispatch assign (default: smoke-vehicle-01)
-#   -s, --suite PATTERN      Run only tests matching pattern (e.g. "02 05")
+#       --tenant-id ID       Tenant ID used in billing/report fixtures (default: tenant-demo-001)
+#       --driver-id ID       Driver ID used in dispatch assign (default: drv-demo-001)
+#       --vehicle-id ID      Vehicle ID used in dispatch assign (default: veh-demo-001)
+#   -s, --suite PATTERN      Run only tests matching pattern (e.g. "02|05")
 #   -v, --verbose            Print full response bodies on failure
 #   -h, --help               Show this help
 #
@@ -41,9 +41,9 @@ export SMOKE_STATE_FILE="$STATE_FILE"
 # ── Defaults ──────────────────────────────────────────────────────────────────
 export SMOKE_API_URL="${SMOKE_API_URL:-http://localhost:3001}"
 export SMOKE_AUTH_TOKEN="${SMOKE_AUTH_TOKEN:-}"
-export SMOKE_TENANT_ID="${SMOKE_TENANT_ID:-smoke-tenant-01}"
-export SMOKE_DRIVER_ID="${SMOKE_DRIVER_ID:-smoke-driver-01}"
-export SMOKE_VEHICLE_ID="${SMOKE_VEHICLE_ID:-smoke-vehicle-01}"
+export SMOKE_TENANT_ID="${SMOKE_TENANT_ID:-tenant-demo-001}"
+export SMOKE_DRIVER_ID="${SMOKE_DRIVER_ID:-drv-demo-001}"
+export SMOKE_VEHICLE_ID="${SMOKE_VEHICLE_ID:-veh-demo-001}"
 export SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-30}"
 export SMOKE_POLL_INTERVAL="${SMOKE_POLL_INTERVAL:-3}"
 export SMOKE_POLL_MAX="${SMOKE_POLL_MAX:-20}"

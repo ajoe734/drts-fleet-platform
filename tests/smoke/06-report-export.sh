@@ -75,7 +75,8 @@ if [[ "$JOB_STATUS" == "completed" ]]; then
     log_warn "Artifact URL missing — may be populated after async upload."
   fi
 else
-  log_warn "Report job still ${JOB_STATUS} after polling; staging async queue may be slow."
+  log_fail "Report job still '${JOB_STATUS}' after ${SMOKE_POLL_MAX} poll(s); smoke timeout exceeded."
+  exit 1
 fi
 
 # ── 5. List jobs sanity check ─────────────────────────────────────────────────
