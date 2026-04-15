@@ -6,10 +6,10 @@ set -euo pipefail
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 SMOKE_API_URL="${SMOKE_API_URL:-http://localhost:3001}"
-SMOKE_AUTH_TOKEN="${SMOKE_AUTH_TOKEN:-}"          # Bearer token (optional for staging bootstrap)
-SMOKE_TENANT_ID="${SMOKE_TENANT_ID:-smoke-tenant-01}"
-SMOKE_DRIVER_ID="${SMOKE_DRIVER_ID:-smoke-driver-01}"
-SMOKE_VEHICLE_ID="${SMOKE_VEHICLE_ID:-smoke-vehicle-01}"
+SMOKE_AUTH_TOKEN="${SMOKE_AUTH_TOKEN:-}"          # Bearer token — obtain via POST /api/auth/login before running
+SMOKE_TENANT_ID="${SMOKE_TENANT_ID:-tenant-demo-001}"
+SMOKE_DRIVER_ID="${SMOKE_DRIVER_ID:-drv-demo-001}"
+SMOKE_VEHICLE_ID="${SMOKE_VEHICLE_ID:-veh-demo-001}"
 SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-30}"              # curl timeout per request (seconds)
 SMOKE_POLL_INTERVAL="${SMOKE_POLL_INTERVAL:-3}"   # seconds between status polls
 SMOKE_POLL_MAX="${SMOKE_POLL_MAX:-20}"            # max poll attempts

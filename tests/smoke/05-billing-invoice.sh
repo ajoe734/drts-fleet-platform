@@ -9,9 +9,14 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 
 log_step "05 — Billing invoice"
 
-# ── 1. Build period fixture (current calendar month) ─────────────────────────
-PERIOD_START=$(date -u +"%Y-%m-01T00:00:00Z")
-PERIOD_END=$(date -u +"%Y-%m-%dT23:59:59Z")
+# ── 1. Build period fixture (previous calendar month — closed period) ─────────
+# Billing engine requires a closed period (past month); current month is open and
+# will be rejected by the staging billing engine with a validation error.
+PERIOD_START=$(date -u -d "$(date -u +%Y-%m-01) -1 month" +"%Y-%m-01T00:00:00Z" 2>/dev/null \
+  || date -u -v-1m -v1d +"%Y-%m-01T00:00:00Z")
+# Last day of previous month = one second before this month's 1st
+PERIOD_END=$(date -u -d "$(date -u +%Y-%m-01) -1 second" +"%Y-%m-%dT23:59:59Z" 2>/dev/null \
+  || date -u -v-1d -v+1m -v1d -v-1d +"%Y-%m-%dT23:59:59Z")
 
 FIXTURE_TMP=$(mktemp /tmp/drts-smoke-invoice-XXXXXX.json)
 trap 'rm -f "$FIXTURE_TMP"' EXIT
