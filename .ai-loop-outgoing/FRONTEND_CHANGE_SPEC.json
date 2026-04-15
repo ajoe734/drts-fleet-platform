@@ -1,0 +1,39 @@
+{
+  "iteration": 0,
+  "written_by": "vscode-llm",
+  "written_at": "2026-04-15T04:30:00Z",
+  "contract_version": "013be16d04113485050bbc833dd5c26778bf4350",
+  "tasks": [
+    {
+      "id": "SPEC-0001",
+      "title": "Add core API base URL config",
+      "type": "config",
+      "priority": "critical",
+      "description": "Add VITE_CORE_API_BASE_URL to .env.local and .env.example. All API calls must use this base.",
+      "acceptance": [
+        "No hardcoded API URLs in src/",
+        "VITE_CORE_API_BASE_URL used in all fetch calls"
+      ]
+    },
+    {
+      "id": "SPEC-0002",
+      "title": "Add required headers to all API requests",
+      "type": "infrastructure",
+      "priority": "critical",
+      "description": "All requests must include Authorization: Bearer <token>, X-Request-Id (UUID v4). POST command endpoints must also include Idempotency-Key.",
+      "acceptance": [
+        "Authorization header present in all requests",
+        "X-Request-Id present in all requests",
+        "Idempotency-Key present on all POST mutations"
+      ]
+    },
+    {
+      "id": "SPEC-0003",
+      "title": "Audit Supabase direct calls",
+      "type": "audit",
+      "priority": "high",
+      "description": "Enumerate all places that call Supabase directly for business data (bookings, passengers, billing, api-keys, webhooks, audit). List them in API_GAP_REQUESTS.json so VS Code LLM can track which core endpoints need to be delivered.",
+      "acceptance": ["API_GAP_REQUESTS.json populated with all gaps found"]
+    }
+  ]
+}

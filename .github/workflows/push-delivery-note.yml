@@ -1,0 +1,43 @@
+name: Push delivery note to tenant-commute-hub
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".ai-loop-outgoing/BACKEND_DELIVERY_NOTE.md"
+      - ".ai-loop-outgoing/CONTRACT_VERSION.lock"
+
+jobs:
+  push-to-tenant:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone tenant-commute-hub
+        run: |
+          git clone \
+            https://x-access-token:${{ secrets.TENANT_REPO_PAT }}@github.com/ajoe734/tenant-commute-hub.git \
+            /tmp/tenant
+
+      - name: Copy outgoing files to tenant .ai-loop/
+        run: |
+          cp .ai-loop-outgoing/BACKEND_DELIVERY_NOTE.md /tmp/tenant/.ai-loop/BACKEND_DELIVERY_NOTE.md
+          cp .ai-loop-outgoing/CONTRACT_VERSION.lock    /tmp/tenant/.ai-loop/CONTRACT_VERSION.lock
+          # Also copy the latest spec if present
+          if [ -f .ai-loop-outgoing/FRONTEND_CHANGE_SPEC.md ]; then
+            cp .ai-loop-outgoing/FRONTEND_CHANGE_SPEC.md  /tmp/tenant/.ai-loop/FRONTEND_CHANGE_SPEC.md
+          fi
+          if [ -f .ai-loop-outgoing/FRONTEND_CHANGE_SPEC.json ]; then
+            cp .ai-loop-outgoing/FRONTEND_CHANGE_SPEC.json /tmp/tenant/.ai-loop/FRONTEND_CHANGE_SPEC.json
+          fi
+
+      - name: Commit and push to tenant
+        run: |
+          cd /tmp/tenant
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot] (drts-fleet-platform)"
+          git add .ai-loop/
+          git diff --cached --quiet && echo "nothing to push" && exit 0
+          git commit -m "chore(ai-loop): backend delivery note from drts-fleet-platform@${{ github.sha }} [skip ci]"
+          git push
