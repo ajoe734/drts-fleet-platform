@@ -1,13 +1,13 @@
 # Baton Log — Phase 2 Planning
 
-| Round | Agent               | Action                                                                                         | Timestamp            |
-| ----- | ------------------- | ---------------------------------------------------------------------------------------------- | -------------------- |
-| 0     | Claude (Supervisor) | Opened planning workspace, created starter-draft.md                                            | 2026-04-15T05:00:00Z |
-| 1     | Codex               | **CURRENT OWNER** — Write starter draft response: answer §3 questions, propose task boundaries | —                    |
+### Round 0
 
-## Baton Rules
+- Baton owner: Claude (Supervisor)
+- Status: complete
+- Outcome: Opened phase2-planning workspace. Wrote starter-draft.md with full gap analysis: 3 major gaps (tenant-commute-hub Supabase cutover, Ops dispatch board, e2e tests). Tasks P2-A through P2-I proposed.
 
-1. Only the current owner edits `starter-draft.md`
-2. Reviewers write **cited** feedback in `review-round-N.md` (do not edit starter-draft.md)
-3. Supervisor advances the baton after each round
-4. Promotion gate: human accepts consensus packet
+### Round 1
+
+- Baton owner: Codex
+- Status: in_progress
+- Outcome: —
