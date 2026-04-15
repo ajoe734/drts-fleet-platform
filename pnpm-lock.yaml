@@ -189,6 +189,12 @@ importers:
 
   apps/platform-admin-web:
     dependencies:
+      "@drts/api-client":
+        specifier: workspace:*
+        version: link:../../packages/api-client
+      "@drts/contracts":
+        specifier: workspace:*
+        version: link:../../packages/contracts
       "@drts/shared-types":
         specifier: workspace:*
         version: link:../../packages/shared-types

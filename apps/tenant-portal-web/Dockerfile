@@ -19,15 +19,14 @@ WORKDIR /workspace
 
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
-COPY packages/*/package.json packages/
+COPY packages/ packages/
 COPY apps/tenant-portal-web/package.json apps/tenant-portal-web/
 
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
 FROM deps AS build
-COPY packages ./packages
-COPY apps/tenant-portal-web ./apps/tenant-portal-web
+COPY apps/tenant-portal-web/ apps/tenant-portal-web/
 COPY tsconfig.base.json .
 
 RUN pnpm --filter @drts/contracts build && \

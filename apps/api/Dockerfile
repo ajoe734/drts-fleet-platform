@@ -20,7 +20,7 @@ FROM base AS deps
 
 # Install dependencies for the whole workspace (pnpm workspaces)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
-COPY packages/*/package.json packages/
+COPY packages/ packages/
 COPY apps/api/package.json apps/api/
 
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
@@ -28,9 +28,8 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 FROM deps AS build
 
-# Copy sources and build contracts + API
-COPY packages ./packages
-COPY apps/api ./apps/api
+# Copy full API source and build contracts + API
+COPY apps/api/ apps/api/
 COPY tsconfig.base.json .
 
 RUN pnpm --filter @drts/contracts build && \
@@ -38,7 +37,7 @@ RUN pnpm --filter @drts/contracts build && \
 
 # pnpm deploy creates a self-contained flat node_modules (no workspace symlinks)
 # that is safe to COPY into the runtime stage
-RUN pnpm --filter @drts/api --prod deploy /deploy/api
+RUN pnpm --filter @drts/api --prod deploy --legacy /deploy/api
 
 FROM node:${NODE_VERSION} AS runtime
 ENV NODE_ENV=production \
