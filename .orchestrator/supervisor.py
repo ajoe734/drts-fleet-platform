@@ -679,16 +679,27 @@ def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reas
         "forbidden",
         "permission denied",
     }
+    # Terminal quota: agent has no quota left — reassign immediately, do not retry
+    quota_terminal_markers = {
+        "quota_exhausted",
+        "terminalquotaerror",
+        "you have exhausted your capacity",
+        "exhausted your capacity",
+        "status: 402",
+        "you have no quota",
+        "no quota remaining",
+        "payment required",
+        "free daily quota has been reached",
+        "oauth quota exceeded",
+        "daily quota",
+    }
     capacity_markers = {
         "status: 429",
-        "quota_exhausted",
         "resource_exhausted",
         "rate limit",
         "rate limited",
         "hit your limit",
-        "exhausted your capacity",
         "no capacity available",
-        "terminalquotaerror",
         "retryablequotaerror",
     }
     unknown_critical_markers = {
@@ -698,6 +709,8 @@ def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reas
 
     if any(marker in normalized for marker in auth_markers):
         return {"kind": "auth", "transient": False, "label": "auth"}
+    if any(marker in normalized for marker in quota_terminal_markers):
+        return {"kind": "quota_terminal", "transient": False, "label": "quota/terminal"}
     if any(marker in normalized for marker in capacity_markers):
         return {"kind": "capacity", "transient": True, "label": "capacity/429"}
     if provider == "gemini" and any(marker in normalized for marker in unknown_critical_markers):
@@ -746,6 +759,35 @@ def worker_retry_settings(config: dict[str, Any], provider: str | None) -> dict[
     return retry
 
 
+def quota_pause_agent(state: dict[str, Any], agent_id: str, reason: str, reset_seconds: int = 14400) -> None:
+    """Mark an agent as quota-exhausted; dispatch will skip it until reset_seconds have elapsed."""
+    paused = state.setdefault("quota_paused_agents", {})
+    resume_at = datetime.now(timezone.utc).timestamp() + reset_seconds
+    paused[agent_id] = {"reason": reason, "resume_at": resume_at, "paused_at": utc_now()}
+    console_log(f"quota pause: agent={agent_id} reset_in={reset_seconds}s reason={reason}", quiet=SUPERVISOR_LOG_QUIET)
+
+
+def is_agent_quota_paused(state: dict[str, Any], agent_id: str) -> bool:
+    """Return True if the agent is currently in the quota-pause registry."""
+    paused = state.get("quota_paused_agents") or {}
+    # Support both agent_id (lowercase) and display name (capitalized) lookups
+    entry = paused.get(agent_id) or paused.get(agent_id.lower()) or paused.get(agent_id.capitalize())
+    if not entry:
+        return False
+    return float(entry.get("resume_at", 0)) > datetime.now(timezone.utc).timestamp()
+
+
+def expire_quota_pauses(state: dict[str, Any]) -> list[str]:
+    """Remove agents whose quota cooldown has elapsed. Returns list of expired agent IDs."""
+    paused = state.get("quota_paused_agents") or {}
+    now = datetime.now(timezone.utc).timestamp()
+    expired = [aid for aid, info in paused.items() if float(info.get("resume_at", 0)) <= now]
+    for aid in expired:
+        del paused[aid]
+        console_log(f"quota pause expired: agent={aid} now available", quiet=SUPERVISOR_LOG_QUIET)
+    return expired
+
+
 def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(config.get("worker_reassignment", {}) or {})
     settings.setdefault("enabled", True)
@@ -788,7 +830,7 @@ def known_agent_display_names(config: dict[str, Any]) -> set[str]:
     }
 
 
-def first_viable_agent(config: dict[str, Any], preferred: list[str], exclude: set[str]) -> str | None:
+def first_viable_agent(config: dict[str, Any], preferred: list[str], exclude: set[str], state: dict[str, Any] | None = None) -> str | None:
     known = known_agent_display_names(config)
     seen: set[str] = set()
     for candidate in preferred:
@@ -797,7 +839,171 @@ def first_viable_agent(config: dict[str, Any], preferred: list[str], exclude: se
             continue
         seen.add(name)
         if name in known:
+            if state is not None and is_agent_quota_paused(state, name):
+                continue
             return name
+    return None
+
+
+def ordered_idle_agent_names(idle_agent_names: list[str], agent_loads: dict[str, list[int]]) -> list[str]:
+    indexed = list(enumerate(idle_agent_names))
+    indexed.sort(
+        key=lambda item: (
+            len(agent_loads.get(item[1], [])),
+            min(agent_loads.get(item[1], [99])),
+            item[0],
+        )
+    )
+    return [name for _index, name in indexed]
+
+
+def proactive_claim_plan_for_idle_agent(
+    config: dict[str, Any],
+    *,
+    task: dict[str, Any],
+    task_map: dict[str, dict[str, Any]],
+    idle_agent_name: str,
+    idle_agent_names: list[str],
+    agent_loads: dict[str, list[int]],
+    helper_settings: dict[str, Any],
+    review_statuses: set[str],
+    finalize_statuses: set[str],
+    dependency_done_statuses: set[str],
+    state: dict[str, Any] | None = None,
+) -> dict[str, str] | None:
+    if not helper_settings.get("enabled", True):
+        return None
+
+    allowed_statuses = {str(value).lower() for value in helper_settings.get("task_statuses", ["todo", "in_progress", "review", "review_approved"])}
+    task_status = str(task.get("status") or "").lower()
+    if task_status not in allowed_statuses:
+        return None
+
+    owner = str(task.get("owner") or "")
+    reviewer = str(task.get("reviewer") or "")
+    reason: str | None = None
+    assigned_agent = ""
+    counterpart_agent = ""
+    claim_role = ""
+
+    if task_status in review_statuses:
+        assigned_agent = reviewer
+        counterpart_agent = owner
+        claim_role = "reviewer"
+        reason = "review_ready_dispatch"
+    elif task_status in finalize_statuses:
+        assigned_agent = owner
+        counterpart_agent = reviewer
+        claim_role = "owner"
+        reason = "owned_finalize_dispatch"
+    elif task_status == "in_progress" and dependencies_satisfied(task, task_map, dependency_done_statuses):
+        assigned_agent = owner
+        counterpart_agent = reviewer
+        claim_role = "owner"
+        reason = "owned_in_progress_dispatch"
+    elif task_status == "todo" and dependencies_satisfied(task, task_map, dependency_done_statuses):
+        assigned_agent = owner
+        counterpart_agent = reviewer
+        claim_role = "owner"
+        reason = "owned_ready_dispatch"
+
+    if not reason or not assigned_agent or assigned_agent == idle_agent_name:
+        return None
+
+    if helper_settings.get("prefer_assigned_when_idle", True) and assigned_agent in idle_agent_names:
+        return None
+
+    current_priority = dispatch_reason_priority(reason)
+    assigned_loads = agent_loads.get(assigned_agent, [])
+    has_higher_priority_load = current_priority is not None and any(priority < current_priority for priority in assigned_loads)
+    assigned_busy = assigned_agent not in idle_agent_names
+
+    if helper_settings.get("require_owner_higher_priority_load", False):
+        if not has_higher_priority_load and not (helper_settings.get("availability_first", True) and assigned_busy):
+            return None
+    elif helper_settings.get("require_assigned_agent_busy", True) and not (assigned_busy or has_higher_priority_load):
+        return None
+
+    reassignment_settings = worker_reassignment_settings(config)
+    ordered_idle = ordered_idle_agent_names(
+        [name for name in idle_agent_names if name not in {assigned_agent, counterpart_agent}],
+        agent_loads,
+    )
+    if claim_role == "reviewer":
+        fallback_candidates = normalized_mapping_values(reassignment_settings.get("reviewer_fallbacks", {}), assigned_agent)
+    else:
+        fallback_candidates = normalized_mapping_values(reassignment_settings.get("owner_fallbacks", {}), assigned_agent)
+    candidate_order = list(fallback_candidates)
+    if helper_settings.get("availability_first", True) or helper_settings.get("allow_any_idle_lane", True):
+        candidate_order.extend(ordered_idle)
+    best_agent = first_viable_agent(config, candidate_order, exclude={assigned_agent, counterpart_agent}, state=state)
+    if best_agent != idle_agent_name:
+        return None
+
+    if claim_role == "reviewer":
+        return {
+            "reason": reason,
+            "claim_role": claim_role,
+            "assigned_agent": assigned_agent,
+            "claim_agent": idle_agent_name,
+            "new_owner": owner,
+            "new_reviewer": idle_agent_name,
+            "handoff_from": assigned_agent,
+            "handoff_to": idle_agent_name,
+        }
+
+    reviewer_candidates: list[str] = []
+    if reviewer and reviewer != idle_agent_name:
+        reviewer_candidates.append(reviewer)
+    if owner and owner != idle_agent_name and owner != reviewer:
+        reviewer_candidates.append(owner)
+    reviewer_candidates.extend(normalized_mapping_values(reassignment_settings.get("reviewer_fallbacks", {}), assigned_agent))
+    if helper_settings.get("availability_first", True) or helper_settings.get("allow_any_idle_lane", True):
+        reviewer_candidates.extend(ordered_idle)
+    new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={idle_agent_name}, state=state)
+    if not new_reviewer:
+        return None
+    return {
+        "reason": reason,
+        "claim_role": claim_role,
+        "assigned_agent": assigned_agent,
+        "claim_agent": idle_agent_name,
+        "new_owner": idle_agent_name,
+        "new_reviewer": new_reviewer,
+        "handoff_from": assigned_agent,
+        "handoff_to": idle_agent_name,
+    }
+
+
+def proactive_claim_plan_for_task(
+    config: dict[str, Any],
+    *,
+    task: dict[str, Any],
+    task_map: dict[str, dict[str, Any]],
+    idle_agent_names: list[str],
+    agent_loads: dict[str, list[int]],
+    helper_settings: dict[str, Any],
+    review_statuses: set[str],
+    finalize_statuses: set[str],
+    dependency_done_statuses: set[str],
+    state: dict[str, Any] | None = None,
+) -> dict[str, str] | None:
+    for idle_agent_name in ordered_idle_agent_names(idle_agent_names, agent_loads):
+        plan = proactive_claim_plan_for_idle_agent(
+            config,
+            task=task,
+            task_map=task_map,
+            idle_agent_name=idle_agent_name,
+            idle_agent_names=idle_agent_names,
+            agent_loads=agent_loads,
+            helper_settings=helper_settings,
+            review_statuses=review_statuses,
+            finalize_statuses=finalize_statuses,
+            dependency_done_statuses=dependency_done_statuses,
+            state=state,
+        )
+        if plan:
+            return plan
     return None
 
 
@@ -885,6 +1091,7 @@ def maybe_reassign_task_after_worker_failure(
     reason: str,
     *,
     terminal: bool = False,
+    state: dict[str, Any] | None = None,
 ) -> str | None:
     settings = worker_reassignment_settings(config)
     if not settings.get("enabled", True):
@@ -921,7 +1128,7 @@ def maybe_reassign_task_after_worker_failure(
 
     if task_status in review_statuses and reviewer == failing_agent:
         candidates = normalized_mapping_values(settings.get("reviewer_fallbacks", {}), failing_agent)
-        new_reviewer = first_viable_agent(config, candidates, exclude={owner, reviewer})
+        new_reviewer = first_viable_agent(config, candidates, exclude={owner, reviewer}, state=state)
         if not new_reviewer:
             return None
         message = (
@@ -956,13 +1163,13 @@ def maybe_reassign_task_after_worker_failure(
 
     if task_status in owned_statuses | finalize_statuses and owner == failing_agent:
         candidates = normalized_mapping_values(settings.get("owner_fallbacks", {}), failing_agent)
-        new_owner = first_viable_agent(config, candidates, exclude={owner, reviewer})
+        new_owner = first_viable_agent(config, candidates, exclude={owner, reviewer}, state=state)
         if not new_owner:
             return None
         reviewer_candidates = [reviewer]
         reviewer_candidates.extend(normalized_mapping_values(settings.get("reviewer_fallbacks", {}), failing_agent))
         reviewer_candidates.extend(normalized_mapping_values(settings.get("owner_fallbacks", {}), failing_agent))
-        new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={new_owner})
+        new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={new_owner}, state=state)
         if not new_reviewer:
             return None
         message = (
@@ -1667,6 +1874,10 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 f"worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} transient={'yes' if failure.get('transient') else 'no'} reason={failure_reason}",
                 quiet=SUPERVISOR_LOG_QUIET,
             )
+            if failure.get("kind") == "quota_terminal":
+                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+                if agent_id:
+                    quota_pause_agent(state, agent_id, failure_reason, reset_seconds=14400)
             if is_transient_worker_failure(config, worker, failure_reason):
                 handled, retry_changed = maybe_trigger_retry_or_fallback(config, state, provider_report, worker, failure_reason)
                 if handled:
@@ -1677,6 +1888,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 worker,
                 failure_reason,
                 terminal=True,
+                state=state,
             )
             if reassigned_to:
                 worker["status"] = "reassigned"
@@ -1780,8 +1992,12 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
 def helper_claim_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(ready_dispatch_settings(config).get("helper_claim", {}) or {})
     settings.setdefault("enabled", True)
-    settings.setdefault("task_statuses", ["todo"])
-    settings.setdefault("require_owner_higher_priority_load", True)
+    settings.setdefault("task_statuses", ["todo", "in_progress", "review", "review_approved"])
+    settings.setdefault("availability_first", True)
+    settings.setdefault("allow_any_idle_lane", True)
+    settings.setdefault("prefer_assigned_when_idle", True)
+    settings.setdefault("require_assigned_agent_busy", True)
+    settings.setdefault("require_owner_higher_priority_load", False)
     return settings
 
 
@@ -1792,6 +2008,7 @@ def underutilization_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("continuous_window_seconds", 900)
     settings.setdefault("cooldown_seconds", 900)
     settings.setdefault("max_new_sidecars_per_wave", 2)
+    settings.setdefault("max_new_main_tasks_per_wave", 2)
     settings.setdefault("max_active_sidecars_per_agent", 1)
     settings.setdefault(
         "productive_worker_statuses",
@@ -2485,23 +2702,29 @@ def choose_helper_claim_agent(
     idle_agent_name: str,
     agent_loads: dict[str, list[int]],
     helper_settings: dict[str, Any],
+    state: dict[str, Any] | None = None,
 ) -> bool:
     if not helper_settings.get("enabled", True):
         return False
-    allowed_statuses = {str(value).lower() for value in helper_settings.get("task_statuses", ["todo"])}
-    if str(task.get("status") or "").lower() not in allowed_statuses:
-        return False
-    if not owner_name or owner_name == idle_agent_name:
-        return False
-    owner_loads = agent_loads.get(owner_name, [])
-    if helper_settings.get("require_owner_higher_priority_load", True):
-        current_priority = dispatch_reason_priority("owned_ready_dispatch")
-        if current_priority is None or not any(priority < current_priority for priority in owner_loads):
-            return False
-    fallbacks = normalized_mapping_values(worker_reassignment_settings(config).get("owner_fallbacks", {}), owner_name)
-    if not fallbacks:
-        return False
-    return idle_agent_name in fallbacks
+    review_statuses = {str(value).lower() for value in ready_dispatch_settings(config).get("review_statuses", ["review"])}
+    finalize_statuses = {str(value).lower() for value in ready_dispatch_settings(config).get("finalize_statuses", ["review_approved"])}
+    dependency_done_statuses = {
+        str(value).lower() for value in ready_dispatch_settings(config).get("dependency_done_statuses", ["done"])
+    }
+    plan = proactive_claim_plan_for_idle_agent(
+        config,
+        task=task,
+        task_map={str(task.get("id") or ""): task},
+        idle_agent_name=idle_agent_name,
+        idle_agent_names=[idle_agent_name],
+        agent_loads=agent_loads,
+        helper_settings=helper_settings,
+        review_statuses=review_statuses,
+        finalize_statuses=finalize_statuses,
+        dependency_done_statuses=dependency_done_statuses,
+        state=state,
+    )
+    return plan is not None
 
 
 def higher_priority_ready_task_exists(
@@ -2663,6 +2886,7 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
     max_tasks_per_agent = max(1, int(settings.get("max_tasks_per_agent", 1)))
     max_dispatches_per_tick = max(1, int(settings.get("max_dispatches_per_tick", 4)))
 
+    agent_ids = list(config.get("agents", {}).keys())
     active_agents, active_task_agents = active_worker_indexes(state, active_statuses)
     pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
     active_task_ids = {task_id for task_id, _agent_id in active_task_agents if task_id}
@@ -2670,14 +2894,23 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
     agent_loads = agent_dispatch_loads(config, state, active_statuses)
     helper_settings = helper_claim_settings(config)
     seen = state.setdefault("seen_event_keys", {})
+    idle_agent_names = [
+        display_name_for(config, agent_id)
+        for agent_id in agent_ids
+        if agent_id not in active_agents
+        and agent_id not in pending_agents
+        and not is_agent_quota_paused(state, agent_id)
+        and display_name_for(config, agent_id)
+    ]
 
     changed = False
     dispatches = 0
-    agent_ids = list(config.get("agents", {}).keys())
     for agent_id in agent_ids:
         if dispatches >= max_dispatches_per_tick:
             break
         if agent_id in active_agents or agent_id in pending_agents:
+            continue
+        if is_agent_quota_paused(state, agent_id):
             continue
 
         target_agent = display_name_for(config, agent_id)
@@ -2708,40 +2941,47 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 reason = "owned_ready_dispatch"
                 priority = 3
 
-            helper_claim_candidate = (
-                task_status == "todo"
-                and dependencies_satisfied(task, task_map, dependency_done_statuses)
+            helper_claim_allowed_statuses = {str(v).lower() for v in helper_settings.get("task_statuses", ["todo", "in_progress", "review", "review_approved"])}
+            helper_claim_plan = None
+            if (
+                task_status in helper_claim_allowed_statuses
                 and task_id not in active_task_ids
                 and task_id not in pending_task_ids
-                and choose_helper_claim_agent(
+            ):
+                helper_claim_plan = proactive_claim_plan_for_idle_agent(
                     config,
                     task=task,
-                    owner_name=str(task_owner or ""),
-                    reviewer_name=str(task_reviewer or ""),
+                    task_map=task_map,
                     idle_agent_name=target_agent,
+                    idle_agent_names=idle_agent_names,
                     agent_loads=agent_loads,
                     helper_settings=helper_settings,
+                    review_statuses=review_statuses,
+                    finalize_statuses=finalize_statuses,
+                    dependency_done_statuses=dependency_done_statuses,
+                    state=state,
                 )
-            )
 
-            if helper_claim_candidate:
+            if helper_claim_plan:
                 helper_message = (
-                    f"Helper-claimed by {target_agent} while {task_owner} completes higher-priority work."
+                    f"Availability-first reassignment: {helper_claim_plan['claim_agent']} claimed "
+                    f"{task_id} while {helper_claim_plan['assigned_agent']} was unavailable or occupied."
                 )
                 if persist_task_reassignment(
                     config,
                     task_id=task_id,
-                    new_owner=target_agent,
-                    new_reviewer=str(task_owner or task_reviewer or ""),
+                    new_owner=helper_claim_plan["new_owner"],
+                    new_reviewer=helper_claim_plan["new_reviewer"],
                     message=helper_message,
-                    handoff_to=target_agent,
-                    handoff_from=str(task_owner or ""),
+                    handoff_to=helper_claim_plan["handoff_to"],
+                    handoff_from=helper_claim_plan["handoff_from"],
                 ):
-                    task[owner_field] = target_agent
-                    task[reviewer_field] = str(task_owner or task_reviewer or "")
+                    task[owner_field] = helper_claim_plan["new_owner"]
+                    task[reviewer_field] = helper_claim_plan["new_reviewer"]
                     task["last_update"] = utc_now()
                     task["next"] = helper_message
-                    event = build_dispatch_event(task, target_agent, "owned_ready_dispatch", task_map)
+                    claim_reason = helper_claim_plan["reason"]
+                    event = build_dispatch_event(task, target_agent, claim_reason, task_map)
                     if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
                         seen[event["key"]] = utc_now()
                         pending_event_keys.add(event["key"])
@@ -2752,16 +2992,18 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
                         write_activity_log(
                             config,
                             {
-                                "type": "task_helper_claimed",
+                                "type": "task_proactive_rebalanced",
                                 "task_id": task_id,
                                 "message": helper_message,
                                 "from_owner": task_owner,
-                                "to_owner": target_agent,
-                                "new_reviewer": str(task_owner or task_reviewer or ""),
+                                "to_owner": helper_claim_plan["new_owner"],
+                                "from_reviewer": task_reviewer,
+                                "to_reviewer": helper_claim_plan["new_reviewer"],
+                                "claim_role": helper_claim_plan["claim_role"],
                             },
                         )
                         console_log(
-                            f"helper claim: task={task_id} from={task_owner} to={target_agent}",
+                            f"availability-first claim: task={task_id} role={helper_claim_plan['claim_role']} to={target_agent}",
                             quiet=SUPERVISOR_LOG_QUIET,
                         )
                         break
@@ -2986,6 +3228,149 @@ def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, 
     return True
 
 
+def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
+    """Proactively reassign uncovered main tasks to idle agents when utilization is below threshold."""
+    settings = underutilization_settings(config)
+    if not settings.get("enabled", True):
+        return False
+
+    tracking = state.setdefault("underutilization", {})
+    productive_statuses = {str(v) for v in settings.get("productive_worker_statuses", [])}
+    ratio = utilization_ratio_for_sidecars(config, state, productive_statuses)
+    threshold = float(settings.get("threshold_ratio", 0.5))
+    now = utc_now()
+
+    if ratio >= threshold:
+        return False
+
+    below_since = _parse_iso_utc(tracking.get("below_threshold_since"))
+    current_dt = _parse_iso_utc(now)
+    if not below_since or not current_dt:
+        return False
+    if (current_dt - below_since).total_seconds() < float(settings.get("continuous_window_seconds", 900)):
+        return False
+
+    last_wave_at = _parse_iso_utc(tracking.get("last_main_task_wave_at"))
+    if last_wave_at and (current_dt - last_wave_at).total_seconds() < float(settings.get("cooldown_seconds", 900)):
+        return False
+
+    dispatch_settings = ready_dispatch_settings(config)
+    active_statuses = {str(v) for v in dispatch_settings.get("active_worker_statuses", [])}
+    dependency_done_statuses = {str(v).lower() for v in dispatch_settings.get("dependency_done_statuses", ["done"])}
+    finalize_statuses = {str(v).lower() for v in dispatch_settings.get("finalize_statuses", ["review_approved"])}
+    review_statuses = {str(v).lower() for v in dispatch_settings.get("review_statuses", ["review"])}
+    helper_settings = helper_claim_settings(config)
+
+    status = load_status(config)
+    task_map = task_index_from_status(config, status)
+    active_agents, active_task_agents = active_worker_indexes(state, active_statuses)
+    pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
+    active_task_ids = {tid for tid, _ in active_task_agents}
+    pending_task_ids = {tid for tid, _ in pending_task_agents}
+    agent_loads = agent_dispatch_loads(config, state, active_statuses)
+
+    idle_agent_names: list[str] = []
+    for agent_id, agent in (config.get("agents", {}) or {}).items():
+        display = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        if "legacy alias" in display.lower():
+            continue
+        normalized = normalize_agent_id(agent_id)
+        if normalized in active_agents or normalized in pending_agents:
+            continue
+        if is_agent_quota_paused(state, agent_id):
+            continue
+        idle_agent_names.append(display)
+
+    if not idle_agent_names:
+        tracking["last_main_task_wave_at"] = now
+        return False
+
+    seen = state.setdefault("seen_event_keys", {})
+    max_per_wave = max(1, int(settings.get("max_new_main_tasks_per_wave", 2)))
+    dispatched = 0
+    changed = False
+
+    sorted_tasks = sorted(
+        [t for t in (status.get("tasks", []) or []) if t.get("id")],
+        key=lambda t: task_phase_priority(t, task_map, dependency_done_statuses),
+    )
+
+    for task in sorted_tasks:
+        if dispatched >= max_per_wave:
+            break
+        if task_is_sidecar(task):
+            continue
+        task_id = str(task.get("id") or "")
+        task_status = str(task.get("status") or "").lower()
+        if task_status not in {str(v).lower() for v in helper_settings.get("task_statuses", ["todo", "in_progress", "review", "review_approved"])}:
+            continue
+        if task_id in active_task_ids or task_id in pending_task_ids:
+            continue
+        plan = proactive_claim_plan_for_task(
+            config,
+            task=task,
+            task_map=task_map,
+            idle_agent_names=idle_agent_names,
+            agent_loads=agent_loads,
+            helper_settings=helper_settings,
+            review_statuses=review_statuses,
+            finalize_statuses=finalize_statuses,
+            dependency_done_statuses=dependency_done_statuses,
+            state=state,
+        )
+        if not plan:
+            continue
+        old_owner = str(task.get("owner") or "")
+        old_reviewer = str(task.get("reviewer") or "")
+        msg = (
+            f"Availability-first backfill by {plan['claim_agent']} "
+            f"(utilization {ratio:.2f} below threshold {threshold:.2f}; "
+            f"reassigned from {plan['assigned_agent']})."
+        )
+        if not persist_task_reassignment(
+            config,
+            task_id=task_id,
+            new_owner=plan["new_owner"],
+            new_reviewer=plan["new_reviewer"],
+            message=msg,
+            handoff_to=plan["handoff_to"],
+            handoff_from=plan["handoff_from"],
+        ):
+            continue
+        task["owner"] = plan["new_owner"]
+        task["reviewer"] = plan["new_reviewer"]
+        task["last_update"] = now
+        task["next"] = msg
+        event = build_dispatch_event(task, plan["claim_agent"], plan["reason"], task_map)
+        if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
+            seen[event["key"]] = now
+            pending_event_keys.add(event["key"])
+            dispatched += 1
+            changed = True
+            active_task_ids.add(task_id)
+            idle_agent_names = [name for name in idle_agent_names if name != plan["claim_agent"]]
+            write_activity_log(
+                config,
+                {
+                    "type": "task_proactive_backfill",
+                    "task_id": task_id,
+                    "message": msg,
+                    "from_owner": old_owner,
+                    "to_owner": plan["new_owner"],
+                    "from_reviewer": old_reviewer,
+                    "to_reviewer": plan["new_reviewer"],
+                    "claim_role": plan["claim_role"],
+                },
+            )
+            console_log(
+                f"proactive backfill: task={task_id} role={plan['claim_role']} to={plan['claim_agent']}",
+                quiet=SUPERVISOR_LOG_QUIET,
+            )
+
+    tracking["last_main_task_wave_at"] = now
+    return changed
+
+
 def run_once(
     config: dict[str, Any],
     *,
@@ -3021,8 +3406,10 @@ def run_once(
     changed = poll_workers(config, state) or changed
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
+    expire_quota_pauses(state)
     changed = dispatch_ready_tasks(config, state) or changed
     changed = dispatch_underutilization_sidecars(config, state) or changed
+    changed = dispatch_underutilization_main_tasks(config, state) or changed
     changed = process_queue(config, state, provider_report) or changed
     changed = poll_workers(config, state) or changed
     changed = reconcile_queue_records(config, state) or changed

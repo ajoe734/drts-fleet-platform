@@ -108,6 +108,14 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^git (add|commit|checkout|fetch|pull|stash)(\s|$)"),
     re.compile(r"^gh(\s|$)"),
     re.compile(r"^bash(\s|$)"),
+    # general python3 — consistent with node/bash being broadly allowed
+    re.compile(r"^python3(\s|$)"),
+    # tmux — needed for supervisor / dashboard session management
+    re.compile(r"^tmux(\s|$)"),
+    re.compile(r"^TERM=\S+ tmux(\s|$)"),
+    # multi-line for loops reading package.json — safe read-only pattern
+    re.compile(r"^for app in .+; do\s*$", re.MULTILINE),
+    re.compile(r"^for \w+ in .+; do"),
 ]
 DEFER_BASH_PATTERNS = [
     re.compile(r"^git (add|commit|remote set-url|submodule)(\s|$)"),
@@ -125,7 +133,8 @@ DENY_BASH_PATTERNS = [
     re.compile(r"^chmod 777(\s|$)"),
 ]
 
-SAFE_TOOLS = {"Read", "Grep", "Glob", "LS", "Task", "TodoRead", "TodoWrite", "ReadNotebook", "ToolSearch"}
+SAFE_TOOLS = {"Read", "Grep", "Glob", "LS", "Task", "TodoRead", "TodoWrite", "ReadNotebook", "ToolSearch",
+              "ExitPlanMode", "EnterPlanMode", "AskUserQuestion", "ExitWorktree", "EnterWorktree"}
 EDIT_TOOLS = {"Edit", "MultiEdit", "Write"}
 NETWORK_TOOLS = {"WebFetch", "WebSearch"}
 
@@ -194,6 +203,12 @@ PNPM_OPTION_TAKES_VALUE = {"--filter", "-F", "--dir", "-C"}
 PNPM_STANDALONE_FLAGS = {"-r", "--recursive", "--stream", "--parallel", "--aggregate-output", "-w", "--workspace-root"}
 
 
+def _normalize_shell_command(shell_command: str) -> str:
+    command = shell_command.replace("\r\n", "\n").replace("\\\n", " ")
+    command = re.sub(r"\s*\n\s*", " ", command)
+    return command.strip()
+
+
 def _matches_workspace_script(path_token: str, relative_path: str) -> bool:
     candidate = Path(path_token)
     expected = ROOT / relative_path
@@ -246,24 +261,29 @@ def classify_command(shell_command: str) -> str:
         return "allow"
     if _is_safe_test_dependency_install_command(shell_command):
         return "allow"
+    if _requires_review_dependency_command(shell_command):
+        return "defer"
+    if _is_safe_python_command(shell_command):
+        return "allow"
     if _is_safe_test_run_command(shell_command):
         return "allow"
     if _is_safe_workspace_mkdir_command(shell_command):
         return "allow"
+    normalized = _normalize_shell_command(shell_command)
     for pattern in DENY_BASH_PATTERNS:
-        if pattern.search(shell_command):
+        if pattern.search(normalized):
             return "deny"
     for pattern in SAFE_BASH_PATTERNS:
-        if pattern.search(shell_command):
+        if pattern.search(normalized):
             return "allow"
     for pattern in DEFER_BASH_PATTERNS:
-        if pattern.search(shell_command):
+        if pattern.search(normalized):
             return "defer"
     return "defer"
 
 
 def _is_safe_python_one_liner(shell_command: str) -> bool:
-    command = shell_command.strip()
+    command = _normalize_shell_command(shell_command)
     if not (command.startswith('python3 -c "') or command.startswith("python3 -c '")):
         return False
     if any(marker in command for marker in UNSAFE_PYTHON_ONE_LINER_MARKERS):
@@ -271,8 +291,53 @@ def _is_safe_python_one_liner(shell_command: str) -> bool:
     return True
 
 
+def _is_safe_python_command(shell_command: str) -> bool:
+    segments = _command_segments(shell_command)
+    if not segments:
+        return False
+    for segment in segments:
+        fragment = _primary_shell_fragment(segment)
+        if not fragment:
+            return False
+        try:
+            tokens = shlex.split(fragment)
+        except ValueError:
+            return False
+        index = 0
+        while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", tokens[index]):
+            index += 1
+        if index >= len(tokens) or tokens[index] != "python3":
+            return False
+    return True
+
+
+def _requires_review_dependency_command(shell_command: str) -> bool:
+    segments = _command_segments(shell_command)
+    if not segments:
+        return False
+    for segment in segments:
+        fragment = _primary_shell_fragment(segment)
+        if not fragment:
+            continue
+        try:
+            tokens = shlex.split(fragment)
+        except ValueError:
+            continue
+        index = 0
+        while index < len(tokens) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=.*$", tokens[index]):
+            index += 1
+        remaining = tokens[index:]
+        if remaining[:4] == ["python3", "-m", "pip", "install"]:
+            return True
+        if remaining[:2] in (["pip", "install"], ["pip3", "install"]):
+            return True
+        if len(remaining) >= 2 and remaining[0] == "pnpm" and remaining[1] == "add":
+            return True
+    return False
+
+
 def _is_safe_status_sync_command(shell_command: str) -> bool:
-    command = shell_command.strip()
+    command = _normalize_shell_command(shell_command)
     try:
         parts = shlex.split(command)
     except ValueError:
@@ -307,7 +372,7 @@ def _is_safe_status_sync_command(shell_command: str) -> bool:
 
 
 def _is_safe_workspace_mkdir_command(shell_command: str) -> bool:
-    command = shell_command.strip()
+    command = _normalize_shell_command(shell_command)
     if not command.startswith("mkdir -p "):
         return False
     raw_paths = [item for item in command[len("mkdir -p ") :].split() if item]
@@ -321,7 +386,7 @@ def _is_pytest_package_spec(token: str) -> bool:
 
 
 def _strip_workspace_cd_prefix(shell_command: str) -> str:
-    command = shell_command.strip()
+    command = _normalize_shell_command(shell_command)
     if not command:
         return command
     try:
@@ -503,7 +568,7 @@ def _collect_paths(tool_input: dict[str, Any]) -> list[Path]:
 def _paths_within_workspace(paths: list[Path]) -> bool:
     if not paths:
         return True
-    allowed_roots = [ROOT, ROOT.parent / "pantheon"]
+    allowed_roots = [ROOT, ROOT.parent / "pantheon", Path.home() / ".claude", Path.home() / ".codex"]
     for path in paths:
         resolved = path if path.is_absolute() else ROOT / path
         if not any(

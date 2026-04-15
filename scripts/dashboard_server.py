@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 class NoCacheRequestHandler(SimpleHTTPRequestHandler):
     live_file_map: dict[str, Path] = {}
     repo_root: Path | None = None
+    ACTIVITY_LOG_TAIL_LINES: int = 2000
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
@@ -47,6 +48,34 @@ class NoCacheRequestHandler(SimpleHTTPRequestHandler):
         if live_path is not None:
             if not live_path.exists():
                 self.send_error(404, f"Live file not found: {parsed.path}")
+                return
+            # For large JSONL activity logs, serve only the last TAIL_LINES lines
+            # to avoid sending tens of MB through the network on every render.
+            if live_path.suffix == ".jsonl":
+                tail_lines = self.ACTIVITY_LOG_TAIL_LINES
+                with live_path.open("rb") as f:
+                    # Read file in reverse to find the last N lines efficiently
+                    f.seek(0, 2)
+                    size = f.tell()
+                    buf = b""
+                    chunk = 65536
+                    lines_found = 0
+                    pos = size
+                    while pos > 0 and lines_found <= tail_lines:
+                        read_size = min(chunk, pos)
+                        pos -= read_size
+                        f.seek(pos)
+                        buf = f.read(read_size) + buf
+                        lines_found = buf.count(b"\n")
+                    # Extract the last tail_lines non-empty lines
+                    all_lines = buf.splitlines(keepends=True)
+                    tail = b"".join(all_lines[-tail_lines:])
+                body = tail
+                self.send_response(200)
+                self.send_header("Content-type", "application/x-ndjson")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
                 return
             self.send_response(200)
             self.send_header("Content-type", self.guess_type(str(live_path)))

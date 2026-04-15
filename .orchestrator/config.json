@@ -56,7 +56,7 @@
     "enabled": true,
     "after_attempts": 2,
     "reassign_on_terminal_failure": true,
-    "eligible_statuses": ["todo", "in_progress", "review"],
+    "eligible_statuses": ["todo", "in_progress", "review", "review_approved"],
     "owner_fallbacks": {
       "Claude": ["Codex", "Qwen", "Copilot", "Gemini"],
       "Gemini": ["Codex", "Qwen", "Claude", "Copilot"],
@@ -357,7 +357,7 @@
     ],
     "helper_claim": {
       "enabled": true,
-      "task_statuses": ["todo"],
+      "task_statuses": ["todo", "in_progress", "review", "review_approved"],
       "require_owner_higher_priority_load": true
     },
     "max_tasks_per_agent": 1,

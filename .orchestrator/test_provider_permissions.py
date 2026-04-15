@@ -136,11 +136,37 @@ class ProviderPermissionsTest(unittest.TestCase):
 
         self.assertEqual(permission_broker.classify_command(command), "allow")
 
+    def test_multiline_status_sync_handoff_is_auto_allowed(self) -> None:
+        command = (
+            "\\\n"
+            "ACTOR=Claude python3 scripts/ai_status.py handoff WE-002 Qwen \\\n"
+            '  "Docker multi-stage builds complete and ready for review."'
+        )
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_generic_python_command_via_cd_is_auto_allowed(self) -> None:
+        command = f"cd {ROOT} && python3 .orchestrator/permission_broker.py print-policy"
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_generic_python_command_with_env_prefix_is_auto_allowed(self) -> None:
+        command = "AI_NAME=Claude python3 -c 'print(\"ok\")'"
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
     def test_verified_claude_policy_includes_pnpm_test_allow_rules(self) -> None:
         policy = _verified_claude_policy({})
 
         self.assertIn("Bash(pnpm test*)", policy["allow"])
         self.assertIn("Bash(pnpm exec vitest*)", policy["allow"])
+
+    def test_verified_claude_policy_includes_generic_python_allow_rules(self) -> None:
+        policy = _verified_claude_policy({})
+
+        self.assertIn("Bash(python3 *)", policy["allow"])
+        self.assertIn("Bash(cd * && python3 *)", policy["allow"])
+        self.assertIn("Bash(AI_NAME=* python3 *)", policy["allow"])
 
 
 if __name__ == "__main__":
