@@ -3,15 +3,15 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-04-15T01:15:34Z
+Last updated: 2026-04-15T13:29:46Z
 
 ## Objective
 
-Phase 1 next-wave: 補齊前端 control plane（Platform Admin、Ops Console、Driver App 多平台）、建立 platform_presence/platform_earnings domain、完整 Tenant Portal 整合、staging pipeline。
+Phase 2 planning: 補齊三大缺口 — (1) tenant-commute-hub 全面切換到 drts-fleet-platform core API（Supabase 直連移除）、(2) Ops Console dispatch board 升級為可操作派遣控制台、(3) Happy path e2e + audit/billing 一致性測試。討論輸出：P2-A 到 P2-I 任務邊界 + Lovable .ai-loop/ Iteration 1 spec 粒度決定。
 
 ## Current Sprint
 
-- Sprint: `2026-04-14-phase1-next-wave`
+- Sprint: `2026-04-15-phase2-planning`
 - Canonical files: `AI_COLLABORATION_GUIDE.md`, `ai-status.json`, `current-work.md`, `phase1_system_analysis_v1.md`, `phase1_prd_detailed_v1.md`, `phase1_service_contracts_v1.md`, `phase1_migration_plan_v1.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/README.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/00_source_of_truth_and_glossary.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/01_decision_tables.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/02_acceptance_scenarios_gherkin.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/03_api_examples_and_error_contracts.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/05_engineering_conventions_and_ai_dev_playbook.md`, `phase1_db_migration_extracted/README.md`
 - Canonical tiers: `L0 Collaboration`, `L1 Product Truth`, `L2 Execution Rules`
 - Supervisor operating model: `SUPERVISOR_OPERATING_MODEL.md`
@@ -24,24 +24,23 @@ Phase 1 next-wave: 補齊前端 control plane（Platform Admin、Ops Console、D
 - Open questions: `PHASE1_OPEN_QUESTIONS.md`
 - Seed design files: `CANONICAL_DOCUMENT_MAP.md`, `TARGET_ARCHITECTURE.md`, `ROADMAP.md`, `DEVELOPMENT_WORKBREAKDOWN.md`, `PHASE1_DECISION_LEDGER.md`, `PHASE1_OPEN_QUESTIONS.md`, `SUPERVISOR_OPERATING_MODEL.md`, `MULTI_LLM_CONSENSUS_WORKFLOW.md`, `PHASE1_DISCUSSION_ASSIGNMENTS.md`, `LLM_READOUT_TEMPLATE.md`, `LLM_CROSS_REVIEW_TEMPLATE.md`, `PHASE1_CONSENSUS_PACKET_TEMPLATE.md`, `docs/02-architecture/consensus/phase1/README.md`, `docs/02-architecture/consensus/phase1/consensus-packet.md`
 - Discussion mode: `supervisor_baton_review_loop`
-- Active supervisor mode: `supervisor_managed_execution`
+- Active supervisor mode: `discussion_planning`
 - Supported supervisor modes: `discussion_planning`, `supervisor_managed_execution`
-- Discussion workspace: `docs/02-architecture/consensus/phase1-status-audit`
+- Discussion workspace: `docs/02-architecture/consensus/phase2-planning`
 - Discussion supervisor: `Claude`
 - Discussion starter: `Codex`
-- Current baton owner: `Claude`
+- Current baton owner: `Codex`
 - Review order: `Qwen`, `Gemini`, `Copilot`, `Claude`
-- Discussion artifacts: `docs/02-architecture/consensus/phase1-status-audit/starter-draft.md`, `docs/02-architecture/consensus/phase1-status-audit/baton-log.md`, `docs/02-architecture/consensus/phase1-status-audit/supervisor-queue.md`, `docs/02-architecture/consensus/phase1-status-audit/review-round-1.md`, `docs/02-architecture/consensus/phase1-status-audit/review-round-2.md`, `docs/02-architecture/consensus/phase1-status-audit/gap-report.md`
 - Mode transitions: Supervisor stays running across both modes; only routing policy changes. | discussion_planning -> supervisor_managed_execution after the consensus packet is accepted by the human. | supervisor_managed_execution -> discussion_planning when implementation hits unresolved product semantics, contract conflicts, or major planning drift. | After discussion resolves the issue, the supervisor may resume implementation mode without restarting the control plane.
 - Dashboard: `docs-site/index.html`
 
 ## Active Slices
 
-- `Claude`: governance-review, architecture-arbitration, control-plane; next: Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.
-- `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
-- `Codex`: contracts, schema, state-system, acceptance; next: Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.
-- `Qwen`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
+- `Claude`: governance-review, architecture-arbitration, control-plane; next: Advance the baton, arbitrate cited disagreements, and maintain the consensus packet.
+- `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Review the current starter draft with citations and queue refinements for the next baton round.
+- `Codex`: contracts, schema, state-system, acceptance; next: Own the starter draft and prepare the next cited discussion synthesis.
+- `Qwen`: integration, api-implementation, adapter-execution, acceptance; next: Review the current starter draft with citations and queue refinements for the next baton round.
+- `Copilot`: research-ingest, external-search, spec-review, critique; next: Review the current starter draft with citations and queue refinements for the next baton round.
 
 ## Delivery Layers
 
@@ -183,23 +182,23 @@ Phase 1 next-wave: 補齊前端 control plane（Platform Admin、Ops Console、D
 
 ## Latest Checkpoints
 
-- 2026-04-15T01:14:43Z Orchestrator: PreToolUse: Bash
-- 2026-04-15T01:14:49Z Orchestrator: PreToolUse: Bash
-- 2026-04-15T01:14:49Z Orchestrator: PostToolUse: Bash
-- 2026-04-15T01:14:49Z Orchestrator: PreToolUse: Read
-- 2026-04-15T01:14:49Z Orchestrator: PostToolUse: Read
-- 2026-04-15T01:14:55Z Orchestrator: PreToolUse: Bash
-- 2026-04-15T01:14:55Z Orchestrator: PostToolUse: Bash
-- 2026-04-15T01:14:57Z Orchestrator: PreToolUse: Bash
-- 2026-04-15T01:15:01Z Orchestrator: PostToolUse: Bash
-- 2026-04-15T01:15:01Z Orchestrator: PreToolUse: Bash
-- 2026-04-15T01:15:01Z Orchestrator: PostToolUse: Bash
-- 2026-04-15T01:15:04Z Orchestrator: PreToolUse: Bash
-- 2026-04-15T01:15:04Z Orchestrator: PostToolUse: Bash
-- 2026-04-15T01:15:07Z Orchestrator: PreToolUse: Bash
-- 2026-04-15T01:15:07Z Orchestrator: PostToolUse: Bash
-- 2026-04-15T01:15:20Z Orchestrator: PreToolUse: Bash
-- 2026-04-15T01:15:21Z Orchestrator: PostToolUse: Bash
-- 2026-04-15T01:15:31Z Orchestrator: PreToolUse: Bash
-- 2026-04-15T01:15:34Z Orchestrator: PreToolUse: Bash
-- 2026-04-15T01:15:34Z Claude: `WE-004` Owner finalized: smoke test suite complete — 6 critical-path tests (health, booking-create, dispatch-assign, driver-task-accept, billing-invoice, report-export), shared helpers with SMOKE_API_PATH_PREFIX auto-prepend, 5 JSON fixtures, run-smoke-tests.sh runner. All AC-P1/P2/P3 reviewer blockers resolved: /api prefix centralised in helpers.sh (9a233d1), README staging guidance aligned, billing closed-period fixed, auth bootstrap documented. Graceful skip for tests 03-04 on empty DB. Suite ready for staging integration post WE-003.
+- 2026-04-15T13:28:00Z Orchestrator: PostToolUse: Bash
+- 2026-04-15T13:28:00Z Orchestrator: PreToolUse: Bash
+- 2026-04-15T13:28:00Z Orchestrator: PostToolUse: Bash
+- 2026-04-15T13:28:03Z Orchestrator: PreToolUse: Bash
+- 2026-04-15T13:28:03Z Orchestrator: PostToolUse: Bash
+- 2026-04-15T13:28:07Z Orchestrator: PreToolUse: Bash
+- 2026-04-15T13:28:07Z Orchestrator: PostToolUse: Bash
+- 2026-04-15T13:28:10Z Orchestrator: PreToolUse: Bash
+- 2026-04-15T13:28:10Z Orchestrator: PostToolUse: Bash
+- 2026-04-15T13:28:21Z Orchestrator: PreToolUse: Bash
+- 2026-04-15T13:28:21Z Orchestrator: PostToolUse: Bash
+- 2026-04-15T13:29:12Z Orchestrator: PreToolUse: Write
+- 2026-04-15T13:29:13Z Orchestrator: PostToolUse: Write
+- 2026-04-15T13:29:21Z Orchestrator: PreToolUse: Write
+- 2026-04-15T13:29:21Z Orchestrator: PostToolUse: Write
+- 2026-04-15T13:29:29Z Orchestrator: PreToolUse: Write
+- 2026-04-15T13:29:29Z Orchestrator: PostToolUse: Write
+- 2026-04-15T13:29:40Z Orchestrator: PreToolUse: Bash
+- 2026-04-15T13:29:40Z Orchestrator: PostToolUse: Bash
+- 2026-04-15T13:29:46Z Orchestrator: PreToolUse: Bash

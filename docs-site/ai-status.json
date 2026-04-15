@@ -1,10 +1,10 @@
 {
   "project": "drts-fleet-platform",
-  "execution_mode": "supervisor_managed_execution",
+  "execution_mode": "discussion_planning",
   "consensus_status": "accepted",
-  "sprint": "2026-04-14-phase1-next-wave",
-  "objective": "Phase 1 next-wave: 補齊前端 control plane（Platform Admin、Ops Console、Driver App 多平台）、建立 platform_presence/platform_earnings domain、完整 Tenant Portal 整合、staging pipeline。",
-  "updated_at": "2026-04-15T01:15:34Z",
+  "sprint": "2026-04-15-phase2-planning",
+  "objective": "Phase 2 planning: 補齊三大缺口 — (1) tenant-commute-hub 全面切換到 drts-fleet-platform core API（Supabase 直連移除）、(2) Ops Console dispatch board 升級為可操作派遣控制台、(3) Happy path e2e + audit/billing 一致性測試。討論輸出：P2-A 到 P2-I 任務邊界 + Lovable .ai-loop/ Iteration 1 spec 粒度決定。",
+  "updated_at": "2026-04-15T13:29:46Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -60,7 +60,7 @@
     "docs/02-architecture/consensus/phase1/consensus-packet.md"
   ],
   "discussion_mode": "supervisor_baton_review_loop",
-  "discussion_workspace": "docs/02-architecture/consensus/phase1-status-audit",
+  "discussion_workspace": "docs/02-architecture/consensus/phase2-planning",
   "supervisor_modes": {
     "discussion_planning": {
       "purpose": "Read canonical specs, debate design, converge on planning, and produce an accepted consensus packet.",
@@ -79,20 +79,17 @@
     "supervisor_managed_execution -> discussion_planning when implementation hits unresolved product semantics, contract conflicts, or major planning drift.",
     "After discussion resolves the issue, the supervisor may resume implementation mode without restarting the control plane."
   ],
-  "discussion_artifacts": {
-    "starter_draft": "docs/02-architecture/consensus/phase1-status-audit/starter-draft.md",
-    "baton_log": "docs/02-architecture/consensus/phase1-status-audit/baton-log.md",
-    "supervisor_queue": "docs/02-architecture/consensus/phase1-status-audit/supervisor-queue.md",
-    "review_round_1": "docs/02-architecture/consensus/phase1-status-audit/review-round-1.md",
-    "review_round_2": "docs/02-architecture/consensus/phase1-status-audit/review-round-2.md",
-    "consensus_packet": "docs/02-architecture/consensus/phase1-status-audit/gap-report.md"
-  },
+  "discussion_artifacts": [
+    "docs/02-architecture/consensus/phase2-planning/starter-draft.md",
+    "docs/02-architecture/consensus/phase2-planning/baton-log.md",
+    "docs/02-architecture/consensus/phase2-planning/supervisor-queue.md"
+  ],
   "discussion_loop": {
     "supervisor": "Claude",
     "starter": "Codex",
-    "current_owner": "Claude",
+    "current_owner": "Codex",
     "review_order": ["Qwen", "Gemini", "Copilot", "Claude"],
-    "loop_rule": "Only the current owner edits starter-draft.md. Reviewers write cited feedback. Supervisor advances the baton.",
+    "loop_rule": "Only the current owner edits starter-draft.md. Reviewers write cited feedback in review-round-N.md. Supervisor advances the baton.",
     "promotion_gate": "human_accepts_consensus_packet"
   },
   "agents": [
@@ -106,7 +103,7 @@
       "status": "idle",
       "current_task_ids": [],
       "branch": "feat/claude-governance-review",
-      "next": "Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.",
+      "next": "Advance the baton, arbitrate cited disagreements, and maintain the consensus packet.",
       "last_update": "2026-04-15T01:13:45Z"
     },
     {
@@ -115,7 +112,7 @@
       "status": "idle",
       "current_task_ids": [],
       "branch": "feat/gemini-runtime-infra",
-      "next": "Pick the next infra, rollout, or runtime slice that is ready for execution review.",
+      "next": "Review the current starter draft with citations and queue refinements for the next baton round.",
       "last_update": "2026-04-15T00:36:58Z"
     },
     {
@@ -124,7 +121,7 @@
       "status": "idle",
       "current_task_ids": [],
       "branch": "feat/codex-phase1-architecture",
-      "next": "Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.",
+      "next": "Own the starter draft and prepare the next cited discussion synthesis.",
       "last_update": "2026-04-15T00:36:55Z"
     },
     {
@@ -138,7 +135,7 @@
       "status": "idle",
       "current_task_ids": [],
       "branch": "feat/qwen-integration-slices",
-      "next": "Pick the next API or integration slice that is unblocked and ready to implement.",
+      "next": "Review the current starter draft with citations and queue refinements for the next baton round.",
       "last_update": "2026-04-15T00:44:59Z"
     },
     {
@@ -152,7 +149,7 @@
       "status": "idle",
       "current_task_ids": [],
       "branch": "feat/copilot-spec-critique",
-      "next": "Critique active implementation slices for contradictions, testing gaps, and weak assumptions.",
+      "next": "Review the current starter draft with citations and queue refinements for the next baton round.",
       "last_update": "2026-04-15T00:14:25Z"
     }
   ],
