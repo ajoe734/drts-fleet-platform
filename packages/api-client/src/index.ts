@@ -29,10 +29,13 @@ import type {
   DriverCompleteTaskCommand,
   CreateComplaintCaseCommand,
   CreateReportJobCommand,
+  CreateIncidentCommand,
+  CreateMaintenanceRecordCommand,
   DriverStatementRecord,
   DriverTaskRecord,
   GenerateFilingPackageCommand,
   IncidentRecord,
+  IncidentTimelineEntry,
   MaintenanceRecord,
   NotificationRecord,
   OwnedOrderRecord,
@@ -55,6 +58,8 @@ import type {
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
   UpdateTenantWebhookEndpointCommand,
+  UpdateIncidentCommand,
+  UpdateMaintenanceRecordCommand,
   WebhookDeliveryRecord,
   UpsertTenantPassengerCommand,
   UpsertTenantAddressCommand,
@@ -783,7 +788,7 @@ export class ApiClient {
     return this.getList<IncidentRecord>("/api/incidents");
   }
 
-  async createIncident(command: any) {
+  async createIncident(command: CreateIncidentCommand) {
     return this.post("/api/incidents", { body: command });
   }
 
@@ -791,7 +796,15 @@ export class ApiClient {
     return this.get(`/api/incidents/${incidentId}`);
   }
 
-  async updateIncident(incidentId: string, command: any) {
+  async getIncidentTimeline(
+    incidentId: string,
+  ): Promise<IncidentTimelineEntry[]> {
+    return this.getList<IncidentTimelineEntry>(
+      `/api/incidents/${incidentId}/timeline`,
+    );
+  }
+
+  async updateIncident(incidentId: string, command: UpdateIncidentCommand) {
     return this.patch(`/api/incidents/${incidentId}`, { body: command });
   }
 
@@ -802,7 +815,7 @@ export class ApiClient {
     return this.getList<MaintenanceRecord>(path);
   }
 
-  async createMaintenance(command: any) {
+  async createMaintenance(command: CreateMaintenanceRecordCommand) {
     return this.post("/api/maintenance", { body: command });
   }
 
@@ -810,7 +823,10 @@ export class ApiClient {
     return this.get(`/api/maintenance/${maintenanceId}`);
   }
 
-  async updateMaintenance(maintenanceId: string, command: any) {
+  async updateMaintenance(
+    maintenanceId: string,
+    command: UpdateMaintenanceRecordCommand,
+  ) {
     return this.patch(`/api/maintenance/${maintenanceId}`, { body: command });
   }
 

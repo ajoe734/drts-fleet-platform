@@ -43,26 +43,22 @@ export class MaintenanceService implements OnModuleInit {
     command: CreateMaintenanceLogCommand,
     requestId?: string,
   ) {
-    this.assertValidType(command.maintenanceType);
+    this.assertValidType(command.type);
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.description, "description");
 
     const now = new Date().toISOString();
-    const logId = `MNT-${String(this.sequence++).padStart(6, "0")}`;
+    const maintenanceId = `MNT-${String(this.sequence++).padStart(6, "0")}`;
     const record: MaintenanceLogRecord = {
-      logId,
+      maintenanceId,
       vehicleId: command.vehicleId,
-      vehicleRegNo: command.vehicleRegNo ?? null,
-      status: command.scheduledDate ? "scheduled" : "in_progress",
-      maintenanceType: command.maintenanceType,
+      type: command.type,
       description: command.description,
-      scheduledDate: command.scheduledDate ?? null,
-      completedDate: null,
-      nextMaintenanceDate: null,
-      costAmount: command.costAmount ?? null,
-      currencyCode: "TWD",
-      attachmentUrls: command.attachmentUrls ?? [],
-      recordedBy: command.recordedBy ?? null,
+      status: this.resolveInitialStatus(command),
+      scheduledAt: command.scheduledAt ?? null,
+      completedAt: command.completedAt ?? null,
+      technician: command.technician ?? null,
+      cost: command.cost ?? null,
       notes: command.notes ?? null,
       createdAt: now,
       updatedAt: now,
@@ -72,16 +68,16 @@ export class MaintenanceService implements OnModuleInit {
     this.persist({ records: [record] }, "create_maintenance");
     this.recordAudit(
       {
-        actorId: command.recordedBy ?? null,
+        actorId: null,
         actorType: "ops_user",
         tenantId: null,
         moduleName: "maintenance",
         actionName: "create_maintenance_log",
         resourceType: "maintenance_log",
-        resourceId: logId,
+        resourceId: maintenanceId,
         newValuesSummary: {
           vehicleId: command.vehicleId,
-          maintenanceType: command.maintenanceType,
+          maintenanceType: command.type,
           status: record.status,
         },
       },
@@ -92,34 +88,42 @@ export class MaintenanceService implements OnModuleInit {
   }
 
   listMaintenanceLogs(vehicleId?: string) {
-    let result = this.records.map((r) => ({ ...r }));
+    let result = this.records.map((r) => this.normalizeStatus(r));
     if (vehicleId) {
       result = result.filter((r) => r.vehicleId === vehicleId);
     }
     return result;
   }
 
-  getMaintenanceLog(logId: string) {
-    return { ...this.require(logId) };
+  getMaintenanceLog(maintenanceId: string) {
+    return this.normalizeStatus(this.require(maintenanceId));
   }
 
   updateMaintenanceLog(
-    logId: string,
+    maintenanceId: string,
     command: UpdateMaintenanceLogCommand,
     requestId?: string,
   ) {
-    const record = this.require(logId);
+    const record = this.require(maintenanceId);
     const updated: MaintenanceLogRecord = {
       ...record,
       status: command.status ?? record.status,
-      completedDate: command.completedDate ?? record.completedDate,
-      nextMaintenanceDate:
-        command.nextMaintenanceDate ?? record.nextMaintenanceDate,
-      costAmount: command.costAmount ?? record.costAmount,
+      completedAt: command.completedAt ?? record.completedAt,
+      technician: command.technician ?? record.technician,
+      cost: command.cost ?? record.cost,
       notes: command.notes ?? record.notes,
-      attachmentUrls: command.attachmentUrls ?? record.attachmentUrls,
       updatedAt: new Date().toISOString(),
     };
+
+    if (command.status !== undefined) {
+      this.assertValidStatus(command.status);
+    }
+    if (command.status === "completed" && updated.completedAt === null) {
+      updated.completedAt = updated.updatedAt;
+    }
+    if (command.completedAt !== undefined && command.status === undefined) {
+      updated.status = "completed";
+    }
 
     this.replace(updated);
     this.persist({ records: [updated] }, "update_maintenance");
@@ -131,26 +135,54 @@ export class MaintenanceService implements OnModuleInit {
         moduleName: "maintenance",
         actionName: "update_maintenance_log",
         resourceType: "maintenance_log",
-        resourceId: logId,
+        resourceId: maintenanceId,
         newValuesSummary: {
           status: updated.status,
-          completedDate: updated.completedDate,
+          completedAt: updated.completedAt,
         },
       },
       requestId,
     );
 
-    return { ...updated };
+    return this.normalizeStatus(updated);
   }
 
-  private require(logId: string) {
-    const record = this.records.find((r) => r.logId === logId);
+  deleteMaintenanceLog(maintenanceId: string, requestId?: string) {
+    const record = this.require(maintenanceId);
+    this.records = this.records.filter(
+      (candidate) => candidate.maintenanceId !== maintenanceId,
+    );
+    this.persist({ deletedIds: [maintenanceId] }, "delete_maintenance");
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "maintenance",
+        actionName: "delete_maintenance_log",
+        resourceType: "maintenance_log",
+        resourceId: maintenanceId,
+        newValuesSummary: {
+          vehicleId: record.vehicleId,
+          status: record.status,
+        },
+      },
+      requestId,
+    );
+
+    return { deleted: true, maintenanceId };
+  }
+
+  private require(maintenanceId: string) {
+    const record = this.records.find(
+      (candidate) => candidate.maintenanceId === maintenanceId,
+    );
     if (!record) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "NOT_FOUND",
         "Maintenance record not found.",
-        { logId },
+        { maintenanceId },
       );
     }
     return record;
@@ -158,26 +190,35 @@ export class MaintenanceService implements OnModuleInit {
 
   private replace(updated: MaintenanceLogRecord) {
     this.records = this.records.map((r) =>
-      r.logId === updated.logId ? updated : r,
+      r.maintenanceId === updated.maintenanceId ? updated : r,
     );
   }
 
   private deriveNextSequence(records: readonly MaintenanceLogRecord[]) {
     const maxSeq = records.reduce((max, r) => {
-      const num = parseInt(r.logId.replace("MNT-", ""), 10);
+      const num = parseInt(r.maintenanceId.replace("MNT-", ""), 10);
       return Number.isInteger(num) ? Math.max(max, num) : max;
     }, 0);
     return maxSeq + 1;
   }
 
   private persist(
-    changes: { records?: readonly MaintenanceLogRecord[] },
+    changes: {
+      records?: readonly MaintenanceLogRecord[];
+      deletedIds?: readonly string[];
+    },
     context: string,
   ) {
     if (!this.repository) return;
-    const payload: { records?: MaintenanceLogRecord[] } = {};
+    const payload: {
+      records?: MaintenanceLogRecord[];
+      deletedIds?: string[];
+    } = {};
     if (changes.records) {
       payload.records = changes.records.map((r) => ({ ...r }));
+    }
+    if (changes.deletedIds) {
+      payload.deletedIds = [...changes.deletedIds];
     }
     void this.repository.persistChanges(payload).catch((error: unknown) => {
       this.repository!.reportPersistenceFailure(error, context);
@@ -191,6 +232,43 @@ export class MaintenanceService implements OnModuleInit {
     const log = { ...input };
     if (requestId) (log as any).requestId = requestId;
     this.auditNotificationService.recordAuditLog(log);
+  }
+
+  private resolveInitialStatus(
+    command: CreateMaintenanceLogCommand,
+  ): MaintenanceStatus {
+    if (command.completedAt) {
+      return "completed";
+    }
+    if (command.scheduledAt) {
+      return new Date(command.scheduledAt).getTime() < Date.now()
+        ? "overdue"
+        : "scheduled";
+    }
+    return "in_progress";
+  }
+
+  private normalizeStatus(record: MaintenanceLogRecord): MaintenanceLogRecord {
+    if (record.status === "completed" || record.status === "cancelled") {
+      return { ...record };
+    }
+
+    if (!record.scheduledAt) {
+      return { ...record };
+    }
+
+    const overdue = new Date(record.scheduledAt).getTime() < Date.now();
+    const nextStatus =
+      overdue && (record.status === "scheduled" || record.status === "overdue")
+        ? "overdue"
+        : !overdue && record.status === "overdue"
+          ? "scheduled"
+          : record.status;
+
+    return {
+      ...record,
+      status: nextStatus,
+    };
   }
 
   private assertValidType(type: string): asserts type is MaintenanceType {

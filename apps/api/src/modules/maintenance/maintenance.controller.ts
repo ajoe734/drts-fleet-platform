@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
+  Patch,
   Post,
   Query,
 } from "@nestjs/common";
@@ -42,25 +44,49 @@ export class MaintenanceController {
     );
   }
 
-  @Get(":logId")
+  @Get(":maintenanceId")
   getMaintenanceLog(
-    @Param("logId") logId: string,
+    @Param("maintenanceId") maintenanceId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.maintenanceService.getMaintenanceLog(logId),
+      this.maintenanceService.getMaintenanceLog(maintenanceId),
       requestId,
     );
   }
 
-  @Post(":logId/update")
+  @Patch(":maintenanceId")
   updateMaintenanceLog(
-    @Param("logId") logId: string,
+    @Param("maintenanceId") maintenanceId: string,
     @Body() command: UpdateMaintenanceLogCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.maintenanceService.updateMaintenanceLog(logId, command, requestId),
+      this.maintenanceService.updateMaintenanceLog(
+        maintenanceId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post(":maintenanceId/update")
+  updateMaintenanceLogAlias(
+    @Param("maintenanceId") maintenanceId: string,
+    @Body() command: UpdateMaintenanceLogCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return this.updateMaintenanceLog(maintenanceId, command, requestId);
+  }
+
+  @Delete(":maintenanceId")
+  deleteMaintenanceLog(
+    @Param("maintenanceId") maintenanceId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.maintenanceService.deleteMaintenanceLog(maintenanceId, requestId),
       requestId,
     );
   }

@@ -206,6 +206,32 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath.startsWith("incidents")) {
+    return {
+      routeKey: `incidents:${upperMethod}`,
+      requiredScopes: methodScope(
+        "incident:read",
+        "incident:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Incident management",
+    };
+  }
+
+  if (routePath.startsWith("maintenance")) {
+    return {
+      routeKey: `maintenance:${upperMethod}`,
+      requiredScopes: methodScope(
+        "maintenance:read",
+        "maintenance:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Maintenance management",
+    };
+  }
+
   if (
     routePath.startsWith("regulatory-registry/") ||
     routePath === "regulatory-registry"

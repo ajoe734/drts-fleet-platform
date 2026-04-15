@@ -113,6 +113,10 @@ export default async function HomePage() {
               Operational reporting and filing.
             </Link>
           )}
+          <Link className="route-link" href="/revenue">
+            <strong>Revenue</strong>
+            Fleet revenue, payout, and settlement pulse.
+          </Link>
           {moduleStatus.registry && (
             <>
               <Link className="route-link" href="/vehicles">

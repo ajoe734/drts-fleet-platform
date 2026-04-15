@@ -1,6 +1,10 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
-import type { MaintenanceLogRecord } from "./maintenance.types";
+import { MAINTENANCE_TYPE_VALUES } from "./maintenance.types";
+import type {
+  MaintenanceLogRecord,
+  MaintenanceType,
+} from "./maintenance.types";
 
 import { DatabaseService } from "../../common/db";
 
@@ -10,6 +14,7 @@ type JsonRecordRow = {
 
 type PersistMaintenanceChanges = {
   records?: readonly MaintenanceLogRecord[];
+  deletedIds?: readonly string[];
 };
 
 @Injectable()
@@ -33,10 +38,7 @@ export class MaintenanceRepository {
 
     return {
       records: result.rows.map((row) =>
-        this.parseRecord<MaintenanceLogRecord>(
-          row.record,
-          "ops.phase1_maintenance_logs",
-        ),
+        this.normalizeLoadedRecord(row.record, "ops.phase1_maintenance_logs"),
       ),
     };
   }
@@ -69,18 +71,27 @@ export class MaintenanceRepository {
               record = EXCLUDED.record
           `,
           [
-            record.logId,
+            record.maintenanceId,
             record.vehicleId,
-            record.vehicleRegNo ?? null,
+            null,
             record.status,
-            record.maintenanceType,
+            record.type,
             record.description,
-            record.recordedBy ?? null,
-            record.costAmount ?? null,
+            record.technician ?? null,
+            record.cost ?? null,
             record.createdAt,
             record.updatedAt,
             JSON.stringify(record),
           ],
+        ),
+      );
+    }
+
+    for (const maintenanceId of changes.deletedIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM ops.phase1_maintenance_logs WHERE log_id = $1`,
+          [maintenanceId],
         ),
       );
     }
@@ -95,10 +106,76 @@ export class MaintenanceRepository {
     );
   }
 
-  private parseRecord<T>(record: unknown, source: string): T {
+  private normalizeLoadedRecord(
+    record: unknown,
+    source: string,
+  ): MaintenanceLogRecord {
     if (!record || typeof record !== "object") {
       throw new Error(`Invalid persisted record loaded from ${source}`);
     }
-    return record as T;
+
+    const candidate = record as Record<string, unknown>;
+
+    if (typeof candidate.maintenanceId === "string") {
+      return candidate as unknown as MaintenanceLogRecord;
+    }
+
+    if (typeof candidate.logId !== "string") {
+      throw new Error(`Unknown maintenance record shape loaded from ${source}`);
+    }
+
+    return {
+      maintenanceId: candidate.logId,
+      vehicleId: this.asString(candidate.vehicleId),
+      type: this.mapLegacyType(candidate.maintenanceType),
+      description: this.asString(candidate.description),
+      status: this.mapLegacyStatus(candidate.status),
+      scheduledAt: this.asNullableString(candidate.scheduledDate),
+      completedAt: this.asNullableString(candidate.completedDate),
+      technician: null,
+      cost:
+        typeof candidate.costAmount === "number" ? candidate.costAmount : null,
+      notes: this.asNullableString(candidate.notes),
+      createdAt: this.asString(candidate.createdAt),
+      updatedAt: this.asString(candidate.updatedAt),
+    };
+  }
+
+  private mapLegacyType(value: unknown): MaintenanceType {
+    if (typeof value !== "string") {
+      return "other";
+    }
+
+    const mapped =
+      value === "routine"
+        ? "scheduled_service"
+        : value === "engine" || value === "electrical" || value === "body_work"
+          ? "other"
+          : value;
+
+    return MAINTENANCE_TYPE_VALUES.includes(mapped as MaintenanceType)
+      ? (mapped as MaintenanceType)
+      : "other";
+  }
+
+  private mapLegacyStatus(value: unknown): MaintenanceLogRecord["status"] {
+    return value === "scheduled" ||
+      value === "in_progress" ||
+      value === "completed" ||
+      value === "cancelled" ||
+      value === "overdue"
+      ? value
+      : "scheduled";
+  }
+
+  private asString(value: unknown): string {
+    if (typeof value !== "string") {
+      throw new Error("Expected persisted maintenance field to be a string");
+    }
+    return value;
+  }
+
+  private asNullableString(value: unknown): string | null {
+    return typeof value === "string" ? value : null;
   }
 }
