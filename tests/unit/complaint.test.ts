@@ -93,6 +93,53 @@ describe("complaint service", () => {
     expect(timeline.at(-1)?.note).toBe("乘客提供新憑證");
   });
 
+  it("assigns, notes, and exports complaint detail for operator closeout", () => {
+    const { complaintService } = createService();
+
+    const complaintCase = complaintService.createComplaintCase({
+      caseSource: "phone",
+      relatedOrderId: "order-demo-009",
+      relatedCallId: "CALL-20260410-000777",
+      category: "fare_dispute",
+      severity: "normal",
+      description: "乘客表示叫車收費有疑義",
+    });
+
+    const assigned = complaintService.assignComplaintCase(
+      complaintCase.caseNo,
+      {
+        assigneeId: "AGENT-QA-001",
+        note: "Assigned to billing specialist",
+      },
+    );
+    const noted = complaintService.addComplaintCaseNote(complaintCase.caseNo, {
+      note: "Requested trip and meter evidence from operator",
+    });
+    complaintService.resolveComplaintCase(complaintCase.caseNo, {
+      resolutionCode: "FARE_ADJUSTED",
+      closingNote: "已確認金額並回覆乘客",
+    });
+    complaintService.closeComplaintCase(complaintCase.caseNo, {
+      resolutionCode: "FARE_ADJUSTED",
+      closingNote: "正式結案並可供匯出",
+    });
+    const exportView = complaintService.getComplaintExportView(
+      complaintCase.caseNo,
+    );
+
+    expect(assigned.assigneeId).toBe("AGENT-QA-001");
+    expect(noted.status).toBe("under_investigation");
+    expect(exportView.readyForAudit).toBe(true);
+    expect(exportView.complaintCase.caseNo).toBe(complaintCase.caseNo);
+    expect(exportView.timeline.map((entry) => entry.action)).toEqual([
+      "case_created",
+      "case_assigned",
+      "case_note_added",
+      "case_resolved",
+      "case_closed",
+    ]);
+  });
+
   it("marks SLA breach without overwriting the main complaint status for SC-029", () => {
     const { auditService, complaintService } = createService();
 
@@ -154,6 +201,7 @@ describe("complaint service", () => {
             category: "other",
             severity: "normal",
             description: "先前已建立的案件",
+            assigneeId: null,
             status: "new",
             slaDueAt: "2026-04-12T00:00:00Z",
             slaBreach: false,

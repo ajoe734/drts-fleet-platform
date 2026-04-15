@@ -251,6 +251,7 @@ export function resolveRouteAuthPolicy(
   if (
     routePath === "driver-fee-plans" ||
     routePath.startsWith("driver-statements") ||
+    routePath === "reimbursements" ||
     routePath.startsWith("reimbursements/")
   ) {
     return {
@@ -264,6 +265,7 @@ export function resolveRouteAuthPolicy(
   if (
     routePath.startsWith("reports/") ||
     routePath === "reports/jobs" ||
+    routePath === "filing-packages" ||
     routePath === "filing-packages/generate" ||
     routePath.startsWith("filing-packages/")
   ) {

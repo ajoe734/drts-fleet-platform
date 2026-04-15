@@ -5,9 +5,10 @@ import { AuditNotificationModule } from "../audit-notification/audit-notificatio
 import { CallcenterController } from "./callcenter.controller";
 import { CallcenterRepository } from "./callcenter.repository";
 import { CallcenterService } from "./callcenter.service";
+import { ComplaintModule } from "../complaint/complaint.module";
 
 @Module({
-  imports: [DatabaseModule, AuditNotificationModule],
+  imports: [DatabaseModule, AuditNotificationModule, ComplaintModule],
   controllers: [CallcenterController],
   providers: [CallcenterRepository, CallcenterService],
   exports: [CallcenterService],

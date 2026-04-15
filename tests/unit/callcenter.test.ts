@@ -37,6 +37,63 @@ describe("callcenter service", () => {
     expect(closedSession.flags).toContain("closed");
   });
 
+  it("tracks identity, ETA reply, callback queue, and recording-missing state for operator workflow", () => {
+    const auditService = new AuditNotificationService();
+    const callcenterService = new CallcenterService(auditService);
+
+    const session = callcenterService.openCallSession({
+      callType: "booking",
+      callerPhone: "0911555666",
+      agentId: "AGENT-0033",
+      agentIdentityAnnounced: false,
+    });
+
+    const announced = callcenterService.announceAgentIdentity(session.callId, {
+      agentId: "AGENT-0033",
+      announcedAt: "2026-04-10T09:02:00Z",
+    });
+    const linked = callcenterService.linkOrderToExistingSession(
+      session.callId,
+      {
+        orderId: "order-demo-operator-001",
+      },
+    );
+    const quoted = callcenterService.quoteEta(session.callId, {
+      etaMinutes: 14,
+      quotedAt: "2026-04-10T09:03:00Z",
+    });
+    const callback = callcenterService.createCallbackTask(session.callId, {
+      dueAt: "2026-04-10T09:30:00Z",
+      note: "Call back after dispatch board refresh",
+    });
+    const completed = callcenterService.completeCallbackTask(
+      callback.callbackTaskId,
+      {
+        note: "Customer updated",
+        completedAt: "2026-04-10T09:40:00Z",
+      },
+    );
+    const closed = callcenterService.closeCallSession(session.callId, {
+      endedAt: "2026-04-10T09:45:00Z",
+    });
+
+    expect(announced.agentIdentityAnnounced).toBe(true);
+    expect(linked.linkedOrderId).toBe("order-demo-operator-001");
+    expect(quoted.lastEtaQuotedMinutes).toBe(14);
+    expect(callback.status).toBe("pending");
+    expect(completed.status).toBe("completed");
+    expect(closed.flags).toContain("recording_missing");
+    expect(callcenterService.listCallbackTasks()).toHaveLength(1);
+    expect(auditService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ actionName: "announce_agent_identity" }),
+        expect.objectContaining({ actionName: "quote_call_eta" }),
+        expect.objectContaining({ actionName: "create_callback_task" }),
+        expect.objectContaining({ actionName: "complete_callback_task" }),
+      ]),
+    );
+  });
+
   it("attaches a recording callback to a linked call session", () => {
     const auditService = new AuditNotificationService();
     const callcenterService = new CallcenterService(auditService);
@@ -81,6 +138,8 @@ describe("callcenter service", () => {
           callType: "booking",
           callerPhone: "0900111222",
           agentId: "AGENT-0099",
+          agentIdentityAnnounced: true,
+          agentIdentityAnnouncedAt: "2026-04-10T09:00:00Z",
           status: "active",
           startedAt: "2026-04-10T09:00:00Z",
           endedAt: null,
@@ -89,6 +148,9 @@ describe("callcenter service", () => {
           recordingUrl: null,
           linkedOrderId: "order-demo-099",
           linkedCaseNo: null,
+          lastEtaQuotedMinutes: null,
+          lastEtaQuotedAt: null,
+          callbackTask: null,
           flags: ["recording_pending"],
         },
       ]),
@@ -105,7 +167,7 @@ describe("callcenter service", () => {
     ).toBe("order-demo-099");
 
     const session = callcenterService.openCallSession({
-      callType: "dispatch_support",
+      callType: "general_inquiry",
       callerPhone: "0911000222",
       agentId: "AGENT-0100",
     });

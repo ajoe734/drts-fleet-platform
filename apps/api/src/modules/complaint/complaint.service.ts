@@ -3,10 +3,13 @@ import { randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  AddComplaintCaseNoteCommand,
+  AssignComplaintCaseCommand,
   AuditLogRecord,
   ComplaintCaseRecord,
   ComplaintCaseStatus,
   ComplaintCategory,
+  ComplaintExportViewRecord,
   ComplaintTimelineEntry,
   CreateComplaintCaseCommand,
   ReopenComplaintCaseCommand,
@@ -43,6 +46,8 @@ const DEFAULT_SLA_HOURS_BY_CATEGORY: Record<ComplaintCategory, number> = {
 
 const TIMELINE_ACTIONS = {
   created: "case_created",
+  assigned: "case_assigned",
+  noteAdded: "case_note_added",
   reopened: "case_reopened",
   slaBreached: "sla_breached",
   resolved: "case_resolved",
@@ -105,6 +110,7 @@ export class ComplaintService implements OnModuleInit {
       category: command.category,
       severity: command.severity,
       description: command.description,
+      assigneeId: null,
       status: "new",
       slaDueAt: this.calculateSlaDueAt(command.category, command.severity, now),
       slaBreach: false,
@@ -169,6 +175,123 @@ export class ComplaintService implements OnModuleInit {
     return (this.complaintTimelines.get(caseNo) ?? []).map((entry) => ({
       ...entry,
     }));
+  }
+
+  assignComplaintCase(
+    caseNo: string,
+    command: AssignComplaintCaseCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.assigneeId, "assigneeId");
+
+    const complaintCase = this.requireComplaintCase(caseNo);
+    this.assertCaseOpenForAction(complaintCase, "assign");
+
+    const note = this.normalizeNullableText(command.note);
+    const updated = {
+      ...complaintCase,
+      assigneeId: command.assigneeId.trim(),
+      status: "assigned" as ComplaintCaseStatus,
+      updatedAt: new Date().toISOString(),
+    };
+    this.replaceComplaintCase(updated);
+    const timelineEntry = this.appendTimelineEntry(
+      caseNo,
+      TIMELINE_ACTIONS.assigned,
+      note ?? `Assigned to ${updated.assigneeId}.`,
+    );
+    this.persistChanges(
+      {
+        complaintCases: [updated],
+        complaintTimelines: [timelineEntry],
+      },
+      "assign_complaint_case",
+    );
+    this.recordAudit(
+      {
+        actorId: updated.assigneeId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "assign_complaint_case",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          assigneeId: updated.assigneeId,
+          status: updated.status,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneComplaintCase(updated);
+  }
+
+  addComplaintCaseNote(
+    caseNo: string,
+    command: AddComplaintCaseNoteCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.note, "note");
+
+    const complaintCase = this.requireComplaintCase(caseNo);
+    this.assertCaseOpenForAction(complaintCase, "note");
+
+    const nextStatus =
+      complaintCase.status === "new" ||
+      complaintCase.status === "assigned" ||
+      complaintCase.status === "reopened"
+        ? ("under_investigation" as ComplaintCaseStatus)
+        : complaintCase.status;
+    const updated = {
+      ...complaintCase,
+      status: nextStatus,
+      updatedAt: new Date().toISOString(),
+    };
+    this.replaceComplaintCase(updated);
+    const timelineEntry = this.appendTimelineEntry(
+      caseNo,
+      TIMELINE_ACTIONS.noteAdded,
+      command.note.trim(),
+    );
+    this.persistChanges(
+      {
+        complaintCases: [updated],
+        complaintTimelines: [timelineEntry],
+      },
+      "add_complaint_case_note",
+    );
+    this.recordAudit(
+      {
+        actorId: updated.assigneeId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "add_complaint_case_note",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          status: updated.status,
+          note: command.note.trim(),
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneComplaintCase(updated);
+  }
+
+  getComplaintExportView(caseNo: string): ComplaintExportViewRecord {
+    const complaintCase = this.getComplaintCase(caseNo);
+    const timeline = this.getComplaintTimeline(caseNo);
+    return {
+      complaintCase,
+      timeline,
+      exportGeneratedAt: new Date().toISOString(),
+      readyForAudit:
+        complaintCase.status === "closed" &&
+        Boolean(complaintCase.resolutionCode && complaintCase.closingNote),
+    };
   }
 
   resolveComplaintCase(
@@ -449,6 +572,26 @@ export class ComplaintService implements OnModuleInit {
     return complaintCase;
   }
 
+  private assertCaseOpenForAction(
+    complaintCase: ComplaintCaseRecord,
+    action: "assign" | "note",
+  ) {
+    if (
+      complaintCase.status === "resolved" ||
+      complaintCase.status === "closed"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "COMPLAINT_NOT_ACTIONABLE",
+        `Cannot ${action} a complaint case once it is ${complaintCase.status}.`,
+        {
+          caseNo: complaintCase.caseNo,
+          status: complaintCase.status,
+        },
+      );
+    }
+  }
+
   private replaceComplaintCase(updated: ComplaintCaseRecord) {
     this.complaintCases = this.complaintCases.map((complaintCase) =>
       complaintCase.caseNo === updated.caseNo ? updated : complaintCase,
@@ -549,6 +692,11 @@ export class ComplaintService implements OnModuleInit {
         },
       );
     }
+  }
+
+  private normalizeNullableText(value: string | null | undefined) {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
   }
 
   private recordAudit(

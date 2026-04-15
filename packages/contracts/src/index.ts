@@ -987,14 +987,23 @@ export type CallType = (typeof CALL_TYPES)[number];
 export const CALL_SESSION_STATUSES = ["active", "closed"] as const;
 export type CallSessionStatus = (typeof CALL_SESSION_STATUSES)[number];
 
+export const CALLBACK_TASK_STATUSES = ["pending", "completed"] as const;
+export type CallbackTaskStatus = (typeof CALLBACK_TASK_STATUSES)[number];
+
 export interface OpenCallSessionCommand {
   callType: CallType;
   callerPhone: string;
   agentId?: string;
+  agentIdentityAnnounced?: boolean;
 }
 
 export interface CloseCallSessionCommand {
   endedAt?: string;
+}
+
+export interface AnnounceCallAgentIdentityCommand {
+  agentId?: string;
+  announcedAt?: string;
 }
 
 export interface AttachCallRecordingCommand {
@@ -1006,11 +1015,46 @@ export interface AttachCallRecordingCommand {
   agentId?: string;
 }
 
+export interface QuoteCallEtaCommand {
+  etaMinutes: number;
+  quotedAt?: string;
+}
+
+export interface LinkCallOrderCommand {
+  orderId: string;
+}
+
+export interface CreateCallbackTaskCommand {
+  dueAt: string;
+  note?: string | null;
+}
+
+export interface CompleteCallbackTaskCommand {
+  note?: string | null;
+  completedAt?: string;
+}
+
+export interface CallbackTaskRecord {
+  callbackTaskId: string;
+  callId: string;
+  callerPhone: string;
+  agentId: string | null;
+  linkedOrderId: string | null;
+  linkedCaseNo: string | null;
+  dueAt: string;
+  note: string | null;
+  status: CallbackTaskStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CallSessionRecord {
   callId: string;
   callType: CallType;
   callerPhone: string;
   agentId: string | null;
+  agentIdentityAnnounced: boolean;
+  agentIdentityAnnouncedAt: string | null;
   status: CallSessionStatus;
   startedAt: string;
   endedAt: string | null;
@@ -1019,6 +1063,9 @@ export interface CallSessionRecord {
   recordingUrl: string | null;
   linkedOrderId: string | null;
   linkedCaseNo: string | null;
+  lastEtaQuotedMinutes: number | null;
+  lastEtaQuotedAt: string | null;
+  callbackTask: CallbackTaskRecord | null;
   flags: string[];
 }
 
@@ -1054,6 +1101,22 @@ export interface CreateComplaintCaseCommand {
   description: string;
 }
 
+export interface TransferCallToComplaintCommand {
+  relatedOrderId?: string | null;
+  category: ComplaintCategory;
+  severity: "normal" | "high";
+  description: string;
+}
+
+export interface AssignComplaintCaseCommand {
+  assigneeId: string;
+  note?: string | null;
+}
+
+export interface AddComplaintCaseNoteCommand {
+  note: string;
+}
+
 export interface ReopenComplaintCaseCommand {
   reason: string;
 }
@@ -1071,6 +1134,7 @@ export interface ComplaintCaseRecord {
   category: ComplaintCategory;
   severity: "normal" | "high";
   description: string;
+  assigneeId: string | null;
   status: ComplaintCaseStatus;
   slaDueAt: string;
   slaBreach: boolean;
@@ -1085,12 +1149,21 @@ export interface ComplaintTimelineEntry {
   caseNo: string;
   action:
     | "case_created"
+    | "case_assigned"
+    | "case_note_added"
     | "case_reopened"
     | "sla_breached"
     | "case_resolved"
     | "case_closed";
   note: string;
   createdAt: string;
+}
+
+export interface ComplaintExportViewRecord {
+  complaintCase: ComplaintCaseRecord;
+  timeline: ComplaintTimelineEntry[];
+  exportGeneratedAt: string;
+  readyForAudit: boolean;
 }
 
 export const BILLING_DOCUMENT_STATUSES = ["draft", "issued", "paid"] as const;

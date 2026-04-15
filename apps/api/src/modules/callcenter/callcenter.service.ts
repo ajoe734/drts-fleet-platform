@@ -1,12 +1,20 @@
+import { randomUUID } from "node:crypto";
+
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  AnnounceCallAgentIdentityCommand,
   AuditLogRecord,
   AttachCallRecordingCommand,
+  CallbackTaskRecord,
   CallSessionRecord,
   CallType,
   CloseCallSessionCommand,
+  CompleteCallbackTaskCommand,
+  CreateCallbackTaskCommand,
+  LinkCallOrderCommand,
   OpenCallSessionCommand,
+  QuoteCallEtaCommand,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -85,6 +93,8 @@ export class CallcenterService implements OnModuleInit {
       callType: command.callType,
       callerPhone: command.callerPhone,
       agentId: command.agentId ?? null,
+      agentIdentityAnnounced: Boolean(command.agentIdentityAnnounced),
+      agentIdentityAnnouncedAt: command.agentIdentityAnnounced ? now : null,
       status: "active",
       startedAt: now,
       endedAt: null,
@@ -93,6 +103,9 @@ export class CallcenterService implements OnModuleInit {
       recordingUrl: null,
       linkedOrderId: null,
       linkedCaseNo: null,
+      lastEtaQuotedMinutes: null,
+      lastEtaQuotedAt: null,
+      callbackTask: null,
       flags: ["recording_pending"],
     };
 
@@ -127,6 +140,38 @@ export class CallcenterService implements OnModuleInit {
     return this.callSessions.map((s) => this.cloneSession(s));
   }
 
+  announceAgentIdentity(
+    callId: string,
+    command: AnnounceCallAgentIdentityCommand,
+    requestId?: string,
+  ) {
+    const session = this.requireSession(callId);
+    const announcedAt = command.announcedAt ?? new Date().toISOString();
+    session.agentId = command.agentId?.trim() || session.agentId;
+    session.agentIdentityAnnounced = true;
+    session.agentIdentityAnnouncedAt = announcedAt;
+    this.persistSessions([session], "announce_agent_identity");
+
+    this.recordAudit(
+      {
+        actorId: session.agentId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "announce_agent_identity",
+        resourceType: "call_session",
+        resourceId: session.callId,
+        newValuesSummary: {
+          agentId: session.agentId,
+          agentIdentityAnnouncedAt: announcedAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneSession(session);
+  }
+
   closeCallSession(
     callId: string,
     command: CloseCallSessionCommand,
@@ -138,6 +183,9 @@ export class CallcenterService implements OnModuleInit {
     session.status = "closed";
     session.endedAt = endedAt;
     this.addFlag(session, "closed");
+    if (session.linkedOrderId && !session.recordingId) {
+      this.addFlag(session, "recording_missing");
+    }
     this.persistSessions([session], "close_call_session");
 
     this.recordAudit(
@@ -152,6 +200,78 @@ export class CallcenterService implements OnModuleInit {
         newValuesSummary: {
           status: session.status,
           endedAt: session.endedAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneSession(session);
+  }
+
+  quoteEta(callId: string, command: QuoteCallEtaCommand, requestId?: string) {
+    this.assertPositiveEta(command.etaMinutes);
+    const session = this.requireSession(callId);
+    session.lastEtaQuotedMinutes = command.etaMinutes;
+    session.lastEtaQuotedAt = command.quotedAt ?? new Date().toISOString();
+    this.persistSessions([session], "quote_call_eta");
+
+    this.recordAudit(
+      {
+        actorId: session.agentId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "quote_call_eta",
+        resourceType: "call_session",
+        resourceId: session.callId,
+        newValuesSummary: {
+          linkedOrderId: session.linkedOrderId,
+          etaMinutes: session.lastEtaQuotedMinutes,
+          quotedAt: session.lastEtaQuotedAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneSession(session);
+  }
+
+  linkOrderToExistingSession(
+    callId: string,
+    command: LinkCallOrderCommand,
+    requestId?: string,
+  ) {
+    const orderId = command.orderId.trim();
+    if (!orderId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ORDER_ID_REQUIRED",
+        "Order ID is required.",
+      );
+    }
+
+    const session = this.requireSession(callId);
+    session.linkedOrderId = orderId;
+    if (session.callbackTask) {
+      session.callbackTask = {
+        ...session.callbackTask,
+        linkedOrderId: orderId,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    this.persistSessions([session], "link_call_order");
+
+    this.recordAudit(
+      {
+        actorId: session.agentId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "link_call_order",
+        resourceType: "call_session",
+        resourceId: session.callId,
+        newValuesSummary: {
+          linkedOrderId: session.linkedOrderId,
         },
       },
       requestId,
@@ -198,6 +318,7 @@ export class CallcenterService implements OnModuleInit {
     session.startedAt = nextStartedAt;
     session.endedAt = nextEndedAt;
     this.removeFlag(session, "recording_pending");
+    this.removeFlag(session, "recording_missing");
     this.addFlag(session, "recording_bound");
     this.persistSessions([session], "attach_recording_callback");
 
@@ -240,6 +361,130 @@ export class CallcenterService implements OnModuleInit {
     return this.cloneSession(session);
   }
 
+  listCallbackTasks() {
+    return this.callSessions
+      .flatMap((session) =>
+        session.callbackTask
+          ? [this.cloneCallbackTask(session.callbackTask)]
+          : [],
+      )
+      .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
+  }
+
+  createCallbackTask(
+    callId: string,
+    command: CreateCallbackTaskCommand,
+    requestId?: string,
+  ) {
+    const session = this.requireSession(callId);
+    this.assertTimestamp(command.dueAt, "dueAt");
+
+    const now = new Date().toISOString();
+    const callbackTask: CallbackTaskRecord = session.callbackTask
+      ? {
+          ...session.callbackTask,
+          dueAt: command.dueAt,
+          note: this.normalizeNullableText(command.note),
+          status: "pending",
+          updatedAt: now,
+        }
+      : {
+          callbackTaskId: `callback-${randomUUID()}`,
+          callId: session.callId,
+          callerPhone: session.callerPhone,
+          agentId: session.agentId,
+          linkedOrderId: session.linkedOrderId,
+          linkedCaseNo: session.linkedCaseNo,
+          dueAt: command.dueAt,
+          note: this.normalizeNullableText(command.note),
+          status: "pending",
+          createdAt: now,
+          updatedAt: now,
+        };
+
+    session.callbackTask = callbackTask;
+    this.addFlag(session, "callback_pending");
+    this.removeFlag(session, "callback_completed");
+    this.persistSessions([session], "create_callback_task");
+
+    this.recordAudit(
+      {
+        actorId: session.agentId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "create_callback_task",
+        resourceType: "callback_task",
+        resourceId: callbackTask.callbackTaskId,
+        newValuesSummary: {
+          callId: session.callId,
+          linkedOrderId: callbackTask.linkedOrderId,
+          linkedCaseNo: callbackTask.linkedCaseNo,
+          dueAt: callbackTask.dueAt,
+          status: callbackTask.status,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneCallbackTask(callbackTask);
+  }
+
+  completeCallbackTask(
+    callbackTaskId: string,
+    command: CompleteCallbackTaskCommand,
+    requestId?: string,
+  ) {
+    const session = this.findSessionByCallbackTaskId(callbackTaskId);
+    if (!session.callbackTask) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "CALLBACK_TASK_NOT_FOUND",
+        "Callback task not found.",
+        {
+          callbackTaskId,
+        },
+      );
+    }
+
+    if (session.callbackTask.status === "completed") {
+      return this.cloneCallbackTask(session.callbackTask);
+    }
+
+    this.assertOptionalTimestamp(command.completedAt, "completedAt");
+    const updatedAt = command.completedAt ?? new Date().toISOString();
+    session.callbackTask = {
+      ...session.callbackTask,
+      note:
+        this.normalizeNullableText(command.note) ?? session.callbackTask.note,
+      status: "completed",
+      updatedAt,
+    };
+    this.removeFlag(session, "callback_pending");
+    this.addFlag(session, "callback_completed");
+    this.persistSessions([session], "complete_callback_task");
+
+    this.recordAudit(
+      {
+        actorId: session.agentId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "complete_callback_task",
+        resourceType: "callback_task",
+        resourceId: session.callbackTask.callbackTaskId,
+        newValuesSummary: {
+          callId: session.callId,
+          status: session.callbackTask.status,
+          updatedAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneCallbackTask(session.callbackTask);
+  }
+
   linkOrderToCallSession(input: PhoneOrderSessionInput) {
     const now = new Date().toISOString();
     const recordingId = input.recordingId?.trim() || null;
@@ -255,6 +500,8 @@ export class CallcenterService implements OnModuleInit {
         callType: input.callType,
         callerPhone: input.callerPhone,
         agentId: input.agentId,
+        agentIdentityAnnounced: false,
+        agentIdentityAnnouncedAt: null,
         status: "active",
         startedAt: now,
         endedAt: null,
@@ -263,6 +510,9 @@ export class CallcenterService implements OnModuleInit {
         recordingUrl,
         linkedOrderId: input.linkedOrderId,
         linkedCaseNo: null,
+        lastEtaQuotedMinutes: null,
+        lastEtaQuotedAt: null,
+        callbackTask: null,
         flags: recordingId ? ["recording_bound"] : ["recording_pending"],
       };
       this.callSessions = [session, ...this.callSessions];
@@ -281,15 +531,64 @@ export class CallcenterService implements OnModuleInit {
 
     if (existingSession.recordingId) {
       this.removeFlag(existingSession, "recording_pending");
+      this.removeFlag(existingSession, "recording_missing");
       this.addFlag(existingSession, "recording_bound");
     } else {
       this.removeFlag(existingSession, "recording_bound");
       this.addFlag(existingSession, "recording_pending");
     }
 
+    if (existingSession.callbackTask) {
+      existingSession.callbackTask = {
+        ...existingSession.callbackTask,
+        linkedOrderId: input.linkedOrderId,
+        updatedAt: now,
+      };
+    }
+
     this.persistSessions([existingSession], "link_order_to_call_session");
 
     return this.cloneSession(existingSession);
+  }
+
+  linkCaseToCallSession(callId: string, caseNo: string, requestId?: string) {
+    const nextCaseNo = caseNo.trim();
+    if (!nextCaseNo) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "CASE_NO_REQUIRED",
+        "Case number is required.",
+      );
+    }
+
+    const session = this.requireSession(callId);
+    session.linkedCaseNo = nextCaseNo;
+    if (session.callbackTask) {
+      session.callbackTask = {
+        ...session.callbackTask,
+        linkedCaseNo: nextCaseNo,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    this.persistSessions([session], "link_call_case");
+
+    this.recordAudit(
+      {
+        actorId: session.agentId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "link_call_case",
+        resourceType: "call_session",
+        resourceId: session.callId,
+        newValuesSummary: {
+          linkedCaseNo: session.linkedCaseNo,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneSession(session);
   }
 
   private nextCallId() {
@@ -354,6 +653,40 @@ export class CallcenterService implements OnModuleInit {
     }
   }
 
+  private assertPositiveEta(etaMinutes: number) {
+    if (!Number.isFinite(etaMinutes) || etaMinutes <= 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "ETA_MINUTES_INVALID",
+        "ETA minutes must be greater than zero.",
+      );
+    }
+  }
+
+  private assertTimestamp(value: string, field: string) {
+    if (!value.trim()) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        `${field.toUpperCase()}_REQUIRED`,
+        `${field} is required.`,
+      );
+    }
+    this.assertOptionalTimestamp(value, field);
+  }
+
+  private assertOptionalTimestamp(value: string | undefined, field: string) {
+    if (!value) {
+      return;
+    }
+    if (Number.isNaN(Date.parse(value))) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        `${field.toUpperCase()}_INVALID`,
+        `${field} must be a valid ISO timestamp.`,
+      );
+    }
+  }
+
   private addFlag(session: CallSessionRecord, flag: string) {
     if (!session.flags.includes(flag)) {
       session.flags = [...session.flags, flag];
@@ -372,8 +705,40 @@ export class CallcenterService implements OnModuleInit {
   private cloneSession(session: CallSessionRecord) {
     return {
       ...session,
+      callbackTask: session.callbackTask
+        ? this.cloneCallbackTask(session.callbackTask)
+        : null,
       flags: [...session.flags],
     };
+  }
+
+  private cloneCallbackTask(callbackTask: CallbackTaskRecord) {
+    return {
+      ...callbackTask,
+    };
+  }
+
+  private findSessionByCallbackTaskId(callbackTaskId: string) {
+    const session = this.callSessions.find(
+      (candidateSession) =>
+        candidateSession.callbackTask?.callbackTaskId === callbackTaskId,
+    );
+    if (!session) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "CALLBACK_TASK_NOT_FOUND",
+        "Callback task not found.",
+        {
+          callbackTaskId,
+        },
+      );
+    }
+    return session;
+  }
+
+  private normalizeNullableText(value: string | null | undefined) {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed : null;
   }
 
   private recordAudit(

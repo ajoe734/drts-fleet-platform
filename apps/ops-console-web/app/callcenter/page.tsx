@@ -1,73 +1,1165 @@
+"use client";
+
 import Link from "next/link";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { AppShellCard } from "@drts/ui-web";
+import type {
+  AttachCallRecordingCommand,
+  CallbackTaskRecord,
+  CallSessionRecord,
+  ComplaintCategory,
+  CreateCallCenterOrderCommand,
+  DispatchTraceLogRecord,
+  OpenCallSessionCommand,
+  OwnedOrderRecord,
+  TransferCallToComplaintCommand,
+} from "@drts/contracts";
+import { CALL_TYPES, COMPLAINT_CATEGORIES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 
-export default async function CallcenterPage() {
-  const client = getOpsClient();
+const CALL_TYPE_OPTIONS = [...CALL_TYPES];
+const COMPLAINT_CATEGORY_OPTIONS: ComplaintCategory[] = [
+  ...COMPLAINT_CATEGORIES,
+];
 
-  let sessions: unknown[] = [];
-  let error: string | null = null;
+type RecordingFormState = AttachCallRecordingCommand & {
+  agentId: string;
+};
 
-  try {
-    const result = await client.listCallSessions();
-    sessions = (result as any)?.items ?? result ?? [];
-  } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+const INITIAL_INTAKE_FORM: OpenCallSessionCommand = {
+  callType: "booking",
+  callerPhone: "",
+  agentId: "AGENT-OPS-001",
+  agentIdentityAnnounced: true,
+};
+
+const INITIAL_ORDER_FORM = {
+  passengerName: "",
+  passengerPhone: "",
+  pickupAddress: "",
+  dropoffAddress: "",
+  notes: "",
+};
+
+const INITIAL_RECORDING_FORM: RecordingFormState = {
+  recordingId: "",
+  providerRecordingRef: "",
+  recordingUrl: "",
+  agentId: "AGENT-OPS-001",
+};
+
+const INITIAL_COMPLAINT_TRANSFER_FORM: TransferCallToComplaintCommand = {
+  category: "fare_dispute",
+  severity: "normal",
+  description: "",
+};
+
+function resolveErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
+function formatDateTime(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleString() : "-";
+}
+
+function toIsoString(value: string) {
+  return value ? new Date(value).toISOString() : "";
+}
+
+export default function CallcenterPage() {
+  const [sessions, setSessions] = useState<CallSessionRecord[]>([]);
+  const [callbacks, setCallbacks] = useState<CallbackTaskRecord[]>([]);
+  const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<OwnedOrderRecord | null>(
+    null,
+  );
+  const [dispatchTrace, setDispatchTrace] = useState<DispatchTraceLogRecord[]>(
+    [],
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [showIntake, setShowIntake] = useState(false);
+  const [intakeForm, setIntakeForm] = useState(INITIAL_INTAKE_FORM);
+  const [orderForm, setOrderForm] = useState(INITIAL_ORDER_FORM);
+  const [existingOrderId, setExistingOrderId] = useState("");
+  const [quotedEtaMinutes, setQuotedEtaMinutes] = useState("12");
+  const [recordingForm, setRecordingForm] = useState<RecordingFormState>(
+    INITIAL_RECORDING_FORM,
+  );
+  const [callbackDueAt, setCallbackDueAt] = useState("");
+  const [callbackNote, setCallbackNote] = useState("");
+  const [callbackCompleteNote, setCallbackCompleteNote] = useState("");
+  const [transferForm, setTransferForm] = useState(
+    INITIAL_COMPLAINT_TRANSFER_FORM,
+  );
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const deferredQuery = useDeferredValue(query.trim().toLowerCase());
+
+  const selectedSession = useMemo(
+    () => sessions.find((session) => session.callId === selectedCallId) ?? null,
+    [selectedCallId, sessions],
+  );
+
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  useEffect(() => {
+    const linkedOrderId = selectedSession?.linkedOrderId;
+    if (!linkedOrderId) {
+      setSelectedOrder(null);
+      setDispatchTrace([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const client = getOpsClient();
+        const [order, trace] = await Promise.all([
+          client.getOrder(linkedOrderId),
+          client.getOrderDispatchTrace(linkedOrderId),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setSelectedOrder(order as OwnedOrderRecord);
+        setDispatchTrace(trace);
+      } catch (nextError) {
+        if (!cancelled) {
+          setError(resolveErrorMessage(nextError));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSession?.linkedOrderId]);
+
+  async function loadData(preferredCallId?: string) {
+    setLoading(true);
+    try {
+      const client = getOpsClient();
+      const [nextSessions, nextCallbacks] = await Promise.all([
+        client.listCallSessions(),
+        client.listCallbackTasks(),
+      ]);
+      setSessions(nextSessions);
+      setCallbacks(nextCallbacks);
+      const focusCallId =
+        preferredCallId ??
+        (nextSessions.some((session) => session.callId === selectedCallId)
+          ? selectedCallId
+          : (nextSessions[0]?.callId ?? null));
+      setSelectedCallId(focusCallId);
+      setError(null);
+    } catch (nextError) {
+      setError(resolveErrorMessage(nextError));
+    } finally {
+      setLoading(false);
+    }
   }
+
+  async function runAction(key: string, action: () => Promise<void>) {
+    setBusyKey(key);
+    try {
+      await action();
+      setError(null);
+    } catch (nextError) {
+      setError(resolveErrorMessage(nextError));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  const filteredSessions = sessions.filter((session) => {
+    if (!deferredQuery) {
+      return true;
+    }
+    const haystack = [
+      session.callId,
+      session.callType,
+      session.callerPhone,
+      session.agentId ?? "",
+      session.linkedOrderId ?? "",
+      session.linkedCaseNo ?? "",
+      session.status,
+      session.flags.join(" "),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(deferredQuery);
+  });
+
+  const openSessions = sessions.filter(
+    (session) => session.status === "active",
+  ).length;
+  const bookingLinked = sessions.filter(
+    (session) => session.linkedOrderId,
+  ).length;
+  const recordingPending = sessions.filter((session) =>
+    session.flags.includes("recording_pending"),
+  ).length;
+  const hotlineTransfers = sessions.filter(
+    (session) => session.linkedCaseNo,
+  ).length;
 
   return (
     <main className="app-grid">
       <AppShellCard
         title="Callcenter"
-        description={`Call session monitoring for ROC and ops teams. ${sessions.length} session(s) found.`}
+        description="Phone intake, order creation, ETA replies, callback queue, and complaint-hotline transfer in the existing ops console."
       >
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
           </div>
         )}
-        {sessions.length > 0 ? (
-          <div className="data-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Call ID</th>
-                  <th>Type</th>
-                  <th>Caller</th>
-                  <th>Agent</th>
-                  <th>Status</th>
-                  <th>Flags</th>
-                  <th>Started</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sessions.map((s: any, i: number) => (
-                  <tr key={i}>
-                    <td>{s.callId ?? "-"}</td>
-                    <td>{s.callType ?? "-"}</td>
-                    <td>{s.callerPhone ?? "-"}</td>
-                    <td>{s.agentId ?? "-"}</td>
-                    <td>{s.status ?? "-"}</td>
-                    <td>{(s.flags ?? []).join(", ") || "-"}</td>
-                    <td>
-                      {s.startedAt
-                        ? new Date(s.startedAt).toLocaleString()
-                        : "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="empty-state">
-            No call sessions. Sessions are created when ops opens a call center
-            intake.
-          </p>
+
+        <section className="summary-grid">
+          {[
+            {
+              label: "Open sessions",
+              value: openSessions,
+              note: "Active call intakes waiting on next action",
+            },
+            {
+              label: "Linked orders",
+              value: bookingLinked,
+              note: "Calls already bound to owned orders",
+            },
+            {
+              label: "Recording pending",
+              value: recordingPending,
+              note: "Calls missing recording callback linkage",
+            },
+            {
+              label: "Hotline transfers",
+              value: hotlineTransfers,
+              note: "Calls already converted into complaint cases",
+            },
+          ].map((card) => (
+            <div key={card.label} className="summary-card">
+              <span>{card.label}</span>
+              <strong>{card.value}</strong>
+              <small>{card.note}</small>
+            </div>
+          ))}
+        </section>
+
+        <div className="toolbar">
+          <input
+            className="search-input"
+            type="search"
+            placeholder="Search call, phone, order, case, or agent"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <button
+            className="btn btn-primary"
+            type="button"
+            onClick={() => setShowIntake((current) => !current)}
+          >
+            {showIntake ? "Hide intake form" : "Open new intake"}
+          </button>
+          <button
+            className="btn"
+            type="button"
+            onClick={() => void loadData(selectedCallId ?? undefined)}
+          >
+            Refresh
+          </button>
+        </div>
+
+        {showIntake && (
+          <section className="panel">
+            <div className="panel-head">
+              <h3>New call intake</h3>
+              <p>
+                Hotline stays inside the existing callcenter + complaint flow.
+              </p>
+            </div>
+            <form
+              className="form-grid"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void runAction("open-intake", async () => {
+                  const created =
+                    await getOpsClient().openCallSession(intakeForm);
+                  setShowIntake(false);
+                  setIntakeForm(INITIAL_INTAKE_FORM);
+                  setOrderForm((current) => ({
+                    ...current,
+                    passengerPhone: created.callerPhone,
+                  }));
+                  setRecordingForm((current) => ({
+                    ...current,
+                    agentId:
+                      created.agentId ??
+                      INITIAL_INTAKE_FORM.agentId ??
+                      "AGENT-OPS-001",
+                  }));
+                  await loadData(created.callId);
+                });
+              }}
+            >
+              <label>
+                Call type
+                <select
+                  value={intakeForm.callType}
+                  onChange={(event) =>
+                    setIntakeForm((current) => ({
+                      ...current,
+                      callType: event.target
+                        .value as OpenCallSessionCommand["callType"],
+                    }))
+                  }
+                >
+                  {CALL_TYPE_OPTIONS.map((callType) => (
+                    <option key={callType} value={callType}>
+                      {callType.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Caller phone
+                <input
+                  type="text"
+                  value={intakeForm.callerPhone}
+                  onChange={(event) =>
+                    setIntakeForm((current) => ({
+                      ...current,
+                      callerPhone: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Agent ID
+                <input
+                  type="text"
+                  value={intakeForm.agentId ?? ""}
+                  onChange={(event) =>
+                    setIntakeForm((current) => ({
+                      ...current,
+                      agentId: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={Boolean(intakeForm.agentIdentityAnnounced)}
+                  onChange={(event) =>
+                    setIntakeForm((current) => ({
+                      ...current,
+                      agentIdentityAnnounced: event.target.checked,
+                    }))
+                  }
+                />
+                Agent identity announced
+              </label>
+              <button
+                className="btn btn-primary"
+                type="submit"
+                disabled={busyKey === "open-intake"}
+              >
+                {busyKey === "open-intake" ? "Opening..." : "Open session"}
+              </button>
+            </form>
+          </section>
         )}
+
+        {loading ? (
+          <p>Loading callcenter sessions...</p>
+        ) : (
+          <div className="content-grid">
+            <section className="panel">
+              <div className="panel-head">
+                <h3>Sessions</h3>
+                <p>{filteredSessions.length} result(s)</p>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Call</th>
+                      <th>Type</th>
+                      <th>Caller</th>
+                      <th>Agent</th>
+                      <th>Status</th>
+                      <th>Order</th>
+                      <th>Complaint</th>
+                      <th>Started</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSessions.map((session) => (
+                      <tr
+                        key={session.callId}
+                        className={
+                          session.callId === selectedCallId
+                            ? "selected-row"
+                            : ""
+                        }
+                        onClick={() => setSelectedCallId(session.callId)}
+                      >
+                        <td>{session.callId}</td>
+                        <td>{session.callType}</td>
+                        <td>{session.callerPhone}</td>
+                        <td>{session.agentId ?? "-"}</td>
+                        <td>{session.status}</td>
+                        <td>{session.linkedOrderId ?? "-"}</td>
+                        <td>{session.linkedCaseNo ?? "-"}</td>
+                        <td>{formatDateTime(session.startedAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-head">
+                <h3>Session detail</h3>
+                <p>
+                  {selectedSession
+                    ? `${selectedSession.callId} / ${selectedSession.callType}`
+                    : "Select a session"}
+                </p>
+              </div>
+
+              {selectedSession ? (
+                <div className="details-stack">
+                  <section className="detail-card">
+                    <div className="detail-grid">
+                      <div>
+                        <span className="label">Identity announced</span>
+                        <strong>
+                          {selectedSession.agentIdentityAnnounced
+                            ? "Yes"
+                            : "No"}
+                        </strong>
+                        <small>
+                          {formatDateTime(
+                            selectedSession.agentIdentityAnnouncedAt,
+                          )}
+                        </small>
+                      </div>
+                      <div>
+                        <span className="label">Recording</span>
+                        <strong>
+                          {selectedSession.recordingId ?? "Pending"}
+                        </strong>
+                        <small>
+                          {selectedSession.providerRecordingRef ?? "-"}
+                        </small>
+                      </div>
+                      <div>
+                        <span className="label">Last ETA reply</span>
+                        <strong>
+                          {selectedSession.lastEtaQuotedMinutes
+                            ? `${selectedSession.lastEtaQuotedMinutes} min`
+                            : "Not sent"}
+                        </strong>
+                        <small>
+                          {formatDateTime(selectedSession.lastEtaQuotedAt)}
+                        </small>
+                      </div>
+                      <div>
+                        <span className="label">Flags</span>
+                        <strong>
+                          {selectedSession.flags.length
+                            ? selectedSession.flags.join(", ")
+                            : "-"}
+                        </strong>
+                        <small>{formatDateTime(selectedSession.endedAt)}</small>
+                      </div>
+                    </div>
+                    <div className="action-row">
+                      {!selectedSession.agentIdentityAnnounced && (
+                        <button
+                          className="btn"
+                          type="button"
+                          disabled={busyKey === "announce-identity"}
+                          onClick={() =>
+                            void runAction("announce-identity", async () => {
+                              await getOpsClient().announceCallAgentIdentity(
+                                selectedSession.callId,
+                                {
+                                  agentId:
+                                    selectedSession.agentId ??
+                                    intakeForm.agentId ??
+                                    "AGENT-OPS-001",
+                                },
+                              );
+                              await loadData(selectedSession.callId);
+                            })
+                          }
+                        >
+                          Mark identity announced
+                        </button>
+                      )}
+                      {selectedSession.status !== "closed" && (
+                        <button
+                          className="btn"
+                          type="button"
+                          disabled={busyKey === "close-session"}
+                          onClick={() =>
+                            void runAction("close-session", async () => {
+                              await getOpsClient().closeCallSession(
+                                selectedSession.callId,
+                              );
+                              await loadData(selectedSession.callId);
+                            })
+                          }
+                        >
+                          Close session
+                        </button>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="detail-card">
+                    <div className="detail-subgrid">
+                      <form
+                        className="stack-form"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void runAction("attach-recording", async () => {
+                            await getOpsClient().attachRecordingCallback(
+                              selectedSession.callId,
+                              {
+                                ...recordingForm,
+                                agentId:
+                                  recordingForm.agentId ??
+                                  selectedSession.agentId ??
+                                  intakeForm.agentId,
+                              },
+                            );
+                            setRecordingForm(INITIAL_RECORDING_FORM);
+                            await loadData(selectedSession.callId);
+                          });
+                        }}
+                      >
+                        <h4>Attach recording callback</h4>
+                        <input
+                          type="text"
+                          placeholder="Recording ID"
+                          value={recordingForm.recordingId}
+                          onChange={(event) =>
+                            setRecordingForm((current) => ({
+                              ...current,
+                              recordingId: event.target.value,
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          placeholder="Provider recording ref"
+                          value={recordingForm.providerRecordingRef ?? ""}
+                          onChange={(event) =>
+                            setRecordingForm((current) => ({
+                              ...current,
+                              providerRecordingRef: event.target.value,
+                            }))
+                          }
+                        />
+                        <input
+                          type="url"
+                          placeholder="Recording URL"
+                          value={recordingForm.recordingUrl ?? ""}
+                          onChange={(event) =>
+                            setRecordingForm((current) => ({
+                              ...current,
+                              recordingUrl: event.target.value,
+                            }))
+                          }
+                        />
+                        <button
+                          className="btn"
+                          type="submit"
+                          disabled={busyKey === "attach-recording"}
+                        >
+                          Attach recording
+                        </button>
+                      </form>
+
+                      <form
+                        className="stack-form"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void runAction("quote-eta", async () => {
+                            await getOpsClient().quoteCallEta(
+                              selectedSession.callId,
+                              {
+                                etaMinutes: Number(quotedEtaMinutes),
+                              },
+                            );
+                            await loadData(selectedSession.callId);
+                          });
+                        }}
+                      >
+                        <h4>Reply ETA</h4>
+                        <input
+                          type="number"
+                          min={1}
+                          value={quotedEtaMinutes}
+                          onChange={(event) =>
+                            setQuotedEtaMinutes(event.target.value)
+                          }
+                        />
+                        <button
+                          className="btn"
+                          type="submit"
+                          disabled={busyKey === "quote-eta"}
+                        >
+                          Save ETA reply
+                        </button>
+                      </form>
+
+                      <form
+                        className="stack-form"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void runAction("create-callback", async () => {
+                            await getOpsClient().createCallbackTask(
+                              selectedSession.callId,
+                              {
+                                dueAt: toIsoString(callbackDueAt),
+                                note: callbackNote,
+                              },
+                            );
+                            setCallbackDueAt("");
+                            setCallbackNote("");
+                            await loadData(selectedSession.callId);
+                          });
+                        }}
+                      >
+                        <h4>Callback queue</h4>
+                        <input
+                          type="datetime-local"
+                          value={callbackDueAt}
+                          onChange={(event) =>
+                            setCallbackDueAt(event.target.value)
+                          }
+                        />
+                        <textarea
+                          rows={2}
+                          placeholder="Callback note"
+                          value={callbackNote}
+                          onChange={(event) =>
+                            setCallbackNote(event.target.value)
+                          }
+                        />
+                        <div className="action-row">
+                          <button
+                            className="btn"
+                            type="submit"
+                            disabled={busyKey === "create-callback"}
+                          >
+                            Save callback
+                          </button>
+                          {selectedSession.callbackTask?.status ===
+                            "pending" && (
+                            <>
+                              <input
+                                type="text"
+                                placeholder="Completion note"
+                                value={callbackCompleteNote}
+                                onChange={(event) =>
+                                  setCallbackCompleteNote(event.target.value)
+                                }
+                              />
+                              <button
+                                className="btn"
+                                type="button"
+                                disabled={busyKey === "complete-callback"}
+                                onClick={() =>
+                                  void runAction(
+                                    "complete-callback",
+                                    async () => {
+                                      await getOpsClient().completeCallbackTask(
+                                        selectedSession.callbackTask!
+                                          .callbackTaskId,
+                                        {
+                                          note: callbackCompleteNote,
+                                        },
+                                      );
+                                      setCallbackCompleteNote("");
+                                      await loadData(selectedSession.callId);
+                                    },
+                                  )
+                                }
+                              >
+                                Complete callback
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </form>
+                    </div>
+                  </section>
+
+                  <section className="detail-card">
+                    <div className="detail-subgrid">
+                      <form
+                        className="stack-form"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          const command: CreateCallCenterOrderCommand = {
+                            callId: selectedSession.callId,
+                            agentId:
+                              selectedSession.agentId ??
+                              intakeForm.agentId ??
+                              "AGENT-OPS-001",
+                            recordingId: selectedSession.recordingId,
+                            pickup: { address: orderForm.pickupAddress },
+                            dropoff: { address: orderForm.dropoffAddress },
+                            passenger: {
+                              name: orderForm.passengerName,
+                              phone:
+                                orderForm.passengerPhone ||
+                                selectedSession.callerPhone,
+                            },
+                            ...(orderForm.notes.trim()
+                              ? { notes: orderForm.notes.trim() }
+                              : {}),
+                          };
+                          void runAction("create-phone-order", async () => {
+                            await getOpsClient().createCallCenterOrder(command);
+                            setOrderForm(INITIAL_ORDER_FORM);
+                            await loadData(selectedSession.callId);
+                          });
+                        }}
+                      >
+                        <h4>Create phone booking</h4>
+                        <input
+                          type="text"
+                          placeholder="Passenger name"
+                          value={orderForm.passengerName}
+                          onChange={(event) =>
+                            setOrderForm((current) => ({
+                              ...current,
+                              passengerName: event.target.value,
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          placeholder="Passenger phone"
+                          value={orderForm.passengerPhone}
+                          onChange={(event) =>
+                            setOrderForm((current) => ({
+                              ...current,
+                              passengerPhone: event.target.value,
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          placeholder="Pickup address"
+                          value={orderForm.pickupAddress}
+                          onChange={(event) =>
+                            setOrderForm((current) => ({
+                              ...current,
+                              pickupAddress: event.target.value,
+                            }))
+                          }
+                        />
+                        <input
+                          type="text"
+                          placeholder="Dropoff address"
+                          value={orderForm.dropoffAddress}
+                          onChange={(event) =>
+                            setOrderForm((current) => ({
+                              ...current,
+                              dropoffAddress: event.target.value,
+                            }))
+                          }
+                        />
+                        <textarea
+                          rows={2}
+                          placeholder="Ops note"
+                          value={orderForm.notes}
+                          onChange={(event) =>
+                            setOrderForm((current) => ({
+                              ...current,
+                              notes: event.target.value,
+                            }))
+                          }
+                        />
+                        <button
+                          className="btn"
+                          type="submit"
+                          disabled={busyKey === "create-phone-order"}
+                        >
+                          Create order from call
+                        </button>
+                      </form>
+
+                      <form
+                        className="stack-form"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void runAction("link-order", async () => {
+                            await getOpsClient().linkCallOrder(
+                              selectedSession.callId,
+                              {
+                                orderId: existingOrderId,
+                              },
+                            );
+                            setExistingOrderId("");
+                            await loadData(selectedSession.callId);
+                          });
+                        }}
+                      >
+                        <h4>Bind existing order</h4>
+                        <input
+                          type="text"
+                          placeholder="Existing order ID"
+                          value={existingOrderId}
+                          onChange={(event) =>
+                            setExistingOrderId(event.target.value)
+                          }
+                        />
+                        <button
+                          className="btn"
+                          type="submit"
+                          disabled={busyKey === "link-order"}
+                        >
+                          Link order to call
+                        </button>
+                      </form>
+
+                      <form
+                        className="stack-form"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void runAction("transfer-complaint", async () => {
+                            await getOpsClient().transferCallToComplaint(
+                              selectedSession.callId,
+                              {
+                                ...transferForm,
+                                ...(selectedSession.linkedOrderId ||
+                                transferForm.relatedOrderId
+                                  ? {
+                                      relatedOrderId:
+                                        selectedSession.linkedOrderId ??
+                                        transferForm.relatedOrderId ??
+                                        null,
+                                    }
+                                  : {}),
+                              },
+                            );
+                            setTransferForm(INITIAL_COMPLAINT_TRANSFER_FORM);
+                            await loadData(selectedSession.callId);
+                          });
+                        }}
+                      >
+                        <h4>Transfer to complaint</h4>
+                        <select
+                          value={transferForm.category}
+                          onChange={(event) =>
+                            setTransferForm((current) => ({
+                              ...current,
+                              category: event.target.value as ComplaintCategory,
+                            }))
+                          }
+                        >
+                          {COMPLAINT_CATEGORY_OPTIONS.map((category) => (
+                            <option key={category} value={category}>
+                              {category.replace(/_/g, " ")}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={transferForm.severity}
+                          onChange={(event) =>
+                            setTransferForm((current) => ({
+                              ...current,
+                              severity: event.target
+                                .value as TransferCallToComplaintCommand["severity"],
+                            }))
+                          }
+                        >
+                          <option value="normal">normal</option>
+                          <option value="high">high</option>
+                        </select>
+                        <textarea
+                          rows={3}
+                          placeholder="Complaint description"
+                          value={transferForm.description}
+                          onChange={(event) =>
+                            setTransferForm((current) => ({
+                              ...current,
+                              description: event.target.value,
+                            }))
+                          }
+                        />
+                        <button
+                          className="btn"
+                          type="submit"
+                          disabled={busyKey === "transfer-complaint"}
+                        >
+                          Create complaint case
+                        </button>
+                      </form>
+                    </div>
+                  </section>
+
+                  <section className="detail-card">
+                    <h4>Linked order + dispatch trace</h4>
+                    {selectedOrder ? (
+                      <div className="stack">
+                        <div className="detail-grid">
+                          <div>
+                            <span className="label">Order</span>
+                            <strong>{selectedOrder.orderNo}</strong>
+                            <small>{selectedOrder.orderId}</small>
+                          </div>
+                          <div>
+                            <span className="label">Status</span>
+                            <strong>{selectedOrder.status}</strong>
+                            <small>
+                              ETA{" "}
+                              {selectedOrder.etaSnapshot
+                                ? `${selectedOrder.etaSnapshot.etaMinutes} min`
+                                : "pending"}
+                            </small>
+                          </div>
+                          <div>
+                            <span className="label">Pickup</span>
+                            <strong>{selectedOrder.pickup.address}</strong>
+                            <small>{selectedOrder.dropoff.address}</small>
+                          </div>
+                          <div>
+                            <span className="label">Compliance</span>
+                            <strong>
+                              {selectedOrder.complianceFlags.join(", ") || "-"}
+                            </strong>
+                            <small>{selectedOrder.recordingId ?? "-"}</small>
+                          </div>
+                        </div>
+                        <div className="trace-list">
+                          {dispatchTrace.length > 0 ? (
+                            dispatchTrace.map((trace) => (
+                              <div key={trace.traceId} className="trace-item">
+                                <strong>{trace.eventType}</strong>
+                                <span>{trace.message}</span>
+                                <small>{formatDateTime(trace.createdAt)}</small>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="empty-state">
+                              No dispatch trace entries yet.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="empty-state">
+                        Link or create an order to review dispatch trace.
+                      </p>
+                    )}
+                  </section>
+                </div>
+              ) : (
+                <p className="empty-state">
+                  Select a session to operate the intake workflow.
+                </p>
+              )}
+            </section>
+          </div>
+        )}
+
+        <section className="panel">
+          <div className="panel-head">
+            <h3>Callback queue</h3>
+            <p>{callbacks.length} callback task(s)</p>
+          </div>
+          {callbacks.length > 0 ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Callback</th>
+                    <th>Call</th>
+                    <th>Status</th>
+                    <th>Due</th>
+                    <th>Order</th>
+                    <th>Case</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {callbacks.map((callback) => (
+                    <tr key={callback.callbackTaskId}>
+                      <td>{callback.callbackTaskId}</td>
+                      <td>{callback.callId}</td>
+                      <td>{callback.status}</td>
+                      <td>{formatDateTime(callback.dueAt)}</td>
+                      <td>{callback.linkedOrderId ?? "-"}</td>
+                      <td>{callback.linkedCaseNo ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="empty-state">
+              No callback tasks yet. Create one from an active session.
+            </p>
+          )}
+        </section>
+
         <Link className="route-link" href="/">
           <strong>Back to home</strong> Return to ops console overview.
         </Link>
+
+        <style jsx>{`
+          .summary-grid,
+          .content-grid,
+          .detail-subgrid,
+          .detail-grid,
+          .form-grid {
+            display: grid;
+            gap: 0.9rem;
+          }
+          .summary-grid {
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            margin-bottom: 1rem;
+          }
+          .summary-card,
+          .panel,
+          .detail-card {
+            border: 1px solid #dbe4f0;
+            border-radius: 1rem;
+            background: #fff;
+          }
+          .summary-card {
+            padding: 0.95rem 1rem;
+          }
+          .summary-card strong {
+            display: block;
+            font-size: 1.35rem;
+            margin: 0.2rem 0;
+          }
+          .toolbar,
+          .action-row {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: center;
+          }
+          .toolbar {
+            margin-bottom: 1rem;
+          }
+          .search-input,
+          input,
+          select,
+          textarea {
+            width: 100%;
+            border: 1px solid #cbd5e1;
+            border-radius: 0.85rem;
+            padding: 0.7rem 0.8rem;
+            font: inherit;
+            background: #fff;
+          }
+          .btn {
+            border: 1px solid #cbd5e1;
+            border-radius: 999px;
+            padding: 0.65rem 1rem;
+            background: #fff;
+            cursor: pointer;
+          }
+          .btn-primary {
+            border-color: #0f766e;
+            background: #0f766e;
+            color: #fff;
+          }
+          .content-grid {
+            grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+            margin-top: 1rem;
+            margin-bottom: 1rem;
+          }
+          .panel,
+          .detail-card {
+            padding: 1rem;
+          }
+          .panel-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            align-items: baseline;
+            margin-bottom: 0.8rem;
+          }
+          .table-wrap {
+            overflow-x: auto;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+          }
+          th,
+          td {
+            text-align: left;
+            padding: 0.75rem 0.65rem;
+            border-bottom: 1px solid #e2e8f0;
+            vertical-align: top;
+          }
+          tbody tr {
+            cursor: pointer;
+          }
+          .selected-row {
+            background: #ecfeff;
+          }
+          .details-stack,
+          .trace-list,
+          .stack,
+          .stack-form {
+            display: grid;
+            gap: 0.8rem;
+          }
+          .detail-grid {
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          }
+          .detail-subgrid {
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          }
+          .label {
+            display: block;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #64748b;
+            margin-bottom: 0.25rem;
+          }
+          .trace-item {
+            border-left: 3px solid #0f766e;
+            padding-left: 0.75rem;
+          }
+          .checkbox {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+          }
+          .checkbox input {
+            width: auto;
+          }
+          .empty-state {
+            color: #64748b;
+          }
+          @media (max-width: 960px) {
+            .content-grid {
+              grid-template-columns: 1fr;
+            }
+          }
+        `}</style>
       </AppShellCard>
     </main>
   );

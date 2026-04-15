@@ -6,13 +6,21 @@
  */
 
 import type {
+  AddComplaintCaseNoteCommand,
+  AnnounceCallAgentIdentityCommand,
+  AssignComplaintCaseCommand,
+  AttachCallRecordingCommand,
   ApiSuccessEnvelope,
   AttendanceRecord,
   BookingRecord,
+  CallbackTaskRecord,
   CallSessionRecord,
   ClockInCommand,
   ClockOutCommand,
   ComplaintCaseRecord,
+  ComplaintExportViewRecord,
+  ComplaintTimelineEntry,
+  CompleteCallbackTaskCommand,
   CreateOwnedOrderCommand,
   CreatePlatformPricingRuleCommand,
   CreatePlatformTenantCommand,
@@ -20,6 +28,7 @@ import type {
   CreatePlatformNoticeCommand,
   CreateTenantBookingCommand,
   CreateCallCenterOrderCommand,
+  CreateCallbackTaskCommand,
   DriverAcceptTaskCommand,
   DriverRegistryRecord,
   DriverRejectTaskCommand,
@@ -31,6 +40,7 @@ import type {
   CreateReportJobCommand,
   CreateIncidentCommand,
   CreateMaintenanceRecordCommand,
+  DispatchTraceLogRecord,
   DriverStatementRecord,
   DriverTaskRecord,
   GenerateFilingPackageCommand,
@@ -39,6 +49,7 @@ import type {
   MaintenanceRecord,
   NotificationRecord,
   OwnedOrderRecord,
+  OpenCallSessionCommand,
   PlacardVersionRecord,
   PlatformAdminTenantRecord,
   PlatformAdminUserRecord,
@@ -47,7 +58,9 @@ import type {
   PlatformPricingRuleRecord,
   PublishPlatformPricingRuleCommand,
   PublicInfoVersionRecord,
+  ReopenComplaintCaseCommand,
   ReportJobRecord,
+  ResolveComplaintCaseCommand,
   SetPlatformMaintenanceModeCommand,
   ShiftRecord,
   TenantAddressRecord,
@@ -65,13 +78,16 @@ import type {
   UpsertTenantAddressCommand,
   IssueTenantApiKeyCommand,
   RotateTenantApiKeyCommand,
+  QuoteCallEtaCommand,
   UpdatePlatformAdminUserRoleCommand,
   UpdatePlatformTenantSettingsCommand,
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
   UpdateTenantNotificationsCommand,
+  LinkCallOrderCommand,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
+  TransferCallToComplaintCommand,
   VehicleContractRecord,
   VehicleRegistryRecord,
   FeatureFlag,
@@ -262,7 +278,15 @@ export class ApiClient {
   }
 
   async getOrder(id: string) {
-    return this.get(`/api/orders/${id}`);
+    return this.get<OwnedOrderRecord>(`/api/orders/${id}`);
+  }
+
+  async getOrderDispatchTrace(
+    orderId: string,
+  ): Promise<DispatchTraceLogRecord[]> {
+    return this.getList<DispatchTraceLogRecord>(
+      `/api/orders/${encodeURIComponent(orderId)}/dispatch-trace`,
+    );
   }
 
   async cancelOrder(id: string, command: CancelOwnedOrderCommand) {
@@ -276,7 +300,13 @@ export class ApiClient {
   // ── Owned Mobility: Call Center ──
 
   async createCallCenterOrder(command: CreateCallCenterOrderCommand) {
-    return this.post("/api/call-center/orders", { body: command });
+    return this.post<{
+      orderId: string;
+      orderSource: string;
+      callId: string;
+      recordingId: string | null;
+      status: string;
+    }>("/api/call-center/orders", { body: command });
   }
 
   // ── Owned Mobility: Tenant Bookings ──
@@ -392,12 +422,90 @@ export class ApiClient {
     return this.getList<CallSessionRecord>("/api/callcenter/sessions");
   }
 
+  async openCallSession(command: OpenCallSessionCommand) {
+    return this.post<CallSessionRecord>("/api/callcenter/sessions", {
+      body: command,
+    });
+  }
+
   async getCallSession(id: string) {
-    return this.get(`/api/callcenter/sessions/${id}`);
+    return this.get<CallSessionRecord>(
+      `/api/callcenter/sessions/${encodeURIComponent(id)}`,
+    );
+  }
+
+  async announceCallAgentIdentity(
+    callId: string,
+    command: AnnounceCallAgentIdentityCommand,
+  ) {
+    return this.post<CallSessionRecord>(
+      `/api/callcenter/sessions/${encodeURIComponent(callId)}/announce-identity`,
+      { body: command },
+    );
+  }
+
+  async quoteCallEta(callId: string, command: QuoteCallEtaCommand) {
+    return this.post<CallSessionRecord>(
+      `/api/callcenter/sessions/${encodeURIComponent(callId)}/eta`,
+      { body: command },
+    );
+  }
+
+  async linkCallOrder(callId: string, command: LinkCallOrderCommand) {
+    return this.post<CallSessionRecord>(
+      `/api/callcenter/sessions/${encodeURIComponent(callId)}/link-order`,
+      { body: command },
+    );
+  }
+
+  async attachRecordingCallback(
+    callId: string,
+    command: AttachCallRecordingCommand,
+  ) {
+    return this.post<CallSessionRecord>(
+      `/api/callcenter/sessions/${encodeURIComponent(callId)}/recording-callback`,
+      { body: command },
+    );
   }
 
   async closeCallSession(id: string) {
-    return this.post(`/api/callcenter/sessions/${id}/close`);
+    return this.post<CallSessionRecord>(
+      `/api/callcenter/sessions/${encodeURIComponent(id)}/close`,
+    );
+  }
+
+  async listCallbackTasks(): Promise<CallbackTaskRecord[]> {
+    return this.getList<CallbackTaskRecord>("/api/callcenter/callbacks");
+  }
+
+  async createCallbackTask(callId: string, command: CreateCallbackTaskCommand) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/sessions/${encodeURIComponent(callId)}/callbacks`,
+      { body: command },
+    );
+  }
+
+  async completeCallbackTask(
+    callbackTaskId: string,
+    command: CompleteCallbackTaskCommand = {},
+  ) {
+    return this.post<CallbackTaskRecord>(
+      `/api/callcenter/callbacks/${encodeURIComponent(callbackTaskId)}/complete`,
+      { body: command },
+    );
+  }
+
+  async transferCallToComplaint(
+    callId: string,
+    command: TransferCallToComplaintCommand,
+  ) {
+    return this.post<{
+      session: CallSessionRecord;
+      complaintCase: ComplaintCaseRecord;
+    }>(
+      `/api/callcenter/sessions/${encodeURIComponent(callId)}/transfer-to-complaint`,
+      { body: command },
+    );
   }
 
   // ── Complaint ──
@@ -407,11 +515,70 @@ export class ApiClient {
   }
 
   async createComplaint(command: CreateComplaintCaseCommand) {
-    return this.post("/api/complaints", { body: command });
+    return this.post<ComplaintCaseRecord>("/api/complaints", { body: command });
   }
 
   async getComplaint(caseNo: string) {
-    return this.get(`/api/complaints/${caseNo}`);
+    return this.get<ComplaintCaseRecord>(
+      `/api/complaints/${encodeURIComponent(caseNo)}`,
+    );
+  }
+
+  async getComplaintTimeline(
+    caseNo: string,
+  ): Promise<ComplaintTimelineEntry[]> {
+    return this.getList<ComplaintTimelineEntry>(
+      `/api/complaints/${encodeURIComponent(caseNo)}/timeline`,
+    );
+  }
+
+  async assignComplaint(caseNo: string, command: AssignComplaintCaseCommand) {
+    return this.post<ComplaintCaseRecord>(
+      `/api/complaints/${encodeURIComponent(caseNo)}/assign`,
+      { body: command },
+    );
+  }
+
+  async addComplaintNote(caseNo: string, command: AddComplaintCaseNoteCommand) {
+    return this.post<ComplaintCaseRecord>(
+      `/api/complaints/${encodeURIComponent(caseNo)}/notes`,
+      { body: command },
+    );
+  }
+
+  async getComplaintExportView(
+    caseNo: string,
+  ): Promise<ComplaintExportViewRecord> {
+    return this.get<ComplaintExportViewRecord>(
+      `/api/complaints/${encodeURIComponent(caseNo)}/export`,
+    );
+  }
+
+  async reopenComplaint(caseNo: string, command: ReopenComplaintCaseCommand) {
+    return this.post<ComplaintCaseRecord>(
+      `/api/complaints/${encodeURIComponent(caseNo)}/reopen`,
+      { body: command },
+    );
+  }
+
+  async resolveComplaint(caseNo: string, command: ResolveComplaintCaseCommand) {
+    return this.post<ComplaintCaseRecord>(
+      `/api/complaints/${encodeURIComponent(caseNo)}/resolve`,
+      { body: command },
+    );
+  }
+
+  async closeComplaint(caseNo: string, command: ResolveComplaintCaseCommand) {
+    return this.post<ComplaintCaseRecord>(
+      `/api/complaints/${encodeURIComponent(caseNo)}/close`,
+      { body: command },
+    );
+  }
+
+  async markComplaintSlaBreach(caseNo: string) {
+    return this.post<ComplaintCaseRecord>(
+      `/api/complaints/${encodeURIComponent(caseNo)}/sla-breach`,
+    );
   }
 
   // ── Billing ──

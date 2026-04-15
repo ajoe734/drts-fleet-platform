@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import type {
+  AddComplaintCaseNoteCommand,
+  AssignComplaintCaseCommand,
   CreateComplaintCaseCommand,
   ReopenComplaintCaseCommand,
   ResolveComplaintCaseCommand,
@@ -54,6 +56,41 @@ export class ComplaintController {
       {
         items: this.complaintService.getComplaintTimeline(caseNo),
       },
+      requestId,
+    );
+  }
+
+  @Post(":caseNo/assign")
+  assignComplaintCase(
+    @Param("caseNo") caseNo: string,
+    @Body() command: AssignComplaintCaseCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.complaintService.assignComplaintCase(caseNo, command, requestId),
+      requestId,
+    );
+  }
+
+  @Post(":caseNo/notes")
+  addComplaintCaseNote(
+    @Param("caseNo") caseNo: string,
+    @Body() command: AddComplaintCaseNoteCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.complaintService.addComplaintCaseNote(caseNo, command, requestId),
+      requestId,
+    );
+  }
+
+  @Get(":caseNo/export")
+  getComplaintExportView(
+    @Param("caseNo") caseNo: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.complaintService.getComplaintExportView(caseNo),
       requestId,
     );
   }

@@ -370,6 +370,7 @@ describe("Phase 1 record wire shapes via deepToSnakeCase", () => {
       category: "fare_dispute",
       severity: "normal",
       description: "乘客認為費用不正確",
+      assigneeId: null,
       status: "new",
       slaDueAt: "2026-04-13T09:00:00Z",
       slaBreach: false,
