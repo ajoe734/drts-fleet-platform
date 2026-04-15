@@ -7,7 +7,7 @@ import type {
   UpdateTenantBillingProfileCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
 import { BillingSettlementService } from "./billing-settlement.service";
 
 @Controller()
@@ -51,12 +51,8 @@ export class BillingSettlementController {
 
   @Get("tenant/invoices")
   listTenantInvoices(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        items: this.billingSettlementService.listTenantInvoices(),
-      },
-      requestId,
-    );
+    const items = this.billingSettlementService.listTenantInvoices();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/invoices/:invoiceId")

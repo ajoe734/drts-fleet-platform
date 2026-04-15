@@ -4,10 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface CancelBookingFormProps {
-  orderId: string;
+  bookingId: string;
 }
 
-export function CancelBookingForm({ orderId }: CancelBookingFormProps) {
+export function CancelBookingForm({ bookingId }: CancelBookingFormProps) {
   const router = useRouter();
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
@@ -20,7 +20,7 @@ export function CancelBookingForm({ orderId }: CancelBookingFormProps) {
     setError(null);
 
     try {
-      const res = await fetch(`/api/bookings/${orderId}/cancel`, {
+      const res = await fetch(`/api/bookings/${bookingId}/cancel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: reason || undefined }),
@@ -90,7 +90,7 @@ export function CancelBookingForm({ orderId }: CancelBookingFormProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <h3>Cancel Booking</h3>
-            <p>Order: {orderId}</p>
+            <p>Booking: {bookingId}</p>
 
             {error && (
               <div
@@ -109,7 +109,10 @@ export function CancelBookingForm({ orderId }: CancelBookingFormProps) {
 
             <form onSubmit={handleCancel}>
               <div style={{ marginBottom: "1rem" }}>
-                <label htmlFor="cancel-reason" style={{ display: "block", marginBottom: "0.5rem" }}>
+                <label
+                  htmlFor="cancel-reason"
+                  style={{ display: "block", marginBottom: "0.5rem" }}
+                >
                   Reason (optional):
                 </label>
                 <textarea
@@ -126,7 +129,13 @@ export function CancelBookingForm({ orderId }: CancelBookingFormProps) {
                 />
               </div>
 
-              <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "0.5rem",
+                  justifyContent: "flex-end",
+                }}
+              >
                 <button
                   type="button"
                   onClick={() => setShowDialog(false)}

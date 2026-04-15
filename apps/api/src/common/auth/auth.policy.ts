@@ -121,6 +121,21 @@ export function resolveRouteAuthPolicy(
         description: "Tenant billing and invoices",
       };
     }
+    if (
+      routePath === "tenant/reports/jobs" ||
+      routePath.startsWith("tenant/reports/")
+    ) {
+      return {
+        routeKey: `tenant:reports:${upperMethod}`,
+        requiredScopes: methodScope(
+          "reports:read",
+          "reports:write",
+          upperMethod,
+        ),
+        allowedRealms: baseAllowedRealms("platform", "tenant"),
+        description: "Tenant reporting and artifact access",
+      };
+    }
     if (routePath === "tenant/audit") {
       return {
         routeKey: "tenant:audit",

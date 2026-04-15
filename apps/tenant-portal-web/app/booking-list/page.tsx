@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { OwnedOrderRecord, OwnedOrderStatus } from "@drts/contracts";
+import type { BookingRecord, OwnedOrderStatus } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { BookingFilterBar } from "@/components/booking-filter-bar";
@@ -33,14 +33,14 @@ export default async function BookingListPage({
   const statusFilter = params.status as OwnedOrderStatus | undefined;
   const errorParam = params.error;
 
-  let orders: OwnedOrderRecord[] = [];
+  let bookings: BookingRecord[] = [];
   let error: string | null = errorParam || null;
 
   try {
-    const allOrders = await client.listOrders();
-    orders = statusFilter
-      ? allOrders.filter((o) => o.status === statusFilter)
-      : allOrders;
+    const allBookings = await client.listTenantBookings();
+    bookings = statusFilter
+      ? allBookings.filter((booking) => booking.orderStatus === statusFilter)
+      : allBookings;
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
@@ -49,7 +49,7 @@ export default async function BookingListPage({
     <main className="app-grid">
       <AppShellCard
         title="Booking List"
-        description={`Fetched from /api/orders. ${orders.length} order(s) found${statusFilter ? ` with status "${statusFilter}"` : ""}.`}
+        description={`Fetched from /api/tenant/bookings. ${bookings.length} booking(s) found${statusFilter ? ` with order status "${statusFilter}"` : ""}.`}
       >
         {error && (
           <div className="error-banner">
@@ -71,7 +71,7 @@ export default async function BookingListPage({
           currentStatus={statusFilter as OwnedOrderStatus}
         />
 
-        {orders.length > 0 ? (
+        {bookings.length > 0 ? (
           <div className="data-table">
             <table>
               <thead>
@@ -86,40 +86,40 @@ export default async function BookingListPage({
                 </tr>
               </thead>
               <tbody>
-                {orders.map((order) => (
-                  <tr key={order.orderId}>
+                {bookings.map((booking) => (
+                  <tr key={booking.bookingId}>
                     <td>
-                      <Link href={`/booking-list/${order.orderId}`}>
-                        {order.orderNo}
+                      <Link href={`/booking-list/${booking.bookingId}`}>
+                        {booking.bookingId}
                       </Link>
                     </td>
-                    <td>{order.serviceBucket}</td>
+                    <td>{booking.serviceBucket}</td>
                     <td>
                       <span
-                        className={`status-badge status-${order.status}`}
+                        className={`status-badge status-${booking.orderStatus}`}
                         style={{
                           padding: "0.25rem 0.5rem",
                           borderRadius: "4px",
                           fontSize: "0.875rem",
                           backgroundColor:
-                            order.status === "completed"
+                            booking.orderStatus === "completed"
                               ? "#d4edda"
-                              : order.status === "cancelled"
+                              : booking.orderStatus === "cancelled"
                                 ? "#f8d7da"
-                                : order.status.includes("pending") ||
-                                    order.status.includes("required")
+                                : booking.orderStatus.includes("pending") ||
+                                    booking.orderStatus.includes("required")
                                   ? "#fff3cd"
                                   : "#cce5ff",
                         }}
                       >
-                        {order.status}
+                        {booking.orderStatus}
                       </span>
                     </td>
-                    <td>{order.pickup.address}</td>
-                    <td>{order.dropoff.address}</td>
-                    <td>{new Date(order.createdAt).toLocaleString()}</td>
+                    <td>{booking.pickup.address}</td>
+                    <td>{booking.dropoff.address}</td>
+                    <td>{new Date(booking.createdAt).toLocaleString()}</td>
                     <td>
-                      <BookingActions order={order} />
+                      <BookingActions booking={booking} />
                     </td>
                   </tr>
                 ))}
@@ -128,8 +128,7 @@ export default async function BookingListPage({
           </div>
         ) : (
           <p className="empty-state">
-            No orders found. Tenant bookings will appear here after they reach
-            the owned mobility read model.
+            No bookings found for the current tenant.
           </p>
         )}
 

@@ -22,7 +22,7 @@ import type {
   UpsertTenantPassengerCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
 import { TenantPartnerService } from "./tenant-partner.service";
 
 @Controller()
@@ -45,12 +45,8 @@ export class TenantPartnerController {
 
   @Get("tenant/passengers")
   listPassengers(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        items: this.tenantPartnerService.listPassengers(),
-      },
-      requestId,
-    );
+    const items = this.tenantPartnerService.listPassengers();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/passengers")
@@ -66,12 +62,8 @@ export class TenantPartnerController {
 
   @Get("tenant/addresses")
   listAddresses(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        items: this.tenantPartnerService.listAddresses(),
-      },
-      requestId,
-    );
+    const items = this.tenantPartnerService.listAddresses();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/addresses")
@@ -87,12 +79,8 @@ export class TenantPartnerController {
 
   @Get("tenant/users")
   listTenantUsers(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        items: this.tenantPartnerService.listTenantUsers(),
-      },
-      requestId,
-    );
+    const items = this.tenantPartnerService.listTenantUsers();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/users")
@@ -124,12 +112,8 @@ export class TenantPartnerController {
 
   @Get("tenant/api-keys")
   listApiKeys(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        items: this.tenantPartnerService.listApiKeys(),
-      },
-      requestId,
-    );
+    const items = this.tenantPartnerService.listApiKeys();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/api-keys")
@@ -174,6 +158,12 @@ export class TenantPartnerController {
     );
   }
 
+  @Get("tenant/notifications/feed")
+  listTenantNotificationFeed(@Headers("x-request-id") requestId?: string) {
+    const items = this.tenantPartnerService.listTenantNotifications();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
   @Post("tenant/notifications")
   updateTenantNotifications(
     @Body() command: UpdateTenantNotificationsCommand,
@@ -190,12 +180,8 @@ export class TenantPartnerController {
 
   @Get("tenant/webhooks")
   listWebhookEndpoints(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        items: this.tenantPartnerService.listWebhookEndpoints(),
-      },
-      requestId,
-    );
+    const items = this.tenantPartnerService.listWebhookEndpoints();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/webhooks")
@@ -273,12 +259,8 @@ export class TenantPartnerController {
 
   @Get("tenant/webhooks/deliveries")
   listWebhookDeliveries(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        items: this.tenantPartnerService.listWebhookDeliveries(),
-      },
-      requestId,
-    );
+    const items = this.tenantPartnerService.listWebhookDeliveries();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/webhooks/:webhookId/deliveries")
@@ -286,13 +268,9 @@ export class TenantPartnerController {
     @Param("webhookId") webhookId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      {
-        items:
-          this.tenantPartnerService.listWebhookDeliveriesByWebhook(webhookId),
-      },
-      requestId,
-    );
+    const items =
+      this.tenantPartnerService.listWebhookDeliveriesByWebhook(webhookId);
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/sla")
@@ -316,11 +294,7 @@ export class TenantPartnerController {
 
   @Get("tenant/audit")
   listTenantAudit(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        items: this.tenantPartnerService.listTenantAudit(),
-      },
-      requestId,
-    );
+    const items = this.tenantPartnerService.listTenantAudit();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 }

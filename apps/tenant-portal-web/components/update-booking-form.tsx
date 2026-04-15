@@ -2,23 +2,28 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { OwnedOrderRecord, UpdateTenantBookingCommand } from "@drts/contracts";
+import type {
+  BookingRecord,
+  UpdateTenantBookingCommand,
+} from "@drts/contracts";
 
 interface UpdateBookingFormProps {
-  order: OwnedOrderRecord;
+  booking: BookingRecord;
 }
 
-export function UpdateBookingForm({ order }: UpdateBookingFormProps) {
+export function UpdateBookingForm({ booking }: UpdateBookingFormProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
 
-  const [pickupAddress, setPickupAddress] = useState(order.pickup.address);
-  const [dropoffAddress, setDropoffAddress] = useState(order.dropoff.address);
-  const [notes, setNotes] = useState(order.notes || "");
-  const [costCenter, setCostCenter] = useState(order.costCenter || "");
-  const [vehiclePreference, setVehiclePreference] = useState(order.vehiclePreference || "");
+  const [pickupAddress, setPickupAddress] = useState(booking.pickup.address);
+  const [dropoffAddress, setDropoffAddress] = useState(booking.dropoff.address);
+  const [notes, setNotes] = useState(booking.notes || "");
+  const [costCenter, setCostCenter] = useState(booking.costCenter || "");
+  const [vehiclePreference, setVehiclePreference] = useState(
+    booking.vehiclePreference || "",
+  );
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,11 +33,11 @@ export function UpdateBookingForm({ order }: UpdateBookingFormProps) {
     try {
       const updateCommand: UpdateTenantBookingCommand = {
         pickup: {
-          ...order.pickup,
+          ...booking.pickup,
           address: pickupAddress,
         },
         dropoff: {
-          ...order.dropoff,
+          ...booking.dropoff,
           address: dropoffAddress,
         },
         notes: notes || null,
@@ -40,7 +45,7 @@ export function UpdateBookingForm({ order }: UpdateBookingFormProps) {
         vehiclePreference: vehiclePreference || null,
       };
 
-      const res = await fetch(`/api/bookings/${order.orderId}/update`, {
+      const res = await fetch(`/api/bookings/${booking.bookingId}/update`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updateCommand),
@@ -112,7 +117,7 @@ export function UpdateBookingForm({ order }: UpdateBookingFormProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <h3>Update Booking</h3>
-            <p>Order: {order.orderNo}</p>
+            <p>Booking: {booking.bookingId}</p>
 
             {error && (
               <div
@@ -131,7 +136,10 @@ export function UpdateBookingForm({ order }: UpdateBookingFormProps) {
 
             <form onSubmit={handleUpdate}>
               <div style={{ marginBottom: "1rem" }}>
-                <label htmlFor="pickup-address" style={{ display: "block", marginBottom: "0.5rem" }}>
+                <label
+                  htmlFor="pickup-address"
+                  style={{ display: "block", marginBottom: "0.5rem" }}
+                >
                   Pickup Address:
                 </label>
                 <input
@@ -149,7 +157,10 @@ export function UpdateBookingForm({ order }: UpdateBookingFormProps) {
               </div>
 
               <div style={{ marginBottom: "1rem" }}>
-                <label htmlFor="dropoff-address" style={{ display: "block", marginBottom: "0.5rem" }}>
+                <label
+                  htmlFor="dropoff-address"
+                  style={{ display: "block", marginBottom: "0.5rem" }}
+                >
                   Dropoff Address:
                 </label>
                 <input
@@ -167,7 +178,10 @@ export function UpdateBookingForm({ order }: UpdateBookingFormProps) {
               </div>
 
               <div style={{ marginBottom: "1rem" }}>
-                <label htmlFor="notes" style={{ display: "block", marginBottom: "0.5rem" }}>
+                <label
+                  htmlFor="notes"
+                  style={{ display: "block", marginBottom: "0.5rem" }}
+                >
                   Notes:
                 </label>
                 <textarea
@@ -185,7 +199,10 @@ export function UpdateBookingForm({ order }: UpdateBookingFormProps) {
               </div>
 
               <div style={{ marginBottom: "1rem" }}>
-                <label htmlFor="cost-center" style={{ display: "block", marginBottom: "0.5rem" }}>
+                <label
+                  htmlFor="cost-center"
+                  style={{ display: "block", marginBottom: "0.5rem" }}
+                >
                   Cost Center:
                 </label>
                 <input
@@ -203,7 +220,10 @@ export function UpdateBookingForm({ order }: UpdateBookingFormProps) {
               </div>
 
               <div style={{ marginBottom: "1rem" }}>
-                <label htmlFor="vehicle-pref" style={{ display: "block", marginBottom: "0.5rem" }}>
+                <label
+                  htmlFor="vehicle-pref"
+                  style={{ display: "block", marginBottom: "0.5rem" }}
+                >
                   Vehicle Preference:
                 </label>
                 <input
@@ -220,7 +240,13 @@ export function UpdateBookingForm({ order }: UpdateBookingFormProps) {
                 />
               </div>
 
-              <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "0.5rem",
+                  justifyContent: "flex-end",
+                }}
+              >
                 <button
                   type="button"
                   onClick={() => setShowDialog(false)}

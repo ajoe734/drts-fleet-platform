@@ -19,7 +19,7 @@ export async function createReportJob(formData: FormData): Promise<void> {
     format,
   };
 
-  await client.createReportJob(command);
+  await client.createTenantReportJob(command);
   revalidatePath("/reports");
 }
 

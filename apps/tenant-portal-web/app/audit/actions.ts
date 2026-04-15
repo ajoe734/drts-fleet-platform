@@ -9,7 +9,7 @@ export async function getAuditLogs(): Promise<{
 }> {
   const client = getTenantClient();
   try {
-    const logs = (await client.listAuditLogs()) as AuditLogRecord[];
+    const logs = (await client.listTenantAuditLogs()) as AuditLogRecord[];
     return { logs, error: null };
   } catch (e) {
     return {

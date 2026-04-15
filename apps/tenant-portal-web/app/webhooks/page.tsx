@@ -34,7 +34,7 @@ export default async function WebhooksPage({
   try {
     const [webhookData, notifData] = await Promise.all([
       client.listWebhooks(),
-      client.listNotifications(),
+      client.listTenantNotificationFeed(),
     ]);
     webhooks = webhookData;
     notifications = notifData;

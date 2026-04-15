@@ -2,17 +2,17 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { OwnedOrderRecord } from "@drts/contracts";
+import type { BookingRecord } from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
 
 interface BookingActionsProps {
-  order: OwnedOrderRecord;
+  booking: BookingRecord;
 }
 
-export function BookingActions({ order }: BookingActionsProps) {
+export function BookingActions({ booking }: BookingActionsProps) {
   const router = useRouter();
   const isCancelable =
-    order.status !== "completed" && order.status !== "cancelled";
+    booking.orderStatus !== "completed" && booking.orderStatus !== "cancelled";
 
   const handleCancel = async () => {
     const reason = prompt("Enter cancellation reason (optional):");
@@ -22,7 +22,7 @@ export function BookingActions({ order }: BookingActionsProps) {
       const client = getTenantClient();
       const command: { reason?: string } = {};
       if (reason) command.reason = reason;
-      await client.cancelOrder(order.orderId, command);
+      await client.cancelTenantBooking(booking.bookingId, command);
       router.refresh();
     } catch (e) {
       alert(
@@ -33,7 +33,7 @@ export function BookingActions({ order }: BookingActionsProps) {
 
   return (
     <div style={{ display: "flex", gap: "0.5rem" }}>
-      <Link href={`/booking-list/${order.orderId}`} className="action-link">
+      <Link href={`/booking-list/${booking.bookingId}`} className="action-link">
         View
       </Link>
       {isCancelable && (

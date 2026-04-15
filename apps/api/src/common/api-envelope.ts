@@ -4,6 +4,13 @@ import { HttpException } from "@nestjs/common";
 
 import type { ApiSuccessEnvelope } from "@drts/contracts";
 
+export interface ApiPageInfo {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
 export function toApiSuccessEnvelope<T>(
   data: T,
   requestId?: string,
@@ -13,6 +20,31 @@ export function toApiSuccessEnvelope<T>(
     meta: {
       requestId: requestId ?? randomUUID(),
       timestamp: new Date().toISOString(),
+    },
+  };
+}
+
+export function toApiListData<T>(
+  items: T[],
+  pageInfo?: Partial<ApiPageInfo>,
+): {
+  items: T[];
+  pageInfo: ApiPageInfo;
+} {
+  const totalItems = pageInfo?.totalItems ?? items.length;
+  const pageSize = pageInfo?.pageSize ?? (items.length > 0 ? items.length : 20);
+  const page = pageInfo?.page ?? 1;
+  const totalPages =
+    pageInfo?.totalPages ??
+    (totalItems > 0 ? Math.ceil(totalItems / pageSize) : 0);
+
+  return {
+    items,
+    pageInfo: {
+      page,
+      pageSize,
+      totalItems,
+      totalPages,
     },
   };
 }

@@ -5,7 +5,7 @@ import type {
   GenerateFilingPackageCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
 import { ReportingFilingService } from "./reporting-filing.service";
 
 @Controller()
@@ -25,18 +25,42 @@ export class ReportingFilingController {
     );
   }
 
-  @Get("reports/jobs")
-  listReportJobs(@Headers("x-request-id") requestId?: string) {
+  @Post("tenant/reports/jobs")
+  createTenantReportJob(
+    @Body() command: CreateReportJobCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
     return toApiSuccessEnvelope(
-      {
-        items: this.reportingFilingService.listReportJobs(),
-      },
+      this.reportingFilingService.createReportJob(command, requestId),
       requestId,
     );
   }
 
+  @Get("reports/jobs")
+  listReportJobs(@Headers("x-request-id") requestId?: string) {
+    const items = this.reportingFilingService.listReportJobs();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/reports/jobs")
+  listTenantReportJobs(@Headers("x-request-id") requestId?: string) {
+    const items = this.reportingFilingService.listReportJobs();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
   @Get("reports/:jobId")
   getReportJob(
+    @Param("jobId") jobId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.reportingFilingService.getReportJob(jobId),
+      requestId,
+    );
+  }
+
+  @Get("tenant/reports/:jobId")
+  getTenantReportJob(
     @Param("jobId") jobId: string,
     @Headers("x-request-id") requestId?: string,
   ) {

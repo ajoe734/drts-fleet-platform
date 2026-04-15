@@ -1,21 +1,24 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import type { OwnedOrderRecord, UpdateTenantBookingCommand } from "@drts/contracts";
+import type {
+  BookingRecord,
+  UpdateTenantBookingCommand,
+} from "@drts/contracts";
 import { getTenantClient } from "@/lib/api-client";
 
 interface BookingDetailActionsProps {
-  order: OwnedOrderRecord;
+  booking: BookingRecord;
 }
 
-export function BookingDetailActions({ order }: BookingDetailActionsProps) {
+export function BookingDetailActions({ booking }: BookingDetailActionsProps) {
   const router = useRouter();
   const isCancelable =
-    order.status !== "completed" && order.status !== "cancelled";
+    booking.orderStatus !== "completed" && booking.orderStatus !== "cancelled";
   const isUpdatable =
-    order.status !== "completed" &&
-    order.status !== "cancelled" &&
-    order.status !== "on_trip";
+    booking.orderStatus !== "completed" &&
+    booking.orderStatus !== "cancelled" &&
+    booking.orderStatus !== "on_trip";
 
   const handleCancel = async () => {
     const reason = prompt("Enter cancellation reason (optional):");
@@ -25,8 +28,8 @@ export function BookingDetailActions({ order }: BookingDetailActionsProps) {
       const client = getTenantClient();
       const command: { reason?: string } = {};
       if (reason) command.reason = reason;
-      await client.cancelOrder(order.orderId, command);
-      alert("Order cancelled successfully.");
+      await client.cancelTenantBooking(booking.bookingId, command);
+      alert("Booking cancelled successfully.");
       router.refresh();
     } catch (e) {
       alert(
@@ -39,7 +42,7 @@ export function BookingDetailActions({ order }: BookingDetailActionsProps) {
     // Simplified update flow - in production, this would be a form
     const notes = prompt(
       "Update booking notes (leave empty to keep current):",
-      order.notes || "",
+      booking.notes || "",
     );
     if (notes === null) return;
 
@@ -48,7 +51,7 @@ export function BookingDetailActions({ order }: BookingDetailActionsProps) {
       const updateCommand: UpdateTenantBookingCommand = {};
       if (notes) updateCommand.notes = notes;
       else updateCommand.notes = null;
-      await client.updateOrder(order.orderId, updateCommand);
+      await client.updateTenantBooking(booking.bookingId, updateCommand);
       alert("Booking updated successfully.");
       router.refresh();
     } catch (e) {

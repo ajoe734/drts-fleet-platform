@@ -348,6 +348,12 @@ export class TenantPartnerService implements OnModuleInit {
     };
   }
 
+  listTenantNotifications() {
+    return this.auditNotificationService
+      .listNotifications()
+      .filter((notification) => notification.tenantId === DEMO_TENANT_ID);
+  }
+
   listPassengers() {
     return this.passengers.map((passenger) => this.clonePassenger(passenger));
   }

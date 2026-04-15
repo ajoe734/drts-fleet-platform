@@ -27,7 +27,7 @@ import type {
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
 @Controller()
@@ -112,8 +112,9 @@ export class OwnedMobilityController {
 
   @Get("tenant/bookings")
   listTenantBookings(@Headers("x-request-id") requestId?: string) {
+    const bookings = this.ownedMobilityService.listTenantBookings();
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.listTenantBookings(),
+      toApiListData(bookings.items, bookings.pagination),
       requestId,
     );
   }

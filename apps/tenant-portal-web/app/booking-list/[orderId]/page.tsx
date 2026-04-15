@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { OwnedOrderRecord } from "@drts/contracts";
+import type { BookingRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { BookingDetailActions } from "@/components/booking-detail-actions";
@@ -11,13 +11,13 @@ export default async function BookingDetailPage({
   params: Promise<{ orderId: string }>;
 }) {
   const client = getTenantClient();
-  const { orderId } = await params;
+  const { orderId: bookingId } = await params;
 
-  let order: OwnedOrderRecord;
+  let booking: BookingRecord;
   let error: string | null = null;
 
   try {
-    order = (await client.getOrder(orderId)) as OwnedOrderRecord;
+    booking = (await client.getTenantBooking(bookingId)) as BookingRecord;
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
     notFound();
@@ -26,8 +26,8 @@ export default async function BookingDetailPage({
   return (
     <main className="app-grid">
       <AppShellCard
-        title={`Booking ${order.orderNo}`}
-        description={`Order details for ${order.orderId}`}
+        title={`Booking ${booking.bookingId}`}
+        description={`Tenant booking details for ${booking.bookingId}`}
       >
         {error && (
           <div className="error-banner">
@@ -36,82 +36,82 @@ export default async function BookingDetailPage({
         )}
 
         <div className="booking-detail" style={{ maxWidth: "800px" }}>
-          {/* Status */}
           <section style={{ marginBottom: "1.5rem" }}>
             <h3 style={{ marginBottom: "0.5rem" }}>Status</h3>
             <span
-              className={`status-badge status-${order.status}`}
+              className={`status-badge status-${booking.orderStatus}`}
               style={{
                 padding: "0.5rem 1rem",
                 borderRadius: "4px",
                 fontSize: "1rem",
                 backgroundColor:
-                  order.status === "completed"
+                  booking.orderStatus === "completed"
                     ? "#d4edda"
-                    : order.status === "cancelled"
+                    : booking.orderStatus === "cancelled"
                       ? "#f8d7da"
-                      : order.status.includes("pending") ||
-                          order.status.includes("required")
+                      : booking.orderStatus.includes("pending") ||
+                          booking.orderStatus.includes("required")
                         ? "#fff3cd"
                         : "#cce5ff",
               }}
             >
-              {order.status}
+              {booking.orderStatus}
             </span>
           </section>
 
-          {/* Basic Info */}
           <section style={{ marginBottom: "1.5rem" }}>
             <h3 style={{ marginBottom: "0.5rem" }}>Basic Information</h3>
             <table style={{ width: "100%" }}>
               <tbody>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
-                    Order ID
+                    Booking ID
                   </td>
-                  <td>{order.orderId}</td>
+                  <td>{booking.bookingId}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
-                    Order No
+                    Order ID
                   </td>
-                  <td>{order.orderNo}</td>
+                  <td>{booking.orderId}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                     Service Bucket
                   </td>
-                  <td>{order.serviceBucket}</td>
-                </tr>
-                <tr>
-                  <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
-                    Dispatch Semantics
-                  </td>
-                  <td>{order.dispatchSemantics}</td>
+                  <td>{booking.serviceBucket}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                     Booking Type
                   </td>
-                  <td>{order.bookingType || "-"}</td>
+                  <td>{booking.bookingType || "-"}</td>
+                </tr>
+                <tr>
+                  <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
+                    Reservation Window
+                  </td>
+                  <td>
+                    {new Date(booking.reservationWindowStart).toLocaleString()}{" "}
+                    - {new Date(booking.reservationWindowEnd).toLocaleString()}
+                  </td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                     Created At
                   </td>
-                  <td>{new Date(order.createdAt).toLocaleString()}</td>
+                  <td>{new Date(booking.createdAt).toLocaleString()}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                     Updated At
                   </td>
-                  <td>{new Date(order.updatedAt).toLocaleString()}</td>
+                  <td>{new Date(booking.updatedAt).toLocaleString()}</td>
                 </tr>
               </tbody>
             </table>
           </section>
 
-          {/* Route */}
           <section style={{ marginBottom: "1.5rem" }}>
             <h3 style={{ marginBottom: "0.5rem" }}>Route</h3>
             <table style={{ width: "100%" }}>
@@ -120,33 +120,18 @@ export default async function BookingDetailPage({
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                     Pickup
                   </td>
-                  <td>{order.pickup.address}</td>
+                  <td>{booking.pickup.address}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                     Dropoff
                   </td>
-                  <td>{order.dropoff.address}</td>
+                  <td>{booking.dropoff.address}</td>
                 </tr>
-                {order.etaSnapshot && (
-                  <tr>
-                    <td
-                      style={{ fontWeight: "bold", paddingRight: "1rem" }}
-                    >
-                      ETA
-                    </td>
-                    <td>
-                      {order.etaSnapshot.etaMinutes} min (calculated at{" "}
-                      {new Date(order.etaSnapshot.calculatedAt).toLocaleString()}
-                      )
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </section>
 
-          {/* Passenger */}
           <section style={{ marginBottom: "1.5rem" }}>
             <h3 style={{ marginBottom: "0.5rem" }}>Passenger</h3>
             <table style={{ width: "100%" }}>
@@ -155,89 +140,96 @@ export default async function BookingDetailPage({
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                     Name
                   </td>
-                  <td>{order.passenger.name}</td>
+                  <td>{booking.passenger.name}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                     Phone
                   </td>
-                  <td>{order.passenger.phone}</td>
+                  <td>{booking.passenger.phone}</td>
                 </tr>
               </tbody>
             </table>
           </section>
 
-          {/* Additional Details */}
-          {(order.flightNo ||
-            order.terminal ||
-            order.luggageCount ||
-            order.notes ||
-            order.costCenter ||
-            order.quotedFare) && (
+          {(booking.flightNo ||
+            booking.terminal ||
+            booking.luggageCount ||
+            booking.notes ||
+            booking.costCenter ||
+            booking.vehiclePreference ||
+            booking.bookedBy ||
+            booking.onsiteContact) && (
             <section style={{ marginBottom: "1.5rem" }}>
               <h3 style={{ marginBottom: "0.5rem" }}>Additional Details</h3>
               <table style={{ width: "100%" }}>
                 <tbody>
-                  {order.flightNo && (
+                  {booking.flightNo && (
                     <tr>
-                      <td
-                        style={{ fontWeight: "bold", paddingRight: "1rem" }}
-                      >
+                      <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                         Flight No
                       </td>
-                      <td>{order.flightNo}</td>
+                      <td>{booking.flightNo}</td>
                     </tr>
                   )}
-                  {order.terminal && (
+                  {booking.terminal && (
                     <tr>
-                      <td
-                        style={{ fontWeight: "bold", paddingRight: "1rem" }}
-                      >
+                      <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                         Terminal
                       </td>
-                      <td>{order.terminal}</td>
+                      <td>{booking.terminal}</td>
                     </tr>
                   )}
-                  {order.luggageCount != null && (
+                  {booking.luggageCount != null && (
                     <tr>
-                      <td
-                        style={{ fontWeight: "bold", paddingRight: "1rem" }}
-                      >
+                      <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                         Luggage Count
                       </td>
-                      <td>{order.luggageCount}</td>
+                      <td>{booking.luggageCount}</td>
                     </tr>
                   )}
-                  {order.notes && (
+                  {booking.notes && (
                     <tr>
-                      <td
-                        style={{ fontWeight: "bold", paddingRight: "1rem" }}
-                      >
+                      <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                         Notes
                       </td>
-                      <td>{order.notes}</td>
+                      <td>{booking.notes}</td>
                     </tr>
                   )}
-                  {order.costCenter && (
+                  {booking.costCenter && (
                     <tr>
-                      <td
-                        style={{ fontWeight: "bold", paddingRight: "1rem" }}
-                      >
+                      <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
                         Cost Center
                       </td>
-                      <td>{order.costCenter}</td>
+                      <td>{booking.costCenter}</td>
                     </tr>
                   )}
-                  {order.quotedFare && (
+                  {booking.vehiclePreference && (
                     <tr>
-                      <td
-                        style={{ fontWeight: "bold", paddingRight: "1rem" }}
-                      >
-                        Quoted Fare
+                      <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
+                        Vehicle Preference
+                      </td>
+                      <td>{booking.vehiclePreference}</td>
+                    </tr>
+                  )}
+                  {booking.bookedBy && (
+                    <tr>
+                      <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
+                        Booked By
                       </td>
                       <td>
-                        {order.quotedFare.currency}{" "}
-                        {(order.quotedFare.amountMinor / 100).toFixed(2)}
+                        {booking.bookedBy.name} ({booking.bookedBy.email})
+                      </td>
+                    </tr>
+                  )}
+                  {booking.onsiteContact && (
+                    <tr>
+                      <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
+                        Onsite Contact
+                      </td>
+                      <td>
+                        {booking.onsiteContact.name} (
+                        {booking.onsiteContact.phone})
                       </td>
                     </tr>
                   )}
@@ -246,10 +238,9 @@ export default async function BookingDetailPage({
             </section>
           )}
 
-          {/* Actions */}
           <section style={{ marginBottom: "1.5rem" }}>
             <h3 style={{ marginBottom: "0.5rem" }}>Actions</h3>
-            <BookingDetailActions order={order} />
+            <BookingDetailActions booking={booking} />
           </section>
 
           <Link className="route-link" href="/booking-list">

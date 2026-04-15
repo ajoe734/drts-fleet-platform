@@ -11,13 +11,13 @@ export default async function ReportsPage() {
   let error: string | null = null;
 
   try {
-    jobs = await client.listReportJobs();
+    jobs = await client.listTenantReportJobs();
   } catch (e) {
     error = e instanceof Error ? e.message : "Unknown error";
   }
 
   const desc =
-    "Fetched from /api/reports/jobs. " + jobs.length + " job(s) found.";
+    "Fetched from /api/tenant/reports/jobs. " + jobs.length + " job(s) found.";
 
   return (
     <main className="app-grid">
@@ -118,7 +118,7 @@ export default async function ReportsPage() {
           </div>
         ) : (
           <p className="empty-state">
-            No report jobs found. Create one via POST /api/reports/jobs.
+            No report jobs found. Create one via POST /api/tenant/reports/jobs.
           </p>
         )}
 
