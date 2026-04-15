@@ -1,0 +1,19 @@
+{
+  "businessDispatchSubtype": "enterprise_dispatch",
+  "pickup": {
+    "address": "1 Smoke Test Plaza, Staging City"
+  },
+  "dropoff": {
+    "address": "99 Destination Ave, Staging City"
+  },
+  "reservationWindowStart": "__RESERVATION_START__",
+  "reservationWindowEnd": "__RESERVATION_END__",
+  "passenger": {
+    "name": "Smoke Passenger",
+    "phone": "+886900000001"
+  },
+  "bookedBy": {
+    "name": "Smoke Operator",
+    "staffId": "smoke-staff-01"
+  }
+}
