@@ -179,9 +179,15 @@
 | ------ | ------------------------------------------------- | ---------- | ------------ |
 | WE-001 | GitHub Actions CI — lint / typecheck / test       | Gemini     | all Wave A-C |
 | WE-002 | Docker multi-stage build（api + web apps）        | Gemini     | WE-001       |
-| WE-003 | GCP staging deploy config                         | Gemini     | WE-002       |
-| WE-004 | Smoke test suite（API + UI critical paths）       | Codex      | WE-003       |
-| WE-005 | UAT scenario pack（Phase 1 acceptance scenarios） | Claude     | WE-004       |
+| WE-003 | GCP staging deploy config                         | Gemini     | WE-001       |
+| WE-004 | Smoke test suite（API + UI critical paths）       | Codex      | WE-001       |
+| WE-005 | UAT scenario pack（Phase 1 acceptance scenarios） | Claude     | WE-001       |
+
+執行時依賴重切原則：
+
+- `WE-003` 可先完成 deploy scaffold、secret wiring 與 migration flow，待 `WE-002` image 輸出穩定後再接 image reference。
+- `WE-004` 可先完成 smoke harness、fixtures 與 critical-path 腳本，待 staging config ready 後再做環境接線與實跑。
+- `WE-005` 可先完成 UAT 場景草稿、角色路徑與 checklist，待 smoke evidence 齊備後再收尾 acceptance evidence mapping。
 
 ---
 
