@@ -81,6 +81,12 @@ export class ReportingFilingController {
     );
   }
 
+  @Get("filing-packages")
+  listFilingPackages(@Headers("x-request-id") requestId?: string) {
+    const items = this.reportingFilingService.listFilingPackages();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
   @Get("filing-packages/:packageId")
   getFilingPackage(
     @Param("packageId") packageId: string,

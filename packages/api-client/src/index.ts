@@ -8,6 +8,7 @@
 import type {
   AddComplaintCaseNoteCommand,
   AnnounceCallAgentIdentityCommand,
+  ApproveReimbursementBatchCommand,
   AssignComplaintCaseCommand,
   AttachCallRecordingCommand,
   ApiSuccessEnvelope,
@@ -41,11 +42,16 @@ import type {
   CreateIncidentCommand,
   CreateMaintenanceRecordCommand,
   DispatchTraceLogRecord,
+  DriverFeePlanRecord,
+  GenerateDriverStatementCommand,
   DriverStatementRecord,
   DriverTaskRecord,
+  FilingPackageListRecord,
+  GenerateTenantInvoiceCommand,
   GenerateFilingPackageCommand,
   IncidentRecord,
   IncidentTimelineEntry,
+  MarkReimbursementPaidCommand,
   MaintenanceRecord,
   NotificationRecord,
   OwnedOrderRecord,
@@ -56,6 +62,7 @@ import type {
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
   PlatformPricingRuleRecord,
+  PublishDriverFeePlanCommand,
   PublishPlatformPricingRuleCommand,
   PublicInfoVersionRecord,
   ReopenComplaintCaseCommand,
@@ -70,6 +77,7 @@ import type {
   TenantRoleCatalogRecord,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
+  ReimbursementBatchRecord,
   UpdateTenantWebhookEndpointCommand,
   UpdateIncidentCommand,
   UpdateMaintenanceRecordCommand,
@@ -591,8 +599,8 @@ export class ApiClient {
     return this.getList<TenantInvoiceRecord>("/api/tenant/invoices");
   }
 
-  async generateInvoice() {
-    return this.post("/api/tenant/invoices/generate");
+  async generateInvoice(command: GenerateTenantInvoiceCommand) {
+    return this.post("/api/tenant/invoices/generate", { body: command });
   }
 
   async listDriverStatements(
@@ -602,6 +610,62 @@ export class ApiClient {
       ? `/api/driver-statements?period=${encodeURIComponent(period)}`
       : "/api/driver-statements";
     return this.getList<DriverStatementRecord>(url);
+  }
+
+  async getDriverStatement(
+    statementId: string,
+  ): Promise<DriverStatementRecord> {
+    return this.get<DriverStatementRecord>(
+      `/api/driver-statements/${encodeURIComponent(statementId)}`,
+    );
+  }
+
+  async listDriverFeePlans(): Promise<DriverFeePlanRecord[]> {
+    return this.getList<DriverFeePlanRecord>("/api/driver-fee-plans");
+  }
+
+  async publishDriverFeePlan(command: PublishDriverFeePlanCommand) {
+    return this.post("/api/driver-fee-plans/publish", { body: command });
+  }
+
+  async generateDriverStatements(command: GenerateDriverStatementCommand) {
+    return this.post("/api/driver-statements/generate", { body: command });
+  }
+
+  async listReimbursementBatches(filters?: {
+    status?: ReimbursementBatchRecord["status"];
+    periodMonth?: string;
+    driverId?: string;
+    statementId?: string;
+  }): Promise<ReimbursementBatchRecord[]> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.periodMonth) params.set("periodMonth", filters.periodMonth);
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    if (filters?.statementId) params.set("statementId", filters.statementId);
+    const query = params.toString();
+    const url = query ? `/api/reimbursements?${query}` : "/api/reimbursements";
+    return this.getList<ReimbursementBatchRecord>(url);
+  }
+
+  async approveReimbursementBatch(
+    batchId: string,
+    command: ApproveReimbursementBatchCommand,
+  ): Promise<ReimbursementBatchRecord> {
+    return this.post<ReimbursementBatchRecord>(
+      `/api/reimbursements/${encodeURIComponent(batchId)}/approve`,
+      { body: command },
+    );
+  }
+
+  async markReimbursementPaid(
+    batchId: string,
+    command: MarkReimbursementPaidCommand,
+  ): Promise<ReimbursementBatchRecord> {
+    return this.post<ReimbursementBatchRecord>(
+      `/api/reimbursements/${encodeURIComponent(batchId)}/pay`,
+      { body: command },
+    );
   }
 
   // ── Platform Presence ──
@@ -669,6 +733,10 @@ export class ApiClient {
 
   async generateFilingPackage(command: GenerateFilingPackageCommand) {
     return this.post("/api/filing-packages/generate", { body: command });
+  }
+
+  async listFilingPackages(): Promise<FilingPackageListRecord[]> {
+    return this.getList<FilingPackageListRecord>("/api/filing-packages");
   }
 
   async getFilingPackage(packageId: string) {

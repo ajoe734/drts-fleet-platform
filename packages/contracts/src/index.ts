@@ -1386,6 +1386,10 @@ export interface FilingPackageRecord {
   updatedAt: string;
 }
 
+export interface FilingPackageListRecord extends FilingPackageRecord {
+  immutable?: boolean;
+}
+
 export const FORWARDED_ORDER_STATUSES = [
   "received",
   "broadcasted",

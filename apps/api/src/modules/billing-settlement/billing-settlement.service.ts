@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  ApproveReimbursementBatchCommand,
   AuditLogRecord,
   DriverFeePlanRecord,
   DriverStatementLineRecord,
@@ -10,6 +11,7 @@ import type {
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
   InvoiceLineRecord,
+  MarkReimbursementPaidCommand,
   MoneyAmount,
   PublishDriverFeePlanCommand,
   ReimbursementBatchRecord,
@@ -54,6 +56,13 @@ type SettlementTripSnapshot = {
 
 type StoredTenantInvoice = TenantInvoiceRecord & {
   artifactDownloadMetadata: ControlledDownloadMetadata;
+};
+
+type ReimbursementBatchFilters = {
+  status?: ReimbursementBatchRecord["status"];
+  periodMonth?: string;
+  driverId?: string;
+  statementId?: string;
 };
 
 const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
@@ -654,26 +663,212 @@ export class BillingSettlementService implements OnModuleInit {
     };
   }
 
-  listDriverStatements() {
-    return this.driverStatements.map((statement) =>
-      this.cloneStatement(statement),
-    );
+  listDriverStatements(periodMonth?: string) {
+    return this.driverStatements
+      .filter(
+        (statement) =>
+          !periodMonth || statement.periodMonth.trim() === periodMonth.trim(),
+      )
+      .map((statement) => this.cloneStatement(statement));
   }
 
-  getReimbursementBatch(batchId: string) {
-    const batch = this.reimbursementBatches.find(
-      (candidate) => candidate.batchId === batchId,
+  getDriverStatement(statementId: string) {
+    const statement = this.driverStatements.find(
+      (candidate) => candidate.statementId === statementId,
     );
-    if (!batch) {
+    if (!statement) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "NOT_FOUND",
-        "Reimbursement batch not found.",
+        "Driver statement not found.",
+        {
+          statementId,
+        },
+      );
+    }
+    return this.cloneStatement(statement);
+  }
+
+  listReimbursementBatches(filters: ReimbursementBatchFilters = {}) {
+    return this.reimbursementBatches
+      .filter((batch) => {
+        if (filters.status && batch.status !== filters.status) {
+          return false;
+        }
+        if (filters.periodMonth && batch.periodMonth !== filters.periodMonth) {
+          return false;
+        }
+        if (filters.driverId && batch.driverId !== filters.driverId) {
+          return false;
+        }
+        if (filters.statementId && batch.statementId !== filters.statementId) {
+          return false;
+        }
+        return true;
+      })
+      .map((batch) => this.cloneReimbursementBatch(batch));
+  }
+
+  approveReimbursementBatch(
+    batchId: string,
+    command: ApproveReimbursementBatchCommand,
+    requestId?: string,
+  ) {
+    const batch = this.requireReimbursementBatch(batchId);
+    if (batch.statementId !== command.statementId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "Statement id does not match the reimbursement batch.",
+        {
+          batchId,
+          statementId: command.statementId,
+          expectedStatementId: batch.statementId,
+        },
+      );
+    }
+
+    if (batch.approvedAt) {
+      return this.cloneReimbursementBatch(batch);
+    }
+
+    batch.approvedAt = new Date().toISOString();
+    this.persistChanges(
+      {
+        reimbursementBatches: [this.cloneReimbursementBatch(batch)],
+      },
+      "approve_reimbursement_batch",
+    );
+    this.auditNotificationService.recordNotification({
+      tenantId: null,
+      channel: "ops_notice",
+      title: "Reimbursement batch approved",
+      message: `Reimbursement batch ${batch.batchId} is approved and ready for remittance.`,
+      status: "unread",
+    });
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "billing-settlement",
+        actionName: "approve_reimbursement_batch",
+        resourceType: "driver_reimbursement_batch",
+        resourceId: batch.batchId,
+        newValuesSummary: {
+          driverId: batch.driverId,
+          statementId: batch.statementId,
+          approvedAt: batch.approvedAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneReimbursementBatch(batch);
+  }
+
+  markReimbursementPaid(
+    batchId: string,
+    command: MarkReimbursementPaidCommand,
+    requestId?: string,
+  ) {
+    const batch = this.requireReimbursementBatch(batchId);
+    if (!batch.approvedAt) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REIMBURSEMENT_NOT_APPROVED",
+        "Reimbursement batch must be approved before it can be marked as paid.",
         {
           batchId,
         },
       );
     }
+
+    if (batch.status === "paid") {
+      return this.cloneReimbursementBatch(batch);
+    }
+
+    const remittanceProofId =
+      command.remittanceProofId?.trim() || batch.remittanceProofId;
+    if (!remittanceProofId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "remittanceProofId is required to mark reimbursement paid.",
+        {
+          batchId,
+        },
+      );
+    }
+
+    const paidAt = command.paidAt?.trim() || new Date().toISOString();
+    if (Number.isNaN(new Date(paidAt).getTime())) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "paidAt must be a valid ISO timestamp.",
+        {
+          batchId,
+          paidAt,
+        },
+      );
+    }
+
+    batch.status = "paid";
+    batch.paidAt = paidAt;
+    batch.remittanceProofId = remittanceProofId;
+
+    const relatedStatement = this.driverStatements.find(
+      (statement) => statement.statementId === batch.statementId,
+    );
+    if (relatedStatement) {
+      relatedStatement.payoutStatus = "paid";
+      relatedStatement.updatedAt = paidAt;
+    }
+
+    this.persistChanges(
+      {
+        reimbursementBatches: [this.cloneReimbursementBatch(batch)],
+        ...(relatedStatement
+          ? {
+              driverStatements: [this.cloneStatement(relatedStatement)],
+            }
+          : {}),
+      },
+      "mark_reimbursement_paid",
+    );
+    this.auditNotificationService.recordNotification({
+      tenantId: null,
+      channel: "ops_notice",
+      title: "Reimbursement batch paid",
+      message: `Reimbursement batch ${batch.batchId} was marked paid with remittance proof ${remittanceProofId}.`,
+      status: "unread",
+    });
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "billing-settlement",
+        actionName: "mark_reimbursement_paid",
+        resourceType: "driver_reimbursement_batch",
+        resourceId: batch.batchId,
+        newValuesSummary: {
+          driverId: batch.driverId,
+          statementId: batch.statementId,
+          remittanceProofId,
+          paidAt,
+          status: batch.status,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneReimbursementBatch(batch);
+  }
+
+  getReimbursementBatch(batchId: string) {
+    const batch = this.requireReimbursementBatch(batchId);
     return this.cloneReimbursementBatch(batch);
   }
 
@@ -764,6 +959,23 @@ export class BillingSettlementService implements OnModuleInit {
         },
       );
     }
+  }
+
+  private requireReimbursementBatch(batchId: string) {
+    const batch = this.reimbursementBatches.find(
+      (candidate) => candidate.batchId === batchId,
+    );
+    if (!batch) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "Reimbursement batch not found.",
+        {
+          batchId,
+        },
+      );
+    }
+    return batch;
   }
 
   private toPeriodMonth(dateTime: string) {

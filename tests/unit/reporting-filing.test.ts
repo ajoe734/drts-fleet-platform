@@ -49,8 +49,11 @@ describe("reporting and filing service", () => {
     const filingPackage = reportingFilingService.getFilingPackage(
       accepted.packageId,
     );
+    const listing = reportingFilingService.listFilingPackages();
 
     expect(filingPackage.status).toBe("completed");
+    expect(listing).toHaveLength(1);
+    expect(listing[0]?.packageId).toBe(accepted.packageId);
     expect(filingPackage.immutable).toBe(true);
     expect(filingPackage.generatedAt).toBeTruthy();
     expect(filingPackage.manifestHash).toBeTruthy();

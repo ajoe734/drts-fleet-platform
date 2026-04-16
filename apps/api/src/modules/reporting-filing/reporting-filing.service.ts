@@ -246,6 +246,12 @@ export class ReportingFilingService implements OnModuleInit {
     return this.cloneFilingPackage(filingPackage);
   }
 
+  listFilingPackages() {
+    return this.filingPackages.map((filingPackage) =>
+      this.cloneFilingPackage(filingPackage),
+    );
+  }
+
   private completeReportJob(job: StoredReportJob, requestId?: string) {
     const updatedAt = new Date().toISOString();
     job.status = "running";

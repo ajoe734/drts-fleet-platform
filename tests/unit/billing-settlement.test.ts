@@ -158,6 +158,62 @@ describe("billing settlement service", () => {
     ).toBe(true);
   });
 
+  it("approves and marks reimbursement paid without moving finance truth into the UI", () => {
+    const { auditService, billingSettlementService } = createService();
+
+    billingSettlementService.publishDriverFeePlan({
+      planName: "Phase1 Driver Fee Plan",
+      version: "drv-fee-v1",
+      serviceFeeBps: 1500,
+      reimbursementMode: "platform_funded",
+    });
+
+    const result = billingSettlementService.generateDriverStatements({
+      periodMonth: "2026-03",
+    });
+    const batchId = result.reimbursementBatchIds[0]!;
+    const pendingBatch =
+      billingSettlementService.getReimbursementBatch(batchId);
+
+    const approvedBatch = billingSettlementService.approveReimbursementBatch(
+      batchId,
+      {
+        statementId: pendingBatch.statementId,
+      },
+      "reimbursement-approve-request",
+    );
+    const paidBatch = billingSettlementService.markReimbursementPaid(
+      batchId,
+      {
+        remittanceProofId: "remit-proof-001",
+        paidAt: "2026-04-01T10:30:00Z",
+      },
+      "reimbursement-paid-request",
+    );
+    const statement = billingSettlementService.getDriverStatement(
+      pendingBatch.statementId,
+    );
+
+    expect(approvedBatch.approvedAt).toBeTruthy();
+    expect(paidBatch.status).toBe("paid");
+    expect(paidBatch.remittanceProofId).toBe("remit-proof-001");
+    expect(paidBatch.paidAt).toBe("2026-04-01T10:30:00Z");
+    expect(statement.payoutStatus).toBe("paid");
+    expect(
+      billingSettlementService.listReimbursementBatches({
+        driverId: paidBatch.driverId,
+      }),
+    ).toHaveLength(1);
+    expect(
+      auditService.listAuditLogs().map((record) => record.actionName),
+    ).toEqual(
+      expect.arrayContaining([
+        "approve_reimbursement_batch",
+        "mark_reimbursement_paid",
+      ]),
+    );
+  });
+
   it("rehydrates persisted billing state and writes fee-plan and statement updates through the repository", async () => {
     const auditService = new AuditNotificationService();
     const persistChanges = vi.fn(async () => undefined);

@@ -227,6 +227,9 @@ describe("W8-001A shared api client list handling", () => {
       ["/api/orders", [{ orderId: "order-001" }]],
       ["/api/reports/jobs", [{ jobId: "job-001" }]],
       ["/api/driver-statements", [{ statementId: "stmt-001" }]],
+      ["/api/driver-fee-plans", [{ feePlanId: "plan-001" }]],
+      ["/api/reimbursements", [{ batchId: "batch-001" }]],
+      ["/api/filing-packages", [{ packageId: "pkg-001" }]],
       [
         "/api/tenant/roles",
         [{ roleCode: "tenant_admin", displayName: "Tenant Admin" }],
@@ -262,6 +265,15 @@ describe("W8-001A shared api client list handling", () => {
     await expect(client.listDriverStatements()).resolves.toEqual(
       payloadByPath.get("/api/driver-statements"),
     );
+    await expect(client.listDriverFeePlans()).resolves.toEqual(
+      payloadByPath.get("/api/driver-fee-plans"),
+    );
+    await expect(client.listReimbursementBatches()).resolves.toEqual(
+      payloadByPath.get("/api/reimbursements"),
+    );
+    await expect(client.listFilingPackages()).resolves.toEqual(
+      payloadByPath.get("/api/filing-packages"),
+    );
     await expect(client.listTenantRoles()).resolves.toEqual(
       payloadByPath.get("/api/tenant/roles"),
     );
@@ -292,6 +304,67 @@ describe("W8-001A shared api client list handling", () => {
       "http://localhost:3001/api/reports/jobs",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("targets canonical finance reimbursement routes for list/approve/pay", async () => {
+    const seenPaths: string[] = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        const pathWithQuery = `${new URL(url).pathname}${new URL(url).search}`;
+        seenPaths.push(pathWithQuery);
+
+        if (pathWithQuery.endsWith("/approve")) {
+          expect(init?.method).toBe("POST");
+          expect(JSON.parse(String(init?.body))).toEqual({
+            statementId: "stmt-001",
+          });
+        }
+
+        if (pathWithQuery.endsWith("/pay")) {
+          expect(init?.method).toBe("POST");
+          expect(JSON.parse(String(init?.body))).toEqual({
+            remittanceProofId: "proof-001",
+          });
+        }
+
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              items: [],
+            },
+          }),
+          text: async () => "",
+        } as Response;
+      },
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await client.listReimbursementBatches({
+      status: "pending",
+      periodMonth: "2026-03",
+    });
+    await client.approveReimbursementBatch("batch-001", {
+      statementId: "stmt-001",
+    });
+    await client.markReimbursementPaid("batch-001", {
+      remittanceProofId: "proof-001",
+    });
+
+    expect(seenPaths).toEqual([
+      "/api/reimbursements?status=pending&periodMonth=2026-03",
+      "/api/reimbursements/batch-001/approve",
+      "/api/reimbursements/batch-001/pay",
+    ]);
   });
 
   it("posts webhook metadata updates to the tenant BFF command path", async () => {
