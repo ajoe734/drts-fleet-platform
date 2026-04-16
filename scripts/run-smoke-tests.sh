@@ -8,26 +8,36 @@
 #
 # Options:
 #   -u, --api-url URL        API base URL (default: $SMOKE_API_URL or http://localhost:3001)
-#   -t, --token TOKEN        Bearer auth token (default: $SMOKE_AUTH_TOKEN)
-#       --tenant-id ID       Tenant ID used in billing/report fixtures (default: tenant-demo-001)
-#       --driver-id ID       Driver ID used in dispatch assign (default: drv-demo-001)
-#       --vehicle-id ID      Vehicle ID used in dispatch assign (default: veh-demo-001)
+#       --actor-type TYPE     Bootstrap auth actor type (default: platform_admin)
+#       --actor-id ID         Bootstrap auth actor ID (default: smoke-platform-admin-001)
+#       --tenant-id ID        Tenant ID used in booking/billing/report fixtures
+#       --driver-id ID        Driver ID used in dispatch assign
+#       --vehicle-id ID       Vehicle ID used in dispatch assign
 #   -s, --suite PATTERN      Run only tests matching pattern (e.g. "02|05")
 #   -v, --verbose            Print full response bodies on failure
 #   -h, --help               Show this help
 #
 # Environment variables (override defaults):
-#   SMOKE_API_URL            API base URL
-#   SMOKE_AUTH_TOKEN         Bearer token
-#   SMOKE_TENANT_ID
-#   SMOKE_DRIVER_ID
-#   SMOKE_VEHICLE_ID
+#   SMOKE_API_URL            API base URL (bare origin — no trailing slash, no /api suffix)
+#   SMOKE_API_PATH_PREFIX    Path prefix prepended to every request (default: /api)
+#   SMOKE_ACTOR_TYPE         Bootstrap auth actor type (x-actor-type header)
+#   SMOKE_ACTOR_ID           Bootstrap auth actor ID (x-actor-id header)
+#   SMOKE_REALM              Override realm derived from actor type (leave blank to auto-derive)
+#   SMOKE_TENANT_ID          Tenant UUID (x-tenant-id header; must match S0002 seed)
+#   SMOKE_DRIVER_ID          Driver UUID (must match S0002 seed)
+#   SMOKE_VEHICLE_ID         Vehicle UUID (must match S0002 seed)
 #   SMOKE_TIMEOUT            Curl timeout per request in seconds (default: 30)
 #   SMOKE_POLL_INTERVAL      Seconds between status polls (default: 3)
-#   SMOKE_POLL_MAX           Max poll attempts (default: 20)
+#   SMOKE_POLL_MAX           Max poll attempts for async jobs (default: 20)
+#
+# Auth model:
+#   The API uses bootstrap-header auth — there is NO /api/auth/login endpoint.
+#   lib/helpers.sh sends x-actor-type, x-actor-id, x-realm, and x-tenant-id headers
+#   directly.  No password, token fetch, or user account is required.
+#   Use SMOKE_ACTOR_TYPE=platform_admin (default) for all smoke routes.
 #
 # Exit codes:
-#   0  All tests passed
+#   0  All tests passed (or tests 03-04 gracefully skipped on empty DB)
 #   1  One or more tests failed
 #   2  Argument error
 
@@ -39,11 +49,15 @@ STATE_FILE="/tmp/drts-smoke-state-$$.json"
 export SMOKE_STATE_FILE="$STATE_FILE"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
+# Bootstrap auth — no login endpoint; headers sent by lib/helpers.sh automatically.
+# Seed IDs must match infra/seeds/S0002__demo_operational_seed.sql.
 export SMOKE_API_URL="${SMOKE_API_URL:-http://localhost:3001}"
-export SMOKE_AUTH_TOKEN="${SMOKE_AUTH_TOKEN:-}"
-export SMOKE_TENANT_ID="${SMOKE_TENANT_ID:-tenant-demo-001}"
-export SMOKE_DRIVER_ID="${SMOKE_DRIVER_ID:-drv-demo-001}"
-export SMOKE_VEHICLE_ID="${SMOKE_VEHICLE_ID:-veh-demo-001}"
+export SMOKE_ACTOR_TYPE="${SMOKE_ACTOR_TYPE:-platform_admin}"
+export SMOKE_ACTOR_ID="${SMOKE_ACTOR_ID:-smoke-platform-admin-001}"
+export SMOKE_REALM="${SMOKE_REALM:-}"
+export SMOKE_TENANT_ID="${SMOKE_TENANT_ID:-10000000-0000-0000-0000-000000000201}"   # TEN_ACME
+export SMOKE_DRIVER_ID="${SMOKE_DRIVER_ID:-10000000-0000-0000-0000-000000000381}"   # 張司機
+export SMOKE_VEHICLE_ID="${SMOKE_VEHICLE_ID:-10000000-0000-0000-0000-000000000351}" # ABC-1234
 export SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-30}"
 export SMOKE_POLL_INTERVAL="${SMOKE_POLL_INTERVAL:-3}"
 export SMOKE_POLL_MAX="${SMOKE_POLL_MAX:-20}"
@@ -60,7 +74,8 @@ usage() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -u|--api-url)    SMOKE_API_URL="$2"; shift 2 ;;
-    -t|--token)      SMOKE_AUTH_TOKEN="$2"; shift 2 ;;
+    --actor-type)    SMOKE_ACTOR_TYPE="$2"; shift 2 ;;
+    --actor-id)      SMOKE_ACTOR_ID="$2"; shift 2 ;;
     --tenant-id)     SMOKE_TENANT_ID="$2"; shift 2 ;;
     --driver-id)     SMOKE_DRIVER_ID="$2"; shift 2 ;;
     --vehicle-id)    SMOKE_VEHICLE_ID="$2"; shift 2 ;;
@@ -112,7 +127,7 @@ echo -e "  API URL    : ${CYAN}${SMOKE_API_URL}${RESET}"
 echo -e "  Tenant     : ${SMOKE_TENANT_ID}"
 echo -e "  Driver     : ${SMOKE_DRIVER_ID}"
 echo -e "  Vehicle    : ${SMOKE_VEHICLE_ID}"
-echo -e "  Auth token : ${SMOKE_AUTH_TOKEN:+(set)}${SMOKE_AUTH_TOKEN:-${YELLOW}(none)${RESET}}"
+echo -e "  Actor type : ${SMOKE_ACTOR_TYPE} (bootstrap headers — no login required)"
 echo -e "  Started    : $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo ""
 
