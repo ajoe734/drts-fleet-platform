@@ -422,28 +422,24 @@ Run: Print staging URLs
 ✅ health-check PASSED
 ```
 
-### 7.5 Observed Live Failure (Current Shared Truth)
+### 7.5 Pre-Remediation Live Failure (Historical Record — Resolved)
 
-The current machine truth does not contain a successful staging deploy run. It contains a
-**failed live migration execution** recorded in `ai-activity-log.jsonl` /
-`current-work.md`:
+Before FBP-013A-INFRA remediation, a **failed live migration execution** was recorded in
+`ai-activity-log.jsonl` / `current-work.md` at `2026-04-16T02:37:56Z`:
 
 ```text
 2026-04-16T02:37:56Z Orchestrator: `FBP-013A` ERROR:
 (gcloud.run.jobs.execute) Execution [drts-migrate-{exec-id}] failed.
 ```
 
-What this means:
+The failure occurred in the **migration gate** before any service deployment or
+health-check step. Root cause: runtime service account split, Cloud SQL binding, and
+Secret Manager access were misconfigured. Codex resolved all issues under child task
+`FBP-013A-INFRA` (commit `fb77010`).
 
-- A real `drts-staging` deploy attempt was made.
-- The failure occurred in the **migration gate**, before the workflow could reach service
-  deploy or health-check.
-- E-11/E-12/E-13 therefore remain unpopulated by a successful run.
-- The current workflow emitted only the top-level gcloud failure line, so the execution
-  needs follow-up inspection in Cloud Run / Cloud Logging before a rerun.
-
-This is no longer a mere "pending live deploy" gap. It is an active blocker until the
-failing execution is diagnosed and a green rerun produces the missing evidence anchors.
+**Post-remediation result:** GitHub Actions run **#24522301392** passed all four jobs.
+E-11/E-12/E-13 are now fully populated (see §8). This section is retained as an
+auditable historical record of the pre-remediation failure.
 
 ---
 
@@ -508,8 +504,8 @@ For use by `FBP-013D` (final evidence synthesis) and `FBP-014` (integrated E2E).
 | Wave E CI              | GitHub Actions CI                   | `4d7d1bb` | `WE-001-SIDECAR-REVIEW`                                 | done        |
 | Wave E Docker          | Docker multi-stage builds           | `657a4d3` | `WE-002-SIDECAR-ACCEPTANCE` + `WE-002-SIDECAR-REVIEW`   | done        |
 | Wave E staging         | GCP staging deploy scaffold         | `ff015a9` | _(FBP-013A is the staging evidence pack)_               | ✅ this doc |
-| Wave E smoke           | Smoke test suite                    | `9a233d1` | `FBP-013B-SMOKE-EVIDENCE-PACK`                          | in_progress |
-| Wave E UAT             | UAT scenario pack                   | `5c9cc4d` | `FBP-013C-UAT-EVIDENCE-PACK`                            | in_progress |
+| Wave E smoke           | Smoke test suite                    | `9a233d1` | `FBP-013B-SMOKE-EVIDENCE-PACK`                          | done        |
+| Wave E UAT             | UAT scenario pack                   | `5c9cc4d` | `FBP-013C-UAT-EVIDENCE-PACK`                            | done        |
 
 ---
 
@@ -554,10 +550,14 @@ For use by `FBP-013D` (final evidence synthesis) and `FBP-014` (integrated E2E).
 
 ---
 
-## 11.1 AC-1 Remediation Commands
+## 11.1 AC-1 Remediation — Applied and Resolved
 
-Use these commands against `drts-staging` to diagnose the latest failed migration run and
-prepare the rerun that will populate E-11/E-12/E-13.
+> **Status: COMPLETED.** All remediation steps below have been applied by Codex under
+> child task `FBP-013A-INFRA` (commit `fb77010`). GitHub Actions run **#24522301392**
+> passed all four jobs. E-11/E-12/E-13 are populated. This section is retained for
+> auditability.
+
+The following commands were used to diagnose the pre-remediation failure and verify the fix:
 
 ```bash
 export PROJECT_ID="drts-staging"
@@ -580,51 +580,58 @@ gcloud run jobs executions tasks list \
   --succeeded
 ```
 
-Remediation checklist before rerun:
+Remediation steps applied (all resolved):
 
-1. Inspect the latest execution's `status.logUri` and task output to identify the failing
-   migration/container-start cause.
-2. Verify `GCP_RUNTIME_SERVICE_ACCOUNT` is configured and is **not** the same identity as
-   `WIF_SERVICE_ACCOUNT`. The runtime SA must have `roles/cloudsql.client` and
-   `roles/secretmanager.secretAccessor`.
-3. Verify the GitHub WIF deployer identity can bind that runtime SA
-   (`iam.serviceAccounts.actAs`, typically via `roles/iam.serviceAccountUser`), or
-   `gcloud run jobs update` / `gcloud run deploy` will fail before the rerun reaches the
-   migration execution.
-4. Verify the `drts-migrate` runtime can read `drts-staging-db-url` and reach the Cloud SQL
-   instance configured by `GCP_CLOUDSQL_INSTANCE`.
-5. Confirm the updated workflow re-applies runtime identity / secret / Cloud SQL settings on
-   every API deploy (`gcloud run deploy drts-api`, not image-only update).
-6. After fixing the runtime prerequisite issue, rerun `Deploy — Staging` with
-   `skip_migration=false`.
-7. Attach the green GitHub Actions run URL, migration success log, and `/health` HTTP 200
-   output back into this pack and the parent closeout.
+1. ✅ Inspected `status.logUri` and task output to identify the failing migration cause.
+2. ✅ `GCP_RUNTIME_SERVICE_ACCOUNT` is now configured separately from `WIF_SERVICE_ACCOUNT`.
+   Runtime SA holds `roles/cloudsql.client` and `roles/secretmanager.secretAccessor`.
+3. ✅ GitHub WIF deployer identity has `iam.serviceAccounts.actAs` (via
+   `roles/iam.serviceAccountUser`) on the runtime SA.
+4. ✅ `drts-migrate` runtime can read `drts-staging-db-url` and reach the Cloud SQL
+   instance via `GCP_CLOUDSQL_INSTANCE`.
+5. ✅ Workflow now always uses `gcloud run deploy` so runtime identity, Cloud SQL
+   binding, and Secret Manager mounts are re-applied on every release.
+6. ✅ `Deploy — Staging` rerun with `skip_migration=false` produced green run #24522301392.
+7. ✅ E-11 (CI run URL), E-12 (migration success log), E-13 (health-check HTTP 200)
+   collected in §8 of this pack.
 
 ---
 
-## 12. Blocker & Handoff
+## 12. Handoff Record
 
-### Owner → Blocker Sync Command
+> **Status: RESOLVED.** The blocker raised in prior revisions has been cleared.
+> FBP-013A-INFRA remediation (commit `fb77010`) and green run #24522301392 satisfy all
+> three acceptance criteria. The post-remediation handoff to Codex was issued at
+> `2026-04-16T23:27:54Z` via `ai_status.py handoff`. FBP-013A is now in `review` status
+> awaiting Codex reviewer response.
 
-```bash
-AI_NAME=Claude python3 scripts/ai_status.py blocker FBP-013A \
-  "Live staging deploy is blocked: shared truth records a failed \`drts-migrate\` execution at 2026-04-16T02:37:56Z. Static evidence and AC-2 gap resolutions are complete, but AC-1 still lacks the successful CI run URL, migration success log, and health-check HTTP 200. Need child task FBP-013A-INFRA to finish runtime-identity / Cloud SQL / secret-access remediation and a green rerun of deploy-staging.yml to populate E-11/E-12/E-13." \
-  Codex
-```
-
-### Post-Remediation Owner → Reviewer Handoff Command
+### Issued Handoff (for audit trail)
 
 ```bash
 AI_NAME=Claude python3 scripts/ai_status.py handoff FBP-013A Codex \
-  "Staging deploy evidence pack updated at support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md. \
-Static deploy topology, migration inventory, secret wiring, AC-2 gap resolutions, and family-to-sidecar cross-reference are complete; \
-the pack now also records the failed live \`drts-migrate\` attempt from 2026-04-16T02:37:56Z and the remediation path. \
-Only hand off after a green rerun populates E-11/E-12/E-13 (CI run URL, migration success log, health-check HTTP 200)."
+  "Staging deploy evidence pack updated at support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md \
+(commit da998be). FBP-013A-INFRA remediation complete — GitHub Actions run #24522301392 passed all four jobs. \
+Live evidence collected: E-11 (CI run URL: run #24522301392), E-12 (migrate job exit 0, V0001-V0018 applied), \
+E-13 (health-check HTTP 200). AC-1 moves to PASS; AC-2 and AC-3 were already PASS. \
+All three acceptance criteria satisfied. Ready for Codex review."
 ```
 
 ---
 
 ## 13. Change Log
+
+- 2026-04-16 (rev 7) — Claude reconciled pack to post-remediation shared truth before
+  re-review per Codex revision request:
+  (1) §7.5 heading changed from "Current Shared Truth" to "Pre-Remediation Live Failure
+  (Historical Record — Resolved)" and body updated to reflect that the failure is
+  historical, not current; the green run #24522301392 result is cross-referenced back to §8;
+  (2) §10 Family-to-Sidecar table: FBP-013B and FBP-013C status updated from `in_progress`
+  to `done`, matching ai-status.json and current-work.md shared truth;
+  (3) §11.1 heading and body converted from forward-looking remediation checklist to
+  retrospective audit record — all 7 checklist items now marked ✅ applied;
+  (4) §12 converted from "Blocker & Handoff" (with an active blocker command) to
+  "Handoff Record" — the prior blocker is declared resolved, the issued handoff command
+  is preserved for audit trail only.
 
 - 2026-04-16 (rev 6) — Claude collected live evidence from green GitHub Actions run
   #24522301392 (FBP-013A-INFRA remediation complete):
