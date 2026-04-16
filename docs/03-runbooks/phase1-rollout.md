@@ -197,4 +197,4 @@ UAT must cover the canonical scenarios from the migration plan:
 - the runbook is the shared operator reference
 - the rollout gate script is available through root `pnpm` commands
 - backfill, UAT, pilot, and production all have explicit evidence expectations
-- the repo documents the current manual gap around `/api/admin/flags` instead of pretending the flag controller already exists
+- the repo documents the correct `/api/admin/flags` implementation status: controller is implemented and registered; runtime flag-evaluation client (per-tenant granular eval) is deferred to a post-Phase-1 slice, and the manual rollout matrix covers tenant/city/module cutovers in the interim
