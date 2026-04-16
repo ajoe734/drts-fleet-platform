@@ -338,7 +338,7 @@ jobs:
             --image  "$IMAGE" \
             --port   3002 \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-env-vars "NODE_ENV=production,PORT=3002,NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
+            --set-env-vars "NODE_ENV=production,NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
             --allow-unauthenticated \
             --min-instances 0 \
             --max-instances 2 \
@@ -352,7 +352,7 @@ jobs:
             --image  "$IMAGE" \
             --port   3003 \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-env-vars "NODE_ENV=production,PORT=3003,NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
+            --set-env-vars "NODE_ENV=production,NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
             --allow-unauthenticated \
             --min-instances 0 \
             --max-instances 2 \
