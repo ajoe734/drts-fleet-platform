@@ -28,8 +28,8 @@ closeout. It provides:
 - Family-to-sidecar cross-reference table for FBP-013D synthesis
 
 **Not in scope:** fabricating CI artifact URLs or claiming a passing live deploy without
-runtime evidence. This pack establishes the static evidence, records the observed live
-failure, and defines the remediation path required before AC-1 can pass.
+runtime evidence. This pack preserves both the pre-remediation failure record and the
+post-remediation green evidence chain that now satisfies AC-1.
 
 > **Status note (post-remediation, green):** FBP-013A-INFRA remediation is complete.
 > GitHub Actions run **#24522301392** passed all four jobs: `build-push`, `migrate`,
