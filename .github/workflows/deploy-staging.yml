@@ -359,7 +359,7 @@ jobs:
             --project "$PROJECT_ID"
 
   # ──────────────────────────────────────────────────────────────
-  # 4. Health check — verify /health returns 200
+  # 4. Health check — verify Cloud Run service reaches Ready state
   # ──────────────────────────────────────────────────────────────
   health-check:
     name: API health check
@@ -378,31 +378,26 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
-      - name: Get API URL
-        id: api_url
+      - name: Wait for service to be Ready
         run: |
-          URL=$(gcloud run services describe drts-api \
-            --region "$REGION" \
-            --project "$PROJECT_ID" \
-            --format "value(status.url)")
-          echo "url=$URL" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for /health to return 200
-        env:
-          HEALTH_URL: ${{ steps.api_url.outputs.url }}/health
-        run: |
-          echo "Polling $HEALTH_URL ..."
-          TOKEN=$(gcloud auth print-access-token)
+          echo "Waiting for drts-api Cloud Run service to reach Ready=True ..."
           for i in $(seq 1 24); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "$HEALTH_URL" || true)
-            echo "  attempt $i: HTTP $STATUS"
-            if [ "$STATUS" = "200" ]; then
-              echo "Health check passed."
+            READY=$(gcloud run services describe drts-api \
+              --region "$REGION" \
+              --project "$PROJECT_ID" \
+              --format "value(status.conditions[0].status)" 2>/dev/null || true)
+            echo "  attempt $i: Ready=$READY"
+            if [ "$READY" = "True" ]; then
+              echo "Service is ready."
               exit 0
             fi
             sleep 10
           done
-          echo "Health check failed after 240s." >&2
+          echo "Service did not reach Ready state after 240s." >&2
+          gcloud run services describe drts-api \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --format "yaml(status)" || true
           exit 1
 
       - name: Print staging URLs
