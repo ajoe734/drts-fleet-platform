@@ -48,6 +48,29 @@ jobs:
         id: tag
         run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
+      - name: Validate staging GitHub config
+        env:
+          WIF_PROVIDER_VALUE: ${{ secrets.WIF_PROVIDER }}
+          RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.GCP_PROJECT_ID")
+          [[ -n "${REGION:-}" ]] || missing+=("vars.GCP_REGION")
+          [[ -n "${CLOUDSQL:-}" ]] || missing+=("vars.GCP_CLOUDSQL_INSTANCE")
+          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.WIF_PROVIDER")
+          [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.WIF_SERVICE_ACCOUNT")
+          if [[ -z "${RUNTIME_SERVICE_ACCOUNT:-${RUNTIME_SERVICE_ACCOUNT_FALLBACK:-}}" ]]; then
+            missing+=("vars.GCP_RUNTIME_SERVICE_ACCOUNT or secrets.GCP_RUNTIME_SERVICE_ACCOUNT")
+          fi
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing GitHub Actions staging configuration: ${missing[*]}."
+            echo "::error::Configure the required repo variables/secrets before rerunning Deploy — Staging."
+            exit 1
+          fi
+
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:

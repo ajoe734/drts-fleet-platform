@@ -26,6 +26,11 @@ for the DRTS Phase 1 staging environment.
 | `WIF_PROVIDER`                | secret   | Workload Identity Federation provider resource name |
 | `WIF_SERVICE_ACCOUNT`         | secret   | GitHub Actions deployer service account email       |
 
+`deploy-staging.yml` validates this configuration before it tries GCP auth. If any
+required repo variable or secret is missing, the workflow now fails fast with an explicit
+list of the missing keys instead of surfacing a generic `google-github-actions/auth`
+error.
+
 ## Identity Split
 
 The staging workflow now distinguishes between two identities:
