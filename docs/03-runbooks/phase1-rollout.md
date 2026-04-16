@@ -11,6 +11,7 @@ This runbook operationalizes `W8-001B` for the current repo state. It turns the 
 - `pnpm db:init` and `pnpm db:verify` are the database entrypoints.
 - The current executable rollout gate is backend-focused: `pnpm --filter @drts/contracts build`, `pnpm --filter @drts/contracts lint`, `pnpm --filter @drts/api typecheck`, `pnpm --filter @drts/api lint`, `pnpm test:unit`, and `pnpm --filter @drts/api test`.
 - `/api/admin/flags` is implemented and registered: `apps/api/src/modules/feature-flags/feature-flags.controller.ts` (`@Controller("admin")`) is imported via `FeatureFlagsModule` in `app.module.ts`. Platform-admin auth scope required; toggle actions are audited. Tenant, city, and module cutovers that depend on granular per-tenant runtime flags still require the manual rollout matrix until the full flag-evaluation client slice lands.
+- Staging Cloud Run runtime identity must be separate from the GitHub WIF deployer identity: `GCP_RUNTIME_SERVICE_ACCOUNT` needs `roles/cloudsql.client` and `roles/secretmanager.secretAccessor`, and `WIF_SERVICE_ACCOUNT` must have `iam.serviceAccounts.actAs` on that runtime SA (for example via `roles/iam.serviceAccountUser`), or the migration gate can fail before deploy / health-check evidence is produced.
 
 ## Automation Entry Points
 

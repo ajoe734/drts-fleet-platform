@@ -27,6 +27,8 @@ env:
   REGION: ${{ vars.GCP_REGION }}
   REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/drts
   CLOUDSQL: ${{ vars.GCP_CLOUDSQL_INSTANCE }}
+  DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+  RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
 
 jobs:
   # ──────────────────────────────────────────────────────────────
@@ -139,6 +141,34 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      - name: Resolve Cloud Run runtime service account
+        id: runtime_sa
+        env:
+          RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+
+          RUNTIME_SA="${RUNTIME_SERVICE_ACCOUNT:-${RUNTIME_SERVICE_ACCOUNT_FALLBACK:-}}"
+          if [[ -z "$RUNTIME_SA" ]]; then
+            echo "::error::Missing Cloud Run runtime identity. Set vars.GCP_RUNTIME_SERVICE_ACCOUNT (preferred) or secret GCP_RUNTIME_SERVICE_ACCOUNT to a service account with roles/cloudsql.client and roles/secretmanager.secretAccessor."
+            exit 1
+          fi
+          if [[ "$RUNTIME_SA" == "$DEPLOYER_SERVICE_ACCOUNT" ]]; then
+            echo "::error::Cloud Run runtime identity resolves to the GitHub WIF deployer service account. Configure a separate runtime service account with roles/cloudsql.client and roles/secretmanager.secretAccessor."
+            exit 1
+          fi
+          ACT_AS_PERMISSIONS="$(gcloud iam service-accounts test-iam-permissions "$RUNTIME_SA" \
+            --project "$PROJECT_ID" \
+            --permissions iam.serviceAccounts.actAs \
+            --format='csv[no-heading](permissions)' \
+            2>/dev/null || true)"
+          if [[ "$ACT_AS_PERMISSIONS" != *"iam.serviceAccounts.actAs"* ]]; then
+            echo "::error::GitHub WIF deployer service account lacks iam.serviceAccounts.actAs on ${RUNTIME_SA}. Grant roles/iam.serviceAccountUser on the runtime service account before rerunning staging deploy."
+            exit 1
+          fi
+
+          echo "email=$RUNTIME_SA" >> "$GITHUB_OUTPUT"
+
       - name: Create / update migration job definition
         run: |
           IMAGE="${{ env.REGISTRY }}/migrate:${{ needs.build-push.outputs.image_tag }}"
@@ -147,7 +177,7 @@ jobs:
             --region "$REGION" \
             --image  "$IMAGE" \
             --set-cloudsql-instances "$CLOUDSQL" \
-            --service-account "${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "DATABASE_URL=drts-staging-db-url:latest" \
             --max-retries 0 \
             --project "$PROJECT_ID" \
@@ -155,7 +185,7 @@ jobs:
             --region "$REGION" \
             --image  "$IMAGE" \
             --set-cloudsql-instances "$CLOUDSQL" \
-            --service-account "${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "DATABASE_URL=drts-staging-db-url:latest" \
             --max-retries 0 \
             --project "$PROJECT_ID"
@@ -222,19 +252,45 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      - name: Resolve Cloud Run runtime service account
+        id: runtime_sa
+        env:
+          RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+
+          RUNTIME_SA="${RUNTIME_SERVICE_ACCOUNT:-${RUNTIME_SERVICE_ACCOUNT_FALLBACK:-}}"
+          if [[ -z "$RUNTIME_SA" ]]; then
+            echo "::error::Missing Cloud Run runtime identity. Set vars.GCP_RUNTIME_SERVICE_ACCOUNT (preferred) or secret GCP_RUNTIME_SERVICE_ACCOUNT to a service account with roles/cloudsql.client and roles/secretmanager.secretAccessor."
+            exit 1
+          fi
+          if [[ "$RUNTIME_SA" == "$DEPLOYER_SERVICE_ACCOUNT" ]]; then
+            echo "::error::Cloud Run runtime identity resolves to the GitHub WIF deployer service account. Configure a separate runtime service account with roles/cloudsql.client and roles/secretmanager.secretAccessor."
+            exit 1
+          fi
+          ACT_AS_PERMISSIONS="$(gcloud iam service-accounts test-iam-permissions "$RUNTIME_SA" \
+            --project "$PROJECT_ID" \
+            --permissions iam.serviceAccounts.actAs \
+            --format='csv[no-heading](permissions)' \
+            2>/dev/null || true)"
+          if [[ "$ACT_AS_PERMISSIONS" != *"iam.serviceAccounts.actAs"* ]]; then
+            echo "::error::GitHub WIF deployer service account lacks iam.serviceAccounts.actAs on ${RUNTIME_SA}. Grant roles/iam.serviceAccountUser on the runtime service account before rerunning staging deploy."
+            exit 1
+          fi
+
+          echo "email=$RUNTIME_SA" >> "$GITHUB_OUTPUT"
+
       - name: Deploy — api
         run: |
           IMAGE="${{ env.REGISTRY }}/api:${{ needs.build-push.outputs.image_tag }}"
-          gcloud run services update drts-api \
-            --region "$REGION" \
-            --image  "$IMAGE" \
-            --project "$PROJECT_ID" \
-          || gcloud run deploy drts-api \
+          # Use deploy for both create and update so the runtime identity, Cloud SQL
+          # binding, and secret mounts are re-applied on every release.
+          gcloud run deploy drts-api \
             --region "$REGION" \
             --image  "$IMAGE" \
             --port   3001 \
             --set-cloudsql-instances "$CLOUDSQL" \
-            --service-account "${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "DATABASE_URL=drts-staging-db-url:latest,API_KEY_SALT=drts-staging-api-key-salt:latest,JWT_SECRET=drts-staging-jwt-secret:latest" \
             --set-env-vars "NODE_ENV=production,API_PORT=3001" \
             --allow-unauthenticated \
@@ -260,7 +316,7 @@ jobs:
             --region "$REGION" \
             --image  "$IMAGE" \
             --port   3002 \
-            --service-account "${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-env-vars "NODE_ENV=production,PORT=3002,NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
             --allow-unauthenticated \
             --min-instances 0 \
@@ -274,7 +330,7 @@ jobs:
             --region "$REGION" \
             --image  "$IMAGE" \
             --port   3003 \
-            --service-account "${{ secrets.WIF_SERVICE_ACCOUNT }}" \
+            --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-env-vars "NODE_ENV=production,PORT=3003,NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
             --allow-unauthenticated \
             --min-instances 0 \

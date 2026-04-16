@@ -57,13 +57,14 @@ YAML both carry the RETIRED annotation.
 
 ### 2.2 GCP Project Coordinates
 
-| Resource          | Value                                                    |
-| ----------------- | -------------------------------------------------------- |
-| GCP Project       | `drts-staging` (via `GCP_PROJECT_ID` repo variable)      |
-| Region            | `asia-east1` (via `GCP_REGION` repo variable)            |
-| Artifact Registry | `asia-east1-docker.pkg.dev/$PROJECT/drts`                |
-| Cloud SQL         | PostgreSQL 16 instance `drts-staging` in `asia-east1`    |
-| Service Account   | `drts-staging-deployer@$PROJECT.iam.gserviceaccount.com` |
+| Resource                 | Value                                                                  |
+| ------------------------ | ---------------------------------------------------------------------- |
+| GCP Project              | `drts-staging` (via `GCP_PROJECT_ID` repo variable)                    |
+| Region                   | `asia-east1` (via `GCP_REGION` repo variable)                          |
+| Artifact Registry        | `asia-east1-docker.pkg.dev/$PROJECT/drts`                              |
+| Cloud SQL                | PostgreSQL 16 instance `drts-staging` in `asia-east1`                  |
+| Deployer service account | `WIF_SERVICE_ACCOUNT` — GitHub Actions identity used for GCP auth      |
+| Runtime service account  | `GCP_RUNTIME_SERVICE_ACCOUNT` — Cloud Run runtime identity for job/API |
 
 ---
 
@@ -151,13 +152,14 @@ A migration failure aborts the deploy before any service update.
 
 ### 5.1 GitHub Secrets / Variables Required
 
-| Name                    | Kind     | Purpose                                        |
-| ----------------------- | -------- | ---------------------------------------------- |
-| `GCP_PROJECT_ID`        | variable | GCP project ID (`drts-staging`)                |
-| `GCP_REGION`            | variable | Cloud Run region (`asia-east1`)                |
-| `GCP_CLOUDSQL_INSTANCE` | variable | CloudSQL connection name                       |
-| `WIF_PROVIDER`          | secret   | Workload Identity Federation provider resource |
-| `WIF_SERVICE_ACCOUNT`   | secret   | Deployer SA email                              |
+| Name                          | Kind     | Purpose                                                      |
+| ----------------------------- | -------- | ------------------------------------------------------------ |
+| `GCP_PROJECT_ID`              | variable | GCP project ID (`drts-staging`)                              |
+| `GCP_REGION`                  | variable | Cloud Run region (`asia-east1`)                              |
+| `GCP_CLOUDSQL_INSTANCE`       | variable | CloudSQL connection name                                     |
+| `GCP_RUNTIME_SERVICE_ACCOUNT` | variable | Cloud Run runtime SA email (must access Cloud SQL + secrets) |
+| `WIF_PROVIDER`                | secret   | Workload Identity Federation provider resource               |
+| `WIF_SERVICE_ACCOUNT`         | secret   | GitHub Actions deployer SA email                             |
 
 ### 5.2 Secret Manager → Cloud Run Runtime Injection
 
@@ -176,7 +178,11 @@ Injection is declared in the `gcloud run deploy` flags:
 ```
 
 Secrets are **never** written to environment variables in the workflow YAML. They are
-fetched from Secret Manager at container startup by the Cloud Run runtime.
+fetched from Secret Manager at container startup by the Cloud Run runtime. The runtime
+service account therefore needs `roles/secretmanager.secretAccessor`; the GitHub WIF
+deployer identity does not satisfy that requirement by itself. That deployer identity must
+also have `iam.serviceAccounts.actAs` on the runtime service account (for example via
+`roles/iam.serviceAccountUser`) so Cloud Run can bind the runtime identity during deploy.
 
 ### 5.3 Static Environment Variables
 
@@ -577,11 +583,20 @@ Remediation checklist before rerun:
 
 1. Inspect the latest execution's `status.logUri` and task output to identify the failing
    migration/container-start cause.
-2. Verify the `drts-migrate` runtime can read `drts-staging-db-url` and reach the Cloud SQL
+2. Verify `GCP_RUNTIME_SERVICE_ACCOUNT` is configured and is **not** the same identity as
+   `WIF_SERVICE_ACCOUNT`. The runtime SA must have `roles/cloudsql.client` and
+   `roles/secretmanager.secretAccessor`.
+3. Verify the GitHub WIF deployer identity can bind that runtime SA
+   (`iam.serviceAccounts.actAs`, typically via `roles/iam.serviceAccountUser`), or
+   `gcloud run jobs update` / `gcloud run deploy` will fail before the rerun reaches the
+   migration execution.
+4. Verify the `drts-migrate` runtime can read `drts-staging-db-url` and reach the Cloud SQL
    instance configured by `GCP_CLOUDSQL_INSTANCE`.
-3. After fixing the runtime prerequisite issue, rerun `Deploy — Staging` with
+5. Confirm the updated workflow re-applies runtime identity / secret / Cloud SQL settings on
+   every API deploy (`gcloud run deploy drts-api`, not image-only update).
+6. After fixing the runtime prerequisite issue, rerun `Deploy — Staging` with
    `skip_migration=false`.
-4. Attach the green GitHub Actions run URL, migration success log, and `/health` HTTP 200
+7. Attach the green GitHub Actions run URL, migration success log, and `/health` HTTP 200
    output back into this pack and the parent closeout.
 
 ---
@@ -592,8 +607,8 @@ Remediation checklist before rerun:
 
 ```bash
 AI_NAME=Claude python3 scripts/ai_status.py blocker FBP-013A \
-  "Live staging deploy is blocked: shared truth records a failed \`drts-migrate\` execution at 2026-04-16T02:37:56Z. Static evidence and AC-2 gap resolutions are complete, but AC-1 still lacks the successful CI run URL, migration success log, and health-check HTTP 200. Need infra triage on the latest Cloud Run execution plus a green rerun of deploy-staging.yml to populate E-11/E-12/E-13." \
-  Gemini
+  "Live staging deploy is blocked: shared truth records a failed \`drts-migrate\` execution at 2026-04-16T02:37:56Z. Static evidence and AC-2 gap resolutions are complete, but AC-1 still lacks the successful CI run URL, migration success log, and health-check HTTP 200. Need child task FBP-013A-INFRA to finish runtime-identity / Cloud SQL / secret-access remediation and a green rerun of deploy-staging.yml to populate E-11/E-12/E-13." \
+  Codex
 ```
 
 ### Post-Remediation Owner → Reviewer Handoff Command
@@ -609,6 +624,24 @@ Only hand off after a green rerun populates E-11/E-12/E-13 (CI run URL, migratio
 ---
 
 ## 13. Change Log
+
+- 2026-04-16 (rev 5) — Codex landed the infra remediation follow-up for child task
+  `FBP-013A-INFRA`:
+  (1) `.github/workflows/deploy-staging.yml` now resolves a dedicated
+  `GCP_RUNTIME_SERVICE_ACCOUNT`, fails fast if it is missing or reuses the GitHub WIF
+  deployer identity, and applies that runtime identity to the migration job plus all
+  Cloud Run services;
+  (2) the API deploy step now always uses `gcloud run deploy` so runtime identity,
+  Cloud SQL binding, and Secret Manager mounts are re-applied on every release instead
+  of surviving from a stale image-only update;
+  (3) this pack's service-account and remediation sections now distinguish deployer vs
+  runtime identities and explicitly call out the required `roles/cloudsql.client` and
+  `roles/secretmanager.secretAccessor` grants, plus the deployer's
+  `iam.serviceAccounts.actAs` / `roles/iam.serviceAccountUser` prerequisite on the
+  runtime SA;
+  (4) the owner blocker command now points at child task `FBP-013A-INFRA` / `Codex`
+  rather than the superseded Gemini lane. AC-1 remains BLOCKED pending a live green
+  rerun; E-11/E-12/E-13 are still unpopulated.
 
 - 2026-04-16 (rev 4) — Claude (availability-first reassignment) committed the uncommitted
   deploy-staging.yml triage improvements added in rev 3:
