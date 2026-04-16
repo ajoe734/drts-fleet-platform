@@ -1,0 +1,9 @@
+{
+  "reportType": "trip_compliance",
+  "format": "csv",
+  "filters": {
+    "tenantId": "__TENANT_ID__",
+    "periodStart": "__PERIOD_START__",
+    "periodEnd": "__PERIOD_END__"
+  }
+}

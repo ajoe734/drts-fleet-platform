@@ -182,24 +182,36 @@ save_evidence "$SCENARIO" "driver" "taskStatusAfterAccept" "$TASK_STATUS_AFTER_A
 log_ok "Task status = ${TASK_STATUS_AFTER_ACCEPT}"
 
 log_step "3.3 — POST /driver/tasks/:taskId/depart"
-http_call POST "/driver/tasks/${TASK_ID_LEG3}/depart" ""
+DEPART_FIXTURE=$(mktemp /tmp/drts-e2e-001-depart-XXXXXX.json)
+trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE"' EXIT
+jq --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '.departedAt = $ts' \
+  "${SCRIPT_DIR}/fixtures/e2e-driver-depart.json" > "$DEPART_FIXTURE"
+http_call POST "/driver/tasks/${TASK_ID_LEG3}/depart" "$DEPART_FIXTURE"
 assert_status "200|201"
 log_ok "Depart pickup sent"
 
 log_step "3.4 — POST /driver/tasks/:taskId/arrived_pickup"
-http_call POST "/driver/tasks/${TASK_ID_LEG3}/arrived_pickup" ""
+ARRIVE_FIXTURE=$(mktemp /tmp/drts-e2e-001-arrive-XXXXXX.json)
+trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE"' EXIT
+jq --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '.arrivedAt = $ts' \
+  "${SCRIPT_DIR}/fixtures/e2e-driver-arrived-pickup.json" > "$ARRIVE_FIXTURE"
+http_call POST "/driver/tasks/${TASK_ID_LEG3}/arrived_pickup" "$ARRIVE_FIXTURE"
 assert_status "200|201"
 log_ok "Arrived at pickup"
 
 log_step "3.5 — POST /driver/tasks/:taskId/start"
-http_call POST "/driver/tasks/${TASK_ID_LEG3}/start" ""
+START_FIXTURE=$(mktemp /tmp/drts-e2e-001-start-XXXXXX.json)
+trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE" "$START_FIXTURE"' EXIT
+jq --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '.startedAt = $ts' \
+  "${SCRIPT_DIR}/fixtures/e2e-driver-start.json" > "$START_FIXTURE"
+http_call POST "/driver/tasks/${TASK_ID_LEG3}/start" "$START_FIXTURE"
 assert_status "200|201"
 log_ok "Trip started"
 
 log_step "3.6 — POST /driver/tasks/:taskId/complete"
 COMPLETED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMPLETE_FIXTURE=$(mktemp /tmp/drts-e2e-001-complete-XXXXXX.json)
-trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$COMPLETE_FIXTURE"' EXIT
+trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE" "$START_FIXTURE" "$COMPLETE_FIXTURE"' EXIT
 
 jq --arg ts "$COMPLETED_AT" \
    '.completedAt = $ts | .signoff.signedAt = $ts' \

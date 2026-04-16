@@ -1,0 +1,18 @@
+{
+  "businessDispatchSubtype": "enterprise_dispatch",
+  "pickup": {
+    "address": "5 Call Center Lane, Integration City"
+  },
+  "dropoff": {
+    "address": "88 Destination Road, Integration City"
+  },
+  "reservationWindowStart": "__WINDOW_START__",
+  "reservationWindowEnd": "__WINDOW_END__",
+  "passenger": {
+    "name": "E2E Phone Caller",
+    "phone": "+886900000201"
+  },
+  "callId": "e2e-call-001",
+  "orderSource": "call_center",
+  "agentId": "e2e-agent-001"
+}
