@@ -8,8 +8,8 @@
 #
 # Options:
 #   -u, --api-url URL        API base URL (default: $SMOKE_API_URL or http://localhost:3001)
-#       --actor-type TYPE     Bootstrap auth actor type (default: platform_admin)
-#       --actor-id ID         Bootstrap auth actor ID (default: smoke-platform-admin-001)
+#       --actor-type TYPE     Bootstrap auth actor type (default: system)
+#       --actor-id ID         Bootstrap auth actor ID (default: smoke-system-001)
 #       --tenant-id ID        Tenant ID used in booking/billing/report fixtures
 #       --driver-id ID        Driver ID used in dispatch assign
 #       --vehicle-id ID       Vehicle ID used in dispatch assign
@@ -34,7 +34,9 @@
 #   The API uses bootstrap-header auth — there is NO /api/auth/login endpoint.
 #   lib/helpers.sh sends x-actor-type, x-actor-id, x-realm, and x-tenant-id headers
 #   directly.  No password, token fetch, or user account is required.
-#   Use SMOKE_ACTOR_TYPE=platform_admin (default) for all smoke routes.
+#   Use SMOKE_ACTOR_TYPE=system (default) for the full suite. The auth policy includes
+#   the `system` realm for every protected smoke route, and the `system` preset includes
+#   the required tenant/dispatch/driver/billing/report scopes.
 #
 # Exit codes:
 #   0  All tests passed (or tests 03-04 gracefully skipped on empty DB)
@@ -52,8 +54,8 @@ export SMOKE_STATE_FILE="$STATE_FILE"
 # Bootstrap auth — no login endpoint; headers sent by lib/helpers.sh automatically.
 # Seed IDs must match infra/seeds/S0002__demo_operational_seed.sql.
 export SMOKE_API_URL="${SMOKE_API_URL:-http://localhost:3001}"
-export SMOKE_ACTOR_TYPE="${SMOKE_ACTOR_TYPE:-platform_admin}"
-export SMOKE_ACTOR_ID="${SMOKE_ACTOR_ID:-smoke-platform-admin-001}"
+export SMOKE_ACTOR_TYPE="${SMOKE_ACTOR_TYPE:-system}"
+export SMOKE_ACTOR_ID="${SMOKE_ACTOR_ID:-smoke-system-001}"
 export SMOKE_REALM="${SMOKE_REALM:-}"
 export SMOKE_TENANT_ID="${SMOKE_TENANT_ID:-10000000-0000-0000-0000-000000000201}"   # TEN_ACME
 export SMOKE_DRIVER_ID="${SMOKE_DRIVER_ID:-10000000-0000-0000-0000-000000000381}"   # 張司機

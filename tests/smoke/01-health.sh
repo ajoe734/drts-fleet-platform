@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test 01 — API health check
-# Verifies the API is reachable and returns { status: "ok" }.
+# Verifies the API is reachable at /api/health and returns { status: "ok" }.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,4 +18,4 @@ if [[ "$STATUS" != "ok" ]]; then
   exit 1
 fi
 
-log_ok "GET /health → HTTP 200, status=${STATUS}"
+log_ok "GET /api/health → HTTP 200, status=${STATUS}"

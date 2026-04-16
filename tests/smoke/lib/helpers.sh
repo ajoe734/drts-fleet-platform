@@ -13,13 +13,14 @@ SMOKE_API_URL="${SMOKE_API_URL:-http://localhost:3001}"
 SMOKE_API_PATH_PREFIX="${SMOKE_API_PATH_PREFIX:-/api}"
 
 # Bootstrap auth — the API uses header-based bootstrap auth (x-actor-type / x-actor-id /
-# x-realm / x-tenant-id / x-scopes).  No login endpoint exists.  Set the headers that
-# match the endpoint group being tested.  Defaults cover the tenant+ops surface that the
-# smoke suite exercises.  For tenant-scoped operations also set SMOKE_TENANT_ID.
+# x-realm / x-tenant-id / x-scopes). No login endpoint exists.
+# The smoke suite defaults to actor type `system` because route auth policy includes the
+# `system` realm for every protected route group it exercises, and the `system` scope
+# preset contains the full booking/dispatch/driver/billing/report coverage the suite needs.
 # Auth realms derived from actor type automatically: platform_admin→platform,
 # tenant_admin→tenant, ops_user→ops, driver_user→driver.
-SMOKE_ACTOR_TYPE="${SMOKE_ACTOR_TYPE:-platform_admin}"
-SMOKE_ACTOR_ID="${SMOKE_ACTOR_ID:-smoke-platform-admin-001}"
+SMOKE_ACTOR_TYPE="${SMOKE_ACTOR_TYPE:-system}"
+SMOKE_ACTOR_ID="${SMOKE_ACTOR_ID:-smoke-system-001}"
 SMOKE_REALM="${SMOKE_REALM:-}"   # leave blank to derive from SMOKE_ACTOR_TYPE
 
 # Seed data IDs — must match infra/seeds/S0002__demo_operational_seed.sql.

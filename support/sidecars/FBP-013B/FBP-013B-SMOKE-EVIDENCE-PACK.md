@@ -2,9 +2,9 @@
 
 **Task:** `FBP-013B` — smoke evidence pack
 **Parent Umbrella:** `FBP-013` — staging / smoke / UAT evidence closeout
-**Owner:** Claude
-**Reviewer:** Codex
-**Status:** review_ready
+**Owner:** Codex
+**Reviewer:** Claude
+**Status:** review (machine-truth snapshot at handoff)
 **Created:** 2026-04-16 (UTC)
 **Smoke Harness Baseline:** commit `9a233d1` (WE-004), path `tests/smoke/`
 
@@ -21,9 +21,9 @@ auditable evidence artifact for Phase 1 blueprint execution closeout. It provide
 - Scope boundary: which surfaces are covered and which are explicitly out-of-scope
 - Gap decision for `/api/admin/flags` (see §6)
 
-**Not in scope:** actual CI artifact URLs (these are populated by the live staging run at
-deploy time). This pack establishes the evidence template; the CI artifact link is the
-live counterpart populated by `FBP-013A` (staging deploy evidence).
+**Not in scope:** actual live staging artifact URLs or logs (these are populated by the
+post-deploy staging run). This pack establishes the evidence template; the live staging
+artifact is the counterpart populated by `FBP-013A` (staging deploy evidence).
 
 ---
 
@@ -31,7 +31,7 @@ live counterpart populated by `FBP-013A` (staging deploy evidence).
 
 | #   | Script                     | Critical Path Tested                                   | Graceful Skip? |
 | --- | -------------------------- | ------------------------------------------------------ | -------------- |
-| 01  | `01-health.sh`             | `GET /health` → `{ status: "ok" }`                     | No — hard gate |
+| 01  | `01-health.sh`             | `GET /api/health` → `{ status: "ok" }`                 | No — hard gate |
 | 02  | `02-booking-create.sh`     | `POST /api/tenant/bookings` + read-back                | No — hard gate |
 | 03  | `03-dispatch-assign.sh`    | `GET /api/dispatch/tasks` → assign driver+vehicle      | Yes (empty DB) |
 | 04  | `04-driver-task-accept.sh` | `POST /api/driver/tasks/:id/accept` + status verify    | Yes (empty DB) |
@@ -55,8 +55,8 @@ pipeline regression).
 | Variable                | Required      | Default                                | Notes                                                    |
 | ----------------------- | ------------- | -------------------------------------- | -------------------------------------------------------- |
 | `SMOKE_API_URL`         | Yes           | `http://localhost:3001`                | Bare origin of the staging (or local) API                |
-| `SMOKE_ACTOR_TYPE`      | Yes (staging) | `platform_admin`                       | Bootstrap auth actor type — see §3.2                     |
-| `SMOKE_ACTOR_ID`        | No            | `smoke-platform-admin-001`             | Logical actor identifier sent in `x-actor-id`            |
+| `SMOKE_ACTOR_TYPE`      | Yes (staging) | `system`                               | Bootstrap auth actor type — see §3.2                     |
+| `SMOKE_ACTOR_ID`        | No            | `smoke-system-001`                     | Logical actor identifier sent in `x-actor-id`            |
 | `SMOKE_REALM`           | No            | _(derived from actor type)_            | Override only when realm differs from actor-type default |
 | `SMOKE_TENANT_ID`       | No            | `10000000-0000-0000-0000-000000000201` | TEN_ACME tenant from S0002 seed                          |
 | `SMOKE_DRIVER_ID`       | No            | `10000000-0000-0000-0000-000000000381` | 張司機 from S0002 seed                                   |
@@ -82,29 +82,31 @@ Auth is established by passing identity headers that the `BootstrapAuthGuard` (`
 The updated `lib/helpers.sh` sends these headers automatically from `SMOKE_ACTOR_TYPE`,
 `SMOKE_ACTOR_ID`, `SMOKE_REALM`, and `SMOKE_TENANT_ID`.
 
-**Recommended actor type per surface:**
+**Recommended full-suite actor:** `system`
 
-| Test | Surface                                                | Recommended `SMOKE_ACTOR_TYPE` | Reason                                          |
-| ---- | ------------------------------------------------------ | ------------------------------ | ----------------------------------------------- |
-| 01   | Health (open route)                                    | any                            | No auth required                                |
-| 02   | `POST /api/tenant/bookings`                            | `platform_admin`               | `platform` realm allowed on tenant routes       |
-| 03   | `GET /api/dispatch/tasks`, `POST /api/dispatch/assign` | `platform_admin`               | `platform` realm covers ops+dispatch            |
-| 04   | `POST /api/driver/tasks/:id/accept`                    | `platform_admin`               | broad scope set covers driver:write             |
-| 05   | `POST /api/tenant/invoices/generate`                   | `platform_admin`               | `tenant:billing:write` in platform_admin preset |
-| 06   | `POST /api/reports/jobs`                               | `platform_admin`               | `reports:write` in platform_admin preset        |
+Using `system` as the default actor type is appropriate for smoke runs because:
 
-Using `platform_admin` as the default actor type is appropriate for smoke runs because:
+1. `resolveRouteAuthPolicy()` uses `baseAllowedRealms(...)`, which prepends `system` to every protected route group used by the smoke suite (`tenant/*`, `dispatch/*`, `driver/tasks*`, `tenant/invoices*`, `reports/*`).
+2. `AUTH_SCOPE_PRESETS.system` includes the full `tenant:*`, `tenant:billing:*`, `dispatch:*`, `driver:*`, and `reports:*` scope set that the six smoke tests require.
+3. This avoids lying about `platform_admin` coverage: `platform_admin` does **not** include `dispatch:*` or `driver:*`, so it cannot truthfully run tests 03–04 under current repo auth policy.
+4. No actual credentials are stored or exposed — bootstrap auth trusts the header values in the staging environment.
 
-1. Its scope preset includes `reports:read/write`, `billing:read/write`, `tenant:read/write`, `foundation:read/write`.
-2. The `platform` realm is in the `allowedRealms` list for all tested route groups.
-3. No actual credentials are stored or exposed — bootstrap auth trusts the header values in the staging environment.
+**Least-privileged manual alternatives (optional):**
+
+| Test | Surface                                                | Alternative actor |
+| ---- | ------------------------------------------------------ | ----------------- |
+| 02   | `POST /api/tenant/bookings`                            | `tenant_admin`    |
+| 03   | `GET /api/dispatch/tasks`, `POST /api/dispatch/assign` | `ops_user`        |
+| 04   | `POST /api/driver/tasks/:id/accept`                    | `driver_user`     |
+| 05   | `POST /api/tenant/invoices/generate`                   | `tenant_admin`    |
+| 06   | `POST /api/reports/jobs`                               | `ops_user`        |
 
 **Staging smoke run:**
 
 ```bash
 export SMOKE_API_URL=https://api-staging.drts.internal   # actual Cloud Run URL from FBP-013A
-export SMOKE_ACTOR_TYPE=platform_admin
-export SMOKE_ACTOR_ID=smoke-platform-admin-001
+export SMOKE_ACTOR_TYPE=system
+export SMOKE_ACTOR_ID=smoke-system-001
 export SMOKE_TENANT_ID=10000000-0000-0000-0000-000000000201  # TEN_ACME from S0002
 ./scripts/run-smoke-tests.sh
 ```
@@ -119,8 +121,8 @@ output (see FBP-013A staging deploy evidence).
 
 ```bash
 export SMOKE_API_URL=https://api-staging.drts.internal   # replace with actual Cloud Run URL
-export SMOKE_ACTOR_TYPE=platform_admin
-export SMOKE_ACTOR_ID=smoke-platform-admin-001
+export SMOKE_ACTOR_TYPE=system
+export SMOKE_ACTOR_ID=smoke-system-001
 export SMOKE_TENANT_ID=10000000-0000-0000-0000-000000000201
 ./scripts/run-smoke-tests.sh
 ```
@@ -156,11 +158,11 @@ environment. Token and IDs shown are illustrative; actual values will differ per
   Tenant     : 10000000-0000-0000-0000-000000000201  (TEN_ACME / S0002)
   Driver     : 10000000-0000-0000-0000-000000000381  (張司機 / S0002)
   Vehicle    : 10000000-0000-0000-0000-000000000351  (ABC-1234 / S0002)
-  Actor type : platform_admin (bootstrap headers — no login required)
+  Actor type : system (bootstrap headers — no login required)
   Started    : 2026-04-16T02:10:00Z
 
 ──── 01 — Health check ────
-[PASS]  GET /health → HTTP 200, status=ok
+[PASS]  GET /api/health → HTTP 200, status=ok
 
 ──── 02 — Booking create ────
 [PASS]  POST /tenant/bookings → HTTP 201, bookingId=bkg-smoke-8f3a1c
@@ -248,13 +250,13 @@ been promoted to a dispatchable job. This is acceptable for a staging cold-start
 
 **Symptom:** HTTP 401, 403, 404, 422, or 500
 
-| HTTP | Cause                               | Check                                                                                                        | Remediation                                                                           |
-| ---- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| 401  | Missing bootstrap headers           | Verify `SMOKE_ACTOR_TYPE` is set and helpers.sh is updated                                                   | Set `SMOKE_ACTOR_TYPE=platform_admin`                                                 |
-| 403  | Wrong actor realm or missing scopes | `x-actor-type` must produce a realm in the route's `allowedRealms`; `platform_admin` covers all smoke routes | Ensure `SMOKE_ACTOR_TYPE=platform_admin`                                              |
-| 404  | Route missing                       | `POST /api/tenant/bookings` not exposed                                                                      | Check `apps/api/src/modules/booking/` controller registration                         |
-| 422  | Invalid fixture                     | `reservationWindowStart` in the past                                                                         | Date generation in `02-booking-create.sh` may be broken (macOS vs Linux `date` flags) |
-| 500  | DB / service error                  | Check api container logs                                                                                     | Inspect migration status; confirm `V0001–V0018` applied                               |
+| HTTP | Cause                               | Check                                                                                                          | Remediation                                                                           |
+| ---- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| 401  | Missing bootstrap headers           | Verify `SMOKE_ACTOR_TYPE` is set and helpers.sh is updated                                                     | Set `SMOKE_ACTOR_TYPE=system`                                                         |
+| 403  | Wrong actor realm or missing scopes | The full-suite default is `system`; narrower actors must match the route's `allowedRealms` and required scopes | Re-run with `SMOKE_ACTOR_TYPE=system` or a route-specific actor that matches policy   |
+| 404  | Route missing                       | `POST /api/tenant/bookings` not exposed                                                                        | Check `apps/api/src/modules/booking/` controller registration                         |
+| 422  | Invalid fixture                     | `reservationWindowStart` in the past                                                                           | Date generation in `02-booking-create.sh` may be broken (macOS vs Linux `date` flags) |
+| 500  | DB / service error                  | Check api container logs                                                                                       | Inspect migration status; confirm `V0001–V0018` applied                               |
 
 ---
 
@@ -262,12 +264,12 @@ been promoted to a dispatchable job. This is acceptable for a staging cold-start
 
 **Symptom:** HTTP 4xx/5xx on `/api/dispatch/tasks` or `/api/dispatch/assign`
 
-| HTTP                             | Cause                                      | Check                                                                                                                          | Remediation                                                                                               |
-| -------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| 401/403                          | Bootstrap headers missing or wrong realm   | `SMOKE_ACTOR_TYPE=platform_admin` covers dispatch routes (`dispatch:read/write` via ops_user preset, `platform` realm allowed) | Set `SMOKE_ACTOR_TYPE=platform_admin`                                                                     |
-| 404 on `/dispatch/assign`        | Assign route missing                       | Check `DispatchController` in `apps/api/src/modules/dispatch/`                                                                 | Fix controller wiring                                                                                     |
-| 422                              | Driver/vehicle IDs not seeded              | `SMOKE_DRIVER_ID`/`SMOKE_VEHICLE_ID` must be S0002 UUIDs                                                                       | Defaults are now S0002 IDs; if overriding, use `10000000-0000-0000-0000-000000000381` / `...000000000351` |
-| Booking not promoted to dispatch | test 02 booking exists but no dispatch job | Booking→dispatch pipeline may require async processing                                                                         | Wait and retry, or confirm `BookingCreatedEvent` handler                                                  |
+| HTTP                             | Cause                                      | Check                                                          | Remediation                                                                                               |
+| -------------------------------- | ------------------------------------------ | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --- | ---------------------------------------------------------------------- | ------------------------------------------------------------- |
+| 401/403                          | Bootstrap headers missing or wrong actor   | Dispatch routes require `dispatch:*` and allow `system         | platform                                                                                                  | ops | tenant`; `platform_admin`is insufficient because it lacks`dispatch:\*` | Re-run with `SMOKE_ACTOR_TYPE=system` (default) or `ops_user` |
+| 404 on `/dispatch/assign`        | Assign route missing                       | Check `DispatchController` in `apps/api/src/modules/dispatch/` | Fix controller wiring                                                                                     |
+| 422                              | Driver/vehicle IDs not seeded              | `SMOKE_DRIVER_ID`/`SMOKE_VEHICLE_ID` must be S0002 UUIDs       | Defaults are now S0002 IDs; if overriding, use `10000000-0000-0000-0000-000000000381` / `...000000000351` |
+| Booking not promoted to dispatch | test 02 booking exists but no dispatch job | Booking→dispatch pipeline may require async processing         | Wait and retry, or confirm `BookingCreatedEvent` handler                                                  |
 
 **Note:** If `items[0].dispatchJobId` is empty and no error is returned, the test gracefully
 skips (exit 0). This is NOT a failure — it means the staging DB has no pending dispatch
@@ -279,11 +281,11 @@ jobs at this moment.
 
 **Symptom:** HTTP 4xx/5xx or `status != "accepted"` after accept call
 
-| HTTP / Condition          | Cause                                    | Check                                                                                                    | Remediation                                                        |
-| ------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| 401/403                   | Bootstrap headers missing or wrong realm | `platform_admin` actor type covers driver routes; if using a separate actor, ensure `driver:write` scope | Set `SMOKE_ACTOR_TYPE=platform_admin`                              |
-| 404 on task               | Task ID stale or wrong                   | State file has wrong `taskId` from test 03                                                               | Re-run full suite; check state file `/tmp/drts-smoke-state-*.json` |
-| 200 but status ≠ accepted | State machine not advancing              | Check `DriverTaskService.accept()` in `apps/api/src/modules/driver-task/`                                | Inspect service logic                                              |
+| HTTP / Condition          | Cause                                    | Check                                                                     | Remediation                                                        |
+| ------------------------- | ---------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------- | ---------------------------------------------------------------- |
+| 401/403                   | Bootstrap headers missing or wrong actor | Driver task routes require `driver:*` and allow `system                   | ops                                                                | driver`; `platform_admin` is insufficient here | Re-run with `SMOKE_ACTOR_TYPE=system` (default) or `driver_user` |
+| 404 on task               | Task ID stale or wrong                   | State file has wrong `taskId` from test 03                                | Re-run full suite; check state file `/tmp/drts-smoke-state-*.json` |
+| 200 but status ≠ accepted | State machine not advancing              | Check `DriverTaskService.accept()` in `apps/api/src/modules/driver-task/` | Inspect service logic                                              |
 
 ---
 
@@ -291,12 +293,12 @@ jobs at this moment.
 
 **Symptom:** HTTP 4xx/5xx on `POST /api/tenant/invoices/generate`
 
-| HTTP    | Cause                             | Check                                                                                       | Remediation                                                                                                           |
-| ------- | --------------------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| 401/403 | Bootstrap headers missing         | `platform_admin` actor type includes `tenant:billing:write`; send `x-tenant-id` header      | Ensure `SMOKE_ACTOR_TYPE=platform_admin` and `SMOKE_TENANT_ID` is set                                                 |
-| 400/422 | Period validation                 | Billing engine rejects current month (open period). Script uses prior calendar month.       | Confirm `date` command works on staging Linux (`-d` flag). macOS fallback is included.                                |
-| 404     | Route missing                     | Check `TenantBillingController` in `apps/api/src/modules/billing/`                          | Fix controller registration                                                                                           |
-| 409     | Invoice already exists for period | S0002 seeds an invoice for the current month (`INV-ACME-2025-04`). Script uses prior month. | If prior month also has an invoice, set `SMOKE_TENANT_ID` to `10000000-0000-0000-0000-000000000202` (TEN_PREMIUMCARD) |
+| HTTP    | Cause                             | Check                                                                                                                       | Remediation                                                                                                           |
+| ------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 401/403 | Bootstrap headers missing         | Tenant invoice routes require `tenant:billing:*`; the suite default `system` covers this, and `x-tenant-id` must be present | Ensure `SMOKE_ACTOR_TYPE=system` and `SMOKE_TENANT_ID` is set                                                         |
+| 400/422 | Period validation                 | Billing engine rejects current month (open period). Script uses prior calendar month.                                       | Confirm `date` command works on staging Linux (`-d` flag). macOS fallback is included.                                |
+| 404     | Route missing                     | Check `TenantBillingController` in `apps/api/src/modules/billing/`                                                          | Fix controller registration                                                                                           |
+| 409     | Invoice already exists for period | S0002 seeds an invoice for the current month (`INV-ACME-2025-04`). Script uses prior month.                                 | If prior month also has an invoice, set `SMOKE_TENANT_ID` to `10000000-0000-0000-0000-000000000202` (TEN_PREMIUMCARD) |
 
 ---
 
@@ -304,13 +306,13 @@ jobs at this moment.
 
 **Symptom:** HTTP 4xx/5xx on `POST /api/reports/jobs`, or job stuck in `pending`/`processing`
 
-| HTTP / Condition                       | Cause                     | Check                                                                   | Remediation                                                 |
-| -------------------------------------- | ------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------- |
-| 401/403                                | Bootstrap headers missing | `platform_admin` actor type includes `reports:write`                    | Ensure `SMOKE_ACTOR_TYPE=platform_admin`                    |
-| 404                                    | Route missing             | Check `ReportingController` in `apps/api/src/modules/reporting-filing/` | Fix controller                                              |
-| Job stuck in `processing` for > 60 s   | Async worker not running  | Report worker must be deployed alongside the API                        | Check Cloud Run worker service in `infra/gcp/staging/`      |
-| `status=failed`                        | Worker error              | Check worker logs in GCP Cloud Logging                                  | Investigate worker error message                            |
-| Artifact URL missing after `completed` | GCS upload not wired      | Check `REPORTS_BUCKET` secret injection in Cloud Run                    | Verify `infra/gcp/staging/api-service.yaml` secret bindings |
+| HTTP / Condition                       | Cause                     | Check                                                                     | Remediation                                                 |
+| -------------------------------------- | ------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| 401/403                                | Bootstrap headers missing | Report routes require `reports:*`; the suite default `system` covers this | Ensure `SMOKE_ACTOR_TYPE=system`                            |
+| 404                                    | Route missing             | Check `ReportingController` in `apps/api/src/modules/reporting-filing/`   | Fix controller                                              |
+| Job stuck in `processing` for > 60 s   | Async worker not running  | Report worker must be deployed alongside the API                          | Check Cloud Run worker service in `infra/gcp/staging/`      |
+| `status=failed`                        | Worker error              | Check worker logs in GCP Cloud Logging                                    | Investigate worker error message                            |
+| Artifact URL missing after `completed` | GCS upload not wired      | Check `REPORTS_BUCKET` secret injection in Cloud Run                      | Verify `infra/gcp/staging/api-service.yaml` secret bindings |
 
 ---
 
@@ -318,13 +320,13 @@ jobs at this moment.
 
 ### 6.1 Surfaces Covered
 
-| Surface      | Auth Realm     | Endpoints Exercised                            |
-| ------------ | -------------- | ---------------------------------------------- |
-| Tenant API   | `tenant_admin` | `/api/tenant/bookings`, `/api/tenant/invoices` |
-| Dispatch API | `ops_admin`    | `/api/dispatch/tasks`, `/api/dispatch/assign`  |
-| Driver API   | `driver`       | `/api/driver/tasks/:id/accept`                 |
-| Reports API  | `ops_admin`    | `/api/reports/jobs`, `/api/reports/:jobId`     |
-| Health       | n/a            | `/health`                                      |
+| Surface      | Route Policy Allows                   | Suite Default Actor | Endpoints Exercised                            |
+| ------------ | ------------------------------------- | ------------------- | ---------------------------------------------- |
+| Tenant API   | `system`, `platform`, `tenant`        | `system`            | `/api/tenant/bookings`, `/api/tenant/invoices` |
+| Dispatch API | `system`, `platform`, `ops`, `tenant` | `system`            | `/api/dispatch/tasks`, `/api/dispatch/assign`  |
+| Driver API   | `system`, `ops`, `driver`             | `system`            | `/api/driver/tasks/:id/accept`                 |
+| Reports API  | `system`, `platform`, `ops`           | `system`            | `/api/reports/jobs`, `/api/reports/:jobId`     |
+| Health       | open route                            | n/a                 | `/api/health`                                  |
 
 ### 6.2 Surfaces NOT Covered by Smoke (by Design)
 
@@ -375,24 +377,28 @@ endpoint.
 
 ---
 
-## 7. CI Integration
+## 7. Deploy-Workflow Relationship
 
-The smoke suite integrates with the GitHub Actions staging deploy workflow
-(`.github/workflows/deploy-staging.yml`, WE-003). After the staging deploy completes and
-health polling confirms the API is up, the suite runs automatically:
+Current repo truth: `.github/workflows/deploy-staging.yml` does **not** run the smoke suite
+automatically. The workflow stops after:
 
-```yaml
-# Snippet from deploy-staging.yml (post-deploy smoke step):
-- name: Run smoke tests
-  env:
-    SMOKE_API_URL: ${{ vars.STAGING_API_URL }}
-    SMOKE_AUTH_TOKEN: ${{ secrets.STAGING_SMOKE_TOKEN }}
-  run: ./scripts/run-smoke-tests.sh
-```
+1. image build/push,
+2. migration job execution,
+3. Cloud Run deploy, and
+4. `/health` polling plus staging URL printout.
 
-The CI artifact (stdout + exit code) from this step is the **live counterpart** to the
-canonical passing transcript in §4. The FBP-013A staging deploy evidence pack should
-include a link to this CI run artifact.
+There is no post-deploy `Run smoke tests` step, and there is no `SMOKE_AUTH_TOKEN`-based
+workflow snippet in the current repo.
+
+Therefore, the live counterpart to the canonical transcript in §4 must currently be captured
+by `FBP-013A` as either:
+
+- a manual staging invocation of `./scripts/run-smoke-tests.sh` after deploy succeeds, or
+- a future workflow enhancement that explicitly adds a smoke step using the bootstrap-header
+  model documented in §3.
+
+This pack remains the static, reviewable smoke evidence companion; `FBP-013A` owns the live
+staging run output / artifact link.
 
 ---
 
@@ -406,7 +412,7 @@ include a link to this CI run artifact.
 | Environment config guide          | DONE — §3 of this pack | This document                                                                             |
 | Per-test failure triage           | DONE — §5 of this pack | This document                                                                             |
 | `/api/admin/flags` scope decision | DONE — §6.3            | Endpoint IS implemented; excluded from smoke gate as admin-config surface; UAT via PA-010 |
-| Live CI artifact (staging run)    | PENDING — FBP-013A     | `deploy-staging.yml` run artifact                                                         |
+| Live staging smoke artifact       | PENDING — FBP-013A     | manual post-deploy smoke log today; future workflow artifact if a smoke job is added      |
 | Seed verification                 | PENDING — FBP-013A     | Staging deploy evidence                                                                   |
 
 The two `PENDING` items are live execution artifacts that can only be populated after the
@@ -417,63 +423,66 @@ companion. The pair together constitutes the complete smoke evidence closeout fo
 
 ## 9. Acceptance Criteria Self-Check
 
-| AC    | Requirement                                                                        | Status                                                                                                                                                                                                                      |
-| ----- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| AC-P1 | Smoke suite is staging-runnable (correct `/api` prefix, auth bootstrap documented) | PASS — `lib/helpers.sh` uses `SMOKE_API_PATH_PREFIX=/api` and now sends bootstrap auth headers (`x-actor-type`/`x-actor-id`/`x-realm`/`x-tenant-id`); §3.2 documents the bootstrap-header auth model with no login required |
-| AC-P2 | Critical-path smoke run output provided                                            | PASS — §4 canonical passing transcript covers all 6 tests with S0002-accurate IDs                                                                                                                                           |
-| AC-P3 | Failure triage guidance per test                                                   | PASS — §5 provides per-test triage tables updated to bootstrap-auth remediation                                                                                                                                             |
-| AC-P4 | `/api/admin/flags` gap explicitly decided                                          | PASS — §6.3: endpoint IS implemented (`feature-flags.controller.ts`); correctly excluded from smoke gate as admin-config surface; UAT coverage is PA-010 in `phase1-uat-scenarios.md`                                       |
-| AC-P5 | Evidence pack is reviewable without live staging access                            | PASS — static document; live CI artifact is FBP-013A responsibility                                                                                                                                                         |
+| AC    | Requirement                                                                        | Status                                                                                                                                                                                                                             |
+| ----- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC-P1 | Smoke suite is staging-runnable (correct `/api` prefix, auth bootstrap documented) | PASS — `lib/helpers.sh` uses `SMOKE_API_PATH_PREFIX=/api`; the suite now defaults to bootstrap actor `system`, which matches current route auth policy for all six smoke paths; §3.2 documents the no-login bootstrap-header model |
+| AC-P2 | Critical-path smoke run output provided                                            | PASS — §4 canonical passing transcript covers all 6 tests with S0002-accurate IDs                                                                                                                                                  |
+| AC-P3 | Failure triage guidance per test                                                   | PASS — §5 provides per-test triage tables updated to bootstrap-auth remediation                                                                                                                                                    |
+| AC-P4 | `/api/admin/flags` gap explicitly decided                                          | PASS — §6.3: endpoint IS implemented (`feature-flags.controller.ts`); correctly excluded from smoke gate as admin-config surface; UAT coverage is PA-010 in `phase1-uat-scenarios.md`                                              |
+| AC-P5 | Evidence pack is reviewable without live staging access                            | PASS — static document; live staging artifact remains FBP-013A responsibility                                                                                                                                                      |
 
 ---
 
-## 10. Handoff to Reviewer (Codex)
+## 10. Handoff to Reviewer (Claude)
 
 ```bash
-AI_NAME=Claude python3 scripts/ai_status.py handoff FBP-013B Codex \
-  "Smoke evidence pack revised and ready at support/sidecars/FBP-013B/FBP-013B-SMOKE-EVIDENCE-PACK.md. \
+AI_NAME=Codex python3 scripts/ai_status.py handoff FBP-013B Claude \
+  "Smoke evidence pack ready at support/sidecars/FBP-013B/FBP-013B-SMOKE-EVIDENCE-PACK.md. \
 Corrections from reopen: (1) §6.3 corrected — /api/admin/flags IS implemented in feature-flags.controller.ts \
 and registered in app.module.ts; pack now documents the correct scope decision (out of smoke gate as \
 admin-config surface) and correct UAT reference (PA-010 in phase1-uat-scenarios.md, not PF-7 which \
 is smoke-baseline tracking). (2) §3.2/§3.4 corrected — auth model is bootstrap headers \
 (x-actor-type/x-actor-id/x-realm/x-tenant-id), no /api/auth/login endpoint exists, no \
-smoke@drts.internal account in S0002. (3) §3.1/§3.4 corrected — default IDs updated to \
+smoke@drts.internal account in S0002, and the suite default is now `system` because \
+`platform_admin` does not cover dispatch/driver routes under current auth policy. (3) §3.1/§3.4 corrected — default IDs updated to \
 match actual S0002 seed UUIDs (TEN_ACME tenant, 張司機 driver, ABC-1234 vehicle). \
-(4) lib/helpers.sh updated to send bootstrap auth headers and use correct default IDs. \
-Static reviewable artifact; live CI artifact is FBP-013A scope."
+(4) §7 corrected — deploy-staging.yml currently has no post-deploy smoke step; live staging \
+smoke output remains FBP-013A scope. (5) lib/helpers.sh / run-smoke-tests.sh / README now align \
+to the same bootstrap-auth execution model. \
+Static reviewable artifact; live staging artifact remains FBP-013A scope."
 ```
 
 ---
 
-## 11. Reviewer Actions (Codex)
+## 11. Reviewer Actions (Claude)
 
 **Approve:**
 
 ```bash
-AI_NAME=Codex python3 scripts/ai_status.py approve FBP-013B \
+AI_NAME=Claude python3 scripts/ai_status.py approve FBP-013B \
   "Smoke evidence pack approved: canonical passing transcript covers all 6 tests, \
 environment config and auth bootstrap complete, per-test failure triage actionable, \
-/api/admin/flags gap correctly decided as out-of-scope with UAT action to FBP-013C. \
+/api/admin/flags scope correctly decided as out-of-smoke but implemented and covered by PA-010 UAT. \
 Support artifact only — no canonical truth changes."
 ```
 
 **Reopen:**
 
 ```bash
-AI_NAME=Codex python3 scripts/ai_status.py reopen FBP-013B \
+AI_NAME=Claude python3 scripts/ai_status.py reopen FBP-013B \
   "Needs revision: [specify gap / missing triage / incorrect scope decision]"
 ```
 
 ---
 
-## 12. Owner Closeout (Claude — after review_approved)
+## 12. Owner Closeout (Codex — after review_approved)
 
 ```bash
-AI_NAME=Claude python3 scripts/ai_status.py done FBP-013B \
+AI_NAME=Codex python3 scripts/ai_status.py done FBP-013B \
   "Owner finalized: smoke evidence pack reconciled to repo truth at support/sidecars/FBP-013B/. \
 Corrections: /api/admin/flags confirmed implemented (feature-flags.controller.ts + app.module.ts); \
 auth model corrected to bootstrap headers (no /api/auth/login); seed IDs updated to S0002 actuals; \
-lib/helpers.sh updated with bootstrap auth headers and correct default IDs. \
+tests/smoke/README.md, lib/helpers.sh, 01-health.sh, and scripts/run-smoke-tests.sh aligned on the same bootstrap-auth + /api-prefix execution model. \
 Canonical passing transcript, env config, failure triage, /api/admin/flags scope decision, \
-and CI integration documented. Static reviewable artifact; live CI run artifact is FBP-013A scope."
+and deploy-workflow relationship documented. Static reviewable artifact; live staging run artifact is FBP-013A scope."
 ```
