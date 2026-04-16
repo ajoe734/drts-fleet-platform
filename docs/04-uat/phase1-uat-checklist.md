@@ -31,7 +31,7 @@ Before starting UAT, confirm:
 | PF-4 | DB migrations applied to staging (V0001–V0018)                        | DevOps | ⬜     |
 | PF-5 | Seed data loaded: 1 tenant, 2 drivers, 2 vehicles, 1 pricing template | DevOps | ⬜     |
 | PF-6 | Test accounts created (see §Test Accounts below)                      | DevOps | ⬜     |
-| PF-7 | Smoke suite run and baseline passing (WE-004)                         | Codex  | ⬜     |
+| PF-7 | Smoke suite run and baseline passing (WE-004)                         | Claude | ⬜     |
 
 ---
 

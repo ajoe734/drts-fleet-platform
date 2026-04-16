@@ -10,7 +10,7 @@ This runbook operationalizes `W8-001B` for the current repo state. It turns the 
 - `Expand -> Backfill -> Dual-write -> Switch-read -> Contract -> Cleanup` remains the canonical rollout order.
 - `pnpm db:init` and `pnpm db:verify` are the database entrypoints.
 - The current executable rollout gate is backend-focused: `pnpm --filter @drts/contracts build`, `pnpm --filter @drts/contracts lint`, `pnpm --filter @drts/api typecheck`, `pnpm --filter @drts/api lint`, `pnpm test:unit`, and `pnpm --filter @drts/api test`.
-- OpenAPI advertises `/api/admin/flags`, but the current API runtime does not yet expose that controller. Tenant, city, and module cutovers therefore require manual coordination until the client rollout slice lands.
+- `/api/admin/flags` is implemented and registered: `apps/api/src/modules/feature-flags/feature-flags.controller.ts` (`@Controller("admin")`) is imported via `FeatureFlagsModule` in `app.module.ts`. Platform-admin auth scope required; toggle actions are audited. Tenant, city, and module cutovers that depend on granular per-tenant runtime flags still require the manual rollout matrix until the full flag-evaluation client slice lands.
 
 ## Automation Entry Points
 
