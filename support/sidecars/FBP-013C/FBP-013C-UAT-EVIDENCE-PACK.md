@@ -2,9 +2,9 @@
 
 **Task:** `FBP-013C` — UAT and sign-off evidence pack
 **Parent Umbrella:** `FBP-013` — staging / smoke / UAT evidence closeout
-**Owner:** Claude
-**Reviewer:** Codex
-**Status:** review_ready
+**Owner:** Codex
+**Reviewer:** Claude
+**Status:** review_approved (static evidence); live execution pending `FBP-013A`
 **Created:** 2026-04-16 (UTC)
 **UAT Scenario Baseline:** commit `5c9cc4d` (WE-005), paths:
 
@@ -19,11 +19,19 @@ This pack is the Phase 1 UAT and sign-off evidence artifact for the blueprint ex
 closeout (`FBP-013`). It:
 
 - Maps all 93 UAT scenarios across four surfaces to their implementation anchors
-- Documents static analysis evidence for every P1 scenario (code-path verified,
-  not live-run; live staging execution is gated on `FBP-013A` landing)
-- Records the deferred-item triage and rationale
+- Documents static analysis evidence for every non-deferred P1 scenario
+  (code-path verified, not live-run; live staging execution is gated on `FBP-013A`)
+- Records the deferred-item triage and rationale for the remaining deferred P1/P2 items
 - Establishes the pilot / production sign-off gate criteria and matrix
 - Corrects two known errors carried forward from earlier runbook drafts (see §8)
+
+**Tenant Portal production-surface note:**
+Per `docs/04-uat/phase1-uat-scenarios.md` and the shared-truth closeout of `FBP-006`/`FBP-007`,
+the production Tenant Portal UAT surface is the external repo `tenant-commute-hub`.
+This pack therefore treats `/api/tenant/*` BFF routes and shared `@drts/api-client` wiring
+as the primary static evidence for tenant scenarios. Any `WD-001` through `WD-008` references
+below are frozen-reference support artifacts from retired `apps/tenant-portal-web`, not the
+authoritative production UAT surface.
 
 **Relationship to FBP-013B (Smoke Evidence):**
 The smoke pack covers the 6 critical-path API cases that run automatically on
@@ -32,15 +40,16 @@ full operator journeys across all four UI surfaces. Together they form the compl
 Phase 1 evidence chain.
 
 **Static vs live evidence:**
-Because `FBP-013A` staging deploy work is still in-progress, live execution
+Because `FBP-013A` is currently blocked on live staging remediation, live execution
 transcripts are not available yet. This pack provides:
 
 - **Static evidence** — code-path, contract, and type-safety verification (done now)
 - **Live evidence hooks** — the evidence slots that the human UAT executor fills in
   once staging is available
 
-All P1 scenarios have passed static analysis. Live execution is deferred to the
-staging gate (see §6).
+All 45 non-deferred P1 scenarios have passed static analysis. Four P1 items and one
+P2 item remain formally deferred pending staging-only dependencies. Live execution is
+deferred to the staging gate (see §6).
 
 ---
 
@@ -54,7 +63,7 @@ staging gate (see §6).
 | PF-4 | DB migrations applied (V0001–V0018)                         | ⬜ Pending FBP-013A | `infra/migrations/` — 18 migration files present                                              |
 | PF-5 | Seed data loaded (S0001 reference + S0002 demo operational) | ⬜ Pending FBP-013A | `infra/seeds/S0001__reference_seed.sql`, `S0002__demo_operational_seed.sql`                   |
 | PF-6 | Test accounts created (see §3)                              | ⬜ Pending FBP-013A | Auth is bootstrap headers — no account creation needed for smoke; UAT needs seeded identities |
-| PF-7 | Smoke suite run and baseline passing (WE-004)               | ⬜ Pending FBP-013A | `tests/smoke/`, commit `9a233d1`; FBP-013B evidence pack reviewed                             |
+| PF-7 | Smoke suite run and baseline passing (WE-004)               | ⬜ Pending FBP-013A | `tests/smoke/`, commit `9a233d1`; `FBP-013B` smoke evidence pack currently in `review`        |
 
 **Note on PF-6:** The API uses `BootstrapAuthGuard` (bootstrap header authentication).
 There is no `/api/auth/login` endpoint. UAT actors are established by passing
@@ -128,9 +137,12 @@ TP-019, TP-023, TP-029
 | TP-029 | P1       | `403` guard: `platform_admin` routes (`/api/admin/*`) reject `tenant_admin` realm; `auth.policy.ts` realm separation verified                                | ⬜ Pending live UAT |
 
 **Static evidence summary — Tenant Portal P1:**
-All 11 P1 scenarios have verified API routes, matching `@drts/api-client` methods,
-correct `@drts/contracts` types, and confirmed typecheck-passing implementations from
-WD-001 through WD-008 and FBP-005/006 closeouts.
+All 11 P1 scenarios have verified `/api/tenant/*` BFF routes, matching shared
+`@drts/api-client` methods, correct `@drts/contracts` types, and production-surface
+alignment to the `tenant-commute-hub` cutover frozen by `FBP-006`/`FBP-007`.
+Where the table cites `WD-001` through `WD-008`, those references are frozen-reference
+support artifacts showing the same shared wire contract in retired `apps/tenant-portal-web`,
+not the production UAT surface.
 
 ---
 
@@ -162,58 +174,57 @@ FBP-008 closeout (commit `61547cc`) and FBP-011/012 finance/public-info coverage
 
 ### 4.3 Surface 3 — Ops Console (26 scenarios, OC-001 to OC-026)
 
-**P1 gate scenarios:** OC-001, OC-002, OC-003, OC-005, OC-006, OC-009, OC-010,
-OC-013, OC-014, OC-016, OC-021, OC-025
+**Checklist P1 scenarios:** OC-001, OC-002, OC-003, OC-005, OC-006, OC-009, OC-010,
+OC-013, OC-014, OC-016, OC-021, OC-023, OC-024, OC-025
 
-| ID     | Priority | Static Evidence                                                                                                                                               | Live Status         |
-| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
-| OC-001 | P1       | Dispatch queue in ops-console; `GET /api/dispatch/tasks`; `exception_hold` status column; WB-002/FBP-009                                                      | ⬜ Pending live UAT |
-| OC-002 | P1       | `POST /api/dispatch/assignments`; dispatch trace log appended; candidate list + assign UI; WB-002                                                             | ⬜ Pending live UAT |
-| OC-003 | P1       | `POST /api/dispatch/assignments/:id/reassign`; old assignment preserved in history; trace log; WB-002                                                         | ⬜ Pending live UAT |
-| OC-004 | P2       | `POST /api/dispatch/assignments/:id/release`; order returns to queue; trace updated                                                                           | ⬜ Pending live UAT |
-| OC-005 | P1       | `exception_hold` queue view; manual assign / escalate actions; SLA notification if configured; WB-002                                                         | ⬜ Pending live UAT |
-| OC-006 | P1       | `dispatch_job.status = "failed"` when no supply; no fake ETA; order remains in queue; FBP-009 dispatch service                                                | ⬜ Pending live UAT |
-| OC-007 | P2       | `POST /api/ops/incidents`; incident create form (WB-003); linked to order/driver                                                                              | ⬜ Pending live UAT |
-| OC-008 | P2       | `PATCH /api/ops/incidents/:id`; status update with audit write; WB-003                                                                                        | ⬜ Pending live UAT |
-| OC-009 | P1       | Incident create does NOT auto-create complaint_case (separate modules: `incidents` controller vs `complaints` controller); FBP-010 confirms domain separation | ⬜ Pending live UAT |
-| OC-010 | P1       | `POST /api/ops/complaints`; unique case number; SLA timer start; timeline entry; FBP-010                                                                      | ⬜ Pending live UAT |
-| OC-011 | P2       | `POST /api/ops/complaints/:id/reopen`; case number retained; timeline appended; FBP-010                                                                       | ⬜ Pending live UAT |
-| OC-012 | P2       | `sla_breach` flag on complaint case; main status unchanged; FBP-010 complaint service                                                                         | ⬜ Pending live UAT |
-| OC-013 | P1       | `dispatchable_flag=true` blocked while exclusivity review pending; vehicle onboarding guard in fleet service; FBP-009                                         | ⬜ Pending live UAT |
-| OC-014 | P1       | ⏸ **Deferred** — insurance expiry auto-suspend requires backend scheduler job activation on staging                                                           | ⬜ Deferred         |
-| OC-015 | P2       | Vehicle offboarding → debranding task created; FBP-009 fleet service                                                                                          | ⬜ Pending live UAT |
-| OC-016 | P1       | `DRIVER_CERT_INVALID` when occupational license expired; `driver_work_state` guard; FBP-009 driver service                                                    | ⬜ Pending live UAT |
-| OC-017 | P2       | `GET /api/ops/drivers/:id/earnings`; read-only display; no net modification path; WB-003/FBP-011                                                              | ⬜ Pending live UAT |
-| OC-018 | P2       | `POST /api/ops/maintenance`; maintenance CRUD; vehicle status reflects; FBP-009 (PATCH/DELETE landed commit `71d9fa8`)                                        | ⬜ Pending live UAT |
-| OC-019 | P2       | `PATCH /api/ops/maintenance/:id` with `status=completed`; vehicle returns to operable; FBP-009                                                                | ⬜ Pending live UAT |
-| OC-020 | P3       | `GET /api/ops/attendance`; clock-in/out with duration; WB-003                                                                                                 | ⬜ Pending live UAT |
-| OC-021 | P1       | `POST /api/callcenter/bookings`; `call_id` + `agent_id` stored; dispatch trace entry; `order_source="phone"`; FBP-010                                         | ⬜ Pending live UAT |
-| OC-022 | P2       | ⏸ **Deferred** — recording-ready callback requires CTI webhook integration (external stub)                                                                    | ⬜ Deferred         |
-| OC-023 | P1       | ⏸ **Deferred** — month-end regulatory filing job requires scheduler activation on staging                                                                     | ⬜ Deferred         |
-| OC-024 | P1       | ⏸ **Deferred** — recording index export job requires scheduler activation on staging                                                                          | ⬜ Deferred         |
-| OC-025 | P1       | `GET /api/ops/artifacts/:id/download`; time-limited URL; `403` for unauthorized; audit entry; FBP-012 signed-download enforcement                             | ⬜ Pending live UAT |
-| OC-026 | P2       | `GET /api/ops/contracts/:tenantId`; contract rules readable; FBP-009 contracts surface                                                                        | ⬜ Pending live UAT |
+| ID     | Priority | Static Evidence                                                                                                                                                                                                                                                                           | Live Status         |
+| ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| OC-001 | P1       | Dispatch queue in ops-console; `GET /api/dispatch/tasks`; `exception_hold` status column; WB-002/FBP-009                                                                                                                                                                                  | ⬜ Pending live UAT |
+| OC-002 | P1       | `POST /api/dispatch/assignments`; dispatch trace log appended; candidate list + assign UI; WB-002                                                                                                                                                                                         | ⬜ Pending live UAT |
+| OC-003 | P1       | `POST /api/dispatch/assignments/:id/reassign`; old assignment preserved in history; trace log; WB-002                                                                                                                                                                                     | ⬜ Pending live UAT |
+| OC-004 | P2       | `POST /api/dispatch/assignments/:id/release`; order returns to queue; trace updated                                                                                                                                                                                                       | ⬜ Pending live UAT |
+| OC-005 | P1       | `exception_hold` queue view; manual assign / escalate actions; SLA notification if configured; WB-002                                                                                                                                                                                     | ⬜ Pending live UAT |
+| OC-006 | P1       | `dispatch_job.status = "failed"` when no supply; no fake ETA; order remains in queue; FBP-009 dispatch service                                                                                                                                                                            | ⬜ Pending live UAT |
+| OC-007 | P2       | `POST /api/ops/incidents`; incident create form (WB-003); linked to order/driver                                                                                                                                                                                                          | ⬜ Pending live UAT |
+| OC-008 | P2       | `PATCH /api/ops/incidents/:id`; status update with audit write; WB-003                                                                                                                                                                                                                    | ⬜ Pending live UAT |
+| OC-009 | P1       | Incident create does NOT auto-create complaint_case (separate modules: `incidents` controller vs `complaints` controller); FBP-010 confirms domain separation                                                                                                                             | ⬜ Pending live UAT |
+| OC-010 | P1       | `POST /api/ops/complaints`; unique case number; SLA timer start; timeline entry; FBP-010                                                                                                                                                                                                  | ⬜ Pending live UAT |
+| OC-011 | P2       | `POST /api/ops/complaints/:id/reopen`; case number retained; timeline appended; FBP-010                                                                                                                                                                                                   | ⬜ Pending live UAT |
+| OC-012 | P2       | `sla_breach` flag on complaint case; main status unchanged; FBP-010 complaint service                                                                                                                                                                                                     | ⬜ Pending live UAT |
+| OC-013 | P1       | `dispatchable_flag=true` blocked while exclusivity review pending; vehicle onboarding guard in fleet service; FBP-009                                                                                                                                                                     | ⬜ Pending live UAT |
+| OC-014 | P1       | `insurance_status === "valid"` is a hard eligibility gate in `regulatory-registry.service.ts`; expired insurance removes the vehicle from `getEligibleCandidates()` and `getVehicleDispatchability()`, and `owned-mobility.service.ts` rejects assignment with `VEHICLE_NOT_DISPATCHABLE` | ⬜ Pending live UAT |
+| OC-015 | P2       | Vehicle offboarding → debranding task created; FBP-009 fleet service                                                                                                                                                                                                                      | ⬜ Pending live UAT |
+| OC-016 | P1       | `DRIVER_CERT_INVALID` when occupational license expired; `driver_work_state` guard; FBP-009 driver service                                                                                                                                                                                | ⬜ Pending live UAT |
+| OC-017 | P2       | `GET /api/ops/drivers/:id/earnings`; read-only display; no net modification path; WB-003/FBP-011                                                                                                                                                                                          | ⬜ Pending live UAT |
+| OC-018 | P2       | `POST /api/ops/maintenance`; maintenance CRUD; vehicle status reflects; FBP-009 (PATCH/DELETE landed commit `71d9fa8`)                                                                                                                                                                    | ⬜ Pending live UAT |
+| OC-019 | P2       | `PATCH /api/ops/maintenance/:id` with `status=completed`; vehicle returns to operable; FBP-009                                                                                                                                                                                            | ⬜ Pending live UAT |
+| OC-020 | P3       | `GET /api/ops/attendance`; clock-in/out with duration; WB-003                                                                                                                                                                                                                             | ⬜ Pending live UAT |
+| OC-021 | P1       | `POST /api/callcenter/bookings`; `call_id` + `agent_id` stored; dispatch trace entry; `order_source="phone"`; FBP-010                                                                                                                                                                     | ⬜ Pending live UAT |
+| OC-022 | P2       | ⏸ **Deferred** — recording-ready callback requires CTI webhook integration (external stub)                                                                                                                                                                                                | ⬜ Deferred         |
+| OC-023 | P1       | ⏸ **Deferred** — month-end regulatory filing job requires scheduler activation on staging                                                                                                                                                                                                 | ⬜ Deferred         |
+| OC-024 | P1       | ⏸ **Deferred** — recording index export job requires scheduler activation on staging                                                                                                                                                                                                      | ⬜ Deferred         |
+| OC-025 | P1       | `GET /api/ops/artifacts/:id/download`; time-limited URL; `403` for unauthorized; audit entry; FBP-012 signed-download enforcement                                                                                                                                                         | ⬜ Pending live UAT |
+| OC-026 | P2       | `GET /api/ops/contracts/:tenantId`; contract rules readable; FBP-009 contracts surface                                                                                                                                                                                                    | ⬜ Pending live UAT |
 
 **Static evidence summary — Ops Console P1:**
 
-- 8 of 12 P1 scenarios fully static-verified (OC-001/002/003/005/006/009/010/013/016/021/025)
-- 4 P1 scenarios deferred (OC-014/023/024 require scheduler; OC-022 requires CTI stub)
+- 12 of 12 non-deferred P1 scenarios fully static-verified
+- 2 deferred P1 scenarios remain (OC-023, OC-024), plus 1 deferred P2 scenario (OC-022)
 - Domain separation between `incidents` and `complaints` modules confirmed at module boundary
 - FBP-010 callcenter controller covers complete operator workflow including session management
 - FBP-012 signed-download enforcement verified for OC-025
 
-**Deferred P1 rationale for Ops Console:**
-OC-014, OC-023, OC-024 all depend on background scheduler jobs that are not activated
-on the staging environment within the FBP-013 window. These are explicitly accepted as
-pre-production deferred items (same class as WE-005 deferred gates). OC-022 requires
-an external CTI environment or stub.
+**Deferred rationale for Ops Console:**
+OC-023 and OC-024 depend on background filing/export jobs that are not activated on the
+staging environment within the FBP-013 window, so they remain deferred P1 items.
+OC-022 remains a deferred P2 item because it requires an external CTI environment or stub.
 
 ---
 
 ### 4.4 Surface 4 — Driver App (23 scenarios, DA-001 to DA-023)
 
-**P1 gate scenarios:** DA-001 through DA-010, DA-012, DA-016, DA-017, DA-019, DA-021,
-DA-022
+**P1 gate scenarios:** DA-001 through DA-010, DA-012, DA-016, DA-017, DA-018, DA-019,
+DA-021, DA-022
 
 | ID     | Priority | Static Evidence                                                                                                                                      | Live Status         |
 | ------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
@@ -243,8 +254,8 @@ DA-022
 
 **Static evidence summary — Driver App P1:**
 
-- 15 of 16 P1 scenarios fully static-verified
-- DA-018 deferred (billing job dependency, same class as OC-014)
+- 16 of 16 non-deferred P1 scenarios fully static-verified
+- DA-018 deferred (billing job dependency; same staging-only activation class as the other §6 job-gated items)
 - `PlatformTaskBadge`, `TaskTypeBadge`, `RouteLockedIcon`, `FixedPriceBadge` all confirmed
   via WC-001 typecheck (commit `9f44bb6`)
 - Platform presence, token expiry, re-auth, eligibility all confirmed via WC-002 typecheck
@@ -270,12 +281,12 @@ DA-022
 
 | Surface        | Total  | P1     | P2     | P3    | P1 Deferred | P1 Static-Verified        |
 | -------------- | ------ | ------ | ------ | ----- | ----------- | ------------------------- |
-| Tenant Portal  | 29     | 11     | 15     | 3     | 0           | 11 / 11 ✅                |
+| Tenant Portal  | 29     | 11     | 16     | 2     | 0           | 11 / 11 ✅                |
 | Platform Admin | 11     | 3      | 7      | 1     | 0           | 3 / 3 ✅                  |
-| Ops Console    | 26     | 12     | 11     | 3     | 4           | 8 / 8 (non-deferred) ✅   |
-| Driver App     | 23     | 16     | 5      | 2     | 1           | 15 / 15 (non-deferred) ✅ |
+| Ops Console    | 26     | 14     | 11     | 1     | 2           | 12 / 12 (non-deferred) ✅ |
+| Driver App     | 23     | 17     | 5      | 1     | 1           | 16 / 16 (non-deferred) ✅ |
 | E2E Flows      | 4      | 4      | —      | —     | 1           | 3 / 3 (non-deferred) ✅   |
-| **Total**      | **93** | **46** | **38** | **9** | **6**       | **40 / 40 ✅**            |
+| **Total**      | **93** | **49** | **39** | **5** | **4**       | **45 / 45 ✅**            |
 
 ---
 
@@ -284,20 +295,20 @@ DA-022
 Items requiring live staging environment or external dependencies beyond the current
 FBP-013 window:
 
-| Scenario | Reason for Deferral                                  | Required Evidence                        | Acceptance Condition                           | Sign-off |
-| -------- | ---------------------------------------------------- | ---------------------------------------- | ---------------------------------------------- | -------- |
-| OC-014   | Insurance expiry auto-suspend (scheduler job)        | Backend job activation + staging run log | Vehicle marked ineligible after expiry         | ⬜       |
-| OC-022   | Recording-ready callback (CTI webhook)               | Real CTI stub or WE-004-equivalent mock  | `recording_pending` flag cleared on receipt    | ⬜       |
-| OC-023   | Month-end regulatory filing package (scheduler)      | Staging scheduler job run evidence       | Package manifest generated; artifact immutable | ⬜       |
-| OC-024   | Recording index export (scheduler + filing job)      | Staging scheduler job run evidence       | Export row includes `call_id` + `recording_id` | ⬜       |
-| DA-018   | Platform-funded discount net isolation (billing job) | Period-end billing job run evidence      | Discount not deducted from driver net          | ⬜       |
-| E2E-003  | Depends on OC-022 + OC-024 (CTI + filing)            | Same as above                            | Full phone booking → compliance export chain   | ⬜       |
+| Scenario | Priority | Reason for Deferral                                  | Required Evidence                       | Acceptance Condition                           | Sign-off |
+| -------- | -------- | ---------------------------------------------------- | --------------------------------------- | ---------------------------------------------- | -------- |
+| OC-022   | P2       | Recording-ready callback (CTI webhook)               | Real CTI stub or WE-004-equivalent mock | `recording_pending` flag cleared on receipt    | ⬜       |
+| OC-023   | P1       | Month-end regulatory filing package (scheduler)      | Staging scheduler job run evidence      | Package manifest generated; artifact immutable | ⬜       |
+| OC-024   | P1       | Recording index export (scheduler + filing job)      | Staging scheduler job run evidence      | Export row includes `call_id` + `recording_id` | ⬜       |
+| DA-018   | P1       | Platform-funded discount net isolation (billing job) | Period-end billing job run evidence     | Discount not deducted from driver net          | ⬜       |
+| E2E-003  | P1       | Depends on OC-022 + OC-024 (CTI + filing)            | Same as above                           | Full phone booking → compliance export chain   | ⬜       |
 
 **Acceptance threshold for Phase 1 pilot gate:**
-All non-deferred P1 scenarios must pass live UAT. The 6 deferred items above require
-formal product owner sign-off accepting the deferral before the pilot gate is declared
-complete. These are the same 5 items (plus E2E-003) carried forward from WE-005
-(commit `5c9cc4d`) with no new additions.
+All non-deferred P1 scenarios must pass live UAT. The 5 deferred items above include
+4 deferred P1 scenarios and 1 deferred P2 scenario; all require formal product owner
+sign-off accepting the deferral before the pilot gate is declared complete. These are
+the same 5 deferred entries already present in WE-005 (commit `5c9cc4d`), with no new
+additions introduced by this pack.
 
 ---
 
@@ -307,14 +318,14 @@ complete. These are the same 5 items (plus E2E-003) carried forward from WE-005
 
 Required before Pilot A launch:
 
-| Condition                                         | Owner         | Status                    |
-| ------------------------------------------------- | ------------- | ------------------------- |
-| PF-1 through PF-7 all green                       | DevOps/Gemini | ⬜                        |
-| All non-deferred P1 scenarios pass live UAT       | UAT Lead      | ⬜                        |
-| Zero open P1 bugs                                 | UAT Lead      | ⬜                        |
-| Deferred items formally accepted by product owner | Product Owner | ⬜                        |
-| FBP-013B smoke evidence reviewed and accepted     | Codex         | ✅ (in review)            |
-| FBP-013A staging deploy evidence accepted         | Codex         | ⬜ (FBP-013A in-progress) |
+| Condition                                         | Owner          | Status                                                  |
+| ------------------------------------------------- | -------------- | ------------------------------------------------------- |
+| PF-1 through PF-7 all green                       | DevOps/Gemini  | ⬜                                                      |
+| All non-deferred P1 scenarios pass live UAT       | UAT Lead       | ⬜                                                      |
+| Zero open P1 bugs                                 | UAT Lead       | ⬜                                                      |
+| Deferred items formally accepted by product owner | Product Owner  | ⬜                                                      |
+| FBP-013B smoke evidence approved and finalized    | Codex / Claude | ⬜ Pending — `FBP-013B` is currently in `review`        |
+| FBP-013A staging deploy evidence accepted         | Claude / Codex | ⬜ Pending — `FBP-013A` is `blocked` on live deploy fix |
 
 ### 7.2 Production Gate
 
@@ -360,8 +371,8 @@ statement:
 - Registration: `FeatureFlagsModule` imported in `apps/api/src/app.module.ts`
 - Auth scope: `platform_admin` realm required; audited on toggle
 
-The `phase1-rollout.md` document is being updated in this FBP-013C pass (see §9).
-PA-010 is therefore a **P2 live-UAT scenario**, not a deferred item.
+The current `phase1-rollout.md` shared truth already reflects this corrected
+implementation status. PA-010 is therefore a **P2 live-UAT scenario**, not a deferred item.
 
 ### 8.2 Auth Model — Bootstrap Headers Only
 
@@ -376,41 +387,44 @@ password-based creation.
 
 ### 8.3 PF-7 Owner: Claude (not Codex)
 
-`WE-004` (smoke test suite) is owned by Claude (committed `9a233d1`). The checklist
-`PF-7` row incorrectly listed Codex. This is corrected in the checklist update
-accompanying this pack.
+`WE-004` (smoke test suite) is owned by Claude (committed `9a233d1`). The current
+checklist shared truth now correctly lists Claude on `PF-7`.
 
 ---
 
-## 9. Companion Document Updates
+## 9. Shared-Truth Alignment For This Reopen Pass
 
-The following documents are updated in this FBP-013C pass:
+No additional canonical-file edits are required in this reopen pass. This pack is instead
+reconciled to the already-corrected shared truth below:
 
-| Document                              | Change                                                                                                |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `docs/04-uat/phase1-uat-checklist.md` | PF-7 owner corrected: Codex → Claude                                                                  |
-| `docs/03-runbooks/phase1-rollout.md`  | Remove false "flags controller not yet exposed" statement; replace with correct implementation status |
+| Document                              | Shared-truth anchor used by this pack                                                                                                                   |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/04-uat/phase1-uat-scenarios.md` | Tenant Portal production UAT surface is external `tenant-commute-hub`; retired `apps/tenant-portal-web` is frozen-reference only                        |
+| `docs/04-uat/phase1-uat-checklist.md` | PF-7 owner is Claude; authoritative priority/deferred math is Tenant Portal `11/16/2`, Ops Console `14/11/1`, Driver App `17/5/1`, deferred tracker = 5 |
+| `docs/03-runbooks/phase1-rollout.md`  | `/api/admin/flags` is implemented and registered; manual rollout matrix remains the interim tenant/city/module cutover path                             |
 
 ---
 
 ## 10. Evidence Chain Traceability
 
-| Evidence layer                  | Source                                                    | Status                                         |
-| ------------------------------- | --------------------------------------------------------- | ---------------------------------------------- |
-| Contract type safety            | `@drts/contracts` — all UAT scenario types verified       | ✅ Done                                        |
-| API route implementation        | `apps/api/src/modules/` — all P1 routes present           | ✅ Done (FBP-005 through FBP-012)              |
-| API client wiring               | `packages/api-client/src/index.ts` — all methods exported | ✅ Done                                        |
-| Frontend surface implementation | All 4 UI apps typecheck-passing                           | ✅ Done                                        |
-| CI gate                         | GHA CI pipeline (WE-001, commit `4d7d1bb`)                | ✅ Done                                        |
-| Docker images                   | 4 images built and verified (WE-002, commit `657a4d3`)    | ✅ Done                                        |
-| Staging deploy scaffold         | GCP Cloud Run + migration job (WE-003, commit `ff015a9`)  | ✅ Scaffold done; live deploy pending FBP-013A |
-| Smoke harness                   | 6 critical-path tests (WE-004, commit `9a233d1`)          | ✅ Done; FBP-013B pack in review               |
-| UAT scenario pack               | 93 scenarios across 4 surfaces (WE-005, commit `5c9cc4d`) | ✅ Done                                        |
-| UAT evidence (this pack)        | Static analysis complete; live slots pending staging      | ✅ Static done; live pending                   |
-| Staging deploy evidence         | FBP-013A (Codex, in-progress)                             | ⬜ Pending                                     |
-| Final synthesis                 | FBP-013D (Copilot, blocked on A/B/C)                      | ⬜ Pending                                     |
+| Evidence layer                          | Source                                                                                                             | Status                                                          |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| Contract type safety                    | `@drts/contracts` — all UAT scenario types verified                                                                | ✅ Done                                                         |
+| API route implementation                | `apps/api/src/modules/` — all non-deferred P1 routes present                                                       | ✅ Done (`FBP-005` through `FBP-012`)                           |
+| API client wiring                       | `packages/api-client/src/index.ts` — all required methods exported                                                 | ✅ Done                                                         |
+| Tenant production surface alignment     | `docs/04-uat/phase1-uat-scenarios.md` + `FBP-006`/`FBP-007` shared truth                                           | ✅ Done — `tenant-commute-hub` is the only production tenant UI |
+| Frontend implementation support in repo | `@drts/platform-admin-web`, `@drts/ops-console-web`, `@drts/driver-app` plus frozen-reference tenant app artifacts | ✅ Done — retired tenant app retained as support evidence only  |
+| CI gate                                 | GHA CI pipeline (WE-001, commit `4d7d1bb`)                                                                         | ✅ Done                                                         |
+| Docker images                           | 4 images built and verified (WE-002, commit `657a4d3`)                                                             | ✅ Done                                                         |
+| Staging deploy scaffold                 | GCP Cloud Run + migration job (WE-003, commit `ff015a9`)                                                           | ✅ Scaffold done; live deploy remediation pending `FBP-013A`    |
+| Smoke harness                           | 6 critical-path tests (WE-004, commit `9a233d1`)                                                                   | ✅ Static done; `FBP-013B` evidence pack currently in `review`  |
+| UAT scenario pack                       | 93 scenarios across 4 surfaces (WE-005, commit `5c9cc4d`)                                                          | ✅ Done                                                         |
+| UAT evidence (this pack)                | Static analysis complete; live slots pending staging                                                               | ✅ Static approved; live execution pending `FBP-013A`           |
+| Staging deploy evidence                 | `FBP-013A` (Claude owner, Codex reviewer, currently `blocked`)                                                     | ⬜ Pending                                                      |
+| Final synthesis                         | `FBP-013D` (Gemini owner; waits on `FBP-013A`, `FBP-013B`, `FBP-013C`)                                             | ⬜ Pending                                                      |
 
 ---
 
-_Static evidence complete. Live UAT execution slots open pending `FBP-013A` staging
-deploy evidence. This pack is ready for Codex review._
+_Static evidence approved. Live UAT execution slots remain open pending `FBP-013A`
+staging deploy evidence. Downstream `FBP-013D` may cite this pack for scenario math,
+deferred-item triage, and sign-off traceability._
