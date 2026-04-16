@@ -1,3 +1,4 @@
+"use client";
 import type { DispatchJobRecord, OwnedOrderRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
