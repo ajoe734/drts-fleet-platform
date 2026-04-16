@@ -264,12 +264,12 @@ been promoted to a dispatchable job. This is acceptable for a staging cold-start
 
 **Symptom:** HTTP 4xx/5xx on `/api/dispatch/tasks` or `/api/dispatch/assign`
 
-| HTTP                             | Cause                                      | Check                                                          | Remediation                                                                                               |
-| -------------------------------- | ------------------------------------------ | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | --- | ---------------------------------------------------------------------- | ------------------------------------------------------------- |
-| 401/403                          | Bootstrap headers missing or wrong actor   | Dispatch routes require `dispatch:*` and allow `system         | platform                                                                                                  | ops | tenant`; `platform_admin`is insufficient because it lacks`dispatch:\*` | Re-run with `SMOKE_ACTOR_TYPE=system` (default) or `ops_user` |
-| 404 on `/dispatch/assign`        | Assign route missing                       | Check `DispatchController` in `apps/api/src/modules/dispatch/` | Fix controller wiring                                                                                     |
-| 422                              | Driver/vehicle IDs not seeded              | `SMOKE_DRIVER_ID`/`SMOKE_VEHICLE_ID` must be S0002 UUIDs       | Defaults are now S0002 IDs; if overriding, use `10000000-0000-0000-0000-000000000381` / `...000000000351` |
-| Booking not promoted to dispatch | test 02 booking exists but no dispatch job | Booking→dispatch pipeline may require async processing         | Wait and retry, or confirm `BookingCreatedEvent` handler                                                  |
+| HTTP                             | Cause                                      | Check                                                                                                                                    | Remediation                                                                                               |
+| -------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 401/403                          | Bootstrap headers missing or wrong actor   | Dispatch routes require `dispatch:*` and allow the `system`, `platform`, `ops`, and `tenant` realms; `platform_admin` lacks `dispatch:*` | Re-run with `SMOKE_ACTOR_TYPE=system` (default) or `ops_user`                                             |
+| 404 on `/dispatch/assign`        | Assign route missing                       | Check `DispatchController` in `apps/api/src/modules/dispatch/`                                                                           | Fix controller wiring                                                                                     |
+| 422                              | Driver/vehicle IDs not seeded              | `SMOKE_DRIVER_ID`/`SMOKE_VEHICLE_ID` must be S0002 UUIDs                                                                                 | Defaults are now S0002 IDs; if overriding, use `10000000-0000-0000-0000-000000000381` / `...000000000351` |
+| Booking not promoted to dispatch | test 02 booking exists but no dispatch job | Booking→dispatch pipeline may require async processing                                                                                   | Wait and retry, or confirm `BookingCreatedEvent` handler                                                  |
 
 **Note:** If `items[0].dispatchJobId` is empty and no error is returned, the test gracefully
 skips (exit 0). This is NOT a failure — it means the staging DB has no pending dispatch
@@ -281,11 +281,11 @@ jobs at this moment.
 
 **Symptom:** HTTP 4xx/5xx or `status != "accepted"` after accept call
 
-| HTTP / Condition          | Cause                                    | Check                                                                     | Remediation                                                        |
-| ------------------------- | ---------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------- | ---------------------------------------------------------------- |
-| 401/403                   | Bootstrap headers missing or wrong actor | Driver task routes require `driver:*` and allow `system                   | ops                                                                | driver`; `platform_admin` is insufficient here | Re-run with `SMOKE_ACTOR_TYPE=system` (default) or `driver_user` |
-| 404 on task               | Task ID stale or wrong                   | State file has wrong `taskId` from test 03                                | Re-run full suite; check state file `/tmp/drts-smoke-state-*.json` |
-| 200 but status ≠ accepted | State machine not advancing              | Check `DriverTaskService.accept()` in `apps/api/src/modules/driver-task/` | Inspect service logic                                              |
+| HTTP / Condition          | Cause                                    | Check                                                                                                                           | Remediation                                                        |
+| ------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 401/403                   | Bootstrap headers missing or wrong actor | Driver task routes require `driver:*` and allow the `system`, `ops`, and `driver` realms; `platform_admin` is insufficient here | Re-run with `SMOKE_ACTOR_TYPE=system` (default) or `driver_user`   |
+| 404 on task               | Task ID stale or wrong                   | State file has wrong `taskId` from test 03                                                                                      | Re-run full suite; check state file `/tmp/drts-smoke-state-*.json` |
+| 200 but status ≠ accepted | State machine not advancing              | Check `DriverTaskService.accept()` in `apps/api/src/modules/driver-task/`                                                       | Inspect service logic                                              |
 
 ---
 
