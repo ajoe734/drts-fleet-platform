@@ -4,7 +4,7 @@
   "consensus_status": "accepted",
   "sprint": "2026-04-15-full-blueprint-execution",
   "objective": "Execute the accepted full blueprint master plan: complete tenant portal convergence, finish the remaining Platform Admin / Ops / finance / filing blueprint families, close rollout evidence, and preserve deferred roadmap slices without losing scope.",
-  "updated_at": "2026-04-16T16:55:00Z",
+  "updated_at": "2026-04-16T17:05:00Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -110,16 +110,18 @@
       "next": "Workflow triage committed (e7afdd8). Static evidence complete \u2014 AC-2 and AC-3 fully PASS. AC-1 blocked on live GCP staging deploy: drts-migrate failed at 2026-04-16T02:37:56Z. E-11 (CI run URL), E-12 (migration log), E-13 (health-check HTTP 200) are now tracked under child task FBP-013A-INFRA for infra remediation and green rerun before FBP-013A can reopen.",
       "last_update": "2026-04-16T03:00:06Z",
       "current_task": "FBP-013A",
-      "note": "FBP-013A-INFRA unblocked; resuming staging evidence pack closeout"
+      "note": "Evidence pack closeout: E-11/E-12/E-13 collection, staging runbook."
     },
     {
       "name": "Gemini",
       "capability_lane": ["runtime-packaging", "ci-cd", "infra", "worker-ops"],
-      "status": "waiting",
+      "status": "working",
       "current_task_ids": ["FBP-013D", "FBP-014B"],
       "branch": "feat/gemini-runtime-infra",
       "next": "Ownership updated to Gemini so the final evidence synthesis can stay on a live lane once FBP-013A to FBP-013C land.",
-      "last_update": "2026-04-16T04:41:39Z"
+      "last_update": "2026-04-16T04:41:39Z",
+      "current_task": "FBP-013D",
+      "note": "Early synthesis start: FBP-013B + FBP-013C evidence available; 013A placeholder pending."
     },
     {
       "name": "Codex",
@@ -130,7 +132,7 @@
       "next": "Cannot complete a green staging rerun from the current repo state: GitHub Actions is missing vars.GCP_PROJECT_ID, vars.GCP_REGION, vars.GCP_CLOUDSQL_INSTANCE, vars.GCP_RUNTIME_SERVICE_ACCOUNT (or secret GCP_RUNTIME_SERVICE_ACCOUNT), secrets.WIF_PROVIDER, and secrets.WIF_SERVICE_ACCOUNT, so remote runs fail before GCP auth or migration. This machine also cannot inspect Cloud Run directly because gcloud auth returns ACCESS_TOKEN_SCOPE_INSUFFICIENT for drts-staging. Need repo/GCP credential provisioning plus a privileged rerun of Deploy \u2014 Staging before E-11/E-12/E-13 can be collected.",
       "last_update": "2026-04-16T04:26:30Z",
       "current_task": "",
-      "note": "FBP-013A-INFRA unblocked (staging green); quota reset expected ~16:55"
+      "note": "Quota reset expected; available for sidecar dispatch."
     },
     {
       "name": "Qwen",
@@ -158,7 +160,8 @@
       "current_task_ids": [],
       "branch": "feat/copilot-spec-critique",
       "next": "Critique active implementation slices for contradictions, testing gaps, and weak assumptions.",
-      "last_update": "2026-04-16T04:41:35Z"
+      "last_update": "2026-04-16T04:41:35Z",
+      "note": "Available for sidecar dispatch."
     },
     {
       "name": "Codex2",
@@ -167,7 +170,8 @@
       "current_task_ids": [],
       "branch": "feat/codex2-parallel-worker",
       "next": "Wait for the next execution slice.",
-      "last_update": "2026-04-16T15:20:53Z"
+      "last_update": "2026-04-16T15:20:53Z",
+      "note": "Available for sidecar dispatch."
     }
   ],
   "tasks": [
@@ -1584,7 +1588,7 @@
       "phase": "Full Blueprint Wave 3",
       "owner": "Claude",
       "reviewer": "Codex",
-      "status": "blocked",
+      "status": "in_progress",
       "depends_on": [
         "FBP-008",
         "FBP-009",
@@ -1602,10 +1606,11 @@
         "migration / secret wiring \u8207 health check evidence \u88ab\u6574\u7406\u9032 rollout packet",
         "manual rollout matrix \u8207 `/api/admin/flags` operational gap \u6709\u660e\u78ba\u8655\u7f6e\uff0c\u4e0d\u518d\u53ea\u505c\u7559\u5728\u5099\u8a3b"
       ],
-      "next": "Workflow triage committed (e7afdd8). Static evidence complete \u2014 AC-2 and AC-3 fully PASS. AC-1 blocked on live GCP staging deploy: drts-migrate failed at 2026-04-16T02:37:56Z. E-11 (CI run URL), E-12 (migration log), E-13 (health-check HTTP 200) are now tracked under child task FBP-013A-INFRA for infra remediation and green rerun before FBP-013A can reopen.",
+      "next": "FBP-013A-INFRA complete. Resume evidence pack: collect E-11 (CI run URL), E-12 (migration log), E-13 (health check pass), finalize staging runbook.",
       "last_update": "2026-04-16T03:00:06Z",
       "task_class": "execution_evidence",
-      "waiting_for": "Gemini"
+      "waiting_for": "Gemini",
+      "updated_at": "2026-04-16T17:05:00Z"
     },
     {
       "id": "FBP-013B",
@@ -1674,7 +1679,7 @@
       "phase": "Full Blueprint Wave 3",
       "owner": "Gemini",
       "reviewer": "Claude",
-      "status": "todo",
+      "status": "in_progress",
       "depends_on": ["FBP-013A", "FBP-013B", "FBP-013C"],
       "artifacts": [
         "docs/03-runbooks/phase1-rollout.md",
@@ -1686,9 +1691,10 @@
         "release / pilot / production decision gate \u8207 evidence trace \u95dc\u806f\u6e05\u695a",
         "paired verification child \u8207\u4e3b\u7dda execution family \u7684\u5f15\u7528\u95dc\u4fc2\u5b8c\u6574"
       ],
-      "next": "Ownership updated to Gemini so the final evidence synthesis can stay on a live lane once FBP-013A to FBP-013C land.",
+      "next": "FBP-013B and FBP-013C evidence done. Begin synthesis scaffold using available evidence; leave 013A placeholder for when it completes.",
       "last_update": "2026-04-16T03:58:50Z",
-      "task_class": "execution_evidence"
+      "task_class": "execution_evidence",
+      "updated_at": "2026-04-16T17:05:00Z"
     },
     {
       "id": "FBP-014",
@@ -2361,7 +2367,7 @@
       "phase": "Full Blueprint Wave 3",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "blocked",
+      "status": "done",
       "depends_on": ["FBP-008", "FBP-009", "FBP-011", "FBP-012"],
       "artifacts": [
         "infra/gcp/staging/",
@@ -2373,10 +2379,11 @@
         "deploy-staging.yml rerun \u8f49\u7da0\u4e14 migration log \u7559\u8b49",
         "health-check HTTP 200 \u8207 rollout packet evidence \u88dc\u9f4a"
       ],
-      "next": "Cannot complete a green staging rerun from the current repo state: GitHub Actions is missing vars.GCP_PROJECT_ID, vars.GCP_REGION, vars.GCP_CLOUDSQL_INSTANCE, vars.GCP_RUNTIME_SERVICE_ACCOUNT (or secret GCP_RUNTIME_SERVICE_ACCOUNT), secrets.WIF_PROVIDER, and secrets.WIF_SERVICE_ACCOUNT, so remote runs fail before GCP auth or migration. This machine also cannot inspect Cloud Run directly because gcloud auth returns ACCESS_TOKEN_SCOPE_INSUFFICIENT for drts-staging. Need repo/GCP credential provisioning plus a privileged rerun of Deploy \u2014 Staging before E-11/E-12/E-13 can be collected.",
+      "next": "Staging deploy green \u2014 GitHub Actions run #24522301392 all pass (build, migration, deploy, health check).",
       "last_update": "2026-04-16T04:26:30Z",
       "task_class": "execution_evidence",
-      "waiting_for": "Claude"
+      "waiting_for": "Claude",
+      "updated_at": "2026-04-16T17:05:00Z"
     },
     {
       "id": "FBP-013A-SIDECAR-ACCEPTANCE",
