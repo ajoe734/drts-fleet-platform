@@ -392,8 +392,9 @@ jobs:
           HEALTH_URL: ${{ steps.api_url.outputs.url }}/health
         run: |
           echo "Polling $HEALTH_URL ..."
+          TOKEN=$(gcloud auth print-identity-token)
           for i in $(seq 1 24); do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_URL" || true)
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "$HEALTH_URL" || true)
             echo "  attempt $i: HTTP $STATUS"
             if [ "$STATUS" = "200" ]; then
               echo "Health check passed."
