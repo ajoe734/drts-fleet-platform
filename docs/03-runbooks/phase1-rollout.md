@@ -13,6 +13,31 @@ This runbook operationalizes `W8-001B` for the current repo state. It turns the 
 - `/api/admin/flags` is implemented and registered: `apps/api/src/modules/feature-flags/feature-flags.controller.ts` (`@Controller("admin")`) is imported via `FeatureFlagsModule` in `app.module.ts`. Platform-admin auth scope required; toggle actions are audited. Tenant, city, and module cutovers that depend on granular per-tenant runtime flags still require the manual rollout matrix until the full flag-evaluation client slice lands.
 - Staging Cloud Run runtime identity must be separate from the GitHub WIF deployer identity: `GCP_RUNTIME_SERVICE_ACCOUNT` needs `roles/cloudsql.client` and `roles/secretmanager.secretAccessor`, and `WIF_SERVICE_ACCOUNT` must have `iam.serviceAccounts.actAs` on that runtime SA (for example via `roles/iam.serviceAccountUser`), or the migration gate can fail before deploy / health-check evidence is produced.
 
+## 2026-04-16 Evidence Closeout Snapshot
+
+The execution-evidence family is now split into child packs plus one synthesis packet:
+
+| Execution family | Current evidence anchor                                              | Shared-truth status     | What to consume                                                                            |
+| ---------------- | -------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------ |
+| Staging deploy   | `support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md` | `done`                  | run `#24522301392`, migrate success, health-check 200, deploy-order and flag-gap decisions |
+| Smoke            | `support/sidecars/FBP-013B/FBP-013B-SMOKE-EVIDENCE-PACK.md`          | `done`                  | 6-case smoke coverage, bootstrap-header auth model, failure triage, smoke-gate boundary    |
+| UAT / sign-off   | `support/sidecars/FBP-013C/FBP-013C-UAT-EVIDENCE-PACK.md`            | `done`                  | 93-scenario coverage math, deferred-item tracker, pilot / production sign-off gate         |
+| Final synthesis  | `support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md`      | active synthesis packet | release / pilot / production decision packet and paired-verification mapping               |
+
+Use `ai-status.json` and `current-work.md` for the live task state. Evidence-pack headers
+may reflect the snapshot when each child pack was last revised rather than the final
+machine-truth task status.
+
+### Current Gate Read
+
+- **Staging release evidence:** PASS — `FBP-013A` records green run `#24522301392` with live evidence `E-11/E-12/E-13`.
+- **Smoke evidence:** PASS as static evidence — `FBP-013B` is the reviewable smoke source of truth; it does not invent a separate live smoke workflow artifact.
+- **Pilot launch:** HOLD — named live UAT sign-off and deferred-item acceptance remain open in `FBP-013C`.
+- **Production rollout:** HOLD — pilot observation, tolerance metrics, dry runs, manual rollout matrix execution, and rollback-owner acknowledgement remain required.
+
+This means the evidence chain is ready for closeout review, but not yet a production go-live
+approval.
+
 ## Automation Entry Points
 
 - `pnpm phase1:verify:backfill`

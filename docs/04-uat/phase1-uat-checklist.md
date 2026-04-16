@@ -1,10 +1,14 @@
 # Phase 1 UAT Execution Checklist
 
-**Status:** Draft — pending smoke evidence from WE-004  
-**Owner:** Claude  
-**Task:** WE-005  
+**Status:** Baseline execution checklist — final evidence interpretation now lives in `support/sidecars/FBP-013C/FBP-013C-UAT-EVIDENCE-PACK.md` and `support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md`
+**Owner:** Claude (WE-005 baseline)
+**Task:** WE-005 baseline; consumed by `FBP-013C` and `FBP-013D` for final closeout
 **Created:** 2026-04-14  
 **Scenario source:** `docs/04-uat/phase1-uat-scenarios.md`
+
+This file remains the canonical row-by-row checklist inventory. Use the `FBP-013C` evidence
+pack for current deferred-item math, static verification coverage, and sign-off framing, and
+use `FBP-013D` for the final release / pilot / production decision read.
 
 ---
 

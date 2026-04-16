@@ -1,8 +1,8 @@
 # Phase 1 UAT Scenario Pack
 
-**Status:** Draft — awaiting smoke evidence from WE-004 before final sign-off  
-**Owner:** Claude  
-**Task:** WE-005  
+**Status:** Baseline scenario inventory — final evidence and sign-off interpretation now lives in `support/sidecars/FBP-013C/FBP-013C-UAT-EVIDENCE-PACK.md` and `support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md`
+**Owner:** Claude (WE-005 baseline)
+**Task:** WE-005 baseline; consumed by `FBP-013C` and `FBP-013D` for final closeout
 **Created:** 2026-04-14  
 **Depends on:** WE-001 (CI), WE-004 (Smoke harness evidence)
 
@@ -13,12 +13,18 @@
 This document is the Phase 1 UAT scenario pack for the DRTS Fleet Platform. It covers all
 four front-end surfaces:
 
-| Surface            | App                        | Audiences                                        |
-| ------------------ | -------------------------- | ------------------------------------------------ |
-| **Tenant Portal**  | `@drts/tenant-portal-web`  | Tenant admin, tenant booking manager             |
-| **Platform Admin** | `@drts/platform-admin-web` | PlatformCo admin, compliance, finance            |
-| **Ops Console**    | `@drts/ops-console-web`    | Dispatcher, operations manager, customer service |
-| **Driver App**     | `@drts/driver-app`         | Driver                                           |
+| Surface            | App                                  | Audiences                                        |
+| ------------------ | ------------------------------------ | ------------------------------------------------ |
+| **Tenant Portal**  | `tenant-commute-hub` (external repo) | Tenant admin, tenant booking manager             |
+| **Platform Admin** | `@drts/platform-admin-web`           | PlatformCo admin, compliance, finance            |
+| **Ops Console**    | `@drts/ops-console-web`              | Dispatcher, operations manager, customer service |
+| **Driver App**     | `@drts/driver-app`                   | Driver                                           |
+
+> **Note (FBP-007):** The legacy `@drts/tenant-portal-web` app has been retired as a production target. All UAT scenarios in §1 (Tenant Portal) are now validated against `tenant-commute-hub`. The `apps/tenant-portal-web` source and its staging YAML are frozen-reference artifacts; they must not be deployed.
+
+This file stays as the canonical scenario inventory. It is not the live sign-off dashboard:
+for current coverage math, deferred-item triage, and gate decisions, use the finalized
+`FBP-013C` evidence pack and the `FBP-013D` synthesis packet.
 
 ### Scope boundary
 
