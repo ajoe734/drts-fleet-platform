@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
@@ -23,6 +23,15 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  DEFAULT_CONTROLLED_DOWNLOAD_HOST,
+  DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
+  DEFAULT_CONTROLLED_DOWNLOAD_SECRET,
+  DEFAULT_CONTROLLED_DOWNLOAD_SIGNATURE_VERSION,
+  DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES,
+  createControlledDownloadMetadata,
+  type ControlledDownloadMetadata,
+} from "../../common/controlled-download";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   PlatformAdminRepository,
@@ -55,9 +64,13 @@ const PLACARD_SEED: PlacardVersionRecord[] = [
     publicInfoVersionId: "public-info-demo-001",
     templateName: "seatback-default",
     artifactFileId: "artifact-demo-001",
+    artifactManifestHash: null,
+    artifactDownloadUrl: null,
+    artifactExpiresAt: null,
     publishedAt: "2026-04-01T00:00:00.000Z",
     createdAt: "2026-03-25T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",
+    downloadMetadata: null,
   },
 ];
 
@@ -161,6 +174,18 @@ export class PlatformAdminService implements OnModuleInit {
 
   private pricingRules: PlatformPricingRuleRecord[] =
     PLATFORM_PRICING_RULES_SEED.map((r) => ({ ...r }));
+
+  private readonly placardDownloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
+
+  private readonly placardSigningKeyId = DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID;
+
+  private readonly placardSigningSecret = DEFAULT_CONTROLLED_DOWNLOAD_SECRET;
+
+  private readonly placardSignatureVersion =
+    DEFAULT_CONTROLLED_DOWNLOAD_SIGNATURE_VERSION;
+
+  private readonly placardExpiryMinutes =
+    DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES;
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -273,6 +298,17 @@ export class PlatformAdminService implements OnModuleInit {
     requestId?: string,
   ) {
     const version = this.requirePublicInfoVersion(versionId);
+    if (version.status !== "draft") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PUBLIC_INFO_VERSION_NOT_DRAFT",
+        "Only draft public info versions can be published.",
+        {
+          versionId,
+          status: version.status,
+        },
+      );
+    }
     const publishedAt = new Date().toISOString();
     const previousPublished = this.publicInfoVersions.find(
       (candidate) =>
@@ -349,25 +385,55 @@ export class PlatformAdminService implements OnModuleInit {
     this.assertNonBlank(command.versionCode, "versionCode");
     this.assertNonBlank(command.publicInfoVersionId, "publicInfoVersionId");
     this.assertNonBlank(command.templateName, "templateName");
-    this.requirePublicInfoVersion(command.publicInfoVersionId);
+    const publicInfoVersion = this.requirePublicInfoVersion(
+      command.publicInfoVersionId,
+    );
+    const normalizedVersionCode = command.versionCode.trim();
+    const duplicate = this.placardVersions.find(
+      (candidate) =>
+        candidate.versionCode.toLowerCase() ===
+        normalizedVersionCode.toLowerCase(),
+    );
+    if (duplicate) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PLACARD_VERSION_CODE_CONFLICT",
+        "A placard version with this version code already exists.",
+        {
+          versionCode: normalizedVersionCode,
+          placardVersionId: duplicate.placardVersionId,
+        },
+      );
+    }
 
     const now = new Date().toISOString();
+    const placardVersionId = `placard_${randomUUID()}`;
+    const derivedPublishedAt =
+      publicInfoVersion.status === "published"
+        ? (this.normalizeNullableText(command.publishedAt) ??
+          publicInfoVersion.publishedAt ??
+          now)
+        : null;
     const placard: PlacardVersionRecord = {
-      placardVersionId: `placard_${randomUUID()}`,
-      versionCode: command.versionCode.trim(),
+      placardVersionId,
+      versionCode: normalizedVersionCode,
       publicInfoVersionId: command.publicInfoVersionId.trim(),
       templateName: command.templateName.trim(),
-      artifactFileId: this.normalizeNullableText(command.artifactFileId),
-      publishedAt: this.normalizeNullableText(command.publishedAt) ?? now,
+      artifactFileId:
+        this.normalizeNullableText(command.artifactFileId) ??
+        `placard-artifact-${placardVersionId}`,
+      artifactManifestHash: null,
+      artifactDownloadUrl: null,
+      artifactExpiresAt: null,
+      publishedAt: derivedPublishedAt,
       createdAt: now,
       updatedAt: now,
+      downloadMetadata: null,
     };
 
     this.placardVersions = [
       this.clonePlacardVersion(placard),
-      ...this.placardVersions.filter(
-        (candidate) => candidate.versionCode !== placard.versionCode,
-      ),
+      ...this.placardVersions,
     ];
     this.persistChanges(
       {
@@ -386,6 +452,7 @@ export class PlatformAdminService implements OnModuleInit {
         resourceId: placard.placardVersionId,
         newValuesSummary: {
           ...this.clonePlacardVersion(placard),
+          sourcePublicInfoStatus: publicInfoVersion.status,
         },
       },
       requestId,
@@ -828,8 +895,34 @@ export class PlatformAdminService implements OnModuleInit {
   private clonePlacardVersion(
     placard: PlacardVersionRecord,
   ): PlacardVersionRecord {
+    const artifactFileId =
+      this.normalizeNullableText(placard.artifactFileId) ??
+      `placard-artifact-${placard.placardVersionId}`;
+    const artifactManifestHash =
+      placard.artifactManifestHash ??
+      this.computeHash({
+        placardVersionId: placard.placardVersionId,
+        versionCode: placard.versionCode,
+        publicInfoVersionId: placard.publicInfoVersionId,
+        templateName: placard.templateName,
+        artifactFileId,
+      });
+    const downloadMetadata =
+      placard.downloadMetadata &&
+      placard.downloadMetadata.manifestHash === artifactManifestHash
+        ? { ...placard.downloadMetadata }
+        : this.createPlacardDownloadMetadata(
+            placard.placardVersionId,
+            artifactManifestHash,
+          );
+
     return {
       ...placard,
+      artifactFileId,
+      artifactManifestHash,
+      artifactDownloadUrl: downloadMetadata.downloadUrl,
+      artifactExpiresAt: downloadMetadata.expiresAt,
+      downloadMetadata,
     };
   }
 
@@ -857,6 +950,45 @@ export class PlatformAdminService implements OnModuleInit {
         },
       );
     }
+  }
+
+  private createPlacardDownloadMetadata(
+    subjectId: string,
+    manifestHash: string,
+  ): ControlledDownloadMetadata {
+    return createControlledDownloadMetadata({
+      kind: "placard",
+      subjectId,
+      manifestHash,
+      createdAt: new Date().toISOString(),
+      host: this.placardDownloadHost,
+      keyId: this.placardSigningKeyId,
+      signingSecret: this.placardSigningSecret,
+      ttlMinutes: this.placardExpiryMinutes,
+      signatureVersion: this.placardSignatureVersion,
+    });
+  }
+
+  private computeHash(value: unknown) {
+    return createHash("sha256")
+      .update(this.stableSerialize(value))
+      .digest("hex");
+  }
+
+  private stableSerialize(value: unknown): string {
+    if (Array.isArray(value)) {
+      return `[${value.map((item) => this.stableSerialize(item)).join(",")}]`;
+    }
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => {
+          const nestedValue = (value as Record<string, unknown>)[key];
+          return `${JSON.stringify(key)}:${this.stableSerialize(nestedValue)}`;
+        })
+        .join(",")}}`;
+    }
+    return JSON.stringify(value);
   }
 
   private persistChanges(

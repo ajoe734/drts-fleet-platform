@@ -89,18 +89,87 @@ describe("platform admin service", () => {
     await Promise.resolve();
 
     expect(placard.publicInfoVersionId).toBe("public-info-persisted-001");
+    expect(placard.publishedAt).toBe("2026-04-01T00:00:00Z");
+    expect(placard.artifactManifestHash).toBeTruthy();
+    expect(placard.artifactDownloadUrl).toContain("sig=");
+    expect(placard.artifactExpiresAt).toBeTruthy();
+    expect(placard.downloadMetadata?.kind).toBe("placard");
     expect(persistChanges).toHaveBeenCalledWith(
       expect.objectContaining({
         placardVersions: [
           expect.objectContaining({
             versionCode: "placard-2026-q3",
             publicInfoVersionId: "public-info-persisted-001",
+            artifactManifestHash: expect.any(String),
+            artifactDownloadUrl: expect.stringContaining("sig="),
+            artifactExpiresAt: expect.any(String),
           }),
         ],
       }),
     );
     expect(auditService.listAuditLogs()[0]?.actionName).toBe(
       "generate_placard_version",
+    );
+  });
+
+  it("backfills signed placard artifact metadata for legacy persisted records", async () => {
+    const auditService = new AuditNotificationService();
+    const repository = {
+      loadState: vi.fn(async () => ({
+        publicInfoVersions: [
+          {
+            versionId: "public-info-persisted-002",
+            title: "Legacy Published Version",
+            callPhone: "0800-010-001",
+            complaintPhone: "0800-010-002",
+            callRateText: "依表計費",
+            fareText: "依公告",
+            paymentMethodText: "現金",
+            status: "published",
+            effectiveFrom: "2026-05-01T00:00:00Z",
+            effectiveTo: null,
+            publishedBy: "platform-admin-legacy",
+            publishedAt: "2026-05-01T00:00:00Z",
+            createdAt: "2026-04-20T00:00:00Z",
+            updatedAt: "2026-05-01T00:00:00Z",
+          },
+        ],
+        placardVersions: [
+          {
+            placardVersionId: "placard-legacy-001",
+            versionCode: "placard-legacy-q2",
+            publicInfoVersionId: "public-info-persisted-002",
+            templateName: "seatback-legacy",
+            artifactFileId: "artifact-legacy-001",
+            publishedAt: "2026-05-01T00:00:00Z",
+            createdAt: "2026-04-20T00:00:00Z",
+            updatedAt: "2026-05-01T00:00:00Z",
+          } as any,
+        ],
+      })),
+      persistChanges: vi.fn(async () => undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as unknown as PlatformAdminRepository;
+    const platformAdminService = new PlatformAdminService(
+      auditService,
+      repository,
+    );
+
+    await platformAdminService.onModuleInit();
+
+    const placard = platformAdminService.listPlacardVersions()[0];
+
+    expect(placard).toEqual(
+      expect.objectContaining({
+        placardVersionId: "placard-legacy-001",
+        artifactManifestHash: expect.any(String),
+        artifactDownloadUrl: expect.stringContaining("sig="),
+        artifactExpiresAt: expect.any(String),
+      }),
+    );
+    expect(placard?.downloadMetadata?.kind).toBe("placard");
+    expect(placard?.downloadMetadata?.manifestHash).toBe(
+      placard?.artifactManifestHash,
     );
   });
 });

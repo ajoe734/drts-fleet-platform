@@ -962,9 +962,13 @@ export interface PlacardVersionRecord {
   publicInfoVersionId: string;
   templateName: string;
   artifactFileId: string | null;
+  artifactManifestHash: string | null;
+  artifactDownloadUrl: string | null;
+  artifactExpiresAt: string | null;
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  downloadMetadata?: ControlledDownloadRecord | null;
 }
 
 export interface GeneratePlacardVersionCommand {
@@ -1308,6 +1312,32 @@ export interface MarkReimbursementPaidCommand {
 export const REPORT_OUTPUT_FORMATS = ["csv", "xlsx", "pdf", "zip"] as const;
 export type ReportOutputFormat = (typeof REPORT_OUTPUT_FORMATS)[number];
 
+export const REGULATORY_REPORT_JOB_TYPES = [
+  "vehicle_roster",
+  "driver_roster",
+  "contract_roster",
+  "insurance_roster",
+  "vehicle_monthly_delta",
+  "six_month_statistics",
+  "fare_version_history",
+  "complaint_case_detail",
+  "dispatch_recording_index",
+] as const;
+
+export const OPERATIONAL_REPORT_JOB_TYPES = [
+  "trip_summary",
+  "monthly_trip_report",
+  "revenue_summary",
+  "incident_register",
+  "maintenance_overview",
+] as const;
+
+export const REPORT_JOB_TYPES = [
+  ...OPERATIONAL_REPORT_JOB_TYPES,
+  ...REGULATORY_REPORT_JOB_TYPES,
+] as const;
+export type ReportJobType = (typeof REPORT_JOB_TYPES)[number];
+
 export const REPORT_JOB_STATUSES = [
   "queued",
   "running",
@@ -1333,6 +1363,21 @@ export interface ReportArtifactRecord {
   immutable: boolean;
 }
 
+export interface ControlledDownloadRecord {
+  kind: string;
+  subjectId: string;
+  manifestHash: string;
+  host: string;
+  keyId: string;
+  signedAt: string;
+  expiresAt: string;
+  ttlMinutes: number;
+  signatureVersion: number;
+  signature: string;
+  downloadUrl: string;
+  immutable: true;
+}
+
 export interface ReportJobRecord {
   jobId: string;
   jobType: string;
@@ -1342,6 +1387,24 @@ export interface ReportJobRecord {
   artifact: ReportArtifactRecord | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DispatchRecordingIndexRowRecord {
+  orderId: string;
+  orderNo: string;
+  callId: string | null;
+  recordingId: string | null;
+  missingRecording: boolean;
+  exportedAt: string;
+}
+
+export interface ReportJobDetailRecord extends ReportJobRecord {
+  artifact:
+    | (ReportArtifactRecord & {
+        downloadMetadata: ControlledDownloadRecord;
+      })
+    | null;
+  rows?: DispatchRecordingIndexRowRecord[];
 }
 
 export const FILING_PACKAGE_TYPES = [
@@ -1373,6 +1436,22 @@ export interface PackageItemRecord {
   manifestHash: string;
 }
 
+export interface FilingPackageManifestEntryRecord {
+  itemId: string;
+  itemType: string;
+  artifactId: string;
+  manifestHash: string;
+}
+
+export interface FilingPackageManifestRecord {
+  manifestId: string;
+  generatedAt: string;
+  entryCount: number;
+  entries: FilingPackageManifestEntryRecord[];
+  checksum: string;
+  immutable: true;
+}
+
 export interface FilingPackageRecord {
   packageId: string;
   packageType: FilingPackageType;
@@ -1388,6 +1467,17 @@ export interface FilingPackageRecord {
 
 export interface FilingPackageListRecord extends FilingPackageRecord {
   immutable?: boolean;
+}
+
+export interface FilingPackageDownloadRecord {
+  zip: ControlledDownloadRecord;
+  pdf: ControlledDownloadRecord;
+}
+
+export interface FilingPackageDetailRecord extends FilingPackageRecord {
+  immutable: true;
+  manifest: FilingPackageManifestRecord | null;
+  downloadMetadata: FilingPackageDownloadRecord | null;
 }
 
 export const FORWARDED_ORDER_STATUSES = [

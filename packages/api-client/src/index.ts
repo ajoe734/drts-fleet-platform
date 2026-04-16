@@ -23,52 +23,75 @@ import type {
   ComplaintTimelineEntry,
   CompleteCallbackTaskCommand,
   CreateOwnedOrderCommand,
-  CreatePlatformPricingRuleCommand,
-  CreatePlatformTenantCommand,
+  CreatePublicInfoVersionCommand,
   CreatePlatformAdminUserCommand,
   CreatePlatformNoticeCommand,
+  CreatePlatformPricingRuleCommand,
+  CreatePlatformTenantCommand,
+  CreateReportJobCommand,
   CreateTenantBookingCommand,
   CreateCallCenterOrderCommand,
   CreateCallbackTaskCommand,
-  DriverAcceptTaskCommand,
-  DriverRegistryRecord,
-  DriverRejectTaskCommand,
-  DriverDepartTaskCommand,
-  DriverArrivedPickupCommand,
-  DriverStartTaskCommand,
-  DriverCompleteTaskCommand,
   CreateComplaintCaseCommand,
-  CreateReportJobCommand,
   CreateIncidentCommand,
   CreateMaintenanceRecordCommand,
+  CreateTenantUserCommand,
+  CreateTenantWebhookEndpointCommand,
+  DispatchCandidate,
+  DispatchJobRecord,
   DispatchTraceLogRecord,
+  DriverAcceptTaskCommand,
+  DriverArrivedPickupCommand,
+  DriverDepartTaskCommand,
   DriverFeePlanRecord,
-  GenerateDriverStatementCommand,
+  DriverRegistryRecord,
+  DriverRejectTaskCommand,
+  DriverStartTaskCommand,
   DriverStatementRecord,
   DriverTaskRecord,
+  FeatureFlag,
+  FeatureFlagSummary,
+  FilingPackageAccepted,
+  FilingPackageDetailRecord,
   FilingPackageListRecord,
-  GenerateTenantInvoiceCommand,
+  GenerateDriverStatementCommand,
   GenerateFilingPackageCommand,
+  GeneratePlacardVersionCommand,
+  GenerateTenantInvoiceCommand,
   IncidentRecord,
   IncidentTimelineEntry,
-  MarkReimbursementPaidCommand,
+  IssueTenantApiKeyCommand,
+  LinkCallOrderCommand,
   MaintenanceRecord,
+  MarkReimbursementPaidCommand,
   NotificationRecord,
-  OwnedOrderRecord,
   OpenCallSessionCommand,
+  OwnedOrderRecord,
   PlacardVersionRecord,
   PlatformAdminTenantRecord,
   PlatformAdminUserRecord,
+  PlatformEarningsByPlatformResponse,
+  PlatformEarningsSummary,
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
+  PlatformPresenceRecord,
+  PlatformPresenceSummary,
   PlatformPricingRuleRecord,
   PublishDriverFeePlanCommand,
   PublishPlatformPricingRuleCommand,
+  PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
+  QuoteCallEtaCommand,
+  ReimbursementBatchRecord,
   ReopenComplaintCaseCommand,
+  ReportJobAccepted,
+  ReportJobDetailRecord,
   ReportJobRecord,
   ResolveComplaintCaseCommand,
+  RotateTenantApiKeyCommand,
   SetPlatformMaintenanceModeCommand,
+  SetPlatformOfflineCommand,
+  SetPlatformOnlineCommand,
   ShiftRecord,
   TenantAddressRecord,
   TenantApiKeyRecord,
@@ -77,40 +100,24 @@ import type {
   TenantRoleCatalogRecord,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
-  ReimbursementBatchRecord,
-  UpdateTenantWebhookEndpointCommand,
+  TransferCallToComplaintCommand,
   UpdateIncidentCommand,
   UpdateMaintenanceRecordCommand,
-  WebhookDeliveryRecord,
-  UpsertTenantPassengerCommand,
-  UpsertTenantAddressCommand,
-  IssueTenantApiKeyCommand,
-  RotateTenantApiKeyCommand,
-  QuoteCallEtaCommand,
   UpdatePlatformAdminUserRoleCommand,
   UpdatePlatformTenantSettingsCommand,
+  UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
-  UpdateTenantNotificationsCommand,
-  LinkCallOrderCommand,
-  CreateTenantUserCommand,
-  CreateTenantWebhookEndpointCommand,
-  TransferCallToComplaintCommand,
+  UpdateTenantWebhookEndpointCommand,
+  UpsertTenantAddressCommand,
+  UpsertTenantPassengerCommand,
   VehicleContractRecord,
   VehicleRegistryRecord,
-  FeatureFlag,
-  FeatureFlagSummary,
-  DispatchJobRecord,
-  DispatchCandidate,
-  AssignDispatchCommand,
+  WebhookDeliveryRecord,
   CancelOwnedOrderCommand,
+  AssignDispatchCommand,
+  DriverCompleteTaskCommand,
   UpdateTenantBookingCommand,
-  PlatformPresenceSummary,
-  PlatformPresenceRecord,
-  SetPlatformOnlineCommand,
-  SetPlatformOfflineCommand,
-  PlatformEarningsSummary,
-  PlatformEarningsByPlatformResponse,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -707,40 +714,56 @@ export class ApiClient {
 
   // ── Reporting & Filing ──
 
-  async createReportJob(command: CreateReportJobCommand) {
-    return this.post("/api/reports/jobs", { body: command });
+  async createReportJob(
+    command: CreateReportJobCommand,
+  ): Promise<ReportJobAccepted> {
+    return this.post<ReportJobAccepted>("/api/reports/jobs", { body: command });
   }
 
   async listReportJobs(): Promise<ReportJobRecord[]> {
     return this.getList<ReportJobRecord>("/api/reports/jobs");
   }
 
-  async getReportJob(jobId: string) {
-    return this.get(`/api/reports/${jobId}`);
+  async getReportJob(jobId: string): Promise<ReportJobDetailRecord> {
+    return this.get<ReportJobDetailRecord>(`/api/reports/${jobId}`);
   }
 
-  async createTenantReportJob(command: CreateReportJobCommand) {
-    return this.post("/api/tenant/reports/jobs", { body: command });
+  async createTenantReportJob(
+    command: CreateReportJobCommand,
+  ): Promise<ReportJobAccepted> {
+    return this.post<ReportJobAccepted>("/api/tenant/reports/jobs", {
+      body: command,
+    });
   }
 
   async listTenantReportJobs(): Promise<ReportJobRecord[]> {
     return this.getList<ReportJobRecord>("/api/tenant/reports/jobs");
   }
 
-  async getTenantReportJob(jobId: string) {
-    return this.get(`/api/tenant/reports/${encodeURIComponent(jobId)}`);
+  async getTenantReportJob(jobId: string): Promise<ReportJobDetailRecord> {
+    return this.get<ReportJobDetailRecord>(
+      `/api/tenant/reports/${encodeURIComponent(jobId)}`,
+    );
   }
 
-  async generateFilingPackage(command: GenerateFilingPackageCommand) {
-    return this.post("/api/filing-packages/generate", { body: command });
+  async generateFilingPackage(
+    command: GenerateFilingPackageCommand,
+  ): Promise<FilingPackageAccepted> {
+    return this.post<FilingPackageAccepted>("/api/filing-packages/generate", {
+      body: command,
+    });
   }
 
   async listFilingPackages(): Promise<FilingPackageListRecord[]> {
     return this.getList<FilingPackageListRecord>("/api/filing-packages");
   }
 
-  async getFilingPackage(packageId: string) {
-    return this.get(`/api/filing-packages/${packageId}`);
+  async getFilingPackage(
+    packageId: string,
+  ): Promise<FilingPackageDetailRecord> {
+    return this.get<FilingPackageDetailRecord>(
+      `/api/filing-packages/${packageId}`,
+    );
   }
 
   // ── Tenant Partner ──
@@ -877,8 +900,37 @@ export class ApiClient {
     );
   }
 
+  async createPublicInfoVersion(
+    command: CreatePublicInfoVersionCommand,
+  ): Promise<PublicInfoVersionRecord> {
+    return this.post<PublicInfoVersionRecord>(
+      "/api/platform-admin/public-info",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async publishPublicInfoVersion(
+    versionId: string,
+    command: PublishPublicInfoVersionCommand,
+  ): Promise<PublicInfoVersionRecord> {
+    return this.post<PublicInfoVersionRecord>(
+      `/api/platform-admin/public-info/${versionId}/publish`,
+      { body: command },
+    );
+  }
+
   async listPlacards(): Promise<PlacardVersionRecord[]> {
     return this.getList<PlacardVersionRecord>("/api/platform-admin/placards");
+  }
+
+  async generatePlacardVersion(
+    command: GeneratePlacardVersionCommand,
+  ): Promise<PlacardVersionRecord> {
+    return this.post<PlacardVersionRecord>("/api/platform-admin/placards", {
+      body: command,
+    });
   }
 
   async listPlatformTenants(): Promise<PlatformAdminTenantRecord[]> {
