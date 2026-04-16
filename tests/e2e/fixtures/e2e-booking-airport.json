@@ -1,0 +1,21 @@
+{
+  "businessDispatchSubtype": "credit_card_airport_transfer",
+  "airportDirection": "dropoff",
+  "terminal": "T2",
+  "pickup": {
+    "address": "88 Corporate HQ, Staging City"
+  },
+  "dropoff": {
+    "address": "Staging International Airport, Terminal 2"
+  },
+  "reservationWindowStart": "__RESERVATION_START__",
+  "reservationWindowEnd": "__RESERVATION_END__",
+  "passenger": {
+    "name": "E2E Airport Passenger",
+    "phone": "+886900000098"
+  },
+  "bookedBy": {
+    "name": "E2E Airport Operator",
+    "staffId": "e2e-staff-02"
+  }
+}

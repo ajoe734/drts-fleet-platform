@@ -1,0 +1,9 @@
+{
+  "name": "E2E Attribution Test Tenant",
+  "code": "__TENANT_CODE__",
+  "enabledModules": ["enterprise_dispatch"],
+  "quotas": {
+    "maxMonthlyBookings": 100,
+    "maxConcurrentDrivers": 10
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "businessDispatchSubtype": "enterprise_dispatch",
+  "pickup": {
+    "address": "1 E2E Test Plaza, Staging City"
+  },
+  "dropoff": {
+    "address": "99 E2E Destination Ave, Staging City"
+  },
+  "reservationWindowStart": "__RESERVATION_START__",
+  "reservationWindowEnd": "__RESERVATION_END__",
+  "passenger": {
+    "name": "E2E Passenger",
+    "phone": "+886900000099"
+  },
+  "bookedBy": {
+    "name": "E2E Tenant Operator",
+    "staffId": "e2e-staff-01"
+  }
+}

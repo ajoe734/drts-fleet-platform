@@ -1,0 +1,319 @@
+# FBP-014A — Cross-Surface E2E Scenario Matrix and Fixture Scaffold
+
+**Task:** `FBP-014A`  
+**Owner:** Claude  
+**Reviewer:** Codex  
+**Status:** Scaffold complete — awaiting staging integration (blocked on FBP-013 live deploy)  
+**Created:** 2026-04-16  
+**Depends on:** FBP-006 (tenant-commute-hub BFF cutover), FBP-008, FBP-009, FBP-011, FBP-012
+
+---
+
+## 1. Purpose
+
+This document defines the cross-surface E2E scenario matrix for Phase 1. It captures:
+
+1. Which E2E scenarios must be executed and what surface chain each exercises.
+2. Which fixtures, seed data, and API routes each scenario uses.
+3. The ID continuity chain each scenario must produce (the "stitched evidence chain").
+4. Verification points: cross-tenant safety, audit trail, billing confirmation.
+5. How the scaffold relates to the existing smoke tests and UAT scenarios.
+
+The E2E scaffold is in `tests/e2e/`. The scenarios operationalize the cross-surface flows
+defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)`.
+
+> **Relationship to smoke tests:** `tests/smoke/` verifies individual API surfaces in isolation.
+> `tests/e2e/` chains surfaces together in a single stateful run, tracking ID continuity across
+> the booking → dispatch → driver → billing/audit chain.
+
+---
+
+## 2. Architecture and Guardrails
+
+The following constraints apply to the entire E2E suite (from FBP-014 guardrails):
+
+| #   | Guardrail                                                                                                                                                      |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1  | Tenant surface entry point is **`tenant-commute-hub`** (external repo, backed by `/api/tenant/*`). The retired `apps/tenant-portal-web` must not be used.      |
+| G2  | Repo B remains a pure UI consumer — no Supabase, edge functions, local authority, or local financial truth.                                                    |
+| G3  | All API calls use canonical `/api/*` prefix, `snake_case`, `{ data, meta }` envelope, `items[] + page_info` for lists, and `Idempotency-Key` on POST commands. |
+| G4  | Primary happy path is the owned **enterprise-dispatch** flow (E2E-001). E2E-002 (forwarded order) is a separate mirror scenario.                               |
+| G5  | Billing and audit remain **backend-owned**. No local calculations or UI assumptions.                                                                           |
+| G6  | Cross-tenant safety is part of the definition of done. E2E-004 explicitly tests it.                                                                            |
+| G7  | If the suite discovers a real gap after FBP-006, the fix belongs in a new authority/evidence task — not in a local `tenant-commute-hub` workaround.            |
+
+---
+
+## 3. Seed Data
+
+All scenarios use the demo operational seed (`infra/seeds/S0002__demo_operational_seed.sql`) by default.
+
+| Seed ID           | UUID                                   | Description             |
+| ----------------- | -------------------------------------- | ----------------------- |
+| `TEN_ACME`        | `10000000-0000-0000-0000-000000000201` | Primary test tenant     |
+| `DRIVER_ZHANG`    | `10000000-0000-0000-0000-000000000381` | 張司機 — seed driver    |
+| `VEHICLE_ABC1234` | `10000000-0000-0000-0000-000000000351` | ABC-1234 — seed vehicle |
+
+Environment variable overrides: `E2E_SEED_TENANT_ID`, `E2E_SEED_DRIVER_ID`, `E2E_SEED_VEHICLE_ID`.
+
+---
+
+## 4. Scenario Matrix
+
+### 4.1 E2E-001 — Enterprise Dispatch Full Cycle
+
+**Script:** `tests/e2e/E2E-001-enterprise-dispatch.sh`  
+**UAT cross-ref:** `docs/04-uat/phase1-uat-scenarios.md §5 E2E-001`
+
+#### Surface Chain
+
+```
+Tenant Portal ─► Ops Console ─► Driver App ─► Tenant Portal (billing) ─► Audit
+```
+
+#### Leg Breakdown
+
+| Leg | Surface       | Actor                     | API Route                                   | Output             |
+| --- | ------------- | ------------------------- | ------------------------------------------- | ------------------ |
+| 1   | Tenant Portal | `tenant_admin` (TEN_ACME) | `POST /api/tenant/bookings`                 | `bookingId`        |
+| 1   | Tenant Portal | `tenant_admin`            | `GET /api/tenant/bookings/:bookingId`       | booking read-back  |
+| 2   | Ops Console   | `platform_admin`          | `GET /api/dispatch/tasks`                   | `dispatchJobId`    |
+| 2   | Ops Console   | `platform_admin`          | `GET /api/dispatch/tasks/:id/candidates`    | candidate list     |
+| 2   | Ops Console   | `platform_admin`          | `POST /api/dispatch/assign`                 | `taskId`           |
+| 3   | Driver App    | `driver_user`             | `GET /api/driver/tasks`                     | task list          |
+| 3   | Driver App    | `driver_user`             | `POST /api/driver/tasks/:id/accept`         | accepted           |
+| 3   | Driver App    | `driver_user`             | `POST /api/driver/tasks/:id/depart`         | departed           |
+| 3   | Driver App    | `driver_user`             | `POST /api/driver/tasks/:id/arrived_pickup` | arrived            |
+| 3   | Driver App    | `driver_user`             | `POST /api/driver/tasks/:id/start`          | started            |
+| 3   | Driver App    | `driver_user`             | `POST /api/driver/tasks/:id/complete`       | completed          |
+| 4   | Tenant Portal | `tenant_admin`            | `GET /api/tenant/bookings/:bookingId`       | `completed` status |
+| 4   | Billing       | `tenant_admin`            | `POST /api/tenant/invoices/generate`        | `invoiceId`        |
+| 4   | Billing       | `tenant_admin`            | `GET /api/tenant/invoices/:invoiceId`       | invoice body       |
+| 4   | Audit         | `platform_admin`          | `GET /api/audit`                            | audit entry count  |
+
+#### ID Continuity Chain
+
+```
+bookingId (tenant) ──► dispatchJobId (ops) ──► taskId (driver) ──► invoiceId (billing)
+```
+
+#### Fixtures Used
+
+| Fixture                      | File                                             |
+| ---------------------------- | ------------------------------------------------ |
+| Enterprise dispatch booking  | `tests/e2e/fixtures/e2e-booking-enterprise.json` |
+| Dispatch assignment          | `tests/e2e/fixtures/e2e-dispatch-assign.json`    |
+| Driver accept                | `tests/e2e/fixtures/e2e-driver-accept.json`      |
+| Driver complete with signoff | `tests/e2e/fixtures/e2e-driver-complete.json`    |
+
+#### Pass Criteria
+
+1. `bookingId` captured and same value readable from tenant booking list.
+2. `dispatchJobId` found in ops dispatch queue (gracefully skippable on empty DB).
+3. Driver task transitions all return `200|201`.
+4. Task status is `accepted` after accept call.
+5. `invoiceId` generated and retrievable.
+6. Audit log returns ≥ 1 entry.
+7. All chain assertions pass: `tenant.bookingId`, `ops.dispatchJobId`, `driver.taskId`, `billing.invoiceId`.
+
+---
+
+### 4.2 E2E-002 — Forwarded Order Mirror Lifecycle
+
+**Script:** `tests/e2e/E2E-002-forwarded-order.sh`  
+**UAT cross-ref:** `docs/04-uat/phase1-uat-scenarios.md §5 E2E-002`
+
+#### Surface Chain
+
+```
+Driver App (visibility) ──► Driver App (accept) ──► Ops Console (no-owned-assignment check)
+```
+
+#### Leg Breakdown
+
+| Leg | Surface     | Actor            | API Route                               | Assertion                                       |
+| --- | ----------- | ---------------- | --------------------------------------- | ----------------------------------------------- |
+| 1   | Driver App  | `driver_user`    | `GET /api/driver/tasks`                 | Find task with `routeLocked=true`               |
+| 2   | Driver App  | `driver_user`    | `GET /api/driver/tasks/:taskId`         | Verify `routeLocked`, `sourcePlatform`          |
+| 3   | Driver App  | `driver_user`    | `POST /api/driver/tasks/:taskId/accept` | Accept succeeds                                 |
+| 4   | Ops Console | `platform_admin` | `GET /api/dispatch/tasks`               | No owned dispatch_assignment for forwarded task |
+
+#### Pass Criteria
+
+1. `routeLocked=true` on the forwarded task.
+2. `sourcePlatform` present and not null.
+3. Accept call succeeds.
+4. No owned `dispatch_assignment` with the forwarded task's ID in ops dispatch queue.
+5. **Graceful skip** when no forwarded task seed data is present.
+
+#### Notes
+
+This scenario is environment-dependent: it requires a seeded forwarded task or a live external
+platform adapter. In dry-run / staging-without-adapters it will warn and exit 0 (skip), not fail.
+
+---
+
+### 4.3 E2E-003 — Phone Booking to Compliance Export _(manual only in scaffold)_
+
+**UAT cross-ref:** `docs/04-uat/phase1-uat-scenarios.md §5 E2E-003`
+
+This scenario requires a live CTI session (`call_id`) and a recording callback webhook. It is
+**not automated in the scaffold** because both dependencies are environment-gated (external CTI
+environment or stub). It is covered by the WE-004 smoke harness guidance and the UAT checklist
+pending items (`OC-021`, `OC-022`, `OC-024`).
+
+**Manual steps** (reference only):
+
+1. Ops agent creates phone booking via `POST /api/call-center/orders` with `call_id`.
+2. Recording callback delivers `recording_id` via webhook.
+3. Driver completes trip with proof.
+4. Export includes `call_id` + `recording_id` row.
+
+---
+
+### 4.4 E2E-004 — Tenant Attribution and Cross-Tenant Safety
+
+**Script:** `tests/e2e/E2E-004-tenant-attribution.sh`  
+**UAT cross-ref:** `docs/04-uat/phase1-uat-scenarios.md §5 E2E-004`
+
+#### Surface Chain
+
+```
+Platform Admin (tenant create) ──► Tenant Portal (new tenant books) ──► Ops Console (attribution check) ──► Tenant Portal (cross-tenant safety)
+```
+
+#### Leg Breakdown
+
+| Leg | Surface        | Actor                       | API Route                          | Assertion                                       |
+| --- | -------------- | --------------------------- | ---------------------------------- | ----------------------------------------------- |
+| 1   | Platform Admin | `platform_admin`            | `POST /api/platform-admin/tenants` | `newTenantId` captured                          |
+| 1   | Platform Admin | `platform_admin`            | `GET /api/platform-admin/tenants`  | New tenant visible in list                      |
+| 2   | Tenant Portal  | `tenant_admin` (new tenant) | `POST /api/tenant/bookings`        | `bookingId2` under new tenantId                 |
+| 2   | Tenant Portal  | `tenant_admin` (new tenant) | `GET /api/tenant/bookings`         | New tenant sees own booking                     |
+| 3   | Ops Console    | `platform_admin`            | `GET /api/dispatch/tasks`          | Dispatch job has correct `tenantId` attribution |
+| 4   | Tenant Portal  | `tenant_admin` (TEN_ACME)   | `GET /api/tenant/bookings`         | `bookingId2` NOT present (no cross-tenant leak) |
+
+#### ID Continuity Chain
+
+```
+newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cross-tenant safety: absent from TEN_ACME view]
+```
+
+#### Fixtures Used
+
+| Fixture                     | File                                             |
+| --------------------------- | ------------------------------------------------ |
+| Tenant create               | `tests/e2e/fixtures/e2e-tenant-create.json`      |
+| Enterprise dispatch booking | `tests/e2e/fixtures/e2e-booking-enterprise.json` |
+
+#### Pass Criteria
+
+1. New tenant created; `newTenantId` non-empty.
+2. New tenant admin can create a booking.
+3. Dispatch queue shows job with correct `tenantId` (or warns if async propagation delay).
+4. **CRITICAL:** TEN_ACME booking list does NOT contain `bookingId2`. Exit 1 on cross-tenant leak.
+
+---
+
+## 5. Fixture Inventory
+
+| Fixture File                  | Used By                          | Description                                                       |
+| ----------------------------- | -------------------------------- | ----------------------------------------------------------------- |
+| `e2e-booking-enterprise.json` | E2E-001, E2E-004                 | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
+| `e2e-booking-airport.json`    | (reserved for E2E-003 expansion) | `credit_card_airport_transfer` booking                            |
+| `e2e-dispatch-assign.json`    | E2E-001                          | Dispatch assign body with `__*__` placeholders                    |
+| `e2e-driver-accept.json`      | E2E-001, E2E-002                 | Driver task accept with `__ACCEPTED_AT__`                         |
+| `e2e-driver-complete.json`    | E2E-001                          | Driver task complete with signoff                                 |
+| `e2e-tenant-create.json`      | E2E-004                          | Platform-admin tenant create with `__TENANT_CODE__`               |
+
+All `__PLACEHOLDER__` values are replaced at runtime by the scenario scripts before the fixture
+is passed to curl.
+
+---
+
+## 6. Running the E2E Suite
+
+```bash
+# Against local dev (default)
+./tests/e2e/run-e2e.sh
+
+# Against staging
+export E2E_API_URL=https://api-staging.drts.internal   # bare origin, no /api suffix
+./tests/e2e/run-e2e.sh
+
+# Run a single scenario
+./tests/e2e/run-e2e.sh --suite 001
+
+# Run multiple scenarios
+./tests/e2e/run-e2e.sh --suite 001,004
+
+# Dry-run: list scenarios without executing
+./tests/e2e/run-e2e.sh --dry-run
+
+# Verbose output (show all scenario output, not just failures)
+./tests/e2e/run-e2e.sh --verbose
+```
+
+### Auth model
+
+The E2E suite uses the same bootstrap-header auth as the smoke tests. No login endpoint exists.
+`tests/e2e/lib/helpers.sh` auto-derives the `x-realm` header from the actor type. Each scenario
+calls `switch_actor TYPE ID [TENANT_ID]` to change the active actor between surface legs.
+
+### Graceful skip rules
+
+- **E2E-001 legs 2–4:** skipped (exit 0 with warning) when staging DB has no open dispatch jobs.
+  This is expected when testing against a fresh staging environment with no booking seed propagated.
+- **E2E-002:** skipped (exit 0 with warning) when no forwarded task is present in driver task list.
+- **E2E-004:** skipped beyond leg 1 (exit 0 with warning) when `POST /api/platform-admin/tenants`
+  does not return a `tenantId` in its response.
+
+---
+
+## 7. Evidence Capture
+
+Each scenario writes to a shared evidence log (`/tmp/drts-e2e-evidence-<RUN_ID>.log`) and
+a chain file (`/tmp/drts-e2e-chain-<RUN_ID>.json`). The runner prints both at the end of the run.
+
+For rollout-grade closeout evidence (FBP-014B), the run must be executed against live staging
+and the evidence log must be committed alongside the FBP-014B evidence pack.
+
+Minimum evidence items required for each scenario:
+
+| Scenario | Required Evidence Items                                                     |
+| -------- | --------------------------------------------------------------------------- |
+| E2E-001  | `bookingId`, `dispatchJobId`, `taskId`, `invoiceId`, `auditEntryCount`      |
+| E2E-002  | `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `taskStatusAfterAccept` |
+| E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`    |
+
+---
+
+## 8. Relationship to Upstream Tasks
+
+| Task     | Status      | Relationship                                                                             |
+| -------- | ----------- | ---------------------------------------------------------------------------------------- |
+| FBP-006  | done        | Establishes `tenant-commute-hub` BFF routes used as E2E entry points                     |
+| FBP-007  | done        | Retires `apps/tenant-portal-web` — E2E must not use it                                   |
+| FBP-008  | done        | Platform Admin control-plane routes used in E2E-004                                      |
+| FBP-009  | done        | Ops Console dispatch routes used in E2E-001 / E2E-004                                    |
+| FBP-011  | done        | Finance / billing routes used in E2E-001 leg 4                                           |
+| FBP-012  | done        | Regulatory / reporting routes (available for future E2E-003 expansion)                   |
+| FBP-013  | in_progress | Staging evidence closeout; E2E-001/004 count as rollout-grade only after FBP-013 closes  |
+| FBP-014B | todo        | Blocked on FBP-013 + FBP-014A; will execute live integrated evidence run against staging |
+
+---
+
+## 9. Acceptance Criteria (FBP-014A)
+
+- [ ] **AC-1:** `tests/e2e/lib/helpers.sh` exists with `switch_actor`, `chain_set/get`, `assert_chain`, `save_evidence` and shared `http_call`.
+- [ ] **AC-2:** `tests/e2e/E2E-001-enterprise-dispatch.sh` exercises all 4 surface legs (tenant booking, ops dispatch assign, driver lifecycle, billing+audit) and captures the full ID continuity chain.
+- [ ] **AC-3:** `tests/e2e/E2E-002-forwarded-order.sh` verifies `routeLocked` metadata and absence of owned dispatch_assignment, with graceful skip when no forwarded task is seeded.
+- [ ] **AC-4:** `tests/e2e/E2E-004-tenant-attribution.sh` verifies correct `tenantId` attribution and **hard-fails on cross-tenant leak**.
+- [ ] **AC-5:** `tests/e2e/run-e2e.sh` runs all scenarios, emits pass/fail summary, and prints the evidence log.
+- [ ] **AC-6:** Fixtures (`e2e-booking-enterprise.json`, `e2e-dispatch-assign.json`, `e2e-driver-accept.json`, `e2e-driver-complete.json`, `e2e-tenant-create.json`) cover all scenario legs.
+- [ ] **AC-7:** This matrix document maps each scenario to its surface chain, fixtures, ID chain, and pass criteria.
+- [ ] **AC-8:** No scenario uses retired `apps/tenant-portal-web` routes or repo-B local authority paths.
+
+---
+
+_End of FBP-014A E2E matrix. Final integrated evidence run is the job of FBP-014B after FBP-013 closes._

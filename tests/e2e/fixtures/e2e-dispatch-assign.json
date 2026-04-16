@@ -1,0 +1,5 @@
+{
+  "dispatchJobId": "__DISPATCH_JOB_ID__",
+  "vehicleId": "__VEHICLE_ID__",
+  "driverId": "__DRIVER_ID__"
+}
