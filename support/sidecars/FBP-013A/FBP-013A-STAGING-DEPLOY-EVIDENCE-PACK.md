@@ -2,9 +2,9 @@
 
 **Task:** `FBP-013A` — staging deploy evidence pack
 **Parent Umbrella:** `FBP-013` — staging / smoke / UAT evidence closeout
-**Owner:** Claude
+**Owner:** Claude (availability-first reassignment from Codex at 2026-04-16T02:49Z)
 **Reviewer:** Codex
-**Status:** in_progress (revised per Codex review — AC-1 pending live deploy; schema/key corrections applied)
+**Status:** blocked (live staging deploy attempt failed at `2026-04-16T02:37:56Z`; awaiting infra remediation + rerun)
 **Created:** 2026-04-16 (UTC)
 **Staging Infra Baseline:** commit `ff015a9` (WE-003), path `infra/gcp/staging/`
 **Deploy Workflow Baseline:** commit `ff015a9` (WE-003), path `.github/workflows/deploy-staging.yml`
@@ -26,15 +26,16 @@ closeout. It provides:
   - `/api/admin/flags` endpoint status (AC-2b)
 - Family-to-sidecar cross-reference table for FBP-013D synthesis
 
-**Not in scope:** actual CI artifact URLs and live run output
-(populated by the real staging run at deploy time). This pack establishes the evidence
-template and canonical transcript; the CI artifact link is the live counterpart populated
-when the GCP staging project (`drts-staging`) executes a deploy from main.
+**Not in scope:** fabricating CI artifact URLs or claiming a passing live deploy without
+runtime evidence. This pack establishes the static evidence, records the observed live
+failure, and defines the remediation path required before AC-1 can pass.
 
-> **Status note (post-Codex review):** AC-1 live evidence items (E-11/E-12/E-13 — CI run
+> **Status note (post-reopen):** AC-1 live evidence items (E-11/E-12/E-13 — CI run
 > artifact URL, migration execution log, health-check HTTP 200 confirmation) are
-> **PENDING LIVE DEPLOY**. AC-1 is not fully satisfied until those items are populated
-> from an actual `drts-staging` deploy run. See §11 for the updated evaluation.
+> **BLOCKED ON LIVE DEPLOY REMEDIATION**. Shared truth records an actual
+> `drts-migrate` failure at `2026-04-16T02:37:56Z`; AC-1 cannot move to PASS until the
+> infra lane inspects that execution, fixes the runtime issue, and reruns staging.
+> See §7.5 and §11 for the blocker state and next actions.
 
 ---
 
@@ -415,30 +416,55 @@ Run: Print staging URLs
 ✅ health-check PASSED
 ```
 
+### 7.5 Observed Live Failure (Current Shared Truth)
+
+The current machine truth does not contain a successful staging deploy run. It contains a
+**failed live migration execution** recorded in `ai-activity-log.jsonl` /
+`current-work.md`:
+
+```text
+2026-04-16T02:37:56Z Orchestrator: `FBP-013A` ERROR:
+(gcloud.run.jobs.execute) Execution [drts-migrate-{exec-id}] failed.
+```
+
+What this means:
+
+- A real `drts-staging` deploy attempt was made.
+- The failure occurred in the **migration gate**, before the workflow could reach service
+  deploy or health-check.
+- E-11/E-12/E-13 therefore remain unpopulated by a successful run.
+- The current workflow emitted only the top-level gcloud failure line, so the execution
+  needs follow-up inspection in Cloud Run / Cloud Logging before a rerun.
+
+This is no longer a mere "pending live deploy" gap. It is an active blocker until the
+failing execution is diagnosed and a green rerun produces the missing evidence anchors.
+
 ---
 
 ## 8. Evidence Checklist
 
-| #    | Evidence Item                                      | Anchor                                                           | Status                 |
-| ---- | -------------------------------------------------- | ---------------------------------------------------------------- | ---------------------- |
-| E-1  | Deploy workflow file (machine-readable)            | `.github/workflows/deploy-staging.yml`                           | ✅ exists              |
-| E-2  | Cloud Run service YAMLs (3 active + 1 retired)     | `infra/gcp/staging/*.yaml`                                       | ✅ exists              |
-| E-3  | Migration job YAML                                 | `infra/gcp/staging/migrate-job.yaml`                             | ✅ exists              |
-| E-4  | Migration sequence V0001–V0018                     | `infra/migrations/V0001–V0018`                                   | ✅ 18 files present    |
-| E-5  | Secret wiring declared in workflow                 | `.github/workflows/deploy-staging.yml` §deploy                   | ✅ documented §5       |
-| E-6  | Deploy order machine-enforced                      | GitHub Actions job dependency graph                              | ✅ documented §3       |
-| E-7  | Manual rollout matrix gap resolution               | §6.1                                                             | ✅ RESOLVED            |
-| E-8  | `/api/admin/flags` gap resolution                  | §6.2                                                             | ✅ RESOLVED            |
-| E-9  | Canonical passing-deploy transcript                | §7                                                               | ✅ documented          |
-| E-10 | Feature flags endpoint implementation confirmation | `apps/api/src/modules/feature-flags/feature-flags.controller.ts` | ✅ verified            |
-| E-11 | CI run artifact URL (live)                         | GitHub Actions run after main push                               | ⬜ pending live deploy |
-| E-12 | DB migration job execution log (V0001–V0018)       | Cloud Run Job execution output                                   | ⬜ pending live deploy |
-| E-13 | API health check HTTP 200 confirmation             | health-check job log                                             | ⬜ pending live deploy |
+| #    | Evidence Item                                      | Anchor                                                           | Status                   |
+| ---- | -------------------------------------------------- | ---------------------------------------------------------------- | ------------------------ |
+| E-1  | Deploy workflow file (machine-readable)            | `.github/workflows/deploy-staging.yml`                           | ✅ exists                |
+| E-2  | Cloud Run service YAMLs (3 active + 1 retired)     | `infra/gcp/staging/*.yaml`                                       | ✅ exists                |
+| E-3  | Migration job YAML                                 | `infra/gcp/staging/migrate-job.yaml`                             | ✅ exists                |
+| E-4  | Migration sequence V0001–V0018                     | `infra/migrations/V0001–V0018`                                   | ✅ 18 files present      |
+| E-5  | Secret wiring declared in workflow                 | `.github/workflows/deploy-staging.yml` §deploy                   | ✅ documented §5         |
+| E-6  | Deploy order machine-enforced                      | GitHub Actions job dependency graph                              | ✅ documented §3         |
+| E-7  | Manual rollout matrix gap resolution               | §6.1                                                             | ✅ RESOLVED              |
+| E-8  | `/api/admin/flags` gap resolution                  | §6.2                                                             | ✅ RESOLVED              |
+| E-9  | Canonical passing-deploy transcript                | §7                                                               | ✅ documented            |
+| E-10 | Feature flags endpoint implementation confirmation | `apps/api/src/modules/feature-flags/feature-flags.controller.ts` | ✅ verified              |
+| E-11 | CI run artifact URL (live)                         | GitHub Actions run after main push                               | ⬜ blocked pending rerun |
+| E-12 | DB migration job execution log (V0001–V0018)       | Cloud Run Job execution output                                   | ⬜ blocked pending rerun |
+| E-13 | API health check HTTP 200 confirmation             | health-check job log                                             | ⬜ blocked pending rerun |
+| E-14 | Failed live deploy attempt recorded                | `ai-activity-log.jsonl` @ `2026-04-16T02:37:56Z`                 | ✅ failure captured      |
+| E-15 | Remediation commands for latest execution          | §11.1                                                            | ✅ documented            |
 
-Items E-11–E-13 are populated when the GCP `drts-staging` project runs a live deploy.
-The staging environment requires the GCP project to be provisioned with the secrets and
-Cloud SQL instance documented in §2 and §5. This pack records the pre-deploy static evidence;
-live evidence is the complement.
+Items E-11–E-13 are populated only when the GCP `drts-staging` project completes a green
+deploy. The staging environment requires the GCP project to be provisioned with the secrets
+and Cloud SQL instance documented in §2 and §5. Because a live attempt has already failed,
+these items are now blocked on remediation rather than simply waiting for a first run.
 
 ---
 
@@ -474,8 +500,8 @@ For use by `FBP-013D` (final evidence synthesis) and `FBP-014` (integrated E2E).
 | Wave E CI              | GitHub Actions CI                   | `4d7d1bb` | `WE-001-SIDECAR-REVIEW`                                 | done        |
 | Wave E Docker          | Docker multi-stage builds           | `657a4d3` | `WE-002-SIDECAR-ACCEPTANCE` + `WE-002-SIDECAR-REVIEW`   | done        |
 | Wave E staging         | GCP staging deploy scaffold         | `ff015a9` | _(FBP-013A is the staging evidence pack)_               | ✅ this doc |
-| Wave E smoke           | Smoke test suite                    | `9a233d1` | `FBP-013B-SMOKE-EVIDENCE-PACK`                          | review      |
-| Wave E UAT             | UAT scenario pack                   | `5c9cc4d` | `FBP-013C-UAT-EVIDENCE-PACK`                            | review      |
+| Wave E smoke           | Smoke test suite                    | `9a233d1` | `FBP-013B-SMOKE-EVIDENCE-PACK`                          | in_progress |
+| Wave E UAT             | UAT scenario pack                   | `5c9cc4d` | `FBP-013C-UAT-EVIDENCE-PACK`                            | in_progress |
 
 ---
 
@@ -483,21 +509,23 @@ For use by `FBP-013D` (final evidence synthesis) and `FBP-014` (integrated E2E).
 
 ### AC-1: staging deploy 流程與 evidence anchor 有實際輸出
 
-> **Overall AC-1 status: PENDING LIVE DEPLOY**
+> **Overall AC-1 status: BLOCKED**
 > Static pipeline evidence (deploy YAML, migration inventory, canonical transcript) is
-> complete. Live deploy evidence (E-11 CI run URL, E-12 migration log, E-13 health-check
-> output) requires an actual `drts-staging` GCP project deploy run. AC-1 is not fully
-> satisfied until those three evidence items are populated.
+> complete, but the current shared truth includes a failed `drts-migrate` execution at
+> `2026-04-16T02:37:56Z`. Live deploy evidence (E-11 CI run URL, E-12 migration success
+> log, E-13 health-check output) is therefore blocked on infra remediation plus a green
+> rerun of the staging workflow.
 
-| Sub-criterion                                 | Evidence                                                 | Status                                              |
-| --------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------- |
-| Deploy pipeline defined and job-ordered       | §3, `.github/workflows/deploy-staging.yml`               | ✅ PASS (static)                                    |
-| All 4 images built & pushed                   | §3.1 (api, migrate, platform-admin-web, ops-console-web) | ✅ PASS (static)                                    |
-| Migration job gates deploy                    | §3 topology diagram, §4 inventory                        | ✅ PASS (static)                                    |
-| Canonical passing transcript provided         | §7                                                       | ✅ PASS (static)                                    |
-| Live CI run artifact URL (E-11)               | ⬜ pending live deploy                                   | **PENDING** — blocked until GCP project provisioned |
-| DB migration execution log V0001–V0018 (E-12) | ⬜ pending live deploy                                   | **PENDING** — blocked until GCP project provisioned |
-| API health check HTTP 200 confirmation (E-13) | ⬜ pending live deploy                                   | **PENDING** — blocked until GCP project provisioned |
+| Sub-criterion                                 | Evidence                                                 | Status                                               |
+| --------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
+| Deploy pipeline defined and job-ordered       | §3, `.github/workflows/deploy-staging.yml`               | ✅ PASS (static)                                     |
+| All 4 images built & pushed                   | §3.1 (api, migrate, platform-admin-web, ops-console-web) | ✅ PASS (static)                                     |
+| Migration job gates deploy                    | §3 topology diagram, §4 inventory                        | ✅ PASS (static)                                     |
+| Canonical passing transcript provided         | §7                                                       | ✅ PASS (static)                                     |
+| Failed live migration attempt observed        | §7.5, E-14                                               | ✅ recorded blocker                                  |
+| Live CI run artifact URL (E-11)               | ⬜ pending successful rerun                              | **BLOCKED** — rerun required after infra remediation |
+| DB migration execution log V0001–V0018 (E-12) | ⬜ latest run failed before success evidence was created | **BLOCKED** — inspect failed execution and rerun     |
+| API health check HTTP 200 confirmation (E-13) | deploy never reached health-check                        | **BLOCKED** — migration gate must pass first         |
 
 ### AC-2: migration / secret wiring 與 health check evidence 被整理進 rollout packet
 
@@ -519,25 +547,93 @@ For use by `FBP-013D` (final evidence synthesis) and `FBP-014` (integrated E2E).
 
 ---
 
-## 12. Handoff
+## 11.1 AC-1 Remediation Commands
 
-### Owner → Reviewer Handoff Command
+Use these commands against `drts-staging` to diagnose the latest failed migration run and
+prepare the rerun that will populate E-11/E-12/E-13.
+
+```bash
+export PROJECT_ID="drts-staging"
+export REGION="asia-east1"
+
+EXECUTION_NAME="$(gcloud run jobs describe drts-migrate \
+  --region "$REGION" \
+  --project "$PROJECT_ID" \
+  --format='value(status.latestCreatedExecution.name)')"
+
+gcloud run jobs executions describe "$EXECUTION_NAME" \
+  --region "$REGION" \
+  --project "$PROJECT_ID" \
+  --format='yaml(metadata.name,status.startTime,status.completionTime,status.logUri,status.conditions,status.failedCount,status.runningCount,status.succeededCount)'
+
+gcloud run jobs executions tasks list \
+  --execution="$EXECUTION_NAME" \
+  --region "$REGION" \
+  --project "$PROJECT_ID" \
+  --succeeded
+```
+
+Remediation checklist before rerun:
+
+1. Inspect the latest execution's `status.logUri` and task output to identify the failing
+   migration/container-start cause.
+2. Verify the `drts-migrate` runtime can read `drts-staging-db-url` and reach the Cloud SQL
+   instance configured by `GCP_CLOUDSQL_INSTANCE`.
+3. After fixing the runtime prerequisite issue, rerun `Deploy — Staging` with
+   `skip_migration=false`.
+4. Attach the green GitHub Actions run URL, migration success log, and `/health` HTTP 200
+   output back into this pack and the parent closeout.
+
+---
+
+## 12. Blocker & Handoff
+
+### Owner → Blocker Sync Command
+
+```bash
+AI_NAME=Claude python3 scripts/ai_status.py blocker FBP-013A \
+  "Live staging deploy is blocked: shared truth records a failed \`drts-migrate\` execution at 2026-04-16T02:37:56Z. Static evidence and AC-2 gap resolutions are complete, but AC-1 still lacks the successful CI run URL, migration success log, and health-check HTTP 200. Need infra triage on the latest Cloud Run execution plus a green rerun of deploy-staging.yml to populate E-11/E-12/E-13." \
+  Gemini
+```
+
+### Post-Remediation Owner → Reviewer Handoff Command
 
 ```bash
 AI_NAME=Claude python3 scripts/ai_status.py handoff FBP-013A Codex \
-  "Staging deploy evidence pack complete at support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md. \
-Covers: (1) deploy pipeline topology — 4-job GitHub Actions graph (build-push → migrate → deploy → health-check) \
-with machine-enforced api-first deploy order; (2) V0001–V0018 migration inventory; (3) Secret Manager wiring \
-for DATABASE_URL/API_KEY_SALT/JWT_SECRET; (4) canonical passing-deploy transcript; (5) AC-2a gap RESOLVED: \
-infra deploy order is machine-enforced by workflow job deps, business rollout matrix intentionally manual; \
-(6) AC-2b gap RESOLVED: /api/admin/flags is fully implemented in feature-flags.controller.ts (5 endpoints, \
-V0014 schema), runtime eval client deferred post-Phase-1; (7) family-to-sidecar cross-reference table for \
-FBP-013D synthesis."
+  "Staging deploy evidence pack updated at support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md. \
+Static deploy topology, migration inventory, secret wiring, AC-2 gap resolutions, and family-to-sidecar cross-reference are complete; \
+the pack now also records the failed live \`drts-migrate\` attempt from 2026-04-16T02:37:56Z and the remediation path. \
+Only hand off after a green rerun populates E-11/E-12/E-13 (CI run URL, migration success log, health-check HTTP 200)."
 ```
 
 ---
 
 ## 13. Change Log
+
+- 2026-04-16 (rev 4) — Claude (availability-first reassignment) committed the uncommitted
+  deploy-staging.yml triage improvements added in rev 3:
+  (1) `Execute migration job and wait for completion` step now wraps the `gcloud run jobs execute`
+  call in an `if/then/exit 0` guard with `set -euo pipefail`, ensuring the step captures the exit
+  code correctly and emits triage metadata (execution name, YAML describe, tasks-list) before
+  exiting 1 on failure;
+  (2) metadata updated to reflect ownership transfer: Claude (availability-first reassignment from
+  Codex at 2026-04-16T02:49Z), reviewer remains Codex;
+  (3) §12 handoff commands updated to `AI_NAME=Claude`.
+  Static evidence (AC-2 and AC-3) remains fully PASS. AC-1 remains BLOCKED on live GCP staging
+  deploy — no change to E-11/E-12/E-13 status.
+
+- 2026-04-16 (rev 3) — Codex converted the pack from "pending live deploy" to an
+  explicit blocker-aware evidence packet:
+  (1) metadata updated to current owner/reviewer (`Codex`/`Claude`) and task state
+  `blocked`;
+  (2) §7.5 added the observed live failure from shared truth:
+  `ERROR: (gcloud.run.jobs.execute) Execution [drts-migrate-{exec-id}] failed.`;
+  (3) §8 and §11 now classify E-11/E-12/E-13 as **blocked** pending infra remediation
+  instead of merely pending;
+  (4) §11.1 adds concrete `gcloud run jobs describe / executions describe / tasks list`
+  triage commands for the latest execution;
+  (5) §12 now provides the owner-side blocker sync command plus the post-remediation
+  reviewer handoff command.
 
 - 2026-04-16 (rev 2) — Claude applied Codex review corrections:
   (1) AC-1 re-evaluated: live evidence items E-11/E-12/E-13 explicitly marked **PENDING
