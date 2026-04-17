@@ -619,6 +619,7 @@ export interface OwnedOrderRecord {
   orderNo: string;
   orderSource: OwnedOrderSource;
   orderDomain: "owned";
+  tenantId: string | null;
   serviceBucket: Phase1ServiceBucket;
   dispatchSemantics: DispatchSemantics;
   businessDispatchSubtype: BusinessDispatchSubtype | null;
@@ -672,6 +673,7 @@ export interface OwnedOrderRecord {
 export interface BookingRecord {
   bookingId: string;
   orderId: string;
+  tenantId: string;
   status: BookingStatus;
   serviceBucket: "business_dispatch";
   businessDispatchSubtype: BusinessDispatchSubtype;
