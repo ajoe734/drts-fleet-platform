@@ -39,6 +39,7 @@ export default async function WebhooksPage({
   const createMode = searchParams?.create === "true";
   const editWebhookId = searchParams?.edit;
   const deliveryWebhookId = searchParams?.deliveries;
+  const showGlobalWebhookDeliveryDisclaimer = !deliveryWebhookId;
   const successMsg = searchParams?.success ?? null;
   const formError = searchParams?.error ?? null;
 
@@ -67,7 +68,9 @@ export default async function WebhooksPage({
         title="Webhooks & Notifications"
         description={`Manage webhook endpoint subscriptions and delivery logs. ${webhooks.length} webhook(s), ${notifications.length} notification(s).`}
       >
-        <WebhookDeliveryDisclaimer />
+        {showGlobalWebhookDeliveryDisclaimer ? (
+          <WebhookDeliveryDisclaimer />
+        ) : null}
 
         {error && (
           <div className="error-banner">
