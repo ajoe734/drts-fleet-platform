@@ -15,5 +15,6 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
     TenantPartnerRepository,
     WebhookDispatchService,
   ],
+  exports: [TenantPartnerService],
 })
 export class TenantPartnerModule {}

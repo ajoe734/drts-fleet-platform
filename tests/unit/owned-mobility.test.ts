@@ -5,8 +5,13 @@ import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcen
 import { OwnedMobilityRepository } from "../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { WebhookDispatchService } from "../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 
-function createService(repository?: OwnedMobilityRepository) {
+function createService(
+  repository?: OwnedMobilityRepository,
+  tenantPartnerService?: TenantPartnerService,
+) {
   const auditService = new AuditNotificationService();
   const callcenterService = new CallcenterService(auditService);
   const regulatoryRegistryService = new RegulatoryRegistryService();
@@ -15,6 +20,7 @@ function createService(repository?: OwnedMobilityRepository) {
     auditService,
     callcenterService,
     repository,
+    tenantPartnerService,
   );
 
   return {
@@ -40,6 +46,11 @@ function getErrorCode(error: unknown) {
   ).getResponse?.();
 
   return response?.error?.code ?? null;
+}
+
+async function flushWebhookDispatch() {
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("owned mobility service", () => {
@@ -549,6 +560,156 @@ describe("owned mobility service", () => {
 
     expect(completedBooking.status).toBe("completed");
     expect(completedBooking.orderStatus).toBe("completed");
+  });
+
+  it("publishes tenant webhook deliveries for created, cancelled, and completed order events", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-16T08:00:00Z"));
+
+    try {
+      const auditService = new AuditNotificationService();
+      const fetchMock = vi.fn(async () => ({
+        ok: true,
+        status: 204,
+      }));
+      const tenantPartnerService = new TenantPartnerService(
+        auditService,
+        undefined,
+        new WebhookDispatchService(fetchMock),
+      );
+
+      tenantPartnerService.createWebhookEndpoint(TENANT_ACME, {
+        url: "https://acme.example.com/webhooks/orders",
+        secret: "acme-secret",
+        events: ["order.created", "order.cancelled"],
+      });
+      tenantPartnerService.createWebhookEndpoint(TENANT_NEWCO, {
+        url: "https://newco.example.com/webhooks/orders",
+        secret: "newco-secret",
+        events: ["order.completed"],
+      });
+
+      const { ownedMobilityService } = createService(
+        undefined,
+        tenantPartnerService,
+      );
+
+      const acmeBooking = ownedMobilityService.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          pickup: {
+            address: "台北市信義區松仁路100號",
+          },
+          dropoff: {
+            address: "桃園機場第二航廈",
+          },
+          reservationWindowStart: "2026-04-16T10:00:00Z",
+          reservationWindowEnd: "2026-04-16T10:20:00Z",
+          passenger: {
+            name: "ACME Admin",
+            phone: "0912000001",
+          },
+        },
+        TENANT_ACME,
+      );
+      await flushWebhookDispatch();
+
+      expect(
+        tenantPartnerService
+          .listWebhookDeliveries(TENANT_ACME)
+          .map((delivery) => ({
+            eventType: delivery.eventType,
+            status: delivery.status,
+          })),
+      ).toEqual([
+        {
+          eventType: "order.created",
+          status: "delivered",
+        },
+      ]);
+      expect(tenantPartnerService.listWebhookDeliveries(TENANT_NEWCO)).toEqual(
+        [],
+      );
+
+      ownedMobilityService.cancelTenantBooking(
+        TENANT_ACME,
+        acmeBooking.bookingId,
+        {
+          reason: "passenger_cancelled",
+        },
+      );
+      await flushWebhookDispatch();
+
+      expect(
+        tenantPartnerService
+          .listWebhookDeliveries(TENANT_ACME)
+          .map((delivery) => delivery.eventType),
+      ).toEqual(["order.cancelled", "order.created"]);
+
+      const newcoBooking = ownedMobilityService.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          pickup: {
+            address: "新竹高鐵站",
+          },
+          dropoff: {
+            address: "台北南港展覽館",
+          },
+          reservationWindowStart: "2026-04-16T11:00:00Z",
+          reservationWindowEnd: "2026-04-16T11:20:00Z",
+          passenger: {
+            name: "NEWCO Admin",
+            phone: "0912000002",
+          },
+        },
+        TENANT_NEWCO,
+      );
+      const dispatchJob = ownedMobilityService.dispatchOrder(
+        newcoBooking.orderId,
+        {
+          mode: "auto",
+        },
+      );
+      const candidate = ownedMobilityService.listDispatchCandidates(
+        dispatchJob.dispatchJobId,
+      )[0]!;
+      const assignment = ownedMobilityService.assignDispatch({
+        dispatchJobId: dispatchJob.dispatchJobId,
+        vehicleId: candidate.vehicleId,
+        driverId: candidate.driverId,
+      });
+
+      ownedMobilityService.acceptDriverTask(assignment.taskId, {
+        acceptedAt: "2026-04-16T11:02:00Z",
+      });
+      ownedMobilityService.departDriverTask(assignment.taskId, {
+        departedAt: "2026-04-16T11:03:00Z",
+      });
+      ownedMobilityService.arrivedPickup(assignment.taskId, {
+        arrivedAt: "2026-04-16T11:08:00Z",
+      });
+      ownedMobilityService.startDriverTask(assignment.taskId, {
+        startedAt: "2026-04-16T11:10:00Z",
+      });
+      ownedMobilityService.completeDriverTask(assignment.taskId, {
+        completedAt: "2026-04-16T11:45:00Z",
+        actualDistanceKm: 22.4,
+        actualDurationSec: 2100,
+        proof: {
+          photoIds: ["proof-photo-001"],
+        },
+      });
+      await flushWebhookDispatch();
+
+      expect(
+        tenantPartnerService
+          .listWebhookDeliveries(TENANT_NEWCO)
+          .map((delivery) => delivery.eventType),
+      ).toEqual(["order.completed"]);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("requires an explicit dispatch step before reservation bookings appear in the dispatch queue", () => {

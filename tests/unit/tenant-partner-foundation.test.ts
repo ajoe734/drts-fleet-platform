@@ -164,6 +164,70 @@ describe("tenant partner foundation service", () => {
     }
   });
 
+  it("publishes subscribed order events only for the matching tenant", async () => {
+    const auditService = new AuditNotificationService();
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 204,
+    }));
+    const tenantPartnerService = new TenantPartnerService(
+      auditService,
+      undefined,
+      new WebhookDispatchService(fetchMock),
+    );
+
+    tenantPartnerService.createWebhookEndpoint(TENANT_ID, {
+      url: "https://tenant.example.com/webhooks/completed",
+      secret: "tenant-secret",
+      events: ["order.completed"],
+    });
+    tenantPartnerService.createWebhookEndpoint(OTHER_TENANT_ID, {
+      url: "https://other.example.com/webhooks/orders",
+      secret: "other-secret",
+      events: ["order.created"],
+    });
+
+    const createdResults = await tenantPartnerService.publishWebhookEvent(
+      TENANT_ID,
+      {
+        eventType: "order.created",
+        occurredAt: "2026-04-17T12:30:00.000Z",
+        data: {
+          orderId: "order-001",
+          orderNo: "O-001",
+          orderStatus: "created",
+        },
+      },
+    );
+    const completedResults = await tenantPartnerService.publishWebhookEvent(
+      TENANT_ID,
+      {
+        eventType: "order.completed",
+        occurredAt: "2026-04-17T12:45:00.000Z",
+        data: {
+          orderId: "order-001",
+          orderNo: "O-001",
+          orderStatus: "completed",
+        },
+      },
+    );
+
+    expect(createdResults).toEqual([]);
+    expect(completedResults).toHaveLength(1);
+    expect(tenantPartnerService.listWebhookDeliveries(TENANT_ID)).toHaveLength(
+      1,
+    );
+    expect(
+      tenantPartnerService.listWebhookDeliveries(TENANT_ID)[0]?.eventType,
+    ).toBe("order.completed");
+    expect(tenantPartnerService.listWebhookDeliveries(OTHER_TENANT_ID)).toEqual(
+      [],
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain('"order_id"');
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain("order.completed");
+  });
+
   it("rotates webhook secrets and records rotation history", () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);

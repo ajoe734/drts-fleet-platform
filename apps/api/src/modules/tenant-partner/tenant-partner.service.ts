@@ -1084,46 +1084,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const createdAt = new Date().toISOString();
-    const deliveryId = `wd_${randomUUID()}`;
-    const delivery: StoredWebhookDelivery = {
-      deliveryId,
-      webhookId: endpoint.webhookId,
-      tenantId: endpoint.tenantId,
-      eventType: "tenant.webhook.test",
-      attempt: 0,
-      status: "queued",
-      httpStatus: null,
-      signature: "",
+    const delivery = this.enqueueWebhookDelivery(
+      endpoint,
+      "tenant.webhook.test",
       createdAt,
-      attemptedAt: createdAt,
-      nextAttemptAt: null,
-      signatureHeader: "",
-      signatureVersion: endpoint.secretVersion,
-      secretVersion: endpoint.secretVersion,
-      retryPolicySnapshot: { ...endpoint.retryPolicy },
-      rawBody: {},
-    };
-
-    this.webhookDeliveries = [delivery, ...this.webhookDeliveries];
-    endpoint.runtimeMetadata = {
-      ...endpoint.runtimeMetadata,
-      deliveryCount: endpoint.runtimeMetadata.deliveryCount + 1,
-      secretRotation: {
-        currentVersion: endpoint.secretVersion,
-        rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
-        rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
-        history: endpoint.runtimeMetadata.secretRotation.history.map(
-          (record) => ({ ...record }),
-        ),
-      },
-      retryPolicy: { ...endpoint.retryPolicy },
-    };
+      "send_test_webhook",
+    );
 
     const payload = this.buildWebhookPayload<{
       webhookId: string;
       secretVersion: number;
     }>({
-      deliveryId,
+      deliveryId: delivery.deliveryId,
       eventType: delivery.eventType,
       tenantId: endpoint.tenantId,
       occurredAt: createdAt,
@@ -1167,6 +1139,66 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async publishWebhookEvent<T extends Record<string, unknown>>(
+    tenantId: string,
+    input: {
+      eventType: string;
+      data: T;
+      occurredAt?: string;
+    },
+  ) {
+    this.assertNonBlank(tenantId, "tenantId");
+    this.assertNonBlank(input.eventType, "eventType");
+
+    const occurredAt = input.occurredAt ?? new Date().toISOString();
+    const endpoints = this.webhookEndpoints.filter(
+      (endpoint) =>
+        endpoint.tenantId === tenantId &&
+        endpoint.status === "active" &&
+        endpoint.events.includes(input.eventType),
+    );
+
+    const results: Array<{
+      webhookId: string;
+      deliveryId: string;
+      attempt: number;
+      httpStatus: number | null;
+      nextAttemptAt: string | null;
+      status: StoredWebhookDelivery["status"];
+    }> = [];
+
+    for (const endpoint of endpoints) {
+      const delivery = this.enqueueWebhookDelivery(
+        endpoint,
+        input.eventType,
+        occurredAt,
+        "publish_webhook_event",
+      );
+      const payload = this.buildWebhookPayload({
+        deliveryId: delivery.deliveryId,
+        eventType: input.eventType,
+        tenantId,
+        occurredAt,
+        data: input.data,
+      });
+      const result = await this.dispatchWebhookAttempt(
+        endpoint,
+        delivery,
+        payload as unknown as Record<string, unknown>,
+      );
+      results.push({
+        webhookId: endpoint.webhookId,
+        deliveryId: delivery.deliveryId,
+        attempt: result.attempt,
+        httpStatus: result.httpStatus,
+        nextAttemptAt: result.nextAttemptAt,
+        status: result.status,
+      });
+    }
+
+    return results;
+  }
+
   private buildWebhookPayload<T extends Record<string, unknown>>(input: {
     deliveryId: string;
     eventType: string;
@@ -1183,6 +1215,57 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         ...input.data,
       },
     };
+  }
+
+  private enqueueWebhookDelivery(
+    endpoint: StoredWebhookEndpoint,
+    eventType: string,
+    createdAt: string,
+    context: string,
+  ) {
+    const delivery: StoredWebhookDelivery = {
+      deliveryId: `wd_${randomUUID()}`,
+      webhookId: endpoint.webhookId,
+      tenantId: endpoint.tenantId,
+      eventType,
+      attempt: 0,
+      status: "queued",
+      httpStatus: null,
+      signature: "",
+      createdAt,
+      attemptedAt: createdAt,
+      nextAttemptAt: null,
+      signatureHeader: "",
+      signatureVersion: endpoint.secretVersion,
+      secretVersion: endpoint.secretVersion,
+      retryPolicySnapshot: { ...endpoint.retryPolicy },
+      rawBody: {},
+    };
+
+    this.webhookDeliveries = [delivery, ...this.webhookDeliveries];
+    endpoint.runtimeMetadata = {
+      ...endpoint.runtimeMetadata,
+      deliveryCount: endpoint.runtimeMetadata.deliveryCount + 1,
+      secretRotation: {
+        currentVersion: endpoint.secretVersion,
+        rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
+        rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
+        history: endpoint.runtimeMetadata.secretRotation.history.map(
+          (record) => ({ ...record }),
+        ),
+      },
+      retryPolicy: { ...endpoint.retryPolicy },
+    };
+
+    this.persistChanges(
+      {
+        webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+        webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+      },
+      context,
+    );
+
+    return delivery;
   }
 
   private async dispatchWebhookAttempt(

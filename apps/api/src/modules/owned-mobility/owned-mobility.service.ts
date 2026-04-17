@@ -37,6 +37,7 @@ import { AuditNotificationService } from "../audit-notification/audit-notificati
 import { CallcenterService } from "../callcenter/callcenter.service";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 
 type TenantBookingResult = {
   orderId: string;
@@ -106,6 +107,8 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly callcenterService: CallcenterService,
     @Optional()
     private readonly ownedMobilityRepository?: OwnedMobilityRepository,
+    @Optional()
+    private readonly tenantPartnerService?: TenantPartnerService,
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
@@ -525,6 +528,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
+    this.publishTenantOrderWebhook(order, "order.created", order.createdAt);
 
     return {
       orderId,
@@ -1261,6 +1265,10 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
+    this.publishTenantOrderWebhook(order, "order.cancelled", now, {
+      cancelledAt: order.cancelledAt,
+      cancelReason: order.cancelReason,
+    });
 
     return this.cloneOrder(order);
   }
@@ -1763,8 +1771,46 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
+    this.publishTenantOrderWebhook(order, "order.completed", now, {
+      completedAt: command.completedAt,
+      taskId,
+      assignmentId: assignment.assignmentId,
+    });
 
     return this.cloneTask(task);
+  }
+
+  private publishTenantOrderWebhook(
+    order: OwnedOrderRecord,
+    eventType: "order.created" | "order.cancelled" | "order.completed",
+    occurredAt: string,
+    extraData: Record<string, unknown> = {},
+  ) {
+    if (!order.tenantId || !this.tenantPartnerService) {
+      return;
+    }
+
+    void this.tenantPartnerService
+      .publishWebhookEvent(order.tenantId, {
+        eventType,
+        occurredAt,
+        data: {
+          orderId: order.orderId,
+          orderNo: order.orderNo,
+          bookingId: order.bookingId,
+          bookingType: order.bookingType,
+          orderStatus: order.status,
+          serviceBucket: order.serviceBucket,
+          dispatchSemantics: order.dispatchSemantics,
+          businessDispatchSubtype: order.businessDispatchSubtype,
+          reservationWindowStart: order.reservationWindowStart,
+          reservationWindowEnd: order.reservationWindowEnd,
+          createdAt: order.createdAt,
+          updatedAt: order.updatedAt,
+          ...extraData,
+        },
+      })
+      .catch(() => undefined);
   }
 
   private nextOrderNo() {
