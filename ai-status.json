@@ -4,7 +4,7 @@
   "consensus_status": "accepted",
   "sprint": "2026-04-15-full-blueprint-execution",
   "objective": "Execute the accepted full blueprint master plan: complete tenant portal convergence, finish the remaining Platform Admin / Ops / finance / filing blueprint families, close rollout evidence, and preserve deferred roadmap slices without losing scope.",
-  "updated_at": "2026-04-16T17:05:00Z",
+  "updated_at": "2026-04-17T00:35:00Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -104,35 +104,35 @@
         "architecture-arbitration",
         "control-plane"
       ],
-      "status": "working",
-      "current_task_ids": ["FBP-013A"],
+      "status": "waiting",
+      "current_task_ids": ["FBP-014", "FBP-015"],
       "branch": "feat/claude-governance-review",
-      "next": "Workflow triage committed (e7afdd8). Static evidence complete \u2014 AC-2 and AC-3 fully PASS. AC-1 blocked on live GCP staging deploy: drts-migrate failed at 2026-04-16T02:37:56Z. E-11 (CI run URL), E-12 (migration log), E-13 (health-check HTTP 200) are now tracked under child task FBP-013A-INFRA for infra remediation and green rerun before FBP-013A can reopen.",
-      "last_update": "2026-04-16T03:00:06Z",
+      "next": "Umbrella waits on an immediately-startable test-matrix scaffold plus a final integrated evidence run, so idle lanes can prepare cross-repo E2E assets before FBP-013 finishes.",
+      "last_update": "2026-04-16T23:58:29Z",
       "current_task": "FBP-013A",
       "note": "Evidence pack closeout: E-11/E-12/E-13 collection, staging runbook."
     },
     {
       "name": "Gemini",
       "capability_lane": ["runtime-packaging", "ci-cd", "infra", "worker-ops"],
-      "status": "working",
-      "current_task_ids": ["FBP-013D", "FBP-014B"],
+      "status": "idle",
+      "current_task_ids": [],
       "branch": "feat/gemini-runtime-infra",
-      "next": "Ownership updated to Gemini so the final evidence synthesis can stay on a live lane once FBP-013A to FBP-013C land.",
-      "last_update": "2026-04-16T04:41:39Z",
+      "next": "Pick the next infra, rollout, or runtime slice that is ready for execution review.",
+      "last_update": "2026-04-16T01:59:51Z",
       "current_task": "FBP-013D",
       "note": "Early synthesis start: FBP-013B + FBP-013C evidence available; 013A placeholder pending."
     },
     {
       "name": "Codex",
       "capability_lane": ["contracts", "schema", "state-system", "acceptance"],
-      "status": "idle",
-      "current_task_ids": ["FBP-013A-INFRA"],
+      "status": "working",
+      "current_task_ids": ["FBP-014B"],
       "branch": "feat/codex-phase1-architecture",
-      "next": "Cannot complete a green staging rerun from the current repo state: GitHub Actions is missing vars.GCP_PROJECT_ID, vars.GCP_REGION, vars.GCP_CLOUDSQL_INSTANCE, vars.GCP_RUNTIME_SERVICE_ACCOUNT (or secret GCP_RUNTIME_SERVICE_ACCOUNT), secrets.WIF_PROVIDER, and secrets.WIF_SERVICE_ACCOUNT, so remote runs fail before GCP auth or migration. This machine also cannot inspect Cloud Run directly because gcloud auth returns ACCESS_TOKEN_SCOPE_INSUFFICIENT for drts-staging. Need repo/GCP credential provisioning plus a privileged rerun of Deploy \u2014 Staging before E-11/E-12/E-13 can be collected.",
-      "last_update": "2026-04-16T04:26:30Z",
-      "current_task": "",
-      "note": "Quota reset expected; available for sidecar dispatch."
+      "next": "Live staging evidence collected in support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md. Harness is now runnable against private Cloud Run, but FBP-014B cannot satisfy acceptance on current staging: E2E-001 creates booking/order yet dispatch/tasks stays empty after 20 polls, E2E-002 remains environment-gated with zero driver tasks, and E2E-004 reproduces a critical cross-tenant leak where TEN_ACME can read booking-000004 from tenant t_e0bc7ef4. Waiting for supervisor triage / follow-up task routing on the reproduced staging defects.",
+      "last_update": "2026-04-17T00:25:04Z",
+      "current_task": "BUG-001",
+      "note": "Critical: fix cross-tenant booking leak in owned-mobility API"
     },
     {
       "name": "Qwen",
@@ -146,7 +146,7 @@
       "current_task_ids": [],
       "branch": "feat/qwen-integration-slices",
       "next": "Pick the next API or integration slice that is unblocked and ready to implement.",
-      "last_update": "2026-04-16T15:18:18Z"
+      "last_update": "2026-04-17T00:00:50Z"
     },
     {
       "name": "Copilot",
@@ -166,12 +166,13 @@
     {
       "name": "Codex2",
       "capability_lane": ["contracts", "schema", "state-system", "acceptance"],
-      "status": "idle",
+      "status": "working",
       "current_task_ids": [],
       "branch": "feat/codex2-parallel-worker",
       "next": "Wait for the next execution slice.",
-      "last_update": "2026-04-16T15:20:53Z",
-      "note": "Available for sidecar dispatch."
+      "last_update": "2026-04-17T00:05:33Z",
+      "note": "Fix E2E-001 dispatch not triggered after booking creation",
+      "current_task": "BUG-002"
     }
   ],
   "tasks": [
@@ -1563,7 +1564,7 @@
       "phase": "Full Blueprint Wave 3",
       "owner": "Claude",
       "reviewer": "Codex",
-      "status": "todo",
+      "status": "done",
       "depends_on": ["FBP-013A", "FBP-013B", "FBP-013C", "FBP-013D"],
       "artifacts": [
         "docs/03-runbooks/phase1-rollout.md",
@@ -1577,9 +1578,21 @@
         "manual rollout matrix \u8207 `/api/admin/flags` operational gap \u88ab\u6b63\u78ba\u8655\u7406\uff0c\u4e0d\u518d\u53ea\u662f\u6587\u6a94\u5099\u8a3b",
         "\u6bcf\u500b major execution family \u7684 paired verification child \u88ab\u6574\u5408\u56de final evidence closeout"
       ],
-      "next": "Umbrella closeout now waits on split child evidence packs (staging, smoke, UAT/sign-off, and final synthesis) so multiple lanes can execute in parallel before the final evidence merge.",
-      "last_update": "2026-04-16T01:59:51Z",
-      "task_class": "execution_evidence"
+      "next": "Owner finalized: FBP-013 umbrella closeout complete. All four child packs (FBP-013A/B/C/D) done, all sidecars closed. Three ACs verified \u2014 staging deploy evidence PASS (GHA run #24522301392), deploy ordering machine-enforced, all 8 upstream execution family commits listed. Smoke static evidence PASS (6 critical-path cases). UAT 45/45 P1 PASS. Pilot/production remain HOLD. FBP-014 and FBP-014B are now formally unblocked for Gemini to execute the final integrated cross-repo evidence run. Anchor commit: 4ec423d.",
+      "last_update": "2026-04-17T00:00:30Z",
+      "task_class": "execution_evidence",
+      "review_notes_zh": [
+        "\u5be9\u67e5\u901a\u904e\uff1aumbrella packet \u4ee5 ai-status.json/current-work.md \u70ba machine truth\uff0c\u6b63\u78ba\u628a FBP-013A/B/C/D \u5168\u90e8\u8996\u70ba\u5df2\u5b8c\u6210 child evidence packs\uff0c\u800c\u975e\u4f9d\u8cf4\u820a header \u5feb\u7167\u3002",
+        "\u00a74 decision table \u8207 child evidence \u4e00\u81f4\uff1astaging deploy PASS\uff08GHA run #24522301392\uff09\u3001smoke static PASS\uff086 critical-path cases\uff09\u3001UAT 45/45 non-deferred P1 PASS\uff0cpilot / production \u4ecd\u7dad\u6301 HOLD\u3002",
+        "\u00a73 \u8207 \u00a77 \u5c0d acceptance criteria \u7684\u652f\u6490\u5b8c\u6574\uff1a8 \u500b upstream execution family closeout commit \u5168\u5217\u51fa\uff0cmanual rollout matrix / /api/admin/flags gap \u7684\u8655\u7f6e\u6c92\u6709\u9000\u56de\u6210\u6a21\u7cca\u5099\u8a3b\u3002",
+        "\u00a76 downstream unblock \u63cf\u8ff0\u8207 shared truth \u4e00\u81f4\uff1aFBP-014A \u5df2 done\uff0cFBP-014B \u7684\u6b63\u5f0f\u5269\u9918 blocker \u53ea\u5269 parent FBP-013 owner finalize\u3002"
+      ],
+      "review_file": "support/sidecars/FBP-013/FBP-013-UMBRELLA-CLOSEOUT.md",
+      "commit_hash": "4ec423d",
+      "commit_subject": "docs(FBP-013): finalize umbrella evidence closeout packet",
+      "commit_agent": "Claude",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-17T00:00:30Z"
     },
     {
       "id": "FBP-013A",
@@ -1588,7 +1601,7 @@
       "phase": "Full Blueprint Wave 3",
       "owner": "Claude",
       "reviewer": "Codex",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "FBP-008",
         "FBP-009",
@@ -1606,11 +1619,19 @@
         "migration / secret wiring \u8207 health check evidence \u88ab\u6574\u7406\u9032 rollout packet",
         "manual rollout matrix \u8207 `/api/admin/flags` operational gap \u6709\u660e\u78ba\u8655\u7f6e\uff0c\u4e0d\u518d\u53ea\u505c\u7559\u5728\u5099\u8a3b"
       ],
-      "next": "FBP-013A-INFRA complete. Resume evidence pack: collect E-11 (CI run URL), E-12 (migration log), E-13 (health check pass), finalize staging runbook.",
-      "last_update": "2026-04-16T03:00:06Z",
+      "next": "Owner finalized: staging deploy evidence pack complete. All three acceptance criteria pass \u2014 AC-1 (green run #24522301392, all four jobs passed), AC-2a (deploy order machine-enforced by GitHub Actions job dependency graph), AC-2b (/api/admin/flags confirmed implemented in feature-flags.controller.ts). Evidence pack now internally consistent with ai-status.json, current-work.md, and green run evidence chain. Reviewer-side wording cleanup in commit e0b256d closes the last pre-remediation scope inconsistency. FBP-013D synthesis unblocked.",
+      "last_update": "2026-04-16T23:35:48Z",
       "task_class": "execution_evidence",
-      "waiting_for": "Gemini",
-      "updated_at": "2026-04-16T17:05:00Z"
+      "updated_at": "2026-04-16T17:05:00Z",
+      "review_notes_zh": [
+        "\u552f\u4e00\u6b98\u7559\u7684 pre-remediation scope \u7528\u8a9e\u5df2\u5728 reviewer-side cleanup commit e0b256d \u4fee\u6b63\uff1bpack \u73fe\u5728\u8207 ai-status.json\u3001current-work.md \u53ca\u7da0\u71c8 run #24522301392 \u4e00\u81f4\u3002"
+      ],
+      "review_file": "support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md",
+      "commit_hash": "e0b256d",
+      "commit_subject": "docs(FBP-013A): fix stale scope wording in evidence pack",
+      "commit_agent": "Claude",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-16T23:35:48Z"
     },
     {
       "id": "FBP-013B",
@@ -1677,9 +1698,9 @@
       "title": "final evidence synthesis and closeout packet",
       "summary_zh": "\u532f\u7e3d staging\u3001smoke\u3001UAT/sign-off \u4e09\u500b evidence packs\uff0c\u7522\u51fa\u6700\u7d42 blueprint execution evidence closeout \u8207 release decision packet\u3002",
       "phase": "Full Blueprint Wave 3",
-      "owner": "Gemini",
+      "owner": "Codex2",
       "reviewer": "Claude",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": ["FBP-013A", "FBP-013B", "FBP-013C"],
       "artifacts": [
         "docs/03-runbooks/phase1-rollout.md",
@@ -1691,10 +1712,15 @@
         "release / pilot / production decision gate \u8207 evidence trace \u95dc\u806f\u6e05\u695a",
         "paired verification child \u8207\u4e3b\u7dda execution family \u7684\u5f15\u7528\u95dc\u4fc2\u5b8c\u6574"
       ],
-      "next": "FBP-013B and FBP-013C evidence done. Begin synthesis scaffold using available evidence; leave 013A placeholder for when it completes.",
-      "last_update": "2026-04-16T03:58:50Z",
+      "next": "Done: final evidence synthesis packet at support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md is formally closed. It consolidates finalized FBP-013A/B/C evidence, keeps staging release evidence PASS and smoke/UAT PASS as static evidence, preserves pilot/production HOLD posture, and maintains the execution-family verification mapping required by FBP-013 umbrella closeout and downstream FBP-014B.",
+      "last_update": "2026-04-16T23:51:49Z",
       "task_class": "execution_evidence",
-      "updated_at": "2026-04-16T17:05:00Z"
+      "updated_at": "2026-04-16T17:05:00Z",
+      "commit_hash": "dd0e7d7",
+      "commit_subject": "docs(fbp-013d): finalize evidence closeout packet",
+      "commit_agent": "Codex2",
+      "commit_reviewer": "Claude",
+      "commit_recorded_at": "2026-04-16T23:51:49Z"
     },
     {
       "id": "FBP-014",
@@ -1756,9 +1782,9 @@
       "title": "final integrated cross-repo evidence run",
       "summary_zh": "\u5728 FBP-013 evidence closeout \u8207 FBP-014A \u8173\u624b\u67b6\u5b8c\u6210\u5f8c\uff0c\u57f7\u884c\u4e26\u6536\u6582\u6700\u7d42 booking \u2192 dispatch \u2192 driver \u2192 billing/audit integrated evidence\u3002",
       "phase": "Full Blueprint Wave 3",
-      "owner": "Gemini",
+      "owner": "Codex",
       "reviewer": "Claude",
-      "status": "todo",
+      "status": "blocked",
       "depends_on": ["FBP-013", "FBP-014A"],
       "artifacts": [
         "docs/04-uat/phase1-uat-scenarios.md",
@@ -1770,9 +1796,10 @@
         "no cross-tenant leak\u3001audit consistency\u3001billing consistency evidence \u5b8c\u6574",
         "repo B cutover \u5f8c\u7684 integrated path \u53ef\u88ab reviewer \u76f4\u63a5\u5be9\u67e5"
       ],
-      "next": "Blocked on FBP-013 and FBP-014A: run the final integrated evidence flow after evidence closeout and scaffold land.",
-      "last_update": "2026-04-16T01:59:51Z",
-      "task_class": "execution_evidence"
+      "next": "Live staging evidence collected in support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md. Harness is now runnable against private Cloud Run, but FBP-014B cannot satisfy acceptance on current staging: E2E-001 creates booking/order yet dispatch/tasks stays empty after 20 polls, E2E-002 remains environment-gated with zero driver tasks, and E2E-004 reproduces a critical cross-tenant leak where TEN_ACME can read booking-000004 from tenant t_e0bc7ef4. Waiting for supervisor triage / follow-up task routing on the reproduced staging defects.",
+      "last_update": "2026-04-17T00:25:04Z",
+      "task_class": "execution_evidence",
+      "waiting_for": "Claude"
     },
     {
       "id": "FBP-015",
@@ -2445,6 +2472,150 @@
       "commit_agent": "Codex2",
       "commit_reviewer": "Claude",
       "commit_recorded_at": "2026-04-16T15:22:27Z"
+    },
+    {
+      "id": "FBP-013D-SIDECAR-ACCEPTANCE",
+      "title": "Prepare FBP-013D acceptance packet and dependency map",
+      "summary_zh": "\u5e73\u884c\u652f\u63f4 FBP-013D\uff0c\u5148\u6574\u7406 acceptance checklist\u3001dependency map \u8207 support packet\uff0c\u4e0d\u6539 canonical truth\u3002",
+      "phase": "Full Blueprint Wave 3",
+      "owner": "Codex2",
+      "reviewer": "Codex",
+      "status": "done",
+      "depends_on": ["FBP-013B", "FBP-013C"],
+      "artifacts": ["support/sidecars/FBP-013D/FBP-013D-SIDECAR-ACCEPTANCE.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Owner finalized approved sidecar; FBP-013D acceptance packet is ready in support/sidecars/FBP-013D/ for Gemini to absorb into the parent evidence synthesis without changing canonical truth.",
+      "last_update": "2026-04-16T23:39:23Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "FBP-013D",
+      "helper_kind": "acceptance_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization",
+      "review_notes_zh": [
+        "\u5be9\u67e5\u901a\u904e\uff1apacket \u5df2\u5c0d\u9f4a\u6700\u65b0 shared truth\uff08reviewer=Codex, sidecar status=review, FBP-013A/013B/013C \u5168\u70ba done\uff09\uff0c\u4e14\u4fdd\u7559 parent FBP-013D \u4f5c\u70ba synthesis glue\u3001child packs \u4f5c\u70ba\u552f\u4e00 evidence source \u7684\u908a\u754c\u3002",
+        "reviewer-side cleanup \u5df2\u540c\u6b65 Gemini->Codex \u6539\u6d3e\u8207 FBP-013A owner finalize\uff08commit e0b256d\u3001green run #24522301392\uff09\uff0chandoff / approve \u6307\u4ee4\u8207 reviewer hotspot \u7686\u53ef\u76f4\u63a5\u4f7f\u7528\u3002"
+      ],
+      "review_file": "support/sidecars/FBP-013D/FBP-013D-SIDECAR-ACCEPTANCE.md",
+      "commit_hash": "-",
+      "commit_subject": "no-commit closeout",
+      "commit_agent": "Codex2",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-16T23:39:23Z"
+    },
+    {
+      "id": "FBP-013D-SIDECAR-REVIEW",
+      "title": "Prepare FBP-013D review packet and evidence summary",
+      "summary_zh": "\u5e73\u884c\u652f\u63f4 FBP-013D\uff0c\u5148\u6574\u7406 review packet\u3001evidence summary \u8207 reviewer handoff\uff0c\u4e0d\u6539 canonical truth\u3002",
+      "phase": "Full Blueprint Wave 3",
+      "owner": "Codex",
+      "reviewer": "Codex2",
+      "status": "done",
+      "depends_on": ["FBP-013A", "FBP-013B", "FBP-013C"],
+      "artifacts": ["support/sidecars/FBP-013D/FBP-013D-SIDECAR-REVIEW.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Owner finalized: FBP-013D sidecar review packet complete and closed. Review packet at support/sidecars/FBP-013D/FBP-013D-SIDECAR-REVIEW.md records the parent closeout chain and reviewer-routing trail. NO_COMMIT_REQUIRED=1.",
+      "last_update": "2026-04-16T23:54:26Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "FBP-013D",
+      "helper_kind": "review_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization",
+      "review_notes_zh": [
+        "\u5be9\u67e5\u901a\u904e\uff1aFBP-013D sidecar review packet \u5df2\u6b63\u78ba\u5c0d\u9f4a shared-truth parent review \u72c0\u614b\uff08FBP-013D=review\uff09\u8207 sidecar reviewer \u968e\u6bb5\uff08FBP-013D-SIDECAR-REVIEW=review\uff09\uff0c\u4e26\u5b8c\u6574\u4fdd\u7559 Qwen 401 failure \u5f8c\u6539\u6d3e\u81f3 Codex2\u3001owner handoff\u3001review_ready_dispatch \u7684\u8def\u7531\u8ecc\u8de1\uff1b\u6700\u7d42 synthesis packet\u3001FBP-013A/B/C child evidence \u9328\u9ede\uff0c\u4ee5\u53ca staging PASS / smoke-UAT static PASS / pilot-production HOLD \u7684 reviewer \u71b1\u9ede\u5747\u5df2\u6574\u7406\u6e05\u695a\u3002|support artifact only\uff0c\u672a\u6539 canonical truth\u3002|\u56de\u5230 owner\uff08Codex2\uff09\u4ee5 NO_COMMIT_REQUIRED=1 \u505a done closeout\u3002"
+      ],
+      "review_file": "support/sidecars/FBP-013D/FBP-013D-SIDECAR-REVIEW.md"
+    },
+    {
+      "id": "FBP-014B-SIDECAR-ACCEPTANCE",
+      "title": "Prepare FBP-014B acceptance packet and dependency map",
+      "summary_zh": "\u5e73\u884c\u652f\u63f4 FBP-014B\uff0c\u5148\u6574\u7406 acceptance checklist\u3001dependency map \u8207 support packet\uff0c\u4e0d\u6539 canonical truth\u3002",
+      "phase": "Full Blueprint Wave 3",
+      "owner": "Codex2",
+      "reviewer": "Codex",
+      "status": "done",
+      "depends_on": ["FBP-013", "FBP-014A"],
+      "artifacts": ["support/sidecars/FBP-014B/FBP-014B-SIDECAR-ACCEPTANCE.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Owner finalized approved sidecar; FBP-014B acceptance packet is ready in support/sidecars/FBP-014B/ for the parent execution lane to absorb while preserving canonical truth.",
+      "last_update": "2026-04-17T00:06:12Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "FBP-014B",
+      "helper_kind": "acceptance_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization",
+      "review_notes_zh": [
+        "\u5be9\u67e5\u901a\u904e\uff1aacceptance packet \u5df2\u56de\u88dc shared-truth \u6f02\u79fb\uff0c\u73fe\u5728\u6b63\u78ba\u53cd\u6620 parent `FBP-014B` owner=Codex2\u3001sidecar status=review\uff0c\u4ee5\u53ca 2026-04-17T00:03:38Z \u7684\u518d\u6b21\u6539\u6d3e\u3002",
+        "\u4f9d\u8cf4\u5716\u8207 AC \u5c55\u958b\u7dad\u6301\u6b63\u78ba\u908a\u754c\uff1a`FBP-013` \u88ab\u8996\u70ba\u5df2\u5b8c\u6210\u7684 upstream evidence family\uff0c`FBP-014A` \u53ea\u4f5c\u70ba static scaffold baseline\uff0c\u4e0d\u88ab\u8aa4\u7b97\u6210 live integrated evidence\u3002",
+        "reviewer-facing checklist \u5df2\u660e\u78ba\u8981\u6c42 stitched ID chain\u3001billing read-back\u3001audit evidence\u3001cross-tenant check \u8207 manual/environment caveat \u986f\u5f0f\u5316\uff1bsupport artifact only\uff0c\u672a\u6539 canonical truth\u3002",
+        "\u56de\u5230 owner\uff08Codex2\uff09\u4ee5 NO_COMMIT_REQUIRED=1 \u505a done closeout\u3002"
+      ],
+      "review_file": "support/sidecars/FBP-014B/FBP-014B-SIDECAR-ACCEPTANCE.md",
+      "commit_hash": "-",
+      "commit_subject": "no-commit closeout",
+      "commit_agent": "Codex2",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-17T00:06:12Z"
+    },
+    {
+      "id": "BUG-001",
+      "title": "Fix cross-tenant booking data leak in owned-mobility API",
+      "summary_zh": "GET /tenant/bookings \u548c GET /tenant/bookings/:bookingId \u6c92\u6709 tenant \u9694\u96e2\uff0c\u4efb\u4f55\u79df\u6236\u53ef\u8b80\u53d6\u5176\u4ed6\u79df\u6236\u7684 booking\u3002\u9700\u5f9e x-tenant-id header \u63d0\u53d6 tenantId\uff0c\u5728 createTenantBooking/listTenantBookings/getTenantBooking \u5168\u90e8\u5957\u7528 filter\u3002",
+      "phase": "Bug Fix",
+      "owner": "Codex",
+      "reviewer": "Claude",
+      "status": "in_progress",
+      "depends_on": [],
+      "artifacts": [
+        "apps/api/src/modules/owned-mobility/owned-mobility.controller.ts",
+        "apps/api/src/modules/owned-mobility/owned-mobility.service.ts"
+      ],
+      "acceptance": [
+        "listTenantBookings() \u53ea\u56de\u50b3\u547c\u53eb\u65b9 tenant \u7684 booking",
+        "getTenantBooking() \u82e5 bookingId \u4e0d\u5c6c\u65bc\u547c\u53eb\u65b9 tenant \u5247\u56de\u50b3 404",
+        "createTenantBooking() \u5c07 tenantId \u5beb\u5165 booking record",
+        "E2E-004 \u901a\u904e\uff1aTEN_ACME \u7121\u6cd5\u8b80\u53d6\u5176\u4ed6 tenant \u7684 booking"
+      ],
+      "next": "Fix: extract x-tenant-id from controller headers, pass tenantId to service, filter listTenantBookings/getTenantBooking by tenantId, scope createTenantBooking to calling tenant.",
+      "last_update": "2026-04-17T00:35:00Z",
+      "task_class": "bug_fix",
+      "priority": "critical"
+    },
+    {
+      "id": "BUG-002",
+      "title": "Fix E2E-001: dispatch not triggered after tenant booking creation",
+      "summary_zh": "E2E-001 \u5728 POST /tenant/bookings \u5f8c poll /api/dispatch/tasks \u5f97\u5230\u7a7a\u7d50\u679c\u3002Phase 1 dispatch \u662f ops \u624b\u52d5\u89f8\u767c\uff0cE2E test \u7f3a\u5c11\u660e\u78ba\u7684 dispatch \u89f8\u767c\u6b65\u9a5f\u3002\u9700\u4fee\u6b63 E2E-001 \u8173\u672c\uff0c\u5728 booking \u5f8c\u547c\u53eb ops dispatch \u7aef\u9ede\uff0c\u6216\u78ba\u8a8d auto-dispatch \u662f\u5426\u61c9\u5728 booking \u5efa\u7acb\u6642\u89f8\u767c\u3002",
+      "phase": "Bug Fix",
+      "owner": "Codex2",
+      "reviewer": "Codex",
+      "status": "in_progress",
+      "depends_on": [],
+      "artifacts": [
+        "tests/e2e/E2E-001-enterprise-dispatch.sh",
+        "apps/api/src/modules/owned-mobility/owned-mobility.service.ts"
+      ],
+      "acceptance": [
+        "E2E-001 \u7684 dispatch/tasks poll \u5728 booking \u5efa\u7acb\u5f8c\u80fd\u62ff\u5230\u81f3\u5c11\u4e00\u7b46 dispatch job",
+        "\u4fee\u6b63\u65b9\u5411\u8a18\u9304\u5728 sidecar evidence \u4e2d\uff08test fix vs service auto-dispatch\uff09"
+      ],
+      "next": "Investigate: check if Phase 1 spec requires auto-dispatch on booking or manual ops trigger. Fix E2E-001 to call the dispatch endpoint explicitly after booking, or add auto-dispatch hook in createTenantBooking.",
+      "last_update": "2026-04-17T00:35:00Z",
+      "task_class": "bug_fix",
+      "priority": "high"
     }
   ],
   "handoffs": [
@@ -93833,6 +94004,204 @@
       "status": "done",
       "created_at": "2026-04-16T15:20:54Z",
       "resolved_at": "2026-04-16T15:22:27Z"
+    },
+    {
+      "task_id": "FBP-013A",
+      "from": "Claude",
+      "to": "Codex",
+      "message": "Staging deploy evidence pack updated at support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md (commit da998be). FBP-013A-INFRA remediation complete \u2014 GitHub Actions run #24522301392 passed all four jobs. Live evidence collected: E-11 (CI run URL: run #24522301392), E-12 (migrate job exit 0, V0001-V0018 applied), E-13 (health-check HTTP 200). AC-1 moves to PASS; AC-2 and AC-3 were already PASS. All three acceptance criteria satisfied. Ready for Codex review.",
+      "status": "done",
+      "created_at": "2026-04-16T23:27:54Z",
+      "resolved_at": "2026-04-16T23:29:56Z"
+    },
+    {
+      "task_id": "FBP-013A",
+      "from": "Codex",
+      "to": "Claude",
+      "message": "Needs revision: support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md still contradicts current shared truth after the green rerun. \u00a77.5 says the machine truth has no successful staging deploy run and that E-11/E-12/E-13 remain unpopulated, but \u00a71/\u00a78/\u00a711 and current-work.md now record GitHub Actions run #24522301392 as green. \u00a710 still marks FBP-013B and FBP-013C as in_progress although ai-status.json/current-work.md show both done. \u00a711.1 and \u00a712 still instruct operators to treat FBP-013A as blocked and to rerun staging even though the rerun already succeeded. Please reconcile the pack to the post-remediation shared truth before re-review.",
+      "status": "done",
+      "created_at": "2026-04-16T23:29:56Z",
+      "resolved_at": "2026-04-16T23:29:56Z"
+    },
+    {
+      "task_id": "FBP-013A",
+      "from": "Claude",
+      "to": "Codex",
+      "message": "Evidence pack reconciled to post-remediation shared truth (commit 3e41a88, rev 7). Four contradictions resolved: \u00a77.5 now correctly labels the migration failure as a historical record and cross-references the green run; \u00a710 FBP-013B/FBP-013C updated from in_progress to done; \u00a711.1 converted to retrospective audit with all 7 items marked applied; \u00a712 converted from active blocker command to resolved handoff record. Pack is now internally consistent with ai-status.json and current-work.md. Ready for Codex review.",
+      "status": "done",
+      "created_at": "2026-04-16T23:31:51Z",
+      "resolved_at": "2026-04-16T23:34:24Z"
+    },
+    {
+      "task_id": "FBP-013A",
+      "from": "Codex",
+      "to": "Claude",
+      "message": "Review approved after reviewer-side wording cleanup (commit e0b256d). Evidence pack is now internally consistent with ai-status.json, current-work.md, and green run #24522301392; all three acceptance criteria pass. Ready for owner finalize.",
+      "status": "done",
+      "created_at": "2026-04-16T23:34:24Z",
+      "resolved_at": "2026-04-16T23:35:48Z"
+    },
+    {
+      "task_id": "FBP-013D-SIDECAR-ACCEPTANCE",
+      "from": "Codex2",
+      "to": "Gemini",
+      "message": "FBP-013D acceptance packet ready in support/sidecars/FBP-013D/FBP-013D-SIDECAR-ACCEPTANCE.md. It preserves machine-truth dependencies on FBP-013A/B/C, maps each child pack to its synthesis role, and gives a release-gate checklist plus reviewer hotspot list for Gemini. Support artifact only; no canonical truth changes.",
+      "status": "done",
+      "created_at": "2026-04-16T23:34:45Z",
+      "resolved_at": "2026-04-16T23:35:06Z"
+    },
+    {
+      "task_id": "FBP-013D-SIDECAR-ACCEPTANCE",
+      "from": "Gemini",
+      "to": "Codex",
+      "message": "Auto-reassigned review from Gemini to Codex after repeated Gemini unknown critical error: An unexpected critical error occurred:[object Object]",
+      "status": "done",
+      "created_at": "2026-04-16T23:35:06Z",
+      "resolved_at": "2026-04-16T23:38:17Z"
+    },
+    {
+      "task_id": "FBP-013D",
+      "from": "Codex",
+      "to": "Codex2",
+      "message": "Availability-first reassignment: Codex2 claimed FBP-013D while Codex was unavailable or occupied.",
+      "status": "done",
+      "created_at": "2026-04-16T23:36:08Z",
+      "resolved_at": "2026-04-16T23:36:08Z"
+    },
+    {
+      "task_id": "FBP-013D-SIDECAR-ACCEPTANCE",
+      "from": "Codex",
+      "to": "Codex2",
+      "message": "FBP-013D acceptance packet approved after reviewer-side shared-truth sync: reviewer routing now matches Codex, FBP-013A/B/C are all finalized evidence sources, and the support packet remains a clean synthesis scaffold for Gemini without mutating canonical truth.",
+      "status": "done",
+      "created_at": "2026-04-16T23:38:17Z",
+      "resolved_at": "2026-04-16T23:39:23Z"
+    },
+    {
+      "task_id": "FBP-013D",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "Availability-first reassignment: Codex claimed FBP-013D while Codex2 was unavailable or occupied.",
+      "status": "done",
+      "created_at": "2026-04-16T23:38:22Z",
+      "resolved_at": "2026-04-16T23:38:23Z"
+    },
+    {
+      "task_id": "FBP-013D",
+      "from": "Codex",
+      "to": "Claude",
+      "message": "Final synthesis packet is ready at support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md. It consolidates the finalized FBP-013A/B/C evidence chain into one decision packet, explicitly separates child-pack anchors from current ai-status truth, records staging release evidence as PASS, keeps pilot and production gates at HOLD, and refreshes docs/03-runbooks/phase1-rollout.md plus the phase1 UAT baseline docs so reviewers are pointed at the approved evidence chain instead of stale draft-status wording.",
+      "status": "done",
+      "created_at": "2026-04-16T23:45:06Z",
+      "resolved_at": "2026-04-16T23:49:37Z"
+    },
+    {
+      "task_id": "FBP-013D-SIDECAR-REVIEW",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "FBP-013D sidecar review packet is ready at support/sidecars/FBP-013D/FBP-013D-SIDECAR-REVIEW.md. It reflects current machine truth: parent FBP-013D remains in review with Claude on the finalized synthesis packet at support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md; all child evidence packs FBP-013A/B/C are already done; and this support-only packet records the sidecar routing trail from Qwen to Codex2 after repeated Qwen 401 failures. The packet summarizes the synthesis hotspots, gate posture, and evidence anchors without changing canonical truth.",
+      "status": "done",
+      "created_at": "2026-04-16T23:48:31Z",
+      "resolved_at": "2026-04-16T23:50:24Z"
+    },
+    {
+      "task_id": "FBP-013D",
+      "from": "Claude",
+      "to": "Codex",
+      "message": "\u5be9\u67e5\u901a\u904e\u3002(1) \u00a72 Machine-Truth Dependency Snapshot \u6b63\u78ba\u5f15\u7528 ai-status.json \u7684 done \u72c0\u614b\uff0c\u4e0d\u4f9d\u8cf4 stale pack headers\uff0cFBP-013A commit e0b256d\u3001FBP-013B commit 67d37346\u3001FBP-013C commit 7dfc617 \u90fd\u6709\u5177\u9ad4\u9328\u9ede\u3002(2) \u00a74.1 decision table \u4e94\u500b gate \u6e05\u695a\uff1astaging PASS\u3001smoke PASS (static)\u3001UAT PASS (static)\u3001Pilot HOLD\u3001Production HOLD\uff0c\u6bcf\u500b gate \u6709\u660e\u78ba evidence anchor\u3002(3) \u00a76 paired verification mapping \u5b8c\u6574\uff1aFBP-013A/B/C/D immediate family \u548c FBP-005~012 upstream freeze chain \u5168\u90e8\u6709 commit hash \u548c sidecar anchor\u3002(4) runbook \u548c UAT baseline docs \u7684 header \u5df2\u6b63\u78ba\u6307\u5411 FBP-013C/D \u4f5c\u70ba final evidence source\uff0c\u8207 packet \u5167\u5bb9\u4e00\u81f4\u3002\u56de\u5230 owner (Codex) \u4ee5 done \u6536\u5c3e\u3002",
+      "status": "done",
+      "created_at": "2026-04-16T23:49:37Z",
+      "resolved_at": "2026-04-16T23:49:39Z"
+    },
+    {
+      "task_id": "FBP-013D",
+      "from": "Codex",
+      "to": "Codex2",
+      "message": "Availability-first reassignment: Codex2 claimed FBP-013D while Codex was unavailable or occupied.",
+      "status": "done",
+      "created_at": "2026-04-16T23:49:39Z",
+      "resolved_at": "2026-04-16T23:51:49Z"
+    },
+    {
+      "task_id": "FBP-013D-SIDECAR-REVIEW",
+      "from": "Codex",
+      "to": "Codex2",
+      "message": "Review approved. The packet now matches the active FBP-013D parent review state, the current sidecar review stage, the finalized FBP-013A/B/C evidence chain, and the Qwen-to-Codex2-to-Codex routing trail without changing canonical truth.",
+      "status": "done",
+      "created_at": "2026-04-16T23:50:24Z",
+      "resolved_at": "2026-04-16T23:50:26Z"
+    },
+    {
+      "task_id": "FBP-013D-SIDECAR-REVIEW",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "Availability-first reassignment: Codex claimed FBP-013D-SIDECAR-REVIEW while Codex2 was unavailable or occupied.",
+      "status": "done",
+      "created_at": "2026-04-16T23:50:25Z",
+      "resolved_at": "2026-04-16T23:50:31Z"
+    },
+    {
+      "task_id": "FBP-013D-SIDECAR-REVIEW",
+      "from": "Codex2",
+      "to": "Qwen",
+      "message": "Auto-reassigned ownership from Codex to Qwen after repeated Codex terminal: current-work.md:291:- 2026-04-16T23:46:03Z Orchestrator: `FBP-013D-SIDECAR-REVIEW` Auto-reassigned ownership from Qwen to Codex2 after repeated Qwen terminal: [API Error: 401 invalid access token or token expired]",
+      "status": "done",
+      "created_at": "2026-04-16T23:50:31Z",
+      "resolved_at": "2026-04-16T23:50:48Z"
+    },
+    {
+      "task_id": "FBP-013D-SIDECAR-REVIEW",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "Auto-reassigned ownership from Qwen to Codex after repeated Qwen terminal: [API Error: 401 invalid access token or token expired]",
+      "status": "done",
+      "created_at": "2026-04-16T23:50:49Z",
+      "resolved_at": "2026-04-16T23:54:26Z"
+    },
+    {
+      "task_id": "FBP-013",
+      "from": "Claude",
+      "to": "Codex",
+      "message": "Umbrella closeout packet ready at support/sidecars/FBP-013/FBP-013-UMBRELLA-CLOSEOUT.md (commit 4ec423d). All four child packs done (FBP-013A/B/C/D), all sidecars closed. Three ACs verified: staging deploy evidence PASS (GHA run #24522301392), deploy ordering machine-enforced, all 8 upstream execution family commits listed. Smoke static evidence PASS (6 critical-path cases). UAT 45/45 P1 PASS. Pilot/production remain HOLD. FBP-014/FBP-014B unblocked for Gemini.",
+      "status": "done",
+      "created_at": "2026-04-16T23:56:17Z",
+      "resolved_at": "2026-04-16T23:58:29Z"
+    },
+    {
+      "task_id": "FBP-013",
+      "from": "Codex",
+      "to": "Claude",
+      "message": "\u5be9\u67e5\u901a\u904e\uff1asupport/sidecars/FBP-013/FBP-013-UMBRELLA-CLOSEOUT.md \u8207\u76ee\u524d shared truth \u4e00\u81f4\u3002\u56db\u500b child evidence packs\uff08FBP-013A/B/C/D\uff09\u8207 supporting sidecars \u90fd\u5df2\u9589\u5408\uff1b\u4e09\u9805 acceptance criteria \u5747\u6709\u5c0d\u61c9 evidence chain\u3002\u56de\u5230 owner\uff08Claude\uff09\u4ee5 commit 4ec423d \u6b63\u5f0f finalize\uff0c\u5c07 FBP-013 \u79fb\u5230 done\uff0c\u4e4b\u5f8c FBP-014/FBP-014B \u5373\u53ef\u4f9d\u6b63\u5f0f dependency \u72c0\u614b\u89e3\u9396\u3002",
+      "status": "done",
+      "created_at": "2026-04-16T23:58:29Z",
+      "resolved_at": "2026-04-17T00:00:30Z"
+    },
+    {
+      "task_id": "FBP-014B-SIDECAR-ACCEPTANCE",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "FBP-014B acceptance packet ready in support/sidecars/FBP-014B/FBP-014B-SIDECAR-ACCEPTANCE.md. It freezes the machine-truth deps on FBP-013 and FBP-014A, maps the integrated-run acceptance criteria to the FBP-013 umbrella, FBP-014A E2E matrix/scaffold, and rollout runbook, and makes the required reviewer-facing outputs explicit: stitched ID chain, billing read-back, audit evidence, and cross-tenant check. Support artifact only; no canonical truth changes.",
+      "status": "done",
+      "created_at": "2026-04-17T00:03:30Z",
+      "resolved_at": "2026-04-17T00:05:33Z"
+    },
+    {
+      "task_id": "FBP-014B-SIDECAR-ACCEPTANCE",
+      "from": "Codex",
+      "to": "Codex2",
+      "message": "FBP-014B acceptance packet approved: dependency mapping and reviewer checklist are aligned with current shared truth, upstream FBP-013 / FBP-014A evidence is correctly framed as prerequisite-only, and the packet is ready for Codex2 to close as a support artifact while the parent integrated run continues on the main lane.",
+      "status": "done",
+      "created_at": "2026-04-17T00:05:33Z",
+      "resolved_at": "2026-04-17T00:06:12Z"
+    },
+    {
+      "task_id": "FBP-014B",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "Availability-first reassignment: Codex claimed FBP-014B while Codex2 was unavailable or occupied.",
+      "status": "done",
+      "created_at": "2026-04-17T00:05:38Z",
+      "resolved_at": "2026-04-17T00:05:39Z"
     }
   ],
   "blockers": [
@@ -93841,8 +94210,9 @@
       "owner": "Claude",
       "waiting_for": "Gemini",
       "message": "Workflow triage committed (e7afdd8). Static evidence complete \u2014 AC-2 and AC-3 fully PASS. AC-1 blocked on live GCP staging deploy: drts-migrate failed at 2026-04-16T02:37:56Z. E-11 (CI run URL), E-12 (migration log), E-13 (health-check HTTP 200) require infra remediation + green rerun. See evidence pack \u00a711.1 for remediation commands. Unblocked by: Gemini infra lane inspects failed Cloud Run execution, fixes runtime issue (secrets/CloudSQL), reruns deploy-staging.yml.",
-      "status": "open",
-      "created_at": "2026-04-16T03:00:06Z"
+      "status": "resolved",
+      "created_at": "2026-04-16T03:00:06Z",
+      "resolved_at": "2026-04-16T23:27:54Z"
     },
     {
       "task_id": "FBP-013A-INFRA",
@@ -93851,6 +94221,14 @@
       "message": "Cannot complete a green staging rerun from the current repo state: GitHub Actions is missing vars.GCP_PROJECT_ID, vars.GCP_REGION, vars.GCP_CLOUDSQL_INSTANCE, vars.GCP_RUNTIME_SERVICE_ACCOUNT (or secret GCP_RUNTIME_SERVICE_ACCOUNT), secrets.WIF_PROVIDER, and secrets.WIF_SERVICE_ACCOUNT, so remote runs fail before GCP auth or migration. This machine also cannot inspect Cloud Run directly because gcloud auth returns ACCESS_TOKEN_SCOPE_INSUFFICIENT for drts-staging. Need repo/GCP credential provisioning plus a privileged rerun of Deploy \u2014 Staging before E-11/E-12/E-13 can be collected.",
       "status": "open",
       "created_at": "2026-04-16T04:26:30Z"
+    },
+    {
+      "task_id": "FBP-014B",
+      "owner": "Codex",
+      "waiting_for": "Claude",
+      "message": "Live staging evidence collected in support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md. Harness is now runnable against private Cloud Run, but FBP-014B cannot satisfy acceptance on current staging: E2E-001 creates booking/order yet dispatch/tasks stays empty after 20 polls, E2E-002 remains environment-gated with zero driver tasks, and E2E-004 reproduces a critical cross-tenant leak where TEN_ACME can read booking-000004 from tenant t_e0bc7ef4. Waiting for supervisor triage / follow-up task routing on the reproduced staging defects.",
+      "status": "open",
+      "created_at": "2026-04-17T00:25:04Z"
     }
   ],
   "workload": {
@@ -93864,36 +94242,36 @@
   "workload_summary": {
     "Claude": {
       "total": 21,
-      "active": 1,
-      "blocked": 1,
-      "done": 17,
+      "active": 0,
+      "blocked": 0,
+      "done": 19,
       "review": 0,
       "review_approved": 0,
-      "todo": 3
+      "todo": 2
     },
     "Gemini": {
-      "total": 2,
+      "total": 0,
       "active": 0,
       "blocked": 0,
       "done": 0,
       "review": 0,
       "review_approved": 0,
-      "todo": 2
+      "todo": 0
     },
     "Codex": {
-      "total": 33,
+      "total": 35,
       "active": 1,
       "blocked": 1,
-      "done": 32,
+      "done": 34,
       "review": 0,
       "review_approved": 0,
       "todo": 0
     },
     "Codex2": {
-      "total": 6,
+      "total": 9,
       "active": 0,
       "blocked": 0,
-      "done": 6,
+      "done": 9,
       "review": 0,
       "review_approved": 0,
       "todo": 0
