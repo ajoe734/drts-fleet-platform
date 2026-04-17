@@ -24,6 +24,7 @@
 #   SMOKE_ACTOR_ID           Bootstrap auth actor ID (x-actor-id header)
 #   SMOKE_REALM              Override realm derived from actor type (leave blank to auto-derive)
 #   SMOKE_TENANT_ID          Tenant UUID (x-tenant-id header; must match S0002 seed)
+#   SMOKE_INTERNAL_KEY       Optional x-drts-internal-key header for staging/internal envs
 #   SMOKE_DRIVER_ID          Driver UUID (must match S0002 seed)
 #   SMOKE_VEHICLE_ID         Vehicle UUID (must match S0002 seed)
 #   SMOKE_TIMEOUT            Curl timeout per request in seconds (default: 30)

@@ -4,3 +4,4 @@ export * from "./auth.extractor";
 export * from "./auth.policy";
 export * from "./auth.types";
 export * from "./bootstrap-auth.guard";
+export * from "./internal-key.middleware";

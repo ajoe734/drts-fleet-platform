@@ -1,13 +1,16 @@
 import { Reflector } from "@nestjs/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import {
   BootstrapAuthGuard,
+  InternalKeyMiddleware,
   OpenRoute,
   RequireScopes,
   extractBootstrapRequestIdentity,
+  isHealthRequest,
   resolveRouteAuthPolicy,
+  validateInternalKey,
 } from "../../src/common/auth";
 import type { AuthenticatedRequestLike } from "../../src/common/auth";
 
@@ -194,5 +197,101 @@ describe("bootstrap auth guard", () => {
     expect(guard.canActivate(context)).toBe(true);
     expect(request.identity?.actorType).toBe("tenant_admin");
     expect(request.identity?.scopes).toContain("tenant:webhooks:write");
+  });
+});
+
+describe("internal key middleware", () => {
+  it("skips enforcement when DRTS_INTERNAL_KEY is not configured", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {},
+          originalUrl: "/api/tenant/webhooks",
+        },
+        "",
+      ),
+    ).not.toThrow();
+  });
+
+  it("allows health endpoints without the internal key", () => {
+    expect(isHealthRequest("/health")).toBe(true);
+    expect(isHealthRequest("/api/health?probe=1")).toBe(true);
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {},
+          originalUrl: "/api/health?probe=1",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects protected routes when the internal key header is missing", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {},
+          originalUrl: "/api/tenant/webhooks",
+        },
+        "staging-secret",
+      ),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("rejects protected routes when the internal key header is invalid", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {
+            "x-drts-internal-key": "wrong-secret",
+          },
+          originalUrl: "/api/tenant/webhooks",
+        },
+        "staging-secret",
+      ),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("allows protected routes when the internal key header matches", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {
+            "x-drts-internal-key": "staging-secret",
+          },
+          originalUrl: "/api/tenant/webhooks",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
+  it("invokes next() after successful validation", () => {
+    const middleware = new InternalKeyMiddleware();
+    const next = vi.fn();
+
+    const originalKey = process.env.DRTS_INTERNAL_KEY;
+    process.env.DRTS_INTERNAL_KEY = "staging-secret";
+    try {
+      middleware.use(
+        {
+          headers: {
+            "x-drts-internal-key": "staging-secret",
+          },
+          originalUrl: "/api/tenant/webhooks",
+        },
+        {},
+        next,
+      );
+    } finally {
+      if (originalKey === undefined) {
+        delete process.env.DRTS_INTERNAL_KEY;
+      } else {
+        process.env.DRTS_INTERNAL_KEY = originalKey;
+      }
+    }
+
+    expect(next).toHaveBeenCalledOnce();
   });
 });

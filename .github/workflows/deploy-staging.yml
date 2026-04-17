@@ -312,7 +312,7 @@ jobs:
             --port   3001 \
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "DATABASE_URL=drts-staging-db-url:latest,API_KEY_SALT=drts-staging-api-key-salt:latest,JWT_SECRET=drts-staging-jwt-secret:latest" \
+            --set-secrets "DATABASE_URL=drts-staging-db-url:latest,API_KEY_SALT=drts-staging-api-key-salt:latest,JWT_SECRET=drts-staging-jwt-secret:latest,DRTS_INTERNAL_KEY=drts-staging-internal-key:latest" \
             --set-env-vars "NODE_ENV=production,API_PORT=3001" \
             --allow-unauthenticated \
             --min-instances 0 \

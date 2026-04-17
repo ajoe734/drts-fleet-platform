@@ -48,6 +48,11 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: drts-staging-jwt-secret
+            - name: DRTS_INTERNAL_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: drts-staging-internal-key
           startupProbe:
             httpGet:
               path: /health

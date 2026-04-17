@@ -63,12 +63,13 @@ See `scripts/run-smoke-tests.sh --help` for the full option reference.
 
 `lib/helpers.sh` sends the following headers automatically on every request:
 
-| Header         | Env var            | Default                 |
-| -------------- | ------------------ | ----------------------- |
-| `x-actor-type` | `SMOKE_ACTOR_TYPE` | `system`                |
-| `x-actor-id`   | `SMOKE_ACTOR_ID`   | `smoke-system-001`      |
-| `x-realm`      | `SMOKE_REALM`      | derived from actor type |
-| `x-tenant-id`  | `SMOKE_TENANT_ID`  | S0002 TEN_ACME UUID     |
+| Header                | Env var              | Default                                                          |
+| --------------------- | -------------------- | ---------------------------------------------------------------- |
+| `x-actor-type`        | `SMOKE_ACTOR_TYPE`   | `system`                                                         |
+| `x-actor-id`          | `SMOKE_ACTOR_ID`     | `smoke-system-001`                                               |
+| `x-realm`             | `SMOKE_REALM`        | derived from actor type                                          |
+| `x-tenant-id`         | `SMOKE_TENANT_ID`    | S0002 TEN_ACME UUID                                              |
+| `x-drts-internal-key` | `SMOKE_INTERNAL_KEY` | unset by default; required when staging sets `DRTS_INTERNAL_KEY` |
 
 The default `system` actor type covers all six smoke routes because route auth policy adds
 `system` to every protected route group's `allowedRealms`, and the `system` preset includes
@@ -107,19 +108,20 @@ Confirm the correct base URL from the Cloud Run service URL in the `WE-003` depl
 
 ## Environment variables
 
-| Variable                | Default                                | Description                                                              |
-| ----------------------- | -------------------------------------- | ------------------------------------------------------------------------ |
-| `SMOKE_API_URL`         | `http://localhost:3001`                | API bare origin — no trailing slash, no path prefix (see note above)     |
-| `SMOKE_API_PATH_PREFIX` | `/api`                                 | Prepended to every path; matches NestJS global prefix — set `""` to skip |
-| `SMOKE_ACTOR_TYPE`      | `system`                               | Bootstrap auth actor type (`x-actor-type` header)                        |
-| `SMOKE_ACTOR_ID`        | `smoke-system-001`                     | Bootstrap auth actor ID (`x-actor-id` header)                            |
-| `SMOKE_REALM`           | _(derived from actor type)_            | Override only when realm differs from actor-type default                 |
-| `SMOKE_TENANT_ID`       | `10000000-0000-0000-0000-000000000201` | TEN_ACME from S0002 seed; sent as `x-tenant-id`                          |
-| `SMOKE_DRIVER_ID`       | `10000000-0000-0000-0000-000000000381` | 張司機 from S0002 seed; used in dispatch assign                          |
-| `SMOKE_VEHICLE_ID`      | `10000000-0000-0000-0000-000000000351` | ABC-1234 from S0002 seed; used in dispatch assign                        |
-| `SMOKE_TIMEOUT`         | `30`                                   | curl timeout per request (seconds)                                       |
-| `SMOKE_POLL_INTERVAL`   | `3`                                    | Seconds between status polls                                             |
-| `SMOKE_POLL_MAX`        | `20`                                   | Max poll attempts for async jobs                                         |
+| Variable                | Default                                | Description                                                                  |
+| ----------------------- | -------------------------------------- | ---------------------------------------------------------------------------- |
+| `SMOKE_API_URL`         | `http://localhost:3001`                | API bare origin — no trailing slash, no path prefix (see note above)         |
+| `SMOKE_API_PATH_PREFIX` | `/api`                                 | Prepended to every path; matches NestJS global prefix — set `""` to skip     |
+| `SMOKE_ACTOR_TYPE`      | `system`                               | Bootstrap auth actor type (`x-actor-type` header)                            |
+| `SMOKE_ACTOR_ID`        | `smoke-system-001`                     | Bootstrap auth actor ID (`x-actor-id` header)                                |
+| `SMOKE_REALM`           | _(derived from actor type)_            | Override only when realm differs from actor-type default                     |
+| `SMOKE_TENANT_ID`       | `10000000-0000-0000-0000-000000000201` | TEN_ACME from S0002 seed; sent as `x-tenant-id`                              |
+| `SMOKE_INTERNAL_KEY`    | _(unset)_                              | Optional internal gate header; defaults from `DRTS_INTERNAL_KEY` if exported |
+| `SMOKE_DRIVER_ID`       | `10000000-0000-0000-0000-000000000381` | 張司機 from S0002 seed; used in dispatch assign                              |
+| `SMOKE_VEHICLE_ID`      | `10000000-0000-0000-0000-000000000351` | ABC-1234 from S0002 seed; used in dispatch assign                            |
+| `SMOKE_TIMEOUT`         | `30`                                   | curl timeout per request (seconds)                                           |
+| `SMOKE_POLL_INTERVAL`   | `3`                                    | Seconds between status polls                                                 |
+| `SMOKE_POLL_MAX`        | `20`                                   | Max poll attempts for async jobs                                             |
 
 ## Exit codes
 

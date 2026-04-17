@@ -22,6 +22,7 @@ SMOKE_API_PATH_PREFIX="${SMOKE_API_PATH_PREFIX:-/api}"
 SMOKE_ACTOR_TYPE="${SMOKE_ACTOR_TYPE:-system}"
 SMOKE_ACTOR_ID="${SMOKE_ACTOR_ID:-smoke-system-001}"
 SMOKE_REALM="${SMOKE_REALM:-}"   # leave blank to derive from SMOKE_ACTOR_TYPE
+SMOKE_INTERNAL_KEY="${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}"
 
 # Seed data IDs — must match infra/seeds/S0002__demo_operational_seed.sql.
 # TEN_ACME tenant; 張司機 / ABC-1234 driver+vehicle pair.
@@ -90,6 +91,10 @@ http_call() {
     if [[ -n "${SMOKE_TENANT_ID:-}" ]]; then
       curl_args+=(-H "x-tenant-id: ${SMOKE_TENANT_ID}")
     fi
+  fi
+
+  if [[ -n "${SMOKE_INTERNAL_KEY:-}" ]]; then
+    curl_args+=(-H "x-drts-internal-key: ${SMOKE_INTERNAL_KEY}")
   fi
 
   if [[ -n "$body_file" ]]; then

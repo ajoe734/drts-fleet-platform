@@ -1,10 +1,15 @@
-import { Module } from "@nestjs/common";
+import {
+  MiddlewareConsumer,
+  Module,
+  NestModule,
+  RequestMethod,
+} from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 
-import { HealthModule } from "./health/health.module";
-import { BootstrapAuthGuard } from "./common/auth";
+import { BootstrapAuthGuard, InternalKeyMiddleware } from "./common/auth";
 import { SnakeCaseExceptionFilter } from "./common/snake-case.exception-filter";
 import { SnakeCaseInterceptor } from "./common/snake-case.interceptor";
+import { HealthModule } from "./health/health.module";
 import { AuditNotificationModule } from "./modules/audit-notification/audit-notification.module";
 import { BillingSettlementModule } from "./modules/billing-settlement/billing-settlement.module";
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
@@ -65,4 +70,14 @@ import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.mod
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(InternalKeyMiddleware)
+      .exclude(
+        { path: "health", method: RequestMethod.ALL },
+        { path: "api/health", method: RequestMethod.ALL },
+      )
+      .forRoutes({ path: "*", method: RequestMethod.ALL });
+  }
+}
