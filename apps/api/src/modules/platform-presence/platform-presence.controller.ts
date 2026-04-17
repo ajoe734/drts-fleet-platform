@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Headers, Post } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 import type {
   PlatformPresenceSummary,
   SetPlatformOfflineCommand,
@@ -7,6 +8,7 @@ import type {
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { PlatformPresenceService } from "./platform-presence.service";
 
 @Controller("platform-presence")
@@ -15,6 +17,7 @@ export class PlatformPresenceController {
 
   @Get()
   @RequireRealms("driver", "platform", "ops")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   async getSummary(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,

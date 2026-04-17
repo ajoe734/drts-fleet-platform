@@ -1,14 +1,17 @@
 import { Controller, Get, Headers } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import type { IdentityContext } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
+import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 
 @Controller("identity")
 export class IdentityController {
   @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Get("context")
   getContext(
     @CurrentIdentity() identity: BootstrapRequestIdentity,

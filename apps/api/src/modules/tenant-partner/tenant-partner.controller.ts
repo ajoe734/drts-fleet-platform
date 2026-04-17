@@ -7,6 +7,7 @@ import {
   Post,
   Delete,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import type {
   CreateTenantUserCommand,
@@ -28,6 +29,7 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { TenantPartnerService } from "./tenant-partner.service";
 
 @Controller()
@@ -48,6 +50,7 @@ export class TenantPartnerController {
   }
 
   @Get("tenant-partner/summary")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   getSummary(@Headers("x-request-id") requestId?: string) {
     const summary: TenantPartnerSummary = {
       supportedRoots: ["tenant", "partner", "site", "call_point"],
@@ -62,6 +65,7 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/passengers")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listPassengers(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -89,6 +93,7 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/addresses")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listAddresses(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -116,6 +121,7 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/users")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listTenantUsers(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -127,6 +133,7 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/roles")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listTenantRoles(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -171,6 +178,7 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/api-keys")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listApiKeys(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -232,6 +240,7 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/notifications")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   getTenantNotifications(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -245,6 +254,7 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/notifications/feed")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listTenantNotificationFeed(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,

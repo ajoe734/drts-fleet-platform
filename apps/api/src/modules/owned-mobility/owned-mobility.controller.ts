@@ -7,6 +7,7 @@ import {
   Post,
   Put,
 } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
 import type {
   AssignDispatchCommand,
@@ -32,6 +33,7 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
 @Controller()
@@ -75,6 +77,7 @@ export class OwnedMobilityController {
   }
 
   @Get("orders")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listOrders(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       {
@@ -85,6 +88,7 @@ export class OwnedMobilityController {
   }
 
   @Get("orders/:orderId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   getOrder(
     @Param("orderId") orderId: string,
     @Headers("x-request-id") requestId?: string,
@@ -96,6 +100,7 @@ export class OwnedMobilityController {
   }
 
   @Get("orders/:orderId/dispatch-trace")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listOrderDispatchTrace(
     @Param("orderId") orderId: string,
     @Headers("x-request-id") requestId?: string,
@@ -146,6 +151,7 @@ export class OwnedMobilityController {
   }
 
   @Get("tenant/bookings")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listTenantBookings(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -160,6 +166,7 @@ export class OwnedMobilityController {
   }
 
   @Get("tenant/bookings/:bookingId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   getTenantBooking(
     @Param("bookingId") bookingId: string,
     @Headers("x-tenant-id") tenantId?: string,
@@ -247,6 +254,7 @@ export class OwnedMobilityController {
   }
 
   @Get("dispatch/tasks")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listDispatchJobs(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       {
@@ -257,6 +265,7 @@ export class OwnedMobilityController {
   }
 
   @Get("dispatch/tasks/:dispatchJobId/candidates")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listDispatchCandidates(
     @Param("dispatchJobId") dispatchJobId: string,
     @Headers("x-request-id") requestId?: string,
@@ -303,6 +312,7 @@ export class OwnedMobilityController {
   }
 
   @Get("driver/tasks")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   listDriverTasks(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       {
@@ -313,6 +323,7 @@ export class OwnedMobilityController {
   }
 
   @Get("driver/tasks/:taskId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
   getDriverTask(
     @Param("taskId") taskId: string,
     @Headers("x-request-id") requestId?: string,

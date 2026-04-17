@@ -1,4 +1,7 @@
 import { Controller, Get } from "@nestjs/common";
+import { SkipThrottle } from "@nestjs/throttler";
+
+import { RATE_LIMIT_SKIP_DEFAULT } from "../common/throttling/rate-limit.constants";
 
 export function buildHealthPayload() {
   return {
@@ -11,6 +14,7 @@ export function buildHealthPayload() {
 }
 
 @Controller("health")
+@SkipThrottle(RATE_LIMIT_SKIP_DEFAULT)
 export class HealthController {
   @Get()
   getHealth() {
