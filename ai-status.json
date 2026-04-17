@@ -1,10 +1,16 @@
 {
   "project": "drts-fleet-platform",
-  "execution_mode": "supervisor_managed_execution",
+  "execution_mode": "discussion_planning",
   "consensus_status": "accepted",
-  "sprint": "2026-04-15-full-blueprint-execution",
-  "objective": "Execute the accepted full blueprint master plan: complete tenant portal convergence, finish the remaining Platform Admin / Ops / finance / filing blueprint families, close rollout evidence, and preserve deferred roadmap slices without losing scope.",
-  "updated_at": "2026-04-17T03:44:00Z",
+  "sprint": {
+    "name": "gap-fix-planning",
+    "phase": "discussion_planning",
+    "wave": "impl-gap-fix",
+    "started_at": "2026-04-17T04:30:00Z",
+    "objective": "Convert 13 source-code gaps into accepted supervisor backlog via baton review loop"
+  },
+  "objective": "Multi-agent baton review of implementation vs blueprint gaps. Produce consensus-packet for Phase 1 hotfixes + Phase 2 Sprint 1-3 backlog.",
+  "updated_at": "2026-04-17T04:30:00Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -60,7 +66,7 @@
     "docs/02-architecture/consensus/phase1/consensus-packet.md"
   ],
   "discussion_mode": "supervisor_baton_review_loop",
-  "discussion_workspace": "docs/02-architecture/consensus/phase2-full-blueprint-planning-20260415",
+  "discussion_workspace": "docs/02-architecture/consensus/impl-gap-fix-planning-20260417",
   "supervisor_modes": {
     "discussion_planning": {
       "purpose": "Read canonical specs, debate design, converge on planning, and produce an accepted consensus packet.",
@@ -90,11 +96,13 @@
   ],
   "discussion_loop": {
     "supervisor": "Claude",
-    "starter": "Codex",
-    "current_owner": "Claude",
+    "starter": "Claude",
+    "current_owner": "Codex",
     "review_order": ["Qwen", "Gemini", "Copilot", "Claude"],
     "loop_rule": "Only the current owner edits starter-draft.md. Reviewers write cited feedback in review-round-N.md. Supervisor advances the baton.",
-    "promotion_gate": "human_accepts_consensus_packet"
+    "promotion_gate": "human_accepts_consensus_packet",
+    "active_round": 1,
+    "workspace": "docs/02-architecture/consensus/impl-gap-fix-planning-20260417"
   },
   "agents": [
     {
@@ -104,35 +112,35 @@
         "architecture-arbitration",
         "control-plane"
       ],
-      "status": "idle",
+      "status": "in_discussion",
       "current_task_ids": [],
       "branch": "feat/claude-governance-review",
       "next": "Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.",
-      "last_update": "2026-04-17T03:42:59Z",
-      "current_task": "FBP-013A",
-      "note": "Evidence pack closeout: E-11/E-12/E-13 collection, staging runbook."
+      "last_update": "2026-04-17T04:30:00Z",
+      "current_task": "planning-supervisor",
+      "note": "Wrote starter draft for impl-gap-fix-planning-20260417. Waiting for Codex review-round-1."
     },
     {
       "name": "Gemini",
       "capability_lane": ["runtime-packaging", "ci-cd", "infra", "worker-ops"],
-      "status": "idle",
+      "status": "in_discussion",
       "current_task_ids": [],
       "branch": "feat/gemini-runtime-infra",
       "next": "Pick the next infra, rollout, or runtime slice that is ready for execution review.",
-      "last_update": "2026-04-16T01:59:51Z",
-      "current_task": "FBP-013D",
-      "note": "Early synthesis start: FBP-013B + FBP-013C evidence available; 013A placeholder pending."
+      "last_update": "2026-04-17T04:30:00Z",
+      "current_task": "GAP-REVIEW-ROUND-3",
+      "note": "Waiting for Qwen round 2. Will review infra/auth (GAP-004) and DB migrations."
     },
     {
       "name": "Codex",
       "capability_lane": ["contracts", "schema", "state-system", "acceptance"],
-      "status": "idle",
+      "status": "in_discussion",
       "current_task_ids": [],
       "branch": "feat/codex-phase1-architecture",
       "next": "Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.",
-      "last_update": "2026-04-17T03:20:17Z",
-      "current_task": "FBP-014B",
-      "note": "Re-run E2E after BUG-001 deploy to staging"
+      "last_update": "2026-04-17T04:30:00Z",
+      "current_task": "GAP-REVIEW-ROUND-1",
+      "note": "Write review-round-1.md: Phase boundary Q1/Q5, incident severity enum verification. See starter-draft.md section 3."
     },
     {
       "name": "Qwen",
@@ -142,11 +150,13 @@
         "adapter-execution",
         "acceptance"
       ],
-      "status": "idle",
+      "status": "in_discussion",
       "current_task_ids": [],
       "branch": "feat/qwen-integration-slices",
       "next": "Pick the next API or integration slice that is unblocked and ready to implement.",
-      "last_update": "2026-04-17T03:19:49Z"
+      "last_update": "2026-04-17T04:30:00Z",
+      "current_task": "GAP-REVIEW-ROUND-2",
+      "note": "Waiting for Codex round 1. Will review API implementation scope for Sprint 1/2."
     },
     {
       "name": "Copilot",
@@ -156,12 +166,13 @@
         "spec-review",
         "critique"
       ],
-      "status": "idle",
+      "status": "in_discussion",
       "current_task_ids": [],
       "branch": "feat/copilot-spec-critique",
       "next": "Critique active implementation slices for contradictions, testing gaps, and weak assumptions.",
-      "last_update": "2026-04-17T00:45:58Z",
-      "note": "Available for sidecar dispatch."
+      "last_update": "2026-04-17T04:30:00Z",
+      "note": "Waiting for Gemini round 3. Will do critique pass for missing gaps and scope risks.",
+      "current_task": "GAP-REVIEW-ROUND-4"
     },
     {
       "name": "Codex2",
@@ -170,8 +181,8 @@
       "current_task_ids": [],
       "branch": "feat/codex2-parallel-worker",
       "next": "Wait for the next execution slice.",
-      "last_update": "2026-04-17T03:26:13Z",
-      "note": "Fix E2E-001 dispatch not triggered after booking creation",
+      "last_update": "2026-04-17T04:30:00Z",
+      "note": "Standby for execution wave after consensus-packet accepted.",
       "current_task": "BUG-002"
     }
   ],
@@ -2753,6 +2764,305 @@
       "commit_agent": "Codex2",
       "commit_reviewer": "Codex",
       "commit_recorded_at": "2026-04-17T03:26:50Z"
+    },
+    {
+      "id": "GAP-P1-001",
+      "title": "billing: remove DEMO_TENANT_ID hardcode — BillingSettlementService tenant isolation",
+      "status": "backlog",
+      "owner": "Codex",
+      "phase": "P1-hotfix",
+      "priority": "critical",
+      "source_gap": "GAP-003a",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P1-002",
+      "title": "tenant-partner: per-tenant sharding for slaProfile/webhooks/passengers",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "P1-hotfix",
+      "priority": "critical",
+      "source_gap": "GAP-003b",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P1-003",
+      "title": "tenant-portal-web: add webhook delivery disclaimer (engine is Phase 2)",
+      "status": "backlog",
+      "owner": "Copilot",
+      "phase": "P1-hotfix",
+      "priority": "high",
+      "source_gap": "GAP-002c",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P1-004",
+      "title": "owned-mobility: clarify enterprise dispatch minPhotoCount intent + demo seed alignment",
+      "status": "backlog",
+      "owner": "Codex",
+      "phase": "P1-hotfix",
+      "priority": "critical",
+      "source_gap": "GAP-001b",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S1-001",
+      "title": "driver-app: SOS screen — one-tap emergency incident report",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "P2-S1",
+      "priority": "high",
+      "source_gap": "GAP-006a",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S1-002",
+      "title": "api/contracts: incident severity=critical support + priority queue routing",
+      "status": "backlog",
+      "owner": "Codex",
+      "phase": "P2-S1",
+      "priority": "high",
+      "source_gap": "GAP-006b",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S1-003",
+      "title": "billing: driver statement live trip ingestion from DB",
+      "status": "backlog",
+      "owner": "Codex",
+      "phase": "P2-S1",
+      "priority": "high",
+      "source_gap": "GAP-005a",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S1-004",
+      "title": "api: driver-profile standalone module with self-service endpoints",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "P2-S1",
+      "priority": "medium",
+      "source_gap": "GAP-008a",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S1-005",
+      "title": "platform-earnings: add demo seed data (3 records matching billing seed)",
+      "status": "backlog",
+      "owner": "Codex",
+      "phase": "P2-S1",
+      "priority": "low",
+      "source_gap": "GAP-012a",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S1-006",
+      "title": "infra: restrict staging Cloud Run to service-account-only (no-allow-unauthenticated)",
+      "status": "backlog",
+      "owner": "Gemini",
+      "phase": "P2-S1",
+      "priority": "high",
+      "source_gap": "GAP-004b",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S2-001",
+      "title": "driver-app: trip screen proof bundle — photo picker + CompletionProofBundle",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "P2-S2",
+      "priority": "high",
+      "source_gap": "GAP-001a",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S2-002",
+      "title": "driver-app: trip screen Expo Location metrics (actualDistanceKm/actualDurationSec)",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "P2-S2",
+      "priority": "medium",
+      "source_gap": "GAP-001c",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S2-003",
+      "title": "webhook: delivery engine — fetch + retry + HMAC-SHA256 signature",
+      "status": "backlog",
+      "owner": "Codex",
+      "phase": "P2-S2",
+      "priority": "high",
+      "source_gap": "GAP-002a",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S2-004",
+      "title": "webhook: order status change event hooks (created/cancelled/completed)",
+      "status": "backlog",
+      "owner": "Codex",
+      "phase": "P2-S2",
+      "priority": "high",
+      "source_gap": "GAP-002b",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S2-005",
+      "title": "regulatory-registry: driver location heartbeat + DB table + haversine ETA",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "P2-S2",
+      "priority": "medium",
+      "source_gap": "GAP-009a+b",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S2-006",
+      "title": "db: migration for ops.phase1_driver_locations table",
+      "status": "backlog",
+      "owner": "Gemini",
+      "phase": "P2-S2",
+      "priority": "medium",
+      "source_gap": "GAP-009b",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S2-007",
+      "title": "forwarder: ForwarderAdapterInterface + Grab Taiwan webhook ingest stub",
+      "status": "backlog",
+      "owner": "Codex",
+      "phase": "P2-S2",
+      "priority": "medium",
+      "source_gap": "GAP-007a+b",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S2-008",
+      "title": "api: NestJS WebSocket gateway for driver task assignment push events",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "P2-S2",
+      "priority": "medium",
+      "source_gap": "GAP-010a",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S3-001",
+      "title": "auth: Cloud IAP / OIDC JWT for production — replace bootstrap header trust",
+      "status": "backlog",
+      "owner": "Gemini",
+      "phase": "P2-S3",
+      "priority": "high",
+      "source_gap": "GAP-004a",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S3-002",
+      "title": "ops-console: SOS incident priority queue view",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "P2-S3",
+      "priority": "medium",
+      "source_gap": "GAP-006c",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S3-003",
+      "title": "regulatory-registry: real-time ETA from ops.phase1_driver_locations",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "P2-S3",
+      "priority": "medium",
+      "source_gap": "GAP-009c",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S3-004",
+      "title": "ops-console: WebSocket/SSE dispatch board live updates",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "P2-S3",
+      "priority": "medium",
+      "source_gap": "GAP-010b",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S3-005",
+      "title": "api: @FeatureGated decorator + NestJS guard for server-side flag enforcement",
+      "status": "backlog",
+      "owner": "Codex",
+      "phase": "P2-S3",
+      "priority": "low",
+      "source_gap": "GAP-011a",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S3-006",
+      "title": "db: settlement migration for per-driver live trip queries",
+      "status": "backlog",
+      "owner": "Gemini",
+      "phase": "P2-S3",
+      "priority": "medium",
+      "source_gap": "GAP-005b",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-P2S3-007",
+      "title": "forwarder: platform code registry + service bucket enum expansion",
+      "status": "backlog",
+      "owner": "Codex",
+      "phase": "P2-S3",
+      "priority": "medium",
+      "source_gap": "GAP-007c",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-PLANNING-001",
+      "title": "discussion: Codex review-round-1 — Phase boundary Q1/Q5 + incident severity enum",
+      "status": "in_progress",
+      "owner": "Codex",
+      "phase": "planning",
+      "priority": "critical",
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-PLANNING-002",
+      "title": "discussion: Qwen review-round-2 — API scope Sprint 1/2",
+      "status": "backlog",
+      "owner": "Qwen",
+      "phase": "planning",
+      "priority": "critical",
+      "depends_on": ["GAP-PLANNING-001"],
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-PLANNING-003",
+      "title": "discussion: Gemini review-round-3 — infra/auth/DB migrations",
+      "status": "backlog",
+      "owner": "Gemini",
+      "phase": "planning",
+      "priority": "critical",
+      "depends_on": ["GAP-PLANNING-002"],
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-PLANNING-004",
+      "title": "discussion: Copilot review-round-4 — contradiction/critique pass",
+      "status": "backlog",
+      "owner": "Copilot",
+      "phase": "planning",
+      "priority": "critical",
+      "depends_on": ["GAP-PLANNING-003"],
+      "created_at": "2026-04-17T04:30:00Z"
+    },
+    {
+      "id": "GAP-PLANNING-005",
+      "title": "discussion: Claude final arbitration + draft consensus-packet.md",
+      "status": "backlog",
+      "owner": "Claude",
+      "phase": "planning",
+      "priority": "critical",
+      "depends_on": ["GAP-PLANNING-004"],
+      "created_at": "2026-04-17T04:30:00Z"
     }
   ],
   "handoffs": [
