@@ -28,6 +28,10 @@ export default function IncidentScreen() {
   }, []);
 
   const handleSubmit = async () => {
+    if (submitting) {
+      return;
+    }
+
     setSubmitting(true);
     const client = getDriverClient();
     try {
@@ -101,7 +105,7 @@ export default function IncidentScreen() {
 
       <Text
         style={[styles.sosButton, submitting && styles.submitBtnDisabled]}
-        onPress={handleSubmit}
+        onPress={submitting ? undefined : handleSubmit}
       >
         {submitting ? "Sending SOS..." : "Send SOS Alert"}
       </Text>
