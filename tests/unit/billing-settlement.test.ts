@@ -184,7 +184,7 @@ describe("billing settlement service", () => {
     expect(invoice.amount.amountMinor).toBe(150000);
   });
 
-  it("publishes an immutable fee plan and generates driver statements for SC-031", () => {
+  it("publishes an immutable fee plan and generates driver statements for SC-031", async () => {
     const { auditService, billingSettlementService } = createService();
 
     const feePlan = billingSettlementService.publishDriverFeePlan(
@@ -196,12 +196,13 @@ describe("billing settlement service", () => {
       },
       "publish-fee-plan-request",
     );
-    const statementsResult = billingSettlementService.generateDriverStatements(
-      {
-        periodMonth: "2026-03",
-      },
-      "statement-generate-request",
-    );
+    const statementsResult =
+      await billingSettlementService.generateDriverStatements(
+        {
+          periodMonth: "2026-03",
+        },
+        "statement-generate-request",
+      );
 
     const statements = billingSettlementService.listDriverStatements();
     const driverOneStatement = statements.find(
@@ -251,7 +252,7 @@ describe("billing settlement service", () => {
     }
   });
 
-  it("creates reimbursement instead of reducing driver net for SC-032", () => {
+  it("creates reimbursement instead of reducing driver net for SC-032", async () => {
     const { auditService, billingSettlementService } = createService();
 
     billingSettlementService.publishDriverFeePlan({
@@ -261,7 +262,7 @@ describe("billing settlement service", () => {
       reimbursementMode: "platform_funded",
     });
 
-    const result = billingSettlementService.generateDriverStatements({
+    const result = await billingSettlementService.generateDriverStatements({
       periodMonth: "2026-03",
     });
     const driverOneStatement = billingSettlementService
@@ -288,7 +289,7 @@ describe("billing settlement service", () => {
     ).toBe(true);
   });
 
-  it("approves and marks reimbursement paid without moving finance truth into the UI", () => {
+  it("approves and marks reimbursement paid without moving finance truth into the UI", async () => {
     const { auditService, billingSettlementService } = createService();
 
     billingSettlementService.publishDriverFeePlan({
@@ -298,7 +299,7 @@ describe("billing settlement service", () => {
       reimbursementMode: "platform_funded",
     });
 
-    const result = billingSettlementService.generateDriverStatements({
+    const result = await billingSettlementService.generateDriverStatements({
       periodMonth: "2026-03",
     });
     const batchId = result.reimbursementBatchIds[0]!;
@@ -348,6 +349,7 @@ describe("billing settlement service", () => {
     const auditService = new AuditNotificationService();
     const persistChanges = vi.fn(async () => undefined);
     const repository = {
+      isEnabled: vi.fn(() => true),
       loadState: vi.fn(async () => ({
         tenantBillingProfiles: [
           {
@@ -365,6 +367,7 @@ describe("billing settlement service", () => {
         driverStatements: [],
         reimbursementBatches: [],
       })),
+      listLiveDriverTripsInPeriod: vi.fn(async () => []),
       persistChanges,
       reportPersistenceFailure: vi.fn(),
     } as unknown as BillingSettlementRepository;
@@ -387,11 +390,9 @@ describe("billing settlement service", () => {
       serviceFeeBps: 1500,
       reimbursementMode: "platform_funded",
     });
-    billingSettlementService.generateDriverStatements({
+    await billingSettlementService.generateDriverStatements({
       periodMonth: "2026-03",
     });
-
-    await Promise.resolve();
 
     expect(persistChanges).toHaveBeenCalledWith(
       expect.objectContaining({

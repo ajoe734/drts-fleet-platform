@@ -132,12 +132,12 @@ export class BillingSettlementController {
   }
 
   @Post("driver-statements/generate")
-  generateDriverStatements(
+  async generateDriverStatements(
     @Body() command: GenerateDriverStatementCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.generateDriverStatements(
+      await this.billingSettlementService.generateDriverStatements(
         command,
         requestId,
       ),

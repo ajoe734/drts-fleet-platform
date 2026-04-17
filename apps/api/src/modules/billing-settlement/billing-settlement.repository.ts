@@ -203,6 +203,58 @@ export class BillingSettlementRepository {
     });
   }
 
+  async listLiveDriverTripsInPeriod(
+    periodStart: string,
+    periodEnd: string,
+  ): Promise<LiveSettlementTripRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const result = await this.databaseService!.query<LiveSettlementTripRow>(
+      `
+        SELECT
+          orders.record AS order_record,
+          tasks.record AS task_record
+        FROM ops.phase1_driver_tasks AS tasks
+        INNER JOIN ops.phase1_owned_orders AS orders
+          ON orders.order_id = tasks.order_id
+        WHERE tasks.status = 'completed'
+          AND COALESCE(tasks.record->>'completedAt', '') <> ''
+          AND COALESCE(tasks.record->>'driverId', '') <> ''
+          AND COALESCE(orders.record->>'serviceBucket', '') = 'business_dispatch'
+          AND (tasks.record->>'completedAt')::timestamptz >= $1::timestamptz
+          AND (tasks.record->>'completedAt')::timestamptz <= $2::timestamptz
+        ORDER BY (tasks.record->>'completedAt')::timestamptz DESC
+      `,
+      [periodStart, periodEnd],
+    );
+
+    return result.rows.map((row) => {
+      const order = this.parseRecord<OwnedOrderRecord>(
+        row.order_record,
+        "ops.phase1_owned_orders",
+      );
+      const task = this.parseRecord<DriverTaskRecord>(
+        row.task_record,
+        "ops.phase1_driver_tasks",
+      );
+      const grossEarning = task.fare ??
+        order.quotedFare ?? {
+          currency: "NTD",
+          amountMinor: 0,
+        };
+
+      return {
+        tenantId: order.tenantId ?? "",
+        driverId: task.driverId,
+        orderId: order.orderId,
+        completedAt: task.completedAt ?? order.updatedAt,
+        grossEarning: { ...grossEarning },
+      };
+    });
+  }
+
   async persistChanges(changes: PersistBillingSettlementChanges) {
     if (!this.isEnabled()) {
       return;
