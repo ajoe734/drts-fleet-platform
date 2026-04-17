@@ -321,6 +321,7 @@ describe("Phase 1 record wire shapes via deepToSnakeCase", () => {
       orderNo: "O-20260411-000001",
       orderSource: "app",
       orderDomain: "owned",
+      tenantId: null,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -343,6 +344,7 @@ describe("Phase 1 record wire shapes via deepToSnakeCase", () => {
 
     const wire = deepToSnakeCase(record) as Record<string, unknown>;
     expect(wire["order_id"]).toBe("ORD-001");
+    expect(wire["tenant_id"]).toBeNull();
     expect(wire["order_no"]).toBe("O-20260411-000001");
     expect(wire["order_source"]).toBe("app");
     expect(wire["order_domain"]).toBe("owned");

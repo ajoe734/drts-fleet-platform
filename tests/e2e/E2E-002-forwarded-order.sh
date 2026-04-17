@@ -50,12 +50,13 @@ FORWARDED_SOURCE_PLATFORM=""
 if [[ "${TOTAL_TASKS:-0}" -gt 0 ]]; then
   # Try to find a task with routeLocked=true
   FORWARDED_TASK_ID=$(echo "$RESP_BODY" | \
-    jq -r '.data.items[] | select(.routeLocked == true) | .taskId' 2>/dev/null | head -1 || true)
+    jq -r '.data.items[] | select((.routeLocked // .route_locked) == true) | (.taskId // .task_id)' \
+      2>/dev/null | head -1 || true)
 
   if [[ -z "$FORWARDED_TASK_ID" ]]; then
     # Fall back: any task with sourcePlatform not null/empty and != "drts"
     FORWARDED_TASK_ID=$(echo "$RESP_BODY" | \
-      jq -r '.data.items[] | select(.sourcePlatform != null and .sourcePlatform != "drts") | .taskId' \
+      jq -r '.data.items[] | select((.sourcePlatform // .source_platform) != null and (.sourcePlatform // .source_platform) != "drts") | (.taskId // .task_id)' \
       2>/dev/null | head -1 || true)
   fi
 fi
@@ -80,8 +81,8 @@ log_step "2.1 — GET /driver/tasks/:taskId (verify forwarded task metadata)"
 http_call GET "/driver/tasks/${FORWARDED_TASK_ID}"
 assert_status "200"
 
-FORWARDED_ROUTE_LOCKED=$(json_get ".data.routeLocked")
-FORWARDED_SOURCE_PLATFORM=$(json_get ".data.sourcePlatform")
+FORWARDED_ROUTE_LOCKED=$(json_get_first ".data.routeLocked" ".data.route_locked")
+FORWARDED_SOURCE_PLATFORM=$(json_get_first ".data.sourcePlatform" ".data.source_platform")
 TASK_TYPE=$(json_get ".data.taskType")
 
 save_evidence "$SCENARIO" "driver" "routeLocked" "${FORWARDED_ROUTE_LOCKED:-false}"
@@ -129,7 +130,7 @@ log_ok "Task status after accept: ${TASK_STATUS_AFTER_ACCEPT:-unknown}"
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Ops Console — verify no owned dispatch_assignment created"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "4.1 — GET /dispatch/tasks (verify no owned job for forwarded task)"
 http_call GET "/dispatch/tasks"
@@ -138,7 +139,7 @@ assert_status "200"
 # Check that there is no dispatch job whose forwardedTaskId matches our task
 OWNED_JOB_FOR_FORWARDED=$(echo "$RESP_BODY" | \
   jq -r --arg tid "$FORWARDED_TASK_ID" \
-    '.data.items[] | select(.sourceTaskId == $tid or .forwardedTaskId == $tid) | .dispatchJobId' \
+    '.data.items[] | select((.sourceTaskId // .source_task_id) == $tid or (.forwardedTaskId // .forwarded_task_id) == $tid) | (.dispatchJobId // .dispatch_job_id)' \
   2>/dev/null | head -1 || true)
 
 if [[ -n "$OWNED_JOB_FOR_FORWARDED" ]]; then

@@ -61,7 +61,7 @@ if [[ "$JOB_STATUS" != "completed" ]]; then
       log_fail "Report job failed: ${RESP_BODY}"
       exit 1
     fi
-    (( attempt++ ))
+    attempt=$((attempt + 1))
   done
 fi
 

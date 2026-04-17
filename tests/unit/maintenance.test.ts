@@ -18,18 +18,16 @@ describe("maintenance service", () => {
 
     const record = service.createMaintenanceLog({
       vehicleId: "VEH-001",
-      maintenanceType: "oil_change",
+      type: "oil_change",
       description: "Regular oil change",
-      recordedBy: "ops-user-001",
-      costAmount: 75.5,
+      cost: 75.5,
     });
 
-    expect(record.logId).toMatch(/^MNT-\d{6}$/);
+    expect(record.maintenanceId).toMatch(/^MNT-\d{6}$/);
     expect(record.vehicleId).toBe("VEH-001");
-    expect(record.maintenanceType).toBe("oil_change");
+    expect(record.type).toBe("oil_change");
     expect(record.status).toBe("in_progress");
-    expect(record.recordedBy).toBe("ops-user-001");
-    expect(record.costAmount).toBe(75.5);
+    expect(record.cost).toBe(75.5);
 
     expect(service.listMaintenanceLogs()).toHaveLength(1);
     expect(auditService.listAuditLogs()[0]?.actionName).toBe(
@@ -42,12 +40,12 @@ describe("maintenance service", () => {
 
     service.createMaintenanceLog({
       vehicleId: "VEH-001",
-      maintenanceType: "repair",
+      type: "repair",
       description: "Brake repair",
     });
     service.createMaintenanceLog({
       vehicleId: "VEH-002",
-      maintenanceType: "inspection",
+      type: "inspection",
       description: "Annual inspection",
     });
 
@@ -60,17 +58,17 @@ describe("maintenance service", () => {
 
     const record = service.createMaintenanceLog({
       vehicleId: "VEH-003",
-      maintenanceType: "tire_replacement",
+      type: "tire_replacement",
       description: "Replace all 4 tires",
     });
 
-    const updated = service.updateMaintenanceLog(record.logId, {
+    const updated = service.updateMaintenanceLog(record.maintenanceId, {
       status: "completed",
-      completedDate: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
     });
 
     expect(updated.status).toBe("completed");
-    expect(updated.completedDate).toBeDefined();
+    expect(updated.completedAt).toBeDefined();
   });
 
   it("creates scheduled log with scheduled status", () => {
@@ -78,13 +76,13 @@ describe("maintenance service", () => {
 
     const record = service.createMaintenanceLog({
       vehicleId: "VEH-004",
-      maintenanceType: "routine",
+      type: "scheduled_service",
       description: "50k mile service",
-      scheduledDate: new Date(Date.now() + 7 * 86400000).toISOString(),
+      scheduledAt: new Date(Date.now() + 7 * 86400000).toISOString(),
     });
 
     expect(record.status).toBe("scheduled");
-    expect(record.scheduledDate).toBeDefined();
+    expect(record.scheduledAt).toBeDefined();
   });
 
   it("rejects invalid maintenance type", () => {
@@ -93,7 +91,7 @@ describe("maintenance service", () => {
     expect(() =>
       service.createMaintenanceLog({
         vehicleId: "VEH-001",
-        maintenanceType: "invalid_type" as any,
+        type: "invalid_type" as any,
         description: "Test",
       }),
     ).toThrow("Api Request Error");
@@ -105,7 +103,7 @@ describe("maintenance service", () => {
     expect(() =>
       service.createMaintenanceLog({
         vehicleId: "",
-        maintenanceType: "repair",
+        type: "repair",
         description: "Test",
       }),
     ).toThrow("Api Request Error");

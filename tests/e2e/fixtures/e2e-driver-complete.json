@@ -1,8 +1,10 @@
 {
   "completedAt": "__COMPLETED_AT__",
-  "signoff": {
-    "signerName": "E2E Passenger",
-    "signedAt": "__COMPLETED_AT__"
+  "actualDistanceKm": 22.4,
+  "actualDurationSec": 2100,
+  "proof": {
+    "photoIds": ["FILE-1001"],
+    "signatureId": "FILE-2001"
   },
   "proofNotes": "E2E automated completion proof"
 }

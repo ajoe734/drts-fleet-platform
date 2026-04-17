@@ -13,6 +13,7 @@
 #
 # Environment:
 #   E2E_API_URL          API bare origin (default: http://localhost:3001)
+#   E2E_AUTH_BEARER_TOKEN Optional bearer token for private Cloud Run ingress
 #   E2E_SEED_TENANT_ID   TEN_ACME seed tenant (default: S0002 UUID)
 #   E2E_SEED_DRIVER_ID   張司機 seed driver   (default: S0002 UUID)
 #   E2E_SEED_VEHICLE_ID  ABC-1234 seed vehicle (default: S0002 UUID)
@@ -111,6 +112,7 @@ echo ""
 echo -e "${BOLD}════════════════════════════════════════════════════════${RESET}"
 echo -e "${BOLD}  DRTS Cross-Surface E2E Suite${RESET}"
 echo -e "${BOLD}  API: ${E2E_API_URL:-http://localhost:3001}${RESET}"
+echo -e "${BOLD}  Bearer auth: $([[ -n ${E2E_AUTH_BEARER_TOKEN:-} ]] && echo enabled || echo disabled)${RESET}"
 echo -e "${BOLD}  Run ID: ${E2E_RUN_ID}${RESET}"
 echo -e "${BOLD}════════════════════════════════════════════════════════${RESET}"
 echo ""
@@ -140,10 +142,10 @@ for scenario in "${SCENARIOS[@]}"; do
   set -e
 
   if [[ $exit_code -eq 0 ]]; then
-    (( PASS++ ))
+    PASS=$((PASS + 1))
     echo -e "  ${GREEN}✓ PASS${RESET}  ${name}"
   else
-    (( FAIL++ ))
+    FAIL=$((FAIL + 1))
     FAILED_NAMES+=("$name")
     echo -e "  ${RED}✗ FAIL${RESET}  ${name} (exit ${exit_code})"
   fi

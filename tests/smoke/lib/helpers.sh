@@ -119,6 +119,19 @@ json_get() {
   echo "$RESP_BODY" | jq -r "${field} // empty" 2>/dev/null || true
 }
 
+# Extract the first non-empty JSON field from a list of jq expressions.
+json_get_first() {
+  local field value
+  for field in "$@"; do
+    value=$(json_get "$field")
+    if [[ -n "$value" && "$value" != "null" ]]; then
+      echo "$value"
+      return 0
+    fi
+  done
+  echo ""
+}
+
 # ── State helpers ─────────────────────────────────────────────────────────────
 state_init() {
   echo '{}' > "$STATE_FILE"
@@ -154,7 +167,7 @@ poll_until_field() {
     fi
     log_info "  poll $((attempt+1))/${SMOKE_POLL_MAX}: ${field}=${actual} (want ${expected})"
     sleep "$SMOKE_POLL_INTERVAL"
-    (( attempt++ ))
+    attempt=$((attempt + 1))
   done
 
   log_fail "Timed out waiting for ${field}=${expected} on ${path}"

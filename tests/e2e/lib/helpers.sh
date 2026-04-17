@@ -14,6 +14,8 @@ set -euo pipefail
 E2E_API_URL="${E2E_API_URL:-${SMOKE_API_URL:-http://localhost:3001}}"
 # NestJS global prefix. Set to "" when ingress already strips it.
 E2E_API_PATH_PREFIX="${E2E_API_PATH_PREFIX:-/api}"
+# Optional Cloud Run / ingress bearer token for private staging access.
+E2E_AUTH_BEARER_TOKEN="${E2E_AUTH_BEARER_TOKEN:-}"
 
 # ── Bootstrap auth (overridden per surface leg via switch_actor) ───────────────
 # Defaults: platform_admin covers all routes; tests call switch_actor for
@@ -75,6 +77,8 @@ http_call() {
   local method="$1"
   local path="$2"
   local body_file="${3:-}"
+  local request_id
+  request_id="e2e-$(date +%s%N | head -c 16)"
 
   local realm="${E2E_REALM:-}"
   if [[ -z "$realm" ]]; then
@@ -93,8 +97,18 @@ http_call() {
     --write-out "\n__HTTP_STATUS__%{http_code}"
     -X "$method"
     -H "Content-Type: application/json"
-    -H "X-Request-ID: e2e-$(date +%s%N | head -c 16)"
+    -H "X-Request-ID: ${request_id}"
   )
+
+  case "$method" in
+    POST|PUT|PATCH|DELETE)
+      curl_args+=(-H "Idempotency-Key: ${request_id}")
+      ;;
+  esac
+
+  if [[ -n "$E2E_AUTH_BEARER_TOKEN" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${E2E_AUTH_BEARER_TOKEN}")
+  fi
 
   if [[ -n "${E2E_ACTOR_TYPE:-}" ]]; then
     curl_args+=(
@@ -132,6 +146,19 @@ assert_status() {
 json_get() {
   local field="$1"
   echo "$RESP_BODY" | jq -r "${field} // empty" 2>/dev/null || true
+}
+
+# Extract the first non-empty JSON field from a list of jq expressions.
+json_get_first() {
+  local field value
+  for field in "$@"; do
+    value=$(json_get "$field")
+    if [[ -n "$value" && "$value" != "null" ]]; then
+      echo "$value"
+      return 0
+    fi
+  done
+  echo ""
 }
 
 # ── Chain helpers (ID continuity across surfaces) ─────────────────────────────
@@ -196,7 +223,7 @@ poll_until_field() {
     fi
     log_info "  poll $((attempt+1))/${E2E_POLL_MAX}: ${field}=${actual} (want ${expected})"
     sleep "$E2E_POLL_INTERVAL"
-    (( attempt++ ))
+    attempt=$((attempt + 1))
   done
 
   log_fail "Timed out waiting for ${field}=${expected} on ${path}"

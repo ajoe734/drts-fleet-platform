@@ -17,7 +17,7 @@ if [[ -z "$TASK_ID" ]]; then
   # Fall back: pick first pending task from driver task list
   http_call GET "/driver/tasks"
   assert_status "200"
-  TASK_ID=$(json_get ".data.items[0].taskId")
+  TASK_ID=$(json_get_first ".data.items[0].taskId" ".data.items[0].task_id")
 fi
 
 if [[ -z "$TASK_ID" ]]; then
