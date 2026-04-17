@@ -48,7 +48,7 @@ export function logicalWorkerAgentId(worker) {
       .trim()
       .toLowerCase();
     if (!normalized) continue;
-    if (["claude", "gemini", "codex", "qwen"].includes(normalized))
+    if (["claude", "gemini", "codex", "codex2", "qwen"].includes(normalized))
       return normalized;
     if (["grok", "copilot"].includes(normalized)) return "copilot";
   }

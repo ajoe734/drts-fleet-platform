@@ -1,9 +1,9 @@
 # FBP-014A — Cross-Surface E2E Scenario Matrix and Fixture Scaffold
 
 **Task:** `FBP-014A`  
-**Owner:** Claude  
-**Reviewer:** Codex  
-**Status:** Scaffold complete — awaiting staging integration (blocked on FBP-013 live deploy)  
+**Owner:** Codex  
+**Reviewer:** Codex2  
+**Status:** Ready for review — scaffold complete; final live staging evidence remains with `FBP-014B` after `FBP-013` closeout  
 **Created:** 2026-04-16  
 **Depends on:** FBP-006 (tenant-commute-hub BFF cutover), FBP-008, FBP-009, FBP-011, FBP-012
 
@@ -99,12 +99,15 @@ bookingId (tenant) ──► dispatchJobId (ops) ──► taskId (driver) ─�
 
 #### Fixtures Used
 
-| Fixture                      | File                                             |
-| ---------------------------- | ------------------------------------------------ |
-| Enterprise dispatch booking  | `tests/e2e/fixtures/e2e-booking-enterprise.json` |
-| Dispatch assignment          | `tests/e2e/fixtures/e2e-dispatch-assign.json`    |
-| Driver accept                | `tests/e2e/fixtures/e2e-driver-accept.json`      |
-| Driver complete with signoff | `tests/e2e/fixtures/e2e-driver-complete.json`    |
+| Fixture                      | File                                                |
+| ---------------------------- | --------------------------------------------------- |
+| Enterprise dispatch booking  | `tests/e2e/fixtures/e2e-booking-enterprise.json`    |
+| Dispatch assignment          | `tests/e2e/fixtures/e2e-dispatch-assign.json`       |
+| Driver accept                | `tests/e2e/fixtures/e2e-driver-accept.json`         |
+| Driver depart                | `tests/e2e/fixtures/e2e-driver-depart.json`         |
+| Driver arrived pickup        | `tests/e2e/fixtures/e2e-driver-arrived-pickup.json` |
+| Driver start                 | `tests/e2e/fixtures/e2e-driver-start.json`          |
+| Driver complete with signoff | `tests/e2e/fixtures/e2e-driver-complete.json`       |
 
 #### Pass Criteria
 
@@ -217,14 +220,20 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ## 5. Fixture Inventory
 
-| Fixture File                  | Used By                          | Description                                                       |
-| ----------------------------- | -------------------------------- | ----------------------------------------------------------------- |
-| `e2e-booking-enterprise.json` | E2E-001, E2E-004                 | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
-| `e2e-booking-airport.json`    | (reserved for E2E-003 expansion) | `credit_card_airport_transfer` booking                            |
-| `e2e-dispatch-assign.json`    | E2E-001                          | Dispatch assign body with `__*__` placeholders                    |
-| `e2e-driver-accept.json`      | E2E-001, E2E-002                 | Driver task accept with `__ACCEPTED_AT__`                         |
-| `e2e-driver-complete.json`    | E2E-001                          | Driver task complete with signoff                                 |
-| `e2e-tenant-create.json`      | E2E-004                          | Platform-admin tenant create with `__TENANT_CODE__`               |
+| Fixture File                     | Used By                          | Description                                                       |
+| -------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
+| `e2e-booking-enterprise.json`    | E2E-001, E2E-004                 | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
+| `e2e-booking-airport.json`       | (reserved for E2E-003 expansion) | `credit_card_airport_transfer` booking                            |
+| `e2e-dispatch-assign.json`       | E2E-001                          | Dispatch assign body with `__*__` placeholders                    |
+| `e2e-driver-accept.json`         | E2E-001, E2E-002                 | Driver task accept with `__ACCEPTED_AT__`                         |
+| `e2e-driver-depart.json`         | E2E-001                          | Driver depart pickup with `__DEPARTED_AT__`                       |
+| `e2e-driver-arrived-pickup.json` | E2E-001                          | Driver arrived at pickup with `__ARRIVED_AT__`                    |
+| `e2e-driver-start.json`          | E2E-001                          | Driver trip start with `__STARTED_AT__`                           |
+| `e2e-driver-complete.json`       | E2E-001                          | Driver task complete with signoff                                 |
+| `e2e-tenant-create.json`         | E2E-004                          | Platform-admin tenant create with `__TENANT_CODE__`               |
+| `e2e-phone-booking.json`         | Reserved (E2E-003 manual flow)   | Phone booking payload stub for future CTI-backed automation       |
+| `e2e-report-compliance.json`     | Reserved (E2E-003 manual flow)   | Compliance export payload stub for future report validation       |
+| `e2e-tenant-module-enable.json`  | Reserved (future expansion)      | Tenant module-enable payload stub for future staged cutovers      |
 
 All `__PLACEHOLDER__` values are replaced at runtime by the scenario scripts before the fixture
 is passed to curl.
@@ -305,14 +314,19 @@ Minimum evidence items required for each scenario:
 
 ## 9. Acceptance Criteria (FBP-014A)
 
-- [ ] **AC-1:** `tests/e2e/lib/helpers.sh` exists with `switch_actor`, `chain_set/get`, `assert_chain`, `save_evidence` and shared `http_call`.
-- [ ] **AC-2:** `tests/e2e/E2E-001-enterprise-dispatch.sh` exercises all 4 surface legs (tenant booking, ops dispatch assign, driver lifecycle, billing+audit) and captures the full ID continuity chain.
-- [ ] **AC-3:** `tests/e2e/E2E-002-forwarded-order.sh` verifies `routeLocked` metadata and absence of owned dispatch_assignment, with graceful skip when no forwarded task is seeded.
-- [ ] **AC-4:** `tests/e2e/E2E-004-tenant-attribution.sh` verifies correct `tenantId` attribution and **hard-fails on cross-tenant leak**.
-- [ ] **AC-5:** `tests/e2e/run-e2e.sh` runs all scenarios, emits pass/fail summary, and prints the evidence log.
-- [ ] **AC-6:** Fixtures (`e2e-booking-enterprise.json`, `e2e-dispatch-assign.json`, `e2e-driver-accept.json`, `e2e-driver-complete.json`, `e2e-tenant-create.json`) cover all scenario legs.
-- [ ] **AC-7:** This matrix document maps each scenario to its surface chain, fixtures, ID chain, and pass criteria.
-- [ ] **AC-8:** No scenario uses retired `apps/tenant-portal-web` routes or repo-B local authority paths.
+- [x] **AC-1:** `tests/e2e/lib/helpers.sh` exists with `switch_actor`, `chain_set/get`, `assert_chain`, `save_evidence`, shared `http_call`, and canonical command headers on write calls.
+- [x] **AC-2:** `tests/e2e/E2E-001-enterprise-dispatch.sh` exercises all 4 surface legs (tenant booking, ops dispatch assign, driver lifecycle, billing+audit) and captures the full ID continuity chain.
+- [x] **AC-3:** `tests/e2e/E2E-002-forwarded-order.sh` verifies `routeLocked` metadata and absence of owned dispatch_assignment, with graceful skip when no forwarded task is seeded.
+- [x] **AC-4:** `tests/e2e/E2E-004-tenant-attribution.sh` verifies correct `tenantId` attribution and **hard-fails on cross-tenant leak**.
+- [x] **AC-5:** `tests/e2e/run-e2e.sh` runs all scenarios, emits pass/fail summary, and prints the evidence log.
+- [x] **AC-6:** Fixtures cover all automated scenario legs plus reserved manual-expansion payloads under `tests/e2e/fixtures/`.
+- [x] **AC-7:** This matrix document maps each scenario to its surface chain, fixtures, ID chain, and pass criteria.
+- [x] **AC-8:** No scenario uses retired `apps/tenant-portal-web` routes or repo-B local authority paths.
+
+### Verification Snapshot
+
+- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/run-e2e.sh`
+- `./tests/e2e/run-e2e.sh --dry-run`
 
 ---
 

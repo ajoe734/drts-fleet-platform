@@ -67,12 +67,15 @@ function renderBatonStatus(discussionState, statusData) {
 
   // Pull review order from ai-status.json
   const reviewOrder = statusData?.discussion_supervisor_config?.review_order ||
+    statusData?.discussion_loop?.review_order ||
     statusData?.review_order || ["Qwen", "Gemini", "Copilot", "Claude"];
 
   const currentOwner =
     queueParsed.currentOwner !== "-"
       ? queueParsed.currentOwner
-      : statusData?.current_baton_owner || "-";
+      : statusData?.discussion_loop?.current_owner ||
+        statusData?.current_baton_owner ||
+        "-";
 
   const activeFile = queueParsed.activeFile;
 
@@ -182,6 +185,8 @@ function renderReviewRounds(rounds) {
     .map((r) => {
       // Try to count how many entries exist in the round file
       const entryCount = (r.content.match(/^### Entry/gm) || []).length;
+      const normalizedEntryCount =
+        entryCount || (r.content.match(/^(##|###) Entry\b/gm) || []).length;
       const hasConclusion = /converged|accepted|resolved|human_required/i.test(
         r.content,
       );
@@ -194,7 +199,7 @@ function renderReviewRounds(rounds) {
           </span>
         </div>
         <div class="lane-meta">
-          ${entryCount ? `<span class="chip">${entryCount} 個 entry</span>` : ""}
+          ${normalizedEntryCount ? `<span class="chip">${normalizedEntryCount} 個 entry</span>` : ""}
         </div>
       </article>
     `;

@@ -4,7 +4,7 @@
   "consensus_status": "accepted",
   "sprint": "2026-04-15-full-blueprint-execution",
   "objective": "Execute the accepted full blueprint master plan: complete tenant portal convergence, finish the remaining Platform Admin / Ops / finance / filing blueprint families, close rollout evidence, and preserve deferred roadmap slices without losing scope.",
-  "updated_at": "2026-04-17T03:37:49Z",
+  "updated_at": "2026-04-17T03:44:00Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -104,11 +104,11 @@
         "architecture-arbitration",
         "control-plane"
       ],
-      "status": "working",
-      "current_task_ids": ["FBP-015"],
+      "status": "idle",
+      "current_task_ids": [],
       "branch": "feat/claude-governance-review",
-      "next": "Starting deferred roadmap packet: creating docs/02-architecture/roadmap/fbp-015-deferred-scope-packet.md with Passenger / Concierge / AV / ODD / Tesla / ROC live-board scope definitions, and updating ROADMAP.md.",
-      "last_update": "2026-04-17T03:37:49Z",
+      "next": "Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.",
+      "last_update": "2026-04-17T03:42:59Z",
       "current_task": "FBP-013A",
       "note": "Evidence pack closeout: E-11/E-12/E-13 collection, staging runbook."
     },
@@ -1824,7 +1824,7 @@
       "phase": "Full Blueprint Wave 4",
       "owner": "Claude",
       "reviewer": "Codex",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": ["FBP-014"],
       "artifacts": [
         "ROADMAP.md",
@@ -1836,9 +1836,20 @@
         "AV / ODD / Tesla / ROC live-board future-gated scope 被整理成明確 roadmap packet",
         "deferred scope 不被誤判為已完成或不在計畫內"
       ],
-      "next": "Starting deferred roadmap packet: creating docs/02-architecture/roadmap/fbp-015-deferred-scope-packet.md with Passenger / Concierge / AV / ODD / Tesla / ROC live-board scope definitions, and updating ROADMAP.md.",
-      "last_update": "2026-04-17T03:37:49Z",
-      "task_class": "planning_roadmap"
+      "next": "Owner finalized: deferred roadmap packet committed at 14836d8 — ROADMAP.md updated with named Deferred Scope section covering 3 families (Passenger App/Web, Call Point/Concierge Portal, AV/ODD/Tesla/ROC live-board), each with PRD reference, classification, repo truth, gate conditions, and promotion criteria. All 3 ACs satisfied. docs/02-architecture/roadmap/fbp-015-deferred-scope-packet.md created.",
+      "last_update": "2026-04-17T03:44:00Z",
+      "task_class": "planning_roadmap",
+      "review_notes_zh": [
+        "審查通過：ROADMAP.md 已新增具名 Deferred Scope 區塊，明確保留 Passenger App / Web、Call Point / Concierge Portal、AV / ODD / Tesla / ROC live-board 三個 family，符合 acceptance 對 master plan 可見性的要求。",
+        "deferred packet 與 accepted consensus packet §3.3 / §5 及 scope-matrix 分類一致，三個 family 的 classification、repo truth、gate condition、promotion conditions 都有落地，且沒有把缺席 surface 誤寫成已完成。",
+        "Repo-truth 敘述與目前工作區可見 landing zones 相符：callcenter backend 存在但無 Concierge 專屬 frontend，AV / ODD / Tesla / ROC live-board 亦無現成 implementation landing zone；docs-only 變更可接受。"
+      ],
+      "review_file": "docs/02-architecture/roadmap/fbp-015-deferred-scope-packet.md",
+      "commit_hash": "14836d8f06f95b66665e08862f228ca984ada797",
+      "commit_subject": "docs(FBP-015): add deferred roadmap packet for Passenger / Concierge / AV / ODD / Tesla / ROC",
+      "commit_agent": "Claude",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-17T03:44:00Z"
     },
     {
       "id": "FBP-005-SIDECAR-BFF-HANDOFF",
@@ -94508,6 +94519,24 @@
       "status": "done",
       "created_at": "2026-04-17T03:34:29Z",
       "resolved_at": "2026-04-17T03:35:43Z"
+    },
+    {
+      "task_id": "FBP-015",
+      "from": "Claude",
+      "to": "Codex",
+      "message": "Deferred roadmap packet complete. docs/02-architecture/roadmap/fbp-015-deferred-scope-packet.md created with 3 explicit families (Passenger App/Web, Call Point/Concierge Portal, AV/ODD/Tesla/ROC live-board), each with PRD reference, classification, repo truth, gate conditions, and promotion criteria. ROADMAP.md updated with named Deferred Scope section. All 3 ACs satisfied. Commit 14836d8.",
+      "status": "done",
+      "created_at": "2026-04-17T03:40:47Z",
+      "resolved_at": "2026-04-17T03:42:59Z"
+    },
+    {
+      "task_id": "FBP-015",
+      "from": "Codex",
+      "to": "Claude",
+      "message": "審查通過：FBP-015 deferred roadmap packet 已對齊 accepted consensus packet §3.3 / §5 與 scope-matrix 分類，ROADMAP.md 已明確保留 Passenger App / Web、Call Point / Concierge Portal、AV / ODD / Tesla / ROC live-board 三個 deferred family，避免被誤判為已完成或不在計畫內。回到 owner（Claude）以 commit_hash=14836d8f06f95b66665e08862f228ca984ada797、commit_subject='docs(FBP-015): add deferred roadmap packet for Passenger / Concierge / AV / ODD / Tesla / ROC' 做 done 收尾。",
+      "status": "done",
+      "created_at": "2026-04-17T03:42:59Z",
+      "resolved_at": "2026-04-17T03:44:00Z"
     }
   ],
   "blockers": [
@@ -94558,12 +94587,12 @@
   "workload_summary": {
     "Claude": {
       "total": 21,
-      "active": 1,
+      "active": 0,
       "blocked": 0,
-      "done": 20,
+      "done": 21,
       "review": 0,
       "review_approved": 0,
-      "todo": 1
+      "todo": 0
     },
     "Gemini": {
       "total": 0,

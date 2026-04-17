@@ -210,6 +210,24 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
 
   const queueEvents = normalizeDispatchQueue(orchState, status);
   const supervisor = orchState?.supervisor || {};
+  const desiredMode = status?.execution_mode || "-";
+  const liveFocusMode = supervisor?.focus_mode || "-";
+  const modeOccupancy = supervisor?.mode_occupancy || {};
+  const planningOccupancy = modeOccupancy?.planning || {
+    running: 0,
+    pending: 0,
+    queued: 0,
+  };
+  const executionOccupancy = modeOccupancy?.execution || {
+    running: 0,
+    pending: 0,
+    queued: 0,
+  };
+  const coordinationOccupancy = modeOccupancy?.coordination || {
+    running: 0,
+    pending: 0,
+    queued: 0,
+  };
   const supervisorHeartbeat =
     supervisor?.last_heartbeat_at || orchState?.last_heartbeat_at || null;
   const lastScan = orchState?.last_scan_at || supervisorHeartbeat || null;
@@ -218,6 +236,10 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
     (w) => w.bucket === "running",
   ).length;
   const pending = (approvalQueue?.pending || []).length;
+  const modeAligned =
+    (desiredMode === "discussion_planning" && liveFocusMode === "planning") ||
+    (desiredMode === "supervisor_managed_execution" &&
+      liveFocusMode === "execution");
 
   // Supervisor card
   const supervisorCard = document.createElement("article");
@@ -226,11 +248,17 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
     <div class="sys-card-head"><span class="sys-icon">🖥</span><strong>Supervisor</strong></div>
     <div class="sys-card-body">
       <span class="status-pill ${supervisorHeartbeat ? "status-working" : "status-blocked"}">${supervisorHeartbeat ? "運作中" : "無資料"}</span>
+      <span class="chip">Desired：${desiredMode}</span>
+      <span class="chip">Live：${liveFocusMode}</span>
+      <span class="status-pill ${modeAligned ? "status-done" : "status-review"}">${modeAligned ? "mode 對齊" : "mode 漂移"}</span>
       <span class="chip">PID：${supervisor?.pid || "-"}</span>
       <span class="chip">啟動：${formatTime(supervisor?.started_at || orchState?.initialized_at || null)}</span>
       <span class="chip">Heartbeat：${timeAgo(supervisorHeartbeat)}</span>
       <span class="chip">上次掃描：${timeAgo(lastScan)}</span>
       <span class="chip">Active Workers：${activeWorkerCount}</span>
+      <span class="chip">Planning：run ${planningOccupancy.running || 0} / pending ${planningOccupancy.pending || 0} / queued ${planningOccupancy.queued || 0}</span>
+      <span class="chip">Execution：run ${executionOccupancy.running || 0} / pending ${executionOccupancy.pending || 0} / queued ${executionOccupancy.queued || 0}</span>
+      <span class="chip">Coordination：run ${coordinationOccupancy.running || 0} / pending ${coordinationOccupancy.pending || 0} / queued ${coordinationOccupancy.queued || 0}</span>
     </div>
   `;
   statusEl.appendChild(supervisorCard);
@@ -282,7 +310,14 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
   statusEl.appendChild(approvalCard);
 
   // Per-agent worker summary cards
-  const logicalAgents = ["claude", "gemini", "codex", "qwen", "copilot"];
+  const logicalAgents = [
+    "claude",
+    "gemini",
+    "codex",
+    "codex2",
+    "qwen",
+    "copilot",
+  ];
   const agentStateMap = new Map(
     (agentStates || []).map((a) => [a.name.toLowerCase(), a]),
   );
