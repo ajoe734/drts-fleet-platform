@@ -1851,6 +1851,47 @@ export interface UpdateDriverSettingsCommand {
   preferredAreas?: string[];
 }
 
+export interface DriverProfileEmergencyContact {
+  name: string;
+  phone: string;
+  relationship: string | null;
+}
+
+export interface DriverProfileBankAccount {
+  bankName: string;
+  accountName: string;
+  accountNumberMasked: string;
+}
+
+export interface DriverProfileRecord {
+  driverId: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  photoUrl: string | null;
+  emergencyContact: DriverProfileEmergencyContact | null;
+  bankAccount: DriverProfileBankAccount | null;
+  updatedAt: string;
+}
+
+export interface CreateDriverProfileCommand {
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  photoUrl?: string | null;
+  emergencyContact?: DriverProfileEmergencyContact | null;
+  bankAccount?: DriverProfileBankAccount | null;
+}
+
+export interface UpdateDriverProfileCommand {
+  name?: string;
+  phone?: string | null;
+  email?: string | null;
+  photoUrl?: string | null;
+  emergencyContact?: DriverProfileEmergencyContact | null;
+  bankAccount?: DriverProfileBankAccount | null;
+}
+
 // ---------------------------------------------------------------------------
 // Platform Admin — Control-Plane Authority Types
 // ---------------------------------------------------------------------------
