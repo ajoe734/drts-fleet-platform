@@ -464,6 +464,9 @@ export class OwnedMobilityService implements OnModuleInit {
         amountMinor: 150000,
       },
       proofRequirements: {
+        // Enterprise dispatch keeps a photo proof requirement by default; unlike
+        // the standard createOrder path, omitting minPhotoCount here must still
+        // enforce at least one completion photo.
         minPhotoCount: command.minPhotoCount ?? 1,
         signoffRequired: command.signoffRequired ?? false,
         expenseProofRequired: command.expenseProofRequired ?? false,
