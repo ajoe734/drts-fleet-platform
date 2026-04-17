@@ -232,11 +232,11 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/webhooks/test")
-  sendTestWebhook(
+  async sendTestWebhook(
     @Body() command: SendTestWebhookCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const result = this.tenantPartnerService.sendTestWebhook(
+    const result = await this.tenantPartnerService.sendTestWebhook(
       command,
       requestId,
     );

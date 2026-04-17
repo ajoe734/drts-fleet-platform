@@ -73,7 +73,7 @@ export const FOUNDATION_MODULE_STATUSES: readonly FoundationModuleStatus[] = [
     stage: "in_progress",
     notes: [
       "Append-only audit listing and notification read endpoints are live.",
-      "Webhook delivery and retry policy remain future implementation work.",
+      "Webhook delivery now attempts live HTTP dispatch with in-process exponential retry scheduling.",
     ],
   },
 ];

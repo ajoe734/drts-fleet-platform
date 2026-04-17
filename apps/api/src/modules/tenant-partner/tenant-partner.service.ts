@@ -1,6 +1,12 @@
-import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
 
 import type {
   AuditLogRecord,
@@ -24,6 +30,7 @@ import type {
   UpdateTenantSlaProfileCommand,
   UpsertTenantAddressCommand,
   UpsertTenantPassengerCommand,
+  WebhookEventPayload,
   WebhookDeliveryRecord,
 } from "@drts/contracts";
 
@@ -36,16 +43,12 @@ import {
   type StoredWebhookDeliveryRecord,
   type StoredWebhookEndpointRecord,
 } from "./tenant-partner.repository";
+import {
+  WebhookDispatchService,
+  type WebhookRetryPolicy,
+} from "./webhook-dispatch.service";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
-
-type WebhookRetryPolicy = {
-  maxAttempts: number;
-  initialBackoffSeconds: number;
-  backoffMultiplier: number;
-  maxBackoffSeconds: number;
-  retryableStatusCodes: number[];
-};
 
 type WebhookSecretRotationRecord = {
   secretVersion: number;
@@ -211,7 +214,7 @@ const API_KEY_SEED: StoredTenantApiKeyRecord[] = [
 ];
 
 @Injectable()
-export class TenantPartnerService implements OnModuleInit {
+export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private notificationPreferences: TenantNotificationPreferences = {
     tenantId: DEMO_TENANT_ID,
     subscriptions: [
@@ -255,10 +258,17 @@ export class TenantPartnerService implements OnModuleInit {
     this.cloneStoredApiKey(apiKey),
   );
 
+  private readonly retryTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
     private readonly tenantPartnerRepository?: TenantPartnerRepository,
+    @Optional()
+    private readonly webhookDispatchService: WebhookDispatchService = new WebhookDispatchService(),
   ) {}
 
   async onModuleInit() {
@@ -329,12 +339,20 @@ export class TenantPartnerService implements OnModuleInit {
       this.apiKeys = persistedState.apiKeys.map((apiKey) =>
         this.cloneStoredApiKey(apiKey),
       );
+      this.schedulePersistedWebhookRetries();
     } catch (error) {
       this.tenantPartnerRepository.reportPersistenceFailure(
         error,
         "module init",
       );
     }
+  }
+
+  onModuleDestroy() {
+    for (const timer of this.retryTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.retryTimers.clear();
   }
 
   getNotificationPreferences() {
@@ -778,6 +796,12 @@ export class TenantPartnerService implements OnModuleInit {
   }
 
   deleteWebhookEndpoint(webhookId: string, requestId?: string) {
+    for (const delivery of this.webhookDeliveries) {
+      if (delivery.webhookId === webhookId) {
+        this.clearWebhookRetry(delivery.deliveryId);
+      }
+    }
+
     const index = this.webhookEndpoints.findIndex(
       (w) => w.webhookId === webhookId,
     );
@@ -964,7 +988,7 @@ export class TenantPartnerService implements OnModuleInit {
     return this.toWebhookResponse(endpoint);
   }
 
-  sendTestWebhook(command: SendTestWebhookCommand, requestId?: string) {
+  async sendTestWebhook(command: SendTestWebhookCommand, requestId?: string) {
     const endpoint = this.webhookEndpoints.find(
       (webhook) => webhook.webhookId === command.webhookId,
     );
@@ -972,52 +996,31 @@ export class TenantPartnerService implements OnModuleInit {
       return null;
     }
 
-    const attemptedAt = new Date().toISOString();
-    const rawBody = {
-      event: "tenant.webhook.test",
-      webhookId: endpoint.webhookId,
-      tenantId: endpoint.tenantId,
-      secretVersion: endpoint.secretVersion,
-    };
-    const rawBodyString = JSON.stringify(rawBody);
-    const signature = createHmac("sha256", endpoint.secretValue)
-      .update(`${attemptedAt}.${rawBodyString}`)
-      .digest("hex");
-    const nextAttemptAt = this.computeNextAttemptAt(
-      attemptedAt,
-      endpoint.retryPolicy,
-      1,
-    );
-
+    const createdAt = new Date().toISOString();
+    const deliveryId = `wd_${randomUUID()}`;
     const delivery: StoredWebhookDelivery = {
-      deliveryId: `wd_${randomUUID()}`,
+      deliveryId,
       webhookId: endpoint.webhookId,
       tenantId: endpoint.tenantId,
       eventType: "tenant.webhook.test",
-      attempt: 1,
+      attempt: 0,
       status: "queued",
-      httpStatus: 202,
-      signature,
-      createdAt: attemptedAt,
-      attemptedAt,
-      nextAttemptAt,
-      signatureHeader: `v=${endpoint.secretVersion};t=${attemptedAt};sig=${signature}`,
+      httpStatus: null,
+      signature: "",
+      createdAt,
+      attemptedAt: createdAt,
+      nextAttemptAt: null,
+      signatureHeader: "",
       signatureVersion: endpoint.secretVersion,
       secretVersion: endpoint.secretVersion,
       retryPolicySnapshot: { ...endpoint.retryPolicy },
-      rawBody,
+      rawBody: {},
     };
 
-    this.webhookDeliveries = [
-      this.cloneStoredWebhookDelivery(delivery),
-      ...this.webhookDeliveries,
-    ];
+    this.webhookDeliveries = [delivery, ...this.webhookDeliveries];
     endpoint.runtimeMetadata = {
       ...endpoint.runtimeMetadata,
       deliveryCount: endpoint.runtimeMetadata.deliveryCount + 1,
-      lastAttemptAt: attemptedAt,
-      nextAttemptAt,
-      lastSignaturePreview: signature.slice(0, 16),
       secretRotation: {
         currentVersion: endpoint.secretVersion,
         rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
@@ -1028,13 +1031,26 @@ export class TenantPartnerService implements OnModuleInit {
       },
       retryPolicy: { ...endpoint.retryPolicy },
     };
-    this.persistChanges(
-      {
-        webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
-        webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+
+    const payload = this.buildWebhookPayload<{
+      webhookId: string;
+      secretVersion: number;
+    }>({
+      deliveryId,
+      eventType: delivery.eventType,
+      tenantId: endpoint.tenantId,
+      occurredAt: createdAt,
+      data: {
+        webhookId: endpoint.webhookId,
+        secretVersion: endpoint.secretVersion,
       },
-      "send_test_webhook",
+    });
+    const result = await this.dispatchWebhookAttempt(
+      endpoint,
+      delivery,
+      payload as unknown as Record<string, unknown>,
     );
+
     this.recordTenantAudit(
       {
         actorId: null,
@@ -1047,8 +1063,9 @@ export class TenantPartnerService implements OnModuleInit {
         newValuesSummary: {
           webhookId: endpoint.webhookId,
           eventType: delivery.eventType,
-          attempt: delivery.attempt,
-          nextAttemptAt: delivery.nextAttemptAt,
+          attempt: result.attempt,
+          httpStatus: result.httpStatus,
+          nextAttemptAt: result.nextAttemptAt,
           retryPolicy: delivery.retryPolicySnapshot,
         },
       },
@@ -1057,10 +1074,167 @@ export class TenantPartnerService implements OnModuleInit {
 
     return {
       deliveryId: delivery.deliveryId,
-      httpStatus: delivery.httpStatus,
-      attempt: delivery.attempt,
-      nextAttemptAt: delivery.nextAttemptAt,
+      httpStatus: result.httpStatus,
+      attempt: result.attempt,
+      nextAttemptAt: result.nextAttemptAt,
     };
+  }
+
+  private buildWebhookPayload<T extends Record<string, unknown>>(input: {
+    deliveryId: string;
+    eventType: string;
+    tenantId: string;
+    occurredAt: string;
+    data: T;
+  }): WebhookEventPayload<T> {
+    return {
+      event: input.eventType,
+      deliveryId: input.deliveryId,
+      occurredAt: input.occurredAt,
+      tenantId: input.tenantId,
+      data: {
+        ...input.data,
+      },
+    };
+  }
+
+  private async dispatchWebhookAttempt(
+    endpoint: StoredWebhookEndpoint,
+    delivery: StoredWebhookDelivery,
+    payload: Record<string, unknown>,
+  ) {
+    const previousStatus = delivery.status;
+    const result = await this.webhookDispatchService.dispatchAttempt({
+      url: endpoint.url,
+      deliveryId: delivery.deliveryId,
+      eventType: delivery.eventType,
+      tenantId: endpoint.tenantId,
+      secretValue: endpoint.secretValue,
+      secretVersion: endpoint.secretVersion,
+      payload,
+      attempt: delivery.attempt + 1,
+      retryPolicy: endpoint.retryPolicy,
+    });
+
+    delivery.attempt = result.attempt;
+    delivery.status = result.status;
+    delivery.httpStatus = result.httpStatus;
+    delivery.signature = result.signature;
+    delivery.attemptedAt = result.attemptedAt;
+    delivery.nextAttemptAt = result.nextAttemptAt;
+    delivery.signatureHeader = result.signatureHeader;
+    delivery.signatureVersion = result.signatureVersion;
+    delivery.secretVersion = result.secretVersion;
+    delivery.retryPolicySnapshot = { ...endpoint.retryPolicy };
+    delivery.rawBody = { ...result.rawBody };
+
+    endpoint.runtimeMetadata = {
+      ...endpoint.runtimeMetadata,
+      failedDeliveryCount:
+        result.status === "delivery_failed" &&
+        previousStatus !== "delivery_failed"
+          ? endpoint.runtimeMetadata.failedDeliveryCount + 1
+          : endpoint.runtimeMetadata.failedDeliveryCount,
+      lastAttemptAt: result.attemptedAt,
+      lastDeliveredAt:
+        result.status === "delivered"
+          ? result.attemptedAt
+          : endpoint.runtimeMetadata.lastDeliveredAt,
+      nextAttemptAt: result.nextAttemptAt,
+      lastSignaturePreview: result.signature.slice(0, 16),
+      secretRotation: {
+        currentVersion: endpoint.secretVersion,
+        rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
+        rotationCount: endpoint.runtimeMetadata.secretRotation.rotationCount,
+        history: endpoint.runtimeMetadata.secretRotation.history.map(
+          (record) => ({ ...record }),
+        ),
+      },
+      retryPolicy: { ...endpoint.retryPolicy },
+    };
+
+    this.persistChanges(
+      {
+        webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+        webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+      },
+      "webhook_dispatch_attempt",
+    );
+
+    if (result.status === "queued" && result.nextAttemptAt) {
+      this.scheduleWebhookRetry(
+        endpoint.webhookId,
+        delivery.deliveryId,
+        result.nextAttemptAt,
+      );
+    } else {
+      this.clearWebhookRetry(delivery.deliveryId);
+    }
+
+    return result;
+  }
+
+  private schedulePersistedWebhookRetries() {
+    for (const delivery of this.webhookDeliveries) {
+      if (delivery.status !== "queued" || !delivery.nextAttemptAt) {
+        continue;
+      }
+
+      const endpoint = this.webhookEndpoints.find(
+        (candidate) => candidate.webhookId === delivery.webhookId,
+      );
+      if (!endpoint) {
+        continue;
+      }
+
+      this.scheduleWebhookRetry(
+        endpoint.webhookId,
+        delivery.deliveryId,
+        delivery.nextAttemptAt,
+      );
+    }
+  }
+
+  private scheduleWebhookRetry(
+    webhookId: string,
+    deliveryId: string,
+    nextAttemptAt: string,
+  ) {
+    this.clearWebhookRetry(deliveryId);
+
+    const delayMs = Math.max(0, new Date(nextAttemptAt).getTime() - Date.now());
+    const timer = setTimeout(() => {
+      this.retryTimers.delete(deliveryId);
+      void this.retryWebhookDelivery(webhookId, deliveryId);
+    }, delayMs);
+
+    this.retryTimers.set(deliveryId, timer);
+  }
+
+  private clearWebhookRetry(deliveryId: string) {
+    const timer = this.retryTimers.get(deliveryId);
+    if (!timer) {
+      return;
+    }
+
+    clearTimeout(timer);
+    this.retryTimers.delete(deliveryId);
+  }
+
+  private async retryWebhookDelivery(webhookId: string, deliveryId: string) {
+    const endpoint = this.webhookEndpoints.find(
+      (candidate) => candidate.webhookId === webhookId,
+    );
+    const delivery = this.webhookDeliveries.find(
+      (candidate) => candidate.deliveryId === deliveryId,
+    );
+
+    if (!endpoint || !delivery || delivery.status !== "queued") {
+      this.clearWebhookRetry(deliveryId);
+      return;
+    }
+
+    await this.dispatchWebhookAttempt(endpoint, delivery, delivery.rawBody);
   }
 
   listWebhookDeliveries() {
@@ -1534,33 +1708,6 @@ export class TenantPartnerService implements OnModuleInit {
     }
 
     return normalized;
-  }
-
-  private computeNextAttemptAt(
-    attemptedAt: string,
-    retryPolicy: WebhookRetryPolicy,
-    attempt: number,
-  ) {
-    const retryDelaySeconds = this.computeRetryDelaySeconds(
-      retryPolicy,
-      attempt,
-    );
-    return new Date(
-      new Date(attemptedAt).getTime() + retryDelaySeconds * 1000,
-    ).toISOString();
-  }
-
-  private computeRetryDelaySeconds(
-    retryPolicy: WebhookRetryPolicy,
-    attempt: number,
-  ) {
-    const delay =
-      retryPolicy.initialBackoffSeconds *
-      retryPolicy.backoffMultiplier ** (attempt - 1);
-    return Math.min(
-      Math.max(1, Math.round(delay)),
-      retryPolicy.maxBackoffSeconds,
-    );
   }
 
   private persistChanges(

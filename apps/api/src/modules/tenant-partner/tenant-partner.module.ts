@@ -5,10 +5,15 @@ import { AuditNotificationModule } from "../audit-notification/audit-notificatio
 import { TenantPartnerController } from "./tenant-partner.controller";
 import { TenantPartnerRepository } from "./tenant-partner.repository";
 import { TenantPartnerService } from "./tenant-partner.service";
+import { WebhookDispatchService } from "./webhook-dispatch.service";
 
 @Module({
   imports: [DatabaseModule, AuditNotificationModule],
   controllers: [TenantPartnerController],
-  providers: [TenantPartnerService, TenantPartnerRepository],
+  providers: [
+    TenantPartnerService,
+    TenantPartnerRepository,
+    WebhookDispatchService,
+  ],
 })
 export class TenantPartnerModule {}

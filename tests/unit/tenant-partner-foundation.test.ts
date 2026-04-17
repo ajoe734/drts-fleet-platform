@@ -7,6 +7,7 @@ import {
   type StoredWebhookEndpointRecord,
 } from "../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { WebhookDispatchService } from "../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 
 describe("tenant partner foundation service", () => {
   it("updates tenant notification preferences and writes tenant audit", () => {
@@ -35,9 +36,17 @@ describe("tenant partner foundation service", () => {
     );
   });
 
-  it("creates a webhook endpoint and queues a test delivery", () => {
+  it("creates a webhook endpoint and dispatches a test delivery", async () => {
     const auditService = new AuditNotificationService();
-    const tenantPartnerService = new TenantPartnerService(auditService);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 204,
+    }));
+    const tenantPartnerService = new TenantPartnerService(
+      auditService,
+      undefined,
+      new WebhookDispatchService(fetchMock),
+    );
 
     const webhook = tenantPartnerService.createWebhookEndpoint(
       {
@@ -48,17 +57,21 @@ describe("tenant partner foundation service", () => {
       "webhook-create-request",
     );
 
-    const delivery = tenantPartnerService.sendTestWebhook(
+    const delivery = await tenantPartnerService.sendTestWebhook(
       {
         webhookId: webhook.webhookId,
       },
       "webhook-test-request",
     );
+    const dispatchedDelivery = tenantPartnerService.listWebhookDeliveries()[0];
+    const firstRequestInit = fetchMock.mock.calls[0]?.[1];
 
     expect(webhook.status).toBe("active");
-    expect(delivery?.httpStatus).toBe(202);
-    expect(delivery?.nextAttemptAt).toBeTruthy();
+    expect(delivery?.httpStatus).toBe(204);
+    expect(delivery?.nextAttemptAt).toBeNull();
     expect(tenantPartnerService.listWebhookDeliveries()).toHaveLength(1);
+    expect(dispatchedDelivery?.status).toBe("delivered");
+    expect(dispatchedDelivery?.attempt).toBe(1);
     expect(
       tenantPartnerService.listWebhookEndpoints()[0]?.runtimeMetadata
         .retryPolicy.maxAttempts,
@@ -67,9 +80,77 @@ describe("tenant partner foundation service", () => {
       tenantPartnerService.listWebhookEndpoints()[0]?.runtimeMetadata
         .secretRotation.currentVersion,
     ).toBe(1);
+    expect(
+      firstRequestInit?.headers &&
+        "x-drts-webhook-signature" in firstRequestInit.headers,
+    ).toBe(true);
+    expect(firstRequestInit?.body).toContain('"delivery_id"');
+    expect(firstRequestInit?.body).not.toContain('"deliveryId"');
     expect(tenantPartnerService.listTenantAudit()[0]?.actionName).toBe(
       "send_test_webhook",
     );
+  });
+
+  it("retries a failed webhook delivery with exponential backoff scheduling", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-17T12:00:00.000Z"));
+
+    try {
+      const auditService = new AuditNotificationService();
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 204,
+        });
+      const tenantPartnerService = new TenantPartnerService(
+        auditService,
+        undefined,
+        new WebhookDispatchService(fetchMock),
+      );
+
+      const webhook = tenantPartnerService.createWebhookEndpoint(
+        {
+          url: "https://tenant.example.com/webhooks/retry",
+          secret: "retry-secret",
+          events: ["tenant.sla.threshold_breached"],
+        },
+        "webhook-create-request",
+      );
+
+      const firstAttempt = await tenantPartnerService.sendTestWebhook(
+        {
+          webhookId: webhook.webhookId,
+        },
+        "webhook-test-request",
+      );
+
+      expect(firstAttempt).toEqual(
+        expect.objectContaining({
+          attempt: 1,
+          httpStatus: 503,
+          nextAttemptAt: "2026-04-17T12:00:30.000Z",
+        }),
+      );
+      expect(tenantPartnerService.listWebhookDeliveries()[0]?.status).toBe(
+        "queued",
+      );
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      const delivery = tenantPartnerService.listWebhookDeliveries()[0];
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(delivery?.status).toBe("delivered");
+      expect(delivery?.attempt).toBe(2);
+      expect(delivery?.httpStatus).toBe(204);
+      expect(delivery?.nextAttemptAt).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rotates webhook secrets and records rotation history", () => {
@@ -391,6 +472,12 @@ describe("tenant partner foundation service", () => {
     const tenantPartnerService = new TenantPartnerService(
       auditService,
       repository,
+      new WebhookDispatchService(
+        vi.fn(async () => ({
+          ok: true,
+          status: 204,
+        })),
+      ),
     );
 
     await tenantPartnerService.onModuleInit();
@@ -421,7 +508,7 @@ describe("tenant partner foundation service", () => {
       keyName: "Persisted Tenant Key v2",
       scopes: ["tenant:read", "tenant:write"],
     });
-    tenantPartnerService.sendTestWebhook({
+    await tenantPartnerService.sendTestWebhook({
       webhookId: "wh_persisted_001",
     });
 
