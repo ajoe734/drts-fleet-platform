@@ -116,6 +116,25 @@ export function parseCurrentWork(markdown) {
 
 // ── Discussion artifact parsers ───────────────────────────────────────────────
 
+function cleanMarkdownCell(value) {
+  return String(value || "")
+    .replace(/`/g, "")
+    .replace(/\*\*/g, "")
+    .trim();
+}
+
+function inferDiscussionActiveFile(action) {
+  const text = String(action || "").toLowerCase();
+  if (text.includes("review-round-1")) return "review-round-1.md";
+  if (text.includes("review-round-2")) return "review-round-2.md";
+  if (text.includes("review-round-3")) return "review-round-3.md";
+  if (text.includes("review-round-4")) return "review-round-4.md";
+  if (text.includes("consensus packet")) return "consensus-packet.md";
+  if (text.includes("starter draft")) return "starter-draft.md";
+  if (text.includes("scope matrix")) return "scope-matrix.md";
+  return "-";
+}
+
 // Extract rounds from baton-log.md
 // Returns array of { round, owner, status, outcome }
 export function parseBatonLog(content) {
@@ -135,6 +154,32 @@ export function parseBatonLog(content) {
       outcome: outcomeMatch ? outcomeMatch[1].trim() : null,
     });
   }
+  if (rounds.length) return rounds;
+
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const match = line.match(
+      /^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|$/,
+    );
+    if (!match) continue;
+    const [, roundCell, ownerCell, actionCell, timestampCell] = match;
+    const round = cleanMarkdownCell(roundCell);
+    if (!round || /^-+$/.test(round) || /^round$/i.test(round)) continue;
+    const owner = cleanMarkdownCell(ownerCell);
+    const outcome = cleanMarkdownCell(actionCell);
+    const ts = cleanMarkdownCell(timestampCell);
+    const isActive =
+      outcome.includes("CURRENT OWNER") ||
+      /^pending$/i.test(ts) ||
+      ts === "—" ||
+      ts === "-";
+    rounds.push({
+      round,
+      owner,
+      status: isActive ? "active" : "completed",
+      outcome,
+    });
+  }
   return rounds;
 }
 
@@ -147,7 +192,7 @@ export function parseSupervisorQueue(content) {
   const dispositionMatch = content.match(
     /## Current disposition\s+([\s\S]*?)(?:\n##|$)/,
   );
-  return {
+  const legacyResult = {
     currentOwner: ownerMatch ? ownerMatch[1].trim() : "-",
     activeFile: fileMatch ? fileMatch[1].trim() : "-",
     disposition: dispositionMatch
@@ -157,6 +202,40 @@ export function parseSupervisorQueue(content) {
           .filter((l) => l.startsWith("- "))
           .map((l) => l.replace(/^- /, "").trim())
       : [],
+  };
+  if (
+    legacyResult.currentOwner !== "-" ||
+    legacyResult.activeFile !== "-" ||
+    legacyResult.disposition.length
+  ) {
+    return legacyResult;
+  }
+
+  const rows = content
+    .split("\n")
+    .map((line) =>
+      line.match(/^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|$/),
+    )
+    .filter(Boolean)
+    .map((match) => ({
+      action: cleanMarkdownCell(match[1]),
+      target: cleanMarkdownCell(match[2]),
+      status: cleanMarkdownCell(match[3]),
+    }))
+    .filter(
+      (row) =>
+        row.action &&
+        !/^action$/i.test(row.action) &&
+        !/^-+$/.test(row.action.replace(/\s+/g, "")),
+    );
+
+  const activeRow = rows.find((row) => /^active$/i.test(row.status));
+  return {
+    currentOwner: activeRow?.target || "-",
+    activeFile: inferDiscussionActiveFile(activeRow?.action || ""),
+    disposition: rows.map(
+      (row) => `${row.target}: ${row.action} (${row.status})`,
+    ),
   };
 }
 

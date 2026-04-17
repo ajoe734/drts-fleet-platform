@@ -67,6 +67,40 @@ Exit gate:
 - expand acceptance coverage from MVP regression set to broader operational flows
 - prepare the repo for longer-running supervisor-managed delivery
 
+## Deferred Scope (Phase 2+)
+
+The following blueprint families are **not targeted by the current Phase 1 execution wave**.
+They are preserved here explicitly so they remain visible in the master plan and are not
+misread as complete or permanently out-of-scope.
+See `docs/02-architecture/roadmap/fbp-015-deferred-scope-packet.md` for full detail,
+gate conditions, and promotion criteria for each family.
+
+### Passenger App / Web (missing_surface_future_gated)
+
+- PRD §9.1.1
+- End-consumer-facing order creation, live tracking, receipt download, trip history
+- No repo landing zone exists; deferred pending human topology decision
+- Do not treat as complete; do not remove from master plan
+
+### Call Point / Concierge Portal (missing_surface_future_gated)
+
+- PRD §9.1.3
+- Concierge-assisted order entry, CTI screen-pop, assisted booking workflow
+- Backend callcenter module exists but no dedicated frontend surface
+- Deferred pending human topology decision (extend ops-console-web vs. new app)
+- Do not treat as complete; do not remove from master plan
+
+### AV / ODD / Tesla / ROC Live-Board (future_gated)
+
+- PRD §16
+- Autonomous-vehicle runtime hooks, ODD geo-fence enforcement, Tesla Fleet API adapter,
+  ROC live-board, AV-specific dispatch qualification, AV → human-driver fallback path
+- No implementation landing zone in the current monorepo
+- Deferred until AV regulatory approval, Tesla Fleet API agreement, and ROC design are ready
+- Do not treat as complete; do not remove from master plan
+
+---
+
 ## Tenant Portal Topology Note
 
 **`apps/tenant-portal-web` is retired as of 2026-04-15 (FBP-007, SUNSET-001-tenant-portal-web).**
