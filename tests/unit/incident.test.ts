@@ -56,6 +56,22 @@ describe("incident service", () => {
     expect(found.incidentId).toBe(incidents[0]!.incidentId);
   });
 
+  it("accepts safety-critical SOS incidents from the driver app path", () => {
+    const { service } = createService();
+
+    const incident = service.createIncident({
+      title: "Driver SOS emergency",
+      description: "SOS alert triggered from the driver app.",
+      category: "safety",
+      severity: "critical",
+      reportedBy: "driver",
+    });
+
+    expect(incident.category).toBe("safety");
+    expect(incident.severity).toBe("critical");
+    expect(incident.status).toBe("open");
+  });
+
   it("updates incident status and assignment", () => {
     const { service } = createService();
 

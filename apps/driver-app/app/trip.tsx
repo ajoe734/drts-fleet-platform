@@ -188,7 +188,7 @@ export default function TripScreen() {
 
       <View style={styles.footer}>
         <Text style={styles.link} onPress={() => router.push("/incident")}>
-          Report Incident →
+          SOS Emergency →
         </Text>
       </View>
     </View>

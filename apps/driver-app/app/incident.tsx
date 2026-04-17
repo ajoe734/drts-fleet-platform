@@ -8,10 +8,11 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
+
 import { getDriverClient } from "@/lib/api-client";
 
 export default function IncidentScreen() {
-  const [description, setDescription] = useState("");
+  const [details, setDetails] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [incidentsEnabled, setIncidentsEnabled] = useState<boolean | null>(
     null,
@@ -27,25 +28,23 @@ export default function IncidentScreen() {
   }, []);
 
   const handleSubmit = async () => {
-    if (!description.trim()) {
-      Alert.alert("Error", "Description is required");
-      return;
-    }
-
     setSubmitting(true);
     const client = getDriverClient();
     try {
       await client.createIncident({
-        title: "Driver-reported incident",
-        description: description.trim(),
-        category: "operational",
-        severity: "medium",
+        title: "Driver SOS emergency",
+        description:
+          details.trim() || "SOS alert triggered from the driver app.",
+        category: "safety",
+        severity: "critical",
         reportedBy: "driver",
-        caseSource: "app",
       });
-      Alert.alert("Success", "Incident reported successfully");
-      setDescription("");
-      router.push("/earnings");
+      Alert.alert(
+        "SOS sent",
+        "Operations has received your critical safety alert.",
+      );
+      setDetails("");
+      router.replace("/trip");
     } catch (e: any) {
       Alert.alert("Error", e.message);
     } finally {
@@ -57,7 +56,7 @@ export default function IncidentScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" />
-        <Text style={styles.label}>Loading...</Text>
+        <Text style={styles.loadingLabel}>Loading...</Text>
       </View>
     );
   }
@@ -65,7 +64,7 @@ export default function IncidentScreen() {
   if (!incidentsEnabled) {
     return (
       <View style={styles.center}>
-        <Text style={styles.title}>Incident Reporting Unavailable</Text>
+        <Text style={styles.disabledTitle}>Incident Reporting Unavailable</Text>
         <Text style={styles.empty}>This feature is currently disabled.</Text>
       </View>
     );
@@ -73,31 +72,43 @@ export default function IncidentScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Report Incident</Text>
-      <Text style={styles.subtitle}>
-        Submit safety events and operational escalation.
-      </Text>
+      <View style={styles.heroCard}>
+        <Text style={styles.eyebrow}>Driver Safety</Text>
+        <Text style={styles.title}>SOS Emergency</Text>
+        <Text style={styles.subtitle}>
+          One tap sends a critical safety incident to operations immediately.
+        </Text>
+      </View>
 
+      <View style={styles.noticeCard}>
+        <Text style={styles.noticeTitle}>Dispatch behavior</Text>
+        <Text style={styles.noticeBody}>
+          This screen always creates an incident with category safety and
+          severity critical.
+        </Text>
+      </View>
+
+      <Text style={styles.fieldLabel}>Additional details (optional)</Text>
       <TextInput
         style={styles.input}
-        placeholder="Describe the incident..."
+        placeholder="Share location, passenger status, or immediate risk..."
         multiline
         numberOfLines={4}
-        value={description}
-        onChangeText={setDescription}
+        value={details}
+        onChangeText={setDetails}
         editable={!submitting}
       />
 
       <Text
-        style={[styles.submitBtn, submitting && styles.submitBtnDisabled]}
+        style={[styles.sosButton, submitting && styles.submitBtnDisabled]}
         onPress={handleSubmit}
       >
-        {submitting ? "Submitting..." : "Submit Report"}
+        {submitting ? "Sending SOS..." : "Send SOS Alert"}
       </Text>
 
       <View style={styles.footer}>
-        <Text style={styles.link} onPress={() => router.push("/earnings")}>
-          View Earnings →
+        <Text style={styles.link} onPress={() => router.replace("/trip")}>
+          Back to Trip
         </Text>
       </View>
     </View>
@@ -105,32 +116,69 @@ export default function IncidentScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: "#fff" },
+  container: { flex: 1, padding: 16, backgroundColor: "#fff5f3" },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  title: { fontSize: 24, fontWeight: "bold", marginBottom: 4 },
-  subtitle: { fontSize: 14, color: "#666", marginBottom: 16 },
+  heroCard: {
+    backgroundColor: "#8a0f19",
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 16,
+  },
+  eyebrow: {
+    color: "#ffd7dc",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+    marginBottom: 8,
+  },
+  title: { fontSize: 30, fontWeight: "800", color: "#fff", marginBottom: 8 },
+  subtitle: { fontSize: 15, color: "#ffe9ec", lineHeight: 22 },
+  noticeCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#f2c2c8",
+  },
+  noticeTitle: {
+    color: "#8a0f19",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  noticeBody: { color: "#5f2930", fontSize: 14, lineHeight: 20 },
+  fieldLabel: {
+    marginBottom: 8,
+    color: "#5f2930",
+    fontSize: 14,
+    fontWeight: "600",
+  },
   input: {
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
+    borderColor: "#e6b7be",
+    borderRadius: 14,
     padding: 12,
     fontSize: 16,
     textAlignVertical: "top",
     minHeight: 100,
     marginBottom: 16,
+    backgroundColor: "#fff",
   },
-  submitBtn: {
-    backgroundColor: "#007AFF",
+  sosButton: {
+    backgroundColor: "#c21423",
     color: "#fff",
     textAlign: "center",
-    padding: 14,
-    borderRadius: 8,
-    fontSize: 16,
-    fontWeight: "600",
+    paddingVertical: 16,
+    borderRadius: 14,
+    fontSize: 18,
+    fontWeight: "800",
   },
   submitBtnDisabled: { opacity: 0.6 },
   footer: { marginTop: 24, alignItems: "center" },
-  link: { color: "#007AFF", fontSize: 16 },
-  label: { marginTop: 8, color: "#666" },
+  link: { color: "#8a0f19", fontSize: 16, fontWeight: "600" },
+  loadingLabel: { marginTop: 8, color: "#666" },
+  disabledTitle: { fontSize: 24, fontWeight: "bold", marginBottom: 4 },
   empty: { textAlign: "center", color: "#999", marginTop: 32 },
 });
