@@ -10,6 +10,14 @@ import type {
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 
+const WEBHOOK_DELIVERY_DISCLAIMER = {
+  title: "Phase 1 limitation",
+  summary:
+    "Webhook delivery logs shown here are not backed by the production delivery engine yet.",
+  detail:
+    "Treat these entries as placeholder visibility only. Real outbound delivery, retry handling, and delivery status integrity will land in Phase 2.",
+};
+
 export default async function WebhooksPage({
   searchParams,
 }: {
@@ -59,6 +67,8 @@ export default async function WebhooksPage({
         title="Webhooks & Notifications"
         description={`Manage webhook endpoint subscriptions and delivery logs. ${webhooks.length} webhook(s), ${notifications.length} notification(s).`}
       >
+        <WebhookDeliveryDisclaimer />
+
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
@@ -106,6 +116,32 @@ export default async function WebhooksPage({
         </Link>
       </AppShellCard>
     </main>
+  );
+}
+
+function WebhookDeliveryDisclaimer() {
+  return (
+    <section
+      aria-label="Webhook delivery disclaimer"
+      style={{
+        marginBottom: "1rem",
+        padding: "1rem 1.25rem",
+        borderRadius: "16px",
+        border: "1px solid rgba(180, 83, 9, 0.28)",
+        background: "linear-gradient(180deg, #fff7ed 0%, #fffbeb 100%)",
+        color: "#7c2d12",
+      }}
+    >
+      <p style={{ margin: 0, fontWeight: 700 }}>
+        {WEBHOOK_DELIVERY_DISCLAIMER.title}
+      </p>
+      <p style={{ margin: "0.5rem 0 0" }}>
+        {WEBHOOK_DELIVERY_DISCLAIMER.summary}
+      </p>
+      <p style={{ margin: "0.5rem 0 0", color: "#9a3412" }}>
+        {WEBHOOK_DELIVERY_DISCLAIMER.detail}
+      </p>
+    </section>
   );
 }
 
@@ -311,6 +347,7 @@ function DeliveryLogView({
   return (
     <div className="delivery-log-section">
       <h3>Delivery Log: {webhook?.url ?? webhookId}</h3>
+      <WebhookDeliveryDisclaimer />
       <p style={{ marginBottom: "1rem" }}>
         <Link href="/webhooks">← Back to webhooks</Link>
       </p>
