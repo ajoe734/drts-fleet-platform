@@ -4,7 +4,7 @@
   "consensus_status": "accepted",
   "sprint": "2026-04-15-full-blueprint-execution",
   "objective": "Execute the accepted full blueprint master plan: complete tenant portal convergence, finish the remaining Platform Admin / Ops / finance / filing blueprint families, close rollout evidence, and preserve deferred roadmap slices without losing scope.",
-  "updated_at": "2026-04-17T01:15:00Z",
+  "updated_at": "2026-04-17T02:50:00Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -129,10 +129,10 @@
       "status": "working",
       "current_task_ids": ["FBP-014B"],
       "branch": "feat/codex-phase1-architecture",
-      "next": "Live staging evidence collected in support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md. Harness is now runnable against private Cloud Run, but FBP-014B cannot satisfy acceptance on current staging: E2E-001 creates booking/order yet dispatch/tasks stays empty after 20 polls, E2E-002 remains environment-gated with zero driver tasks, and E2E-004 reproduces a critical cross-tenant leak where TEN_ACME can read booking-000004 from tenant t_e0bc7ef4. Waiting for supervisor triage / follow-up task routing on the reproduced staging defects.",
-      "last_update": "2026-04-17T00:25:04Z",
+      "next": "Live suite rerun 818343 removed the old dispatch false negative: E2E-001 now reaches dispatch assignment and driver completion on staging. FBP-014B is still blocked because tenant booking read-back stays status=active after completion, billing invoice generation returns NO_ELIGIBLE_TRIPS, E2E-004 still reproduces a cross-tenant leak, and GitHub Actions shows the latest bug-fix push b005cf2 failed CI + Deploy \u2014 Staging so live staging is still behind main.",
+      "last_update": "2026-04-17T01:46:30Z",
       "current_task": "FBP-014B",
-      "note": "Re-run E2E against staging after BUG-001/BUG-002 fixes"
+      "note": "Re-run E2E after BUG-001 deploy to staging"
     },
     {
       "name": "Qwen",
@@ -1796,11 +1796,11 @@
         "no cross-tenant leak\u3001audit consistency\u3001billing consistency evidence \u5b8c\u6574",
         "repo B cutover \u5f8c\u7684 integrated path \u53ef\u88ab reviewer \u76f4\u63a5\u5be9\u67e5"
       ],
-      "next": "BUG-001 (cross-tenant leak) and BUG-002 (dispatch trigger) both fixed. Re-run E2E suite against staging to collect final E2E-001/E2E-004 pass evidence.",
-      "last_update": "2026-04-17T00:25:04Z",
+      "next": "BUG-001 deployed to staging (CI run #24544870495, green). Re-run E2E suite to verify tenant isolation fix and collect final pass evidence for E2E-001 and E2E-004.",
+      "last_update": "2026-04-17T01:46:30Z",
       "task_class": "execution_evidence",
       "waiting_for": "Claude",
-      "updated_at": "2026-04-17T01:15:00Z"
+      "updated_at": "2026-04-17T02:50:00Z"
     },
     {
       "id": "FBP-015",
@@ -94415,6 +94415,14 @@
       "message": "Live staging evidence collected in support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md. Harness is now runnable against private Cloud Run, but FBP-014B cannot satisfy acceptance on current staging: E2E-001 creates booking/order yet dispatch/tasks stays empty after 20 polls, E2E-002 remains environment-gated with zero driver tasks, and E2E-004 reproduces a critical cross-tenant leak where TEN_ACME can read booking-000004 from tenant t_e0bc7ef4. Waiting for supervisor triage / follow-up task routing on the reproduced staging defects.",
       "status": "open",
       "created_at": "2026-04-17T00:25:04Z"
+    },
+    {
+      "task_id": "FBP-014B",
+      "owner": "Codex",
+      "waiting_for": "Claude",
+      "message": "Live suite rerun 818343 removed the old dispatch false negative: E2E-001 now reaches dispatch assignment and driver completion on staging. FBP-014B is still blocked because tenant booking read-back stays status=active after completion, billing invoice generation returns NO_ELIGIBLE_TRIPS, E2E-004 still reproduces a cross-tenant leak, and GitHub Actions shows the latest bug-fix push b005cf2 failed CI + Deploy \u2014 Staging so live staging is still behind main.",
+      "status": "open",
+      "created_at": "2026-04-17T01:46:30Z"
     }
   ],
   "workload": {
