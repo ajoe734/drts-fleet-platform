@@ -95,6 +95,19 @@ export class OwnedMobilityController {
     );
   }
 
+  @Get("orders/:orderId/dispatch-trace")
+  listOrderDispatchTrace(
+    @Param("orderId") orderId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      {
+        items: this.ownedMobilityService.listDispatchTrace(orderId),
+      },
+      requestId,
+    );
+  }
+
   @Post("call-center/orders")
   createCallCenterOrder(
     @Body() command: CreateCallCenterOrderCommand,

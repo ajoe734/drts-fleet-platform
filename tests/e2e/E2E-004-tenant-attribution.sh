@@ -108,7 +108,7 @@ log_step "2.1 — POST /tenant/bookings (as new tenant)"
 http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
 assert_status "200|201"
 
-NEW_BOOKING_ID=$(json_get ".data.bookingId")
+NEW_BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")
 if [[ -z "$NEW_BOOKING_ID" ]]; then
   log_fail "No bookingId in response: ${RESP_BODY}"
   exit 1
@@ -124,7 +124,7 @@ http_call GET "/tenant/bookings"
 assert_status "200"
 OWN_BOOKING_VISIBLE=$(echo "$RESP_BODY" | \
   jq -r --arg bid "$NEW_BOOKING_ID" \
-    '.data.items[] | select(.bookingId == $bid) | .bookingId' \
+    '.data.items[] | select((.bookingId // .booking_id) == $bid) | (.bookingId // .booking_id)' \
   2>/dev/null | head -1 || true)
 
 if [[ -z "$OWN_BOOKING_VISIBLE" ]]; then
@@ -138,7 +138,7 @@ fi
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Ops Console — dispatch queue with tenant attribution"
 
-switch_actor "platform_admin" "e2e-platform-admin-001"
+switch_actor "ops_user" "e2e-ops-001"
 
 log_step "3.1 — GET /dispatch/tasks (look for new-tenant booking)"
 http_call GET "/dispatch/tasks"
@@ -176,7 +176,7 @@ assert_status "200"
 
 LEAKED_BOOKING=$(echo "$RESP_BODY" | \
   jq -r --arg bid "$NEW_BOOKING_ID" \
-    '.data.items[] | select(.bookingId == $bid) | .bookingId' \
+    '.data.items[] | select((.bookingId // .booking_id) == $bid) | (.bookingId // .booking_id)' \
   2>/dev/null | head -1 || true)
 
 if [[ -n "$LEAKED_BOOKING" ]]; then
@@ -188,6 +188,16 @@ else
 fi
 
 save_evidence "$SCENARIO" "safety" "crossTenantLeakDetected" "false"
+
+log_step "4.2 — GET /tenant/bookings/:bookingId (as TEN_ACME — direct detail leak check)"
+http_call GET "/tenant/bookings/${NEW_BOOKING_ID}"
+save_evidence "$SCENARIO" "safety" "directDetailStatus" "$RESP_STATUS"
+if [[ "$RESP_STATUS" != "404" ]]; then
+  log_fail "Expected direct cross-tenant detail read to return 404, got ${RESP_STATUS}"
+  log_fail "Body: ${RESP_BODY}"
+  exit 1
+fi
+log_ok "Cross-tenant detail read is blocked with BOOKING_NOT_FOUND."
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CHAIN VERIFICATION

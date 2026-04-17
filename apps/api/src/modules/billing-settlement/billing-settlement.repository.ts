@@ -1,8 +1,11 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
+  DriverTaskRecord,
   DriverFeePlanRecord,
   DriverStatementRecord,
+  MoneyAmount,
+  OwnedOrderRecord,
   ReimbursementBatchRecord,
   TenantBillingProfile,
   TenantInvoiceRecord,
@@ -15,8 +18,21 @@ type JsonRecordRow = {
   record: unknown;
 };
 
+type LiveSettlementTripRow = {
+  order_record: unknown;
+  task_record: unknown;
+};
+
 export type StoredTenantInvoiceRecord = TenantInvoiceRecord & {
   artifactDownloadMetadata: ControlledDownloadMetadata;
+};
+
+export type LiveSettlementTripRecord = {
+  tenantId: string;
+  driverId: string;
+  orderId: string;
+  completedAt: string;
+  grossEarning: MoneyAmount;
 };
 
 export type BillingSettlementState = {
@@ -133,6 +149,59 @@ export class BillingSettlementRepository {
         ),
       ),
     };
+  }
+
+  async listLiveCompletedTenantTrips(
+    tenantId: string,
+    periodStart: string,
+    periodEnd: string,
+  ): Promise<LiveSettlementTripRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const result = await this.databaseService!.query<LiveSettlementTripRow>(
+      `
+        SELECT
+          orders.record AS order_record,
+          tasks.record AS task_record
+        FROM ops.phase1_driver_tasks AS tasks
+        INNER JOIN ops.phase1_owned_orders AS orders
+          ON orders.order_id = tasks.order_id
+        WHERE tasks.status = 'completed'
+          AND COALESCE(tasks.record->>'completedAt', '') <> ''
+          AND COALESCE(orders.record->>'tenantId', '') = $1
+          AND COALESCE(orders.record->>'serviceBucket', '') = 'business_dispatch'
+          AND (tasks.record->>'completedAt')::timestamptz >= $2::timestamptz
+          AND (tasks.record->>'completedAt')::timestamptz <= $3::timestamptz
+        ORDER BY (tasks.record->>'completedAt')::timestamptz DESC
+      `,
+      [tenantId, periodStart, periodEnd],
+    );
+
+    return result.rows.map((row) => {
+      const order = this.parseRecord<OwnedOrderRecord>(
+        row.order_record,
+        "ops.phase1_owned_orders",
+      );
+      const task = this.parseRecord<DriverTaskRecord>(
+        row.task_record,
+        "ops.phase1_driver_tasks",
+      );
+      const grossEarning = task.fare ??
+        order.quotedFare ?? {
+          currency: "NTD",
+          amountMinor: 0,
+        };
+
+      return {
+        tenantId: order.tenantId ?? tenantId,
+        driverId: task.driverId,
+        orderId: order.orderId,
+        completedAt: task.completedAt ?? order.updatedAt,
+        grossEarning: { ...grossEarning },
+      };
+    });
   }
 
   async persistChanges(changes: PersistBillingSettlementChanges) {

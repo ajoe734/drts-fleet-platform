@@ -15,7 +15,7 @@ function createService() {
 }
 
 describe("billing settlement service", () => {
-  it("updates the tenant billing profile and generates an invoice with artifact metadata for SC-030", () => {
+  it("updates the tenant billing profile and generates an invoice with artifact metadata for SC-030", async () => {
     const { auditService, billingSettlementService } = createService();
 
     const profile = billingSettlementService.updateTenantBillingProfile(
@@ -29,7 +29,7 @@ describe("billing settlement service", () => {
       "billing-profile-request",
     );
 
-    const invoice = billingSettlementService.generateTenantInvoice(
+    const invoice = await billingSettlementService.generateTenantInvoice(
       {
         tenantId: "tenant-demo-001",
         periodStart: "2026-03-01T00:00:00Z",
@@ -52,6 +52,55 @@ describe("billing settlement service", () => {
     expect(auditService.listAuditLogs()[0]?.actionName).toBe(
       "generate_tenant_invoice",
     );
+  });
+
+  it("generates a tenant invoice from live completed owned trips when persistence is enabled", async () => {
+    const auditService = new AuditNotificationService();
+    const persistChanges = vi.fn(async () => undefined);
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      loadState: vi.fn(async () => ({
+        tenantBillingProfile: null,
+        tenantInvoices: [],
+        driverFeePlans: [],
+        driverStatements: [],
+        reimbursementBatches: [],
+      })),
+      listLiveCompletedTenantTrips: vi.fn(async () => [
+        {
+          tenantId: "10000000-0000-0000-0000-000000000201",
+          driverId: "drv-demo-001",
+          orderId: "live-order-001",
+          completedAt: "2026-04-17T02:49:22Z",
+          grossEarning: {
+            currency: "NTD",
+            amountMinor: 150000,
+          },
+        },
+      ]),
+      persistChanges,
+      reportPersistenceFailure: vi.fn(),
+    } as unknown as BillingSettlementRepository;
+    const billingSettlementService = new BillingSettlementService(
+      auditService,
+      repository,
+    );
+
+    await billingSettlementService.onModuleInit();
+
+    const invoice = await billingSettlementService.generateTenantInvoice(
+      {
+        tenantId: "10000000-0000-0000-0000-000000000201",
+        periodStart: "2026-04-17T00:00:00Z",
+        periodEnd: "2026-04-17T03:00:00Z",
+      },
+      "live-invoice-request",
+    );
+
+    expect(invoice.status).toBe("issued");
+    expect(invoice.lines).toHaveLength(1);
+    expect(invoice.lines[0]?.orderId).toBe("live-order-001");
+    expect(invoice.amount.amountMinor).toBe(150000);
   });
 
   it("publishes an immutable fee plan and generates driver statements for SC-031", () => {

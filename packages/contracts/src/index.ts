@@ -424,7 +424,7 @@ export type DriverTaskStatus = (typeof DRIVER_TASK_STATUSES)[number];
 export const BOOKING_TYPES = ["oneway", "roundtrip", "recurring"] as const;
 export type BookingType = (typeof BOOKING_TYPES)[number];
 
-export const BOOKING_STATUSES = ["active", "cancelled"] as const;
+export const BOOKING_STATUSES = ["active", "completed", "cancelled"] as const;
 export type BookingStatus = (typeof BOOKING_STATUSES)[number];
 
 export const QUEUE_ENTRY_STATUSES = ["checked_in", "checked_out"] as const;

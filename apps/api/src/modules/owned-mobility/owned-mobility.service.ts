@@ -1009,6 +1009,13 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.dispatchJobs.map((job) => ({ ...job }));
   }
 
+  listDispatchTrace(orderId: string) {
+    this.requireOrder(orderId);
+    return this.dispatchTraceLogs
+      .filter((traceLog) => traceLog.orderId === orderId)
+      .map((traceLog) => this.cloneTraceLog(traceLog));
+  }
+
   listDispatchCandidates(dispatchJobId: string): DispatchCandidate[] {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
@@ -2175,7 +2182,12 @@ export class OwnedMobilityService implements OnModuleInit {
       bookingId: order.bookingId,
       orderId: order.orderId,
       tenantId: order.tenantId,
-      status: order.status === "cancelled" ? "cancelled" : "active",
+      status:
+        order.status === "cancelled"
+          ? "cancelled"
+          : order.status === "completed"
+            ? "completed"
+            : "active",
       serviceBucket: "business_dispatch",
       businessDispatchSubtype: order.businessDispatchSubtype,
       bookingType: order.bookingType,

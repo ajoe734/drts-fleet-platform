@@ -25,6 +25,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   BillingSettlementRepository,
+  type LiveSettlementTripRecord,
   type PersistBillingSettlementChanges,
 } from "./billing-settlement.repository";
 import {
@@ -39,6 +40,7 @@ import {
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_CURRENCY = "NTD";
+const LIVE_SETTLEMENT_PRICING_VERSION = "tenant-pricing-live";
 
 type SettlementTripSnapshot = {
   settlementId: string;
@@ -279,7 +281,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.getTenantBillingProfile();
   }
 
-  generateTenantInvoice(
+  async generateTenantInvoice(
     command: GenerateTenantInvoiceCommand,
     requestId?: string,
   ) {
@@ -295,10 +297,12 @@ export class BillingSettlementService implements OnModuleInit {
       return this.cloneInvoice(existingInvoice);
     }
 
-    const eligibleTrips = this.listSettlementTripsInPeriod(
-      command.tenantId,
-      command.periodStart,
-      command.periodEnd,
+    const eligibleTrips = (
+      await this.listTenantInvoiceTripsInPeriod(
+        command.tenantId,
+        command.periodStart,
+        command.periodEnd,
+      )
     ).filter((trip) => trip.eligibleForTenantInvoice);
 
     if (eligibleTrips.length === 0) {
@@ -915,7 +919,62 @@ export class BillingSettlementService implements OnModuleInit {
       );
   }
 
-  private listSettlementTripsInPeriod(
+  private async listTenantInvoiceTripsInPeriod(
+    tenantId: string,
+    periodStart: string,
+    periodEnd: string,
+  ) {
+    const seededTrips = this.listSeedSettlementTripsInPeriod(
+      tenantId,
+      periodStart,
+      periodEnd,
+    );
+    const liveTrips = await this.listLiveSettlementTripsInPeriod(
+      tenantId,
+      periodStart,
+      periodEnd,
+    );
+    const tripMap = new Map<string, SettlementTripSnapshot>();
+
+    for (const trip of seededTrips) {
+      tripMap.set(trip.orderId, trip);
+    }
+    for (const trip of liveTrips) {
+      tripMap.set(trip.orderId, trip);
+    }
+
+    return [...tripMap.values()].sort((left, right) =>
+      right.completedAt.localeCompare(left.completedAt),
+    );
+  }
+
+  private async listLiveSettlementTripsInPeriod(
+    tenantId: string,
+    periodStart: string,
+    periodEnd: string,
+  ) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return [];
+    }
+
+    try {
+      const trips =
+        await this.billingSettlementRepository.listLiveCompletedTenantTrips(
+          tenantId,
+          periodStart,
+          periodEnd,
+        );
+      return trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip));
+    } catch (error) {
+      this.billingSettlementRepository.reportPersistenceFailure(
+        error,
+        "list_live_completed_tenant_trips",
+      );
+      return [];
+    }
+  }
+
+  private listSeedSettlementTripsInPeriod(
     tenantId: string,
     periodStart: string,
     periodEnd: string,
@@ -929,6 +988,24 @@ export class BillingSettlementService implements OnModuleInit {
         trip.tenantId === tenantId && completedAt >= start && completedAt <= end
       );
     });
+  }
+
+  private mapLiveTripToSettlementSnapshot(
+    trip: LiveSettlementTripRecord,
+  ): SettlementTripSnapshot {
+    return {
+      settlementId: `settlement-live-${trip.orderId}`,
+      tenantId: trip.tenantId,
+      driverId: trip.driverId,
+      orderId: trip.orderId,
+      completedAt: trip.completedAt,
+      grossEarning: { ...trip.grossEarning },
+      subsidy: this.money(0),
+      platformFundedDiscount: this.money(0),
+      pricingVersionSnapshot: LIVE_SETTLEMENT_PRICING_VERSION,
+      eligibleForTenantInvoice: true,
+      eligibleForDriverStatement: true,
+    };
   }
 
   private assertClosedPeriod(periodStart: string, periodEnd: string) {

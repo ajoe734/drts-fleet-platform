@@ -485,6 +485,72 @@ describe("owned mobility service", () => {
     );
   });
 
+  it("projects completed tenant bookings as completed after the driver lifecycle closes", () => {
+    const { ownedMobilityService } = createService();
+    const booking = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: {
+          address: "台中高鐵站",
+        },
+        dropoff: {
+          address: "台中市梧棲區中二路一段9號",
+        },
+        reservationWindowStart: "2026-04-16T10:00:00Z",
+        reservationWindowEnd: "2026-04-16T10:20:00Z",
+        passenger: {
+          name: "企業旅客",
+          phone: "0912000003",
+        },
+      },
+      TENANT_ACME,
+    );
+    const dispatchJob = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const candidate = ownedMobilityService.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+    )[0];
+    const assignment = ownedMobilityService.assignDispatch({
+      dispatchJobId: dispatchJob.dispatchJobId,
+      vehicleId: candidate!.vehicleId,
+      driverId: candidate!.driverId,
+    });
+
+    ownedMobilityService.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-16T10:02:00Z",
+    });
+    ownedMobilityService.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-16T10:03:00Z",
+      currentLocation: {
+        lat: 24.266,
+        lng: 120.522,
+      },
+    });
+    ownedMobilityService.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-16T10:08:00Z",
+    });
+    ownedMobilityService.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-16T10:10:00Z",
+    });
+    ownedMobilityService.completeDriverTask(assignment.taskId, {
+      completedAt: "2026-04-16T10:45:00Z",
+      actualDistanceKm: 18.2,
+      actualDurationSec: 2100,
+      proof: {
+        photoIds: ["proof-photo-001"],
+      },
+    });
+
+    const completedBooking = ownedMobilityService.getTenantBooking(
+      TENANT_ACME,
+      booking.bookingId,
+    );
+
+    expect(completedBooking.status).toBe("completed");
+    expect(completedBooking.orderStatus).toBe("completed");
+  });
+
   it("requires an explicit dispatch step before reservation bookings appear in the dispatch queue", () => {
     const { ownedMobilityService } = createService();
     const booking = ownedMobilityService.createTenantBooking(

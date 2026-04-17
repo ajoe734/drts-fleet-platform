@@ -106,7 +106,7 @@ printf '%s\n' '{"mode":"auto"}' > "$DISPATCH_FIXTURE"
 http_call POST "/orders/${ORDER_ID}/dispatch" "$DISPATCH_FIXTURE"
 assert_status "200|201"
 
-DISPATCH_JOB_ID=$(json_get ".data.dispatchJobId")
+DISPATCH_JOB_ID=$(json_get_first ".data.dispatchJobId" ".data.dispatch_job_id")
 if [[ -n "$DISPATCH_JOB_ID" ]]; then
   chain_set "ops" "dispatchJobId" "$DISPATCH_JOB_ID"
   save_evidence "$SCENARIO" "ops" "dispatchJobIdAfterTrigger" "$DISPATCH_JOB_ID"
@@ -125,9 +125,11 @@ while (( ATTEMPT < E2E_POLL_MAX )); do
   assert_status "200"
   if [[ -n "${ORDER_ID:-}" ]]; then
     DISPATCH_JOB_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
-      '.data.items[] | select(.orderId == $oid) | .dispatchJobId' 2>/dev/null | head -1 || true)
+      '.data.items[] | select((.orderId // .order_id) == $oid) | (.dispatchJobId // .dispatch_job_id)' \
+      2>/dev/null | head -1 || true)
   else
-    DISPATCH_JOB_ID=$(json_get ".data.items[0].dispatchJobId")
+    DISPATCH_JOB_ID=$(echo "$RESP_BODY" | jq -r \
+      '.data.items[0] | (.dispatchJobId // .dispatch_job_id // empty)' 2>/dev/null || true)
   fi
   if [[ -n "$DISPATCH_JOB_ID" ]]; then
     break
@@ -154,21 +156,39 @@ assert_status "200"
 CANDIDATE_COUNT=$(json_get ".data.items | length")
 log_info "Candidate count: ${CANDIDATE_COUNT:-0}"
 
+ASSIGN_VEHICLE_ID=$(echo "$RESP_BODY" | jq -r \
+  '.data.items[0] | (.vehicleId // .vehicle_id // empty)' 2>/dev/null || true)
+ASSIGN_DRIVER_ID=$(echo "$RESP_BODY" | jq -r \
+  '.data.items[0] | (.driverId // .driver_id // empty)' 2>/dev/null || true)
+
+if [[ -z "$ASSIGN_VEHICLE_ID" ]]; then
+  ASSIGN_VEHICLE_ID="$E2E_SEED_VEHICLE_ID"
+fi
+if [[ -z "$ASSIGN_DRIVER_ID" ]]; then
+  ASSIGN_DRIVER_ID="$E2E_SEED_DRIVER_ID"
+fi
+
+chain_set "ops" "vehicleId" "$ASSIGN_VEHICLE_ID"
+chain_set "ops" "driverId" "$ASSIGN_DRIVER_ID"
+save_evidence "$SCENARIO" "ops" "vehicleId" "$ASSIGN_VEHICLE_ID"
+save_evidence "$SCENARIO" "ops" "driverId" "$ASSIGN_DRIVER_ID"
+log_info "Dispatch assign target → vehicleId=${ASSIGN_VEHICLE_ID}, driverId=${ASSIGN_DRIVER_ID}"
+
 log_step "2.4 — POST /dispatch/assign"
 ASSIGN_FIXTURE=$(mktemp /tmp/drts-e2e-001-assign-XXXXXX.json)
 trap 'rm -f "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE"' EXIT
 
 jq \
   --arg jobId   "$DISPATCH_JOB_ID" \
-  --arg vehicle "$E2E_SEED_VEHICLE_ID" \
-  --arg driver  "$E2E_SEED_DRIVER_ID" \
+  --arg vehicle "$ASSIGN_VEHICLE_ID" \
+  --arg driver  "$ASSIGN_DRIVER_ID" \
   '.dispatchJobId = $jobId | .vehicleId = $vehicle | .driverId = $driver' \
   "${SCRIPT_DIR}/fixtures/e2e-dispatch-assign.json" > "$ASSIGN_FIXTURE"
 
 http_call POST "/dispatch/assign" "$ASSIGN_FIXTURE"
 assert_status "200|201"
 
-TASK_ID=$(json_get ".data.taskId")
+TASK_ID=$(json_get_first ".data.taskId" ".data.task_id")
 if [[ -n "$TASK_ID" ]]; then
   chain_set "ops" "taskId" "$TASK_ID"
   save_evidence "$SCENARIO" "ops" "taskId" "$TASK_ID"
@@ -183,7 +203,7 @@ log_ok "POST /dispatch/assign → HTTP ${RESP_STATUS}, taskId=${TASK_ID:-<not_in
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Driver App — task lifecycle"
 
-switch_actor "driver_user" "e2e-driver-${E2E_SEED_DRIVER_ID}" "$E2E_SEED_TENANT_ID"
+switch_actor "driver_user" "e2e-driver-${ASSIGN_DRIVER_ID}" "$E2E_SEED_TENANT_ID"
 
 # Resolve taskId: prefer chain, else query driver task list
 TASK_ID_LEG3=$(chain_get "ops" "taskId")
@@ -194,14 +214,17 @@ if [[ -z "$TASK_ID_LEG3" ]]; then
   assert_status "200"
   if [[ -n "${DISPATCH_JOB_ID:-}" ]]; then
     TASK_ID_LEG3=$(echo "$RESP_BODY" | jq -r --arg jobId "$DISPATCH_JOB_ID" \
-      '.data.items[] | select(.dispatchJobId == $jobId) | .taskId' 2>/dev/null | head -1 || true)
+      '.data.items[] | select((.dispatchJobId // .dispatch_job_id) == $jobId) | (.taskId // .task_id)' \
+      2>/dev/null | head -1 || true)
   fi
   if [[ -z "$TASK_ID_LEG3" && -n "${ORDER_ID:-}" ]]; then
     TASK_ID_LEG3=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
-      '.data.items[] | select(.orderId == $oid) | .taskId' 2>/dev/null | head -1 || true)
+      '.data.items[] | select((.orderId // .order_id) == $oid) | (.taskId // .task_id)' \
+      2>/dev/null | head -1 || true)
   fi
   if [[ -z "$TASK_ID_LEG3" ]]; then
-    TASK_ID_LEG3=$(json_get ".data.items[0].taskId")
+    TASK_ID_LEG3=$(echo "$RESP_BODY" | jq -r \
+      '.data.items[0] | (.taskId // .task_id // empty)' 2>/dev/null || true)
   fi
 fi
 
@@ -290,18 +313,19 @@ assert_status "200"
 BOOKING_STATUS_FINAL=$(json_get ".data.status")
 save_evidence "$SCENARIO" "tenant" "bookingStatusFinal" "$BOOKING_STATUS_FINAL"
 log_ok "Booking final status = ${BOOKING_STATUS_FINAL}"
-# Note: may be 'completed' or still 'in_progress' depending on async completion propagation.
-# We verify the field is present, not a hard-fail on exact value, as completion propagation
-# may be async in staging. Log a warning if not yet completed.
 if [[ "$BOOKING_STATUS_FINAL" != "completed" ]]; then
-  log_warn "Booking status is '${BOOKING_STATUS_FINAL}' — may require async propagation on live staging."
+  log_fail "Expected booking status 'completed', got '${BOOKING_STATUS_FINAL}'"
+  exit 1
 fi
 
 log_step "4.2 — POST /tenant/invoices/generate"
-PERIOD_START=$(date -u -d "$(date -u +%Y-%m-01) -1 month" +"%Y-%m-01T00:00:00Z" 2>/dev/null \
-  || date -u -v-1m -v1d +"%Y-%m-01T00:00:00Z")
-PERIOD_END=$(date -u -d "$(date -u +%Y-%m-01) -1 second" +"%Y-%m-%dT23:59:59Z" 2>/dev/null \
-  || date -u -v-1d -v+1m -v1d -v-1d +"%Y-%m-%dT23:59:59Z")
+# Invoice generation only accepts a closed period. Anchor the billing window to
+# the current UTC day after the trip completes so the just-finished trip is
+# eligible without fabricating historical timestamps.
+sleep 2
+PERIOD_START=$(date -u +"%Y-%m-%dT00:00:00Z")
+PERIOD_END=$(date -u -d "-1 second" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
+  || date -u -v-1S +"%Y-%m-%dT%H:%M:%SZ")
 
 INVOICE_FIXTURE=$(mktemp /tmp/drts-e2e-001-invoice-XXXXXX.json)
 trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$COMPLETE_FIXTURE" "$INVOICE_FIXTURE"' EXIT
@@ -315,7 +339,7 @@ EOF
 
 http_call POST "/tenant/invoices/generate" "$INVOICE_FIXTURE"
 assert_status "200|201"
-INVOICE_ID=$(json_get ".data.invoiceId")
+INVOICE_ID=$(json_get_first ".data.invoiceId" ".data.invoice_id")
 if [[ -z "$INVOICE_ID" ]]; then
   log_fail "No invoiceId in response: ${RESP_BODY}"
   exit 1

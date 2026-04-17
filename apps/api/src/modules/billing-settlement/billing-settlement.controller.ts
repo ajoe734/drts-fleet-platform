@@ -49,12 +49,15 @@ export class BillingSettlementController {
   }
 
   @Post("tenant/invoices/generate")
-  generateTenantInvoice(
+  async generateTenantInvoice(
     @Body() command: GenerateTenantInvoiceCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.generateTenantInvoice(command, requestId),
+      await this.billingSettlementService.generateTenantInvoice(
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
