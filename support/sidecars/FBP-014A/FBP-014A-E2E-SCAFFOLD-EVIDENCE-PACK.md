@@ -2,9 +2,9 @@
 
 **Task:** `FBP-014A` — cross-surface E2E matrix and fixture scaffold
 **Parent Umbrella:** `FBP-014` — integrated cross-surface and cross-repo E2E suite
-**Owner:** Claude
-**Reviewer:** Codex
-**Status:** scaffold complete — all 8 ACs met; pending staging integration (blocked on FBP-013 live deploy)
+**Owner:** Codex
+**Reviewer:** Codex2
+**Status:** ready for review — scaffold complete; pending staging integration under `FBP-014B` after `FBP-013` closeout
 **Created:** 2026-04-16
 **Depends on:** FBP-006, FBP-008, FBP-009, FBP-011, FBP-012
 
@@ -23,12 +23,12 @@ integrated evidence run (FBP-014B) can be executed.
 
 | AC   | Criterion                                                                                                                                                                                                                                         | Artifact                                   | Status  |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------- |
-| AC-1 | `tests/e2e/lib/helpers.sh` with `switch_actor`, `chain_set/get`, `assert_chain`, `save_evidence`, `http_call`                                                                                                                                     | `tests/e2e/lib/helpers.sh`                 | ✅ PASS |
+| AC-1 | `tests/e2e/lib/helpers.sh` with `switch_actor`, `chain_set/get`, `assert_chain`, `save_evidence`, `http_call`, and canonical command headers (`X-Request-ID`, `Idempotency-Key` on write calls)                                                   | `tests/e2e/lib/helpers.sh`                 | ✅ PASS |
 | AC-2 | E2E-001 exercises all 4 surface legs (tenant booking → ops dispatch → driver lifecycle → billing+audit) with full ID chain; driver lifecycle uses proper fixture bodies for all 5 state transitions (accept/depart/arrived_pickup/start/complete) | `tests/e2e/E2E-001-enterprise-dispatch.sh` | ✅ PASS |
 | AC-3 | E2E-002 verifies `routeLocked` metadata and no owned dispatch_assignment; graceful skip when no forwarded task seeded                                                                                                                             | `tests/e2e/E2E-002-forwarded-order.sh`     | ✅ PASS |
 | AC-4 | E2E-004 verifies correct `tenantId` attribution and hard-fails on cross-tenant leak                                                                                                                                                               | `tests/e2e/E2E-004-tenant-attribution.sh`  | ✅ PASS |
 | AC-5 | `run-e2e.sh` runs all scenarios, emits pass/fail summary, prints evidence log                                                                                                                                                                     | `tests/e2e/run-e2e.sh`                     | ✅ PASS |
-| AC-6 | Fixtures cover all scenario legs                                                                                                                                                                                                                  | `tests/e2e/fixtures/` (9 files)            | ✅ PASS |
+| AC-6 | Fixtures cover all scenario legs and reserved manual-expansion payloads                                                                                                                                                                           | `tests/e2e/fixtures/` (12 files)           | ✅ PASS |
 | AC-7 | Matrix document maps each scenario to surface chain, fixtures, ID chain, and pass criteria                                                                                                                                                        | `docs/04-uat/fbp-014a-e2e-matrix.md`       | ✅ PASS |
 | AC-8 | No scenario uses retired `apps/tenant-portal-web` routes or repo-B local authority                                                                                                                                                                | Code inspection                            | ✅ PASS |
 
@@ -69,6 +69,9 @@ live CTI session and recording callback webhook. Documented as manual-only in
 | `e2e-driver-arrived-pickup.json` | E2E-001                      | Driver arrived at pickup; `arrivedAt` injected at runtime        |
 | `e2e-driver-start.json`          | E2E-001                      | Driver start trip; `startedAt` injected at runtime               |
 | `e2e-tenant-create.json`         | E2E-004                      | Platform-admin tenant create; `code` injected to avoid collision |
+| `e2e-phone-booking.json`         | Reserved (E2E-003 manual)    | Phone booking payload stub for future CTI-backed automation      |
+| `e2e-report-compliance.json`     | Reserved (E2E-003 manual)    | Compliance export payload stub for future report checks          |
+| `e2e-tenant-module-enable.json`  | Reserved (future expansion)  | Tenant module-enable payload stub for future staged cutovers     |
 
 ### 3.4 Matrix Document
 
@@ -119,15 +122,15 @@ All scenarios use `infra/seeds/S0002__demo_operational_seed.sql` defaults:
 
 ## 6. Guardrail Compliance
 
-| Guardrail | Requirement                                                          | Verified                                                  |
-| --------- | -------------------------------------------------------------------- | --------------------------------------------------------- |
-| G1        | Tenant entry point is `tenant-commute-hub` backed by `/api/tenant/*` | ✅ No `apps/tenant-portal-web` routes used                |
-| G2        | Repo B remains pure UI consumer                                      | ✅ No repo-B local authority calls                        |
-| G3        | Canonical `/api/*` prefix, envelope, Idempotency-Key                 | ✅ `E2E_API_PATH_PREFIX=/api` in helpers                  |
-| G4        | Primary happy path is owned enterprise-dispatch (E2E-001)            | ✅ E2E-001 is the primary scenario                        |
-| G5        | Billing and audit are backend-owned                                  | ✅ `POST /api/tenant/invoices/generate`, `GET /api/audit` |
-| G6        | Cross-tenant safety is part of DoD                                   | ✅ E2E-004 hard-fails on cross-tenant leak                |
-| G7        | Gaps found → new authority task, not local workaround                | ✅ Graceful skips documented; no workarounds              |
+| Guardrail | Requirement                                                          | Verified                                                                         |
+| --------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| G1        | Tenant entry point is `tenant-commute-hub` backed by `/api/tenant/*` | ✅ No `apps/tenant-portal-web` routes used                                       |
+| G2        | Repo B remains pure UI consumer                                      | ✅ No repo-B local authority calls                                               |
+| G3        | Canonical `/api/*` prefix, envelope, Idempotency-Key                 | ✅ `E2E_API_PATH_PREFIX=/api`; `http_call` adds `Idempotency-Key` on write calls |
+| G4        | Primary happy path is owned enterprise-dispatch (E2E-001)            | ✅ E2E-001 is the primary scenario                                               |
+| G5        | Billing and audit are backend-owned                                  | ✅ `POST /api/tenant/invoices/generate`, `GET /api/audit`                        |
+| G6        | Cross-tenant safety is part of DoD                                   | ✅ E2E-004 hard-fails on cross-tenant leak                                       |
+| G7        | Gaps found → new authority task, not local workaround                | ✅ Graceful skips documented; no workarounds                                     |
 
 ---
 
@@ -163,7 +166,7 @@ dev instance without seed data propagation. They are **not** failures of the sca
 ## 9. Handoff to Reviewer
 
 ```bash
-AI_NAME=Claude python3 scripts/ai_status.py handoff FBP-014A Codex \
+AI_NAME=Codex python3 scripts/ai_status.py handoff FBP-014A Codex2 \
   "FBP-014A cross-surface E2E scaffold complete at tests/e2e/. \
 All 8 ACs verified: helpers.sh (AC-1), E2E-001 (AC-2), E2E-002 (AC-3), E2E-004 (AC-4), \
 run-e2e.sh (AC-5), fixtures (AC-6), fbp-014a-e2e-matrix.md (AC-7), no retired routes (AC-8). \
@@ -175,11 +178,15 @@ Scaffold is staging-ready; live integrated evidence run is FBP-014B scope after 
 
 ## 10. Change Log
 
-- 2026-04-16 (rev 1) — Claude created initial FBP-014A evidence pack recording scaffold
+- 2026-04-16 (rev 1) — Initial FBP-014A evidence pack recorded scaffold
   completion: all 8 ACs met across helpers.sh, E2E-001/002/004 scenarios, run-e2e.sh,
   6 fixtures, and the fbp-014a-e2e-matrix.md matrix document.
-- 2026-04-16 (rev 2) — Claude added 3 missing driver lifecycle fixtures
+- 2026-04-16 (rev 2) — Added 3 missing driver lifecycle fixtures
   (e2e-driver-depart.json, e2e-driver-arrived-pickup.json, e2e-driver-start.json) and updated
   E2E-001 steps 3.3/3.4/3.5 to send proper request bodies instead of empty payloads.
   AC-6 fixture count updated from 6 to 9. AC-2 description updated to reflect full 5-step
   driver lifecycle.
+- 2026-04-16 (rev 3) — Reconciled review blockers: `http_call` now emits `Idempotency-Key`
+  for write calls, metadata now reflects the current owner/reviewer, and fixture inventories
+  in both the matrix and evidence pack match the 12 JSON files currently tracked under
+  `tests/e2e/fixtures/`.
