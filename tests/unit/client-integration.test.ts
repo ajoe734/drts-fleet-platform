@@ -423,4 +423,70 @@ describe("W8-001A shared api client list handling", () => {
       }),
     );
   });
+
+  it("targets canonical driver profile routes for self-service profile access", async () => {
+    const seen: Array<{ path: string; method: string; body?: unknown }> = [];
+    const profile = {
+      driverId: "drv-demo-001",
+      name: "Driver Demo One",
+      phone: "+886-912-000-001",
+      email: "driver.one@example.com",
+      photoUrl: null,
+      emergencyContact: null,
+      bankAccount: null,
+      updatedAt: "2026-04-17T00:00:00.000Z",
+    };
+
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        seen.push({
+          path: new URL(url).pathname,
+          method: init?.method ?? "GET",
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+
+        return {
+          ok: true,
+          json: async () => ({ data: profile }),
+          text: async () => "",
+        } as Response;
+      },
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await expect(client.getDriverProfile()).resolves.toEqual(profile);
+    await expect(
+      client.createDriverProfile({ name: "Driver Demo One" }),
+    ).resolves.toEqual(profile);
+    await expect(
+      client.updateDriverProfile({ phone: "+886-912-000-001" }),
+    ).resolves.toEqual(profile);
+
+    expect(seen).toEqual([
+      {
+        path: "/api/driver/profile",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        path: "/api/driver/profile",
+        method: "POST",
+        body: { name: "Driver Demo One" },
+      },
+      {
+        path: "/api/driver/profile",
+        method: "PATCH",
+        body: { phone: "+886-912-000-001" },
+      },
+    ]);
+  });
 });

@@ -180,6 +180,18 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    routePath === "driver/profile" ||
+    routePath.startsWith("driver/profile/")
+  ) {
+    return {
+      routeKey: `driver:profile:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("driver"),
+      description: "Driver self-service profile access",
+    };
+  }
+
   if (routePath.startsWith("callcenter/")) {
     return {
       routeKey: `callcenter:${upperMethod}`,

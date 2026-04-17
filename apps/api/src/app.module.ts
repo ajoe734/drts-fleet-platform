@@ -17,6 +17,7 @@ import { AuditNotificationModule } from "./modules/audit-notification/audit-noti
 import { BillingSettlementModule } from "./modules/billing-settlement/billing-settlement.module";
 import { CallcenterModule } from "./modules/callcenter/callcenter.module";
 import { ComplaintModule } from "./modules/complaint/complaint.module";
+import { DriverProfileModule } from "./modules/driver-profile/driver-profile.module";
 import { DriverSettingsModule } from "./modules/driver-settings/driver-settings.module";
 import { FeatureFlagsModule } from "./modules/feature-flags/feature-flags.module";
 import { FoundationModule } from "./modules/foundation/foundation.module";
@@ -46,6 +47,7 @@ import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.mod
     AuditNotificationModule,
     CallcenterModule,
     ComplaintModule,
+    DriverProfileModule,
     OwnedMobilityModule,
     PlatformAdminModule,
     BillingSettlementModule,

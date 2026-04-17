@@ -22,6 +22,7 @@ import type {
   ComplaintExportViewRecord,
   ComplaintTimelineEntry,
   CompleteCallbackTaskCommand,
+  CreateDriverProfileCommand,
   CreateOwnedOrderCommand,
   CreatePublicInfoVersionCommand,
   CreatePlatformAdminUserCommand,
@@ -44,6 +45,7 @@ import type {
   DriverArrivedPickupCommand,
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
+  DriverProfileRecord,
   DriverRegistryRecord,
   DriverRejectTaskCommand,
   DriverStartTaskCommand,
@@ -101,6 +103,7 @@ import type {
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
   TransferCallToComplaintCommand,
+  UpdateDriverProfileCommand,
   UpdateIncidentCommand,
   UpdateMaintenanceRecordCommand,
   UpdatePlatformAdminUserRoleCommand,
@@ -1154,6 +1157,26 @@ export class ApiClient {
   async updateDriverSettings(driverId: string, command: any) {
     return this.patch(`/api/driver-settings/${driverId}`, { body: command });
   }
+
+  async getDriverProfile(): Promise<DriverProfileRecord> {
+    return this.get<DriverProfileRecord>("/api/driver/profile");
+  }
+
+  async createDriverProfile(
+    command: CreateDriverProfileCommand,
+  ): Promise<DriverProfileRecord> {
+    return this.post<DriverProfileRecord>("/api/driver/profile", {
+      body: command,
+    });
+  }
+
+  async updateDriverProfile(
+    command: UpdateDriverProfileCommand,
+  ): Promise<DriverProfileRecord> {
+    return this.patch<DriverProfileRecord>("/api/driver/profile", {
+      body: command,
+    });
+  }
 }
 
 /**
@@ -1193,7 +1216,7 @@ export function createDriverClient(
   return new ApiClient({
     baseUrl,
     defaultHeaders: {
-      "x-actor-type": "driver",
+      "x-actor-type": "driver_user",
       "x-actor-id": driverId,
       "x-realm": "driver",
     },

@@ -89,6 +89,17 @@ describe("bootstrap auth extraction", () => {
       description: "Platform admin master-data management",
     });
   });
+
+  it("resolves driver profile routes to driver-scoped self-service access", () => {
+    const policy = resolveRouteAuthPolicy("PATCH", "/api/driver/profile");
+
+    expect(policy).toEqual({
+      routeKey: "driver:profile:PATCH",
+      requiredScopes: ["driver:write"],
+      allowedRealms: ["system", "driver"],
+      description: "Driver self-service profile access",
+    });
+  });
 });
 
 describe("bootstrap auth guard", () => {
@@ -242,7 +253,24 @@ describe("internal key middleware", () => {
     ).not.toThrow();
   });
 
-  it("allows protected routes for non-system bootstrap realms without the internal key", () => {
+  it("allows protected routes for validated non-system bootstrap identities without the internal key", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {
+            "x-actor-type": "tenant_admin",
+            "x-actor-id": "tenant-admin-001",
+            "x-realm": "tenant",
+          },
+          method: "POST",
+          originalUrl: "/api/tenant/webhooks",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects x-realm-only requests that do not provide a validated bootstrap identity", () => {
     expect(() =>
       validateInternalKey(
         {
@@ -254,16 +282,59 @@ describe("internal key middleware", () => {
         },
         "staging-secret",
       ),
-    ).not.toThrow();
+    ).toThrowError(ApiRequestError);
   });
 
-  it("allows open routes without the internal key", () => {
+  it("allows explicit public routes without the internal key", () => {
     expect(() =>
       validateInternalKey(
         {
           headers: {},
           method: "GET",
           originalUrl: "/api/identity/context",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects uncovered admin routes without the internal key", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {},
+          method: "GET",
+          originalUrl: "/api/admin/flags",
+        },
+        "staging-secret",
+      ),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("rejects uncovered driver-settings routes without the internal key", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {},
+          method: "PATCH",
+          originalUrl: "/api/driver-settings/drv-001",
+        },
+        "staging-secret",
+      ),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("allows uncovered driver-settings routes for non-system bootstrap realms", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {
+            "x-actor-type": "driver_user",
+            "x-actor-id": "driver-001",
+            "x-realm": "driver",
+          },
+          method: "PATCH",
+          originalUrl: "/api/driver-settings/drv-001",
         },
         "staging-secret",
       ),

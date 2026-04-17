@@ -2,7 +2,7 @@ import { Injectable, type NestMiddleware } from "@nestjs/common";
 import { timingSafeEqual } from "node:crypto";
 
 import { ApiRequestError } from "../api-envelope";
-import { resolveRouteAuthPolicy } from "./auth.policy";
+import { extractBootstrapRequestIdentity } from "./auth.extractor";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -15,6 +15,7 @@ type RequestLike = {
 
 const INTERNAL_KEY_HEADER = "x-drts-internal-key";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
+const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set(["GET identity/context"]);
 const PUBLIC_BOOTSTRAP_REALMS = new Set([
   "platform",
   "tenant",
@@ -34,6 +35,13 @@ function stripQueryString(path: string): string {
   return queryStart >= 0 ? path.slice(0, queryStart) : path;
 }
 
+function normalizeRequestPath(path: string): string {
+  return stripQueryString(path)
+    .replace(/^\/+/, "")
+    .replace(/^api\/+/, "")
+    .replace(/\/+$/, "");
+}
+
 export function isHealthRequest(path: string | undefined): boolean {
   if (!path) {
     return false;
@@ -41,17 +49,35 @@ export function isHealthRequest(path: string | undefined): boolean {
   return HEALTH_PATHS.has(stripQueryString(path));
 }
 
-function normalizeRealm(value: HeaderValue): string {
-  return normalizeHeaderValue(value).toLowerCase();
-}
-
 function isOptionsRequest(method: string | undefined): boolean {
   return method?.toUpperCase() === "OPTIONS";
 }
 
+function isExplicitPublicRequest(
+  method: string | undefined,
+  path: string | undefined,
+): boolean {
+  if (!method || !path) {
+    return false;
+  }
+
+  return EXPLICIT_PUBLIC_ROUTE_KEYS.has(
+    `${method.toUpperCase()} ${normalizeRequestPath(path)}`,
+  );
+}
+
 function hasPublicBootstrapRealm(request: RequestLike): boolean {
-  return PUBLIC_BOOTSTRAP_REALMS.has(
-    normalizeRealm(request.headers?.["x-realm"]),
+  const identity = extractBootstrapRequestIdentity(request.headers ?? {}, {
+    allowAnonymous: false,
+    method: request.method,
+    requestUrl: request.originalUrl ?? request.url,
+  });
+
+  return Boolean(
+    identity &&
+    identity.actorType !== "system" &&
+    identity.actorId &&
+    PUBLIC_BOOTSTRAP_REALMS.has(identity.realm),
   );
 }
 
@@ -61,13 +87,12 @@ export function validateInternalKey(
 ): void {
   const requestPath = request.originalUrl ?? request.url ?? "";
   const requestMethod = request.method ?? "GET";
-  const routePolicy = resolveRouteAuthPolicy(requestMethod, requestPath);
 
   if (
     !expectedKey ||
     isHealthRequest(requestPath) ||
     isOptionsRequest(requestMethod) ||
-    routePolicy === null ||
+    isExplicitPublicRequest(requestMethod, requestPath) ||
     hasPublicBootstrapRealm(request)
   ) {
     return;
