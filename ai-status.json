@@ -4,7 +4,7 @@
   "consensus_status": "accepted",
   "sprint": "2026-04-15-full-blueprint-execution",
   "objective": "Execute the accepted full blueprint master plan: complete tenant portal convergence, finish the remaining Platform Admin / Ops / finance / filing blueprint families, close rollout evidence, and preserve deferred roadmap slices without losing scope.",
-  "updated_at": "2026-04-17T00:35:00Z",
+  "updated_at": "2026-04-17T01:15:00Z",
   "canonical_document_layers": {
     "L0 Collaboration": [
       "AI_COLLABORATION_GUIDE.md",
@@ -131,8 +131,8 @@
       "branch": "feat/codex-phase1-architecture",
       "next": "Live staging evidence collected in support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md. Harness is now runnable against private Cloud Run, but FBP-014B cannot satisfy acceptance on current staging: E2E-001 creates booking/order yet dispatch/tasks stays empty after 20 polls, E2E-002 remains environment-gated with zero driver tasks, and E2E-004 reproduces a critical cross-tenant leak where TEN_ACME can read booking-000004 from tenant t_e0bc7ef4. Waiting for supervisor triage / follow-up task routing on the reproduced staging defects.",
       "last_update": "2026-04-17T00:25:04Z",
-      "current_task": "BUG-001",
-      "note": "Critical: fix cross-tenant booking leak in owned-mobility API"
+      "current_task": "FBP-014B",
+      "note": "Re-run E2E against staging after BUG-001/BUG-002 fixes"
     },
     {
       "name": "Qwen",
@@ -146,7 +146,7 @@
       "current_task_ids": [],
       "branch": "feat/qwen-integration-slices",
       "next": "Pick the next API or integration slice that is unblocked and ready to implement.",
-      "last_update": "2026-04-17T00:00:50Z"
+      "last_update": "2026-04-17T00:49:13Z"
     },
     {
       "name": "Copilot",
@@ -160,17 +160,17 @@
       "current_task_ids": [],
       "branch": "feat/copilot-spec-critique",
       "next": "Critique active implementation slices for contradictions, testing gaps, and weak assumptions.",
-      "last_update": "2026-04-16T04:41:35Z",
+      "last_update": "2026-04-17T00:45:58Z",
       "note": "Available for sidecar dispatch."
     },
     {
       "name": "Codex2",
       "capability_lane": ["contracts", "schema", "state-system", "acceptance"],
-      "status": "working",
+      "status": "idle",
       "current_task_ids": [],
       "branch": "feat/codex2-parallel-worker",
       "next": "Wait for the next execution slice.",
-      "last_update": "2026-04-17T00:05:33Z",
+      "last_update": "2026-04-17T00:56:33Z",
       "note": "Fix E2E-001 dispatch not triggered after booking creation",
       "current_task": "BUG-002"
     }
@@ -1784,7 +1784,7 @@
       "phase": "Full Blueprint Wave 3",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "blocked",
+      "status": "in_progress",
       "depends_on": ["FBP-013", "FBP-014A"],
       "artifacts": [
         "docs/04-uat/phase1-uat-scenarios.md",
@@ -1796,10 +1796,11 @@
         "no cross-tenant leak\u3001audit consistency\u3001billing consistency evidence \u5b8c\u6574",
         "repo B cutover \u5f8c\u7684 integrated path \u53ef\u88ab reviewer \u76f4\u63a5\u5be9\u67e5"
       ],
-      "next": "Live staging evidence collected in support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md. Harness is now runnable against private Cloud Run, but FBP-014B cannot satisfy acceptance on current staging: E2E-001 creates booking/order yet dispatch/tasks stays empty after 20 polls, E2E-002 remains environment-gated with zero driver tasks, and E2E-004 reproduces a critical cross-tenant leak where TEN_ACME can read booking-000004 from tenant t_e0bc7ef4. Waiting for supervisor triage / follow-up task routing on the reproduced staging defects.",
+      "next": "BUG-001 (cross-tenant leak) and BUG-002 (dispatch trigger) both fixed. Re-run E2E suite against staging to collect final E2E-001/E2E-004 pass evidence.",
       "last_update": "2026-04-17T00:25:04Z",
       "task_class": "execution_evidence",
-      "waiting_for": "Claude"
+      "waiting_for": "Claude",
+      "updated_at": "2026-04-17T01:15:00Z"
     },
     {
       "id": "FBP-015",
@@ -2578,7 +2579,7 @@
       "phase": "Bug Fix",
       "owner": "Codex",
       "reviewer": "Claude",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [],
       "artifacts": [
         "apps/api/src/modules/owned-mobility/owned-mobility.controller.ts",
@@ -2590,10 +2591,15 @@
         "createTenantBooking() \u5c07 tenantId \u5beb\u5165 booking record",
         "E2E-004 \u901a\u904e\uff1aTEN_ACME \u7121\u6cd5\u8b80\u53d6\u5176\u4ed6 tenant \u7684 booking"
       ],
-      "next": "Fix: extract x-tenant-id from controller headers, pass tenantId to service, filter listTenantBookings/getTenantBooking by tenantId, scope createTenantBooking to calling tenant.",
-      "last_update": "2026-04-17T00:35:00Z",
+      "next": "Owner finalized: tenant booking endpoints now require x-tenant-id, create/list/get/update/cancel all enforce tenant scoping, cross-tenant access returns BOOKING_NOT_FOUND, and commit b068f92 records the approved BUG-001 fix.",
+      "last_update": "2026-04-17T01:10:50Z",
       "task_class": "bug_fix",
-      "priority": "critical"
+      "priority": "critical",
+      "commit_hash": "b068f9270df18bfd4807f195361dd0cc712eada6",
+      "commit_subject": "fix(BUG-001): enforce tenant isolation for tenant bookings",
+      "commit_agent": "Codex",
+      "commit_reviewer": "Claude",
+      "commit_recorded_at": "2026-04-17T01:10:50Z"
     },
     {
       "id": "BUG-002",
@@ -2602,7 +2608,7 @@
       "phase": "Bug Fix",
       "owner": "Codex2",
       "reviewer": "Codex",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [],
       "artifacts": [
         "tests/e2e/E2E-001-enterprise-dispatch.sh",
@@ -2612,10 +2618,82 @@
         "E2E-001 \u7684 dispatch/tasks poll \u5728 booking \u5efa\u7acb\u5f8c\u80fd\u62ff\u5230\u81f3\u5c11\u4e00\u7b46 dispatch job",
         "\u4fee\u6b63\u65b9\u5411\u8a18\u9304\u5728 sidecar evidence \u4e2d\uff08test fix vs service auto-dispatch\uff09"
       ],
-      "next": "Investigate: check if Phase 1 spec requires auto-dispatch on booking or manual ops trigger. Fix E2E-001 to call the dispatch endpoint explicitly after booking, or add auto-dispatch hook in createTenantBooking.",
-      "last_update": "2026-04-17T00:35:00Z",
+      "next": "Owner finalized: E2E-001 now triggers explicit POST /orders/:orderId/dispatch before polling dispatch/tasks; regression test locks reservation bookings behind an explicit dispatch step, and evidence is recorded in support/sidecars/BUG-002/BUG-002-DISPATCH-SEMANTICS-EVIDENCE.md.",
+      "last_update": "2026-04-17T00:46:40Z",
       "task_class": "bug_fix",
-      "priority": "high"
+      "priority": "high",
+      "review_file": "support/sidecars/BUG-002/BUG-002-DISPATCH-SEMANTICS-EVIDENCE.md",
+      "commit_hash": "17f88955ffa0dc414841591be1d4327d840e1ff6",
+      "commit_subject": "fix(BUG-002): require explicit dispatch trigger in E2E-001",
+      "commit_agent": "Codex2",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-17T00:46:40Z"
+    },
+    {
+      "id": "BUG-001-SIDECAR-ACCEPTANCE",
+      "title": "Prepare BUG-001 acceptance packet and dependency map",
+      "summary_zh": "\u5e73\u884c\u652f\u63f4 BUG-001\uff0c\u5148\u6574\u7406 acceptance checklist\u3001dependency map \u8207 support packet\uff0c\u4e0d\u6539 canonical truth\u3002",
+      "phase": "Bug Fix",
+      "owner": "Codex2",
+      "reviewer": "Codex",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": ["support/sidecars/BUG-001/BUG-001-SIDECAR-ACCEPTANCE.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Owner finalized approved support-only acceptance packet for BUG-001 at support/sidecars/BUG-001/BUG-001-SIDECAR-ACCEPTANCE.md.",
+      "last_update": "2026-04-17T00:52:06Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "BUG-001",
+      "helper_kind": "acceptance_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization",
+      "review_notes_zh": [
+        "\u5be9\u67e5\u901a\u904e\uff1apacket \u5df2\u5c0d\u9f4a\u6700\u65b0 shared truth\uff0c\u6b63\u78ba\u53cd\u6620 parent BUG-001 owner=Codex2\u3001sidecar status=review\uff0c\u4ee5\u53ca 2026-04-17T00:49:00Z handoff / 00:49:01Z review_ready_dispatch\u3002support-only artifact \u908a\u754c\u6e05\u695a\uff0c\u672a\u6539 canonical truth\u3002|\u56de\u5230 owner\uff08Codex2\uff09\u4ee5 NO_COMMIT_REQUIRED=1 \u505a done closeout\u3002"
+      ],
+      "review_file": "support/sidecars/BUG-001/BUG-001-SIDECAR-ACCEPTANCE.md",
+      "commit_hash": "-",
+      "commit_subject": "no-commit closeout",
+      "commit_agent": "Codex2",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-17T00:52:06Z"
+    },
+    {
+      "id": "BUG-002-SIDECAR-REVIEW",
+      "title": "Prepare BUG-002 review packet and evidence summary",
+      "summary_zh": "\u5e73\u884c\u652f\u63f4 BUG-002\uff0c\u5148\u6574\u7406 review packet\u3001evidence summary \u8207 reviewer handoff\uff0c\u4e0d\u6539 canonical truth\u3002",
+      "phase": "Bug Fix",
+      "owner": "Codex2",
+      "reviewer": "Codex",
+      "status": "done",
+      "depends_on": [],
+      "artifacts": ["support/sidecars/BUG-002/BUG-002-SIDECAR-REVIEW.md"],
+      "acceptance": [
+        "Create support artifacts only",
+        "Do not edit canonical truth",
+        "Hand off the packet to the assigned reviewer"
+      ],
+      "next": "Done: BUG-002 sidecar review packet recorded the closed parent evidence chain, the explicit-dispatch decision rationale, the E2E and regression anchors, and the support-only reviewer handoff without changing canonical truth.",
+      "last_update": "2026-04-17T00:57:35Z",
+      "task_class": "sidecar",
+      "auto_generated": true,
+      "helper_parent": "BUG-002",
+      "helper_kind": "review_packet",
+      "mutates_canonical": false,
+      "auto_created_by": "supervisor-underutilization",
+      "review_notes_zh": [
+        "\u5be9\u67e5\u901a\u904e\uff1aBUG-002 sidecar review packet \u5df2\u6b63\u78ba\u5c0d\u9f4a shared truth\uff08parent BUG-002=done\u3001sidecar BUG-002-SIDECAR-REVIEW=review\uff0cowner handoff 2026-04-17T00:54:12Z\uff0creview_ready_dispatch 00:54:14Z\uff09\uff0c\u4e26\u6e05\u695a\u5f59\u6574 test-fix vs auto-dispatch \u7684\u65e2\u5b9a\u7d50\u8ad6\u3001E2E-001 \u986f\u5f0f POST /orders/:orderId/dispatch \u9328\u9ede\u3001reservation queue regression \u9396\u9ede\uff0c\u4ee5\u53ca sidecar \u6539\u6d3e\u8ecc\u8de1\uff1bsupport artifact only\uff0c\u672a\u6539 canonical truth\u3002|\u56de\u5230 owner\uff08Codex2\uff09\u4ee5 NO_COMMIT_REQUIRED=1 \u505a done closeout\u3002"
+      ],
+      "review_file": "support/sidecars/BUG-002/BUG-002-SIDECAR-REVIEW.md",
+      "commit_hash": "-",
+      "commit_subject": "no-commit closeout",
+      "commit_agent": "Codex2",
+      "commit_reviewer": "Codex",
+      "commit_recorded_at": "2026-04-17T00:57:35Z"
     }
   ],
   "handoffs": [
@@ -94202,6 +94280,114 @@
       "status": "done",
       "created_at": "2026-04-17T00:05:38Z",
       "resolved_at": "2026-04-17T00:05:39Z"
+    },
+    {
+      "task_id": "BUG-002",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "BUG-002 ready for review. Fix keeps reservation bookings as created/requested-hold until explicit dispatch, updates E2E-001 to trigger POST /orders/:orderId/dispatch before queue polling, and adds regression coverage that listDispatchJobs stays empty before dispatchOrder. Verified with bash -n tests/e2e/E2E-001-enterprise-dispatch.sh and pnpm vitest run tests/unit/owned-mobility.test.ts (11/11).",
+      "status": "done",
+      "created_at": "2026-04-17T00:42:43Z",
+      "resolved_at": "2026-04-17T00:45:03Z"
+    },
+    {
+      "task_id": "BUG-002",
+      "from": "Codex",
+      "to": "Codex2",
+      "message": "Reviewed BUG-002: E2E-001 now triggers explicit POST /orders/:orderId/dispatch before queue polling, preserving Phase 1 reservation semantics. Verified with bash -n tests/e2e/E2E-001-enterprise-dispatch.sh, pnpm vitest run tests/unit/owned-mobility.test.ts (11/11), and recorded the test-fix vs auto-dispatch decision in support/sidecars/BUG-002/BUG-002-DISPATCH-SEMANTICS-EVIDENCE.md.",
+      "status": "done",
+      "created_at": "2026-04-17T00:45:03Z",
+      "resolved_at": "2026-04-17T00:46:40Z"
+    },
+    {
+      "task_id": "BUG-002-SIDECAR-REVIEW",
+      "from": "Codex",
+      "to": "Codex2",
+      "message": "Availability-first reassignment: Codex2 claimed BUG-002-SIDECAR-REVIEW while Codex was unavailable or occupied.",
+      "status": "done",
+      "created_at": "2026-04-17T00:46:41Z",
+      "resolved_at": "2026-04-17T00:49:13Z"
+    },
+    {
+      "task_id": "BUG-001-SIDECAR-ACCEPTANCE",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "Acceptance packet ready at support/sidecars/BUG-001/BUG-001-SIDECAR-ACCEPTANCE.md: captures tenant-header scoping requirements, create/list/get isolation checklist, evidence anchors, and reviewer hotspots for BUG-001.",
+      "status": "done",
+      "created_at": "2026-04-17T00:49:00Z",
+      "resolved_at": "2026-04-17T00:51:34Z"
+    },
+    {
+      "task_id": "BUG-001-SIDECAR-ACCEPTANCE",
+      "from": "Codex",
+      "to": "Codex2",
+      "message": "Acceptance packet now aligns with current BUG-001 shared truth and reviewer routing; support-only artifact correctly captures tenant-isolation closure criteria, evidence anchors, and owner closeout path for Codex2.",
+      "status": "done",
+      "created_at": "2026-04-17T00:51:34Z",
+      "resolved_at": "2026-04-17T00:52:06Z"
+    },
+    {
+      "task_id": "BUG-001",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "Availability-first reassignment: Codex claimed BUG-001 while Codex2 was unavailable or occupied.",
+      "status": "done",
+      "created_at": "2026-04-17T00:51:40Z",
+      "resolved_at": "2026-04-17T00:51:41Z"
+    },
+    {
+      "task_id": "BUG-002-SIDECAR-REVIEW",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "Availability-first reassignment: Codex claimed BUG-002-SIDECAR-REVIEW while Codex2 was unavailable or occupied.",
+      "status": "done",
+      "created_at": "2026-04-17T00:51:49Z",
+      "resolved_at": "2026-04-17T00:52:09Z"
+    },
+    {
+      "task_id": "BUG-002-SIDECAR-REVIEW",
+      "from": "Codex",
+      "to": "Codex2",
+      "message": "Availability-first reassignment: Codex2 claimed BUG-002-SIDECAR-REVIEW while Codex was unavailable or occupied.",
+      "status": "done",
+      "created_at": "2026-04-17T00:52:08Z",
+      "resolved_at": "2026-04-17T00:54:12Z"
+    },
+    {
+      "task_id": "BUG-002-SIDECAR-REVIEW",
+      "from": "Codex2",
+      "to": "Codex",
+      "message": "BUG-002 sidecar review packet is ready at support/sidecars/BUG-002/BUG-002-SIDECAR-REVIEW.md. It matches current shared truth: parent BUG-002 is already done at commit 17f88955 with the explicit-dispatch E2E correction, the decision memo remains support/sidecars/BUG-002/BUG-002-DISPATCH-SEMANTICS-EVIDENCE.md, and this packet summarizes the reviewer hotspots, routing trail, and evidence anchors without changing canonical truth.",
+      "status": "done",
+      "created_at": "2026-04-17T00:54:12Z",
+      "resolved_at": "2026-04-17T00:56:33Z"
+    },
+    {
+      "task_id": "BUG-002-SIDECAR-REVIEW",
+      "from": "Codex",
+      "to": "Codex2",
+      "message": "Review approved. The packet matches shared truth for parent BUG-002 closeout, the explicit-dispatch evidence chain, and the final owner-to-reviewer routing history without changing canonical truth.",
+      "status": "done",
+      "created_at": "2026-04-17T00:56:33Z",
+      "resolved_at": "2026-04-17T00:57:35Z"
+    },
+    {
+      "task_id": "BUG-001",
+      "from": "Codex",
+      "to": "Claude",
+      "message": "Tenant booking endpoints now enforce x-tenant-id scoping end-to-end: OwnedOrderRecord/BookingRecord carry tenantId, create/list/get/update/cancel booking flows are tenant-scoped, booking-related audits/notifications use the real tenant attribution, and targeted owned-mobility + wire-contract tests plus @drts/api typecheck passed.",
+      "status": "done",
+      "created_at": "2026-04-17T01:05:09Z",
+      "resolved_at": "2026-04-17T01:06:55Z"
+    },
+    {
+      "task_id": "BUG-001",
+      "from": "Claude",
+      "to": "Codex",
+      "message": "\u5be9\u67e5\u901a\u904e\u3002(1) Controller \u7684 createTenantBooking/listTenantBookings/getTenantBooking/updateTenantBooking/cancelTenantBooking \u5168\u90e8\u900f\u904e requireTenantId() \u5f9e x-tenant-id header \u53d6 tenantId\uff0c\u7f3a\u5c11 header \u56de 400/TENANT_ID_REQUIRED\uff0c\u4e0d silently fallback\u3002(2) createTenantBooking() \u5c07\u547c\u53eb\u65b9 tenantId \u5beb\u5165 order.tenantId\uff0caudit \u4f7f\u7528 order.tenantId\uff08\u975e\u786c\u7de8\u78bc\uff09\u3002(3) listTenantBookings() \u904e\u6ffe order.tenantId === callerTenantId\uff1brequireBookingOrder(bookingId, tenantId) \u56b4\u683c\u76f8\u7b49 guard\uff0ccross-tenant \u5b58\u53d6\u56de BOOKING_NOT_FOUND\uff08\u4e0d\u6d29\u6f0f existence\uff09\u3002(4) unit test \u65b0\u589e\u4e00\u7d44 cross-tenant isolation test \u8986\u84cb list/get/update/cancel \u5171 4 \u500b\u5834\u666f\uff0c12/12 tests pass\uff1bE2E-004 leg-4 cross-tenant leak check \u5b8c\u6574\u3002(5) @drts/api typecheck \u96f6\u932f\u8aa4\u3002\u56de\u5230 owner\uff08Codex\uff09\u505a done closeout\u3002",
+      "status": "done",
+      "created_at": "2026-04-17T01:06:55Z",
+      "resolved_at": "2026-04-17T01:10:50Z"
     }
   ],
   "blockers": [
@@ -94259,19 +94445,19 @@
       "todo": 0
     },
     "Codex": {
-      "total": 35,
+      "total": 36,
       "active": 1,
       "blocked": 1,
-      "done": 34,
+      "done": 35,
       "review": 0,
       "review_approved": 0,
       "todo": 0
     },
     "Codex2": {
-      "total": 9,
+      "total": 12,
       "active": 0,
       "blocked": 0,
-      "done": 9,
+      "done": 12,
       "review": 0,
       "review_approved": 0,
       "todo": 0
