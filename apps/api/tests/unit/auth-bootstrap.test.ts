@@ -207,6 +207,7 @@ describe("internal key middleware", () => {
         {
           headers: {},
           originalUrl: "/api/tenant/webhooks",
+          method: "POST",
         },
         "",
       ),
@@ -221,17 +222,62 @@ describe("internal key middleware", () => {
         {
           headers: {},
           originalUrl: "/api/health?probe=1",
+          method: "GET",
         },
         "staging-secret",
       ),
     ).not.toThrow();
   });
 
-  it("rejects protected routes when the internal key header is missing", () => {
+  it("allows browser preflight requests without the internal key", () => {
     expect(() =>
       validateInternalKey(
         {
           headers: {},
+          method: "OPTIONS",
+          originalUrl: "/api/tenant/webhooks",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
+  it("allows protected routes for non-system bootstrap realms without the internal key", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {
+            "x-realm": "tenant",
+          },
+          method: "POST",
+          originalUrl: "/api/tenant/webhooks",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
+  it("allows open routes without the internal key", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {},
+          method: "GET",
+          originalUrl: "/api/identity/context",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects system-scoped protected routes when the internal key header is missing", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {
+            "x-realm": "system",
+          },
+          method: "POST",
           originalUrl: "/api/tenant/webhooks",
         },
         "staging-secret",
@@ -244,8 +290,10 @@ describe("internal key middleware", () => {
       validateInternalKey(
         {
           headers: {
+            "x-realm": "system",
             "x-drts-internal-key": "wrong-secret",
           },
+          method: "POST",
           originalUrl: "/api/tenant/webhooks",
         },
         "staging-secret",
@@ -258,8 +306,10 @@ describe("internal key middleware", () => {
       validateInternalKey(
         {
           headers: {
+            "x-realm": "system",
             "x-drts-internal-key": "staging-secret",
           },
+          method: "POST",
           originalUrl: "/api/tenant/webhooks",
         },
         "staging-secret",
@@ -277,8 +327,10 @@ describe("internal key middleware", () => {
       middleware.use(
         {
           headers: {
+            "x-realm": "system",
             "x-drts-internal-key": "staging-secret",
           },
+          method: "POST",
           originalUrl: "/api/tenant/webhooks",
         },
         {},

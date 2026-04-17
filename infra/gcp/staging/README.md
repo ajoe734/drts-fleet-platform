@@ -60,12 +60,12 @@ before the migration job if the deployer cannot bind the runtime service account
 These secrets are injected into Cloud Run services at runtime. The Cloud Run runtime
 service account, not the GitHub WIF deployer identity, must be able to access them:
 
-| Secret name                 | Consumed by          | Notes                                                                           |
-| --------------------------- | -------------------- | ------------------------------------------------------------------------------- |
-| `drts-staging-db-url`       | `api`, `migrate-job` | `postgresql://user:pass@/dbname?host=/cloudsql/INSTANCE`                        |
-| `drts-staging-api-key-salt` | `api`                | Random 32-byte hex string                                                       |
-| `drts-staging-jwt-secret`   | `api`                | Random 64-byte hex string                                                       |
-| `drts-staging-internal-key` | `api`                | Shared secret required in `x-drts-internal-key` for all non-health API requests |
+| Secret name                 | Consumed by          | Notes                                                                                                                                |
+| --------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `drts-staging-db-url`       | `api`, `migrate-job` | `postgresql://user:pass@/dbname?host=/cloudsql/INSTANCE`                                                                             |
+| `drts-staging-api-key-salt` | `api`                | Random 32-byte hex string                                                                                                            |
+| `drts-staging-jwt-secret`   | `api`                | Random 64-byte hex string                                                                                                            |
+| `drts-staging-internal-key` | `api`                | Shared secret used for system/machine-to-machine API requests that do not already carry a tenant/platform/ops/driver bootstrap realm |
 
 ## Service Map
 

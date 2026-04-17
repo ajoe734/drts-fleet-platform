@@ -2,6 +2,7 @@ import { Injectable, type NestMiddleware } from "@nestjs/common";
 import { timingSafeEqual } from "node:crypto";
 
 import { ApiRequestError } from "../api-envelope";
+import { resolveRouteAuthPolicy } from "./auth.policy";
 
 type HeaderValue = string | string[] | undefined;
 
@@ -9,10 +10,17 @@ type RequestLike = {
   headers?: Record<string, HeaderValue>;
   originalUrl?: string;
   url?: string;
+  method?: string;
 };
 
 const INTERNAL_KEY_HEADER = "x-drts-internal-key";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
+const PUBLIC_BOOTSTRAP_REALMS = new Set([
+  "platform",
+  "tenant",
+  "ops",
+  "driver",
+]);
 
 function normalizeHeaderValue(value: HeaderValue): string {
   if (Array.isArray(value)) {
@@ -33,12 +41,35 @@ export function isHealthRequest(path: string | undefined): boolean {
   return HEALTH_PATHS.has(stripQueryString(path));
 }
 
+function normalizeRealm(value: HeaderValue): string {
+  return normalizeHeaderValue(value).toLowerCase();
+}
+
+function isOptionsRequest(method: string | undefined): boolean {
+  return method?.toUpperCase() === "OPTIONS";
+}
+
+function hasPublicBootstrapRealm(request: RequestLike): boolean {
+  return PUBLIC_BOOTSTRAP_REALMS.has(
+    normalizeRealm(request.headers?.["x-realm"]),
+  );
+}
+
 export function validateInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
 ): void {
   const requestPath = request.originalUrl ?? request.url ?? "";
-  if (!expectedKey || isHealthRequest(requestPath)) {
+  const requestMethod = request.method ?? "GET";
+  const routePolicy = resolveRouteAuthPolicy(requestMethod, requestPath);
+
+  if (
+    !expectedKey ||
+    isHealthRequest(requestPath) ||
+    isOptionsRequest(requestMethod) ||
+    routePolicy === null ||
+    hasPublicBootstrapRealm(request)
+  ) {
     return;
   }
 
@@ -52,6 +83,7 @@ export function validateInternalKey(
       "x-drts-internal-key header is required for this environment.",
       {
         route: requestPath,
+        method: requestMethod,
       },
     );
   }
@@ -72,6 +104,7 @@ export function validateInternalKey(
     "x-drts-internal-key header is invalid for this environment.",
     {
       route: requestPath,
+      method: requestMethod,
     },
   );
 }
