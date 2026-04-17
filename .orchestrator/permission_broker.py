@@ -86,9 +86,14 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^nohup python3 \.orchestrator/supervisor\.py"),
     re.compile(r"^nohup python3 -m http\.server"),
     re.compile(r"^fuser \d+"),
-    re.compile(r"^lsof -i:"),
+    re.compile(r"^lsof -i\s*:"),
     re.compile(r"^kill \d+"),
     re.compile(r"^pkill -f supervisor\.py"),
+    re.compile(r"^pkill -f [\"']dashboard_server\.py[\"']"),
+    re.compile(r"^python3 .+/scripts/dashboard_server\.py(\s|$)"),
+    re.compile(r"^nohup python3 .+/scripts/dashboard_server\.py"),
+    re.compile(r"^curl(?:\s+-[A-Za-z0-9-]+)*\s+http://127\.0\.0\.1:\d+"),
+    re.compile(r"^curl(?:\s+-[A-Za-z0-9-]+)*\s+http://localhost:\d+"),
     # file operations
     re.compile(r"^cp(\s|$)"),
     re.compile(r"^mv(\s|$)"),
@@ -205,7 +210,12 @@ PNPM_STANDALONE_FLAGS = {"-r", "--recursive", "--stream", "--parallel", "--aggre
 
 
 def _normalize_shell_command(shell_command: str) -> str:
-    command = shell_command.replace("\r\n", "\n").replace("\\\n", " ")
+    lines = []
+    for line in shell_command.replace("\r\n", "\n").split("\n"):
+        if line.strip().startswith("#"):
+            continue
+        lines.append(line)
+    command = "\n".join(lines).replace("\\\n", " ")
     command = re.sub(r"\s*\n\s*", " ", command)
     return command.strip()
 
@@ -587,12 +597,40 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return False
 
 
+def _check_claude_allow_rules(tool_name: str, tool_input: dict[str, Any]) -> bool:
+    """Return True if a Claude settings allow rule matches this tool call."""
+    try:
+        settings_path = Path.home() / ".claude" / "projects" / "-home-edna-workspace-drts-fleet-platform" / "settings.json"
+        local_settings_path = ROOT / ".claude" / "settings.local.json"
+        for path in (local_settings_path, settings_path):
+            if not path.exists():
+                continue
+            data = json.loads(path.read_text())
+            allow_rules = data.get("permissions", {}).get("allow", [])
+            for rule in allow_rules:
+                rule = str(rule)
+                if rule == f"{tool_name}(*)":
+                    return True
+                if rule.startswith(f"{tool_name}(") and rule.endswith(")"):
+                    pattern = rule[len(tool_name) + 1:-1]
+                    if tool_name == "Bash":
+                        cmd = tool_input.get("command") or ""
+                        if fnmatch.fnmatch(cmd, pattern) or pattern == "*":
+                            return True
+    except Exception:
+        pass
+    return False
+
+
 def evaluate_tool_request(tool_name: str, tool_input: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, Any]:
     tool_input = tool_input or {}
     decision = "defer"
     reason = f"Deferred by default for {tool_name}."
     risk_class = "unknown"
     suggested_rule = None
+
+    if _check_claude_allow_rules(tool_name, tool_input):
+        return {"decision": "allow", "reason": "Matched Claude settings allow rule.", "risk_class": "settings_allowed", "suggested_rule": None}
 
     if tool_name in SAFE_TOOLS:
         decision = "allow"

@@ -33,6 +33,11 @@ KNOWN_AGENTS = {
         "default_branch": "feat/codex-phase1-architecture",
         "target_workload": 30,
     },
+    "Codex2": {
+        "capability_lane": ["contracts", "schema", "state-system", "acceptance"],
+        "default_branch": "feat/codex2-parallel-worker",
+        "target_workload": 15,
+    },
     "Qwen": {
         "capability_lane": ["integration", "api-implementation", "adapter-execution", "acceptance"],
         "default_branch": "feat/qwen-integration-slices",
@@ -55,6 +60,8 @@ AGENT_ALIASES = {
     "copilot": "Copilot",
     "copilot host": "Copilot",
     "copilot_host": "Copilot",
+    "codex2": "Codex2",
+    "codex 2": "Codex2",
 }
 
 STATUS_LABELS = {
@@ -669,16 +676,7 @@ def default_next_for_idle_agent(state: dict[str, Any], agent_name: str) -> str:
     discussion_loop = state.get("discussion_loop", {}) if isinstance(state.get("discussion_loop"), dict) else {}
 
     if execution_mode == "discussion_planning":
-        starter = discussion_loop.get("starter")
-        supervisor = discussion_loop.get("supervisor")
-        review_order = discussion_loop.get("review_order")
-        if agent_name == starter:
-            return "Own the starter draft and prepare the next cited discussion synthesis."
-        if agent_name == supervisor:
-            return "Advance the baton, arbitrate cited disagreements, and maintain the consensus packet."
-        if isinstance(review_order, list) and agent_name in review_order:
-            return "Review the current starter draft with citations and queue refinements for the next baton round."
-        return "Read the canonical specs and contribute to the next discussion round."
+        return planning_next_for_idle_agent(state, agent_name, discussion_loop)
 
     if execution_mode == "supervisor_managed_execution":
         execution_defaults = {
@@ -691,6 +689,74 @@ def default_next_for_idle_agent(state: dict[str, Any], agent_name: str) -> str:
         return execution_defaults.get(agent_name, "Wait for the next execution slice.")
 
     return ""
+
+
+def planning_next_for_idle_agent(
+    state: dict[str, Any],
+    agent_name: str,
+    discussion_loop: dict[str, Any],
+) -> str:
+    starter = canonical_agent_name(str(discussion_loop.get("starter", "")).strip())
+    supervisor = canonical_agent_name(str(discussion_loop.get("supervisor", "")).strip())
+    current_owner = canonical_agent_name(str(discussion_loop.get("current_owner", "")).strip())
+    review_order = [
+        canonical_agent_name(str(name).strip())
+        for name in discussion_loop.get("review_order", [])
+        if str(name).strip()
+    ]
+    workspace = str(state.get("discussion_workspace", "")).strip()
+    workspace_label = Path(workspace).name if workspace else "current planning session"
+
+    review_focus = {
+        "Qwen": "implementation-boundary review",
+        "Gemini": "rollout, infra, and evidence review",
+        "Copilot": "scope-completeness and critique review",
+        "Claude": "final synthesis and architecture arbitration",
+    }
+
+    if agent_name == current_owner:
+        if agent_name == supervisor:
+            return (
+                f"CURRENT OWNER - synthesize cited reviews for {workspace_label}, "
+                "resolve scope disagreements, and advance the consensus packet."
+            )
+        focus = review_focus.get(agent_name, "cited review")
+        return (
+            f"CURRENT OWNER - write the active {focus} for {workspace_label} "
+            "and update the current review round."
+        )
+
+    if agent_name == starter:
+        return (
+            f"Starter draft already delivered for {workspace_label}; stay available "
+            "for rebuttal, source-of-truth corrections, and synthesis support."
+        )
+
+    if agent_name == supervisor:
+        owner_label = current_owner or "the active reviewer"
+        return (
+            f"Monitor {owner_label}'s active baton for {workspace_label}, arbitrate cited disagreements, "
+            "and prepare the consensus packet once review quorum converges."
+        )
+
+    if agent_name in review_order:
+        focus = review_focus.get(agent_name, "cited review")
+        if current_owner in review_order:
+            current_index = review_order.index(current_owner)
+            agent_index = review_order.index(agent_name)
+            if agent_index > current_index:
+                return (
+                    f"Stand by for the {focus} in {workspace_label} after {current_owner} "
+                    "finishes the current baton pass."
+                )
+            if agent_index < current_index:
+                return (
+                    f"Your primary {focus} pass for {workspace_label} is behind the baton; "
+                    "stay available for follow-up challenge, clarification, or synthesis."
+                )
+        return f"Prepare the next {focus} for {workspace_label}."
+
+    return f"Read the canonical specs and contribute to the next discussion round for {workspace_label}."
 
 
 def recompute_workload(state: dict[str, Any]) -> None:

@@ -51,6 +51,46 @@ Instead, it keeps running and changes routing policy:
 - in `discussion_planning`, the supervisor routes baton ownership and review order
 - in `supervisor_managed_execution`, the supervisor routes implementation tasks
 
+## Machine Truth
+
+Two files describe different parts of the same control plane:
+
+- `ai-status.json` is the desired collaboration truth:
+  - the active `execution_mode`
+  - the active `discussion_workspace`
+  - the current baton owner and review order
+  - the official implementation task board
+- `.orchestrator/state.json` is the live runtime truth:
+  - the running supervisor `pid`
+  - `focus_mode`
+  - heartbeat and runtime occupancy
+  - queued wake-ups and worker runs
+
+The dashboard must show both layers instead of collapsing them into one field.
+
+Practical rule:
+
+- trust `ai-status.json` for what mode the repo is supposed to be in
+- trust `.orchestrator/state.json` for what the live daemon is actually doing right now
+- if those drift, treat it as a control-plane problem rather than assuming planning or execution is truly active
+
+## Live Runtime Routing
+
+The canonical supervisor process is still `.orchestrator/supervisor.py`, but its routing now differs by live focus:
+
+- in `discussion_planning`
+  - the supervisor reads `ai-status.json`
+  - derives `focus_mode=planning`
+  - queues a planning baton wake-up for the current owner
+  - records planning worker activity and mode occupancy in `.orchestrator/state.json`
+- in `supervisor_managed_execution`
+  - the same process derives `focus_mode=execution`
+  - scans the task board
+  - dispatches owners/reviewers through the implementation lifecycle
+
+Planning dispatch therefore is not a second hidden daemon.
+It is the planning routing policy of the same canonical supervisor process.
+
 ## Start Condition
 
 The loop can start as soon as the canonical design packet is available in the repo.

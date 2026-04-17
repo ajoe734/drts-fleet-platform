@@ -59,6 +59,37 @@ class DetectWorkerFailureTests(unittest.TestCase):
             "An unexpected critical error occurred:[object Object]",
         )
 
+    def test_detects_qwen_quota_failure_inside_json_result_log(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    '{"type":"assistant","message":{"content":[{"type":"text","text":"Qwen OAuth quota exceeded: Your free daily quota has been reached."}]}}',
+                    '{"type":"result","subtype":"success","result":"Qwen OAuth quota exceeded: Your free daily quota has been reached."}',
+                ]
+            )
+            + "\n"
+        )
+
+        self.assertEqual(
+            supervisor.detect_worker_failure(worker),
+            "Qwen OAuth quota exceeded: Your free daily quota has been reached.",
+        )
+
+    def test_detects_copilot_no_quota_plain_text_log(self) -> None:
+        worker = self._worker_for_log("402 You have no quota (Request ID: test)\n")
+
+        self.assertEqual(
+            supervisor.detect_worker_failure(worker),
+            "402 You have no quota (Request ID: test)",
+        )
+
+    def test_ignores_json_artifact_listing_that_contains_unauthorized_path_names(self) -> None:
+        worker = self._worker_for_log(
+            '{"type":"result","result":"apps/platform-admin-web/.next/server/chunks/ssr/0ssi_next_dist_client_components_builtin_unauthorized_0to1781.js\\napps/platform-admin-web/.next/server/app/_not-found/page.js"}\n'
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
     def test_ignores_transcribed_limit_error_inside_review_notes(self) -> None:
         worker = self._worker_for_log(
             "\n".join(
@@ -69,6 +100,13 @@ class DetectWorkerFailureTests(unittest.TestCase):
                 ]
             )
             + "\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_numbered_markdown_dump_that_mentions_quota_text(self) -> None:
+        worker = self._worker_for_log(
+            '{"type":"result","result":"39\\t- `Claude`: governance-review; next: Auto-reassigned ownership from Qwen to Claude after repeated Qwen quota/terminal: Qwen OAuth quota exceeded: Your free daily quota has been reached.\\n40\\tTo continue using Qwen Code without waiting, upgrade to the Alibaba Cloud Coding Plan."}\n'
         )
 
         self.assertIsNone(supervisor.detect_worker_failure(worker))
@@ -512,6 +550,76 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(queued_event["target_agent"], "Codex")
         self.assertEqual(queued_event["reason"], "owned_in_progress_dispatch")
 
+    def test_dispatcher_availability_first_skips_quota_paused_idle_lane(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "helper_claim": {
+                    "enabled": True,
+                    "task_statuses": ["in_progress"],
+                    "availability_first": True,
+                    "allow_any_idle_lane": True,
+                    "require_assigned_agent_busy": True,
+                }
+            },
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+            },
+            "providers": {},
+        }
+        state = {
+            "queue": {"events": {}},
+            "quota_paused_agents": {
+                "codex": {
+                    "reason": "provider quota exhausted",
+                    "paused_at": "2026-04-16T00:00:00Z",
+                    "resume_at": 9999999999,
+                }
+            },
+            "workers": {
+                "run-busy": {
+                    "run_id": "run-busy",
+                    "task_id": "BUSY-PAUSED",
+                    "provider": "copilot",
+                    "agent_id": "copilot",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+        status = {
+            "tasks": [
+                {"id": "BUSY-PAUSED", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+                {"id": "REG-PAUSED", "status": "in_progress", "owner": "Copilot", "reviewer": "Claude", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state)
+
+        self.assertTrue(changed)
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], "REG-PAUSED")
+        self.assertEqual(kwargs["new_owner"], "Claude")
+        self.assertEqual(kwargs["new_reviewer"], "Copilot")
+        queued_event = queue_delivery_event.call_args.args[1]
+        self.assertEqual(queued_event["task_id"], "REG-PAUSED")
+        self.assertEqual(queued_event["target_agent"], "Claude")
+        self.assertEqual(queued_event["reason"], "owned_in_progress_dispatch")
+
     def test_dispatcher_availability_first_claims_review_approved_when_owner_is_busy(self) -> None:
         config = {
             "schema": {
@@ -775,6 +883,7 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
         with (
             mock.patch.object(supervisor, "write_supervisor_pid"),
             mock.patch.object(supervisor, "load_runtime_state", side_effect=[dict(initial_state), dict(initial_state)]),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [], "execution_mode": "supervisor_managed_execution"}),
             mock.patch.object(supervisor, "prune_stale_approvals", return_value=False),
             mock.patch.object(supervisor, "load_provider_report", return_value={}),
             mock.patch.object(supervisor, "run_scan", return_value=False),
@@ -793,6 +902,89 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
         self.assertEqual(saved_state["supervisor"]["pid"], os.getpid())
         self.assertIsNotNone(saved_state["supervisor"]["last_heartbeat_at"])
         self.assertEqual(saved_state["supervisor"]["started_at"], saved_state["supervisor"]["last_heartbeat_at"])
+
+    def test_run_once_can_skip_pid_file_management(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {},
+            "watcher": {},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {},
+        }
+
+        with (
+            mock.patch.object(supervisor, "write_supervisor_pid") as write_pid,
+            mock.patch.object(supervisor, "load_runtime_state", return_value={"queue": {"events": {}}, "workers": {}, "approvals": {}, "supervisor": {}}),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": [], "execution_mode": "supervisor_managed_execution"}),
+            mock.patch.object(supervisor, "prune_stale_approvals", return_value=False),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "run_scan", return_value=False),
+            mock.patch.object(supervisor, "poll_workers", return_value=False),
+            mock.patch.object(supervisor, "reconcile_queue_records", return_value=False),
+            mock.patch.object(supervisor, "prune_event_queue", return_value=False),
+            mock.patch.object(supervisor, "dispatch_ready_tasks", return_value=False),
+            mock.patch.object(supervisor, "process_queue", return_value=False),
+            mock.patch.object(supervisor, "sync_github_bus", return_value=False),
+            mock.patch.object(supervisor, "trim_worker_history"),
+            mock.patch.object(supervisor, "trim_seen_events"),
+            mock.patch.object(supervisor, "save_runtime_state"),
+        ):
+            supervisor.run_once(config, watch=False, replay=False, once=True, manage_pid_file=False)
+
+        write_pid.assert_not_called()
+
+    def test_main_once_skips_daemon_pid_management(self) -> None:
+        args = mock.Mock(
+            quiet=False,
+            config="config.json",
+            poll_interval=None,
+            no_watch=False,
+            replay=False,
+            verbose=False,
+            once=True,
+        )
+
+        with (
+            mock.patch.object(supervisor, "parse_args", return_value=args),
+            mock.patch.object(supervisor, "load_config", return_value={"supervisor": {"poll_interval_seconds": 2.0}}),
+            mock.patch.object(supervisor, "terminate_older_supervisors") as terminate_old,
+            mock.patch.object(supervisor.atexit, "register") as register_exit,
+            mock.patch.object(supervisor, "write_supervisor_pid") as write_pid,
+            mock.patch.object(supervisor, "run_once", return_value=False) as run_once,
+        ):
+            result = supervisor.main()
+
+        self.assertEqual(result, 0)
+        terminate_old.assert_not_called()
+        register_exit.assert_not_called()
+        write_pid.assert_not_called()
+        run_once.assert_called_once()
+        self.assertFalse(run_once.call_args.kwargs["manage_pid_file"])
+
+    def test_safe_load_approval_state_filters_non_pending_entries(self) -> None:
+        config: dict[str, object] = {}
+
+        with mock.patch.object(
+            supervisor,
+            "load_approval_state",
+            return_value={
+                "pending": [
+                    {"approval_id": "apr-1", "status": "pending"},
+                    {"approval_id": "apr-2", "status": "denied"},
+                ],
+                "history": [{"approval_id": "apr-old", "status": "resolved"}],
+            },
+        ):
+            state = supervisor.safe_load_approval_state(config)
+
+        self.assertEqual(state["pending"], [{"approval_id": "apr-1", "status": "pending"}])
+        self.assertEqual(state["history"], [{"approval_id": "apr-old", "status": "resolved"}])
 
 
 class UnderutilizationSidecarDispatchTests(unittest.TestCase):
@@ -1323,8 +1515,163 @@ class PollWorkersRecoveryTests(unittest.TestCase):
             worker,
             "Worker exited before the task reached a terminal status.",
             terminal=True,
+            state=state,
         )
         write_activity_log.assert_not_called()
+
+    def test_dead_owner_worker_that_advanced_task_to_review_is_completed(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "FBP-008",
+                    "provider": "claude",
+                    "agent_id": "claude",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 999999,
+                    "last_event_at": "2026-04-15T16:19:02Z",
+                    "request_snapshot": {"reason": "owned_ready_dispatch"},
+                }
+            },
+        }
+        status = {"tasks": [{"id": "FBP-008", "status": "review", "owner": "Claude", "reviewer": "Codex"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "completed")
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_completed")
+
+    def test_dead_reviewer_worker_that_advanced_task_to_review_approved_is_completed(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "FBP-008",
+                    "provider": "codex",
+                    "agent_id": "codex",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 999999,
+                    "last_event_at": "2026-04-15T16:30:07Z",
+                    "request_snapshot": {"reason": "review_ready_dispatch"},
+                }
+            },
+        }
+        status = {"tasks": [{"id": "FBP-008", "status": "review_approved", "owner": "Claude", "reviewer": "Codex"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "completed")
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_completed")
+
+    def test_dead_finalize_worker_still_waiting_on_done_is_marked_failed(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "FBP-008",
+                    "provider": "claude",
+                    "agent_id": "claude",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 999999,
+                    "last_event_at": "2026-04-15T16:31:00Z",
+                    "request_snapshot": {"reason": "owned_finalize_dispatch"},
+                }
+            },
+        }
+        status = {"tasks": [{"id": "FBP-008", "status": "review_approved", "owner": "Claude", "reviewer": "Codex"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "failed")
+        self.assertEqual(worker["last_error"], "Worker exited before the task reached a terminal status.")
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
 
     def test_dead_waiting_approval_worker_is_failed_and_approval_is_resolved(self) -> None:
         config = {
@@ -1580,6 +1927,78 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(state["workers"]["run-1"]["status"], "running")
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_recovered")
 
+    def test_manual_pending_file_inbox_worker_is_reaped_after_auth_recovers(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {
+                "review_statuses": ["review"],
+                "owned_statuses": ["in_progress", "todo"],
+                "done_statuses": ["done", "review_approved"],
+                "active_worker_statuses": ["running", "waiting_approval", "suspended_approval", "manual_pending", "retry_backoff", "stalled"],
+            },
+            "providers": {},
+            "agents": {
+                "codex": {"id": "codex", "display_name": "Codex"},
+                "copilot": {"id": "copilot", "display_name": "Copilot"},
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "manual_pending"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "FBP-010-SIDECAR-REVIEW",
+                    "provider": "copilot",
+                    "agent_id": "copilot",
+                    "mode": "file_inbox",
+                    "status": "manual_pending",
+                    "queue_event_id": "evt-1",
+                    "pid": None,
+                    "last_event_at": "2026-04-16T00:23:21Z",
+                }
+            },
+        }
+        status = {
+            "tasks": [
+                {
+                    "id": "FBP-010-SIDECAR-REVIEW",
+                    "status": "review",
+                    "owner": "Codex",
+                    "reviewer": "Copilot",
+                }
+            ]
+        }
+        provider_report = {
+            "providers": {
+                "copilot": {
+                    "auth_ready": True,
+                    "local_cli_worker_supported": True,
+                }
+            }
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value=provider_report),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        self.assertNotIn("run-1", state["workers"])
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_reaped")
+        self.assertIn("auth recovered", write_activity_log.call_args.args[1]["message"])
+
     def test_stalled_worker_is_terminated_after_extended_stall(self) -> None:
         config = {
             "schema": {
@@ -1698,7 +2117,7 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
         maybe_reassign.assert_called_once()
         self.assertIn("terminated for redispatch", maybe_reassign.call_args.args[2])
-        self.assertEqual(maybe_reassign.call_args.kwargs, {"terminal": True})
+        self.assertEqual(maybe_reassign.call_args.kwargs, {"terminal": True, "state": state})
         write_activity_log.assert_not_called()
 
     def test_alive_worker_is_superseded_after_reassignment(self) -> None:
@@ -1935,6 +2354,134 @@ class WorkerReassignmentTests(unittest.TestCase):
         self.assertEqual(kwargs["task_id"], "RUN-001")
         self.assertEqual(kwargs["new_owner"], "Qwen")
         self.assertEqual(kwargs["new_reviewer"], "Codex")
+
+    def test_reassign_skips_quota_paused_fallback_agent(self) -> None:
+        config = {
+            **self.config,
+            "worker_reassignment": {
+                **self.config["worker_reassignment"],
+                "owner_fallbacks": {
+                    **self.config["worker_reassignment"]["owner_fallbacks"],
+                    "Claude": ["Qwen", "Grok", "Gemini"],
+                },
+                "reviewer_fallbacks": {
+                    **self.config["worker_reassignment"]["reviewer_fallbacks"],
+                    "Claude": ["Qwen", "Grok", "Gemini"],
+                },
+            },
+            "agents": {
+                **self.config["agents"],
+                "qwen": {"display_name": "Qwen"},
+            },
+        }
+        worker = {
+            "task_id": "RUN-PAUSED",
+            "agent_id": "claude",
+            "retry_count": 5,
+            "run_id": "claude-run-paused",
+        }
+        status = {
+            "tasks": [
+                {
+                    "id": "RUN-PAUSED",
+                    "status": "review_approved",
+                    "owner": "Claude",
+                    "reviewer": "Codex",
+                }
+            ]
+        }
+        state = {
+            "quota_paused_agents": {
+                "qwen": {
+                    "reason": "provider quota exhausted",
+                    "paused_at": "2026-04-16T00:00:00Z",
+                    "resume_at": 9999999999,
+                }
+            }
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "persist_task_reassignment", return_value=True) as persist,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            reassigned_to = supervisor.maybe_reassign_task_after_worker_failure(
+                config,
+                worker,
+                "You've hit your limit · resets 1pm (Asia/Taipei)",
+                terminal=True,
+                state=state,
+            )
+
+        self.assertEqual(reassigned_to, "Grok")
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["task_id"], "RUN-PAUSED")
+        self.assertEqual(kwargs["new_owner"], "Grok")
+        self.assertEqual(kwargs["new_reviewer"], "Codex")
+
+    def test_retry_wrapper_passes_state_into_reassignment(self) -> None:
+        config = {
+            **self.config,
+            "worker_retry": {
+                "max_attempts": 0,
+                "fallback_mode": "none",
+            },
+        }
+        state = {"quota_paused_agents": {"qwen": {"resume_at": 9999999999}}}
+        worker = {
+            "run_id": "gemini-run-wrapper",
+            "task_id": "WRAP-001",
+            "provider": "gemini",
+            "agent_id": "gemini",
+            "retry_count": 0,
+            "queue_event_id": "evt-wrap-1",
+        }
+
+        with (
+            mock.patch.object(supervisor, "request_for_worker", return_value={"task_id": "WRAP-001"}),
+            mock.patch.object(supervisor, "maybe_reassign_task_after_worker_failure", return_value="Codex") as maybe_reassign,
+            mock.patch.object(supervisor, "finalize_queue_event_record"),
+        ):
+            handled, changed = supervisor.maybe_trigger_retry_or_fallback(
+                config,
+                state,
+                {},
+                worker,
+                "status: 429",
+            )
+
+        self.assertTrue(handled)
+        self.assertTrue(changed)
+        self.assertEqual(worker["status"], "reassigned")
+        self.assertEqual(worker["reassigned_to"], "Codex")
+        self.assertIs(maybe_reassign.call_args.kwargs["state"], state)
+
+    def test_finalize_terminal_wrapper_passes_state_into_reassignment(self) -> None:
+        config = dict(self.config)
+        state = {"quota_paused_agents": {"qwen": {"resume_at": 9999999999}}}
+        worker = {
+            "run_id": "claude-run-wrapper",
+            "task_id": "WRAP-002",
+            "provider": "claude",
+            "agent_id": "claude",
+            "queue_event_id": "evt-wrap-2",
+        }
+
+        with (
+            mock.patch.object(supervisor, "maybe_reassign_task_after_worker_failure", return_value="Grok") as maybe_reassign,
+            mock.patch.object(supervisor, "finalize_queue_event_record"),
+        ):
+            handled = supervisor.finalize_terminal_worker_outcome(
+                config,
+                state,
+                worker,
+                "You've hit your limit",
+            )
+
+        self.assertTrue(handled)
+        self.assertEqual(worker["status"], "reassigned")
+        self.assertEqual(worker["reassigned_to"], "Grok")
+        self.assertIs(maybe_reassign.call_args.kwargs["state"], state)
 
 
 if __name__ == "__main__":

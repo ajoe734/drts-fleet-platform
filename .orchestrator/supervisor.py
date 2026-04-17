@@ -44,7 +44,7 @@ from common import (
 )
 from github_bus import sync_github_bus
 from provider_permissions import provider_capabilities as build_provider_capabilities, write_provider_capabilities
-from runtime_state import load_approval_state, load_event_queue, load_runtime_state, prune_worker_records, queue_event_record, save_runtime_state
+from runtime_state import enqueue_event, load_approval_state, load_event_queue, load_runtime_state, prune_worker_records, queue_event_record, save_runtime_state
 from watch_events import queue_delivery_event, run_scan, trim_seen_events
 
 
@@ -66,13 +66,36 @@ WORKER_FAILURE_PATTERNS = (
         re.IGNORECASE,
     ),
     re.compile(r"^status:\s*(401|429)\b", re.IGNORECASE),
+    re.compile(r"\[API Error:\s*401\b", re.IGNORECASE),
+    re.compile(r"^402\b.*\byou have no quota\b", re.IGNORECASE),
+    re.compile(r"^(?:error:\s*)?\b(?:you have no quota|no quota remaining|payment required)\b", re.IGNORECASE),
     re.compile(r"^(?:you(?:'ve| have)\s+)?hit your limit\b", re.IGNORECASE),
     re.compile(r"^An unexpected critical error occurred", re.IGNORECASE),
     re.compile(r"^(?:Error|error|fatal):", re.IGNORECASE),
 )
+JSON_WORKER_FAILURE_PATTERN = re.compile(
+    r"quota_exhausted|oauth quota exceeded|free daily quota has been reached|"
+    r"you have no quota|no quota remaining|payment required|"
+    r"you have exhausted your capacity|exhausted your capacity|resource_exhausted|"
+    r"rate limit|rate limited|hit your limit|an unexpected critical error occurred|"
+    r"permission denied|invalid api key|auth failed|status:\s*401|"
+    r"\[api error:\s*401\b|invalid access token",
+    re.IGNORECASE,
+)
 
 LOCAL_TZ = ZoneInfo("Asia/Taipei")
 SUPERVISOR_LOG_QUIET = False
+ACTIVE_RUNTIME_STATUSES = {
+    "running",
+    "started",
+    "waiting_approval",
+    "suspended_approval",
+    "manual_pending",
+    "retry_backoff",
+    "stalled",
+    "fallback",
+}
+MODE_BUCKETS = ("planning", "execution", "coordination")
 
 
 def supervisor_pid_path(config: dict[str, Any]) -> Path:
@@ -246,9 +269,15 @@ def summarize_runtime(state: dict[str, Any], approval_state: dict[str, Any]) -> 
 
 def safe_load_approval_state(config: dict[str, Any]) -> dict[str, Any]:
     try:
-        return load_approval_state(config)
+        state = load_approval_state(config)
     except KeyError:
         return {"pending": [], "history": []}
+    pending = [item for item in (state.get("pending", []) or []) if item.get("status") == "pending"]
+    return {
+        **state,
+        "pending": pending,
+        "history": state.get("history", []) or [],
+    }
 
 
 def log_runtime_summary(
@@ -304,6 +333,228 @@ def log_runtime_summary(
         console_log(f"queue: {details}", quiet=quiet)
     else:
         console_log("queue: empty", quiet=quiet)
+
+
+def desired_focus_mode_from_status(status: dict[str, Any]) -> str:
+    execution_mode = str(status.get("execution_mode") or "").strip()
+    if execution_mode == "discussion_planning":
+        return "planning"
+    return "execution"
+
+
+def runtime_mode_for_snapshot(reason: str | None, metadata: dict[str, Any] | None) -> str:
+    metadata = metadata or {}
+    explicit = str(metadata.get("mode") or "").strip().lower()
+    if explicit in MODE_BUCKETS:
+        return explicit
+    normalized_reason = str(reason or "").strip().lower()
+    if normalized_reason.startswith("planning:"):
+        return "planning"
+    if normalized_reason.startswith("coordination:"):
+        return "coordination"
+    return "execution"
+
+
+def worker_runtime_mode(worker: dict[str, Any]) -> str:
+    snapshot = dict(worker.get("request_snapshot", {}) or {})
+    return runtime_mode_for_snapshot(snapshot.get("reason"), snapshot.get("metadata"))
+
+
+def update_supervisor_mode_metadata(
+    state: dict[str, Any],
+    *,
+    focus_mode: str,
+    heartbeat_at: str,
+) -> None:
+    supervisor_state = state.setdefault("supervisor", {})
+    previous_focus = str(supervisor_state.get("focus_mode") or "").strip()
+    supervisor_state["focus_mode"] = focus_mode
+    supervisor_state["mode_status"] = "active"
+    supervisor_state.setdefault("mode_switch_requested", None)
+    if previous_focus and previous_focus != focus_mode:
+        supervisor_state["last_mode_switch_at"] = heartbeat_at
+
+    occupancy = {
+        "planning": {"running": 0, "pending": 0, "queued": 0},
+        "execution": {"running": 0, "pending": 0, "queued": 0},
+        "coordination": {"running": 0, "pending": 0, "queued": 0},
+    }
+
+    for worker in state.get("workers", {}).values():
+        worker_status = str(worker.get("status") or "")
+        if worker_status not in ACTIVE_RUNTIME_STATUSES:
+            continue
+        snapshot = dict(worker.get("request_snapshot", {}) or {})
+        bucket = runtime_mode_for_snapshot(snapshot.get("reason"), snapshot.get("metadata"))
+        occupancy.setdefault(bucket, {"running": 0, "pending": 0, "queued": 0})
+        occupancy[bucket]["running"] += 1
+
+    for record in state.get("queue", {}).get("events", {}).values():
+        queue_status = str(record.get("status") or "").strip().lower()
+        if queue_status in {"completed", "failed", "done"}:
+            continue
+        bucket = str(record.get("mode") or "execution").strip().lower()
+        if bucket not in occupancy:
+            bucket = "execution"
+        if queue_status == "queued":
+            occupancy[bucket]["queued"] += 1
+        else:
+            occupancy[bucket]["pending"] += 1
+
+    supervisor_state["mode_occupancy"] = occupancy
+
+
+def planning_primary_file(workspace: Path, status: dict[str, Any], current_owner: str) -> str:
+    discussion_loop = status.get("discussion_loop", {}) if isinstance(status.get("discussion_loop"), dict) else {}
+    starter = str(discussion_loop.get("starter") or "").strip()
+    supervisor = str(discussion_loop.get("supervisor") or "").strip()
+
+    if current_owner == supervisor:
+        return "consensus-packet.md"
+    if current_owner == starter and not (workspace / "review-round-1.md").exists():
+        return "starter-draft.md"
+    for candidate in ("review-round-1.md", "review-round-2.md", "review-round-3.md", "review-round-4.md"):
+        if (workspace / candidate).exists():
+            return candidate
+    return "starter-draft.md"
+
+
+def planning_target_files(workspace: Path, primary_file: str) -> list[str]:
+    candidates = [
+        "README.md",
+        "starter-draft.md",
+        "scope-matrix.md",
+        "backlog-proposal.md",
+        "baton-log.md",
+        "supervisor-queue.md",
+        primary_file,
+        "consensus-packet.md",
+    ]
+    result: list[str] = []
+    for candidate in candidates:
+        path = workspace / candidate
+        if path.exists():
+            result.append(relpath(path))
+    return list(dict.fromkeys(result))
+
+
+def build_planning_baton_message(
+    config: dict[str, Any],
+    *,
+    workspace: str,
+    current_owner: str,
+    primary_file: str,
+    target_files: list[str],
+) -> str:
+    shared_files = [relpath(path) for path in selected_shared_files(config)]
+    shared_block = "\n".join(f"- {path}" for path in shared_files) if shared_files else "- (none)"
+    target_block = "\n".join(f"- {path}" for path in target_files) if target_files else "- (none)"
+    return (
+        f"You are the current planning baton owner for `{workspace}`.\n\n"
+        f"Primary file to advance: `{primary_file}`\n"
+        f"Current baton owner: `{current_owner}`\n\n"
+        "Planning goals:\n"
+        "- Read the shared canonical files first.\n"
+        "- Update the active planning artifact with cited feedback or synthesis.\n"
+        "- Do not start execution tasks or implementation commits from this planning dispatch.\n\n"
+        "Shared files:\n"
+        f"{shared_block}\n\n"
+        "Target files:\n"
+        f"{target_block}\n"
+    )
+
+
+def ensure_planning_baton_dispatch(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    status: dict[str, Any],
+) -> bool:
+    if desired_focus_mode_from_status(status) != "planning":
+        return False
+
+    workspace_value = str(status.get("discussion_workspace") or "").strip()
+    discussion_loop = status.get("discussion_loop", {}) if isinstance(status.get("discussion_loop"), dict) else {}
+    current_owner = str(discussion_loop.get("current_owner") or "").strip()
+    if not workspace_value or not current_owner:
+        return False
+
+    workspace = Path(workspace_value)
+    if not workspace.is_absolute():
+        workspace = (THIS_DIR.parent / workspace).resolve()
+    if not workspace.exists():
+        return False
+
+    primary_file = planning_primary_file(workspace, status, current_owner)
+    workspace_label = workspace.name
+    planning_key = f"planning:{workspace_label}:{current_owner}:{primary_file}"
+
+    for worker in state.get("workers", {}).values():
+        if str(worker.get("status") or "") not in ACTIVE_RUNTIME_STATUSES:
+            continue
+        snapshot = dict(worker.get("request_snapshot", {}) or {})
+        metadata = dict(snapshot.get("metadata", {}) or {})
+        if metadata.get("planning_event_key") == planning_key:
+            return False
+
+    queue_records = state.get("queue", {}).get("events", {})
+    for event in load_event_queue(config):
+        if str(event.get("event_key") or "") != planning_key:
+            continue
+        record = queue_records.get(str(event.get("event_id") or ""), {})
+        if str(record.get("status") or "").lower() not in {"completed", "failed", "done"}:
+            return False
+
+    target_files = planning_target_files(workspace, primary_file)
+    planning_task_id = f"PLANNING-{workspace_label}-{current_owner}".upper()
+    agent = agent_config_for(config, current_owner)
+    queue_payload = {
+        "event_id": new_runtime_id("evt"),
+        "created_at": utc_now(),
+        "event_key": planning_key,
+        "task_id": planning_task_id,
+        "target_agent": agent["id"],
+        "target_display_name": display_name_for(config, agent["id"]),
+        "provider": agent.get("provider", agent["id"]),
+        "reason": f"planning:{primary_file}",
+        "message": build_planning_baton_message(
+            config,
+            workspace=workspace_value,
+            current_owner=current_owner,
+            primary_file=primary_file,
+            target_files=target_files,
+        ),
+        "context_files": [relpath(path) for path in selected_shared_files(config)],
+        "target_files": target_files,
+        "metadata": {
+            "mode": "planning",
+            "planning_event_key": planning_key,
+            "workspace": workspace_value,
+            "current_owner": current_owner,
+            "primary_file": primary_file,
+            "task": {
+                "id": planning_task_id,
+                "task_class": "planning",
+                "artifacts": target_files,
+                "next": f"Advance {primary_file} for the active planning baton.",
+            },
+        },
+    }
+    enqueue_event(config, queue_payload)
+    queue_record = queue_event_record(state, queue_payload["event_id"])
+    queue_record["status"] = "queued"
+    queue_record["attempt_count"] = 0
+    queue_record["mode"] = "planning"
+    write_activity_log(
+        config,
+        {
+            "type": "planning_wake_queued",
+            "task_id": planning_task_id,
+            "target_agent": display_name_for(config, agent["id"]),
+            "message": f"Queued planning baton wake-up for {current_owner}: {primary_file}",
+            "queue_event_id": queue_payload["event_id"],
+        },
+    )
+    return True
 
 
 def load_provider_report(config: dict[str, Any]) -> dict[str, Any]:
@@ -641,6 +892,67 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
                 break
 
 
+def _iter_json_string_values(payload: Any) -> list[str]:
+    values: list[str] = []
+    if isinstance(payload, str):
+        values.append(payload)
+    elif isinstance(payload, dict):
+        for item in payload.values():
+            values.extend(_iter_json_string_values(item))
+    elif isinstance(payload, list):
+        for item in payload:
+            values.extend(_iter_json_string_values(item))
+    return values
+
+
+def _ignore_embedded_failure_line(stripped: str) -> bool:
+    if re.match(r"^\d+\t", stripped):
+        return True
+    if re.match(r"^[-*]\s+`[^`]+`:", stripped):
+        return True
+    if stripped.startswith(("Reviewer note:", "Review Outcome:", "Impact On Consensus:", "Remaining Question:")):
+        return True
+    return False
+
+
+def _extract_failure_candidate(text: str) -> str | None:
+    lines = text.splitlines() or [text]
+    for line in reversed(lines):
+        stripped = line.strip()
+        if not stripped or _ignore_embedded_failure_line(stripped):
+            continue
+        if any(pattern.search(stripped) for pattern in WORKER_FAILURE_PATTERNS):
+            return stripped
+        if JSON_WORKER_FAILURE_PATTERN.search(stripped) and re.match(
+            r"^(reason:|status:|error:|fatal:|402\b|quota_exhausted\b|resource_exhausted\b|"
+            r"qwen oauth quota exceeded\b|you(?:'ve| have)\s+hit your limit\b|"
+            r"an unexpected critical error occurred\b)",
+            stripped,
+            re.IGNORECASE,
+        ):
+            return stripped
+    return None
+
+
+def _detect_json_worker_failure(line: str) -> str | None:
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("ts"):
+        return None
+    for candidate in _iter_json_string_values(payload):
+        stripped = candidate.strip()
+        if not stripped:
+            continue
+        detected = _extract_failure_candidate(stripped)
+        if detected:
+            return detected
+    return None
+
+
 def detect_worker_failure(worker: dict[str, Any]) -> str | None:
     log_path_value = worker.get("log_path")
     if not log_path_value:
@@ -657,10 +969,15 @@ def detect_worker_failure(worker: dict[str, Any]) -> str | None:
         stripped = line.strip()
         if not stripped:
             continue
+        if stripped.startswith("{"):
+            detected = _detect_json_worker_failure(stripped)
+            if detected:
+                return detected
         if '"ts":' in stripped and '"type":' in stripped:
             continue
-        if any(pattern.search(stripped) for pattern in WORKER_FAILURE_PATTERNS):
-            return stripped
+        detected = _extract_failure_candidate(stripped)
+        if detected:
+            return detected
     return None
 
 
@@ -1289,7 +1606,7 @@ def maybe_trigger_retry_or_fallback(
     request = request_for_worker(config, worker)
     if request is None:
         return False, False
-    reassigned_to = maybe_reassign_task_after_worker_failure(config, worker, reason)
+    reassigned_to = maybe_reassign_task_after_worker_failure(config, worker, reason, state=state)
     if reassigned_to:
         worker["status"] = "reassigned"
         worker["reassigned_to"] = reassigned_to
@@ -1360,6 +1677,7 @@ def finalize_terminal_worker_outcome(
         worker,
         reason,
         terminal=True,
+        state=state,
     )
     if reassigned_to:
         worker["status"] = "reassigned"
@@ -1386,6 +1704,44 @@ def finalize_terminal_worker_outcome(
     )
     finalize_queue_event_record(config, state, worker, "failed", reason)
     return False
+
+
+def worker_expected_completion_statuses(
+    config: dict[str, Any],
+    worker: dict[str, Any],
+    task: dict[str, Any] | None,
+) -> set[str]:
+    settings = ready_dispatch_settings(config)
+    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
+    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
+    done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
+    statuses = set(done_statuses)
+
+    reason = str(((worker.get("request_snapshot") or {}).get("reason")) or "").strip().lower()
+    if reason in {"owned_ready_dispatch", "owned_in_progress_dispatch"}:
+        statuses.update(review_statuses)
+        statuses.update(finalize_statuses)
+        return statuses
+    if reason == "review_ready_dispatch":
+        statuses.update(finalize_statuses)
+        return statuses
+    if reason == "owned_finalize_dispatch":
+        return statuses
+
+    if not task:
+        return statuses
+
+    schema = config.get("schema", {})
+    owner_field = schema.get("assignee_field", "owner")
+    reviewer_field = schema.get("reviewer_field", "reviewer")
+    agent_id = normalize_agent_id(str(worker.get("agent_id") or worker.get("provider") or ""))
+    owner_id = normalize_agent_id(str(task.get(owner_field) or ""))
+    reviewer_id = normalize_agent_id(str(task.get(reviewer_field) or ""))
+    if agent_id and agent_id == reviewer_id:
+        statuses.update(finalize_statuses)
+    elif agent_id and agent_id == owner_id:
+        statuses.update(review_statuses)
+    return statuses
 
 
 def retry_due_workers(
@@ -1573,6 +1929,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
     workers = state.setdefault("workers", {})
     for run_id, worker in list(workers.items()):
         previous_last_event_at = worker.get("last_event_at")
+        task = task_map.get(worker.get("task_id"), {})
         if worker.get("queue_event_id") and worker.get("queue_event_id") not in valid_queue_event_ids:
             if worker.get("status") in {"running", "waiting_approval", "retry_backoff", "manual_pending", "stalled"} and not pid_is_alive(worker.get("pid")):
                 task_status = str(task_map.get(worker.get("task_id"), {}).get("status") or "").lower()
@@ -1600,42 +1957,50 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             and worker.get("last_event_at")
             and worker.get("last_event_at") > previous_last_event_at
         )
+        current_mode = worker_runtime_mode(worker)
+        task_status = str(task.get("status") or "").lower()
+        expected_completion_statuses = worker_expected_completion_statuses(config, worker, task)
         if (
             worker.get("queue_event_id")
+            and current_mode == "execution"
             and not worker_matches_current_assignment(config, worker, task_map)
         ):
-            if worker.get("status") == "superseded":
+            if not alive and task_status in expected_completion_statuses:
+                pass
+            else:
+                if worker.get("status") == "superseded":
+                    continue
+                if alive:
+                    terminate_worker_pid(worker.get("pid"))
+                worker["status"] = "superseded"
+                worker["last_event_at"] = utc_now()
+                worker["last_error"] = "Worker superseded after task responsibility moved to another agent."
+                finalize_queue_event_record(
+                    config,
+                    state,
+                    worker,
+                    "completed",
+                    worker["last_error"],
+                )
+                write_activity_log(
+                    config,
+                    {
+                        "type": "worker_superseded",
+                        "provider": worker.get("provider"),
+                        "task_id": worker.get("task_id"),
+                        "message": worker["last_error"],
+                        "worker_run_id": worker.get("run_id"),
+                    },
+                )
+                console_log(
+                    f"worker superseded: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
+                    quiet=SUPERVISOR_LOG_QUIET,
+                )
+                changed = True
                 continue
-            if alive:
-                terminate_worker_pid(worker.get("pid"))
-            worker["status"] = "superseded"
-            worker["last_event_at"] = utc_now()
-            worker["last_error"] = "Worker superseded after task responsibility moved to another agent."
-            finalize_queue_event_record(
-                config,
-                state,
-                worker,
-                "completed",
-                worker["last_error"],
-            )
-            write_activity_log(
-                config,
-                {
-                    "type": "worker_superseded",
-                    "provider": worker.get("provider"),
-                    "task_id": worker.get("task_id"),
-                    "message": worker["last_error"],
-                    "worker_run_id": worker.get("run_id"),
-                },
-            )
-            console_log(
-                f"worker superseded: task={worker.get('task_id')} provider={worker.get('provider')} run={worker.get('run_id')}",
-                quiet=SUPERVISOR_LOG_QUIET,
-            )
-            changed = True
-            continue
         if (
             worker.get("queue_event_id")
+            and current_mode == "execution"
             and worker.get("status") in active_worker_statuses
             and higher_priority_ready_task_exists(config, worker, task_map)
         ):
@@ -1688,6 +2053,37 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                     "provider": worker.get("provider"),
                     "task_id": worker.get("task_id"),
                     "message": "Dropped stale worker after task responsibility moved to another agent.",
+                    "worker_run_id": worker.get("run_id"),
+                },
+            )
+            changed = True
+            continue
+        provider_info = (provider_report or {}).get("providers", {}).get(str(worker.get("provider") or ""), {})
+        if (
+            not alive
+            and worker.get("queue_event_id")
+            and worker.get("status") == "manual_pending"
+            and worker.get("mode") == "file_inbox"
+            and worker_matches_current_assignment(config, worker, task_map)
+            and task_status in redispatch_statuses
+            and provider_info.get("auth_ready")
+            and provider_info.get("local_cli_worker_supported")
+        ):
+            workers.pop(run_id, None)
+            finalize_queue_event_record(
+                config,
+                state,
+                worker,
+                "completed",
+                "Dropped inbox fallback after provider auth recovered; task will be redispatched automatically.",
+            )
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_reaped",
+                    "provider": worker.get("provider"),
+                    "task_id": worker.get("task_id"),
+                    "message": "Dropped inbox fallback after provider auth recovered; task will be redispatched automatically.",
                     "worker_run_id": worker.get("run_id"),
                 },
             )
@@ -1912,19 +2308,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             continue
 
         if worker.get("status") not in {"completed", "failed", "manual_pending"}:
-            task_status = str(task_map.get(worker.get("task_id"), {}).get("status") or "").lower()
-            terminal_statuses = {
-                str(value).lower()
-                for value in ready_dispatch_settings(config).get("worker_terminal_statuses", ["done", "review_approved"])
-            }
-            if task_status in redispatch_statuses:
-                finalize_terminal_worker_outcome(
-                    config,
-                    state,
-                    worker,
-                    "Worker exited before the task reached a terminal status.",
-                )
-            elif task_status in terminal_statuses:
+            if task_status in expected_completion_statuses:
                 worker["status"] = "completed"
                 worker["last_event_at"] = utc_now()
                 write_activity_log(
@@ -1933,13 +2317,20 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                         "type": "worker_completed",
                         "provider": worker.get("provider"),
                         "task_id": worker.get("task_id"),
-                        "message": "Background worker process exited.",
+                        "message": f"Background worker process exited after advancing the task to `{task_status}`.",
                         "worker_run_id": worker["run_id"],
                         "pr_url": worker.get("pr_url"),
                         "session_url": worker.get("session_url"),
                     },
                 )
                 finalize_queue_event_record(config, state, worker, "completed")
+            elif task_status in redispatch_statuses:
+                finalize_terminal_worker_outcome(
+                    config,
+                    state,
+                    worker,
+                    "Worker exited before the task reached a terminal status.",
+                )
             else:
                 finalize_terminal_worker_outcome(
                     config,
@@ -3388,9 +3779,14 @@ def run_once(
     quiet: bool = False,
     verbose: bool = False,
     once: bool = False,
+    manage_pid_file: bool = True,
 ) -> bool:
-    write_supervisor_pid(config)
+    if manage_pid_file:
+        write_supervisor_pid(config)
     heartbeat_at = utc_now()
+    status = load_status(config)
+    desired_focus_mode = desired_focus_mode_from_status(status)
+
     def stamp_supervisor_state(state: dict[str, Any]) -> None:
         supervisor_state = state.setdefault("supervisor", {})
         previous_pid = supervisor_state.get("pid")
@@ -3399,6 +3795,11 @@ def run_once(
         supervisor_state["last_heartbeat_at"] = heartbeat_at
         if not supervisor_state.get("started_at") or previous_pid != current_pid:
             supervisor_state["started_at"] = heartbeat_at
+        update_supervisor_mode_metadata(
+            state,
+            focus_mode=desired_focus_mode,
+            heartbeat_at=heartbeat_at,
+        )
 
     state = load_runtime_state(config)
     previous_heartbeat = state.get("supervisor", {}).get("last_heartbeat_at")
@@ -3408,7 +3809,7 @@ def run_once(
     if pruned:
         changed = True
     provider_report = load_provider_report(config)
-    if watch:
+    if watch and desired_focus_mode != "planning":
         changed = run_scan(config, state, replay=replay, provider_capabilities=provider_report) or changed
         state = load_runtime_state(config)
         stamp_supervisor_state(state)
@@ -3416,9 +3817,12 @@ def run_once(
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
     expire_quota_pauses(state)
-    changed = dispatch_ready_tasks(config, state) or changed
-    changed = dispatch_underutilization_sidecars(config, state) or changed
-    changed = dispatch_underutilization_main_tasks(config, state) or changed
+    if desired_focus_mode == "planning":
+        changed = ensure_planning_baton_dispatch(config, state, status) or changed
+    else:
+        changed = dispatch_ready_tasks(config, state) or changed
+        changed = dispatch_underutilization_sidecars(config, state) or changed
+        changed = dispatch_underutilization_main_tasks(config, state) or changed
     changed = process_queue(config, state, provider_report) or changed
     changed = poll_workers(config, state) or changed
     changed = reconcile_queue_records(config, state) or changed
@@ -3446,9 +3850,11 @@ def main() -> int:
     args = parse_args()
     SUPERVISOR_LOG_QUIET = args.quiet
     config = load_config(args.config)
-    terminate_older_supervisors(config)
-    atexit.register(clear_supervisor_pid, config)
-    write_supervisor_pid(config)
+    manage_pid_file = not args.once
+    if manage_pid_file:
+        terminate_older_supervisors(config)
+        atexit.register(clear_supervisor_pid, config)
+        write_supervisor_pid(config)
     poll_interval = args.poll_interval or float(config.get("supervisor", {}).get("poll_interval_seconds", 2.0))
     console_log(
         f"starting supervisor pid={os.getpid()} poll_interval={poll_interval:.1f}s config={args.config}",
@@ -3461,6 +3867,7 @@ def main() -> int:
         quiet=args.quiet,
         verbose=args.verbose,
         once=args.once,
+        manage_pid_file=manage_pid_file,
     )
     if args.once:
         return 0
@@ -3473,6 +3880,7 @@ def main() -> int:
             quiet=args.quiet,
             verbose=args.verbose,
             once=False,
+            manage_pid_file=True,
         )
 
 

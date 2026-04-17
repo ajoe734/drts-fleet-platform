@@ -29,11 +29,49 @@ class NoCacheRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/__refresh":
             self.handle_refresh()
             return
-        # Serve consensus discussion artifacts from docs/02-architecture/consensus/phase1/
+        if parsed.path == "/approval-queue.json":
+            live_path = self.live_file_map.get(parsed.path)
+            if live_path is None or not live_path.exists():
+                self.send_error(404, "Approval queue not found")
+                return
+            try:
+                payload = json.loads(live_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                self.send_error(500, "Approval queue unreadable")
+                return
+            body = json.dumps(
+                {
+                    "version": payload.get("version", 1),
+                    "updated_at": payload.get("updated_at"),
+                    "pending": [item for item in payload.get("pending", []) if item.get("status") == "pending"],
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        # Serve consensus discussion artifacts from the active planning workspace.
+        # Resolve active workspace from ai-status.json discussion_workspace field,
+        # falling back to phase1 for backwards compat.
         if parsed.path.startswith(self.CONSENSUS_DIR_PREFIX) and self.repo_root is not None:
             filename = parsed.path[len(self.CONSENSUS_DIR_PREFIX):]
             if filename and "/" not in filename and filename.endswith(".md"):
-                live_path = self.repo_root / "docs" / "02-architecture" / "consensus" / "phase1" / filename
+                # Resolve active workspace from ai-status.json
+                active_workspace = "docs/02-architecture/consensus/phase1"
+                try:
+                    status_path = self.repo_root / "ai-status.json"
+                    if status_path.exists():
+                        import json as _json
+                        status = _json.loads(status_path.read_text())
+                        ws = status.get("discussion_workspace", "")
+                        if ws:
+                            active_workspace = ws
+                except Exception:
+                    pass
+                live_path = self.repo_root / active_workspace / filename
                 if live_path.exists():
                     self.send_response(200)
                     self.send_header("Content-type", "text/markdown; charset=utf-8")

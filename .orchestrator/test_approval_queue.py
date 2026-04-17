@@ -147,6 +147,35 @@ class ApprovalQueuePruneTests(unittest.TestCase):
         self.assertEqual(len(saved["pending"]), 1)
         self.assertEqual(saved["pending"][0]["approval_id"], "apr-claude-resume")
 
+    def test_list_pending_filters_out_non_pending_entries(self) -> None:
+        self._write_json(
+            self.root / "approval-queue.json",
+            {
+                "pending": [
+                    {
+                        "approval_id": "apr-real-pending",
+                        "status": "pending",
+                        "created_at": "2026-04-06T10:00:00Z",
+                        "provider": "claude",
+                        "tool_name": "Bash",
+                    },
+                    {
+                        "approval_id": "apr-stale-denied",
+                        "status": "denied",
+                        "created_at": "2026-04-06T10:01:00Z",
+                        "provider": "claude",
+                        "tool_name": "Bash",
+                    },
+                ],
+                "history": [],
+            },
+        )
+
+        payload = approval_queue.list_pending(self.config)
+
+        self.assertEqual(len(payload["pending"]), 1)
+        self.assertEqual(payload["pending"][0]["approval_id"], "apr-real-pending")
+
 
 if __name__ == "__main__":
     unittest.main()

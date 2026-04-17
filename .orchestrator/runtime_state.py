@@ -28,6 +28,7 @@ def default_state() -> dict[str, Any]:
             "last_sidecar_wave_reason": None,
             "last_ratio": None,
         },
+        "quota_paused_agents": {},
         "supervisor": {
             "pid": None,
             "started_at": None,
@@ -40,7 +41,13 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state = deepcopy(default_state())
     if not raw:
         return state
-    state.update({k: v for k, v in raw.items() if k in state or k in {"queue", "workers", "approvals", "supervisor"}})
+    state.update(
+        {
+            k: v
+            for k, v in raw.items()
+            if k in state or k in {"queue", "workers", "approvals", "supervisor", "quota_paused_agents"}
+        }
+    )
     state.setdefault("tasks", {})
     state.setdefault("pending_handoff_keys", [])
     state.setdefault("seen_event_keys", {})
@@ -54,6 +61,7 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["underutilization"].setdefault("last_sidecar_wave_at", None)
     state["underutilization"].setdefault("last_sidecar_wave_reason", None)
     state["underutilization"].setdefault("last_ratio", None)
+    state.setdefault("quota_paused_agents", {})
     state.setdefault("supervisor", {})
     state["supervisor"].setdefault("pid", None)
     state["supervisor"].setdefault("started_at", None)

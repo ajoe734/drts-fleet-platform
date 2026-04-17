@@ -33,12 +33,13 @@ def _copilot_plaintext_token() -> str | None:
         payload = json.loads(config_path.read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
-    tokens = payload.get("copilot_tokens")
-    if not isinstance(tokens, dict):
-        return None
-    for value in tokens.values():
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+    for key in ("copilot_tokens", "copilotTokens"):
+        tokens = payload.get(key)
+        if not isinstance(tokens, dict):
+            continue
+        for value in tokens.values():
+            if isinstance(value, str) and value.strip():
+                return value.strip()
     return None
 
 

@@ -37,7 +37,7 @@ def approval_lock(config: dict[str, Any]):
 
 def list_pending(config: dict[str, Any], include_history: bool = False) -> dict[str, Any]:
     state = load_approval_state(config)
-    payload = {"pending": state.get("pending", [])}
+    payload = {"pending": [item for item in state.get("pending", []) if item.get("status") == "pending"]}
     if include_history:
         payload["history"] = state.get("history", [])
     return payload

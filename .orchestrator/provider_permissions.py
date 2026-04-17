@@ -170,12 +170,13 @@ def _copilot_plaintext_token() -> str | None:
         payload = json.loads(config_path.read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
-    tokens = payload.get("copilot_tokens")
-    if not isinstance(tokens, dict):
-        return None
-    for value in tokens.values():
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+    for key in ("copilot_tokens", "copilotTokens"):
+        tokens = payload.get(key)
+        if not isinstance(tokens, dict):
+            continue
+        for value in tokens.values():
+            if isinstance(value, str) and value.strip():
+                return value.strip()
     return None
 
 
@@ -254,6 +255,7 @@ def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
         "Bash(sed *)",
         "Bash(head *)",
         "Bash(tail *)",
+        "Bash(lsof *)",
         "Bash(git status*)",
         "Bash(git diff*)",
         "Bash(git show*)",
@@ -314,6 +316,15 @@ def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
         "Bash(cd * && python3 -m py_compile *)",
         "Bash(python3 */smoke_test.py*)",
         "Bash(cd * && python3 smoke_test.py*)",
+        "Bash(curl http://127.0.0.1:*)",
+        "Bash(curl -s http://127.0.0.1:*)",
+        "Bash(curl -I http://127.0.0.1:*)",
+        "Bash(curl http://localhost:*)",
+        "Bash(curl -s http://localhost:*)",
+        "Bash(curl -I http://localhost:*)",
+        "Bash(python3 */scripts/dashboard_server.py *)",
+        "Bash(nohup python3 */scripts/dashboard_server.py *)",
+        "Bash(pkill -f *dashboard_server.py*)",
         "Bash(AI_NAME=* python3 scripts/ai_status.py *)",
         "Bash(AI_NAME=* python3 */scripts/ai_status.py *)",
         "Bash(AI_NAME=* cd * && python3 scripts/ai_status.py *)",

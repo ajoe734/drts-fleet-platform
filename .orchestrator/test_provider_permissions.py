@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import permission_broker
-from provider_permissions import ROOT, _verified_claude_hooks, _verified_claude_policy
+from provider_permissions import ROOT, _copilot_auth_ready, _copilot_plaintext_token, _verified_claude_hooks, _verified_claude_policy
 
 
 class ProviderPermissionsTest(unittest.TestCase):
@@ -155,6 +159,34 @@ class ProviderPermissionsTest(unittest.TestCase):
 
         self.assertEqual(permission_broker.classify_command(command), "allow")
 
+    def test_local_lsof_port_probe_is_auto_allowed(self) -> None:
+        command = "lsof -i :8765 2>/dev/null | head -5"
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_commented_read_only_inventory_script_is_auto_allowed(self) -> None:
+        command = (
+            "# Check tenant portal API routes actually exist (not just empty pages)\n"
+            "ls apps/api/src/modules/platform-admin/ 2>/dev/null\n"
+            "echo \"---\"\n"
+            "ls apps/api/src/modules/tenant-partner/ 2>/dev/null\n"
+            "echo \"---\"\n"
+            "wc -l apps/tenant-portal-web/app/bookings/page.tsx 2>/dev/null"
+        )
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
+    def test_local_dashboard_restart_sequence_is_auto_allowed(self) -> None:
+        command = (
+            f'pkill -f "dashboard_server.py" 2>/dev/null; sleep 1\n'
+            f'nohup python3 {ROOT / "scripts" / "dashboard_server.py"} '
+            f'--host 127.0.0.1 --port 4174 --directory {ROOT / "docs-site"} '
+            '>> /tmp/dashboard.log 2>&1 &\n'
+            'sleep 1 && curl -s http://127.0.0.1:4174/consensus/baton-log.md | head -10'
+        )
+
+        self.assertEqual(permission_broker.classify_command(command), "allow")
+
     def test_verified_claude_policy_includes_pnpm_test_allow_rules(self) -> None:
         policy = _verified_claude_policy({})
 
@@ -167,6 +199,48 @@ class ProviderPermissionsTest(unittest.TestCase):
         self.assertIn("Bash(python3 *)", policy["allow"])
         self.assertIn("Bash(cd * && python3 *)", policy["allow"])
         self.assertIn("Bash(AI_NAME=* python3 *)", policy["allow"])
+
+    def test_verified_claude_policy_includes_local_service_rules(self) -> None:
+        policy = _verified_claude_policy({})
+
+        self.assertIn("Bash(lsof *)", policy["allow"])
+        self.assertIn("Bash(curl -I http://127.0.0.1:*)", policy["allow"])
+        self.assertIn("Bash(nohup python3 */scripts/dashboard_server.py *)", policy["allow"])
+        self.assertIn("Bash(pkill -f *dashboard_server.py*)", policy["allow"])
+
+    def test_copilot_plaintext_token_reads_camel_case_token_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "storeTokenPlaintext": True,
+                        "copilotTokens": {
+                            "https://github.com:demo": "gho_demo_token"
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"COPILOT_CONFIG_DIR": tmp}, clear=False):
+                self.assertEqual(_copilot_plaintext_token(), "gho_demo_token")
+
+    def test_copilot_auth_ready_accepts_camel_case_plaintext_token(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "storeTokenPlaintext": True,
+                        "copilotTokens": {
+                            "https://github.com:demo": "gho_demo_token"
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"COPILOT_CONFIG_DIR": tmp}, clear=False):
+                self.assertTrue(_copilot_auth_ready(None))
 
 
 if __name__ == "__main__":

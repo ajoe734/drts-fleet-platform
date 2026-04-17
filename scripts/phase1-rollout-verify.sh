@@ -215,8 +215,8 @@ run_production_gate() {
 }
 
 print_manual_flag_warning() {
-  printf '\n[note] OpenAPI includes /api/admin/flags, but the current API runtime does not yet expose that controller.\n'
-  printf '[note] Treat tenant/city/module rollout switches as manual coordination until the client rollout slice lands.\n'
+  printf '\n[note] /api/admin/flags is implemented in the API runtime and exposed via FeatureFlagsController.\n'
+  printf '[note] Tenant/city/module rollout switches are still manual coordination until the client-side runtime flag-evaluation slice lands.\n'
 }
 
 run_backfill_stage() {
