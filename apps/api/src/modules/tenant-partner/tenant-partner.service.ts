@@ -215,34 +215,20 @@ const API_KEY_SEED: StoredTenantApiKeyRecord[] = [
 
 @Injectable()
 export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
-  private notificationPreferences: TenantNotificationPreferences = {
-    tenantId: DEMO_TENANT_ID,
-    subscriptions: [
-      {
-        eventType: "reservation.failed",
-        channel: "ops_console",
-        enabled: true,
-      },
-      {
-        eventType: "tenant.sla.threshold_breached",
-        channel: "webhook",
-        enabled: true,
-      },
-    ],
-    updatedAt: "2026-04-10T00:00:00.000Z",
-  };
+  private notificationPreferences = new Map<
+    string,
+    TenantNotificationPreferences
+  >([
+    [DEMO_TENANT_ID, this.createDefaultNotificationPreferences(DEMO_TENANT_ID)],
+  ]);
 
   private webhookEndpoints: StoredWebhookEndpoint[] = [];
 
   private webhookDeliveries: StoredWebhookDelivery[] = [];
 
-  private slaProfile: TenantSlaProfile = {
-    tenantId: DEMO_TENANT_ID,
-    waitThresholdMin: 10,
-    arrivalThresholdMin: 15,
-    completionThresholdMin: 90,
-    updatedAt: "2026-04-10T00:00:00.000Z",
-  };
+  private slaProfiles = new Map<string, TenantSlaProfile>([
+    [DEMO_TENANT_ID, this.createDefaultSlaProfile(DEMO_TENANT_ID)],
+  ]);
 
   private passengers = PASSENGER_SEED.map((passenger) =>
     this.clonePassenger(passenger),
@@ -279,8 +265,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     try {
       const persistedState = await this.tenantPartnerRepository.loadState();
       const hasPersistedState =
-        persistedState.notificationPreferences !== null ||
-        persistedState.slaProfile !== null ||
+        persistedState.notificationPreferences.length > 0 ||
+        persistedState.slaProfiles.length > 0 ||
         persistedState.webhookEndpoints.length > 0 ||
         persistedState.webhookDeliveries.length > 0 ||
         persistedState.passengers.length > 0 ||
@@ -291,10 +277,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       if (!hasPersistedState) {
         this.persistChanges(
           {
-            notificationPreferences: this.cloneNotificationPreferences(
-              this.notificationPreferences,
+            notificationPreferences: Array.from(
+              this.notificationPreferences.values(),
+              (preferences) => this.cloneNotificationPreferences(preferences),
             ),
-            slaProfile: this.cloneSlaProfile(this.slaProfile),
+            slaProfiles: Array.from(this.slaProfiles.values(), (profile) =>
+              this.cloneSlaProfile(profile),
+            ),
             passengers: this.passengers.map((passenger) =>
               this.clonePassenger(passenger),
             ),
@@ -313,14 +302,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      if (persistedState.notificationPreferences) {
-        this.notificationPreferences = this.cloneNotificationPreferences(
-          persistedState.notificationPreferences,
-        );
-      }
-      if (persistedState.slaProfile) {
-        this.slaProfile = this.cloneSlaProfile(persistedState.slaProfile);
-      }
+      this.notificationPreferences = new Map(
+        persistedState.notificationPreferences.map((preferences) => [
+          preferences.tenantId,
+          this.cloneNotificationPreferences(preferences),
+        ]),
+      );
+      this.slaProfiles = new Map(
+        persistedState.slaProfiles.map((profile) => [
+          profile.tenantId,
+          this.cloneSlaProfile(profile),
+        ]),
+      );
       this.webhookEndpoints = persistedState.webhookEndpoints.map((endpoint) =>
         this.cloneStoredWebhookEndpoint(endpoint),
       );
@@ -355,26 +348,33 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.retryTimers.clear();
   }
 
-  getNotificationPreferences() {
-    return this.cloneNotificationPreferences(this.notificationPreferences);
+  getNotificationPreferences(tenantId: string) {
+    return this.cloneNotificationPreferences(
+      this.getOrCreateNotificationPreferences(tenantId),
+    );
   }
 
   updateNotificationPreferences(
+    tenantId: string,
     command: UpdateTenantNotificationsCommand,
     requestId?: string,
   ) {
-    this.notificationPreferences = {
-      tenantId: DEMO_TENANT_ID,
+    const notificationPreferences: TenantNotificationPreferences = {
+      tenantId,
       subscriptions: command.subscriptions.map((subscription) => ({
         ...subscription,
       })),
       updatedAt: new Date().toISOString(),
     };
+    this.notificationPreferences.set(
+      tenantId,
+      this.cloneNotificationPreferences(notificationPreferences),
+    );
     this.persistChanges(
       {
-        notificationPreferences: this.cloneNotificationPreferences(
-          this.notificationPreferences,
-        ),
+        notificationPreferences: [
+          this.cloneNotificationPreferences(notificationPreferences),
+        ],
       },
       "update_notification_preferences",
     );
@@ -383,13 +383,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "update_notification_subscription",
         resourceType: "tenant_notifications",
-        resourceId: DEMO_TENANT_ID,
+        resourceId: tenantId,
         newValuesSummary: {
-          subscriptions: this.notificationPreferences.subscriptions,
+          subscriptions: notificationPreferences.subscriptions,
         },
       },
       requestId,
@@ -400,23 +400,50 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  listTenantNotifications() {
+  listTenantNotifications(tenantId: string) {
     return this.auditNotificationService
       .listNotifications()
-      .filter((notification) => notification.tenantId === DEMO_TENANT_ID);
+      .filter((notification) => notification.tenantId === tenantId);
   }
 
-  listPassengers() {
-    return this.passengers.map((passenger) => this.clonePassenger(passenger));
+  listPassengers(tenantId: string) {
+    return this.passengers
+      .filter((passenger) => passenger.tenantId === tenantId)
+      .map((passenger) => this.clonePassenger(passenger));
   }
 
-  upsertPassenger(command: UpsertTenantPassengerCommand, requestId?: string) {
+  upsertPassenger(
+    tenantId: string,
+    command: UpsertTenantPassengerCommand,
+    requestId?: string,
+  ) {
     this.assertNonBlank(command.fullName, "fullName");
 
+    const passengerId = command.passengerId?.trim() || null;
+    if (passengerId) {
+      const passengerOwnedByOtherTenant = this.passengers.some(
+        (passenger) =>
+          passenger.passengerId === passengerId &&
+          passenger.tenantId !== tenantId,
+      );
+      if (passengerOwnedByOtherTenant) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "PASSENGER_NOT_FOUND",
+          "The tenant passenger could not be found.",
+          {
+            passengerId,
+          },
+        );
+      }
+    }
+
     const now = new Date().toISOString();
-    const existing = command.passengerId
+    const existing = passengerId
       ? (this.passengers.find(
-          (passenger) => passenger.passengerId === command.passengerId,
+          (passenger) =>
+            passenger.tenantId === tenantId &&
+            passenger.passengerId === passengerId,
         ) ?? null)
       : null;
 
@@ -440,9 +467,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           updatedAt: now,
         }
       : {
-          passengerId:
-            command.passengerId?.trim() || `passenger_${randomUUID()}`,
-          tenantId: DEMO_TENANT_ID,
+          passengerId: passengerId || `passenger_${randomUUID()}`,
+          tenantId,
           fullName: command.fullName.trim(),
           employeeNo: this.normalizeNullableText(command.employeeNo),
           departmentName: this.normalizeNullableText(command.departmentName),
@@ -472,7 +498,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "upsert_passenger",
         resourceType: "tenant_passenger",
@@ -487,19 +513,45 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePassenger(passenger);
   }
 
-  listAddresses() {
-    return this.addresses.map((address) => this.cloneAddress(address));
+  listAddresses(tenantId: string) {
+    return this.addresses
+      .filter((address) => address.tenantId === tenantId)
+      .map((address) => this.cloneAddress(address));
   }
 
-  upsertAddress(command: UpsertTenantAddressCommand, requestId?: string) {
+  upsertAddress(
+    tenantId: string,
+    command: UpsertTenantAddressCommand,
+    requestId?: string,
+  ) {
     this.assertNonBlank(command.addressName, "addressName");
     this.assertNonBlank(command.addressText, "addressText");
+
+    const addressId = command.addressId?.trim() || null;
+    if (addressId) {
+      const addressOwnedByOtherTenant = this.addresses.some(
+        (address) =>
+          address.addressId === addressId && address.tenantId !== tenantId,
+      );
+      if (addressOwnedByOtherTenant) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "ADDRESS_NOT_FOUND",
+          "The tenant address could not be found.",
+          {
+            addressId,
+          },
+        );
+      }
+    }
 
     const ownerPassengerId = command.ownerPassengerId ?? null;
     if (
       ownerPassengerId !== null &&
       !this.passengers.some(
-        (passenger) => passenger.passengerId === ownerPassengerId,
+        (passenger) =>
+          passenger.tenantId === tenantId &&
+          passenger.passengerId === ownerPassengerId,
       )
     ) {
       throw new ApiRequestError(
@@ -513,9 +565,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const now = new Date().toISOString();
-    const existing = command.addressId
+    const existing = addressId
       ? (this.addresses.find(
-          (address) => address.addressId === command.addressId,
+          (address) =>
+            address.tenantId === tenantId && address.addressId === addressId,
         ) ?? null)
       : null;
 
@@ -532,8 +585,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           updatedAt: now,
         }
       : {
-          addressId: command.addressId?.trim() || `address_${randomUUID()}`,
-          tenantId: DEMO_TENANT_ID,
+          addressId: addressId || `address_${randomUUID()}`,
+          tenantId,
           ownerPassengerId,
           addressName: command.addressName.trim(),
           addressText: command.addressText.trim(),
@@ -561,7 +614,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "upsert_address",
         resourceType: "tenant_address",
@@ -576,22 +629,33 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.cloneAddress(address);
   }
 
-  listTenantUsers() {
-    return this.userRoles.map((userRole) => this.cloneUserRole(userRole));
+  listTenantUsers(tenantId: string) {
+    return this.userRoles
+      .filter((userRole) => userRole.tenantId === tenantId)
+      .map((userRole) => this.cloneUserRole(userRole));
   }
 
   listTenantRoles() {
     return TENANT_ROLE_CATALOG.map((role) => ({ ...role }));
   }
 
-  createTenantUser(command: CreateTenantUserCommand, requestId?: string) {
+  createTenantUser(
+    tenantId: string,
+    command: CreateTenantUserCommand,
+    requestId?: string,
+  ) {
     this.assertNonBlank(command.email, "email");
     this.assertNonBlank(command.displayName, "displayName");
     this.assertNonBlank(command.roleCode, "roleCode");
     this.assertSupportedTenantRoleCode(command.roleCode);
 
     const normalizedEmail = command.email.trim().toLowerCase();
-    if (this.userRoles.some((userRole) => userRole.email === normalizedEmail)) {
+    if (
+      this.userRoles.some(
+        (userRole) =>
+          userRole.tenantId === tenantId && userRole.email === normalizedEmail,
+      )
+    ) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "TENANT_USER_EXISTS",
@@ -605,7 +669,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const now = new Date().toISOString();
     const userRole: TenantUserRoleRecord = {
       userId: `tenant_user_${randomUUID()}`,
-      tenantId: DEMO_TENANT_ID,
+      tenantId,
       email: normalizedEmail,
       displayName: command.displayName.trim(),
       roleCode: command.roleCode.trim(),
@@ -625,7 +689,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "create_tenant_user",
         resourceType: "tenant_user_role",
@@ -641,6 +705,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   updateTenantUserRole(
+    tenantId: string,
     userId: string,
     command: UpdateTenantRoleCommand,
     requestId?: string,
@@ -648,7 +713,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.assertNonBlank(command.roleCode, "roleCode");
     this.assertSupportedTenantRoleCode(command.roleCode);
 
-    const userRole = this.requireTenantUser(userId);
+    const userRole = this.requireTenantUser(tenantId, userId);
     userRole.roleCode = command.roleCode.trim();
     userRole.status = command.status ?? userRole.status;
     userRole.updatedAt = new Date().toISOString();
@@ -663,7 +728,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "update_tenant_role",
         resourceType: "tenant_user_role",
@@ -678,17 +743,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.cloneUserRole(userRole);
   }
 
-  listApiKeys() {
-    return this.apiKeys.map((apiKey) => this.toApiKeyResponse(apiKey));
+  listApiKeys(tenantId: string) {
+    return this.apiKeys
+      .filter((apiKey) => apiKey.tenantId === tenantId)
+      .map((apiKey) => this.toApiKeyResponse(apiKey));
   }
 
   issueApiKey(
+    tenantId: string,
     command: IssueTenantApiKeyCommand,
     requestId?: string,
   ): TenantApiKeyIssued {
     this.assertNonBlank(command.keyName, "keyName");
 
     const issued = this.buildIssuedApiKey(
+      tenantId,
       {
         keyName: command.keyName,
         scopes: command.scopes,
@@ -710,7 +779,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "issue_api_key",
         resourceType: "tenant_api_key",
@@ -728,15 +797,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   rotateApiKey(
+    tenantId: string,
     apiKeyId: string,
     command: RotateTenantApiKeyCommand,
     requestId?: string,
   ): TenantApiKeyIssued {
-    const currentApiKey = this.requireApiKey(apiKeyId);
+    const currentApiKey = this.requireApiKey(tenantId, apiKeyId);
     const rotatedAt = new Date().toISOString();
     currentApiKey.revokedAt = rotatedAt;
 
     const issued = this.buildIssuedApiKey(
+      tenantId,
       {
         keyName: command.keyName ?? currentApiKey.keyName,
         scopes:
@@ -771,7 +842,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "rotate_api_key",
         resourceType: "tenant_api_key",
@@ -789,32 +860,40 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  listWebhookEndpoints() {
-    return this.webhookEndpoints.map((endpoint) =>
-      this.toWebhookResponse(endpoint),
-    );
+  listWebhookEndpoints(tenantId: string) {
+    return this.webhookEndpoints
+      .filter((endpoint) => endpoint.tenantId === tenantId)
+      .map((endpoint) => this.toWebhookResponse(endpoint));
   }
 
-  deleteWebhookEndpoint(webhookId: string, requestId?: string) {
+  deleteWebhookEndpoint(
+    tenantId: string,
+    webhookId: string,
+    requestId?: string,
+  ) {
+    const removed = this.webhookEndpoints.find(
+      (endpoint) =>
+        endpoint.tenantId === tenantId && endpoint.webhookId === webhookId,
+    );
+    if (!removed) {
+      return null;
+    }
+
     for (const delivery of this.webhookDeliveries) {
-      if (delivery.webhookId === webhookId) {
+      if (
+        delivery.tenantId === tenantId &&
+        delivery.webhookId === removed.webhookId
+      ) {
         this.clearWebhookRetry(delivery.deliveryId);
       }
     }
 
-    const index = this.webhookEndpoints.findIndex(
-      (w) => w.webhookId === webhookId,
+    this.webhookEndpoints = this.webhookEndpoints.filter(
+      (endpoint) => endpoint.webhookId !== removed.webhookId,
     );
-    if (index === -1) {
-      return null;
-    }
-    const removed = this.webhookEndpoints[index]!;
-    this.webhookEndpoints.splice(index, 1);
     this.persistChanges(
       {
-        webhookEndpoints: this.webhookEndpoints.map((w) =>
-          this.cloneStoredWebhookEndpoint(w),
-        ),
+        webhookEndpoints: [this.cloneStoredWebhookEndpoint(removed)],
       },
       "delete_webhook_endpoint",
     );
@@ -822,7 +901,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "delete_webhook_endpoint",
         resourceType: "webhook_endpoint",
@@ -836,6 +915,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   createWebhookEndpoint(
+    tenantId: string,
     command: CreateTenantWebhookEndpointCommand,
     requestId?: string,
   ) {
@@ -848,7 +928,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const secretPreview = this.secretPreview(command.secret);
     const webhookEndpoint: StoredWebhookEndpoint = {
       webhookId: `wh_${randomUUID()}`,
-      tenantId: DEMO_TENANT_ID,
+      tenantId,
       url: normalizedUrl,
       events: normalizedEvents,
       status: "active",
@@ -904,7 +984,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "create_webhook_endpoint",
         resourceType: "webhook_endpoint",
@@ -926,11 +1006,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   updateWebhookEndpoint(
+    tenantId: string,
     webhookId: string,
     command: UpdateTenantWebhookEndpointCommand,
     requestId?: string,
   ) {
-    const endpoint = this.requireWebhookEndpoint(webhookId);
+    const endpoint = this.requireWebhookEndpoint(tenantId, webhookId);
     const oldValues = this.toWebhookResponse(endpoint);
 
     let changed = false;
@@ -974,7 +1055,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "update_webhook_endpoint",
         resourceType: "webhook_endpoint",
@@ -988,9 +1069,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.toWebhookResponse(endpoint);
   }
 
-  async sendTestWebhook(command: SendTestWebhookCommand, requestId?: string) {
+  async sendTestWebhook(
+    tenantId: string,
+    command: SendTestWebhookCommand,
+    requestId?: string,
+  ) {
     const endpoint = this.webhookEndpoints.find(
-      (webhook) => webhook.webhookId === command.webhookId,
+      (webhook) =>
+        webhook.tenantId === tenantId &&
+        webhook.webhookId === command.webhookId,
     );
     if (!endpoint) {
       return null;
@@ -1055,7 +1142,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "send_test_webhook",
         resourceType: "webhook_delivery",
@@ -1237,23 +1324,32 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     await this.dispatchWebhookAttempt(endpoint, delivery, delivery.rawBody);
   }
 
-  listWebhookDeliveries() {
-    return this.webhookDeliveries.map((delivery) =>
-      this.toDeliveryResponse(delivery),
-    );
-  }
-
-  listWebhookDeliveriesByWebhook(webhookId: string) {
+  listWebhookDeliveries(tenantId: string) {
     return this.webhookDeliveries
-      .filter((delivery) => delivery.webhookId === webhookId)
+      .filter((delivery) => delivery.tenantId === tenantId)
       .map((delivery) => this.toDeliveryResponse(delivery));
   }
 
-  rotateWebhookSecret(command: RotateWebhookSecretCommand, requestId?: string) {
+  listWebhookDeliveriesByWebhook(tenantId: string, webhookId: string) {
+    return this.webhookDeliveries
+      .filter(
+        (delivery) =>
+          delivery.tenantId === tenantId && delivery.webhookId === webhookId,
+      )
+      .map((delivery) => this.toDeliveryResponse(delivery));
+  }
+
+  rotateWebhookSecret(
+    tenantId: string,
+    command: RotateWebhookSecretCommand,
+    requestId?: string,
+  ) {
     this.assertNonBlank(command.secret, "secret");
 
     const endpoint = this.webhookEndpoints.find(
-      (webhook) => webhook.webhookId === command.webhookId,
+      (webhook) =>
+        webhook.tenantId === tenantId &&
+        webhook.webhookId === command.webhookId,
     );
     if (!endpoint) {
       return null;
@@ -1294,7 +1390,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "rotate_webhook_secret",
         resourceType: "webhook_endpoint",
@@ -1318,25 +1414,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  getSlaProfile() {
-    return { ...this.slaProfile };
+  getSlaProfile(tenantId: string) {
+    return { ...this.getOrCreateSlaProfile(tenantId) };
   }
 
-  updateSlaProfile(command: UpdateTenantSlaProfileCommand, requestId?: string) {
-    this.slaProfile = {
-      tenantId: DEMO_TENANT_ID,
+  updateSlaProfile(
+    tenantId: string,
+    command: UpdateTenantSlaProfileCommand,
+    requestId?: string,
+  ) {
+    const currentProfile = this.getOrCreateSlaProfile(tenantId);
+    const slaProfile: TenantSlaProfile = {
+      tenantId,
       waitThresholdMin:
-        command.waitThresholdMin ?? this.slaProfile.waitThresholdMin,
+        command.waitThresholdMin ?? currentProfile.waitThresholdMin,
       arrivalThresholdMin:
-        command.arrivalThresholdMin ?? this.slaProfile.arrivalThresholdMin,
+        command.arrivalThresholdMin ?? currentProfile.arrivalThresholdMin,
       completionThresholdMin:
-        command.completionThresholdMin ??
-        this.slaProfile.completionThresholdMin,
+        command.completionThresholdMin ?? currentProfile.completionThresholdMin,
       updatedAt: new Date().toISOString(),
     };
+    this.slaProfiles.set(tenantId, this.cloneSlaProfile(slaProfile));
     this.persistChanges(
       {
-        slaProfile: this.cloneSlaProfile(this.slaProfile),
+        slaProfiles: [this.cloneSlaProfile(slaProfile)],
       },
       "update_sla_profile",
     );
@@ -1345,15 +1446,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "tenant-partner",
         actionName: "update_sla_profile",
         resourceType: "tenant_sla",
-        resourceId: DEMO_TENANT_ID,
+        resourceId: tenantId,
         newValuesSummary: {
-          waitThresholdMin: this.slaProfile.waitThresholdMin,
-          arrivalThresholdMin: this.slaProfile.arrivalThresholdMin,
-          completionThresholdMin: this.slaProfile.completionThresholdMin,
+          waitThresholdMin: slaProfile.waitThresholdMin,
+          arrivalThresholdMin: slaProfile.arrivalThresholdMin,
+          completionThresholdMin: slaProfile.completionThresholdMin,
         },
       },
       requestId,
@@ -1364,8 +1465,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  revokeApiKey(apiKeyId: string, requestId?: string) {
-    const apiKey = this.requireApiKey(apiKeyId);
+  revokeApiKey(tenantId: string, apiKeyId: string, requestId?: string) {
+    const apiKey = this.requireApiKey(tenantId, apiKeyId);
     if (!apiKey.revokedAt) {
       apiKey.revokedAt = new Date().toISOString();
       this.persistChanges(
@@ -1376,7 +1477,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         {
           actorId: null,
           actorType: "tenant_admin",
-          tenantId: DEMO_TENANT_ID,
+          tenantId,
           moduleName: "tenant-partner",
           actionName: "revoke_api_key",
           resourceType: "tenant_api_key",
@@ -1389,13 +1490,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return { status: "revoked", apiKeyId };
   }
 
-  listTenantAudit() {
+  listTenantAudit(tenantId: string) {
     return this.auditNotificationService
       .listAuditLogs()
-      .filter((auditLog) => auditLog.tenantId === DEMO_TENANT_ID);
+      .filter((auditLog) => auditLog.tenantId === tenantId);
   }
 
   private buildIssuedApiKey(
+    tenantId: string,
     input: {
       keyName: string;
       scopes: string[];
@@ -1407,7 +1509,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const plaintextKey = `tk_${randomBytes(18).toString("hex")}`;
     const storedApiKey: StoredTenantApiKeyRecord = {
       apiKeyId: `api_key_${randomUUID()}`,
-      tenantId: DEMO_TENANT_ID,
+      tenantId,
       keyName: input.keyName.trim(),
       keyPrefix: plaintextKey.slice(0, 12),
       maskedSuffix: this.maskedSuffix(plaintextKey),
@@ -1560,9 +1662,66 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private requireTenantUser(userId: string) {
+  private getOrCreateNotificationPreferences(tenantId: string) {
+    const existing = this.notificationPreferences.get(tenantId);
+    if (existing) {
+      return existing;
+    }
+
+    const created = this.createDefaultNotificationPreferences(tenantId);
+    this.notificationPreferences.set(
+      tenantId,
+      this.cloneNotificationPreferences(created),
+    );
+    return created;
+  }
+
+  private getOrCreateSlaProfile(tenantId: string) {
+    const existing = this.slaProfiles.get(tenantId);
+    if (existing) {
+      return existing;
+    }
+
+    const created = this.createDefaultSlaProfile(tenantId);
+    this.slaProfiles.set(tenantId, this.cloneSlaProfile(created));
+    return created;
+  }
+
+  private createDefaultNotificationPreferences(
+    tenantId: string,
+  ): TenantNotificationPreferences {
+    return {
+      tenantId,
+      subscriptions: [
+        {
+          eventType: "reservation.failed",
+          channel: "ops_console",
+          enabled: true,
+        },
+        {
+          eventType: "tenant.sla.threshold_breached",
+          channel: "webhook",
+          enabled: true,
+        },
+      ],
+      updatedAt: "2026-04-10T00:00:00.000Z",
+    };
+  }
+
+  private createDefaultSlaProfile(tenantId: string): TenantSlaProfile {
+    return {
+      tenantId,
+      waitThresholdMin: 10,
+      arrivalThresholdMin: 15,
+      completionThresholdMin: 90,
+      updatedAt: "2026-04-10T00:00:00.000Z",
+    };
+  }
+
+  private requireTenantUser(tenantId: string, userId: string) {
     const userRole = this.userRoles.find(
-      (candidate) => candidate.userId === userId,
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.userId === userId,
     );
     if (!userRole) {
       throw new ApiRequestError(
@@ -1577,9 +1736,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return userRole;
   }
 
-  private requireApiKey(apiKeyId: string) {
+  private requireApiKey(tenantId: string, apiKeyId: string) {
     const apiKey = this.apiKeys.find(
-      (candidate) => candidate.apiKeyId === apiKeyId,
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.apiKeyId === apiKeyId,
     );
     if (!apiKey) {
       throw new ApiRequestError(
@@ -1594,9 +1754,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return apiKey;
   }
 
-  private requireWebhookEndpoint(webhookId: string) {
+  private requireWebhookEndpoint(tenantId: string, webhookId: string) {
     const endpoint = this.webhookEndpoints.find(
-      (candidate) => candidate.webhookId === webhookId,
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.webhookId === webhookId,
     );
     if (!endpoint) {
       throw new ApiRequestError(

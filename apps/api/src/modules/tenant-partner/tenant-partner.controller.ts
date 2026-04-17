@@ -23,12 +23,29 @@ import type {
   UpsertTenantPassengerCommand,
 } from "@drts/contracts";
 
-import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiListData,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
 import { TenantPartnerService } from "./tenant-partner.service";
 
 @Controller()
 export class TenantPartnerController {
   constructor(private readonly tenantPartnerService: TenantPartnerService) {}
+
+  private requireTenantId(tenantId?: string) {
+    const normalizedTenantId = tenantId?.trim();
+    if (!normalizedTenantId) {
+      throw new ApiRequestError(
+        400,
+        "TENANT_ID_REQUIRED",
+        "x-tenant-id header is required for tenant-partner endpoints.",
+      );
+    }
+
+    return normalizedTenantId;
+  }
 
   @Get("tenant-partner/summary")
   getSummary(@Headers("x-request-id") requestId?: string) {
@@ -45,47 +62,76 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/passengers")
-  listPassengers(@Headers("x-request-id") requestId?: string) {
-    const items = this.tenantPartnerService.listPassengers();
+  listPassengers(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.tenantPartnerService.listPassengers(
+      this.requireTenantId(tenantId),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/passengers")
   upsertPassenger(
     @Body() command: UpsertTenantPassengerCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertPassenger(command, requestId),
+      this.tenantPartnerService.upsertPassenger(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Get("tenant/addresses")
-  listAddresses(@Headers("x-request-id") requestId?: string) {
-    const items = this.tenantPartnerService.listAddresses();
+  listAddresses(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.tenantPartnerService.listAddresses(
+      this.requireTenantId(tenantId),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/addresses")
   upsertAddress(
     @Body() command: UpsertTenantAddressCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertAddress(command, requestId),
+      this.tenantPartnerService.upsertAddress(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Get("tenant/users")
-  listTenantUsers(@Headers("x-request-id") requestId?: string) {
-    const items = this.tenantPartnerService.listTenantUsers();
+  listTenantUsers(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.tenantPartnerService.listTenantUsers(
+      this.requireTenantId(tenantId),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/roles")
-  listTenantRoles(@Headers("x-request-id") requestId?: string) {
+  listTenantRoles(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    this.requireTenantId(tenantId);
     const items = this.tenantPartnerService.listTenantRoles();
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
@@ -93,10 +139,15 @@ export class TenantPartnerController {
   @Post("tenant/users")
   createTenantUser(
     @Body() command: CreateTenantUserCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.createTenantUser(command, requestId),
+      this.tenantPartnerService.createTenantUser(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -105,10 +156,12 @@ export class TenantPartnerController {
   updateTenantRole(
     @Param("userId") userId: string,
     @Body() command: UpdateTenantRoleCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.updateTenantUserRole(
+        this.requireTenantId(tenantId),
         userId,
         command,
         requestId,
@@ -118,18 +171,28 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/api-keys")
-  listApiKeys(@Headers("x-request-id") requestId?: string) {
-    const items = this.tenantPartnerService.listApiKeys();
+  listApiKeys(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.tenantPartnerService.listApiKeys(
+      this.requireTenantId(tenantId),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/api-keys")
   issueApiKey(
     @Body() command: IssueTenantApiKeyCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.issueApiKey(command, requestId),
+      this.tenantPartnerService.issueApiKey(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -137,10 +200,15 @@ export class TenantPartnerController {
   @Post("tenant/api-keys/:apiKeyId/revoke")
   revokeApiKey(
     @Param("apiKeyId") apiKeyId: string,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.revokeApiKey(apiKeyId, requestId),
+      this.tenantPartnerService.revokeApiKey(
+        this.requireTenantId(tenantId),
+        apiKeyId,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -149,35 +217,53 @@ export class TenantPartnerController {
   rotateApiKey(
     @Param("apiKeyId") apiKeyId: string,
     @Body() command: RotateTenantApiKeyCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.rotateApiKey(apiKeyId, command, requestId),
+      this.tenantPartnerService.rotateApiKey(
+        this.requireTenantId(tenantId),
+        apiKeyId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Get("tenant/notifications")
-  getTenantNotifications(@Headers("x-request-id") requestId?: string) {
+  getTenantNotifications(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.getNotificationPreferences(),
+      this.tenantPartnerService.getNotificationPreferences(
+        this.requireTenantId(tenantId),
+      ),
       requestId,
     );
   }
 
   @Get("tenant/notifications/feed")
-  listTenantNotificationFeed(@Headers("x-request-id") requestId?: string) {
-    const items = this.tenantPartnerService.listTenantNotifications();
+  listTenantNotificationFeed(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.tenantPartnerService.listTenantNotifications(
+      this.requireTenantId(tenantId),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/notifications")
   updateTenantNotifications(
     @Body() command: UpdateTenantNotificationsCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.updateNotificationPreferences(
+        this.requireTenantId(tenantId),
         command,
         requestId,
       ),
@@ -186,18 +272,28 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/webhooks")
-  listWebhookEndpoints(@Headers("x-request-id") requestId?: string) {
-    const items = this.tenantPartnerService.listWebhookEndpoints();
+  listWebhookEndpoints(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.tenantPartnerService.listWebhookEndpoints(
+      this.requireTenantId(tenantId),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/webhooks")
   createWebhookEndpoint(
     @Body() command: CreateTenantWebhookEndpointCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.createWebhookEndpoint(command, requestId),
+      this.tenantPartnerService.createWebhookEndpoint(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -206,10 +302,12 @@ export class TenantPartnerController {
   updateWebhookEndpoint(
     @Param("webhookId") webhookId: string,
     @Body() command: UpdateTenantWebhookEndpointCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.updateWebhookEndpoint(
+        this.requireTenantId(tenantId),
         webhookId,
         command,
         requestId,
@@ -221,10 +319,15 @@ export class TenantPartnerController {
   @Delete("tenant/webhooks/:webhookId")
   deleteWebhookEndpoint(
     @Param("webhookId") webhookId: string,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.deleteWebhookEndpoint(webhookId, requestId) ?? {
+      this.tenantPartnerService.deleteWebhookEndpoint(
+        this.requireTenantId(tenantId),
+        webhookId,
+        requestId,
+      ) ?? {
         status: "not_found",
       },
       requestId,
@@ -234,9 +337,11 @@ export class TenantPartnerController {
   @Post("tenant/webhooks/test")
   async sendTestWebhook(
     @Body() command: SendTestWebhookCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const result = await this.tenantPartnerService.sendTestWebhook(
+      this.requireTenantId(tenantId),
       command,
       requestId,
     );
@@ -257,9 +362,11 @@ export class TenantPartnerController {
       secret: string;
       rotationReason?: string;
     },
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const result = this.tenantPartnerService.rotateWebhookSecret(
+      this.requireTenantId(tenantId),
       {
         webhookId,
         secret: command.secret,
@@ -281,25 +388,36 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/webhooks/deliveries")
-  listWebhookDeliveries(@Headers("x-request-id") requestId?: string) {
-    const items = this.tenantPartnerService.listWebhookDeliveries();
+  listWebhookDeliveries(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.tenantPartnerService.listWebhookDeliveries(
+      this.requireTenantId(tenantId),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/webhooks/:webhookId/deliveries")
   listWebhookDeliveriesByEndpoint(
     @Param("webhookId") webhookId: string,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items =
-      this.tenantPartnerService.listWebhookDeliveriesByWebhook(webhookId);
+    const items = this.tenantPartnerService.listWebhookDeliveriesByWebhook(
+      this.requireTenantId(tenantId),
+      webhookId,
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/sla")
-  getSlaProfile(@Headers("x-request-id") requestId?: string) {
+  getSlaProfile(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.getSlaProfile(),
+      this.tenantPartnerService.getSlaProfile(this.requireTenantId(tenantId)),
       requestId,
     );
   }
@@ -307,17 +425,27 @@ export class TenantPartnerController {
   @Post("tenant/sla")
   updateSlaProfile(
     @Body() command: UpdateTenantSlaProfileCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.updateSlaProfile(command, requestId),
+      this.tenantPartnerService.updateSlaProfile(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Get("tenant/audit")
-  listTenantAudit(@Headers("x-request-id") requestId?: string) {
-    const items = this.tenantPartnerService.listTenantAudit();
+  listTenantAudit(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.tenantPartnerService.listTenantAudit(
+      this.requireTenantId(tenantId),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 }

@@ -70,10 +70,10 @@ export type StoredTenantApiKeyRecord = TenantApiKeyRecord & {
 };
 
 export type TenantPartnerState = {
-  notificationPreferences: TenantNotificationPreferences | null;
+  notificationPreferences: TenantNotificationPreferences[];
   webhookEndpoints: StoredWebhookEndpointRecord[];
   webhookDeliveries: StoredWebhookDeliveryRecord[];
-  slaProfile: TenantSlaProfile | null;
+  slaProfiles: TenantSlaProfile[];
   passengers: TenantPassengerRecord[];
   addresses: TenantAddressRecord[];
   userRoles: TenantUserRoleRecord[];
@@ -81,10 +81,10 @@ export type TenantPartnerState = {
 };
 
 export type PersistTenantPartnerChanges = {
-  notificationPreferences?: TenantNotificationPreferences;
+  notificationPreferences?: readonly TenantNotificationPreferences[];
   webhookEndpoints?: readonly StoredWebhookEndpointRecord[];
   webhookDeliveries?: readonly StoredWebhookDeliveryRecord[];
-  slaProfile?: TenantSlaProfile;
+  slaProfiles?: readonly TenantSlaProfile[];
   passengers?: readonly TenantPassengerRecord[];
   addresses?: readonly TenantAddressRecord[];
   userRoles?: readonly TenantUserRoleRecord[];
@@ -104,10 +104,10 @@ export class TenantPartnerRepository {
   async loadState(): Promise<TenantPartnerState> {
     if (!this.isEnabled()) {
       return {
-        notificationPreferences: null,
+        notificationPreferences: [],
         webhookEndpoints: [],
         webhookDeliveries: [],
-        slaProfile: null,
+        slaProfiles: [],
         passengers: [],
         addresses: [],
         userRoles: [],
@@ -130,7 +130,6 @@ export class TenantPartnerRepository {
           SELECT record
           FROM admin.phase1_tenant_notification_preferences
           ORDER BY updated_at DESC
-          LIMIT 1
         `,
       ),
       this.databaseService!.query<JsonRecordRow>(
@@ -152,7 +151,6 @@ export class TenantPartnerRepository {
           SELECT record
           FROM admin.phase1_tenant_sla_profiles
           ORDER BY updated_at DESC
-          LIMIT 1
         `,
       ),
       this.databaseService!.query<JsonRecordRow>(
@@ -186,12 +184,12 @@ export class TenantPartnerRepository {
     ]);
 
     return {
-      notificationPreferences: notificationResult.rows[0]
-        ? this.parseRecord<TenantNotificationPreferences>(
-            notificationResult.rows[0].record,
-            "admin.phase1_tenant_notification_preferences",
-          )
-        : null,
+      notificationPreferences: notificationResult.rows.map((row) =>
+        this.parseRecord<TenantNotificationPreferences>(
+          row.record,
+          "admin.phase1_tenant_notification_preferences",
+        ),
+      ),
       webhookEndpoints: webhookEndpointsResult.rows.map((row) =>
         this.parseRecord<StoredWebhookEndpointRecord>(
           row.record,
@@ -204,12 +202,12 @@ export class TenantPartnerRepository {
           "admin.phase1_tenant_webhook_deliveries",
         ),
       ),
-      slaProfile: slaProfileResult.rows[0]
-        ? this.parseRecord<TenantSlaProfile>(
-            slaProfileResult.rows[0].record,
-            "admin.phase1_tenant_sla_profiles",
-          )
-        : null,
+      slaProfiles: slaProfileResult.rows.map((row) =>
+        this.parseRecord<TenantSlaProfile>(
+          row.record,
+          "admin.phase1_tenant_sla_profiles",
+        ),
+      ),
       passengers: passengersResult.rows.map((row) =>
         this.parseRecord<TenantPassengerRecord>(
           row.record,
@@ -244,7 +242,7 @@ export class TenantPartnerRepository {
 
     const writes: Promise<unknown>[] = [];
 
-    if (changes.notificationPreferences) {
+    for (const preferences of changes.notificationPreferences ?? []) {
       writes.push(
         this.databaseService!.query(
           `
@@ -260,15 +258,15 @@ export class TenantPartnerRepository {
               record = EXCLUDED.record
           `,
           [
-            changes.notificationPreferences.tenantId,
-            changes.notificationPreferences.updatedAt,
-            JSON.stringify(changes.notificationPreferences),
+            preferences.tenantId,
+            preferences.updatedAt,
+            JSON.stringify(preferences),
           ],
         ),
       );
     }
 
-    if (changes.slaProfile) {
+    for (const slaProfile of changes.slaProfiles ?? []) {
       writes.push(
         this.databaseService!.query(
           `
@@ -284,9 +282,9 @@ export class TenantPartnerRepository {
               record = EXCLUDED.record
           `,
           [
-            changes.slaProfile.tenantId,
-            changes.slaProfile.updatedAt,
-            JSON.stringify(changes.slaProfile),
+            slaProfile.tenantId,
+            slaProfile.updatedAt,
+            JSON.stringify(slaProfile),
           ],
         ),
       );

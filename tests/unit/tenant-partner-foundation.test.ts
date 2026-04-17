@@ -9,12 +9,16 @@ import {
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 
+const TENANT_ID = "tenant-demo-001";
+const OTHER_TENANT_ID = "tenant-other-001";
+
 describe("tenant partner foundation service", () => {
   it("updates tenant notification preferences and writes tenant audit", () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
     const result = tenantPartnerService.updateNotificationPreferences(
+      TENANT_ID,
       {
         subscriptions: [
           {
@@ -29,9 +33,9 @@ describe("tenant partner foundation service", () => {
 
     expect(result.status).toBe("updated");
     expect(
-      tenantPartnerService.getNotificationPreferences().subscriptions,
+      tenantPartnerService.getNotificationPreferences(TENANT_ID).subscriptions,
     ).toHaveLength(1);
-    expect(tenantPartnerService.listTenantAudit()[0]?.actionName).toBe(
+    expect(tenantPartnerService.listTenantAudit(TENANT_ID)[0]?.actionName).toBe(
       "update_notification_subscription",
     );
   });
@@ -49,6 +53,7 @@ describe("tenant partner foundation service", () => {
     );
 
     const webhook = tenantPartnerService.createWebhookEndpoint(
+      TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
         secret: "local-test-secret",
@@ -58,26 +63,30 @@ describe("tenant partner foundation service", () => {
     );
 
     const delivery = await tenantPartnerService.sendTestWebhook(
+      TENANT_ID,
       {
         webhookId: webhook.webhookId,
       },
       "webhook-test-request",
     );
-    const dispatchedDelivery = tenantPartnerService.listWebhookDeliveries()[0];
+    const dispatchedDelivery =
+      tenantPartnerService.listWebhookDeliveries(TENANT_ID)[0];
     const firstRequestInit = fetchMock.mock.calls[0]?.[1];
 
     expect(webhook.status).toBe("active");
     expect(delivery?.httpStatus).toBe(204);
     expect(delivery?.nextAttemptAt).toBeNull();
-    expect(tenantPartnerService.listWebhookDeliveries()).toHaveLength(1);
+    expect(tenantPartnerService.listWebhookDeliveries(TENANT_ID)).toHaveLength(
+      1,
+    );
     expect(dispatchedDelivery?.status).toBe("delivered");
     expect(dispatchedDelivery?.attempt).toBe(1);
     expect(
-      tenantPartnerService.listWebhookEndpoints()[0]?.runtimeMetadata
+      tenantPartnerService.listWebhookEndpoints(TENANT_ID)[0]?.runtimeMetadata
         .retryPolicy.maxAttempts,
     ).toBe(5);
     expect(
-      tenantPartnerService.listWebhookEndpoints()[0]?.runtimeMetadata
+      tenantPartnerService.listWebhookEndpoints(TENANT_ID)[0]?.runtimeMetadata
         .secretRotation.currentVersion,
     ).toBe(1);
     expect(
@@ -86,7 +95,7 @@ describe("tenant partner foundation service", () => {
     ).toBe(true);
     expect(firstRequestInit?.body).toContain('"delivery_id"');
     expect(firstRequestInit?.body).not.toContain('"deliveryId"');
-    expect(tenantPartnerService.listTenantAudit()[0]?.actionName).toBe(
+    expect(tenantPartnerService.listTenantAudit(TENANT_ID)[0]?.actionName).toBe(
       "send_test_webhook",
     );
   });
@@ -114,6 +123,7 @@ describe("tenant partner foundation service", () => {
       );
 
       const webhook = tenantPartnerService.createWebhookEndpoint(
+        TENANT_ID,
         {
           url: "https://tenant.example.com/webhooks/retry",
           secret: "retry-secret",
@@ -123,6 +133,7 @@ describe("tenant partner foundation service", () => {
       );
 
       const firstAttempt = await tenantPartnerService.sendTestWebhook(
+        TENANT_ID,
         {
           webhookId: webhook.webhookId,
         },
@@ -136,13 +147,13 @@ describe("tenant partner foundation service", () => {
           nextAttemptAt: "2026-04-17T12:00:30.000Z",
         }),
       );
-      expect(tenantPartnerService.listWebhookDeliveries()[0]?.status).toBe(
-        "queued",
-      );
+      expect(
+        tenantPartnerService.listWebhookDeliveries(TENANT_ID)[0]?.status,
+      ).toBe("queued");
 
       await vi.advanceTimersByTimeAsync(30_000);
 
-      const delivery = tenantPartnerService.listWebhookDeliveries()[0];
+      const delivery = tenantPartnerService.listWebhookDeliveries(TENANT_ID)[0];
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(delivery?.status).toBe("delivered");
       expect(delivery?.attempt).toBe(2);
@@ -158,6 +169,7 @@ describe("tenant partner foundation service", () => {
     const tenantPartnerService = new TenantPartnerService(auditService);
 
     const webhook = tenantPartnerService.createWebhookEndpoint(
+      TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
         secret: "local-test-secret",
@@ -167,6 +179,7 @@ describe("tenant partner foundation service", () => {
     );
 
     const rotated = tenantPartnerService.rotateWebhookSecret(
+      TENANT_ID,
       {
         webhookId: webhook.webhookId,
         secret: "rotated-test-secret",
@@ -175,7 +188,7 @@ describe("tenant partner foundation service", () => {
       "webhook-rotate-request",
     );
 
-    const endpoint = tenantPartnerService.listWebhookEndpoints()[0];
+    const endpoint = tenantPartnerService.listWebhookEndpoints(TENANT_ID)[0];
 
     expect(rotated?.secretVersion).toBe(2);
     expect(rotated?.rotationCount).toBe(2);
@@ -194,6 +207,7 @@ describe("tenant partner foundation service", () => {
     const tenantPartnerService = new TenantPartnerService(auditService);
 
     const webhook = tenantPartnerService.createWebhookEndpoint(
+      TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
         secret: "local-test-secret",
@@ -203,6 +217,7 @@ describe("tenant partner foundation service", () => {
     );
 
     const updated = tenantPartnerService.updateWebhookEndpoint(
+      TENANT_ID,
       webhook.webhookId,
       {
         url: "https://tenant.example.com/webhooks/drts-v2",
@@ -231,6 +246,7 @@ describe("tenant partner foundation service", () => {
     const tenantPartnerService = new TenantPartnerService(auditService);
 
     const passenger = tenantPartnerService.upsertPassenger(
+      TENANT_ID,
       {
         fullName: "測試乘客",
         employeeNo: "E2001",
@@ -241,6 +257,7 @@ describe("tenant partner foundation service", () => {
       "passenger-upsert-request",
     );
     const address = tenantPartnerService.upsertAddress(
+      TENANT_ID,
       {
         ownerPassengerId: passenger.passengerId,
         addressName: "客戶總部",
@@ -250,6 +267,7 @@ describe("tenant partner foundation service", () => {
       "address-upsert-request",
     );
     const tenantUser = tenantPartnerService.createTenantUser(
+      TENANT_ID,
       {
         email: "ops-admin@example.com",
         displayName: "Ops Admin",
@@ -258,6 +276,7 @@ describe("tenant partner foundation service", () => {
       "tenant-user-create-request",
     );
     const updatedUser = tenantPartnerService.updateTenantUserRole(
+      TENANT_ID,
       tenantUser.userId,
       {
         roleCode: "tenant_finance_admin",
@@ -266,6 +285,7 @@ describe("tenant partner foundation service", () => {
       "tenant-user-update-request",
     );
     const issuedApiKey = tenantPartnerService.issueApiKey(
+      TENANT_ID,
       {
         keyName: "Tenant Automation Key",
         scopes: ["tenant:read", "tenant:write"],
@@ -273,6 +293,7 @@ describe("tenant partner foundation service", () => {
       "tenant-api-key-issue-request",
     );
     const rotatedApiKey = tenantPartnerService.rotateApiKey(
+      TENANT_ID,
       issuedApiKey.apiKey.apiKeyId,
       {
         scopes: ["tenant:read"],
@@ -287,13 +308,166 @@ describe("tenant partner foundation service", () => {
     expect(issuedApiKey.plaintextKey).toMatch(/^tk_/);
     expect(
       tenantPartnerService
-        .listApiKeys()
+        .listApiKeys(TENANT_ID)
         .find((apiKey) => apiKey.apiKeyId === issuedApiKey.apiKey.apiKeyId)
         ?.maskedSuffix,
     ).toMatch(/^\*\*\*\*/);
     expect(rotatedApiKey.revokedApiKeyId).toBe(issuedApiKey.apiKey.apiKeyId);
     expect(rotatedApiKey.plaintextKey).toMatch(/^tk_/);
     expect(auditService.listAuditLogs()[0]?.actionName).toBe("rotate_api_key");
+  });
+
+  it("isolates tenant-partner state by tenant id", async () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(
+      auditService,
+      undefined,
+      new WebhookDispatchService(
+        vi.fn(async () => ({
+          ok: true,
+          status: 204,
+        })),
+      ),
+    );
+
+    tenantPartnerService.updateNotificationPreferences(OTHER_TENANT_ID, {
+      subscriptions: [
+        {
+          eventType: "tenant.billing_profile.updated",
+          channel: "email",
+          enabled: true,
+        },
+      ],
+    });
+    const otherPassenger = tenantPartnerService.upsertPassenger(
+      OTHER_TENANT_ID,
+      {
+        fullName: "Other Tenant Passenger",
+      },
+    );
+    const otherWebhook = tenantPartnerService.createWebhookEndpoint(
+      OTHER_TENANT_ID,
+      {
+        url: "https://other.example.com/webhooks/drts",
+        secret: "other-secret",
+        events: ["tenant.sla.threshold_breached"],
+      },
+    );
+
+    await tenantPartnerService.sendTestWebhook(OTHER_TENANT_ID, {
+      webhookId: otherWebhook.webhookId,
+    });
+
+    expect(
+      tenantPartnerService.getNotificationPreferences(TENANT_ID).subscriptions,
+    ).toEqual([
+      {
+        eventType: "reservation.failed",
+        channel: "ops_console",
+        enabled: true,
+      },
+      {
+        eventType: "tenant.sla.threshold_breached",
+        channel: "webhook",
+        enabled: true,
+      },
+    ]);
+    expect(tenantPartnerService.listPassengers(TENANT_ID)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ tenantId: TENANT_ID }),
+      ]),
+    );
+    expect(tenantPartnerService.listPassengers(OTHER_TENANT_ID)).toEqual([
+      expect.objectContaining({
+        passengerId: otherPassenger.passengerId,
+        tenantId: OTHER_TENANT_ID,
+      }),
+    ]);
+    expect(tenantPartnerService.listWebhookEndpoints(TENANT_ID)).toEqual([]);
+    expect(tenantPartnerService.listWebhookDeliveries(TENANT_ID)).toEqual([]);
+    expect(tenantPartnerService.listWebhookEndpoints(OTHER_TENANT_ID)).toEqual([
+      expect.objectContaining({
+        webhookId: otherWebhook.webhookId,
+        tenantId: OTHER_TENANT_ID,
+      }),
+    ]);
+    expect(
+      tenantPartnerService.listWebhookDeliveries(OTHER_TENANT_ID),
+    ).toHaveLength(1);
+  });
+
+  it("rejects cross-tenant passenger and address upserts when ids belong to another tenant", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const otherPassenger = tenantPartnerService.upsertPassenger(
+      OTHER_TENANT_ID,
+      {
+        fullName: "Other Tenant Passenger",
+      },
+    );
+    const otherAddress = tenantPartnerService.upsertAddress(OTHER_TENANT_ID, {
+      ownerPassengerId: otherPassenger.passengerId,
+      addressName: "Other Tenant HQ",
+      addressText: "台中市西屯區台灣大道 99 號",
+    });
+
+    let passengerError: unknown;
+    try {
+      tenantPartnerService.upsertPassenger(TENANT_ID, {
+        passengerId: otherPassenger.passengerId,
+        fullName: "Hijacked Passenger",
+      });
+    } catch (error) {
+      passengerError = error;
+    }
+
+    let addressError: unknown;
+    try {
+      tenantPartnerService.upsertAddress(TENANT_ID, {
+        addressId: otherAddress.addressId,
+        addressName: "Hijacked Address",
+        addressText: "台北市信義區松仁路 100 號",
+      });
+    } catch (error) {
+      addressError = error;
+    }
+
+    expect(
+      (
+        passengerError as { getResponse?: () => { error?: { code?: string } } }
+      ).getResponse?.().error?.code,
+    ).toBe("PASSENGER_NOT_FOUND");
+    expect(
+      (
+        addressError as { getResponse?: () => { error?: { code?: string } } }
+      ).getResponse?.().error?.code,
+    ).toBe("ADDRESS_NOT_FOUND");
+    expect(
+      tenantPartnerService
+        .listPassengers(TENANT_ID)
+        .find(
+          (passenger) => passenger.passengerId === otherPassenger.passengerId,
+        ),
+    ).toBeUndefined();
+    expect(
+      tenantPartnerService
+        .listAddresses(TENANT_ID)
+        .find((address) => address.addressId === otherAddress.addressId),
+    ).toBeUndefined();
+    expect(
+      tenantPartnerService
+        .listPassengers(OTHER_TENANT_ID)
+        .find(
+          (passenger) => passenger.passengerId === otherPassenger.passengerId,
+        )?.fullName,
+    ).toBe("Other Tenant Passenger");
+    expect(
+      tenantPartnerService
+        .listAddresses(OTHER_TENANT_ID)
+        .find((address) => address.addressId === otherAddress.addressId)
+        ?.addressName,
+    ).toBe("Other Tenant HQ");
   });
 
   it("publishes a tenant role catalog and rejects unsupported role assignments", () => {
@@ -311,7 +485,7 @@ describe("tenant partner foundation service", () => {
 
     let thrown: unknown;
     try {
-      tenantPartnerService.createTenantUser({
+      tenantPartnerService.createTenantUser(TENANT_ID, {
         email: "unsupported@example.com",
         displayName: "Unsupported Role User",
         roleCode: "admin",
@@ -401,26 +575,30 @@ describe("tenant partner foundation service", () => {
     };
     const repository = {
       loadState: vi.fn(async () => ({
-        notificationPreferences: {
-          tenantId: "tenant-demo-001",
-          subscriptions: [
-            {
-              eventType: "tenant.sla.threshold_breached",
-              channel: "webhook",
-              enabled: true,
-            },
-          ],
-          updatedAt: "2026-04-10T00:00:00Z",
-        },
+        notificationPreferences: [
+          {
+            tenantId: "tenant-demo-001",
+            subscriptions: [
+              {
+                eventType: "tenant.sla.threshold_breached",
+                channel: "webhook",
+                enabled: true,
+              },
+            ],
+            updatedAt: "2026-04-10T00:00:00Z",
+          },
+        ],
         webhookEndpoints: [persistedEndpoint],
         webhookDeliveries: [],
-        slaProfile: {
-          tenantId: "tenant-demo-001",
-          waitThresholdMin: 12,
-          arrivalThresholdMin: 18,
-          completionThresholdMin: 95,
-          updatedAt: "2026-04-10T00:00:00Z",
-        },
+        slaProfiles: [
+          {
+            tenantId: "tenant-demo-001",
+            waitThresholdMin: 12,
+            arrivalThresholdMin: 18,
+            completionThresholdMin: 95,
+            updatedAt: "2026-04-10T00:00:00Z",
+          },
+        ],
         passengers: [
           {
             passengerId: "passenger-persisted-001",
@@ -482,33 +660,43 @@ describe("tenant partner foundation service", () => {
 
     await tenantPartnerService.onModuleInit();
 
-    expect(tenantPartnerService.getSlaProfile().waitThresholdMin).toBe(12);
-    expect(tenantPartnerService.listPassengers()[0]?.passengerId).toBe(
+    expect(tenantPartnerService.getSlaProfile(TENANT_ID).waitThresholdMin).toBe(
+      12,
+    );
+    expect(tenantPartnerService.listPassengers(TENANT_ID)[0]?.passengerId).toBe(
       "passenger-persisted-001",
     );
-    expect(tenantPartnerService.listApiKeys()[0]?.apiKeyId).toBe(
+    expect(tenantPartnerService.listApiKeys(TENANT_ID)[0]?.apiKeyId).toBe(
       "tenant-api-key-persisted-001",
     );
-    expect(tenantPartnerService.listWebhookEndpoints()[0]?.webhookId).toBe(
-      "wh_persisted_001",
-    );
+    expect(
+      tenantPartnerService.listWebhookEndpoints(TENANT_ID)[0]?.webhookId,
+    ).toBe("wh_persisted_001");
 
-    tenantPartnerService.updateSlaProfile({
+    tenantPartnerService.updateSlaProfile(TENANT_ID, {
       waitThresholdMin: 20,
     });
-    tenantPartnerService.upsertPassenger({
+    tenantPartnerService.upsertPassenger(TENANT_ID, {
       passengerId: "passenger-persisted-001",
       fullName: "Persisted Passenger Updated",
     });
-    tenantPartnerService.updateTenantUserRole("tenant-user-persisted-001", {
-      roleCode: "tenant_finance_admin",
-      status: "active",
-    });
-    tenantPartnerService.rotateApiKey("tenant-api-key-persisted-001", {
-      keyName: "Persisted Tenant Key v2",
-      scopes: ["tenant:read", "tenant:write"],
-    });
-    await tenantPartnerService.sendTestWebhook({
+    tenantPartnerService.updateTenantUserRole(
+      TENANT_ID,
+      "tenant-user-persisted-001",
+      {
+        roleCode: "tenant_finance_admin",
+        status: "active",
+      },
+    );
+    tenantPartnerService.rotateApiKey(
+      TENANT_ID,
+      "tenant-api-key-persisted-001",
+      {
+        keyName: "Persisted Tenant Key v2",
+        scopes: ["tenant:read", "tenant:write"],
+      },
+    );
+    await tenantPartnerService.sendTestWebhook(TENANT_ID, {
       webhookId: "wh_persisted_001",
     });
 
@@ -516,9 +704,11 @@ describe("tenant partner foundation service", () => {
 
     expect(persistChanges).toHaveBeenCalledWith(
       expect.objectContaining({
-        slaProfile: expect.objectContaining({
-          waitThresholdMin: 20,
-        }),
+        slaProfiles: [
+          expect.objectContaining({
+            waitThresholdMin: 20,
+          }),
+        ],
       }),
     );
     expect(persistChanges).toHaveBeenCalledWith(
