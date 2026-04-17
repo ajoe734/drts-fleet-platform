@@ -25,6 +25,9 @@ function createService(repository?: OwnedMobilityRepository) {
   };
 }
 
+const TENANT_ACME = "tenant-acme-001";
+const TENANT_NEWCO = "tenant-newco-001";
+
 function getErrorCode(error: unknown) {
   const response = (
     error as {
@@ -212,48 +215,54 @@ describe("owned mobility service", () => {
     const { ownedMobilityService } = createService();
 
     try {
-      ownedMobilityService.createTenantBooking({
-        businessDispatchSubtype: "credit_card_airport_transfer",
-        direction: "pickup",
-        pickup: {
-          address: "桃園機場第二航廈",
+      ownedMobilityService.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          direction: "pickup",
+          pickup: {
+            address: "桃園機場第二航廈",
+          },
+          dropoff: {
+            address: "台中市梧棲區中二路一段9號",
+          },
+          reservationWindowStart: "2026-04-18T10:00:00Z",
+          reservationWindowEnd: "2026-04-18T10:20:00Z",
+          passenger: {
+            name: "陳小姐",
+            phone: "0900123456",
+          },
         },
-        dropoff: {
-          address: "台中市梧棲區中二路一段9號",
-        },
-        reservationWindowStart: "2026-04-18T10:00:00Z",
-        reservationWindowEnd: "2026-04-18T10:20:00Z",
-        passenger: {
-          name: "陳小姐",
-          phone: "0900123456",
-        },
-      });
+        TENANT_ACME,
+      );
       expect.unreachable("airport pickup should require flight_no");
     } catch (error) {
       expect(getErrorCode(error)).toBe("FLIGHT_NO_REQUIRED");
     }
 
-    const booking = ownedMobilityService.createTenantBooking({
-      businessDispatchSubtype: "enterprise_dispatch",
-      pickup: {
-        address: "台北市信義區松仁路100號",
+    const booking = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: {
+          address: "台北市信義區松仁路100號",
+        },
+        dropoff: {
+          address: "桃園機場第二航廈",
+        },
+        reservationWindowStart: "2026-04-15T08:30:00Z",
+        reservationWindowEnd: "2026-04-15T08:45:00Z",
+        passenger: {
+          name: "王小明",
+          phone: "0912000111",
+        },
+        signoffRequired: true,
+        minPhotoCount: 1,
+        quotedFare: {
+          currency: "NTD",
+          amountMinor: 150000,
+        },
       },
-      dropoff: {
-        address: "桃園機場第二航廈",
-      },
-      reservationWindowStart: "2026-04-15T08:30:00Z",
-      reservationWindowEnd: "2026-04-15T08:45:00Z",
-      passenger: {
-        name: "王小明",
-        phone: "0912000111",
-      },
-      signoffRequired: true,
-      minPhotoCount: 1,
-      quotedFare: {
-        currency: "NTD",
-        amountMinor: 150000,
-      },
-    });
+      TENANT_ACME,
+    );
     const dispatchJob = ownedMobilityService.dispatchOrder(booking.orderId, {
       mode: "auto",
     });
@@ -324,30 +333,38 @@ describe("owned mobility service", () => {
     vi.setSystemTime(new Date("2026-04-14T08:00:00Z"));
 
     const { ownedMobilityService } = createService();
-    const created = ownedMobilityService.createTenantBooking({
-      businessDispatchSubtype: "enterprise_dispatch",
-      pickup: {
-        address: "台北市信義區松仁路100號",
+    const created = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: {
+          address: "台北市信義區松仁路100號",
+        },
+        dropoff: {
+          address: "桃園機場第二航廈",
+        },
+        reservationWindowStart: "2026-04-14T10:00:00Z",
+        reservationWindowEnd: "2026-04-14T10:20:00Z",
+        passenger: {
+          name: "王小明",
+          phone: "0912000111",
+        },
+        costCenter: "OPS-01",
+        notes: "原始預約",
       },
-      dropoff: {
-        address: "桃園機場第二航廈",
-      },
-      reservationWindowStart: "2026-04-14T10:00:00Z",
-      reservationWindowEnd: "2026-04-14T10:20:00Z",
-      passenger: {
-        name: "王小明",
-        phone: "0912000111",
-      },
-      costCenter: "OPS-01",
-      notes: "原始預約",
-    });
+      TENANT_ACME,
+    );
 
-    const listed = ownedMobilityService.listTenantBookings();
+    const listed = ownedMobilityService.listTenantBookings(TENANT_ACME);
     expect(listed.items).toHaveLength(1);
     expect(listed.items[0]?.bookingId).toBe(created.bookingId);
+    expect(listed.items[0]?.tenantId).toBe(TENANT_ACME);
     expect(listed.items[0]?.modifiableUntil).toBe("2026-04-14T09:30:00.000Z");
+    expect(ownedMobilityService.getOrder(created.orderId).tenantId).toBe(
+      TENANT_ACME,
+    );
 
     const updated = ownedMobilityService.updateTenantBooking(
+      TENANT_ACME,
       created.bookingId,
       {
         reservationWindowStart: "2026-04-14T11:00:00Z",
@@ -362,6 +379,7 @@ describe("owned mobility service", () => {
     expect(updated.notes).toBe("改到十一點出發");
 
     const cancelled = ownedMobilityService.cancelTenantBooking(
+      TENANT_ACME,
       created.bookingId,
       {
         reason: "passenger_rescheduled",
@@ -375,23 +393,118 @@ describe("owned mobility service", () => {
     vi.useRealTimers();
   });
 
+  it("enforces tenant isolation for booking list, detail, update, and cancel", () => {
+    const { ownedMobilityService } = createService();
+    const acmeBooking = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: {
+          address: "台北市信義區松仁路100號",
+        },
+        dropoff: {
+          address: "桃園機場第二航廈",
+        },
+        reservationWindowStart: "2026-04-16T10:00:00Z",
+        reservationWindowEnd: "2026-04-16T10:20:00Z",
+        passenger: {
+          name: "ACME Admin",
+          phone: "0912000001",
+        },
+      },
+      TENANT_ACME,
+    );
+    const newcoBooking = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: {
+          address: "新竹高鐵站",
+        },
+        dropoff: {
+          address: "台北南港展覽館",
+        },
+        reservationWindowStart: "2026-04-16T11:00:00Z",
+        reservationWindowEnd: "2026-04-16T11:20:00Z",
+        passenger: {
+          name: "NEWCO Admin",
+          phone: "0912000002",
+        },
+      },
+      TENANT_NEWCO,
+    );
+
+    const acmeList = ownedMobilityService.listTenantBookings(TENANT_ACME);
+    expect(acmeList.items).toHaveLength(1);
+    expect(acmeList.items[0]?.bookingId).toBe(acmeBooking.bookingId);
+    expect(acmeList.items[0]?.tenantId).toBe(TENANT_ACME);
+
+    expect(
+      ownedMobilityService.getTenantBooking(
+        TENANT_NEWCO,
+        newcoBooking.bookingId,
+      ).tenantId,
+    ).toBe(TENANT_NEWCO);
+
+    try {
+      ownedMobilityService.getTenantBooking(
+        TENANT_ACME,
+        newcoBooking.bookingId,
+      );
+      expect.unreachable("cross-tenant booking read should fail");
+    } catch (error) {
+      expect(getErrorCode(error)).toBe("BOOKING_NOT_FOUND");
+    }
+
+    try {
+      ownedMobilityService.updateTenantBooking(
+        TENANT_ACME,
+        newcoBooking.bookingId,
+        {
+          notes: "malicious edit",
+        },
+      );
+      expect.unreachable("cross-tenant booking update should fail");
+    } catch (error) {
+      expect(getErrorCode(error)).toBe("BOOKING_NOT_FOUND");
+    }
+
+    try {
+      ownedMobilityService.cancelTenantBooking(
+        TENANT_ACME,
+        newcoBooking.bookingId,
+        {
+          reason: "malicious cancel",
+        },
+      );
+      expect.unreachable("cross-tenant booking cancel should fail");
+    } catch (error) {
+      expect(getErrorCode(error)).toBe("BOOKING_NOT_FOUND");
+    }
+
+    expect(ownedMobilityService.getOrder(newcoBooking.orderId).status).toBe(
+      "created",
+    );
+  });
+
   it("requires an explicit dispatch step before reservation bookings appear in the dispatch queue", () => {
     const { ownedMobilityService } = createService();
-    const booking = ownedMobilityService.createTenantBooking({
-      businessDispatchSubtype: "enterprise_dispatch",
-      pickup: {
-        address: "台北市信義區松仁路100號",
+    const booking = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: {
+          address: "台北市信義區松仁路100號",
+        },
+        dropoff: {
+          address: "桃園機場第二航廈",
+        },
+        reservationWindowStart: "2026-04-16T10:00:00Z",
+        reservationWindowEnd: "2026-04-16T10:20:00Z",
+        passenger: {
+          name: "王小明",
+          phone: "0912000111",
+        },
       },
-      dropoff: {
-        address: "桃園機場第二航廈",
-      },
-      reservationWindowStart: "2026-04-16T10:00:00Z",
-      reservationWindowEnd: "2026-04-16T10:20:00Z",
-      passenger: {
-        name: "王小明",
-        phone: "0912000111",
-      },
-    });
+      TENANT_ACME,
+    );
 
     expect(booking.status).toBe("created");
     expect(ownedMobilityService.listDispatchJobs()).toHaveLength(0);
@@ -415,26 +528,29 @@ describe("owned mobility service", () => {
     vi.setSystemTime(new Date("2026-04-15T08:00:00Z"));
 
     const { ownedMobilityService } = createService();
-    const created = ownedMobilityService.createTenantBooking({
-      businessDispatchSubtype: "enterprise_dispatch",
-      pickup: {
-        address: "台中高鐵站",
+    const created = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: {
+          address: "台中高鐵站",
+        },
+        dropoff: {
+          address: "台中市梧棲區中二路一段9號",
+        },
+        reservationWindowStart: "2026-04-15T10:00:00Z",
+        reservationWindowEnd: "2026-04-15T10:20:00Z",
+        passenger: {
+          name: "李秘書",
+          phone: "0933555777",
+        },
       },
-      dropoff: {
-        address: "台中市梧棲區中二路一段9號",
-      },
-      reservationWindowStart: "2026-04-15T10:00:00Z",
-      reservationWindowEnd: "2026-04-15T10:20:00Z",
-      passenger: {
-        name: "李秘書",
-        phone: "0933555777",
-      },
-    });
+      TENANT_ACME,
+    );
 
     vi.setSystemTime(new Date("2026-04-15T09:31:00Z"));
 
     try {
-      ownedMobilityService.updateTenantBooking(created.bookingId, {
+      ownedMobilityService.updateTenantBooking(TENANT_ACME, created.bookingId, {
         notes: "延後十分鐘",
       });
       expect.unreachable("booking update should fail after modifiable_until");
@@ -460,21 +576,24 @@ describe("owned mobility service", () => {
         ["ops_notice", "tenant_sla"].includes(notification.channel),
       ).length;
 
-    const queuedBooking = ownedMobilityService.createTenantBooking({
-      businessDispatchSubtype: "enterprise_dispatch",
-      pickup: {
-        address: "台中高鐵站",
+    const queuedBooking = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: {
+          address: "台中高鐵站",
+        },
+        dropoff: {
+          address: "台中市梧棲區中二路一段9號",
+        },
+        reservationWindowStart: "2026-04-15T08:00:00Z",
+        reservationWindowEnd: "2026-04-15T08:20:00Z",
+        passenger: {
+          name: "企業旅客 A",
+          phone: "0911000001",
+        },
       },
-      dropoff: {
-        address: "台中市梧棲區中二路一段9號",
-      },
-      reservationWindowStart: "2026-04-15T08:00:00Z",
-      reservationWindowEnd: "2026-04-15T08:20:00Z",
-      passenger: {
-        name: "企業旅客 A",
-        phone: "0911000001",
-      },
-    });
+      TENANT_ACME,
+    );
     const queuedDispatch = ownedMobilityService.dispatchOrder(
       queuedBooking.orderId,
       {
@@ -487,21 +606,24 @@ describe("owned mobility service", () => {
       "redispatch_required",
     );
 
-    const holdBooking = ownedMobilityService.createTenantBooking({
-      businessDispatchSubtype: "enterprise_dispatch",
-      pickup: {
-        address: "台中高鐵站",
+    const holdBooking = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: {
+          address: "台中高鐵站",
+        },
+        dropoff: {
+          address: "台中市梧棲區中二路一段9號",
+        },
+        reservationWindowStart: "2026-04-15T06:20:00Z",
+        reservationWindowEnd: "2026-04-15T06:35:00Z",
+        passenger: {
+          name: "企業旅客 B",
+          phone: "0911000002",
+        },
       },
-      dropoff: {
-        address: "台中市梧棲區中二路一段9號",
-      },
-      reservationWindowStart: "2026-04-15T06:20:00Z",
-      reservationWindowEnd: "2026-04-15T06:35:00Z",
-      passenger: {
-        name: "企業旅客 B",
-        phone: "0911000002",
-      },
-    });
+      TENANT_ACME,
+    );
     const holdDispatch = ownedMobilityService.dispatchOrder(
       holdBooking.orderId,
       {

@@ -27,12 +27,29 @@ import type {
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
-import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiListData,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
 @Controller()
 export class OwnedMobilityController {
   constructor(private readonly ownedMobilityService: OwnedMobilityService) {}
+
+  private requireTenantId(tenantId?: string) {
+    const normalizedTenantId = tenantId?.trim();
+    if (!normalizedTenantId) {
+      throw new ApiRequestError(
+        400,
+        "TENANT_ID_REQUIRED",
+        "x-tenant-id header is required for tenant booking endpoints.",
+      );
+    }
+
+    return normalizedTenantId;
+  }
 
   @Post("orders")
   createOwnedOrder(
@@ -102,17 +119,27 @@ export class OwnedMobilityController {
   @Post("tenant/bookings")
   createTenantBooking(
     @Body() command: CreateTenantBookingCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.createTenantBooking(command, requestId),
+      this.ownedMobilityService.createTenantBooking(
+        command,
+        this.requireTenantId(tenantId),
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Get("tenant/bookings")
-  listTenantBookings(@Headers("x-request-id") requestId?: string) {
-    const bookings = this.ownedMobilityService.listTenantBookings();
+  listTenantBookings(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const bookings = this.ownedMobilityService.listTenantBookings(
+      this.requireTenantId(tenantId),
+    );
     return toApiSuccessEnvelope(
       toApiListData(bookings.items, bookings.pagination),
       requestId,
@@ -122,10 +149,14 @@ export class OwnedMobilityController {
   @Get("tenant/bookings/:bookingId")
   getTenantBooking(
     @Param("bookingId") bookingId: string,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getTenantBooking(bookingId),
+      this.ownedMobilityService.getTenantBooking(
+        this.requireTenantId(tenantId),
+        bookingId,
+      ),
       requestId,
     );
   }
@@ -134,10 +165,12 @@ export class OwnedMobilityController {
   updateTenantBooking(
     @Param("bookingId") bookingId: string,
     @Body() command: UpdateTenantBookingCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.ownedMobilityService.updateTenantBooking(
+        this.requireTenantId(tenantId),
         bookingId,
         command,
         requestId,
@@ -150,10 +183,12 @@ export class OwnedMobilityController {
   cancelTenantBooking(
     @Param("bookingId") bookingId: string,
     @Body() command: CancelOwnedOrderCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.ownedMobilityService.cancelTenantBooking(
+        this.requireTenantId(tenantId),
         bookingId,
         command,
         requestId,

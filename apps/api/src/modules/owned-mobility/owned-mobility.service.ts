@@ -60,8 +60,6 @@ type CallRecordingAttachmentEvent = {
   requestId?: string;
 };
 
-const OPS_TENANT_ID = "tenant-demo-001";
-
 const BOOKING_RULES: Record<
   NonNullable<OwnedOrderRecord["businessDispatchSubtype"]>,
   {
@@ -170,6 +168,7 @@ export class OwnedMobilityService implements OnModuleInit {
       orderNo: this.nextOrderNo(),
       orderSource: "app",
       orderDomain: "owned",
+      tenantId: null,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -277,6 +276,7 @@ export class OwnedMobilityService implements OnModuleInit {
       orderNo: this.nextOrderNo(),
       orderSource: "phone",
       orderDomain: "owned",
+      tenantId: null,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -391,8 +391,10 @@ export class OwnedMobilityService implements OnModuleInit {
 
   createTenantBooking(
     command: CreateTenantBookingCommand,
+    tenantId: string,
     requestId?: string,
   ): TenantBookingResult {
+    this.assertNonBlank(tenantId, "tenantId");
     this.assertAddress(command.pickup.address, "pickup.address");
     this.assertAddress(command.dropoff.address, "dropoff.address");
     this.assertBookingRules(
@@ -414,6 +416,7 @@ export class OwnedMobilityService implements OnModuleInit {
       orderNo: this.nextOrderNo(),
       orderSource: "portal",
       orderDomain: "owned",
+      tenantId,
       serviceBucket: "business_dispatch",
       dispatchSemantics: "reservation",
       businessDispatchSubtype: command.businessDispatchSubtype,
@@ -506,7 +509,7 @@ export class OwnedMobilityService implements OnModuleInit {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: OPS_TENANT_ID,
+        tenantId: order.tenantId,
         moduleName: "order",
         actionName: "create_tenant_booking",
         resourceType: "booking",
@@ -597,9 +600,10 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.cloneOrder(this.requireOrder(orderId));
   }
 
-  listTenantBookings() {
+  listTenantBookings(tenantId: string) {
+    this.assertNonBlank(tenantId, "tenantId");
     const items = this.orders
-      .filter((order) => order.bookingId)
+      .filter((order) => order.bookingId && order.tenantId === tenantId)
       .map((order) => this.mapOrderToBooking(order));
 
     return {
@@ -613,16 +617,21 @@ export class OwnedMobilityService implements OnModuleInit {
     };
   }
 
-  getTenantBooking(bookingId: string) {
-    return this.mapOrderToBooking(this.requireBookingOrder(bookingId));
+  getTenantBooking(tenantId: string, bookingId: string) {
+    this.assertNonBlank(tenantId, "tenantId");
+    return this.mapOrderToBooking(
+      this.requireBookingOrder(bookingId, tenantId),
+    );
   }
 
   updateTenantBooking(
+    tenantId: string,
     bookingId: string,
     command: UpdateTenantBookingCommand,
     requestId?: string,
   ) {
-    const order = this.requireBookingOrder(bookingId);
+    this.assertNonBlank(tenantId, "tenantId");
+    const order = this.requireBookingOrder(bookingId, tenantId);
     this.assertBookingModifiable(order);
 
     const businessDispatchSubtype =
@@ -749,7 +758,7 @@ export class OwnedMobilityService implements OnModuleInit {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: OPS_TENANT_ID,
+        tenantId: order.tenantId,
         moduleName: "order",
         actionName: "update_booking",
         resourceType: "booking",
@@ -767,11 +776,13 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   cancelTenantBooking(
+    tenantId: string,
     bookingId: string,
     command: CancelOwnedOrderCommand,
     requestId?: string,
   ) {
-    const order = this.requireBookingOrder(bookingId);
+    this.assertNonBlank(tenantId, "tenantId");
+    const order = this.requireBookingOrder(bookingId, tenantId);
     this.cancelOwnedOrder(order.orderId, command, requestId);
     return this.mapOrderToBooking(order);
   }
@@ -1120,7 +1131,7 @@ export class OwnedMobilityService implements OnModuleInit {
       }),
     );
     this.auditNotificationService.recordNotification({
-      tenantId: OPS_TENANT_ID,
+      tenantId: order.tenantId,
       channel: "driver_task",
       title: "Driver task assigned",
       message: `Driver ${command.driverId} received task ${taskId} for order ${order.orderNo}.`,
@@ -1228,7 +1239,7 @@ export class OwnedMobilityService implements OnModuleInit {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: OPS_TENANT_ID,
+        tenantId: order.tenantId,
         moduleName: "order",
         actionName: "cancel_owned_order",
         resourceType: "order",
@@ -2126,14 +2137,14 @@ export class OwnedMobilityService implements OnModuleInit {
     dispatchJobId: string,
   ) {
     this.auditNotificationService.recordNotification({
-      tenantId: OPS_TENANT_ID,
+      tenantId: order.tenantId,
       channel: "ops_notice",
       title: "Reservation scheduler escalation",
       message: `Reservation order ${order.orderNo} escalated after ${dispatchJobId} exhausted eligible supply.`,
       status: "unread",
     });
     this.auditNotificationService.recordNotification({
-      tenantId: OPS_TENANT_ID,
+      tenantId: order.tenantId,
       channel: "tenant_sla",
       title: "Reservation dispatch requires follow-up",
       message: `Booking ${order.bookingId ?? order.orderId} needs manual dispatch follow-up.`,
@@ -2144,6 +2155,7 @@ export class OwnedMobilityService implements OnModuleInit {
   private mapOrderToBooking(order: OwnedOrderRecord): BookingRecord {
     if (
       !order.bookingId ||
+      !order.tenantId ||
       !order.bookingType ||
       !order.businessDispatchSubtype ||
       !order.reservationWindowStart ||
@@ -2162,6 +2174,7 @@ export class OwnedMobilityService implements OnModuleInit {
     return {
       bookingId: order.bookingId,
       orderId: order.orderId,
+      tenantId: order.tenantId,
       status: order.status === "cancelled" ? "cancelled" : "active",
       serviceBucket: "business_dispatch",
       businessDispatchSubtype: order.businessDispatchSubtype,
@@ -2207,9 +2220,11 @@ export class OwnedMobilityService implements OnModuleInit {
     return order;
   }
 
-  private requireBookingOrder(bookingId: string) {
+  private requireBookingOrder(bookingId: string, tenantId?: string) {
     const order = this.orders.find(
-      (candidateOrder) => candidateOrder.bookingId === bookingId,
+      (candidateOrder) =>
+        candidateOrder.bookingId === bookingId &&
+        (tenantId === undefined || candidateOrder.tenantId === tenantId),
     );
     if (!order) {
       throw new ApiRequestError(
@@ -2218,6 +2233,7 @@ export class OwnedMobilityService implements OnModuleInit {
         "Booking was not found.",
         {
           bookingId,
+          ...(tenantId ? { tenantId } : {}),
         },
       );
     }
