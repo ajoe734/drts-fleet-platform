@@ -15,6 +15,14 @@ import {
 } from "./audit-log.persistence";
 import { AuditLogRepository } from "./audit-log.repository";
 
+const MAX_IN_MEMORY_AUDIT_LOGS = 1000;
+
+function trimAuditLogs(auditLogs: AuditLogRecord[]) {
+  return auditLogs.length <= MAX_IN_MEMORY_AUDIT_LOGS
+    ? auditLogs
+    : auditLogs.slice(0, MAX_IN_MEMORY_AUDIT_LOGS);
+}
+
 @Injectable()
 export class AuditNotificationService implements OnModuleInit {
   private readonly logger = new Logger(AuditNotificationService.name);
@@ -43,7 +51,9 @@ export class AuditNotificationService implements OnModuleInit {
     },
   ];
 
-  private auditLogs: AuditLogRecord[] = [cloneAuditLog(BOOTSTRAP_AUDIT_LOG)];
+  private auditLogs: AuditLogRecord[] = trimAuditLogs([
+    cloneAuditLog(BOOTSTRAP_AUDIT_LOG),
+  ]);
 
   constructor(
     @Optional() private readonly auditLogRepository?: AuditLogRepository,
@@ -55,10 +65,12 @@ export class AuditNotificationService implements OnModuleInit {
     }
 
     try {
-      this.auditLogs = await this.auditLogRepository.loadRecent();
+      this.auditLogs = trimAuditLogs(
+        await this.auditLogRepository.loadRecent(MAX_IN_MEMORY_AUDIT_LOGS),
+      );
     } catch (error) {
       this.auditLogRepository.reportPersistenceFailure(error, "module init");
-      this.auditLogs = [cloneAuditLog(BOOTSTRAP_AUDIT_LOG)];
+      this.auditLogs = trimAuditLogs([cloneAuditLog(BOOTSTRAP_AUDIT_LOG)]);
     }
   }
 
@@ -150,7 +162,7 @@ export class AuditNotificationService implements OnModuleInit {
     },
   ) {
     const auditLog = createAuditLogRecord(input);
-    this.auditLogs = [auditLog, ...this.auditLogs];
+    this.auditLogs = trimAuditLogs([auditLog, ...this.auditLogs]);
     this.persistAuditLog(auditLog);
     return auditLog;
   }

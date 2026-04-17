@@ -6,6 +6,24 @@ import { AuditLogRepository } from "../../apps/api/src/modules/audit-notificatio
 import { BOOTSTRAP_AUDIT_LOG } from "../../apps/api/src/modules/audit-notification/audit-log.persistence";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 
+function makeStoredAuditLog(index: number): AuditLogRecord {
+  return {
+    auditId: `audit-${index}`,
+    actorId: null,
+    actorType: "system",
+    tenantId: null,
+    moduleName: "audit-notification",
+    actionName: `loaded-${index}`,
+    resourceType: "retention_test",
+    resourceId: `resource-${index}`,
+    requestId: `request-${index}`,
+    createdAt: `2026-04-11T00:00:${String(index % 60).padStart(2, "0")}.000Z`,
+    newValuesSummary: {
+      index,
+    },
+  };
+}
+
 describe("audit notification persistence baseline", () => {
   it("writes audit logs through to the repository and keeps UUID ids", async () => {
     const appended: AuditLogRecord[] = [];
@@ -83,5 +101,65 @@ describe("audit notification persistence baseline", () => {
 
     expect(service.listAuditLogs()).toEqual([BOOTSTRAP_AUDIT_LOG]);
     expect(reportPersistenceFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps only the 1000 newest audit logs in memory while preserving write-through", async () => {
+    const appended: AuditLogRecord[] = [];
+    const repository = {
+      append: vi.fn(async (record: AuditLogRecord) => {
+        appended.push(record);
+      }),
+    } as unknown as AuditLogRepository;
+
+    const service = new AuditNotificationService(repository);
+
+    for (let index = 0; index < 1005; index += 1) {
+      service.recordAuditLog({
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "audit-notification",
+        actionName: `recorded-${index}`,
+        resourceType: "retention_test",
+        resourceId: `resource-${index}`,
+        newValuesSummary: {
+          index,
+        },
+      });
+    }
+
+    await Promise.resolve();
+
+    const auditLogs = service.listAuditLogs();
+    expect(auditLogs).toHaveLength(1000);
+    expect(auditLogs[0]?.actionName).toBe("recorded-1004");
+    expect(auditLogs.at(-1)?.actionName).toBe("recorded-5");
+    expect(auditLogs.some((record) => record.actionName === "recorded-4")).toBe(
+      false,
+    );
+    expect(
+      auditLogs.some(
+        (record) => record.auditId === BOOTSTRAP_AUDIT_LOG.auditId,
+      ),
+    ).toBe(false);
+    expect(appended).toHaveLength(1005);
+  });
+
+  it("trims repository-loaded audit logs down to the 1000 newest records on module init", async () => {
+    const repository = {
+      loadRecent: vi.fn(async () =>
+        Array.from({ length: 1002 }, (_, index) => makeStoredAuditLog(index)),
+      ),
+    } as unknown as AuditLogRepository;
+
+    const service = new AuditNotificationService(repository);
+
+    await service.onModuleInit();
+
+    const auditLogs = service.listAuditLogs();
+    expect(repository.loadRecent).toHaveBeenCalledWith(1000);
+    expect(auditLogs).toHaveLength(1000);
+    expect(auditLogs[0]?.actionName).toBe("loaded-0");
+    expect(auditLogs.at(-1)?.actionName).toBe("loaded-999");
   });
 });
