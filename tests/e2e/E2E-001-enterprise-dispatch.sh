@@ -59,7 +59,7 @@ log_step "1.1 — POST /tenant/bookings"
 http_call POST "/tenant/bookings" "$BOOKING_FIXTURE"
 assert_status "200|201"
 
-BOOKING_ID=$(json_get ".data.bookingId")
+BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")
 if [[ -z "$BOOKING_ID" ]]; then
   log_fail "No bookingId in response: ${RESP_BODY}"
   exit 1
@@ -74,26 +74,71 @@ log_step "1.2 — GET /tenant/bookings/:bookingId (read-back)"
 http_call GET "/tenant/bookings/${BOOKING_ID}"
 assert_status "200"
 BOOKING_STATUS=$(json_get ".data.status")
+ORDER_ID=$(json_get_first ".data.orderId" ".data.order_id")
 log_ok "Booking status after creation: ${BOOKING_STATUS}"
 save_evidence "$SCENARIO" "tenant" "bookingStatusAfterCreate" "$BOOKING_STATUS"
+if [[ -n "$ORDER_ID" ]]; then
+  chain_set "tenant" "orderId" "$ORDER_ID"
+  save_evidence "$SCENARIO" "tenant" "orderId" "$ORDER_ID"
+  log_ok "Booking read-back orderId=${ORDER_ID}"
+else
+  log_warn "Booking read-back did not expose orderId; dispatch leg will fall back to first visible job."
+fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LEG 2 — Ops Console: dispatch queue → assign driver
 # ══════════════════════════════════════════════════════════════════════════════
 log_surface "Ops Console — dispatch assignment"
 
-# platform_admin covers both ops and tenant surfaces; in staging ops_user is the
-# correct actor, but the bootstrap-auth model allows platform_admin for smoke/E2E.
-switch_actor "platform_admin" "e2e-platform-admin-001"
+# Live staging bootstrap auth grants dispatch scopes through the ops_user preset.
+switch_actor "ops_user" "e2e-ops-001"
 
-log_step "2.1 — GET /dispatch/tasks (find open job)"
-http_call GET "/dispatch/tasks"
-assert_status "200"
+log_step "2.1 — POST /orders/:orderId/dispatch"
+if [[ -z "${ORDER_ID:-}" ]]; then
+  log_fail "Booking read-back did not expose orderId; cannot trigger dispatch for reservation booking."
+  exit 1
+fi
 
-DISPATCH_JOB_ID=$(json_get ".data.items[0].dispatchJobId")
+DISPATCH_FIXTURE=$(mktemp /tmp/drts-e2e-001-dispatch-XXXXXX.json)
+trap 'rm -f "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE"' EXIT
+printf '%s\n' '{"mode":"auto"}' > "$DISPATCH_FIXTURE"
+
+http_call POST "/orders/${ORDER_ID}/dispatch" "$DISPATCH_FIXTURE"
+assert_status "200|201"
+
+DISPATCH_JOB_ID=$(json_get ".data.dispatchJobId")
+if [[ -n "$DISPATCH_JOB_ID" ]]; then
+  chain_set "ops" "dispatchJobId" "$DISPATCH_JOB_ID"
+  save_evidence "$SCENARIO" "ops" "dispatchJobIdAfterTrigger" "$DISPATCH_JOB_ID"
+  log_ok "POST /orders/${ORDER_ID}/dispatch → HTTP ${RESP_STATUS}, dispatchJobId=${DISPATCH_JOB_ID}"
+else
+  log_warn "dispatch trigger response did not include dispatchJobId; falling back to queue poll."
+fi
+
+log_step "2.2 — GET /dispatch/tasks (find job for this booking)"
+ATTEMPT=0
+while (( ATTEMPT < E2E_POLL_MAX )); do
+  if [[ -n "$DISPATCH_JOB_ID" ]]; then
+    break
+  fi
+  http_call GET "/dispatch/tasks"
+  assert_status "200"
+  if [[ -n "${ORDER_ID:-}" ]]; then
+    DISPATCH_JOB_ID=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+      '.data.items[] | select(.orderId == $oid) | .dispatchJobId' 2>/dev/null | head -1 || true)
+  else
+    DISPATCH_JOB_ID=$(json_get ".data.items[0].dispatchJobId")
+  fi
+  if [[ -n "$DISPATCH_JOB_ID" ]]; then
+    break
+  fi
+  log_info "  poll $((ATTEMPT + 1))/${E2E_POLL_MAX}: dispatch job for orderId=${ORDER_ID:-unknown} not visible yet"
+  sleep "$E2E_POLL_INTERVAL"
+  ATTEMPT=$((ATTEMPT + 1))
+done
 if [[ -z "$DISPATCH_JOB_ID" ]]; then
-  log_warn "No open dispatch jobs found; skipping dispatch + driver legs."
-  log_warn "Expected when staging DB is empty or booking-to-dispatch propagation is async."
+  log_warn "No matching dispatch job found after polling; skipping dispatch + driver legs."
+  log_warn "Expected when booking-to-dispatch propagation is delayed or staging lacks owned-dispatch readiness."
   log_warn "Chain state so far:"
   print_chain_summary
   exit 0
@@ -103,15 +148,15 @@ chain_set "ops" "dispatchJobId" "$DISPATCH_JOB_ID"
 save_evidence "$SCENARIO" "ops" "dispatchJobId" "$DISPATCH_JOB_ID"
 log_ok "Found dispatchJobId=${DISPATCH_JOB_ID}"
 
-log_step "2.2 — GET /dispatch/tasks/:dispatchJobId/candidates"
+log_step "2.3 — GET /dispatch/tasks/:dispatchJobId/candidates"
 http_call GET "/dispatch/tasks/${DISPATCH_JOB_ID}/candidates"
 assert_status "200"
 CANDIDATE_COUNT=$(json_get ".data.items | length")
 log_info "Candidate count: ${CANDIDATE_COUNT:-0}"
 
-log_step "2.3 — POST /dispatch/assign"
+log_step "2.4 — POST /dispatch/assign"
 ASSIGN_FIXTURE=$(mktemp /tmp/drts-e2e-001-assign-XXXXXX.json)
-trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE"' EXIT
+trap 'rm -f "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE"' EXIT
 
 jq \
   --arg jobId   "$DISPATCH_JOB_ID" \
@@ -124,11 +169,11 @@ http_call POST "/dispatch/assign" "$ASSIGN_FIXTURE"
 assert_status "200|201"
 
 TASK_ID=$(json_get ".data.taskId")
-[[ -z "$TASK_ID" ]] && TASK_ID=$(json_get ".data.dispatchJobId")
-
 if [[ -n "$TASK_ID" ]]; then
   chain_set "ops" "taskId" "$TASK_ID"
   save_evidence "$SCENARIO" "ops" "taskId" "$TASK_ID"
+else
+  log_warn "dispatch/assign response did not include taskId; driver leg will resolve from driver/tasks."
 fi
 
 log_ok "POST /dispatch/assign → HTTP ${RESP_STATUS}, taskId=${TASK_ID:-<not_in_response>}"
@@ -147,7 +192,17 @@ if [[ -z "$TASK_ID_LEG3" ]]; then
   log_step "3.0 — GET /driver/tasks (resolve taskId from driver view)"
   http_call GET "/driver/tasks"
   assert_status "200"
-  TASK_ID_LEG3=$(json_get ".data.items[0].taskId")
+  if [[ -n "${DISPATCH_JOB_ID:-}" ]]; then
+    TASK_ID_LEG3=$(echo "$RESP_BODY" | jq -r --arg jobId "$DISPATCH_JOB_ID" \
+      '.data.items[] | select(.dispatchJobId == $jobId) | .taskId' 2>/dev/null | head -1 || true)
+  fi
+  if [[ -z "$TASK_ID_LEG3" && -n "${ORDER_ID:-}" ]]; then
+    TASK_ID_LEG3=$(echo "$RESP_BODY" | jq -r --arg oid "$ORDER_ID" \
+      '.data.items[] | select(.orderId == $oid) | .taskId' 2>/dev/null | head -1 || true)
+  fi
+  if [[ -z "$TASK_ID_LEG3" ]]; then
+    TASK_ID_LEG3=$(json_get ".data.items[0].taskId")
+  fi
 fi
 
 if [[ -z "$TASK_ID_LEG3" ]]; then
@@ -161,7 +216,7 @@ NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 log_step "3.1 — POST /driver/tasks/:taskId/accept"
 ACCEPT_FIXTURE=$(mktemp /tmp/drts-e2e-001-accept-XXXXXX.json)
-trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE"' EXIT
+trap 'rm -f "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE"' EXIT
 jq --arg ts "$NOW" '.acceptedAt = $ts' \
   "${SCRIPT_DIR}/fixtures/e2e-driver-accept.json" > "$ACCEPT_FIXTURE"
 
@@ -183,7 +238,7 @@ log_ok "Task status = ${TASK_STATUS_AFTER_ACCEPT}"
 
 log_step "3.3 — POST /driver/tasks/:taskId/depart"
 DEPART_FIXTURE=$(mktemp /tmp/drts-e2e-001-depart-XXXXXX.json)
-trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE"' EXIT
+trap 'rm -f "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE"' EXIT
 jq --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '.departedAt = $ts' \
   "${SCRIPT_DIR}/fixtures/e2e-driver-depart.json" > "$DEPART_FIXTURE"
 http_call POST "/driver/tasks/${TASK_ID_LEG3}/depart" "$DEPART_FIXTURE"
@@ -192,7 +247,7 @@ log_ok "Depart pickup sent"
 
 log_step "3.4 — POST /driver/tasks/:taskId/arrived_pickup"
 ARRIVE_FIXTURE=$(mktemp /tmp/drts-e2e-001-arrive-XXXXXX.json)
-trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE"' EXIT
+trap 'rm -f "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE"' EXIT
 jq --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '.arrivedAt = $ts' \
   "${SCRIPT_DIR}/fixtures/e2e-driver-arrived-pickup.json" > "$ARRIVE_FIXTURE"
 http_call POST "/driver/tasks/${TASK_ID_LEG3}/arrived_pickup" "$ARRIVE_FIXTURE"
@@ -201,7 +256,7 @@ log_ok "Arrived at pickup"
 
 log_step "3.5 — POST /driver/tasks/:taskId/start"
 START_FIXTURE=$(mktemp /tmp/drts-e2e-001-start-XXXXXX.json)
-trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE" "$START_FIXTURE"' EXIT
+trap 'rm -f "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE" "$START_FIXTURE"' EXIT
 jq --arg ts "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" '.startedAt = $ts' \
   "${SCRIPT_DIR}/fixtures/e2e-driver-start.json" > "$START_FIXTURE"
 http_call POST "/driver/tasks/${TASK_ID_LEG3}/start" "$START_FIXTURE"
@@ -211,7 +266,7 @@ log_ok "Trip started"
 log_step "3.6 — POST /driver/tasks/:taskId/complete"
 COMPLETED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 COMPLETE_FIXTURE=$(mktemp /tmp/drts-e2e-001-complete-XXXXXX.json)
-trap 'rm -f "$BOOKING_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE" "$START_FIXTURE" "$COMPLETE_FIXTURE"' EXIT
+trap 'rm -f "$BOOKING_FIXTURE" "$DISPATCH_FIXTURE" "$ASSIGN_FIXTURE" "$ACCEPT_FIXTURE" "$DEPART_FIXTURE" "$ARRIVE_FIXTURE" "$START_FIXTURE" "$COMPLETE_FIXTURE"' EXIT
 
 jq --arg ts "$COMPLETED_AT" \
    '.completedAt = $ts | .signoff.signedAt = $ts' \
@@ -275,8 +330,8 @@ assert_status "200"
 log_ok "Invoice retrievable"
 
 log_step "4.4 — GET /audit (verify audit entries exist)"
-# Switch to platform_admin for the platform-level audit endpoint
-switch_actor "platform_admin" "e2e-platform-admin-001"
+# Use the same ops-user preset that carries dispatch + audit scopes on live staging.
+switch_actor "ops_user" "e2e-ops-001"
 http_call GET "/audit"
 assert_status "200"
 AUDIT_COUNT=$(json_get ".data.items | length")
@@ -293,6 +348,7 @@ save_evidence "$SCENARIO" "audit" "entryCount" "${AUDIT_COUNT:-0}"
 log_step "Chain continuity assertions"
 assert_chain "tenant"  "bookingId"
 assert_chain "tenant"  "tenantId"
+assert_chain "tenant"  "orderId"
 assert_chain "ops"     "dispatchJobId"
 assert_chain "driver"  "taskId"
 assert_chain "billing" "invoiceId"

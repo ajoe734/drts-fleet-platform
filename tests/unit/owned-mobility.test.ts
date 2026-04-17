@@ -375,6 +375,41 @@ describe("owned mobility service", () => {
     vi.useRealTimers();
   });
 
+  it("requires an explicit dispatch step before reservation bookings appear in the dispatch queue", () => {
+    const { ownedMobilityService } = createService();
+    const booking = ownedMobilityService.createTenantBooking({
+      businessDispatchSubtype: "enterprise_dispatch",
+      pickup: {
+        address: "台北市信義區松仁路100號",
+      },
+      dropoff: {
+        address: "桃園機場第二航廈",
+      },
+      reservationWindowStart: "2026-04-16T10:00:00Z",
+      reservationWindowEnd: "2026-04-16T10:20:00Z",
+      passenger: {
+        name: "王小明",
+        phone: "0912000111",
+      },
+    });
+
+    expect(booking.status).toBe("created");
+    expect(ownedMobilityService.listDispatchJobs()).toHaveLength(0);
+
+    const dispatchJob = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+
+    expect(dispatchJob.status).toBe("reserved");
+    expect(ownedMobilityService.listDispatchJobs()).toHaveLength(1);
+    expect(ownedMobilityService.listDispatchJobs()[0]?.orderId).toBe(
+      booking.orderId,
+    );
+    expect(ownedMobilityService.getOrder(booking.orderId).status).toBe(
+      "preassigned",
+    );
+  });
+
   it("rejects tenant booking changes after modifiable_until", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-15T08:00:00Z"));
