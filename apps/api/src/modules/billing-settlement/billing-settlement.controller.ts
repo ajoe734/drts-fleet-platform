@@ -17,7 +17,11 @@ import type {
   UpdateTenantBillingProfileCommand,
 } from "@drts/contracts";
 
-import { toApiListData, toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiListData,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
 import { BillingSettlementService } from "./billing-settlement.service";
 
 @Controller()
@@ -26,10 +30,28 @@ export class BillingSettlementController {
     private readonly billingSettlementService: BillingSettlementService,
   ) {}
 
+  private requireTenantId(tenantId?: string) {
+    const normalizedTenantId = tenantId?.trim();
+    if (!normalizedTenantId) {
+      throw new ApiRequestError(
+        400,
+        "TENANT_ID_REQUIRED",
+        "x-tenant-id header is required for tenant billing endpoints.",
+      );
+    }
+
+    return normalizedTenantId;
+  }
+
   @Get("tenant/billing/profile")
-  getTenantBillingProfile(@Headers("x-request-id") requestId?: string) {
+  getTenantBillingProfile(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.getTenantBillingProfile(),
+      this.billingSettlementService.getTenantBillingProfile(
+        this.requireTenantId(tenantId),
+      ),
       requestId,
     );
   }
@@ -37,10 +59,12 @@ export class BillingSettlementController {
   @Post("tenant/billing/profile")
   updateTenantBillingProfile(
     @Body() command: UpdateTenantBillingProfileCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.billingSettlementService.updateTenantBillingProfile(
+        this.requireTenantId(tenantId),
         command,
         requestId,
       ),
@@ -51,10 +75,12 @@ export class BillingSettlementController {
   @Post("tenant/invoices/generate")
   async generateTenantInvoice(
     @Body() command: GenerateTenantInvoiceCommand,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       await this.billingSettlementService.generateTenantInvoice(
+        this.requireTenantId(tenantId),
         command,
         requestId,
       ),
@@ -63,18 +89,27 @@ export class BillingSettlementController {
   }
 
   @Get("tenant/invoices")
-  listTenantInvoices(@Headers("x-request-id") requestId?: string) {
-    const items = this.billingSettlementService.listTenantInvoices();
+  listTenantInvoices(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.billingSettlementService.listTenantInvoices(
+      this.requireTenantId(tenantId),
+    );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/invoices/:invoiceId")
   getTenantInvoice(
     @Param("invoiceId") invoiceId: string,
+    @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.billingSettlementService.getTenantInvoice(invoiceId),
+      this.billingSettlementService.getTenantInvoice(
+        this.requireTenantId(tenantId),
+        invoiceId,
+      ),
       requestId,
     );
   }

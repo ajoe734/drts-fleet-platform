@@ -19,6 +19,7 @@ describe("billing settlement service", () => {
     const { auditService, billingSettlementService } = createService();
 
     const profile = billingSettlementService.updateTenantBillingProfile(
+      "tenant-demo-001",
       {
         invoiceTitle: "Demo Tenant Co., Ltd.",
         taxId: "24567891",
@@ -30,6 +31,7 @@ describe("billing settlement service", () => {
     );
 
     const invoice = await billingSettlementService.generateTenantInvoice(
+      "tenant-demo-001",
       {
         tenantId: "tenant-demo-001",
         periodStart: "2026-03-01T00:00:00Z",
@@ -46,12 +48,90 @@ describe("billing settlement service", () => {
     expect(invoice.artifactDownloadMetadata.signatureVersion).toBe(1);
     expect(invoice.amount.amountMinor).toBe(350000);
     expect(
-      billingSettlementService.getTenantInvoice(invoice.invoiceId).invoiceId,
+      billingSettlementService.getTenantInvoice(
+        "tenant-demo-001",
+        invoice.invoiceId,
+      ).invoiceId,
     ).toBe(invoice.invoiceId);
-    expect(billingSettlementService.listTenantInvoices()).toHaveLength(1);
+    expect(
+      billingSettlementService.listTenantInvoices("tenant-demo-001"),
+    ).toHaveLength(1);
     expect(auditService.listAuditLogs()[0]?.actionName).toBe(
       "generate_tenant_invoice",
     );
+  });
+
+  it("keeps tenant billing profiles and invoice reads isolated by tenant id", async () => {
+    const { billingSettlementService } = createService();
+
+    billingSettlementService.updateTenantBillingProfile("tenant-demo-001", {
+      invoiceTitle: "Tenant Demo Billing",
+      taxId: "11112222",
+      address: "Alpha Road",
+      contactName: "Alpha Owner",
+      email: "billing@alpha.example.com",
+    });
+    billingSettlementService.updateTenantBillingProfile("tenant-beta", {
+      invoiceTitle: "Tenant Beta Billing",
+      taxId: "33334444",
+      address: "Beta Road",
+      contactName: "Beta Owner",
+      email: "billing@beta.example.com",
+    });
+
+    const alphaInvoice = await billingSettlementService.generateTenantInvoice(
+      "tenant-demo-001",
+      {
+        tenantId: "tenant-demo-001",
+        periodStart: "2026-03-01T00:00:00Z",
+        periodEnd: "2026-03-31T23:59:59Z",
+      },
+    );
+
+    expect(
+      billingSettlementService.getTenantBillingProfile("tenant-demo-001")
+        .invoiceTitle,
+    ).toBe("Tenant Demo Billing");
+    expect(
+      billingSettlementService.getTenantBillingProfile("tenant-beta")
+        .invoiceTitle,
+    ).toBe("Tenant Beta Billing");
+    expect(
+      billingSettlementService.listTenantInvoices("tenant-demo-001"),
+    ).toEqual([
+      expect.objectContaining({
+        invoiceId: alphaInvoice.invoiceId,
+        tenantId: "tenant-demo-001",
+      }),
+    ]);
+    expect(billingSettlementService.listTenantInvoices("tenant-beta")).toEqual(
+      [],
+    );
+
+    expect(() =>
+      billingSettlementService.getTenantInvoice(
+        "tenant-beta",
+        alphaInvoice.invoiceId,
+      ),
+    ).toThrow();
+  });
+
+  it("rejects tenant invoice generation when x-tenant-id and command tenantId diverge", async () => {
+    const { billingSettlementService } = createService();
+
+    await expect(
+      billingSettlementService.generateTenantInvoice("tenant-alpha", {
+        tenantId: "tenant-beta",
+        periodStart: "2026-03-01T00:00:00Z",
+        periodEnd: "2026-03-31T23:59:59Z",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "TENANT_SCOPE_MISMATCH",
+        },
+      },
+    });
   });
 
   it("generates a tenant invoice from live completed owned trips when persistence is enabled", async () => {
@@ -60,7 +140,7 @@ describe("billing settlement service", () => {
     const repository = {
       isEnabled: vi.fn(() => true),
       loadState: vi.fn(async () => ({
-        tenantBillingProfile: null,
+        tenantBillingProfiles: [],
         tenantInvoices: [],
         driverFeePlans: [],
         driverStatements: [],
@@ -89,6 +169,7 @@ describe("billing settlement service", () => {
     await billingSettlementService.onModuleInit();
 
     const invoice = await billingSettlementService.generateTenantInvoice(
+      "10000000-0000-0000-0000-000000000201",
       {
         tenantId: "10000000-0000-0000-0000-000000000201",
         periodStart: "2026-04-17T00:00:00Z",
@@ -268,15 +349,17 @@ describe("billing settlement service", () => {
     const persistChanges = vi.fn(async () => undefined);
     const repository = {
       loadState: vi.fn(async () => ({
-        tenantBillingProfile: {
-          tenantId: "tenant-demo-001",
-          invoiceTitle: "Persisted Billing Profile",
-          taxId: "99887766",
-          address: "Taichung Harbor",
-          contactName: "Persisted Owner",
-          email: "persisted@example.com",
-          updatedAt: "2026-03-01T00:00:00Z",
-        },
+        tenantBillingProfiles: [
+          {
+            tenantId: "tenant-demo-001",
+            invoiceTitle: "Persisted Billing Profile",
+            taxId: "99887766",
+            address: "Taichung Harbor",
+            contactName: "Persisted Owner",
+            email: "persisted@example.com",
+            updatedAt: "2026-03-01T00:00:00Z",
+          },
+        ],
         tenantInvoices: [],
         driverFeePlans: [],
         driverStatements: [],
@@ -294,7 +377,8 @@ describe("billing settlement service", () => {
     await billingSettlementService.onModuleInit();
 
     expect(
-      billingSettlementService.getTenantBillingProfile().invoiceTitle,
+      billingSettlementService.getTenantBillingProfile("tenant-demo-001")
+        .invoiceTitle,
     ).toBe("Persisted Billing Profile");
 
     billingSettlementService.publishDriverFeePlan({

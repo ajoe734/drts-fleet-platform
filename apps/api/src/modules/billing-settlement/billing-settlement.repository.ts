@@ -36,7 +36,7 @@ export type LiveSettlementTripRecord = {
 };
 
 export type BillingSettlementState = {
-  tenantBillingProfile: TenantBillingProfile | null;
+  tenantBillingProfiles: TenantBillingProfile[];
   tenantInvoices: StoredTenantInvoiceRecord[];
   driverFeePlans: DriverFeePlanRecord[];
   driverStatements: DriverStatementRecord[];
@@ -44,7 +44,7 @@ export type BillingSettlementState = {
 };
 
 export type PersistBillingSettlementChanges = {
-  tenantBillingProfile?: TenantBillingProfile;
+  tenantBillingProfiles?: readonly TenantBillingProfile[];
   tenantInvoices?: readonly StoredTenantInvoiceRecord[];
   driverFeePlans?: readonly DriverFeePlanRecord[];
   driverStatements?: readonly DriverStatementRecord[];
@@ -64,7 +64,7 @@ export class BillingSettlementRepository {
   async loadState(): Promise<BillingSettlementState> {
     if (!this.isEnabled()) {
       return {
-        tenantBillingProfile: null,
+        tenantBillingProfiles: [],
         tenantInvoices: [],
         driverFeePlans: [],
         driverStatements: [],
@@ -84,7 +84,6 @@ export class BillingSettlementRepository {
           SELECT record
           FROM billing.phase1_tenant_billing_profiles
           ORDER BY updated_at DESC
-          LIMIT 1
         `,
       ),
       this.databaseService!.query<JsonRecordRow>(
@@ -118,12 +117,12 @@ export class BillingSettlementRepository {
     ]);
 
     return {
-      tenantBillingProfile: profileResult.rows[0]
-        ? this.parseRecord<TenantBillingProfile>(
-            profileResult.rows[0].record,
-            "billing.phase1_tenant_billing_profiles",
-          )
-        : null,
+      tenantBillingProfiles: profileResult.rows.map((row) =>
+        this.parseRecord<TenantBillingProfile>(
+          row.record,
+          "billing.phase1_tenant_billing_profiles",
+        ),
+      ),
       tenantInvoices: invoicesResult.rows.map((row) =>
         this.parseRecord<StoredTenantInvoiceRecord>(
           row.record,
@@ -211,7 +210,7 @@ export class BillingSettlementRepository {
 
     const writes: Promise<unknown>[] = [];
 
-    if (changes.tenantBillingProfile) {
+    for (const profile of changes.tenantBillingProfiles ?? []) {
       writes.push(
         this.databaseService!.query(
           `
@@ -226,11 +225,7 @@ export class BillingSettlementRepository {
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
           `,
-          [
-            changes.tenantBillingProfile.tenantId,
-            changes.tenantBillingProfile.updatedAt,
-            JSON.stringify(changes.tenantBillingProfile),
-          ],
+          [profile.tenantId, profile.updatedAt, JSON.stringify(profile)],
         ),
       );
     }

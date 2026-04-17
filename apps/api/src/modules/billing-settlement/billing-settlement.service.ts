@@ -138,15 +138,9 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
 
 @Injectable()
 export class BillingSettlementService implements OnModuleInit {
-  private tenantBillingProfile: TenantBillingProfile = {
-    tenantId: DEMO_TENANT_ID,
-    invoiceTitle: "DRTS Fleet Platform Demo Tenant",
-    taxId: "12345678",
-    address: "Taichung Port District",
-    contactName: "Tenant Billing Owner",
-    email: "billing@tenant-demo.example.com",
-    updatedAt: "2026-03-01T00:00:00Z",
-  };
+  private tenantBillingProfiles = new Map<string, TenantBillingProfile>([
+    [DEMO_TENANT_ID, this.createDefaultBillingProfile(DEMO_TENANT_ID)],
+  ]);
 
   private tenantInvoices: StoredTenantInvoice[] = [];
 
@@ -189,7 +183,7 @@ export class BillingSettlementService implements OnModuleInit {
     try {
       const persistedState = await this.billingSettlementRepository.loadState();
       const hasPersistedState =
-        persistedState.tenantBillingProfile !== null ||
+        persistedState.tenantBillingProfiles.length > 0 ||
         persistedState.tenantInvoices.length > 0 ||
         persistedState.driverFeePlans.length > 0 ||
         persistedState.driverStatements.length > 0 ||
@@ -198,20 +192,19 @@ export class BillingSettlementService implements OnModuleInit {
       if (!hasPersistedState) {
         this.persistChanges(
           {
-            tenantBillingProfile: this.cloneBillingProfile(
-              this.tenantBillingProfile,
-            ),
+            tenantBillingProfiles: this.listStoredTenantBillingProfiles(),
           },
           "module init bootstrap",
         );
         return;
       }
 
-      if (persistedState.tenantBillingProfile) {
-        this.tenantBillingProfile = this.cloneBillingProfile(
-          persistedState.tenantBillingProfile,
-        );
-      }
+      this.tenantBillingProfiles = new Map(
+        persistedState.tenantBillingProfiles.map((profile) => [
+          profile.tenantId,
+          this.cloneBillingProfile(profile),
+        ]),
+      );
       this.tenantInvoices = persistedState.tenantInvoices.map((invoice) =>
         this.cloneInvoice(invoice),
       );
@@ -232,19 +225,20 @@ export class BillingSettlementService implements OnModuleInit {
     }
   }
 
-  getTenantBillingProfile() {
-    return this.cloneBillingProfile(this.tenantBillingProfile);
+  getTenantBillingProfile(tenantId: string) {
+    return this.cloneBillingProfile(this.requireTenantBillingProfile(tenantId));
   }
 
   updateTenantBillingProfile(
+    tenantId: string,
     command: UpdateTenantBillingProfileCommand,
     requestId?: string,
   ) {
     this.assertNonBlank(command.invoiceTitle, "invoiceTitle");
     this.assertNonBlank(command.email, "email");
 
-    this.tenantBillingProfile = {
-      tenantId: DEMO_TENANT_ID,
+    const profile: TenantBillingProfile = {
+      tenantId,
       invoiceTitle: command.invoiceTitle,
       taxId: command.taxId?.trim() || null,
       address: command.address?.trim() || null,
@@ -252,11 +246,10 @@ export class BillingSettlementService implements OnModuleInit {
       email: command.email,
       updatedAt: new Date().toISOString(),
     };
+    this.tenantBillingProfiles.set(tenantId, this.cloneBillingProfile(profile));
     this.persistChanges(
       {
-        tenantBillingProfile: this.cloneBillingProfile(
-          this.tenantBillingProfile,
-        ),
+        tenantBillingProfiles: [this.cloneBillingProfile(profile)],
       },
       "update_tenant_billing_profile",
     );
@@ -265,26 +258,28 @@ export class BillingSettlementService implements OnModuleInit {
       {
         actorId: null,
         actorType: "tenant_admin",
-        tenantId: DEMO_TENANT_ID,
+        tenantId,
         moduleName: "billing-settlement",
         actionName: "update_tenant_billing_profile",
         resourceType: "tenant_billing_profile",
-        resourceId: DEMO_TENANT_ID,
+        resourceId: tenantId,
         newValuesSummary: {
-          invoiceTitle: this.tenantBillingProfile.invoiceTitle,
-          email: this.tenantBillingProfile.email,
+          invoiceTitle: profile.invoiceTitle,
+          email: profile.email,
         },
       },
       requestId,
     );
 
-    return this.getTenantBillingProfile();
+    return this.getTenantBillingProfile(tenantId);
   }
 
   async generateTenantInvoice(
+    tenantId: string,
     command: GenerateTenantInvoiceCommand,
     requestId?: string,
   ) {
+    this.assertTenantScope(tenantId, command.tenantId);
     this.assertClosedPeriod(command.periodStart, command.periodEnd);
 
     const existingInvoice = this.tenantInvoices.find(
@@ -397,13 +392,16 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneInvoice(invoice);
   }
 
-  listTenantInvoices() {
-    return this.tenantInvoices.map((invoice) => this.cloneInvoice(invoice));
+  listTenantInvoices(tenantId: string) {
+    return this.tenantInvoices
+      .filter((invoice) => invoice.tenantId === tenantId)
+      .map((invoice) => this.cloneInvoice(invoice));
   }
 
-  getTenantInvoice(invoiceId: string) {
+  getTenantInvoice(tenantId: string, invoiceId: string) {
     const invoice = this.tenantInvoices.find(
-      (candidate) => candidate.invoiceId === invoiceId,
+      (candidate) =>
+        candidate.invoiceId === invoiceId && candidate.tenantId === tenantId,
     );
     if (!invoice) {
       throw new ApiRequestError(
@@ -1057,6 +1055,84 @@ export class BillingSettlementService implements OnModuleInit {
 
   private toPeriodMonth(dateTime: string) {
     return dateTime.slice(0, 7);
+  }
+
+  private getPeriodMonthRange(periodMonth: string) {
+    const periodStart = `${periodMonth}-01T00:00:00.000Z`;
+    const start = new Date(periodStart);
+    if (
+      Number.isNaN(start.getTime()) ||
+      this.toPeriodMonth(periodStart) !== periodMonth
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "periodMonth must be in YYYY-MM format.",
+        {
+          periodMonth,
+        },
+      );
+    }
+
+    const periodEnd = new Date(
+      Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1, 0, 0, 0, -1),
+    ).toISOString();
+
+    return {
+      periodStart,
+      periodEnd,
+    };
+  }
+
+  private createDefaultBillingProfile(tenantId: string): TenantBillingProfile {
+    const normalizedTenantId = tenantId.trim() || DEMO_TENANT_ID;
+    const emailLocalPart = normalizedTenantId
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    return {
+      tenantId: normalizedTenantId,
+      invoiceTitle:
+        normalizedTenantId === DEMO_TENANT_ID
+          ? "DRTS Fleet Platform Demo Tenant"
+          : `Tenant ${normalizedTenantId}`,
+      taxId: normalizedTenantId === DEMO_TENANT_ID ? "12345678" : null,
+      address:
+        normalizedTenantId === DEMO_TENANT_ID ? "Taichung Port District" : null,
+      contactName: "Tenant Billing Owner",
+      email: `billing@${emailLocalPart || "tenant"}.example.com`,
+      updatedAt: "2026-03-01T00:00:00Z",
+    };
+  }
+
+  private requireTenantBillingProfile(tenantId: string) {
+    return (
+      this.tenantBillingProfiles.get(tenantId) ??
+      this.createDefaultBillingProfile(tenantId)
+    );
+  }
+
+  private listStoredTenantBillingProfiles() {
+    return [...this.tenantBillingProfiles.values()].map((profile) =>
+      this.cloneBillingProfile(profile),
+    );
+  }
+
+  private assertTenantScope(headerTenantId: string, commandTenantId: string) {
+    if (headerTenantId === commandTenantId) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "TENANT_SCOPE_MISMATCH",
+      "Tenant invoice command tenantId must match x-tenant-id.",
+      {
+        tenantId: headerTenantId,
+        commandTenantId,
+      },
+    );
   }
 
   private sumMoney(amounts: MoneyAmount[]) {
