@@ -19,9 +19,19 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow DRTS Driver App to access your location while a trip is active so it can calculate trip distance and duration."
+          "locationWhenInUsePermission": "Allow DRTS Driver App to access your location while a trip is active so it can calculate trip distance and duration.",
+          "locationAlwaysAndWhenInUsePermission": "Allow DRTS Driver App to keep using your location for active-trip heartbeat updates even when the app is backgrounded.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true
         }
       ]
-    ]
+    ],
+    "android": {
+      "permissions": [
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
+      ]
+    }
   }
 }

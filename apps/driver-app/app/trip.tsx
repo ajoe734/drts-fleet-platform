@@ -29,7 +29,12 @@ import {
   roundTripDistanceKm,
   type TripCoordinate,
 } from "@/lib/trip-metrics";
-import * as Location from "expo-location";
+import {
+  getLatestDriverLocationUpdate,
+  stopDriverLocationHeartbeat,
+  subscribeToDriverLocationUpdates,
+  syncDriverLocationHeartbeat,
+} from "@/lib/driver-location-heartbeat";
 
 function PlatformBadge({ platform }: { platform: string | null }) {
   const label = platform ?? "direct";
@@ -141,9 +146,6 @@ export default function TripScreen() {
     string | null
   >(null);
   const [trackingRetryKey, setTrackingRetryKey] = useState(0);
-  const locationSubscriptionRef = useRef<Location.LocationSubscription | null>(
-    null,
-  );
   const lastTrackedCoordinateRef = useRef<TripCoordinate | null>(null);
   const tripStartTimeRef = useRef<number | null>(null);
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
@@ -172,12 +174,6 @@ export default function TripScreen() {
       clearInterval(durationIntervalRef.current);
       durationIntervalRef.current = null;
     }
-  }
-
-  function stopLocationTracking() {
-    locationSubscriptionRef.current?.remove();
-    locationSubscriptionRef.current = null;
-    lastTrackedCoordinateRef.current = null;
   }
 
   function syncTripMetricsFromTask(task: DriverTaskRecord | null) {
@@ -260,78 +256,42 @@ export default function TripScreen() {
 
   useEffect(() => {
     if (!isTripInProgress) {
-      stopLocationTracking();
+      lastTrackedCoordinateRef.current = null;
       setLocationTrackingState("idle");
       setLocationTrackingMessage(null);
+      void stopDriverLocationHeartbeat();
       return;
     }
 
     let cancelled = false;
 
     const beginLocationTracking = async () => {
-      stopLocationTracking();
       setLocationTrackingState("requesting_permission");
       setLocationTrackingMessage(null);
 
       try {
-        const permission = await Location.requestForegroundPermissionsAsync();
-        if (cancelled) {
-          return;
-        }
-
-        if (!permission.granted) {
-          setLocationTrackingState("permission_denied");
-          setLocationTrackingMessage(
-            "Location access is required while a trip is active so distance and duration can be recorded.",
-          );
-          return;
-        }
-
-        const initialPosition = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        }).catch(() => null);
-        if (cancelled) {
-          return;
-        }
-
-        if (initialPosition) {
-          lastTrackedCoordinateRef.current = {
-            latitude: initialPosition.coords.latitude,
-            longitude: initialPosition.coords.longitude,
-          };
-        }
-
-        const subscription = await Location.watchPositionAsync(
-          {
-            accuracy: Location.Accuracy.Balanced,
-            distanceInterval: 25,
-            timeInterval: 10000,
-          },
-          (position) => {
-            const nextCoordinate = {
-              latitude: position.coords.latitude,
-              longitude: position.coords.longitude,
-            };
-
-            setLiveDistanceKm((currentDistanceKm) => {
-              const updatedDistanceKm = accumulateTripDistanceKm(
-                currentDistanceKm,
-                lastTrackedCoordinateRef.current,
-                nextCoordinate,
-              );
-              lastTrackedCoordinateRef.current = nextCoordinate;
-              return updatedDistanceKm;
-            });
-          },
+        const result = await syncDriverLocationHeartbeat(
+          taskDetail
+            ? {
+                taskId: taskDetail.taskId,
+                driverId: taskDetail.driverId,
+              }
+            : null,
         );
 
         if (cancelled) {
-          subscription.remove();
           return;
         }
 
-        locationSubscriptionRef.current = subscription;
-        setLocationTrackingState("active");
+        if (result.latestUpdate) {
+          lastTrackedCoordinateRef.current = {
+            latitude: result.latestUpdate.latitude,
+            longitude: result.latestUpdate.longitude,
+          };
+        }
+
+        setLocationTrackingState(result.status);
+        setLocationTrackingMessage(result.message);
       } catch (trackingError) {
         if (cancelled) {
           return;
@@ -346,9 +306,40 @@ export default function TripScreen() {
 
     return () => {
       cancelled = true;
-      stopLocationTracking();
     };
   }, [isTripInProgress, taskDetail?.taskId, trackingRetryKey]);
+
+  useEffect(() => {
+    if (!isTripInProgress) {
+      lastTrackedCoordinateRef.current = null;
+      return;
+    }
+
+    const seededUpdate = getLatestDriverLocationUpdate();
+    if (seededUpdate) {
+      lastTrackedCoordinateRef.current = {
+        latitude: seededUpdate.latitude,
+        longitude: seededUpdate.longitude,
+      };
+    }
+
+    return subscribeToDriverLocationUpdates((update) => {
+      const nextCoordinate = {
+        latitude: update.latitude,
+        longitude: update.longitude,
+      };
+
+      setLiveDistanceKm((currentDistanceKm) => {
+        const updatedDistanceKm = accumulateTripDistanceKm(
+          currentDistanceKm,
+          lastTrackedCoordinateRef.current,
+          nextCoordinate,
+        );
+        lastTrackedCoordinateRef.current = nextCoordinate;
+        return updatedDistanceKm;
+      });
+    });
+  }, [isTripInProgress, taskDetail?.taskId]);
 
   async function requestPhotoPermission(
     source: "camera" | "library",
@@ -499,11 +490,12 @@ export default function TripScreen() {
       }
 
       if (action === "complete") {
-        stopLocationTracking();
+        await stopDriverLocationHeartbeat();
         clearDurationTicker();
         setLocationTrackingState("idle");
         setLocationTrackingMessage(null);
         setProofPhotos([]);
+        lastTrackedCoordinateRef.current = null;
       }
 
       Alert.alert("Success", `Task ${action} successful`);
@@ -576,7 +568,8 @@ export default function TripScreen() {
               </View>
               {isTripInProgress && locationTrackingState === "active" && (
                 <Text style={styles.metricHint}>
-                  Live location tracking is active for this trip.
+                  {locationTrackingMessage ??
+                    "Live location tracking is active for this trip."}
                 </Text>
               )}
               {isTripInProgress &&
@@ -591,7 +584,7 @@ export default function TripScreen() {
                   <>
                     <Text style={styles.metricWarning}>
                       {locationTrackingMessage ??
-                        "Trip metrics could not start. Retry location tracking before completing the trip."}
+                        "Trip metrics could not start. Retry location tracking. You can still complete the trip once foreground tracking is available."}
                     </Text>
                     <ActionButton
                       label="Retry Tracking"
