@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
 
 import type {
   ActivateInsurancePolicyCommand,
@@ -6,13 +15,17 @@ import type {
   ApproveExclusivityCommand,
   CreateInsurancePolicyCommand,
   CreateVehicleContractCommand,
+  DriverLocationHeartbeatCommand,
   RegulatoryRegistrySummary,
   SubmitExclusivityReviewCommand,
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
 import { RegulatoryRegistryService } from "./regulatory-registry.service";
 
 @Controller("regulatory-registry")
@@ -75,6 +88,34 @@ export class RegulatoryRegistryController {
       {
         items: this.regulatoryRegistryService.listDrivers(),
       },
+      requestId,
+    );
+  }
+
+  @Post("driver-location")
+  async recordDriverLocation(
+    @Body() command: DriverLocationHeartbeatCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.regulatoryRegistryService.recordDriverLocation(command),
+      requestId,
+    );
+  }
+
+  @Get("driver-eta")
+  async getDriverEta(
+    @Query("driverId") driverId: string,
+    @Query("destLat") destLat: string,
+    @Query("destLng") destLng: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.regulatoryRegistryService.getDriverEta(
+        driverId,
+        this.parseFiniteQueryNumber(destLat, "destLat"),
+        this.parseFiniteQueryNumber(destLng, "destLng"),
+      ),
       requestId,
     );
   }
@@ -202,5 +243,33 @@ export class RegulatoryRegistryController {
       this.regulatoryRegistryService.approveExclusivity(vehicleId, command),
       requestId,
     );
+  }
+
+  private parseFiniteQueryNumber(value: string, fieldName: string): number {
+    const normalizedValue = value.trim();
+    if (normalizedValue.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_NUMBER",
+        `${fieldName} must be a finite number.`,
+        {
+          field: fieldName,
+        },
+      );
+    }
+
+    const numericValue = Number(normalizedValue);
+    if (!Number.isFinite(numericValue)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_NUMBER",
+        `${fieldName} must be a finite number.`,
+        {
+          field: fieldName,
+        },
+      );
+    }
+
+    return numericValue;
   }
 }

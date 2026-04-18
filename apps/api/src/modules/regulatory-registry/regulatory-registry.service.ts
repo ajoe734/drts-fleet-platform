@@ -9,6 +9,9 @@ import type {
   CreateInsurancePolicyCommand,
   CreateVehicleContractCommand,
   DispatchExclusivityRecord,
+  DriverEtaResponse,
+  DriverLocationHeartbeatCommand,
+  DriverLocationSnapshot,
   DriverRegistryRecord,
   InsurancePolicyRecord,
   Phase1ServiceBucket,
@@ -25,6 +28,9 @@ import {
   type PersistRegulatoryRegistryChanges,
   type RegulatorySupplyPair,
 } from "./regulatory-registry.repository";
+
+const EARTH_RADIUS_KM = 6371;
+const AVERAGE_SPEED_KMH = 30;
 
 const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
@@ -273,6 +279,73 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
   listDrivers() {
     return this.drivers.map((driver) => ({ ...driver }));
+  }
+
+  async recordDriverLocation(
+    command: DriverLocationHeartbeatCommand,
+  ): Promise<{ success: true }> {
+    this.assertNonBlank(command.driverId, "driverId");
+    this.assertCoordinate(command.lat, "lat", -90, 90);
+    this.assertCoordinate(command.lng, "lng", -180, 180);
+    this.assertOptionalNonNegativeNumber(command.accuracyM, "accuracyM");
+    this.requireDriver(command.driverId);
+
+    await this.requireLocationRepository().upsertDriverLocation({
+      driverId: command.driverId.trim(),
+      lat: command.lat,
+      lng: command.lng,
+      ...(command.accuracyM === undefined
+        ? {}
+        : { accuracyM: command.accuracyM }),
+    });
+
+    return { success: true };
+  }
+
+  async getDriverEta(
+    driverId: string,
+    destLat: number,
+    destLng: number,
+  ): Promise<DriverEtaResponse> {
+    this.assertNonBlank(driverId, "driverId");
+    this.assertCoordinate(destLat, "destLat", -90, 90);
+    this.assertCoordinate(destLng, "destLng", -180, 180);
+    this.requireDriver(driverId);
+
+    const driverLocation =
+      await this.requireLocationRepository().findLatestDriverLocation(
+        driverId.trim(),
+      );
+
+    if (!driverLocation) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "DRIVER_LOCATION_NOT_FOUND",
+        "The driver's latest location could not be found.",
+        {
+          driverId,
+        },
+      );
+    }
+
+    const distanceKm = this.calculateHaversineDistanceKm(
+      driverLocation.lat,
+      driverLocation.lng,
+      destLat,
+      destLng,
+    );
+    const etaMinutes = Math.round((distanceKm / AVERAGE_SPEED_KMH) * 60);
+
+    return {
+      driverId: driverLocation.driverId,
+      etaMinutes,
+      calculatedAt: new Date().toISOString(),
+      driverLocation: this.cloneDriverLocation(driverLocation),
+      destination: {
+        lat: destLat,
+        lng: destLng,
+      },
+    };
   }
 
   listContracts() {
@@ -647,6 +720,14 @@ export class RegulatoryRegistryService implements OnModuleInit {
     };
   }
 
+  private cloneDriverLocation(
+    location: DriverLocationSnapshot,
+  ): DriverLocationSnapshot {
+    return {
+      ...location,
+    };
+  }
+
   private normalizeNullableText(value: string | null | undefined) {
     const normalized = value?.trim();
     return normalized ? normalized : null;
@@ -658,6 +739,55 @@ export class RegulatoryRegistryService implements OnModuleInit {
         HttpStatus.BAD_REQUEST,
         "FIELD_REQUIRED",
         `${fieldName} is required.`,
+        {
+          field: fieldName,
+        },
+      );
+    }
+  }
+
+  private assertCoordinate(
+    value: number,
+    fieldName: string,
+    min: number,
+    max: number,
+  ): void {
+    if (!Number.isFinite(value)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_NUMBER",
+        `${fieldName} must be a finite number.`,
+        {
+          field: fieldName,
+        },
+      );
+    }
+    if (value < min || value > max) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_COORDINATE",
+        `${fieldName} must be between ${min} and ${max}.`,
+        {
+          field: fieldName,
+          min,
+          max,
+        },
+      );
+    }
+  }
+
+  private assertOptionalNonNegativeNumber(
+    value: number | undefined,
+    fieldName: string,
+  ): void {
+    if (value === undefined) {
+      return;
+    }
+    if (!Number.isFinite(value) || value < 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_NUMBER",
+        `${fieldName} must be a non-negative finite number.`,
         {
           field: fieldName,
         },
@@ -719,6 +849,18 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return driver;
   }
 
+  private requireLocationRepository(): RegulatoryRegistryRepository {
+    if (!this.regulatoryRegistryRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "DRIVER_LOCATION_STORAGE_UNAVAILABLE",
+        "Driver location storage is not available.",
+      );
+    }
+
+    return this.regulatoryRegistryRepository;
+  }
+
   private requireContract(contractId: string) {
     const contract = this.contracts.find(
       (candidate) => candidate.contractId === contractId,
@@ -769,5 +911,35 @@ export class RegulatoryRegistryService implements OnModuleInit {
           context,
         );
       });
+  }
+
+  private calculateHaversineDistanceKm(
+    originLat: number,
+    originLng: number,
+    destinationLat: number,
+    destinationLng: number,
+  ): number {
+    if (originLat === destinationLat && originLng === destinationLng) {
+      return 0;
+    }
+
+    const latDelta = this.degreesToRadians(destinationLat - originLat);
+    const lngDelta = this.degreesToRadians(destinationLng - originLng);
+    const normalizedOriginLat = this.degreesToRadians(originLat);
+    const normalizedDestinationLat = this.degreesToRadians(destinationLat);
+
+    const haversineTerm =
+      Math.sin(latDelta / 2) ** 2 +
+      Math.cos(normalizedOriginLat) *
+        Math.cos(normalizedDestinationLat) *
+        Math.sin(lngDelta / 2) ** 2;
+    const angularDistance =
+      2 * Math.atan2(Math.sqrt(haversineTerm), Math.sqrt(1 - haversineTerm));
+
+    return EARTH_RADIUS_KM * angularDistance;
+  }
+
+  private degreesToRadians(value: number): number {
+    return (value * Math.PI) / 180;
   }
 }

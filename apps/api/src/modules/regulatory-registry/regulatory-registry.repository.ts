@@ -2,6 +2,8 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
   DispatchExclusivityRecord,
+  DriverLocationHeartbeatCommand,
+  DriverLocationSnapshot,
   DriverRegistryRecord,
   InsurancePolicyRecord,
   VehicleContractRecord,
@@ -36,6 +38,15 @@ export type PersistRegulatoryRegistryChanges = {
   contracts?: readonly VehicleContractRecord[];
   policies?: readonly InsurancePolicyRecord[];
   exclusivities?: readonly DispatchExclusivityRecord[];
+};
+
+type DriverLocationRow = {
+  driver_id: string;
+  lat: number | string;
+  lng: number | string;
+  accuracy_m: number | string | null;
+  recorded_at: Date | string;
+  updated_at: Date | string;
 };
 
 @Injectable()
@@ -357,6 +368,73 @@ export class RegulatoryRegistryRepository {
     await Promise.all(writes);
   }
 
+  async upsertDriverLocation(
+    command: DriverLocationHeartbeatCommand,
+  ): Promise<void> {
+    this.assertDatabaseEnabled("upsert driver location");
+
+    await this.databaseService!.query(
+      `
+        INSERT INTO ops.phase1_driver_locations (
+          driver_id,
+          lat,
+          lng,
+          accuracy_m,
+          recorded_at,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, $4, now(), now()
+        )
+        ON CONFLICT (driver_id) DO UPDATE SET
+          lat = EXCLUDED.lat,
+          lng = EXCLUDED.lng,
+          accuracy_m = EXCLUDED.accuracy_m,
+          recorded_at = now(),
+          updated_at = now()
+      `,
+      [command.driverId, command.lat, command.lng, command.accuracyM ?? null],
+    );
+  }
+
+  async findLatestDriverLocation(
+    driverId: string,
+  ): Promise<DriverLocationSnapshot | null> {
+    this.assertDatabaseEnabled("find latest driver location");
+
+    const result = await this.databaseService!.query<DriverLocationRow>(
+      `
+        SELECT
+          driver_id,
+          lat,
+          lng,
+          accuracy_m,
+          recorded_at,
+          updated_at
+        FROM ops.phase1_driver_locations
+        WHERE driver_id = $1
+        LIMIT 1
+      `,
+      [driverId],
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      driverId: row.driver_id,
+      lat: this.parseNumericValue(row.lat, "lat"),
+      lng: this.parseNumericValue(row.lng, "lng"),
+      accuracyM:
+        row.accuracy_m === null
+          ? null
+          : this.parseNumericValue(row.accuracy_m, "accuracy_m"),
+      recordedAt: this.toIsoString(row.recorded_at),
+      updatedAt: this.toIsoString(row.updated_at),
+    };
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
@@ -374,5 +452,26 @@ export class RegulatoryRegistryRepository {
     }
 
     return record as T;
+  }
+
+  private assertDatabaseEnabled(context: string): void {
+    if (!this.isEnabled()) {
+      throw new Error(`Database service is required to ${context}.`);
+    }
+  }
+
+  private parseNumericValue(value: number | string, fieldName: string): number {
+    const numericValue =
+      typeof value === "number" ? value : Number.parseFloat(value);
+    if (!Number.isFinite(numericValue)) {
+      throw new Error(`Invalid numeric value for ${fieldName}.`);
+    }
+    return numericValue;
+  }
+
+  private toIsoString(value: Date | string): string {
+    return value instanceof Date
+      ? value.toISOString()
+      : new Date(value).toISOString();
   }
 }

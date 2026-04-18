@@ -43,8 +43,10 @@ import type {
   DispatchTraceLogRecord,
   DriverAcceptTaskCommand,
   DriverArrivedPickupCommand,
+  DriverEtaResponse,
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
+  DriverLocationHeartbeatCommand,
   DriverProfileRecord,
   DriverRegistryRecord,
   DriverRejectTaskCommand,
@@ -1063,6 +1065,29 @@ export class ApiClient {
   async listDrivers(): Promise<DriverRegistryRecord[]> {
     return this.getList<DriverRegistryRecord>(
       "/api/regulatory-registry/drivers",
+    );
+  }
+
+  async recordDriverLocation(
+    command: DriverLocationHeartbeatCommand,
+  ): Promise<{ success: true }> {
+    return this.post<{ success: true }>(
+      "/api/regulatory-registry/driver-location",
+      { body: command },
+    );
+  }
+
+  async getDriverEta(
+    driverId: string,
+    destination: { lat: number; lng: number },
+  ): Promise<DriverEtaResponse> {
+    const query = new URLSearchParams({
+      driverId,
+      destLat: destination.lat.toString(),
+      destLng: destination.lng.toString(),
+    });
+    return this.get<DriverEtaResponse>(
+      `/api/regulatory-registry/driver-eta?${query.toString()}`,
     );
   }
 

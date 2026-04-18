@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
+import { RegulatoryRegistryController } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.controller";
 import { RegulatoryRegistryRepository } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 
@@ -251,5 +253,173 @@ describe("regulatory registry service", () => {
         ],
       }),
     );
+  });
+
+  it("writes driver location heartbeats through the repository", async () => {
+    const upsertDriverLocation = vi.fn(async () => undefined);
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      upsertDriverLocation,
+    } as unknown as RegulatoryRegistryRepository;
+    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+
+    await expect(
+      regulatoryRegistryService.recordDriverLocation({
+        driverId: "drv-demo-001",
+        lat: 25.033964,
+        lng: 121.564468,
+        accuracyM: 6,
+      }),
+    ).resolves.toEqual({ success: true });
+
+    expect(upsertDriverLocation).toHaveBeenCalledWith({
+      driverId: "drv-demo-001",
+      lat: 25.033964,
+      lng: 121.564468,
+      accuracyM: 6,
+    });
+  });
+
+  it("rejects invalid heartbeat coordinates before persistence", async () => {
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      upsertDriverLocation: vi.fn(async () => undefined),
+    } as unknown as RegulatoryRegistryRepository;
+    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+
+    await expect(
+      regulatoryRegistryService.recordDriverLocation({
+        driverId: "drv-demo-001",
+        lat: 91,
+        lng: 121.564468,
+      }),
+    ).rejects.toThrowError(ApiRequestError);
+  });
+
+  it("calculates haversine ETA from the latest persisted driver location", async () => {
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      findLatestDriverLocation: vi.fn(async () => ({
+        driverId: "drv-demo-001",
+        lat: 25.033964,
+        lng: 121.564468,
+        accuracyM: 5,
+        recordedAt: "2026-04-18T06:00:00.000Z",
+        updatedAt: "2026-04-18T06:00:00.000Z",
+      })),
+    } as unknown as RegulatoryRegistryRepository;
+    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+
+    const response = await regulatoryRegistryService.getDriverEta(
+      "drv-demo-001",
+      25.04776,
+      121.51706,
+    );
+
+    expect(response.driverId).toBe("drv-demo-001");
+    expect(response.etaMinutes).toBeGreaterThan(0);
+    expect(response.destination).toEqual({
+      lat: 25.04776,
+      lng: 121.51706,
+    });
+    expect(response.driverLocation).toEqual(
+      expect.objectContaining({
+        lat: 25.033964,
+        lng: 121.564468,
+      }),
+    );
+  });
+
+  it("returns 404 semantics when the latest driver location is missing", async () => {
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      findLatestDriverLocation: vi.fn(async () => null),
+    } as unknown as RegulatoryRegistryRepository;
+    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+
+    await expect(
+      regulatoryRegistryService.getDriverEta(
+        "drv-demo-001",
+        25.04776,
+        121.51706,
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: "DRIVER_LOCATION_NOT_FOUND",
+        }),
+      }),
+      status: 404,
+    });
+  });
+});
+
+describe("regulatory registry controller", () => {
+  it("parses strict numeric ETA query parameters before delegating to the service", async () => {
+    const getDriverEta = vi.fn(async () => ({
+      driverId: "drv-demo-001",
+      etaMinutes: 3,
+      calculatedAt: "2026-04-18T06:00:00.000Z",
+      driverLocation: {
+        driverId: "drv-demo-001",
+        lat: 25.033964,
+        lng: 121.564468,
+        accuracyM: 5,
+        recordedAt: "2026-04-18T06:00:00.000Z",
+        updatedAt: "2026-04-18T06:00:00.000Z",
+      },
+      destination: {
+        lat: 25.04776,
+        lng: 121.51706,
+      },
+    }));
+    const controller = new RegulatoryRegistryController({
+      getDriverEta,
+    } as unknown as RegulatoryRegistryService);
+
+    const response = await controller.getDriverEta(
+      "drv-demo-001",
+      "25.04776",
+      "121.51706",
+      "req-driver-eta",
+    );
+
+    expect(getDriverEta).toHaveBeenCalledWith(
+      "drv-demo-001",
+      25.04776,
+      121.51706,
+    );
+    expect(response.meta.requestId).toBe("req-driver-eta");
+    expect(response.data).toMatchObject({
+      driverId: "drv-demo-001",
+      etaMinutes: 3,
+    });
+  });
+
+  it("rejects malformed ETA query coordinates instead of truncating them", async () => {
+    const getDriverEta = vi.fn();
+    const controller = new RegulatoryRegistryController({
+      getDriverEta,
+    } as unknown as RegulatoryRegistryService);
+
+    await expect(
+      controller.getDriverEta(
+        "drv-demo-001",
+        "25.04776foo",
+        "121.51706",
+        "req-driver-eta",
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: "INVALID_NUMBER",
+          details: expect.objectContaining({
+            field: "destLat",
+          }),
+        }),
+      }),
+      status: 400,
+    });
+    expect(getDriverEta).not.toHaveBeenCalled();
   });
 });

@@ -458,6 +458,33 @@ export interface EtaSnapshot {
   calculatedAt: string;
 }
 
+export interface DriverLocationHeartbeatCommand {
+  driverId: string;
+  lat: number;
+  lng: number;
+  accuracyM?: number;
+}
+
+export interface DriverLocationSnapshot {
+  driverId: string;
+  lat: number;
+  lng: number;
+  accuracyM: number | null;
+  recordedAt: string;
+  updatedAt: string;
+}
+
+export interface DriverEtaResponse {
+  driverId: string;
+  etaMinutes: number;
+  calculatedAt: string;
+  driverLocation: DriverLocationSnapshot;
+  destination: {
+    lat: number;
+    lng: number;
+  };
+}
+
 export interface ServicePreferences {
   accessible: boolean;
   childSeat: boolean;
