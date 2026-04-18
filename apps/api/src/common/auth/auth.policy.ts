@@ -172,14 +172,24 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    routePath === "ops/dispatch-events" ||
     routePath === "driver/task-events" ||
     routePath.startsWith("driver/tasks")
   ) {
+    const isOpsDispatchEvents = routePath === "ops/dispatch-events";
     return {
-      routeKey: `driver:tasks:${upperMethod}`,
-      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
-      allowedRealms: baseAllowedRealms("ops", "driver"),
-      description: "Driver task access",
+      routeKey: isOpsDispatchEvents
+        ? `ops:dispatch-events:${upperMethod}`
+        : `driver:tasks:${upperMethod}`,
+      requiredScopes: isOpsDispatchEvents
+        ? methodScope("dispatch:read", "dispatch:write", upperMethod)
+        : methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: isOpsDispatchEvents
+        ? baseAllowedRealms("ops")
+        : baseAllowedRealms("ops", "driver"),
+      description: isOpsDispatchEvents
+        ? "Ops dispatch event access"
+        : "Driver task access",
     };
   }
 

@@ -23,6 +23,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import {
   RegulatoryRegistryRepository,
   type PersistRegulatoryRegistryChanges,
@@ -205,6 +206,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
   );
 
   constructor(
+    private readonly opsDispatchEventsService: OpsDispatchEventsService,
     @Optional()
     private readonly regulatoryRegistryRepository?: RegulatoryRegistryRepository,
   ) {}
@@ -320,6 +322,17 @@ export class RegulatoryRegistryService implements OnModuleInit {
       recordedAt,
       updatedAt: recordedAt,
     });
+    this.opsDispatchEventsService.publishDriverLocationUpdated(
+      {
+        driverId: command.driverId.trim(),
+        lat: command.lat,
+        lng: command.lng,
+        accuracyM: command.accuracyM ?? null,
+        recordedAt,
+        updatedAt: recordedAt,
+      },
+      undefined,
+    );
 
     return { success: true };
   }

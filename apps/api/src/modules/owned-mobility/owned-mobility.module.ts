@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
+import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { CallcenterModule } from "../callcenter/callcenter.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
@@ -23,6 +24,7 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     OwnedMobilityRepository,
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,
+    OpsDispatchEventsService,
   ],
   exports: [OwnedMobilityService],
 })

@@ -209,6 +209,31 @@ describe("bootstrap auth guard", () => {
     expect(request.identity?.actorType).toBe("tenant_admin");
     expect(request.identity?.scopes).toContain("tenant:webhooks:write");
   });
+
+  it("accepts SSE bootstrap identity from query params on ops dispatch streams", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {},
+      method: "GET",
+      originalUrl:
+        "/api/ops/dispatch-events?actorType=ops_user&actorId=ops-007&realm=ops",
+      query: {
+        actorType: "ops_user",
+        actorId: "ops-007",
+        realm: "ops",
+      },
+    };
+
+    const context = createExecutionContext(request);
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(request.identity).toMatchObject({
+      actorType: "ops_user",
+      actorId: "ops-007",
+      realm: "ops",
+    });
+    expect(request.identity?.scopes).toContain("dispatch:read");
+  });
 });
 
 describe("internal key middleware", () => {

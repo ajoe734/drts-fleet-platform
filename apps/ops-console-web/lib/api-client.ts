@@ -16,4 +16,12 @@ export function getOpsClient(): ApiClient {
   return _client;
 }
 
+export function createOpsDispatchEventSource(): EventSource {
+  const url = new URL("/api/ops/dispatch-events", API_URL);
+  url.searchParams.set("actorType", "ops_user");
+  url.searchParams.set("actorId", DEMO_ACTOR_ID);
+  url.searchParams.set("realm", "ops");
+  return new EventSource(url.toString());
+}
+
 export { API_URL };

@@ -24,6 +24,60 @@ function asHeaderRecord(
   return headers as Record<string, string | string[] | undefined>;
 }
 
+function asQueryRecord(
+  query: unknown,
+): Record<string, string | string[] | undefined> {
+  if (!query || typeof query !== "object") {
+    return {};
+  }
+
+  return query as Record<string, string | string[] | undefined>;
+}
+
+function normalizeRoutePath(url: string): string {
+  return url.split("?", 1)[0]?.replace(/^\/+/, "") ?? "";
+}
+
+function isSseBootstrapQueryRoute(method: string, url: string): boolean {
+  if (method.toUpperCase() !== "GET") {
+    return false;
+  }
+
+  const routePath = normalizeRoutePath(url).replace(/^api\/+/, "");
+  return (
+    routePath === "driver/task-events" || routePath === "ops/dispatch-events"
+  );
+}
+
+function mergeSseBootstrapQueryIdentity(
+  headers: Record<string, string | string[] | undefined>,
+  query: Record<string, string | string[] | undefined>,
+): Record<string, string | string[] | undefined> {
+  const merged = { ...headers };
+  const queryKeyMap: Record<string, string> = {
+    actorType: "x-actor-type",
+    actorId: "x-actor-id",
+    realm: "x-realm",
+    tenantId: "x-tenant-id",
+    roles: "x-roles",
+    roleFamilies: "x-role-families",
+    scopes: "x-scopes",
+    requestId: "x-request-id",
+  };
+
+  for (const [queryKey, headerKey] of Object.entries(queryKeyMap)) {
+    if (merged[headerKey]) {
+      continue;
+    }
+    const value = query[queryKey];
+    if (value) {
+      merged[headerKey] = value;
+    }
+  }
+
+  return merged;
+}
+
 function includesAll(haystack: string[], needles: string[]): boolean {
   return needles.every((needle) => haystack.includes(needle));
 }
@@ -46,6 +100,17 @@ export class BootstrapAuthGuard implements CanActivate {
     const request = context
       .switchToHttp()
       .getRequest<AuthenticatedRequestLike>();
+    const requestUrl = request.originalUrl ?? request.url ?? "";
+    const baseHeaders = asHeaderRecord(request.headers);
+    const headers = isSseBootstrapQueryRoute(
+      request.method ?? "GET",
+      requestUrl,
+    )
+      ? mergeSseBootstrapQueryIdentity(
+          baseHeaders,
+          asQueryRecord((request as { query?: unknown }).query),
+        )
+      : baseHeaders;
     const decoratorScopes =
       this.reflector.getAllAndOverride<string[]>(AUTH_REQUIRED_SCOPES_KEY, [
         context.getHandler(),
@@ -64,34 +129,25 @@ export class BootstrapAuthGuard implements CanActivate {
             description: "Decorator-authenticated route",
             routeKey: "decorator",
           }
-        : resolveRouteAuthPolicy(
-            request.method ?? "GET",
-            request.originalUrl ?? request.url ?? "",
-          );
+        : resolveRouteAuthPolicy(request.method ?? "GET", requestUrl);
 
     if (!policy) {
-      const anonymousIdentity = extractBootstrapRequestIdentity(
-        asHeaderRecord(request.headers),
-        {
-          allowAnonymous: true,
-          method: request.method ?? undefined,
-          requestUrl: request.originalUrl ?? request.url ?? undefined,
-        },
-      );
+      const anonymousIdentity = extractBootstrapRequestIdentity(headers, {
+        allowAnonymous: true,
+        method: request.method ?? undefined,
+        requestUrl: requestUrl || undefined,
+      });
       if (anonymousIdentity) {
         request.identity = anonymousIdentity;
       }
       return true;
     }
 
-    const identity = extractBootstrapRequestIdentity(
-      asHeaderRecord(request.headers),
-      {
-        allowAnonymous: false,
-        method: request.method ?? undefined,
-        requestUrl: request.originalUrl ?? request.url ?? undefined,
-      },
-    );
+    const identity = extractBootstrapRequestIdentity(headers, {
+      allowAnonymous: false,
+      method: request.method ?? undefined,
+      requestUrl: requestUrl || undefined,
+    });
 
     if (!identity) {
       throw new ApiRequestError(

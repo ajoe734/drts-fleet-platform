@@ -1,13 +1,19 @@
 "use client";
 
-import { useDeferredValue, useState } from "react";
+import {
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type {
   DispatchCandidate,
   DispatchJobRecord,
+  OpsDispatchStreamEventEnvelope,
   OwnedOrderRecord,
 } from "@drts/contracts";
-import { useRouter } from "next/navigation";
-import { getOpsClient } from "@/lib/api-client";
+import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 
 interface DispatchWorkflowProps {
@@ -71,23 +77,146 @@ export function DispatchWorkflow({
   dispatchJobs,
   focusOrderId = "",
 }: DispatchWorkflowProps) {
-  const router = useRouter();
   const client = getOpsClient();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [streamStatus, setStreamStatus] = useState<
+    "connecting" | "live" | "retrying"
+  >("connecting");
   const [filterMode, setFilterMode] = useState<FilterMode>(
     focusOrderId ? "attention" : "all",
   );
   const [searchValue, setSearchValue] = useState(focusOrderId);
   const deferredSearch = useDeferredValue(searchValue.trim().toLowerCase());
+  const [liveOrders, setLiveOrders] = useState(orders);
+  const [liveDispatchJobs, setLiveDispatchJobs] = useState(dispatchJobs);
   const [candidates, setCandidates] = useState<
     Record<string, DispatchCandidate[]>
   >({});
   const [selectedCandidate, setSelectedCandidate] = useState<
     Record<string, string>
   >({});
+  const reloadTimerRef = useRef<number | null>(null);
 
-  const orderJobMap = dispatchJobs.reduce(
+  useEffect(() => {
+    setLiveOrders(orders);
+  }, [orders]);
+
+  useEffect(() => {
+    setLiveDispatchJobs(dispatchJobs);
+  }, [dispatchJobs]);
+
+  const reloadDispatchState = async () => {
+    const [nextOrders, nextDispatchJobs] = await Promise.all([
+      client.listOrders(),
+      client.listDispatchJobs(),
+    ]);
+    startTransition(() => {
+      setLiveOrders(nextOrders);
+      setLiveDispatchJobs(nextDispatchJobs);
+    });
+  };
+
+  const scheduleDispatchReload = () => {
+    if (reloadTimerRef.current !== null) {
+      return;
+    }
+
+    reloadTimerRef.current = window.setTimeout(() => {
+      reloadTimerRef.current = null;
+      void reloadDispatchState().catch((reloadError) => {
+        setError(
+          reloadError instanceof Error
+            ? reloadError.message
+            : "Failed to refresh dispatch board",
+        );
+      });
+    }, 300);
+  };
+
+  useEffect(() => {
+    const eventSource = createOpsDispatchEventSource();
+
+    const handleEnvelope = (rawEvent: MessageEvent<string>) => {
+      try {
+        const envelope = JSON.parse(
+          rawEvent.data,
+        ) as OpsDispatchStreamEventEnvelope;
+
+        startTransition(() => {
+          switch (envelope.eventType) {
+            case "order_created": {
+              if (!("order" in envelope.data)) {
+                return;
+              }
+              const nextOrder = envelope.data.order;
+              setLiveOrders((currentOrders) => [
+                nextOrder,
+                ...currentOrders.filter(
+                  (order) => order.orderId !== nextOrder.orderId,
+                ),
+              ]);
+              return;
+            }
+            case "dispatch_job_updated": {
+              if (!("dispatchJob" in envelope.data)) {
+                return;
+              }
+              const nextDispatchJob = envelope.data.dispatchJob;
+              setLiveDispatchJobs((currentJobs) => [
+                nextDispatchJob,
+                ...currentJobs.filter(
+                  (job) => job.dispatchJobId !== nextDispatchJob.dispatchJobId,
+                ),
+              ]);
+              scheduleDispatchReload();
+              return;
+            }
+            case "driver_location_updated": {
+              scheduleDispatchReload();
+              return;
+            }
+          }
+        });
+      } catch (parseError) {
+        setError(
+          parseError instanceof Error
+            ? parseError.message
+            : "Failed to process dispatch event",
+        );
+      }
+    };
+
+    eventSource.onopen = () => {
+      setStreamStatus("live");
+    };
+    eventSource.onerror = () => {
+      setStreamStatus("retrying");
+    };
+
+    eventSource.addEventListener(
+      "order_created",
+      handleEnvelope as EventListener,
+    );
+    eventSource.addEventListener(
+      "dispatch_job_updated",
+      handleEnvelope as EventListener,
+    );
+    eventSource.addEventListener(
+      "driver_location_updated",
+      handleEnvelope as EventListener,
+    );
+
+    return () => {
+      if (reloadTimerRef.current !== null) {
+        window.clearTimeout(reloadTimerRef.current);
+        reloadTimerRef.current = null;
+      }
+      eventSource.close();
+    };
+  }, []);
+
+  const orderJobMap = liveDispatchJobs.reduce(
     (acc, job) => {
       acc[job.orderId] = job;
       return acc;
@@ -95,7 +224,7 @@ export function DispatchWorkflow({
     {} as Record<string, DispatchJobRecord>,
   );
 
-  const filteredOrders = orders.filter((order) => {
+  const filteredOrders = liveOrders.filter((order) => {
     const job = orderJobMap[order.orderId];
     if (filterMode === "attention") {
       const needsAttention =
@@ -146,7 +275,7 @@ export function DispatchWorkflow({
       setLoading(target);
       setError(null);
       await action();
-      router.refresh();
+      await reloadDispatchState();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Dispatch action failed");
     } finally {
@@ -171,7 +300,7 @@ export function DispatchWorkflow({
   };
 
   const handleReassign = async (jobId: string) => {
-    const job = dispatchJobs.find((item) => item.dispatchJobId === jobId);
+    const job = liveDispatchJobs.find((item) => item.dispatchJobId === jobId);
     if (!job) return;
 
     await runAction(jobId, async () => {
@@ -230,6 +359,15 @@ export function DispatchWorkflow({
         </div>
       </div>
 
+      <div className="stream-banner">
+        <strong>Live dispatch:</strong>{" "}
+        {streamStatus === "live"
+          ? "connected"
+          : streamStatus === "retrying"
+            ? "reconnecting"
+            : "connecting"}
+      </div>
+
       <div className="queue-summary">
         {(["pending", "reserved", "exception"] as QueueState[]).map((state) => (
           <div
@@ -243,7 +381,7 @@ export function DispatchWorkflow({
       </div>
 
       <div className="results-note">
-        Showing {filteredOrders.length} order(s) from {orders.length} total.
+        Showing {filteredOrders.length} order(s) from {liveOrders.length} total.
       </div>
 
       <div className="data-table">
@@ -456,6 +594,13 @@ export function DispatchWorkflow({
         .actions {
           display: grid;
           gap: 0.75rem;
+        }
+        .stream-banner {
+          margin-bottom: 0.75rem;
+          padding: 0.65rem 0.8rem;
+          border-radius: 0.75rem;
+          background: #ecfeff;
+          color: #155e75;
         }
         .toolbar {
           margin-bottom: 1rem;

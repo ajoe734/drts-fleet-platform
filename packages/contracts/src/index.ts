@@ -453,6 +453,8 @@ export type ReservationHoldStatus = (typeof RESERVATION_HOLD_STATUSES)[number];
 
 export interface AddressPayload {
   address: string;
+  lat?: number | null;
+  lng?: number | null;
 }
 
 export interface PassengerProfile {
@@ -833,6 +835,36 @@ export interface DriverTaskStreamEventData {
 
 export interface DriverTaskStreamEventEnvelope extends DomainEventEnvelope<DriverTaskStreamEventData> {
   eventType: DriverTaskStreamEventType;
+}
+
+export type OpsDispatchStreamEventType =
+  | "order_created"
+  | "dispatch_job_updated"
+  | "driver_location_updated";
+
+export interface OpsDispatchOrderCreatedEventData {
+  order: OwnedOrderRecord;
+}
+
+export interface OpsDispatchJobUpdatedEventData {
+  orderId: string;
+  dispatchJob: DispatchJobRecord;
+}
+
+export interface OpsDispatchDriverLocationUpdatedEventData {
+  driverId: string;
+  lat: number;
+  lng: number;
+  recordedAt: string;
+}
+
+export type OpsDispatchStreamEventData =
+  | OpsDispatchOrderCreatedEventData
+  | OpsDispatchJobUpdatedEventData
+  | OpsDispatchDriverLocationUpdatedEventData;
+
+export interface OpsDispatchStreamEventEnvelope extends DomainEventEnvelope<OpsDispatchStreamEventData> {
+  eventType: OpsDispatchStreamEventType;
 }
 
 export interface DispatchTraceLogRecord {

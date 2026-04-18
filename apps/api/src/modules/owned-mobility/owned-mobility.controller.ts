@@ -66,6 +66,20 @@ export class OwnedMobilityController {
     );
   }
 
+  private resolveOpsDispatchStreamActorId(
+    identity: BootstrapRequestIdentity | null,
+  ) {
+    if (identity?.realm === "ops" && identity.actorId) {
+      return identity.actorId;
+    }
+
+    throw new ApiRequestError(
+      403,
+      "OPS_IDENTITY_REQUIRED",
+      "ops dispatch event stream requires an ops bootstrap identity.",
+    );
+  }
+
   private requireTenantId(tenantId?: string) {
     const normalizedTenantId = tenantId?.trim();
     if (!normalizedTenantId) {
@@ -356,6 +370,14 @@ export class OwnedMobilityController {
     return this.ownedMobilityService.streamDriverTaskEvents(
       this.resolveDriverTaskStreamDriverId(identity, requestedDriverId),
     );
+  }
+
+  @Sse("ops/dispatch-events")
+  streamOpsDispatchEvents(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+  ): Observable<MessageEvent> {
+    this.resolveOpsDispatchStreamActorId(identity);
+    return this.ownedMobilityService.streamOpsDispatchEvents();
   }
 
   @Get("driver/tasks/:taskId")
