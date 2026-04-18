@@ -1,10 +1,12 @@
+import type { PlatformCode } from "./platform-codes";
+
 export type PlatformPresenceStatus = "online" | "offline";
 
 export type PlatformEligibility = "eligible" | "ineligible" | "pending";
 
 export interface PlatformPresenceRecord {
   driverId: string;
-  platformCode: string;
+  platformCode: PlatformCode;
   accountId: string | null;
   status: PlatformPresenceStatus;
   eligibility: PlatformEligibility;
@@ -22,10 +24,10 @@ export interface PlatformPresenceSummary {
 }
 
 export interface SetPlatformOnlineCommand {
-  platformCode: string;
+  platformCode: PlatformCode;
   tokenExpiresAt?: string | null;
 }
 
 export interface SetPlatformOfflineCommand {
-  platformCode: string;
+  platformCode: PlatformCode;
 }

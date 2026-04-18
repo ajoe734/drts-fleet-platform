@@ -8,6 +8,7 @@ import {
   OnModuleInit,
   Optional,
 } from "@nestjs/common";
+import { FORWARDER_ROUTING_SERVICE_BUCKETS } from "@drts/contracts";
 
 import type {
   AdapterHealthRecord,
@@ -15,6 +16,7 @@ import type {
   BroadcastForwardedOrderCommand,
   ForwardedOrderRecord,
   IngestExternalOrderCommand,
+  PlatformCode,
   RelayDriverAcceptCommand,
   SyncForwardedOrderStatusCommand,
 } from "@drts/contracts";
@@ -374,7 +376,7 @@ export class ForwarderService implements OnModuleInit {
     return this.adapterHealth.map((adapter) => ({ ...adapter }));
   }
 
-  hasAdapter(platformCode: string) {
+  hasAdapter(platformCode: PlatformCode) {
     return Boolean(this.findAdapter(platformCode));
   }
 
@@ -399,6 +401,16 @@ export class ForwarderService implements OnModuleInit {
   ) {
     const requestedServiceBucket =
       payload.serviceBucket ?? authoritativeSnapshot.serviceBucket;
+    if (
+      typeof requestedServiceBucket === "string" &&
+      !FORWARDER_ROUTING_SERVICE_BUCKETS.includes(
+        requestedServiceBucket as (typeof FORWARDER_ROUTING_SERVICE_BUCKETS)[number],
+      )
+    ) {
+      this.logger.warn(
+        `Forwarder received unsupported serviceBucket "${requestedServiceBucket}", defaulting to standard_taxi.`,
+      );
+    }
     return requestedServiceBucket === "business_dispatch"
       ? "business_dispatch"
       : "standard_taxi";
@@ -426,7 +438,7 @@ export class ForwarderService implements OnModuleInit {
     }
   }
 
-  private findAdapter(platformCode: string) {
+  private findAdapter(platformCode: PlatformCode) {
     return this.adapters.find(
       (adapter) => adapter.platformCode === platformCode,
     );
@@ -451,7 +463,7 @@ export class ForwarderService implements OnModuleInit {
   }
 
   private updateAdapterHealth(
-    platformCode: string,
+    platformCode: PlatformCode,
     status: AdapterHealthRecord["status"],
     lastError: string | null,
   ) {

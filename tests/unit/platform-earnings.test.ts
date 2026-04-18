@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  PLATFORM_CODE_GRAB,
+  PLATFORM_CODE_LINE_TAXI,
+  PLATFORM_CODE_UBER,
+} from "../../packages/contracts/src/platform-codes";
 
 import { PlatformEarningsService } from "../../apps/api/src/modules/platform-earnings/platform-earnings.service";
 
@@ -11,14 +16,14 @@ describe("platform earnings service", () => {
 
     expect(driverOneBreakdown.items).toEqual([
       {
-        platformCode: "uber",
+        platformCode: PLATFORM_CODE_UBER,
         grossEarning: { currency: "TWD", amountMinor: 120000 },
         serviceFee: { currency: "TWD", amountMinor: 18000 },
         subsidy: { currency: "TWD", amountMinor: 5000 },
         netAmount: { currency: "TWD", amountMinor: 107000 },
       },
       {
-        platformCode: "grab",
+        platformCode: PLATFORM_CODE_GRAB,
         grossEarning: { currency: "TWD", amountMinor: 80000 },
         serviceFee: { currency: "TWD", amountMinor: 12000 },
         subsidy: { currency: "TWD", amountMinor: 0 },
@@ -27,7 +32,7 @@ describe("platform earnings service", () => {
     ]);
     expect(driverTwoBreakdown.items).toEqual([
       {
-        platformCode: "line-taxi",
+        platformCode: PLATFORM_CODE_LINE_TAXI,
         grossEarning: { currency: "TWD", amountMinor: 150000 },
         serviceFee: { currency: "TWD", amountMinor: 22500 },
         subsidy: { currency: "TWD", amountMinor: 10000 },

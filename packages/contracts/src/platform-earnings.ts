@@ -1,7 +1,8 @@
 import type { MoneyAmount } from ".";
+import type { PlatformCode } from "./platform-codes";
 
 export interface PlatformEarningsItem {
-  platformCode: string;
+  platformCode: PlatformCode;
   grossEarning: MoneyAmount;
   serviceFee: MoneyAmount;
   subsidy: MoneyAmount;

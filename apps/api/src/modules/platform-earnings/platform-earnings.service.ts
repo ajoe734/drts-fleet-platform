@@ -1,12 +1,21 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import type { MoneyAmount, PlatformEarningsItem } from "@drts/contracts";
+import {
+  PLATFORM_CODE_GRAB,
+  PLATFORM_CODE_LINE_TAXI,
+  PLATFORM_CODE_UBER,
+} from "@drts/contracts";
+import type {
+  MoneyAmount,
+  PlatformCode,
+  PlatformEarningsItem,
+} from "@drts/contracts";
 import { PlatformEarningsRepository } from "./platform-earnings.repository";
 
 const DEFAULT_CURRENCY = "TWD";
 
 type PlatformEarningsSeedRecord = {
   driverId: string;
-  platformCode: string;
+  platformCode: PlatformCode;
   grossMinor: number;
   serviceFeeMinor: number;
   subsidyMinor: number;
@@ -18,7 +27,7 @@ type PlatformEarningsSeedRecord = {
 const PLATFORM_EARNINGS_SEED: PlatformEarningsSeedRecord[] = [
   {
     driverId: "drv-demo-001",
-    platformCode: "uber",
+    platformCode: PLATFORM_CODE_UBER,
     grossMinor: 120000,
     serviceFeeMinor: 18000,
     subsidyMinor: 5000,
@@ -26,7 +35,7 @@ const PLATFORM_EARNINGS_SEED: PlatformEarningsSeedRecord[] = [
   },
   {
     driverId: "drv-demo-001",
-    platformCode: "grab",
+    platformCode: PLATFORM_CODE_GRAB,
     grossMinor: 80000,
     serviceFeeMinor: 12000,
     subsidyMinor: 0,
@@ -34,7 +43,7 @@ const PLATFORM_EARNINGS_SEED: PlatformEarningsSeedRecord[] = [
   },
   {
     driverId: "drv-demo-002",
-    platformCode: "line-taxi",
+    platformCode: PLATFORM_CODE_LINE_TAXI,
     grossMinor: 150000,
     serviceFeeMinor: 22500,
     subsidyMinor: 10000,

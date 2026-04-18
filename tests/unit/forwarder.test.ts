@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  PLATFORM_CODE_LINE_TAXI,
+  PLATFORM_CODE_UBER,
+} from "../../packages/contracts/src/platform-codes";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
@@ -35,7 +39,7 @@ describe("forwarder service", () => {
 
     const inbound = forwarderService.ingestExternalOrder(
       {
-        platformCode: "uber",
+        platformCode: PLATFORM_CODE_UBER,
         externalOrderId: "UBER-ORDER-0001",
         payload: {
           serviceBucket: "standard_taxi",
@@ -90,7 +94,7 @@ describe("forwarder service", () => {
     const { forwarderService, ownedMobilityService } = createServices();
 
     const inbound = forwarderService.ingestExternalOrder({
-      platformCode: "uber",
+      platformCode: PLATFORM_CODE_UBER,
       externalOrderId: "UBER-ORDER-0002",
       payload: {
         serviceBucket: "standard_taxi",
@@ -122,7 +126,7 @@ describe("forwarder service", () => {
     const { forwarderService } = createServices();
 
     const inbound = forwarderService.ingestExternalOrder({
-      platformCode: "line-taxi",
+      platformCode: PLATFORM_CODE_LINE_TAXI,
       externalOrderId: "LT-ORDER-0003",
       payload: {
         serviceBucket: "business_dispatch",
@@ -142,7 +146,7 @@ describe("forwarder service", () => {
     ).toBe("external_customer_cancelled");
     expect(forwarderService.listAdapterHealth()).toEqual([
       expect.objectContaining({
-        platformCode: "line-taxi",
+        platformCode: PLATFORM_CODE_LINE_TAXI,
         status: "healthy",
         lastError: null,
       }),
@@ -158,7 +162,7 @@ describe("forwarder service", () => {
         forwardedOrders: [
           {
             mirrorOrderId: "FWD-persisted-001",
-            platformCode: "uber",
+            platformCode: PLATFORM_CODE_UBER,
             externalOrderId: "UBER-PERSISTED-001",
             status: "broadcasted",
             candidateDriverIds: ["drv-demo-001"],
@@ -168,7 +172,7 @@ describe("forwarder service", () => {
               serviceBucket: "standard_taxi",
             },
             authoritativeSnapshot: {
-              platformCode: "uber",
+              platformCode: PLATFORM_CODE_UBER,
               externalOrderId: "UBER-PERSISTED-001",
               nativeStatus: "received",
               serviceBucket: "standard_taxi",
@@ -179,7 +183,7 @@ describe("forwarder service", () => {
         ],
         adapterHealth: [
           {
-            platformCode: "uber",
+            platformCode: PLATFORM_CODE_UBER,
             status: "healthy",
             lastCheckedAt: "2026-04-10T00:00:00Z",
             lastError: null,
@@ -192,6 +196,7 @@ describe("forwarder service", () => {
     const forwarderService = new ForwarderService(
       regulatoryRegistryService,
       auditService,
+      [],
       repository,
     );
 
@@ -220,7 +225,7 @@ describe("forwarder service", () => {
         ],
         adapterHealth: [
           expect.objectContaining({
-            platformCode: "uber",
+            platformCode: PLATFORM_CODE_UBER,
             status: "healthy",
           }),
         ],

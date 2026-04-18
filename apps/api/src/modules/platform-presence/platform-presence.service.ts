@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type {
   PlatformEligibility,
+  PlatformCode,
   PlatformPresenceRecord,
   PlatformPresenceSummary,
 } from "@drts/contracts";
@@ -52,7 +53,7 @@ export class PlatformPresenceService {
 
   async setOnline(
     driverId: string,
-    platformCode: string,
+    platformCode: PlatformCode,
     tokenExpiresAt?: string | null,
   ): Promise<PlatformPresenceRecord> {
     const existing = (await this.listForDriver(driverId)).find(
@@ -84,7 +85,7 @@ export class PlatformPresenceService {
 
   async setOffline(
     driverId: string,
-    platformCode: string,
+    platformCode: PlatformCode,
   ): Promise<PlatformPresenceRecord> {
     const existing = (await this.listForDriver(driverId)).find(
       (r) => r.platformCode === platformCode,

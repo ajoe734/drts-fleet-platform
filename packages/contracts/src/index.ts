@@ -1,3 +1,5 @@
+import type { PlatformCode } from "./platform-codes";
+
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
 export type OrderDomain = (typeof ORDER_DOMAINS)[number];
 
@@ -16,6 +18,16 @@ export const SERVICE_BUCKETS = [
   "av_pilot",
 ] as const;
 export type ServiceBucket = (typeof SERVICE_BUCKETS)[number];
+
+export const FORWARDER_ROUTING_SERVICE_BUCKETS = [...SERVICE_BUCKETS] as const;
+export type ForwarderRoutingServiceBucket =
+  (typeof FORWARDER_ROUTING_SERVICE_BUCKETS)[number];
+
+export const SERVICE_BUCKET_CATALOGS = {
+  phase1: PHASE1_SERVICE_BUCKETS,
+  future: FUTURE_SERVICE_BUCKETS,
+  routing: FORWARDER_ROUTING_SERVICE_BUCKETS,
+} as const;
 
 export const DISPATCH_SEMANTICS = [
   "realtime",
@@ -1537,7 +1549,7 @@ export const ADAPTER_HEALTH_STATUSES = ["healthy", "degraded", "down"] as const;
 export type AdapterHealthStatus = (typeof ADAPTER_HEALTH_STATUSES)[number];
 
 export interface IngestExternalOrderCommand {
-  platformCode: string;
+  platformCode: PlatformCode;
   externalOrderId: string;
   payload?: Record<string, unknown>;
 }
@@ -1557,7 +1569,7 @@ export interface SyncForwardedOrderStatusCommand {
 
 export interface ForwardedOrderRecord {
   mirrorOrderId: string;
-  platformCode: string;
+  platformCode: PlatformCode;
   externalOrderId: string;
   status: ForwardedOrderStatus;
   candidateDriverIds: string[];
@@ -1570,7 +1582,7 @@ export interface ForwardedOrderRecord {
 }
 
 export interface AdapterHealthRecord {
-  platformCode: string;
+  platformCode: PlatformCode;
   status: AdapterHealthStatus;
   lastCheckedAt: string;
   lastError: string | null;
@@ -1578,7 +1590,7 @@ export interface AdapterHealthRecord {
 
 export interface ReconciliationJobRecord {
   reconciliationJobId: string;
-  platformCode: string;
+  platformCode: PlatformCode;
   status: "queued" | "completed";
   mismatchCount: number;
   createdAt: string;
@@ -2081,3 +2093,5 @@ export interface SetTenantStatusCommand {
   status: "active" | "paused";
   reason?: string;
 }
+
+export * from "./platform-codes";

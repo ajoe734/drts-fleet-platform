@@ -1,20 +1,22 @@
+import type { PlatformCode } from "@drts/contracts";
+
 export const FORWARDER_ADAPTERS = Symbol("FORWARDER_ADAPTERS");
 
 export interface ForwarderAdapterActionResult {
   acknowledged: boolean;
-  platformCode: string;
+  platformCode: PlatformCode;
   externalOrderId: string;
   detail?: string;
 }
 
 export interface ForwarderAdapterHeartbeatResult {
   acknowledged: boolean;
-  platformCode: string;
+  platformCode: PlatformCode;
   checkedAt: string;
 }
 
 export interface ForwarderAdapterEarningsResult {
-  platformCode: string;
+  platformCode: PlatformCode;
   currency: string;
   totalAmount: number;
   asOf: string;
@@ -48,7 +50,7 @@ export interface ForwarderAdapterFetchEarningsInput {
 }
 
 export interface ForwarderAdapterInterface {
-  readonly platformCode: string;
+  readonly platformCode: PlatformCode;
   accept(
     input: ForwarderAdapterAcceptInput,
   ): Promise<ForwarderAdapterActionResult>;
