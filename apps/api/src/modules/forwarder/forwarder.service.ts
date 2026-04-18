@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
 
 import type {
   AdapterHealthRecord,
@@ -16,9 +23,14 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import {
+  FORWARDER_ADAPTERS,
+  type ForwarderAdapterInterface,
+} from "./forwarder-adapter.interface";
+import {
   ForwarderRepository,
   type PersistForwarderChanges,
 } from "./forwarder.repository";
+import { GRAB_TAIWAN_PLATFORM_CODE } from "./grab-taiwan.adapter";
 
 type ForwarderSyncStatus =
   | "confirmed_by_platform"
@@ -36,6 +48,8 @@ const FORWARDER_SYNC_STATUS_MAP: Record<
 
 @Injectable()
 export class ForwarderService implements OnModuleInit {
+  private readonly logger = new Logger(ForwarderService.name);
+
   private forwardedOrders: ForwardedOrderRecord[] = [];
 
   private adapterHealth: AdapterHealthRecord[] = [];
@@ -43,11 +57,15 @@ export class ForwarderService implements OnModuleInit {
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly auditNotificationService: AuditNotificationService,
+    @Optional()
+    @Inject(FORWARDER_ADAPTERS)
+    private readonly adapters: readonly ForwarderAdapterInterface[] = [],
     @Optional() private readonly forwarderRepository?: ForwarderRepository,
   ) {}
 
   async onModuleInit() {
     if (!this.forwarderRepository) {
+      this.seedRegisteredAdapters();
       return;
     }
 
@@ -62,6 +80,8 @@ export class ForwarderService implements OnModuleInit {
     } catch (error) {
       this.forwarderRepository.reportPersistenceFailure(error, "module init");
     }
+
+    this.seedRegisteredAdapters();
   }
 
   ingestExternalOrder(command: IngestExternalOrderCommand, requestId?: string) {
@@ -132,6 +152,27 @@ export class ForwarderService implements OnModuleInit {
     );
 
     return this.cloneOrder(forwardedOrder);
+  }
+
+  ingestGrabTaiwanWebhook(
+    payload: Record<string, unknown>,
+    requestId?: string,
+  ) {
+    this.logger.log("Received stub Grab Taiwan webhook payload.");
+
+    const adapter = this.findAdapter(GRAB_TAIWAN_PLATFORM_CODE);
+    if (adapter) {
+      this.updateAdapterHealth(adapter.platformCode, "healthy", null);
+    }
+
+    return this.ingestExternalOrder(
+      {
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        externalOrderId: this.resolveExternalOrderId(payload, requestId),
+        payload,
+      },
+      requestId,
+    );
   }
 
   listOrders() {
@@ -333,6 +374,10 @@ export class ForwarderService implements OnModuleInit {
     return this.adapterHealth.map((adapter) => ({ ...adapter }));
   }
 
+  hasAdapter(platformCode: string) {
+    return Boolean(this.findAdapter(platformCode));
+  }
+
   private resolveNextStatus(nativeStatus: string) {
     if (nativeStatus in FORWARDER_SYNC_STATUS_MAP) {
       return FORWARDER_SYNC_STATUS_MAP[nativeStatus as ForwarderSyncStatus];
@@ -357,6 +402,52 @@ export class ForwarderService implements OnModuleInit {
     return requestedServiceBucket === "business_dispatch"
       ? "business_dispatch"
       : "standard_taxi";
+  }
+
+  private seedRegisteredAdapters() {
+    const seededHealth = this.adapters
+      .filter(
+        (adapter) =>
+          !this.adapterHealth.some(
+            (record) => record.platformCode === adapter.platformCode,
+          ),
+      )
+      .map((adapter) =>
+        this.updateAdapterHealth(adapter.platformCode, "healthy", null),
+      );
+
+    if (seededHealth.length > 0) {
+      this.persistChanges(
+        {
+          adapterHealth: seededHealth,
+        },
+        "seed_forwarder_adapters",
+      );
+    }
+  }
+
+  private findAdapter(platformCode: string) {
+    return this.adapters.find(
+      (adapter) => adapter.platformCode === platformCode,
+    );
+  }
+
+  private resolveExternalOrderId(
+    payload: Record<string, unknown>,
+    requestId?: string,
+  ) {
+    const candidateKeys = ["externalOrderId", "orderId", "bookingId", "id"];
+
+    for (const key of candidateKeys) {
+      const candidate = payload[key];
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate;
+      }
+    }
+
+    return requestId?.trim()
+      ? `grab-webhook-${requestId.trim()}`
+      : `grab-webhook-${randomUUID()}`;
   }
 
   private updateAdapterHealth(

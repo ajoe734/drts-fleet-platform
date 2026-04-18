@@ -25,6 +25,17 @@ export class ForwarderController {
     );
   }
 
+  @Post("forwarder/webhooks/grab-taiwan")
+  ingestGrabTaiwanWebhook(
+    @Body() payload: Record<string, unknown>,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.forwarderService.ingestGrabTaiwanWebhook(payload, requestId),
+      requestId,
+    );
+  }
+
   @Get("forwarder/orders")
   listForwardedOrders(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
