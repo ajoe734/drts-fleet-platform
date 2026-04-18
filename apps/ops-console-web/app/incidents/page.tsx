@@ -75,31 +75,42 @@ export default function IncidentsPage() {
     }
   }
 
-  const filteredRecords = records.filter((record) => {
-    if (statusFilter !== "all" && record.status !== statusFilter) return false;
-    if (severityFilter !== "all" && record.severity !== severityFilter) {
-      return false;
-    }
-    if (categoryFilter !== "all" && record.category !== categoryFilter) {
-      return false;
-    }
-    if (!deferredQuery) return true;
-    const haystack = [
-      record.incidentId,
-      record.title,
-      record.description,
-      record.category,
-      record.severity,
-      record.status,
-      record.relatedOrderId ?? "",
-      record.relatedVehicleId ?? "",
-      record.relatedDriverId ?? "",
-      record.relatedComplaintCaseNo ?? "",
-    ]
-      .join(" ")
-      .toLowerCase();
-    return haystack.includes(deferredQuery);
-  });
+  const filteredRecords = records
+    .filter((record) => {
+      if (statusFilter !== "all" && record.status !== statusFilter)
+        return false;
+      if (severityFilter !== "all" && record.severity !== severityFilter) {
+        return false;
+      }
+      if (categoryFilter !== "all" && record.category !== categoryFilter) {
+        return false;
+      }
+      if (!deferredQuery) return true;
+      const haystack = [
+        record.incidentId,
+        record.title,
+        record.description,
+        record.category,
+        record.severity,
+        record.status,
+        record.relatedOrderId ?? "",
+        record.relatedVehicleId ?? "",
+        record.relatedDriverId ?? "",
+        record.relatedComplaintCaseNo ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(deferredQuery);
+    })
+    .sort(compareIncidentPriority);
+  const criticalQueue = records
+    .filter(
+      (record) =>
+        record.severity === "critical" &&
+        record.status !== "resolved" &&
+        record.status !== "closed",
+    )
+    .sort(compareIncidentPriority);
 
   const openCount = records.filter(
     (record) => record.status === "open" || record.status === "investigating",
@@ -113,6 +124,11 @@ export default function IncidentsPage() {
       record.relatedVehicleId ||
       record.relatedComplaintCaseNo,
   ).length;
+
+  function focusCriticalQueue() {
+    const section = document.getElementById("critical-sos-queue");
+    section?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <main className="app-grid">
@@ -144,12 +160,67 @@ export default function IncidentsPage() {
               note: "Connected to order / vehicle / complaint",
             },
           ].map((card) => (
-            <div key={card.label} className="summary-card">
+            <button
+              key={card.label}
+              className={`summary-card ${
+                card.label === "Critical severity" ? "summary-card-alert" : ""
+              }`}
+              type="button"
+              onClick={
+                card.label === "Critical severity"
+                  ? focusCriticalQueue
+                  : undefined
+              }
+            >
               <span>{card.label}</span>
               <strong>{card.value}</strong>
               <small>{card.note}</small>
-            </div>
+            </button>
           ))}
+        </section>
+
+        <section id="critical-sos-queue" className="sos-queue">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">Priority queue</p>
+              <h3>Critical / SOS queue</h3>
+            </div>
+            <span className="panel-note">
+              {criticalQueue.length} active critical incident(s)
+            </span>
+          </div>
+          {criticalQueue.length > 0 ? (
+            <div className="sos-list">
+              {criticalQueue.map((record) => (
+                <article key={record.incidentId} className="sos-card">
+                  <div>
+                    <div className="sos-title-row">
+                      <strong className="cell-title">{record.title}</strong>
+                      {renderSeverityBadge(record.severity)}
+                    </div>
+                    <div className="cell-subcopy">
+                      {record.incidentId} · {record.category.replace(/_/g, " ")}
+                    </div>
+                    <div className="cell-subcopy">{record.description}</div>
+                  </div>
+                  <div className="sos-meta">
+                    <span className="status-pill">{record.status}</span>
+                    <button
+                      className="btn"
+                      type="button"
+                      onClick={() => void loadTimeline(record.incidentId)}
+                    >
+                      Review timeline
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="all-clear-copy">
+              No critical incidents. All clear for now.
+            </p>
+          )}
         </section>
 
         <div className="toolbar">
@@ -300,7 +371,7 @@ export default function IncidentsPage() {
                             {record.description}
                           </div>
                         </td>
-                        <td>{record.severity}</td>
+                        <td>{renderSeverityBadge(record.severity)}</td>
                         <td>{record.status}</td>
                         <td>
                           <div className="link-stack">
@@ -435,6 +506,7 @@ export default function IncidentsPage() {
 
         <style jsx>{`
           .summary-grid,
+          .sos-list,
           .toolbar,
           .content-grid,
           .link-stack {
@@ -446,6 +518,7 @@ export default function IncidentsPage() {
             margin-bottom: 1rem;
           }
           .summary-card,
+          .sos-queue,
           .panel {
             padding: 1rem;
             border-radius: 1rem;
@@ -454,9 +527,80 @@ export default function IncidentsPage() {
           }
           .summary-card {
             background: #f8fafc;
+            text-align: left;
+            cursor: default;
+          }
+          .summary-card-alert {
+            cursor: pointer;
+            border-color: #fca5a5;
+            background: linear-gradient(135deg, #fff1f2, #fef2f2);
           }
           .summary-card strong {
             font-size: 1.4rem;
+          }
+          .sos-queue {
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #fff7ed, #fff1f2);
+          }
+          .sos-card {
+            display: grid;
+            gap: 0.75rem;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: center;
+            padding: 0.9rem 1rem;
+            border-radius: 0.9rem;
+            border: 1px solid #fdba74;
+            background: rgba(255, 255, 255, 0.92);
+          }
+          .sos-title-row,
+          .sos-meta {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+          }
+          .all-clear-copy {
+            margin: 0;
+            color: #166534;
+          }
+          .status-pill,
+          .severity-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: fit-content;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: capitalize;
+          }
+          .status-pill {
+            background: #e2e8f0;
+            color: #334155;
+          }
+          .severity-badge {
+            border: 1px solid transparent;
+          }
+          .severity-critical {
+            background: #fee2e2;
+            border-color: #fca5a5;
+            color: #b91c1c;
+          }
+          .severity-high {
+            background: #ffedd5;
+            border-color: #fdba74;
+            color: #c2410c;
+          }
+          .severity-medium {
+            background: #fef3c7;
+            border-color: #fcd34d;
+            color: #a16207;
+          }
+          .severity-low {
+            background: #e2e8f0;
+            border-color: #cbd5e1;
+            color: #334155;
           }
           .toolbar {
             grid-template-columns: 2fr repeat(3, minmax(0, 1fr)) auto auto;
@@ -544,9 +688,47 @@ export default function IncidentsPage() {
           .row-critical {
             background: #fef2f2;
           }
+          @media (max-width: 900px) {
+            .toolbar,
+            .content-grid,
+            .sos-card {
+              grid-template-columns: 1fr;
+            }
+          }
         `}</style>
       </AppShellCard>
     </main>
+  );
+}
+
+function compareIncidentPriority(a: IncidentRecord, b: IncidentRecord) {
+  const severityWeight =
+    incidentSeverityWeight(b.severity) - incidentSeverityWeight(a.severity);
+  if (severityWeight !== 0) return severityWeight;
+
+  return (
+    new Date(b.occurredAt ?? b.createdAt).getTime() -
+    new Date(a.occurredAt ?? a.createdAt).getTime()
+  );
+}
+
+function incidentSeverityWeight(severity: IncidentSeverity) {
+  switch (severity) {
+    case "critical":
+      return 4;
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    case "low":
+    default:
+      return 1;
+  }
+}
+
+function renderSeverityBadge(severity: IncidentSeverity) {
+  return (
+    <span className={`severity-badge severity-${severity}`}>{severity}</span>
   );
 }
 

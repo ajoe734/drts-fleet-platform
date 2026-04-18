@@ -119,7 +119,27 @@ chain_set "tenant_newco" "tenantId" "$NEW_TENANT_ID"
 save_evidence "$SCENARIO" "tenant_newco" "bookingId" "$NEW_BOOKING_ID"
 log_ok "New-tenant booking created: bookingId=${NEW_BOOKING_ID}"
 
-log_step "2.2 — GET /tenant/bookings (as new tenant — must see own booking)"
+log_step "2.2 — GET /tenant/bookings/:bookingId (as new tenant — verify tenant attribution)"
+http_call GET "/tenant/bookings/${NEW_BOOKING_ID}"
+assert_status "200"
+
+BOOKING_TENANT_ID=$(json_get_first ".data.tenantId" ".data.tenant_id")
+NEW_ORDER_ID=$(json_get_first ".data.orderId" ".data.order_id")
+if [[ "$BOOKING_TENANT_ID" != "$NEW_TENANT_ID" ]]; then
+  log_fail "Expected booking tenantId ${NEW_TENANT_ID}, got '${BOOKING_TENANT_ID:-<empty>}'"
+  exit 1
+fi
+if [[ -z "$NEW_ORDER_ID" ]]; then
+  log_fail "Booking read-back did not expose orderId; cannot tie dispatch attribution to this booking."
+  exit 1
+fi
+
+chain_set "tenant_newco" "orderId" "$NEW_ORDER_ID"
+save_evidence "$SCENARIO" "tenant_newco" "bookingTenantId" "$BOOKING_TENANT_ID"
+save_evidence "$SCENARIO" "tenant_newco" "orderId" "$NEW_ORDER_ID"
+log_ok "Booking tenant attribution = ${BOOKING_TENANT_ID}, orderId=${NEW_ORDER_ID}"
+
+log_step "2.3 — GET /tenant/bookings (as new tenant — must see own booking)"
 http_call GET "/tenant/bookings"
 assert_status "200"
 OWN_BOOKING_VISIBLE=$(echo "$RESP_BODY" | \
@@ -147,19 +167,28 @@ assert_status "200"
 DISPATCH_TOTAL=$(json_get ".data.items | length")
 log_info "Total dispatch jobs visible to ops: ${DISPATCH_TOTAL:-0}"
 
-# Try to find the dispatch job linked to our new-tenant booking
-# (may use tenantId, bookingRef, or orderId as cross-reference depending on model)
+# Tie attribution to the exact order created under the new tenant, then assert
+# the dispatch projection kept the same tenantId.
 NEWCO_DISPATCH_JOB=$(echo "$RESP_BODY" | \
-  jq -r --arg tid "$NEW_TENANT_ID" \
-    '.data.items[] | select(.tenantId == $tid) | .dispatchJobId' \
+  jq -r --arg oid "$NEW_ORDER_ID" \
+    '.data.items[] | select((.orderId // .order_id) == $oid) | (.dispatchJobId // .dispatch_job_id)' \
+  2>/dev/null | head -1 || true)
+DISPATCH_JOB_TENANT_ID=$(echo "$RESP_BODY" | \
+  jq -r --arg oid "$NEW_ORDER_ID" \
+    '.data.items[] | select((.orderId // .order_id) == $oid) | (.tenantId // .tenant_id)' \
   2>/dev/null | head -1 || true)
 
 if [[ -n "$NEWCO_DISPATCH_JOB" ]]; then
+  if [[ "$DISPATCH_JOB_TENANT_ID" != "$NEW_TENANT_ID" ]]; then
+    log_fail "Expected dispatch job tenantId ${NEW_TENANT_ID}, got '${DISPATCH_JOB_TENANT_ID:-<empty>}' for orderId=${NEW_ORDER_ID}."
+    exit 1
+  fi
   chain_set "ops" "newcoDispatchJobId" "$NEWCO_DISPATCH_JOB"
+  save_evidence "$SCENARIO" "ops" "dispatchJobTenantId" "$DISPATCH_JOB_TENANT_ID"
   save_evidence "$SCENARIO" "ops" "newcoDispatchJobId" "$NEWCO_DISPATCH_JOB"
   log_ok "New-tenant dispatch job visible with correct tenantId attribution: ${NEWCO_DISPATCH_JOB}"
 else
-  log_warn "Could not find dispatch job with tenantId=${NEW_TENANT_ID} in dispatch queue."
+  log_warn "Could not find dispatch job for orderId=${NEW_ORDER_ID} in dispatch queue."
   log_warn "This may be expected if booking-to-dispatch propagation is async on staging."
 fi
 
@@ -206,6 +235,7 @@ log_step "Chain continuity assertions"
 assert_chain "platform_admin" "newTenantId"
 assert_chain "tenant_newco"   "bookingId"
 assert_chain "tenant_newco"   "tenantId"
+assert_chain "tenant_newco"   "orderId"
 
 print_chain_summary
 

@@ -74,9 +74,16 @@ log_step "1.2 — GET /tenant/bookings/:bookingId (read-back)"
 http_call GET "/tenant/bookings/${BOOKING_ID}"
 assert_status "200"
 BOOKING_STATUS=$(json_get ".data.status")
+BOOKING_TENANT_ID=$(json_get_first ".data.tenantId" ".data.tenant_id")
 ORDER_ID=$(json_get_first ".data.orderId" ".data.order_id")
 log_ok "Booking status after creation: ${BOOKING_STATUS}"
 save_evidence "$SCENARIO" "tenant" "bookingStatusAfterCreate" "$BOOKING_STATUS"
+if [[ "$BOOKING_TENANT_ID" != "$E2E_SEED_TENANT_ID" ]]; then
+  log_fail "Expected booking tenantId ${E2E_SEED_TENANT_ID}, got '${BOOKING_TENANT_ID:-<empty>}'"
+  exit 1
+fi
+save_evidence "$SCENARIO" "tenant" "bookingTenantId" "$BOOKING_TENANT_ID"
+log_ok "Booking tenant attribution = ${BOOKING_TENANT_ID}"
 if [[ -n "$ORDER_ID" ]]; then
   chain_set "tenant" "orderId" "$ORDER_ID"
   save_evidence "$SCENARIO" "tenant" "orderId" "$ORDER_ID"
@@ -351,6 +358,12 @@ log_ok "Invoice generated: ${INVOICE_ID}"
 log_step "4.3 — GET /tenant/invoices/:invoiceId"
 http_call GET "/tenant/invoices/${INVOICE_ID}"
 assert_status "200"
+INVOICE_TENANT_ID=$(json_get_first ".data.tenantId" ".data.tenant_id")
+if [[ "$INVOICE_TENANT_ID" != "$E2E_SEED_TENANT_ID" ]]; then
+  log_fail "Expected invoice tenantId ${E2E_SEED_TENANT_ID}, got '${INVOICE_TENANT_ID:-<empty>}'"
+  exit 1
+fi
+save_evidence "$SCENARIO" "billing" "invoiceTenantId" "$INVOICE_TENANT_ID"
 log_ok "Invoice retrievable"
 
 log_step "4.4 — GET /audit (verify audit entries exist)"
