@@ -471,7 +471,7 @@ export interface CompletionExpenseItem {
 }
 
 export interface CompletionProofBundle {
-  photoIds: string[];
+  photos: string[];
   signatureId?: string | null;
   expenseItems?: CompletionExpenseItem[];
 }

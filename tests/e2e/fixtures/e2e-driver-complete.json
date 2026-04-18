@@ -3,7 +3,7 @@
   "actualDistanceKm": 22.4,
   "actualDurationSec": 2100,
   "proof": {
-    "photoIds": ["FILE-1001"],
+    "photos": ["cHJvb2YtcGhvdG8tMDAx"],
     "signatureId": "FILE-2001"
   },
   "proofNotes": "E2E automated completion proof"

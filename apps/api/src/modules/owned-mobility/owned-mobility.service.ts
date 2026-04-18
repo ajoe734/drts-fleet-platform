@@ -81,6 +81,12 @@ const BOOKING_RULES: Record<
   },
 };
 
+const MAX_COMPLETION_PROOF_PHOTO_COUNT = 5;
+const MAX_COMPLETION_PROOF_PHOTO_BYTES = 600 * 1024;
+const BASE64_DATA_URL_PREFIX = /^data:[^;]+;base64,/i;
+const BASE64_PAYLOAD_PATTERN =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
 @Injectable()
 export class OwnedMobilityService implements OnModuleInit {
   private orderSequence = 1;
@@ -1672,10 +1678,11 @@ export class OwnedMobilityService implements OnModuleInit {
     const assignment = this.requireAssignment(task.assignmentId);
     const order = this.requireOrder(task.orderId);
     const proof = {
-      photoIds: [...(command.proof?.photoIds ?? [])],
+      photos: [...(command.proof?.photos ?? [])],
       signatureId: command.proof?.signatureId ?? null,
       expenseItems: [...(command.proof?.expenseItems ?? [])],
     };
+    this.assertCompletionProofPhotos(proof.photos);
 
     if (
       order.fixedPrice &&
@@ -1693,7 +1700,7 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
 
-    if (proof.photoIds.length < order.proofRequirements.minPhotoCount) {
+    if (proof.photos.length < order.proofRequirements.minPhotoCount) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "MIN_PHOTO_COUNT_NOT_MET",
@@ -1867,6 +1874,54 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
+  }
+
+  private assertCompletionProofPhotos(photos: string[]) {
+    if (photos.length > MAX_COMPLETION_PROOF_PHOTO_COUNT) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PHOTO_LIMIT_EXCEEDED",
+        "Completion proof exceeds the maximum allowed photo count.",
+        {
+          maxPhotoCount: MAX_COMPLETION_PROOF_PHOTO_COUNT,
+        },
+      );
+    }
+
+    photos.forEach((photo, index) => {
+      const payload = this.parseProofPhotoPayload(photo, index);
+      const photoSizeBytes = Buffer.from(payload, "base64").byteLength;
+
+      if (photoSizeBytes > MAX_COMPLETION_PROOF_PHOTO_BYTES) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "PROOF_PHOTO_TOO_LARGE",
+          "Completion proof photo exceeds the maximum allowed size.",
+          {
+            photoIndex: index,
+            maxPhotoSizeBytes: MAX_COMPLETION_PROOF_PHOTO_BYTES,
+          },
+        );
+      }
+    });
+  }
+
+  private parseProofPhotoPayload(photo: string, index: number) {
+    const trimmed = photo.trim();
+    const payload = trimmed.replace(BASE64_DATA_URL_PREFIX, "");
+
+    if (!payload || !BASE64_PAYLOAD_PATTERN.test(payload)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_PROOF_PHOTO",
+        "Completion proof photo must be a valid base64 string.",
+        {
+          photoIndex: index,
+        },
+      );
+    }
+
+    return payload;
   }
 
   private assertBookingRules(
@@ -2401,7 +2456,7 @@ export class OwnedMobilityService implements OnModuleInit {
       fare: task.fare ? { ...task.fare } : null,
       proof: task.proof
         ? {
-            photoIds: [...task.proof.photoIds],
+            photos: [...task.proof.photos],
             signatureId: task.proof.signatureId ?? null,
             expenseItems: [...(task.proof.expenseItems ?? [])],
           }

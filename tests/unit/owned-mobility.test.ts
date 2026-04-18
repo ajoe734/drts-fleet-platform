@@ -33,6 +33,7 @@ function createService(
 
 const TENANT_ACME = "tenant-acme-001";
 const TENANT_NEWCO = "tenant-newco-001";
+const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
 
 function getErrorCode(error: unknown) {
   const response = (
@@ -112,7 +113,7 @@ describe("owned mobility service", () => {
           amountMinor: 150000,
         },
         proof: {
-          photoIds: [],
+          photos: [],
         },
       },
     );
@@ -309,7 +310,7 @@ describe("owned mobility service", () => {
           amountMinor: 140000,
         },
         proof: {
-          photoIds: ["FILE-1001"],
+          photos: [SAMPLE_PROOF_PHOTO],
           signatureId: "FILE-2001",
         },
       });
@@ -330,12 +331,92 @@ describe("owned mobility service", () => {
           amountMinor: 150000,
         },
         proof: {
-          photoIds: ["FILE-1001"],
+          photos: [SAMPLE_PROOF_PHOTO],
         },
       });
       expect.unreachable("enterprise booking should require signoff proof");
     } catch (error) {
       expect(getErrorCode(error)).toBe("PROOF_REQUIRED");
+    }
+  });
+
+  it("rejects completion proof payloads that exceed photo count or size limits", () => {
+    const { ownedMobilityService } = createService();
+    const booking = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: {
+          address: "台北市信義區松仁路100號",
+        },
+        dropoff: {
+          address: "桃園機場第二航廈",
+        },
+        reservationWindowStart: "2026-04-15T08:30:00Z",
+        reservationWindowEnd: "2026-04-15T08:45:00Z",
+        passenger: {
+          name: "王小明",
+          phone: "0912000111",
+        },
+        signoffRequired: false,
+        minPhotoCount: 1,
+      },
+      TENANT_ACME,
+    );
+    const dispatchJob = ownedMobilityService.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const candidate = ownedMobilityService.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+    )[0]!;
+    const assignment = ownedMobilityService.assignDispatch({
+      dispatchJobId: dispatchJob.dispatchJobId,
+      vehicleId: candidate.vehicleId,
+      driverId: candidate.driverId,
+    });
+
+    ownedMobilityService.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-10T09:02:00Z",
+    });
+    ownedMobilityService.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-10T09:03:00Z",
+    });
+    ownedMobilityService.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-10T09:08:00Z",
+    });
+    ownedMobilityService.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-10T09:10:00Z",
+    });
+
+    try {
+      ownedMobilityService.completeDriverTask(assignment.taskId, {
+        completedAt: "2026-04-10T09:45:00Z",
+        actualDistanceKm: 22.4,
+        actualDurationSec: 2100,
+        proof: {
+          photos: Array.from({ length: 6 }, () => SAMPLE_PROOF_PHOTO),
+        },
+      });
+      expect.unreachable(
+        "completion should reject more than five proof photos",
+      );
+    } catch (error) {
+      expect(getErrorCode(error)).toBe("PHOTO_LIMIT_EXCEEDED");
+    }
+
+    try {
+      ownedMobilityService.completeDriverTask(assignment.taskId, {
+        completedAt: "2026-04-10T09:45:00Z",
+        actualDistanceKm: 22.4,
+        actualDurationSec: 2100,
+        proof: {
+          photos: [Buffer.alloc(600 * 1024 + 1, 1).toString("base64")],
+        },
+      });
+      expect.unreachable(
+        "completion should reject base64 proof photos above the size limit",
+      );
+    } catch (error) {
+      expect(getErrorCode(error)).toBe("PROOF_PHOTO_TOO_LARGE");
     }
   });
 
@@ -549,7 +630,7 @@ describe("owned mobility service", () => {
       actualDistanceKm: 18.2,
       actualDurationSec: 2100,
       proof: {
-        photoIds: ["proof-photo-001"],
+        photos: [SAMPLE_PROOF_PHOTO],
       },
     });
 
@@ -696,7 +777,7 @@ describe("owned mobility service", () => {
         actualDistanceKm: 22.4,
         actualDurationSec: 2100,
         proof: {
-          photoIds: ["proof-photo-001"],
+          photos: [SAMPLE_PROOF_PHOTO],
         },
       });
       await flushWebhookDispatch();
