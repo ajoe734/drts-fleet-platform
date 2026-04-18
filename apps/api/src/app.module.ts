@@ -13,6 +13,7 @@ import {
   FeatureGateGuard,
   InternalKeyMiddleware,
 } from "./common/auth";
+import { JwtAuthService } from "./common/auth/jwt-auth.service";
 import { SnakeCaseExceptionFilter } from "./common/snake-case.exception-filter";
 import { SnakeCaseInterceptor } from "./common/snake-case.interceptor";
 import { BootstrapThrottlerGuard } from "./common/throttling/bootstrap-throttler.guard";
@@ -39,11 +40,13 @@ import { RegulatoryRegistryModule } from "./modules/regulatory-registry/regulato
 import { ReportingFilingModule } from "./modules/reporting-filing/reporting-filing.module";
 import { ShiftAttendanceModule } from "./modules/shift-attendance/shift-attendance.module";
 import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.module";
+import { AuthModule } from "./modules/auth/auth.module";
 
 @Module({
   imports: [
     EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([...GLOBAL_RATE_LIMIT]),
+    AuthModule,
     HealthModule,
     FoundationModule,
     IdentityModule,
@@ -68,6 +71,7 @@ import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.mod
     PlatformEarningsModule,
   ],
   providers: [
+    JwtAuthService,
     {
       provide: APP_GUARD,
       useClass: BootstrapAuthGuard,

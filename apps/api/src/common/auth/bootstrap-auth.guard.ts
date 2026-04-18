@@ -1,4 +1,9 @@
-import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  Optional,
+} from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 
 import { ApiRequestError } from "../api-envelope";
@@ -13,6 +18,7 @@ import type {
 } from "./auth.types";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
+import { JwtAuthService } from "./jwt-auth.service";
 
 function asHeaderRecord(
   headers: unknown,
@@ -82,9 +88,21 @@ function includesAll(haystack: string[], needles: string[]): boolean {
   return needles.every((needle) => haystack.includes(needle));
 }
 
+function extractBearerToken(
+  headers: Record<string, string | string[] | undefined>,
+): string | null {
+  const authHeader = headers["authorization"];
+  const value = Array.isArray(authHeader) ? authHeader[0] : authHeader;
+  if (!value || !value.startsWith("Bearer ")) return null;
+  return value.slice(7).trim() || null;
+}
+
 @Injectable()
 export class BootstrapAuthGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    @Optional() private readonly jwtAuthService?: JwtAuthService,
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
     const isOpenRoute =
@@ -102,6 +120,24 @@ export class BootstrapAuthGuard implements CanActivate {
       .getRequest<AuthenticatedRequestLike>();
     const requestUrl = request.originalUrl ?? request.url ?? "";
     const baseHeaders = asHeaderRecord(request.headers);
+
+    // JWT fast-path: verify Bearer token if present
+    if (this.jwtAuthService) {
+      const token = extractBearerToken(baseHeaders);
+      if (token) {
+        const payload = this.jwtAuthService.verify(token);
+        if (payload) {
+          request.identity = this.jwtAuthService.toRequestIdentity(payload);
+          return true;
+        }
+        throw new ApiRequestError(
+          401,
+          "JWT_INVALID",
+          "Bearer token is invalid or expired.",
+          { route: requestUrl },
+        );
+      }
+    }
     const headers = isSseBootstrapQueryRoute(
       request.method ?? "GET",
       requestUrl,

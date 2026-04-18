@@ -6,3 +6,4 @@ export * from "./auth.types";
 export * from "./bootstrap-auth.guard";
 export * from "./feature-gate.guard";
 export * from "./internal-key.middleware";
+export * from "./jwt-auth.service";
