@@ -489,6 +489,18 @@ export class BillingSettlementService implements OnModuleInit {
     command: GenerateDriverStatementCommand,
     requestId?: string,
   ) {
+    const driverId = command.driverId?.trim() || undefined;
+    if (command.driverId !== undefined && !driverId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "driverId must not be blank.",
+        {
+          periodMonth: command.periodMonth,
+        },
+      );
+    }
+
     const activeFeePlan = this.driverFeePlans[0];
     if (!activeFeePlan) {
       throw new ApiRequestError(
@@ -504,11 +516,16 @@ export class BillingSettlementService implements OnModuleInit {
     const existingStatements = this.driverStatements.filter(
       (statement) =>
         statement.periodMonth === command.periodMonth &&
-        statement.feePlanVersion === activeFeePlan.version,
+        statement.feePlanVersion === activeFeePlan.version &&
+        (!driverId || statement.driverId === driverId),
     );
     if (existingStatements.length > 0) {
       const reimbursementBatchIds = this.reimbursementBatches
-        .filter((batch) => batch.periodMonth === command.periodMonth)
+        .filter(
+          (batch) =>
+            batch.periodMonth === command.periodMonth &&
+            (!driverId || batch.driverId === driverId),
+        )
         .map((batch) => batch.batchId);
       return {
         items: existingStatements.map((statement) =>
@@ -519,7 +536,7 @@ export class BillingSettlementService implements OnModuleInit {
     }
 
     const eligibleTrips = (
-      await this.listDriverStatementTripsInPeriod(command.periodMonth)
+      await this.listDriverStatementTripsInPeriod(command.periodMonth, driverId)
     ).filter((trip) => trip.eligibleForDriverStatement);
     if (eligibleTrips.length === 0) {
       throw new ApiRequestError(
@@ -528,6 +545,7 @@ export class BillingSettlementService implements OnModuleInit {
         "No eligible trips found for the requested statement period.",
         {
           periodMonth: command.periodMonth,
+          ...(driverId ? { driverId } : {}),
         },
       );
     }
@@ -944,14 +962,20 @@ export class BillingSettlementService implements OnModuleInit {
     );
   }
 
-  private async listDriverStatementTripsInPeriod(periodMonth: string) {
+  private async listDriverStatementTripsInPeriod(
+    periodMonth: string,
+    driverId?: string,
+  ) {
     const { periodStart, periodEnd } = this.getPeriodMonthRange(periodMonth);
     const seededTrips = this.settlementTrips.filter(
-      (trip) => this.toPeriodMonth(trip.completedAt) === periodMonth,
+      (trip) =>
+        this.toPeriodMonth(trip.completedAt) === periodMonth &&
+        (!driverId || trip.driverId === driverId),
     );
     const liveTrips = await this.listLiveDriverStatementTripsInPeriod(
       periodStart,
       periodEnd,
+      driverId,
     );
     const tripMap = new Map<string, SettlementTripSnapshot>();
 
@@ -996,22 +1020,30 @@ export class BillingSettlementService implements OnModuleInit {
   private async listLiveDriverStatementTripsInPeriod(
     periodStart: string,
     periodEnd: string,
+    driverId?: string,
   ) {
     if (!this.billingSettlementRepository?.isEnabled()) {
       return [];
     }
 
     try {
-      const trips =
-        await this.billingSettlementRepository.listLiveDriverTripsInPeriod(
-          periodStart,
-          periodEnd,
-        );
+      const trips = driverId
+        ? await this.billingSettlementRepository.listLiveDriverTripsInPeriodForDriver(
+            driverId,
+            periodStart,
+            periodEnd,
+          )
+        : await this.billingSettlementRepository.listLiveDriverTripsInPeriod(
+            periodStart,
+            periodEnd,
+          );
       return trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip));
     } catch (error) {
       this.billingSettlementRepository.reportPersistenceFailure(
         error,
-        "list_live_driver_trips_in_period",
+        driverId
+          ? "list_live_driver_trips_in_period_for_driver"
+          : "list_live_driver_trips_in_period",
       );
       return [];
     }

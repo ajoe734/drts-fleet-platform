@@ -1338,6 +1338,7 @@ export interface DriverFeePlanRecord {
 
 export interface GenerateDriverStatementCommand {
   periodMonth: string;
+  driverId?: string;
 }
 
 export interface DriverStatementLineRecord {

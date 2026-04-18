@@ -134,4 +134,57 @@ describe("BillingSettlementService live driver statement ingestion", () => {
       "order-demo-033",
     ]);
   });
+
+  it("uses the driver-scoped repository query when generating a single driver's statement", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-17T12:00:00.000Z"));
+
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      persistChanges: vi.fn(async () => undefined),
+      listLiveDriverTripsInPeriod: vi.fn(async () => {
+        throw new Error("should not fetch all drivers");
+      }),
+      listLiveDriverTripsInPeriodForDriver: vi.fn(async () => [
+        {
+          tenantId: "tenant-demo-001",
+          driverId: "drv-demo-001",
+          orderId: "order-demo-034",
+          completedAt: "2026-03-28T08:00:00Z",
+          grossEarning: {
+            currency: "NTD",
+            amountMinor: 90000,
+          },
+        },
+      ]),
+      reportPersistenceFailure: vi.fn(),
+    } as unknown as BillingSettlementRepository;
+
+    const service = new BillingSettlementService(
+      createAuditNotificationService(),
+      repository,
+    );
+    publishFeePlan(service);
+
+    const result = await service.generateDriverStatements({
+      periodMonth: "2026-03",
+      driverId: "drv-demo-001",
+    });
+
+    expect(
+      repository.listLiveDriverTripsInPeriodForDriver,
+    ).toHaveBeenCalledWith(
+      "drv-demo-001",
+      "2026-03-01T00:00:00.000Z",
+      "2026-03-31T23:59:59.999Z",
+    );
+    expect(repository.listLiveDriverTripsInPeriod).not.toHaveBeenCalled();
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.driverId).toBe("drv-demo-001");
+    expect(result.items[0]?.lines.map((line) => line.orderId)).toEqual([
+      "order-demo-034",
+      "order-demo-032",
+      "order-demo-031",
+    ]);
+  });
 });
