@@ -810,6 +810,19 @@ export interface DriverTaskRecord {
   proof: CompletionProofBundle | null;
 }
 
+export type DriverTaskStreamEventType =
+  | "task_assigned"
+  | "task_updated"
+  | "task_cancelled";
+
+export interface DriverTaskStreamEventData {
+  task: DriverTaskRecord;
+}
+
+export interface DriverTaskStreamEventEnvelope extends DomainEventEnvelope<DriverTaskStreamEventData> {
+  eventType: DriverTaskStreamEventType;
+}
+
 export interface DispatchTraceLogRecord {
   traceId: string;
   orderId: string;

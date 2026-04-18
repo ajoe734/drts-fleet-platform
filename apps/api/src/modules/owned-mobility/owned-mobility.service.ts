@@ -38,6 +38,9 @@ import { CallcenterService } from "../callcenter/callcenter.service";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
+import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
+import type { MessageEvent } from "@nestjs/common";
+import type { Observable } from "rxjs";
 
 type TenantBookingResult = {
   orderId: string;
@@ -111,6 +114,7 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly auditNotificationService: AuditNotificationService,
     private readonly callcenterService: CallcenterService,
+    private readonly ownedMobilityTaskEventsService: OwnedMobilityTaskEventsService,
     @Optional()
     private readonly ownedMobilityRepository?: OwnedMobilityRepository,
     @Optional()
@@ -1185,6 +1189,11 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "assign_dispatch",
     );
+    this.ownedMobilityTaskEventsService.publishTaskAssigned(
+      task,
+      order,
+      requestId,
+    );
 
     return {
       assignmentId: assignment.assignmentId,
@@ -1275,6 +1284,13 @@ export class OwnedMobilityService implements OnModuleInit {
       cancelledAt: order.cancelledAt,
       cancelReason: order.cancelReason,
     });
+    if (task) {
+      this.ownedMobilityTaskEventsService.publishTaskCancelled(
+        task,
+        order,
+        requestId,
+      );
+    }
 
     return this.cloneOrder(order);
   }
@@ -1424,6 +1440,11 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.driverTasks.map((task) => this.cloneTask(task));
   }
 
+  streamDriverTaskEvents(driverId: string): Observable<MessageEvent> {
+    this.assertNonBlank(driverId, "driverId");
+    return this.ownedMobilityTaskEventsService.streamDriverTaskEvents(driverId);
+  }
+
   getDriverTask(taskId: string) {
     return this.cloneTask(this.requireTask(taskId));
   }
@@ -1469,6 +1490,11 @@ export class OwnedMobilityService implements OnModuleInit {
           status: task.status,
         },
       },
+      requestId,
+    );
+    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+      task,
+      order,
       requestId,
     );
     return this.cloneTask(task);
@@ -1538,6 +1564,11 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
+    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+      task,
+      order,
+      requestId,
+    );
     return this.cloneTask(task);
   }
 
@@ -1579,6 +1610,11 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
+    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+      task,
+      order,
+      requestId,
+    );
     return this.cloneTask(task);
   }
 
@@ -1617,6 +1653,11 @@ export class OwnedMobilityService implements OnModuleInit {
           status: task.status,
         },
       },
+      requestId,
+    );
+    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+      task,
+      order,
       requestId,
     );
     return this.cloneTask(task);
@@ -1664,6 +1705,11 @@ export class OwnedMobilityService implements OnModuleInit {
           status: task.status,
         },
       },
+      requestId,
+    );
+    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+      task,
+      order,
       requestId,
     );
     return this.cloneTask(task);
@@ -1783,6 +1829,11 @@ export class OwnedMobilityService implements OnModuleInit {
       taskId,
       assignmentId: assignment.assignmentId,
     });
+    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+      task,
+      order,
+      requestId,
+    );
 
     return this.cloneTask(task);
   }

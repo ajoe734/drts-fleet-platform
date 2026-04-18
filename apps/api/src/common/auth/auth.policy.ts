@@ -171,7 +171,10 @@ export function resolveRouteAuthPolicy(
     };
   }
 
-  if (routePath.startsWith("driver/tasks")) {
+  if (
+    routePath === "driver/task-events" ||
+    routePath.startsWith("driver/tasks")
+  ) {
     return {
       routeKey: `driver:tasks:${upperMethod}`,
       requiredScopes: methodScope("driver:read", "driver:write", upperMethod),

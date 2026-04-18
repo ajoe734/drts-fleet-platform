@@ -5,6 +5,7 @@ import {
   RequestMethod,
 } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
+import { EventEmitterModule } from "@nestjs/event-emitter";
 import { ThrottlerModule } from "@nestjs/throttler";
 
 import {
@@ -41,6 +42,7 @@ import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.mod
 
 @Module({
   imports: [
+    EventEmitterModule.forRoot(),
     ThrottlerModule.forRoot([...GLOBAL_RATE_LIMIT]),
     HealthModule,
     FoundationModule,

@@ -6,8 +6,12 @@ import {
   Param,
   Post,
   Put,
+  Query,
+  Sse,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
+import type { MessageEvent } from "@nestjs/common";
+import type { Observable } from "rxjs";
 
 import type {
   AssignDispatchCommand,
@@ -33,12 +37,34 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { CurrentIdentity } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
 @Controller()
 export class OwnedMobilityController {
   constructor(private readonly ownedMobilityService: OwnedMobilityService) {}
+
+  private resolveDriverTaskStreamDriverId(
+    identity: BootstrapRequestIdentity | null,
+    requestedDriverId?: string,
+  ) {
+    if (identity?.actorType === "driver_user" && identity.actorId) {
+      return identity.actorId;
+    }
+
+    const normalizedDriverId = requestedDriverId?.trim();
+    if (normalizedDriverId) {
+      return normalizedDriverId;
+    }
+
+    throw new ApiRequestError(
+      400,
+      "DRIVER_ID_REQUIRED",
+      "driverId query is required when the caller is not a driver bootstrap identity.",
+    );
+  }
 
   private requireTenantId(tenantId?: string) {
     const normalizedTenantId = tenantId?.trim();
@@ -319,6 +345,16 @@ export class OwnedMobilityController {
         items: this.ownedMobilityService.listDriverTasks(),
       },
       requestId,
+    );
+  }
+
+  @Sse("driver/task-events")
+  streamDriverTaskEvents(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Query("driverId") requestedDriverId?: string,
+  ): Observable<MessageEvent> {
+    return this.ownedMobilityService.streamDriverTaskEvents(
+      this.resolveDriverTaskStreamDriverId(identity, requestedDriverId),
     );
   }
 

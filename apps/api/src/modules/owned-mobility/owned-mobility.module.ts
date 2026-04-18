@@ -7,6 +7,7 @@ import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-regi
 import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
 import { OwnedMobilityController } from "./owned-mobility.controller";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
+import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 
 @Module({
@@ -18,7 +19,11 @@ import { OwnedMobilityService } from "./owned-mobility.service";
     TenantPartnerModule,
   ],
   controllers: [OwnedMobilityController],
-  providers: [OwnedMobilityRepository, OwnedMobilityService],
+  providers: [
+    OwnedMobilityRepository,
+    OwnedMobilityService,
+    OwnedMobilityTaskEventsService,
+  ],
   exports: [OwnedMobilityService],
 })
 export class OwnedMobilityModule {}
