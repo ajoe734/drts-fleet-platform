@@ -4,6 +4,7 @@ export const AUTH_METADATA_KEY = "drts:auth";
 export const AUTH_OPEN_ROUTE_KEY = "drts:auth:open";
 export const AUTH_REQUIRED_SCOPES_KEY = "drts:auth:scopes";
 export const AUTH_ALLOWED_REALMS_KEY = "drts:auth:realms";
+export const FEATURE_GATED_FLAG_KEY = "drts:feature-gate:flag-key";
 
 export const AUTH_ANONYMOUS_REQUEST_ID = "anonymous";
 

@@ -7,7 +7,11 @@ import {
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ThrottlerModule } from "@nestjs/throttler";
 
-import { BootstrapAuthGuard, InternalKeyMiddleware } from "./common/auth";
+import {
+  BootstrapAuthGuard,
+  FeatureGateGuard,
+  InternalKeyMiddleware,
+} from "./common/auth";
 import { SnakeCaseExceptionFilter } from "./common/snake-case.exception-filter";
 import { SnakeCaseInterceptor } from "./common/snake-case.interceptor";
 import { BootstrapThrottlerGuard } from "./common/throttling/bootstrap-throttler.guard";
@@ -69,6 +73,10 @@ import { TenantPartnerModule } from "./modules/tenant-partner/tenant-partner.mod
     {
       provide: APP_GUARD,
       useClass: BootstrapThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: FeatureGateGuard,
     },
     {
       provide: APP_INTERCEPTOR,

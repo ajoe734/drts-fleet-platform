@@ -9,6 +9,7 @@ import {
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
   AUTH_REQUIRED_SCOPES_KEY,
+  FEATURE_GATED_FLAG_KEY,
 } from "./auth.constants";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 
@@ -19,6 +20,9 @@ export const RequireScopes = (...scopes: string[]) =>
 
 export const RequireRealms = (...allowedRealms: AuthRealm[]) =>
   SetMetadata(AUTH_ALLOWED_REALMS_KEY, allowedRealms);
+
+export const FeatureGated = (flagKey: string) =>
+  SetMetadata(FEATURE_GATED_FLAG_KEY, flagKey);
 
 export const CurrentIdentity = createParamDecorator(
   (
