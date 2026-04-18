@@ -8,15 +8,27 @@ import {
   ActivityIndicator,
   Alert,
 } from "react-native";
-import type { PlatformPresenceRecord } from "@drts/contracts";
+import {
+  PLATFORM_CODES,
+  type PlatformCode,
+  type PlatformPresenceRecord,
+} from "@drts/contracts";
 import { getDriverClient } from "@/lib/api-client";
 
-type FormMode = "bind" | "reauth";
+type BindForm =
+  | {
+      mode: "bind";
+      platformCode: string;
+      tokenExpiresAt: string;
+    }
+  | {
+      mode: "reauth";
+      platformCode: PlatformCode;
+      tokenExpiresAt: string;
+    };
 
-interface BindForm {
-  mode: FormMode;
-  platformCode: string;
-  tokenExpiresAt: string;
+function isPlatformCode(value: string): value is PlatformCode {
+  return PLATFORM_CODES.includes(value as PlatformCode);
 }
 
 function PlatformCard({
@@ -25,8 +37,8 @@ function PlatformCard({
   onReauth,
 }: {
   record: PlatformPresenceRecord;
-  onUnbind: (platformCode: string) => void;
-  onReauth: (platformCode: string) => void;
+  onUnbind: (platformCode: PlatformCode) => void;
+  onReauth: (platformCode: PlatformCode) => void;
 }) {
   return (
     <View style={styles.card}>
@@ -106,11 +118,24 @@ export function PlatformBinding() {
       Alert.alert("Validation", "Platform code is required.");
       return;
     }
+    let platformCode: PlatformCode;
+    if (form.mode === "bind") {
+      if (!isPlatformCode(form.platformCode)) {
+        Alert.alert(
+          "Validation",
+          `Platform code must be one of: ${PLATFORM_CODES.join(", ")}.`,
+        );
+        return;
+      }
+      platformCode = form.platformCode;
+    } else {
+      platformCode = form.platformCode;
+    }
     setSubmitting(true);
     try {
       const client = getDriverClient();
       await client.setPlatformOnline({
-        platformCode: form.platformCode,
+        platformCode,
         tokenExpiresAt: form.tokenExpiresAt.trim() || null,
       });
       setForm(null);
@@ -128,7 +153,7 @@ export function PlatformBinding() {
     }
   };
 
-  const handleUnbind = (platformCode: string) => {
+  const handleUnbind = (platformCode: PlatformCode) => {
     Alert.alert(
       "Unbind Platform",
       `Remove account binding for "${platformCode}"?`,
@@ -151,7 +176,7 @@ export function PlatformBinding() {
     );
   };
 
-  const handleOpenReauth = (platformCode: string) => {
+  const handleOpenReauth = (platformCode: PlatformCode) => {
     setForm({ mode: "reauth", platformCode, tokenExpiresAt: "" });
   };
 
