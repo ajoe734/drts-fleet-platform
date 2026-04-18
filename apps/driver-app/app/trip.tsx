@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +21,15 @@ import {
   type ProofPhoto,
 } from "@/lib/completion-proof";
 import { getDriverClient } from "@/lib/api-client";
+import {
+  accumulateTripDistanceKm,
+  calculateTripDurationSec,
+  formatTripDistance,
+  formatTripDuration,
+  roundTripDistanceKm,
+  type TripCoordinate,
+} from "@/lib/trip-metrics";
+import * as Location from "expo-location";
 
 function PlatformBadge({ platform }: { platform: string | null }) {
   const label = platform ?? "direct";
@@ -92,6 +101,31 @@ function getErrorMessage(error: unknown): string {
   return "Unknown error";
 }
 
+type LocationTrackingState =
+  | "idle"
+  | "requesting_permission"
+  | "active"
+  | "permission_denied"
+  | "error";
+
+function parseStartedAtMs(task: DriverTaskRecord | null): number | null {
+  if (!task?.startedAt) {
+    return null;
+  }
+
+  const parsed = Date.parse(task.startedAt);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function shouldShowTripMetrics(task: DriverTaskRecord | null): boolean {
+  return Boolean(
+    task?.status === "on_trip" ||
+    task?.startedAt ||
+    task?.actualDistanceKm != null ||
+    task?.actualDurationSec != null,
+  );
+}
+
 export default function TripScreen() {
   const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
   const [orderDetail, setOrderDetail] = useState<OwnedOrderRecord | null>(null);
@@ -99,6 +133,22 @@ export default function TripScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
+  const [liveDistanceKm, setLiveDistanceKm] = useState(0);
+  const [liveDurationSec, setLiveDurationSec] = useState(0);
+  const [locationTrackingState, setLocationTrackingState] =
+    useState<LocationTrackingState>("idle");
+  const [locationTrackingMessage, setLocationTrackingMessage] = useState<
+    string | null
+  >(null);
+  const [trackingRetryKey, setTrackingRetryKey] = useState(0);
+  const locationSubscriptionRef = useRef<Location.LocationSubscription | null>(
+    null,
+  );
+  const lastTrackedCoordinateRef = useRef<TripCoordinate | null>(null);
+  const tripStartTimeRef = useRef<number | null>(null);
+  const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
   const router = useRouter();
 
   const proofRequirements = getCompletionProofRequirements(orderDetail);
@@ -112,6 +162,32 @@ export default function TripScreen() {
     proofRequirements.minPhotoCount - proofPhotos.length,
     0,
   );
+  const isTripInProgress = taskDetail?.status === "on_trip";
+  const showTripMetrics = shouldShowTripMetrics(taskDetail);
+  const completionBlockedByTracking =
+    isTripInProgress && locationTrackingState !== "active";
+
+  function clearDurationTicker() {
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
+  }
+
+  function stopLocationTracking() {
+    locationSubscriptionRef.current?.remove();
+    locationSubscriptionRef.current = null;
+    lastTrackedCoordinateRef.current = null;
+  }
+
+  function syncTripMetricsFromTask(task: DriverTaskRecord | null) {
+    tripStartTimeRef.current = parseStartedAtMs(task);
+    setLiveDistanceKm(task?.actualDistanceKm ?? 0);
+    setLiveDurationSec(
+      task?.actualDurationSec ??
+        calculateTripDurationSec(tripStartTimeRef.current),
+    );
+  }
 
   async function loadTrip(showSpinner: boolean) {
     if (showSpinner) {
@@ -155,6 +231,124 @@ export default function TripScreen() {
   useEffect(() => {
     setProofPhotos([]);
   }, [taskDetail?.taskId]);
+
+  useEffect(() => {
+    syncTripMetricsFromTask(taskDetail);
+  }, [
+    taskDetail?.taskId,
+    taskDetail?.actualDistanceKm,
+    taskDetail?.actualDurationSec,
+    taskDetail?.startedAt,
+  ]);
+
+  useEffect(() => {
+    clearDurationTicker();
+
+    if (!isTripInProgress) {
+      return;
+    }
+
+    setLiveDurationSec(calculateTripDurationSec(tripStartTimeRef.current));
+    durationIntervalRef.current = setInterval(() => {
+      setLiveDurationSec(calculateTripDurationSec(tripStartTimeRef.current));
+    }, 1000);
+
+    return () => {
+      clearDurationTicker();
+    };
+  }, [isTripInProgress, taskDetail?.taskId, taskDetail?.startedAt]);
+
+  useEffect(() => {
+    if (!isTripInProgress) {
+      stopLocationTracking();
+      setLocationTrackingState("idle");
+      setLocationTrackingMessage(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const beginLocationTracking = async () => {
+      stopLocationTracking();
+      setLocationTrackingState("requesting_permission");
+      setLocationTrackingMessage(null);
+
+      try {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (cancelled) {
+          return;
+        }
+
+        if (!permission.granted) {
+          setLocationTrackingState("permission_denied");
+          setLocationTrackingMessage(
+            "Location access is required while a trip is active so distance and duration can be recorded.",
+          );
+          return;
+        }
+
+        const initialPosition = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        }).catch(() => null);
+        if (cancelled) {
+          return;
+        }
+
+        if (initialPosition) {
+          lastTrackedCoordinateRef.current = {
+            latitude: initialPosition.coords.latitude,
+            longitude: initialPosition.coords.longitude,
+          };
+        }
+
+        const subscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            distanceInterval: 25,
+            timeInterval: 10000,
+          },
+          (position) => {
+            const nextCoordinate = {
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+            };
+
+            setLiveDistanceKm((currentDistanceKm) => {
+              const updatedDistanceKm = accumulateTripDistanceKm(
+                currentDistanceKm,
+                lastTrackedCoordinateRef.current,
+                nextCoordinate,
+              );
+              lastTrackedCoordinateRef.current = nextCoordinate;
+              return updatedDistanceKm;
+            });
+          },
+        );
+
+        if (cancelled) {
+          subscription.remove();
+          return;
+        }
+
+        locationSubscriptionRef.current = subscription;
+        setLocationTrackingState("active");
+      } catch (trackingError) {
+        if (cancelled) {
+          return;
+        }
+
+        setLocationTrackingState("error");
+        setLocationTrackingMessage(getErrorMessage(trackingError));
+      }
+    };
+
+    void beginLocationTracking();
+
+    return () => {
+      cancelled = true;
+      stopLocationTracking();
+    };
+  }, [isTripInProgress, taskDetail?.taskId, trackingRetryKey]);
 
   async function requestPhotoPermission(
     source: "camera" | "library",
@@ -275,10 +469,23 @@ export default function TripScreen() {
             return;
           }
 
+          if (completionBlockedByTracking) {
+            Alert.alert(
+              "Trip metrics unavailable",
+              locationTrackingMessage ??
+                (locationTrackingState === "requesting_permission"
+                  ? "Location tracking is still starting. Wait a moment, then try again."
+                  : "Enable location tracking before completing the trip so distance and duration can be recorded."),
+            );
+            return;
+          }
+
           await client.completeTask(taskDetail.taskId, {
             completedAt: now,
-            actualDistanceKm: 0,
-            actualDurationSec: 0,
+            actualDistanceKm: roundTripDistanceKm(liveDistanceKm),
+            actualDurationSec: calculateTripDurationSec(
+              tripStartTimeRef.current,
+            ),
             proof:
               proofPhotos.length > 0
                 ? {
@@ -292,6 +499,10 @@ export default function TripScreen() {
       }
 
       if (action === "complete") {
+        stopLocationTracking();
+        clearDurationTicker();
+        setLocationTrackingState("idle");
+        setLocationTrackingMessage(null);
         setProofPhotos([]);
       }
 
@@ -337,6 +548,63 @@ export default function TripScreen() {
               : "No order linked"}
           </Text>
           <RouteDisplay task={taskDetail} order={orderDetail} />
+          {showTripMetrics && (
+            <View style={styles.metricsCard}>
+              <View style={styles.metricsHeader}>
+                <Text style={styles.metricsTitle}>Trip Metrics</Text>
+                {isTripInProgress && (
+                  <Text style={styles.metricsStatusPill}>
+                    {locationTrackingState === "active"
+                      ? "live"
+                      : "needs attention"}
+                  </Text>
+                )}
+              </View>
+              <View style={styles.metricsGrid}>
+                <View style={styles.metricTile}>
+                  <Text style={styles.metricLabel}>Distance</Text>
+                  <Text style={styles.metricValue}>
+                    {formatTripDistance(liveDistanceKm)}
+                  </Text>
+                </View>
+                <View style={styles.metricTile}>
+                  <Text style={styles.metricLabel}>Duration</Text>
+                  <Text style={styles.metricValue}>
+                    {formatTripDuration(liveDurationSec)}
+                  </Text>
+                </View>
+              </View>
+              {isTripInProgress && locationTrackingState === "active" && (
+                <Text style={styles.metricHint}>
+                  Live location tracking is active for this trip.
+                </Text>
+              )}
+              {isTripInProgress &&
+                locationTrackingState === "requesting_permission" && (
+                  <Text style={styles.metricWarning}>
+                    Allow location access to start live trip tracking.
+                  </Text>
+                )}
+              {isTripInProgress &&
+                (locationTrackingState === "permission_denied" ||
+                  locationTrackingState === "error") && (
+                  <>
+                    <Text style={styles.metricWarning}>
+                      {locationTrackingMessage ??
+                        "Trip metrics could not start. Retry location tracking before completing the trip."}
+                    </Text>
+                    <ActionButton
+                      label="Retry Tracking"
+                      onPress={() =>
+                        setTrackingRetryKey((current) => current + 1)
+                      }
+                      disabled={submittingAction !== null}
+                      variant="secondary"
+                    />
+                  </>
+                )}
+            </View>
+          )}
           {isForwardedTask(taskDetail) && (
             <Text style={styles.forwardedNote}>
               Dispatched by {taskDetail.sourcePlatform}. Dispatch rules are
@@ -467,7 +735,8 @@ export default function TripScreen() {
                 submittingAction !== null ||
                 proofRequirementsUnavailable ||
                 unsupportedProofMessages.length > 0 ||
-                proofPhotos.length < proofRequirements.minPhotoCount
+                proofPhotos.length < proofRequirements.minPhotoCount ||
+                completionBlockedByTracking
               }
             />
           </View>
@@ -526,6 +795,47 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontStyle: "italic",
   },
+  metricsCard: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#d9e7f5",
+    gap: 10,
+  },
+  metricsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  metricsTitle: { fontSize: 16, fontWeight: "600", color: "#0f3554" },
+  metricsStatusPill: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#0f6cbd",
+    backgroundColor: "#e8f3fc",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  metricsGrid: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  metricTile: {
+    flex: 1,
+    backgroundColor: "#f7fbff",
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#d9e7f5",
+  },
+  metricLabel: { fontSize: 12, color: "#4f6b85", marginBottom: 4 },
+  metricValue: { fontSize: 20, fontWeight: "700", color: "#0f3554" },
+  metricHint: { fontSize: 12, color: "#0f6cbd" },
+  metricWarning: { fontSize: 12, color: "#b42318" },
   proofCard: {
     backgroundColor: "#faf7ef",
     borderRadius: 8,
