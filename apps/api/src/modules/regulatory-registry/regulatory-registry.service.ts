@@ -32,6 +32,11 @@ import {
 const EARTH_RADIUS_KM = 6371;
 const AVERAGE_SPEED_KMH = 30;
 
+type EtaDestination = {
+  lat: number;
+  lng: number;
+};
+
 const VEHICLE_SEED: VehicleRegistryRecord[] = [
   {
     vehicleId: "veh-demo-001",
@@ -169,6 +174,8 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
   private drivers = DRIVER_SEED.map((driver) => ({ ...driver }));
 
+  private latestDriverLocations = new Map<string, DriverLocationSnapshot>();
+
   private supplyPairs: RegulatorySupplyPair[] = [
     {
       vehicleId: "veh-demo-001",
@@ -208,6 +215,11 @@ export class RegulatoryRegistryService implements OnModuleInit {
     }
 
     try {
+      const latestDriverLocations =
+        (await this.regulatoryRegistryRepository.listLatestDriverLocations?.()) ??
+        [];
+      this.replaceLatestDriverLocations(latestDriverLocations);
+
       const persistedState =
         await this.regulatoryRegistryRepository.loadState();
       const hasPersistedState =
@@ -297,6 +309,16 @@ export class RegulatoryRegistryService implements OnModuleInit {
       ...(command.accuracyM === undefined
         ? {}
         : { accuracyM: command.accuracyM }),
+    });
+
+    const recordedAt = new Date().toISOString();
+    this.setLatestDriverLocation({
+      driverId: command.driverId.trim(),
+      lat: command.lat,
+      lng: command.lng,
+      accuracyM: command.accuracyM ?? null,
+      recordedAt,
+      updatedAt: recordedAt,
     });
 
     return { success: true };
@@ -639,7 +661,10 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return { ...driver };
   }
 
-  getEligibleCandidates(serviceBucket: Phase1ServiceBucket) {
+  getEligibleCandidates(
+    serviceBucket: Phase1ServiceBucket,
+    destination?: EtaDestination | null,
+  ) {
     return this.supplyPairs
       .map((pair) => {
         const vehicle = this.vehicles.find(
@@ -663,12 +688,22 @@ export class RegulatoryRegistryService implements OnModuleInit {
         if (!eligibleVehicle || !eligibleDriver) {
           return null;
         }
+
+        const etaMinutes = this.resolveCandidateEta(
+          pair,
+          driver.driverId,
+          destination ?? null,
+        );
+        if (etaMinutes === null) {
+          return null;
+        }
+
         return {
           vehicleId: vehicle.vehicleId,
           driverId: driver.driverId,
           operatingArea: vehicle.operatingArea,
           serviceBuckets: [...vehicle.supportedServiceBuckets],
-          etaMinutes: pair.etaMinutes,
+          etaMinutes,
         };
       })
       .filter((candidate): candidate is NonNullable<typeof candidate> =>
@@ -726,6 +761,47 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return {
       ...location,
     };
+  }
+
+  private replaceLatestDriverLocations(
+    locations: readonly DriverLocationSnapshot[],
+  ): void {
+    this.latestDriverLocations = new Map(
+      locations.map((location) => [
+        location.driverId,
+        this.cloneDriverLocation(location),
+      ]),
+    );
+  }
+
+  private setLatestDriverLocation(location: DriverLocationSnapshot): void {
+    this.latestDriverLocations.set(
+      location.driverId,
+      this.cloneDriverLocation(location),
+    );
+  }
+
+  private resolveCandidateEta(
+    pair: RegulatorySupplyPair,
+    driverId: string,
+    destination: EtaDestination | null,
+  ): number | null {
+    if (!destination) {
+      return pair.etaMinutes;
+    }
+
+    const driverLocation = this.latestDriverLocations.get(driverId);
+    if (!driverLocation) {
+      return null;
+    }
+
+    const distanceKm = this.calculateHaversineDistanceKm(
+      driverLocation.lat,
+      driverLocation.lng,
+      destination.lat,
+      destination.lng,
+    );
+    return Math.round((distanceKm / AVERAGE_SPEED_KMH) * 60);
   }
 
   private normalizeNullableText(value: string | null | undefined) {

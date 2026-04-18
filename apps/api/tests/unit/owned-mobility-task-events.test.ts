@@ -93,4 +93,70 @@ describe("owned mobility task events", () => {
       },
     });
   });
+
+  it("passes pickup coordinates into candidate lookup and stores the live ETA snapshot", () => {
+    const regulatoryRegistryService = {
+      getEligibleCandidates: vi.fn(() => [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 2,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ]),
+      getVehicleDispatchability: vi.fn(() => true),
+      getDriverAvailability: vi.fn(() => true),
+    };
+    const auditNotificationService = {
+      recordNotification: vi.fn(),
+      recordAuditLog: vi.fn(),
+    };
+    const callcenterService = {
+      registerRecordingAttachmentListener: vi.fn(),
+    };
+    const taskEventsService = new OwnedMobilityTaskEventsService(
+      new EventEmitter2(),
+    );
+    const service = new OwnedMobilityService(
+      regulatoryRegistryService as never,
+      auditNotificationService as never,
+      callcenterService as never,
+      taskEventsService,
+      undefined,
+      undefined,
+    );
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Pickup", lat: 25.04776, lng: 121.51706 },
+      dropoff: { address: "Dropoff" },
+      passenger: { name: "Rider One", phone: "0912000000" },
+    });
+    const dispatchJob = service.dispatchOrder(order.orderId, { mode: "auto" });
+    const candidates = service.listDispatchCandidates(
+      dispatchJob.dispatchJobId,
+    );
+    const storedDispatchJob = service.listDispatchJobs()[0];
+
+    expect(
+      regulatoryRegistryService.getEligibleCandidates,
+    ).toHaveBeenNthCalledWith(1, "standard_taxi", {
+      lat: 25.04776,
+      lng: 121.51706,
+    });
+    expect(
+      regulatoryRegistryService.getEligibleCandidates,
+    ).toHaveBeenNthCalledWith(2, "standard_taxi", {
+      lat: 25.04776,
+      lng: 121.51706,
+    });
+    expect(storedDispatchJob?.latestEtaMinutes).toBe(2);
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        driverId: "driver-001",
+        vehicleId: "vehicle-001",
+        etaMinutes: 2,
+      }),
+    ]);
+  });
 });

@@ -828,6 +828,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
     const candidates = this.regulatoryRegistryService.getEligibleCandidates(
       order.serviceBucket,
+      this.resolvePickupEtaDestination(order),
     );
     const now = new Date().toISOString();
     const isReservation = order.dispatchSemantics === "reservation";
@@ -1037,7 +1038,10 @@ export class OwnedMobilityService implements OnModuleInit {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
     return this.regulatoryRegistryService
-      .getEligibleCandidates(order.serviceBucket)
+      .getEligibleCandidates(
+        order.serviceBucket,
+        this.resolvePickupEtaDestination(order),
+      )
       .map((candidate) => ({ ...candidate }));
   }
 
@@ -2479,6 +2483,20 @@ export class OwnedMobilityService implements OnModuleInit {
       this.driverTasks.find((task) => task.assignmentId === assignmentId) ??
       null
     );
+  }
+
+  private resolvePickupEtaDestination(order: Pick<OwnedOrderRecord, "pickup">) {
+    if (
+      Number.isFinite(order.pickup.lat) &&
+      Number.isFinite(order.pickup.lng)
+    ) {
+      return {
+        lat: order.pickup.lat as number,
+        lng: order.pickup.lng as number,
+      };
+    }
+
+    return null;
   }
 
   private normalizeNullableText(value: string | null | undefined) {

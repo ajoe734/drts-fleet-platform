@@ -245,8 +245,11 @@ export class RegulatoryRegistryController {
     );
   }
 
-  private parseFiniteQueryNumber(value: string, fieldName: string): number {
-    const normalizedValue = value.trim();
+  private parseFiniteQueryNumber(
+    value: string | undefined,
+    fieldName: string,
+  ): number {
+    const normalizedValue = value?.trim() ?? "";
     if (normalizedValue.length === 0) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,

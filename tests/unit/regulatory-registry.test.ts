@@ -330,6 +330,95 @@ describe("regulatory registry service", () => {
     );
   });
 
+  it("recomputes candidate ETA from live driver locations when a destination is provided", async () => {
+    const repository = {
+      loadState: vi.fn(async () => ({
+        vehicles: [],
+        drivers: [],
+        supplyPairs: [],
+        contracts: [],
+        policies: [],
+        exclusivities: [],
+      })),
+      listLatestDriverLocations: vi.fn(async () => [
+        {
+          driverId: "drv-demo-001",
+          lat: 25.033964,
+          lng: 121.564468,
+          accuracyM: 5,
+          recordedAt: "2026-04-18T06:00:00.000Z",
+          updatedAt: "2026-04-18T06:00:00.000Z",
+        },
+      ]),
+      persistChanges: vi.fn(async () => undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as unknown as RegulatoryRegistryRepository;
+    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+
+    await regulatoryRegistryService.onModuleInit();
+
+    expect(
+      regulatoryRegistryService.getEligibleCandidates("standard_taxi", {
+        lat: 25.033964,
+        lng: 121.564468,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        driverId: "drv-demo-001",
+        vehicleId: "veh-demo-001",
+        etaMinutes: 0,
+      }),
+    ]);
+  });
+
+  it("updates live candidate ETA after a new driver heartbeat is recorded", async () => {
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      loadState: vi.fn(async () => ({
+        vehicles: [],
+        drivers: [],
+        supplyPairs: [],
+        contracts: [],
+        policies: [],
+        exclusivities: [],
+      })),
+      listLatestDriverLocations: vi.fn(async () => []),
+      upsertDriverLocation: vi.fn(async () => undefined),
+      persistChanges: vi.fn(async () => undefined),
+      reportPersistenceFailure: vi.fn(),
+    } as unknown as RegulatoryRegistryRepository;
+    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+
+    await regulatoryRegistryService.onModuleInit();
+
+    expect(
+      regulatoryRegistryService.getEligibleCandidates("standard_taxi", {
+        lat: 25.04776,
+        lng: 121.51706,
+      }),
+    ).toEqual([]);
+
+    await regulatoryRegistryService.recordDriverLocation({
+      driverId: "drv-demo-001",
+      lat: 25.04776,
+      lng: 121.51706,
+      accuracyM: 4,
+    });
+
+    expect(
+      regulatoryRegistryService.getEligibleCandidates("standard_taxi", {
+        lat: 25.04776,
+        lng: 121.51706,
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        driverId: "drv-demo-001",
+        vehicleId: "veh-demo-001",
+        etaMinutes: 0,
+      }),
+    ]);
+  });
+
   it("returns 404 semantics when the latest driver location is missing", async () => {
     const repository = {
       isEnabled: vi.fn(() => true),
@@ -406,6 +495,33 @@ describe("regulatory registry controller", () => {
       controller.getDriverEta(
         "drv-demo-001",
         "25.04776foo",
+        "121.51706",
+        "req-driver-eta",
+      ),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        error: expect.objectContaining({
+          code: "INVALID_NUMBER",
+          details: expect.objectContaining({
+            field: "destLat",
+          }),
+        }),
+      }),
+      status: 400,
+    });
+    expect(getDriverEta).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing ETA query coordinates without crashing on trim()", async () => {
+    const getDriverEta = vi.fn();
+    const controller = new RegulatoryRegistryController({
+      getDriverEta,
+    } as unknown as RegulatoryRegistryService);
+
+    await expect(
+      controller.getDriverEta(
+        "drv-demo-001",
+        undefined as unknown as string,
         "121.51706",
         "req-driver-eta",
       ),
