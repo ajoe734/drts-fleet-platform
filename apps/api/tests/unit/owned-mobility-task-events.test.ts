@@ -1,8 +1,9 @@
 import { EventEmitter2 } from "@nestjs/event-emitter";
-import { firstValueFrom, take, timeout } from "rxjs";
+import { firstValueFrom, take, timeout, toArray } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
 
 import { resolveRouteAuthPolicy } from "../../src/common/auth";
+import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 
@@ -30,12 +31,16 @@ function createOwnedMobilityService() {
   const taskEventsService = new OwnedMobilityTaskEventsService(
     new EventEmitter2(),
   );
+  const opsDispatchEventsService = new OpsDispatchEventsService(
+    new EventEmitter2(),
+  );
 
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
     auditNotificationService as never,
     callcenterService as never,
     taskEventsService,
+    opsDispatchEventsService,
     undefined,
     undefined,
   );
@@ -43,6 +48,7 @@ function createOwnedMobilityService() {
   return {
     service,
     taskEventsService,
+    opsDispatchEventsService,
   };
 }
 
@@ -94,6 +100,60 @@ describe("owned mobility task events", () => {
     });
   });
 
+  it("protects ops dispatch event streams with the ops auth policy", () => {
+    expect(resolveRouteAuthPolicy("GET", "/api/ops/dispatch-events")).toEqual({
+      routeKey: "ops:dispatch-events:GET",
+      requiredScopes: ["dispatch:read"],
+      allowedRealms: ["system", "ops"],
+      description: "Ops dispatch event access",
+    });
+  });
+
+  it("emits order and dispatch job updates to the ops dispatch stream", async () => {
+    const { service } = createOwnedMobilityService();
+    const streamPromise = firstValueFrom(
+      service.streamOpsDispatchEvents().pipe(take(2), toArray(), timeout(1_000)),
+    );
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Pickup" },
+      dropoff: { address: "Dropoff" },
+      passenger: { name: "Rider One", phone: "0912000000" },
+    });
+
+    service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    const events = await streamPromise;
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      type: "order_created",
+      retry: 10_000,
+      data: {
+        eventType: "order_created",
+        data: {
+          order: {
+            orderId: order.orderId,
+            status: "ready_for_dispatch",
+          },
+        },
+      },
+    });
+    expect(events[1]).toMatchObject({
+      type: "dispatch_job_updated",
+      data: {
+        eventType: "dispatch_job_updated",
+        data: {
+          orderId: order.orderId,
+          dispatchJob: {
+            orderId: order.orderId,
+            status: "matching",
+          },
+        },
+      },
+    });
+  });
+
   it("passes pickup coordinates into candidate lookup and stores the live ETA snapshot", () => {
     const regulatoryRegistryService = {
       getEligibleCandidates: vi.fn(() => [
@@ -118,11 +178,15 @@ describe("owned mobility task events", () => {
     const taskEventsService = new OwnedMobilityTaskEventsService(
       new EventEmitter2(),
     );
+    const opsDispatchEventsService = new OpsDispatchEventsService(
+      new EventEmitter2(),
+    );
     const service = new OwnedMobilityService(
       regulatoryRegistryService as never,
       auditNotificationService as never,
       callcenterService as never,
       taskEventsService,
+      opsDispatchEventsService,
       undefined,
       undefined,
     );

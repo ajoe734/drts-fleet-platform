@@ -33,6 +33,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { CallcenterService } from "../callcenter/callcenter.service";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
@@ -115,6 +116,7 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly auditNotificationService: AuditNotificationService,
     private readonly callcenterService: CallcenterService,
     private readonly ownedMobilityTaskEventsService: OwnedMobilityTaskEventsService,
+    private readonly opsDispatchEventsService: OpsDispatchEventsService,
     @Optional()
     private readonly ownedMobilityRepository?: OwnedMobilityRepository,
     @Optional()
@@ -264,6 +266,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
+    this.opsDispatchEventsService.publishOrderCreated(order, requestId);
 
     return this.cloneOrder(order);
   }
@@ -398,6 +401,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
+    this.opsDispatchEventsService.publishOrderCreated(order, requestId);
 
     return this.cloneOrder(order);
   }
@@ -539,6 +543,7 @@ export class OwnedMobilityService implements OnModuleInit {
       requestId,
     );
     this.publishTenantOrderWebhook(order, "order.created", order.createdAt);
+    this.opsDispatchEventsService.publishOrderCreated(order, requestId);
 
     return {
       orderId,
@@ -964,6 +969,11 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "dispatch_order",
     );
+    this.opsDispatchEventsService.publishDispatchJobUpdated(
+      orderId,
+      dispatchJob,
+      requestId,
+    );
 
     return {
       dispatchJobId: dispatchJob.dispatchJobId,
@@ -1198,6 +1208,11 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.opsDispatchEventsService.publishDispatchJobUpdated(
+      order.orderId,
+      dispatchJob,
+      requestId,
+    );
 
     return {
       assignmentId: assignment.assignmentId,
@@ -1295,6 +1310,7 @@ export class OwnedMobilityService implements OnModuleInit {
         requestId,
       );
     }
+    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
     return this.cloneOrder(order);
   }
@@ -1449,6 +1465,23 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.ownedMobilityTaskEventsService.streamDriverTaskEvents(driverId);
   }
 
+  streamOpsDispatchEvents(): Observable<MessageEvent> {
+    return this.opsDispatchEventsService.streamEvents();
+  }
+
+  private publishLatestDispatchJobUpdate(orderId: string, requestId?: string) {
+    const dispatchJob = this.dispatchJobs.find((job) => job.orderId === orderId);
+    if (!dispatchJob) {
+      return;
+    }
+
+    this.opsDispatchEventsService.publishDispatchJobUpdated(
+      orderId,
+      dispatchJob,
+      requestId,
+    );
+  }
+
   getDriverTask(taskId: string) {
     return this.cloneTask(this.requireTask(taskId));
   }
@@ -1501,6 +1534,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
@@ -1573,6 +1607,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
@@ -1619,6 +1654,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
@@ -1664,6 +1700,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
@@ -1716,6 +1753,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
     return this.cloneTask(task);
   }
 
@@ -1838,6 +1876,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
+    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
     return this.cloneTask(task);
   }
