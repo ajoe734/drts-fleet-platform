@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  Param,
+  Post,
+} from "@nestjs/common";
 
 import type {
   CreatePlatformPricingRuleCommand,
@@ -12,7 +20,12 @@ import type {
   UpdatePlatformAdminUserRoleCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
+import { CurrentIdentity } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { PlatformAdminService } from "./platform-admin.service";
 
 @Controller("platform-admin")
@@ -44,6 +57,7 @@ export class PlatformAdminController {
   publishPublicInfoVersion(
     @Param("versionId") versionId: string,
     @Body() command: PublishPublicInfoVersionCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
@@ -51,6 +65,23 @@ export class PlatformAdminController {
         versionId,
         command,
         requestId,
+        this.requireActorId(identity),
+      ),
+      requestId,
+    );
+  }
+
+  @Delete("public-info/:versionId")
+  deleteDraftPublicInfoVersion(
+    @Param("versionId") versionId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.deleteDraftPublicInfoVersion(
+        versionId,
+        requestId,
+        this.requireActorId(identity),
       ),
       requestId,
     );
@@ -73,6 +104,20 @@ export class PlatformAdminController {
   ) {
     return toApiSuccessEnvelope(
       this.platformAdminService.generatePlacardVersion(command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("placards/:placardVersionId/publish")
+  publishPlacardVersion(
+    @Param("placardVersionId") placardVersionId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.platformAdminService.publishPlacardVersion(
+        placardVersionId,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -212,5 +257,18 @@ export class PlatformAdminController {
       { items: this.platformAdminService.listPlatformInvoices() },
       requestId,
     );
+  }
+
+  private requireActorId(identity: BootstrapRequestIdentity | null): string {
+    const actorId = identity?.actorId?.trim();
+    if (!actorId) {
+      throw new ApiRequestError(
+        401,
+        "PLATFORM_ADMIN_IDENTITY_REQUIRED",
+        "Platform admin publish routes require an authenticated actorId.",
+      );
+    }
+
+    return actorId;
   }
 }

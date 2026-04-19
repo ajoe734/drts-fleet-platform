@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import type { BootstrapRequestIdentity } from "../../apps/api/src/common/auth";
+import { PlatformAdminController } from "../../apps/api/src/modules/platform-admin/platform-admin.controller";
 import { PlatformAdminRepository } from "../../apps/api/src/modules/platform-admin/platform-admin.repository";
 import { PlatformAdminService } from "../../apps/api/src/modules/platform-admin/platform-admin.service";
 
@@ -42,6 +44,73 @@ describe("platform admin service", () => {
     );
   });
 
+  it("prefers the verified publisher actorId over the request body when publishing", () => {
+    const auditService = new AuditNotificationService();
+    const platformAdminService = new PlatformAdminService(auditService);
+
+    const draftVersion = platformAdminService.createPublicInfoVersion(
+      {
+        title: "2026 Q4 公開資訊版",
+      },
+      "public-info-create-request",
+    );
+    const publishedVersion = platformAdminService.publishPublicInfoVersion(
+      draftVersion.versionId,
+      {
+        publishedBy: "forged-body-actor",
+      },
+      "public-info-publish-request",
+      "platform-admin-jwt-007",
+    );
+
+    expect(publishedVersion.publishedBy).toBe("platform-admin-jwt-007");
+    expect(auditService.listAuditLogs()[0]).toEqual(
+      expect.objectContaining({
+        actorId: "platform-admin-jwt-007",
+      }),
+    );
+    expect(auditService.listAuditLogs()[0]?.newValuesSummary).toEqual(
+      expect.objectContaining({
+        newVersionId: draftVersion.versionId,
+        publishedBy: "platform-admin-jwt-007",
+      }),
+    );
+  });
+
+  it("controller forwards the verified identity actorId to publish public info", () => {
+    const service = {
+      publishPublicInfoVersion: vi.fn(() => ({
+        versionId: "public-info-001",
+        status: "published",
+      })),
+    } as unknown as PlatformAdminService;
+    const controller = new PlatformAdminController(service);
+    const identity: BootstrapRequestIdentity = {
+      authMode: "bootstrap_headers",
+      actorType: "platform_admin",
+      actorId: "platform-admin-jwt-001",
+      realm: "platform",
+      tenantId: null,
+      roleFamilies: ["platform"],
+      roles: ["platform_admin"],
+      scopes: ["platform:write"],
+      requestId: "req-123",
+    };
+
+    controller.publishPublicInfoVersion(
+      "public-info-001",
+      { publishedBy: "body-actor" },
+      identity,
+      "req-123",
+    );
+
+    expect(service.publishPublicInfoVersion).toHaveBeenCalledWith(
+      "public-info-001",
+      { publishedBy: "body-actor" },
+      "req-123",
+      "platform-admin-jwt-001",
+    );
+  });
   it("rehydrates persisted platform-admin state and writes placard changes through the repository", async () => {
     const auditService = new AuditNotificationService();
     const persistChanges = vi.fn(async () => undefined);

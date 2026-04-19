@@ -78,7 +78,13 @@ export default function SwitchboardPage() {
   const [publishingVersionId, setPublishingVersionId] = useState<string | null>(
     null,
   );
+  const [deletingVersionId, setDeletingVersionId] = useState<string | null>(
+    null,
+  );
   const [creatingPlacard, setCreatingPlacard] = useState(false);
+  const [publishingPlacardId, setPublishingPlacardId] = useState<string | null>(
+    null,
+  );
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -164,14 +170,25 @@ export default function SwitchboardPage() {
     setPublishingVersionId(versionId);
     setError(null);
     try {
-      await client.publishPublicInfoVersion(versionId, {
-        publishedBy: "platform-admin-web-bootstrap",
-      });
+      await client.publishPublicInfoVersion(versionId, {});
       await loadData();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setPublishingVersionId(null);
+    }
+  }
+
+  async function handleDeleteDraft(versionId: string) {
+    setDeletingVersionId(versionId);
+    setError(null);
+    try {
+      await client.deletePublicInfoVersion(versionId);
+      await loadData();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeletingVersionId(null);
     }
   }
 
@@ -197,6 +214,19 @@ export default function SwitchboardPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setCreatingPlacard(false);
+    }
+  }
+
+  async function handlePublishPlacard(placardVersionId: string) {
+    setPublishingPlacardId(placardVersionId);
+    setError(null);
+    try {
+      await client.publishPlacardVersion(placardVersionId);
+      await loadData();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPublishingPlacardId(null);
     }
   }
 
@@ -584,15 +614,36 @@ export default function SwitchboardPage() {
                     </td>
                     <td>
                       {version.status === "draft" ? (
-                        <button
-                          className="admin-btn admin-btn--primary"
-                          onClick={() => void handlePublish(version.versionId)}
-                          disabled={publishingVersionId === version.versionId}
-                        >
-                          {publishingVersionId === version.versionId
-                            ? "Publishing..."
-                            : "Publish"}
-                        </button>
+                        <div style={actionsStyle}>
+                          <button
+                            className="admin-btn admin-btn--primary"
+                            onClick={() =>
+                              void handlePublish(version.versionId)
+                            }
+                            disabled={
+                              publishingVersionId === version.versionId ||
+                              deletingVersionId === version.versionId
+                            }
+                          >
+                            {publishingVersionId === version.versionId
+                              ? "Publishing..."
+                              : "Publish"}
+                          </button>
+                          <button
+                            className="admin-btn admin-btn--secondary"
+                            onClick={() =>
+                              void handleDeleteDraft(version.versionId)
+                            }
+                            disabled={
+                              deletingVersionId === version.versionId ||
+                              publishingVersionId === version.versionId
+                            }
+                          >
+                            {deletingVersionId === version.versionId
+                              ? "Deleting..."
+                              : "Delete draft"}
+                          </button>
+                        </div>
                       ) : (
                         <span style={subcopyStyle}>Immutable history</span>
                       )}
@@ -613,6 +664,7 @@ export default function SwitchboardPage() {
                 <th>Template</th>
                 <th>Artifact</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -676,6 +728,25 @@ export default function SwitchboardPage() {
                       <div style={subcopyStyle}>
                         Published {formatDateTime(placard.publishedAt ?? "")}
                       </div>
+                    </td>
+                    <td>
+                      {!placard.publishedAt ? (
+                        <button
+                          className="admin-btn admin-btn--primary"
+                          onClick={() =>
+                            void handlePublishPlacard(placard.placardVersionId)
+                          }
+                          disabled={
+                            publishingPlacardId === placard.placardVersionId
+                          }
+                        >
+                          {publishingPlacardId === placard.placardVersionId
+                            ? "Publishing..."
+                            : "Publish"}
+                        </button>
+                      ) : (
+                        <span style={subcopyStyle}>Immutable history</span>
+                      )}
                     </td>
                   </tr>
                 );

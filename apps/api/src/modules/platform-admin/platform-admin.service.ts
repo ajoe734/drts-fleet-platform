@@ -296,6 +296,7 @@ export class PlatformAdminService implements OnModuleInit {
     versionId: string,
     command: PublishPublicInfoVersionCommand,
     requestId?: string,
+    publisherActorId?: string | null,
   ) {
     const version = this.requirePublicInfoVersion(versionId);
     if (version.status !== "draft") {
@@ -310,6 +311,9 @@ export class PlatformAdminService implements OnModuleInit {
       );
     }
     const publishedAt = new Date().toISOString();
+    const publishedBy =
+      this.normalizeNullableText(publisherActorId) ??
+      this.normalizeNullableText(command.publishedBy);
     const previousPublished = this.publicInfoVersions.find(
       (candidate) =>
         candidate.status === "published" &&
@@ -323,7 +327,7 @@ export class PlatformAdminService implements OnModuleInit {
     }
 
     version.status = "published";
-    version.publishedBy = this.normalizeNullableText(command.publishedBy);
+    version.publishedBy = publishedBy;
     version.publishedAt = publishedAt;
     version.effectiveFrom =
       this.normalizeNullableText(command.effectiveFrom) ??
@@ -345,7 +349,7 @@ export class PlatformAdminService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: null,
+        actorId: publishedBy,
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",
@@ -364,6 +368,56 @@ export class PlatformAdminService implements OnModuleInit {
           previousVersionId: previousPublished?.versionId ?? null,
           newVersionId: version.versionId,
           publishedAt,
+          publishedBy,
+        },
+      },
+      requestId,
+    );
+
+    return this.clonePublicInfoVersion(version);
+  }
+
+  deleteDraftPublicInfoVersion(
+    versionId: string,
+    requestId?: string,
+    deleteActorId?: string | null,
+  ) {
+    const version = this.requirePublicInfoVersion(versionId);
+    if (version.status !== "draft") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PUBLIC_INFO_VERSION_NOT_DRAFT",
+        "Only draft public info versions can be deleted.",
+        {
+          versionId,
+          status: version.status,
+        },
+      );
+    }
+
+    this.publicInfoVersions = this.publicInfoVersions.filter(
+      (candidate) => candidate.versionId !== versionId,
+    );
+    this.persistChanges(
+      {
+        deletedPublicInfoVersionIds: [versionId],
+      },
+      "delete_draft_public_info_version",
+    );
+    this.recordAudit(
+      {
+        actorId: this.normalizeNullableText(deleteActorId),
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "delete_draft_public_info_version",
+        resourceType: "public_info_version",
+        resourceId: versionId,
+        oldValuesSummary: {
+          ...this.clonePublicInfoVersion(version),
+        },
+        newValuesSummary: {
+          deleted: true,
         },
       },
       requestId,
@@ -376,6 +430,56 @@ export class PlatformAdminService implements OnModuleInit {
     return this.placardVersions.map((placard) =>
       this.clonePlacardVersion(placard),
     );
+  }
+
+  publishPlacardVersion(placardVersionId: string, requestId?: string) {
+    const placard = this.placardVersions.find(
+      (candidate) => candidate.placardVersionId === placardVersionId,
+    );
+    if (!placard) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PLACARD_VERSION_NOT_FOUND",
+        "The placard version could not be found.",
+        { placardVersionId },
+      );
+    }
+    if (placard.publishedAt) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PLACARD_VERSION_ALREADY_PUBLISHED",
+        "This placard version has already been published.",
+        { placardVersionId, publishedAt: placard.publishedAt },
+      );
+    }
+
+    const now = new Date().toISOString();
+    placard.publishedAt = now;
+    placard.updatedAt = now;
+
+    this.persistChanges(
+      { placardVersions: [this.clonePlacardVersion(placard)] },
+      "publish_placard_version",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "publish_placard_version",
+        resourceType: "placard_version",
+        resourceId: placard.placardVersionId,
+        newValuesSummary: {
+          placardVersionId: placard.placardVersionId,
+          versionCode: placard.versionCode,
+          publishedAt: now,
+        },
+      },
+      requestId,
+    );
+
+    return this.clonePlacardVersion(placard);
   }
 
   generatePlacardVersion(

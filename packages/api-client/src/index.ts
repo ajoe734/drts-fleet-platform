@@ -82,6 +82,7 @@ import type {
   PlatformPresenceSummary,
   PlatformPricingRuleRecord,
   PublishDriverFeePlanCommand,
+  PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
@@ -926,6 +927,14 @@ export class ApiClient {
     );
   }
 
+  async deletePublicInfoVersion(
+    versionId: string,
+  ): Promise<PublicInfoVersionRecord> {
+    return this.delete<PublicInfoVersionRecord>(
+      `/api/platform-admin/public-info/${versionId}`,
+    );
+  }
+
   async listPlacards(): Promise<PlacardVersionRecord[]> {
     return this.getList<PlacardVersionRecord>("/api/platform-admin/placards");
   }
@@ -936,6 +945,16 @@ export class ApiClient {
     return this.post<PlacardVersionRecord>("/api/platform-admin/placards", {
       body: command,
     });
+  }
+
+  async publishPlacardVersion(
+    placardVersionId: string,
+    command: PublishPlacardVersionCommand = {},
+  ): Promise<PlacardVersionRecord> {
+    return this.post<PlacardVersionRecord>(
+      `/api/platform-admin/placards/${placardVersionId}/publish`,
+      { body: command },
+    );
   }
 
   async listPlatformTenants(): Promise<PlatformAdminTenantRecord[]> {
