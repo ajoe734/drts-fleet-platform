@@ -13,41 +13,40 @@ It is the practical bridge between:
 
 ## 1. Execution-Ready Now
 
-These tasks are now materialized in shared truth and can be dispatched by supervisor
-execution mode.
+These tasks were materialized and are now effectively closed.
 
 1. `MSC-R1-001`
-   - status: `backlog`
+   - status: `done`
    - owner / reviewer: `Codex2` / `Claude`
    - objective: close the remaining staging-evidence narrative drift, confirm the resolved `FBP-013A` credential blocker state, and produce the rollout-evidence closeout packet
 
 2. `MSC-T1-001`
-   - status: `backlog`
+   - status: `done`
    - owner / reviewer: `Codex` / `Claude`
    - objective: verify the `tenant-commute-hub` contract, authority boundary, and retired shell assumptions
 
 3. `MSC-P1-001`
-   - status: `backlog`
+   - status: `done`
    - owner / reviewer: `Claude` / `Codex`
    - objective: produce an explicit decision packet for Passenger / Call Point / Concierge / complaint-entry completion scope
 
 4. `MSC-F1-001`
-   - status: `backlog`
+   - status: `done`
    - owner / reviewer: `Codex2` / `Claude`
    - objective: audit finance / reporting / filing completeness against the PRD and actual operator workflow
 
 ## 2. Dependency-Gated Execution
 
-These tasks are real and materialized, but they should wait for prerequisite closeout work.
+These tasks were real and materialized; only one remains open now.
 
 1. `MSC-I1-001`
-   - status: `backlog`
+   - status: `done`
    - owner / reviewer: `Gemini` / `Codex`
    - depends on: `MSC-T1-001`, `MSC-F1-001`
    - objective: verify cross-surface workflow integrity and remaining operational hardening gaps
 
 2. `MSC-N1-001`
-   - status: `backlog`
+   - status: `done`
    - owner / reviewer: `Codex` / `Claude`
    - depends on: `MSC-R1-001`, `MSC-T1-001`, `MSC-P1-001`, `MSC-F1-001`, `MSC-I1-001`, `GAP-P2S3-001`
    - objective: align `ai-status.json`, `current-work.md`, evidence packets, and control-plane views to one final closeout story
@@ -65,13 +64,12 @@ These tasks are real and materialized, but they should wait for prerequisite clo
 
 If supervisor execution mode keeps running, the intended behavior is:
 
-1. dispatch the four execution-ready `MSC-*` tasks
-2. keep `MSC-I1-001` and `MSC-N1-001` dependency-gated until prerequisites clear
-3. keep `GAP-P2S3-001` visible but blocked
-4. use `docs/03-runbooks/master-system-closeout-checklist.md` as the planning anchor for any new closeout work
+1. keep `GAP-P2S3-001` visible but blocked as the only active product-critical blocker
+2. use `docs/03-runbooks/master-system-closeout-checklist.md` as the planning anchor for any remaining closeout work
+3. avoid reopening the closeout narrative unless execution truth changes again
 
 ## 5. Current Interpretation
 
 - The switchboard follow-up wave is already closed.
-- A new closeout wave is now materialized for rollout evidence, tenant boundary, product-surface decision, and finance/reporting completeness.
-- The final “all-clear” narrative cannot close until `GAP-P2S3-001` is unblocked.
+- The substantive closeout wave (`MSC-R1-001`, `MSC-T1-001`, `MSC-P1-001`, `MSC-F1-001`, `MSC-I1-001`) and the final narrative sync (`MSC-N1-001`) are now done.
+- The final “all-clear” narrative still cannot close until `GAP-P2S3-001` is unblocked.

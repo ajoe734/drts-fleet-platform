@@ -16,18 +16,16 @@ Use it to separate:
 
 ## Current Reality Snapshot
 
-As of `2026-04-19`, the accepted gap-fix Sprint 2 / Sprint 3 blueprint is almost fully implemented.
-The current shared-truth gap is no longer “core backlog missing everywhere”; it is mostly:
+As of `2026-04-20`, the switchboard follow-up wave is closed and the master closeout wave narrative is synced.
+The current shared-truth gap is now:
 
 - one major external auth blocker: `GAP-P2S3-001`
-- a small set of switchboard follow-up tasks: `GAP-SB-003`, `005`, `006`, `007`
-- two sidecar acceptance packets still in backlog
-- one remaining rollout-evidence narrative consistency task outside the app code path
+- a small set of consciously deferred future-gated surfaces captured in `MSC-P1-001`
 
 This means:
 
-- **gap-fix execution is close to complete**
-- **the full Phase 1 system is not yet complete**
+- **gap-fix execution is complete enough to stop being the main story**
+- **the full Phase 1 system is still not yet complete because auth cutover remains open while deferred scope stays explicit**
 
 ## A. Gap-Fix Wave Closeout
 
@@ -35,21 +33,21 @@ These items close the currently active implementation wave.
 
 ### A-1. Finish active execution tasks
 
-- [ ] Close `GAP-SB-003` — delete draft public info version
-- [ ] Close `GAP-SB-005` — placard publish endpoint + UI
-- [ ] Close `GAP-SB-006` — retired source warning / disable behavior
-- [ ] Close `GAP-SB-007` — versionCode local uniqueness precheck
+- [x] Close `GAP-SB-003` — delete draft public info version
+- [x] Close `GAP-SB-005` — placard publish endpoint + UI
+- [x] Close `GAP-SB-006` — retired source warning / disable behavior
+- [x] Close `GAP-SB-007` — versionCode local uniqueness precheck
 
 ### A-2. Finish active support artifacts
 
-- [ ] Close `GAP-SB-001-SIDECAR-ACCEPTANCE`
-- [ ] Close `GAP-SB-002-SIDECAR-ACCEPTANCE`
+- [x] Close `GAP-SB-001-SIDECAR-ACCEPTANCE`
+- [x] Close `GAP-SB-002-SIDECAR-ACCEPTANCE`
 
 ### A-3. Remove execution drift
 
-- [ ] Reconcile any stale `dispatch_pauses`, handoff queue leftovers, or review routing drift after the active tasks are closed
-- [ ] Ensure `current-work.md` reflects the actual remaining wave instead of old Sprint 1 / Sprint 2 wording
-- [ ] Ensure the active narrative no longer lags behind `ai-status.json`
+- [x] Reconcile any stale `dispatch_pauses`, handoff queue leftovers, or review routing drift after the active tasks are closed
+- [x] Ensure `current-work.md` reflects the actual remaining wave instead of old Sprint 1 / Sprint 2 wording
+- [x] Ensure the active narrative no longer lags behind `ai-status.json`
 
 ## B. Auth / GCP Blocker Closeout
 
@@ -63,10 +61,10 @@ This is the largest remaining product-critical blocker.
 
 ### B-2. Repo auth migration
 
-- [ ] Replace bootstrap-header trust as the claimed production auth path
-- [ ] Implement verified Bearer token / OIDC handling in the API
-- [ ] update deploy / post-deploy verification to match the new auth model
-- [ ] update smoke / E2E / runbooks so they no longer describe bootstrap auth as the default production path
+- [~] Replace bootstrap-header trust as the claimed production auth path
+- [x] Implement verified Bearer token / OIDC handling in the API
+- [~] update deploy / post-deploy verification to match the new auth model
+- [~] update smoke / E2E / runbooks so they no longer describe bootstrap auth as the default production path
 
 ### B-3. Exit condition
 
@@ -85,8 +83,8 @@ Even when features exist, the system is not operationally complete until rollout
 
 ### C-2. Evidence consistency
 
-- [ ] Ensure the latest evidence references live in the correct evidence packets, not only in logs or handoff notes
-- [ ] Ensure current blockers and completion claims in `current-work.md` and `ai-status.json` do not contradict the evidence family
+- [x] Ensure the latest evidence references live in the correct evidence packets, not only in logs or handoff notes
+- [x] Ensure current blockers and completion claims in `current-work.md` and `ai-status.json` do not contradict the evidence family
 
 ## D. Product Surface Completeness
 
@@ -96,30 +94,30 @@ This section compares the current repo shape against the broader Phase 1 PRD.
 
 These surfaces are already materially implemented in the current repo and mainly need closure / hardening:
 
-- [ ] API host
-- [ ] driver app
-- [ ] ops console web
-- [ ] platform admin web
+- [x] API host
+- [x] driver app
+- [x] ops console web
+- [x] platform admin web
 
 ### D-2. Cross-repo tenant surface closure
 
-- [ ] Confirm the production tenant surface contract with `tenant-commute-hub`
-- [ ] Verify tenant flows that depend on the external repo are fully supported by this repo’s APIs and authority boundaries
-- [ ] Confirm no critical Phase 1 tenant workflow is still blocked by the retired `apps/tenant-portal-web` shell
+- [x] Confirm the production tenant surface contract with `tenant-commute-hub`
+- [x] Verify tenant flows that depend on the external repo are fully supported by this repo’s APIs and authority boundaries
+- [x] Confirm no critical Phase 1 tenant workflow is still blocked by the retired `apps/tenant-portal-web` shell
 
 ### D-3. Missing or unresolved entry surfaces
 
 The PRD still includes customer / call-entry surfaces that are not fully closed in the current monorepo execution wave.
 
-- [ ] Decide whether passenger-facing booking / tracking surface is part of the Phase 1 completion bar or remains intentionally deferred
-- [ ] Decide whether call point / concierge workflow lands in an existing surface or a separate frontend
-- [ ] Confirm the complaint hotline / customer-service operator surface is complete enough for the PRD’s complaint scope
+- [x] Decide whether passenger-facing booking / tracking surface is part of the Phase 1 completion bar or remains intentionally deferred
+- [x] Decide whether call point / concierge workflow lands in an existing surface or a separate frontend
+- [x] Confirm the complaint hotline / customer-service operator surface is complete enough for the PRD’s complaint scope
 
 ### D-4. Reporting / filing / finance closure
 
-- [ ] Re-check receipts / invoices / driver statements / reimbursements against the PRD completion bar
-- [ ] Re-check regulatory reporting and filing-package generation against the PRD completion bar
-- [ ] Confirm these flows are not only backend-capable but operationally reviewable in the intended UI / workflow
+- [x] Re-check receipts / invoices / driver statements / reimbursements against the PRD completion bar
+- [x] Re-check regulatory reporting and filing-package generation against the PRD completion bar
+- [~] Confirm these flows are not only backend-capable but operationally reviewable in the intended UI / workflow. _(Backoffice/operator review path is confirmed; passenger receipt UI remains deferred with the passenger surface.)_
 
 ## E. Integration and Operational Hardening
 
@@ -127,27 +125,27 @@ The roadmap’s Wave 7 standard is broader than “feature exists.”
 
 ### E-1. Surface integration
 
-- [ ] Confirm web and mobile surfaces are connected to the accepted APIs and read models
-- [ ] Confirm no critical operational flow still depends on placeholder shells, mock-only paths, or hidden manual edits
+- [x] Confirm web and mobile surfaces are connected to the accepted APIs and read models
+- [x] Confirm no critical operational flow still depends on placeholder shells, mock-only paths, or hidden manual edits
 
 ### E-2. Acceptance coverage
 
-- [ ] Expand verification beyond narrow task-scoped tests where Phase 1 workflows require broader operational confidence
-- [ ] Confirm cross-surface workflows still hold after the latest switchboard / auth / dispatch changes
+- [x] Expand verification beyond narrow task-scoped tests where Phase 1 workflows require broader operational confidence
+- [x] Confirm cross-surface workflows still hold after the latest switchboard / auth / dispatch changes
 
 ### E-3. Supervisor / control-plane readiness
 
-- [ ] Keep the orchestrator’s plane separation intact while closing the remaining tasks
-- [ ] Confirm worker routing, evidence capture, runtime pause handling, and human summary views remain consistent through closeout
+- [x] Keep the orchestrator’s plane separation intact while closing the remaining tasks
+- [x] Confirm worker routing, evidence capture, runtime pause handling, and human summary views remain consistent through closeout
 
 ## F. Deferred Scope Decision Gate
 
 The roadmap explicitly keeps some families visible but outside the current execution wave.
 System completion cannot be claimed ambiguously here; these items need an explicit decision, not silent drift.
 
-- [ ] Confirm whether Passenger App / Web remains deferred beyond the current Phase 1 execution wave
-- [ ] Confirm whether Call Point / Concierge Portal remains deferred or is absorbed into an existing surface
-- [ ] Confirm AV / ODD / Tesla / ROC live-board scope remains future-gated and is not part of the current completion claim
+- [x] Confirm whether Passenger App / Web remains deferred beyond the current Phase 1 execution wave
+- [x] Confirm whether Call Point / Concierge Portal remains deferred or is absorbed into an existing surface
+- [x] Confirm AV / ODD / Tesla / ROC live-board scope remains future-gated and is not part of the current completion claim
 
 ## G. Final Exit Criteria
 
