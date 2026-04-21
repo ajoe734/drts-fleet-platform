@@ -115,12 +115,12 @@ class NoCacheRequestHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            body = live_path.read_bytes()
             self.send_response(200)
             self.send_header("Content-type", self.guess_type(str(live_path)))
-            self.send_header("Content-Length", str(live_path.stat().st_size))
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            with live_path.open("rb") as source:
-                shutil.copyfileobj(source, self.wfile)
+            self.wfile.write(body)
             return
         super().do_GET()
 

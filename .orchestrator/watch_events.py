@@ -229,14 +229,38 @@ def compute_events(previous: dict[str, Any], current: dict[str, Any], config: di
     return events
 
 
-def render_wakeup_message(config: dict[str, Any], event: dict[str, Any], target_agent: str) -> str:
+def event_mode_bucket(event: dict[str, Any]) -> str:
+    metadata = event.get("metadata", {}) if isinstance(event.get("metadata"), dict) else {}
+    mode = str(metadata.get("mode") or "").strip().lower()
+    if mode in {"planning", "coordination", "execution"}:
+        return mode
+    task_payload = event.get("task", {}) if isinstance(event.get("task"), dict) else {}
+    if str(task_payload.get("task_class") or "").strip().lower() == "planning":
+        return "planning"
+    return "execution"
+
+
+def render_wakeup_message(
+    config: dict[str, Any],
+    event: dict[str, Any],
+    target_agent: str,
+    *,
+    status: dict[str, Any] | None = None,
+) -> str:
     agent = agent_config_for(config, target_agent)
     template_path = resolve_path(agent.get("wake_template") or ".orchestrator/templates/wakeup.txt")
     if template_path is None:
         raise RuntimeError("Unable to resolve wake-up template path")
-    shared_files = serialize_shared_files(selected_shared_files(config))
-    target_files = event.get("task", {}).get("artifacts") or []
     task_payload = event.get("task", {}) or {}
+    shared_files = serialize_shared_files(
+        selected_shared_files(
+            config,
+            mode=event_mode_bucket(event),
+            task=task_payload,
+            status=status,
+        )
+    )
+    target_files = event.get("target_files") or task_payload.get("artifacts") or []
     sidecar_guardrails = ""
     if str(task_payload.get("task_class") or "").lower() == "sidecar":
         helper_parent = str(task_payload.get("helper_parent") or "").strip() or "(unknown parent)"
@@ -274,8 +298,18 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
         return False
 
     agent = agent_config_for(config, target_agent)
-    message = render_wakeup_message(config, event, target_agent)
-    context_files = [relpath(path) for path in selected_shared_files(config)]
+    status = load_status(config)
+    task_payload = event.get("task", {}) if isinstance(event.get("task"), dict) else {}
+    message = render_wakeup_message(config, event, target_agent, status=status)
+    context_files = [
+        relpath(path)
+        for path in selected_shared_files(
+            config,
+            mode=event_mode_bucket(event),
+            task=task_payload,
+            status=status,
+        )
+    ]
     queue_payload = {
         "event_id": new_runtime_id("evt"),
         "created_at": utc_now(),
@@ -287,8 +321,12 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
         "reason": event.get("reason"),
         "message": message,
         "context_files": context_files,
-        "target_files": event.get("task", {}).get("artifacts") or [],
-        "metadata": {"handoff": event.get("handoff"), "task": event.get("task", {})},
+        "target_files": event.get("target_files") or task_payload.get("artifacts") or [],
+        "metadata": {
+            "handoff": event.get("handoff"),
+            "task": task_payload,
+            "mode": event_mode_bucket(event),
+        },
     }
     enqueue_event(config, queue_payload)
     write_activity_log(

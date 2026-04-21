@@ -301,6 +301,34 @@ jobs:
 
           echo "email=$RUNTIME_SA" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve Cloud Run auth exposure flags
+        id: exposure
+        env:
+          API_ALLOW_UNAUTHENTICATED: ${{ vars.STAGING_API_ALLOW_UNAUTHENTICATED }}
+          PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED: ${{ vars.STAGING_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED }}
+          OPS_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.STAGING_OPS_CONSOLE_ALLOW_UNAUTHENTICATED }}
+        run: |
+          set -euo pipefail
+
+          resolve_flag() {
+            local raw="${1:-}"
+            local default_value="${2:-true}"
+            local normalized="${raw:-$default_value}"
+            normalized="$(echo "$normalized" | tr '[:upper:]' '[:lower:]')"
+            case "$normalized" in
+              true|1|yes|y) echo "--allow-unauthenticated" ;;
+              false|0|no|n) echo "--no-allow-unauthenticated" ;;
+              *)
+                echo "::error::Invalid Cloud Run exposure flag: ${raw}. Use true/false."
+                exit 1
+                ;;
+            esac
+          }
+
+          echo "api=$(resolve_flag "${API_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
+          echo "platform_admin=$(resolve_flag "${PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
+          echo "ops_console=$(resolve_flag "${OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
+
       - name: Deploy — api
         run: |
           IMAGE="${{ env.REGISTRY }}/api:${{ needs.build-push.outputs.image_tag }}"
@@ -314,7 +342,7 @@ jobs:
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "DATABASE_URL=drts-staging-db-url:latest,API_KEY_SALT=drts-staging-api-key-salt:latest,JWT_SECRET=drts-staging-jwt-secret:latest,DRTS_INTERNAL_KEY=drts-staging-internal-key:latest" \
             --set-env-vars "NODE_ENV=production,API_PORT=3001" \
-            --allow-unauthenticated \
+            ${{ steps.exposure.outputs.api }} \
             --min-instances 0 \
             --max-instances 3 \
             --project "$PROJECT_ID"
@@ -339,7 +367,7 @@ jobs:
             --port   3002 \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-env-vars "NODE_ENV=production,NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
-            --allow-unauthenticated \
+            ${{ steps.exposure.outputs.platform_admin }} \
             --min-instances 0 \
             --max-instances 2 \
             --project "$PROJECT_ID"
@@ -353,7 +381,7 @@ jobs:
             --port   3003 \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-env-vars "NODE_ENV=production,NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
-            --allow-unauthenticated \
+            ${{ steps.exposure.outputs.ops_console }} \
             --min-instances 0 \
             --max-instances 2 \
             --project "$PROJECT_ID"

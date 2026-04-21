@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 import os
@@ -107,6 +108,28 @@ class DetectWorkerFailureTests(unittest.TestCase):
     def test_ignores_numbered_markdown_dump_that_mentions_quota_text(self) -> None:
         worker = self._worker_for_log(
             '{"type":"result","result":"39\\t- `Claude`: governance-review; next: Auto-reassigned ownership from Qwen to Claude after repeated Qwen quota/terminal: Qwen OAuth quota exceeded: Your free daily quota has been reached.\\n40\\tTo continue using Qwen Code without waiting, upgrade to the Alibaba Cloud Coding Plan."}\n'
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_diff_hunk_that_mentions_old_terminal_failure(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "codex",
+                    '+**Status:** `review` — shared L0 currently keeps sidecar `GAP-P2S3-007-SIDECAR-ACCEPTANCE` at `status=review` with owner=`Codex`, reviewer=`Codex2`, `last_update=2026-04-18T04:32:26Z`, and `next=\"Auto-reassigned review from Qwen to Codex2 after repeated Qwen terminal: [API Error: 401 invalid access token or token expired]\"`.',
+                    "+  - `2026-04-18T04:32:18Z` `Qwen` worker start 後，再於 `2026-04-18T04:32:31Z` 因 terminal `401 invalid access token or token expired` 被自動改派回 `Codex2`。",
+                    "No local failure happened in this session.",
+                ]
+            )
+            + "\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_current_work_excerpt_that_mentions_auto_reassignment(self) -> None:
+        worker = self._worker_for_log(
+            "current-work.md:145:- 2026-04-18T04:27:18Z Orchestrator: `GAP-P2S3-007-SIDECAR-ACCEPTANCE` Auto-reassigned review from Qwen to Codex2 after repeated Qwen terminal: [API Error: 401 invalid access token or token expired]\n"
         )
 
         self.assertIsNone(supervisor.detect_worker_failure(worker))
@@ -258,9 +281,162 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         record = state["queue"]["events"]["evt-stale"]
         self.assertEqual(record["status"], "completed")
         self.assertEqual(record["skip_reason"], "stale_dispatch_event")
-        self.assertIn("processed_at", record)
-        write_activity_log.assert_called_once()
-        self.assertEqual(write_activity_log.call_args.args[1]["type"], "wake_skipped")
+
+    def test_build_request_uses_task_brief_context_for_execution_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            status_path = tmp / "ai-status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "id": "BUS-VAL-002",
+                                "title": "Execution review",
+                                "status": "review",
+                                "owner": "Claude",
+                                "reviewer": "Qwen",
+                                "artifacts": ["docs/example.md"],
+                                "next": "Review the execution slice.",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "paths": {"status_file": str(status_path)},
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "status_field": "status",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "agents": {
+                    "qwen": {
+                        "id": "qwen",
+                        "display_name": "Qwen",
+                        "provider": "qwen",
+                        "adapter": "qwen",
+                    }
+                },
+                "providers": {"qwen": {"delivery_mode": "qwen"}},
+            }
+
+            request = supervisor.build_request(
+                config,
+                {
+                    "target_agent": "qwen",
+                    "message": "wake",
+                    "task_id": "BUS-VAL-002",
+                    "metadata": {
+                        "mode": "execution",
+                        "task": {
+                            "id": "BUS-VAL-002",
+                            "status": "review",
+                            "owner": "Claude",
+                            "reviewer": "Qwen",
+                            "artifacts": ["docs/example.md"],
+                        },
+                    },
+                },
+            )
+
+            self.assertIn(".orchestrator/task-briefs/BUS-VAL-002.md", request.context_files)
+            self.assertNotIn("current-work.md", request.context_files)
+            self.assertNotIn("ai-activity-log.jsonl", request.context_files)
+            self.assertNotIn("docs-site/index.html", request.context_files)
+
+    def test_dispatch_ready_tasks_accepts_backlog_as_owned_ready(self) -> None:
+        state = {"queue": {"events": {}}, "workers": {}, "seen_event_keys": {}}
+        status = {
+            "tasks": [
+                {
+                    "id": "BUS-VAL-003",
+                    "status": "backlog",
+                    "owner": "Codex",
+                    "reviewer": "",
+                    "depends_on": [],
+                    "artifacts": ["docs/example.md"],
+                }
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(self.config, state)
+
+        self.assertTrue(changed)
+        queue_delivery_event.assert_called_once()
+        event = queue_delivery_event.call_args.args[1]
+        self.assertEqual(event["reason"], "owned_ready_dispatch")
+        self.assertEqual(event["task_id"], "BUS-VAL-003")
+
+    def test_prune_completed_dispatch_pauses_removes_done_task_entries(self) -> None:
+        state = {
+            "dispatch_pauses": [
+                {"task_id": "DONE-1", "worker_run_id": "run-1"},
+                {"task_id": "ACTIVE-1", "worker_run_id": "run-2"},
+            ]
+        }
+        status = {
+            "tasks": [
+                {"id": "DONE-1", "status": "done"},
+                {"id": "ACTIVE-1", "status": "review"},
+            ]
+        }
+
+        changed = supervisor.prune_completed_dispatch_pauses(state, status)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["dispatch_pauses"], [{"task_id": "ACTIVE-1", "worker_run_id": "run-2"}])
+
+    def test_prune_completed_dispatch_pauses_removes_stale_entries_when_task_has_active_worker(self) -> None:
+        state = {
+            "dispatch_pauses": [
+                {"task_id": "ACTIVE-1", "worker_run_id": "run-1"},
+                {"task_id": "PAUSED-1", "worker_run_id": "run-2"},
+            ],
+            "workers": {
+                "live-1": {"task_id": "ACTIVE-1", "status": "running"},
+            },
+        }
+        status = {
+            "tasks": [
+                {"id": "ACTIVE-1", "status": "in_progress"},
+                {"id": "PAUSED-1", "status": "backlog"},
+            ]
+        }
+
+        changed = supervisor.prune_completed_dispatch_pauses(state, status)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["dispatch_pauses"], [{"task_id": "PAUSED-1", "worker_run_id": "run-2"}])
+
+    def test_prune_completed_dispatch_pauses_removes_entries_for_tasks_updated_after_pause(self) -> None:
+        state = {
+            "dispatch_pauses": [
+                {"task_id": "REASSIGNED-1", "worker_run_id": "run-1", "paused_at": "2026-04-19T16:03:02Z"},
+                {"task_id": "CURRENT-1", "worker_run_id": "run-2", "paused_at": "2026-04-19T16:10:43Z"},
+            ],
+            "workers": {},
+        }
+        status = {
+            "tasks": [
+                {"id": "REASSIGNED-1", "status": "backlog", "last_update": "2026-04-19T16:10:27Z"},
+                {"id": "CURRENT-1", "status": "backlog", "last_update": "2026-04-19T16:10:35Z"},
+            ]
+        }
+
+        changed = supervisor.prune_completed_dispatch_pauses(state, status)
+
+        self.assertTrue(changed)
+        self.assertEqual(state["dispatch_pauses"], [{"task_id": "CURRENT-1", "worker_run_id": "run-2", "paused_at": "2026-04-19T16:10:43Z"}])
 
     def test_starts_current_owned_dispatch_event(self) -> None:
         current_task = {

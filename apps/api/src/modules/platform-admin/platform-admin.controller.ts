@@ -14,6 +14,7 @@ import type {
   CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
+  PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   SetPlatformMaintenanceModeCommand,
@@ -111,12 +112,16 @@ export class PlatformAdminController {
   @Post("placards/:placardVersionId/publish")
   publishPlacardVersion(
     @Param("placardVersionId") placardVersionId: string,
+    @Body() command: PublishPlacardVersionCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.platformAdminService.publishPlacardVersion(
         placardVersionId,
+        command,
         requestId,
+        this.requireActorId(identity),
       ),
       requestId,
     );

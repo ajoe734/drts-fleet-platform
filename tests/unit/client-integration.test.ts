@@ -306,6 +306,61 @@ describe("W8-001A shared api client list handling", () => {
     );
   });
 
+  it("targets the platform-admin delete draft public info route with DELETE", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+
+        expect(new URL(url).pathname).toBe(
+          "/api/platform-admin/public-info/public-info-draft-001",
+        );
+        expect(init?.method).toBe("DELETE");
+        expect(init?.body).toBeUndefined();
+
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              versionId: "public-info-draft-001",
+              title: "Draft version",
+              status: "draft",
+              callPhone: null,
+              complaintPhone: null,
+              callRateText: null,
+              fareText: null,
+              paymentMethodText: null,
+              effectiveFrom: null,
+              effectiveTo: null,
+              publishedBy: null,
+              publishedAt: null,
+              createdAt: "2026-04-19T00:00:00.000Z",
+              updatedAt: "2026-04-19T00:00:00.000Z",
+            },
+          }),
+          text: async () => "",
+        } as Response;
+      },
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await expect(
+      client.deletePublicInfoVersion("public-info-draft-001"),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        versionId: "public-info-draft-001",
+        status: "draft",
+      }),
+    );
+  });
+
   it("targets canonical finance reimbursement routes for list/approve/pay", async () => {
     const seenPaths: string[] = [];
     const fetchMock = vi.fn(

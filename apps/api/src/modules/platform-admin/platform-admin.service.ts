@@ -14,6 +14,7 @@ import type {
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
   PlatformPricingRuleRecord,
+  PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
@@ -432,7 +433,13 @@ export class PlatformAdminService implements OnModuleInit {
     );
   }
 
-  publishPlacardVersion(placardVersionId: string, requestId?: string) {
+  publishPlacardVersion(
+    placardVersionId: string,
+    command: PublishPlacardVersionCommand = {},
+    requestId?: string,
+    publishActorId?: string | null,
+  ) {
+    void command;
     const placard = this.placardVersions.find(
       (candidate) => candidate.placardVersionId === placardVersionId,
     );
@@ -463,7 +470,7 @@ export class PlatformAdminService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: null,
+        actorId: this.normalizeNullableText(publishActorId),
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",

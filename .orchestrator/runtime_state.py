@@ -29,6 +29,7 @@ def default_state() -> dict[str, Any]:
             "last_ratio": None,
         },
         "quota_paused_agents": {},
+        "dispatch_pauses": [],
         "supervisor": {
             "pid": None,
             "started_at": None,
@@ -62,6 +63,7 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["underutilization"].setdefault("last_sidecar_wave_reason", None)
     state["underutilization"].setdefault("last_ratio", None)
     state.setdefault("quota_paused_agents", {})
+    state.setdefault("dispatch_pauses", [])
     state.setdefault("supervisor", {})
     state["supervisor"].setdefault("pid", None)
     state["supervisor"].setdefault("started_at", None)
@@ -164,6 +166,39 @@ def queue_event_record(state: dict[str, Any], event_id: str) -> dict[str, Any]:
     events = queue.setdefault("events", {})
     record = events.setdefault(event_id, {"attempt_count": 0, "status": "queued"})
     return record
+
+
+def dispatch_pauses_for_task(state: dict[str, Any], task_id: str) -> list[dict[str, Any]]:
+    return [pause for pause in state.setdefault("dispatch_pauses", []) if str(pause.get("task_id") or "") == str(task_id)]
+
+
+def upsert_dispatch_pause(state: dict[str, Any], pause: dict[str, Any]) -> None:
+    task_id = str(pause.get("task_id") or "").strip()
+    worker_run_id = str(pause.get("worker_run_id") or "").strip()
+    provider = str(pause.get("provider") or "").strip()
+    pauses = state.setdefault("dispatch_pauses", [])
+    for index, current in enumerate(pauses):
+        if (
+            str(current.get("task_id") or "") == task_id
+            and str(current.get("worker_run_id") or "") == worker_run_id
+            and str(current.get("provider") or "") == provider
+        ):
+            pauses[index] = deepcopy(pause)
+            break
+    else:
+        pauses.append(deepcopy(pause))
+
+
+def clear_dispatch_pause(state: dict[str, Any], *, task_id: str | None = None, worker_run_id: str | None = None) -> None:
+    pauses = state.setdefault("dispatch_pauses", [])
+    state["dispatch_pauses"] = [
+        pause
+        for pause in pauses
+        if not (
+            (task_id is None or str(pause.get("task_id") or "") == str(task_id))
+            and (worker_run_id is None or str(pause.get("worker_run_id") or "") == str(worker_run_id))
+        )
+    ]
 
 
 def default_approval_state() -> dict[str, Any]:

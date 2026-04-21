@@ -41,7 +41,7 @@ import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-reg
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import type { MessageEvent } from "@nestjs/common";
-import type { Observable } from "rxjs";
+import { EMPTY, type Observable } from "rxjs";
 
 type TenantBookingResult = {
   orderId: string;
@@ -116,7 +116,8 @@ export class OwnedMobilityService implements OnModuleInit {
     private readonly auditNotificationService: AuditNotificationService,
     private readonly callcenterService: CallcenterService,
     private readonly ownedMobilityTaskEventsService: OwnedMobilityTaskEventsService,
-    private readonly opsDispatchEventsService: OpsDispatchEventsService,
+    @Optional()
+    private readonly opsDispatchEventsService?: OpsDispatchEventsService,
     @Optional()
     private readonly ownedMobilityRepository?: OwnedMobilityRepository,
     @Optional()
@@ -266,7 +267,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.opsDispatchEventsService.publishOrderCreated(order, requestId);
+    this.opsDispatchEventsService?.publishOrderCreated(order, requestId);
 
     return this.cloneOrder(order);
   }
@@ -401,7 +402,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.opsDispatchEventsService.publishOrderCreated(order, requestId);
+    this.opsDispatchEventsService?.publishOrderCreated(order, requestId);
 
     return this.cloneOrder(order);
   }
@@ -543,7 +544,7 @@ export class OwnedMobilityService implements OnModuleInit {
       requestId,
     );
     this.publishTenantOrderWebhook(order, "order.created", order.createdAt);
-    this.opsDispatchEventsService.publishOrderCreated(order, requestId);
+    this.opsDispatchEventsService?.publishOrderCreated(order, requestId);
 
     return {
       orderId,
@@ -969,7 +970,7 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       "dispatch_order",
     );
-    this.opsDispatchEventsService.publishDispatchJobUpdated(
+    this.opsDispatchEventsService?.publishDispatchJobUpdated(
       orderId,
       dispatchJob,
       requestId,
@@ -1034,7 +1035,7 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   listDispatchJobs() {
-    return this.dispatchJobs.map((job) => ({ ...job }));
+    return this.dispatchJobs.map((job) => this.buildDispatchJobSnapshot(job));
   }
 
   listDispatchTrace(orderId: string) {
@@ -1053,6 +1054,26 @@ export class OwnedMobilityService implements OnModuleInit {
         this.resolvePickupEtaDestination(order),
       )
       .map((candidate) => ({ ...candidate }));
+  }
+
+  private buildDispatchJobSnapshot(dispatchJob: DispatchJobRecord) {
+    const order = this.orders.find(
+      (candidateOrder) => candidateOrder.orderId === dispatchJob.orderId,
+    );
+    if (!order) {
+      return { ...dispatchJob };
+    }
+
+    const liveCandidates = this.regulatoryRegistryService.getEligibleCandidates(
+      order.serviceBucket,
+      this.resolvePickupEtaDestination(order),
+    );
+
+    return {
+      ...dispatchJob,
+      latestEtaMinutes:
+        liveCandidates[0]?.etaMinutes ?? dispatchJob.latestEtaMinutes,
+    };
   }
 
   assignDispatch(command: AssignDispatchCommand, requestId?: string) {
@@ -1208,7 +1229,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order,
       requestId,
     );
-    this.opsDispatchEventsService.publishDispatchJobUpdated(
+    this.opsDispatchEventsService?.publishDispatchJobUpdated(
       order.orderId,
       dispatchJob,
       requestId,
@@ -1466,16 +1487,18 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   streamOpsDispatchEvents(): Observable<MessageEvent> {
-    return this.opsDispatchEventsService.streamEvents();
+    return this.opsDispatchEventsService?.streamEvents() ?? EMPTY;
   }
 
   private publishLatestDispatchJobUpdate(orderId: string, requestId?: string) {
-    const dispatchJob = this.dispatchJobs.find((job) => job.orderId === orderId);
+    const dispatchJob = this.dispatchJobs.find(
+      (job) => job.orderId === orderId,
+    );
     if (!dispatchJob) {
       return;
     }
 
-    this.opsDispatchEventsService.publishDispatchJobUpdated(
+    this.opsDispatchEventsService?.publishDispatchJobUpdated(
       orderId,
       dispatchJob,
       requestId,

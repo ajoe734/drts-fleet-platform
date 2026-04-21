@@ -81,3 +81,51 @@ describe("PlatformAdminService.deleteDraftPublicInfoVersion", () => {
     );
   });
 });
+
+describe("PlatformAdminService.publishPlacardVersion", () => {
+  it("records the verified publisher actorId in placard publish audit logs", () => {
+    const { service, auditNotificationService, platformAdminRepository } =
+      createService();
+    const draftPublicInfo = service.createPublicInfoVersion({
+      title: "Draft disclosure for placard publish",
+      callPhone: null,
+      complaintPhone: null,
+      callRateText: null,
+      fareText: null,
+      paymentMethodText: null,
+      effectiveFrom: null,
+      effectiveTo: null,
+    });
+    const placard = service.generatePlacardVersion(
+      {
+        versionCode: "placard-2026-q4",
+        publicInfoVersionId: draftPublicInfo.versionId,
+        templateName: "seatback-v2",
+        publishedAt: null,
+      },
+      "req-generate-placard",
+    );
+
+    const published = service.publishPlacardVersion(
+      placard.placardVersionId,
+      {},
+      "req-publish-placard",
+      "platform-admin-jwt-022",
+    );
+
+    expect(published.publishedAt).toEqual(expect.any(String));
+    expect(platformAdminRepository.persistChanges).toHaveBeenCalledWith({
+      placardVersions: [
+        expect.objectContaining({ placardVersionId: placard.placardVersionId }),
+      ],
+    });
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-publish-placard",
+        actorId: "platform-admin-jwt-022",
+        actionName: "publish_placard_version",
+        resourceId: placard.placardVersionId,
+      }),
+    );
+  });
+});

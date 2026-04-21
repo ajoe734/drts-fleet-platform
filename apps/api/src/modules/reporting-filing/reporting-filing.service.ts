@@ -95,6 +95,10 @@ export class ReportingFilingService implements OnModuleInit {
 
   private filingPackages: StoredFilingPackage[] = [];
 
+  private readonly scheduledReportJobIds = new Set<string>();
+
+  private readonly scheduledFilingPackageIds = new Set<string>();
+
   private orderFeedProvider: OrderFeedProvider = () => [];
 
   private readonly downloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
@@ -126,8 +130,21 @@ export class ReportingFilingService implements OnModuleInit {
         this.cloneStoredReportJob(job),
       );
       this.filingPackages = persistedState.filingPackages.map((filingPackage) =>
-        this.cloneFilingPackage(filingPackage),
+        this.cloneStoredFilingPackage(filingPackage),
       );
+      for (const job of this.reportJobs) {
+        if (job.status === "queued" || job.status === "running") {
+          this.scheduleReportJobCompletion(job.jobId);
+        }
+      }
+      for (const filingPackage of this.filingPackages) {
+        if (
+          filingPackage.status === "queued" ||
+          filingPackage.status === "running"
+        ) {
+          this.scheduleFilingPackageCompletion(filingPackage.packageId);
+        }
+      }
     } catch (error) {
       this.reportingFilingRepository.reportPersistenceFailure(
         error,
@@ -160,6 +177,12 @@ export class ReportingFilingService implements OnModuleInit {
     };
 
     this.reportJobs = [job, ...this.reportJobs];
+    this.persistChanges(
+      {
+        reportJobs: [this.cloneStoredReportJob(job)],
+      },
+      "queue_report_job",
+    );
     this.recordAudit(
       {
         actorId: null,
@@ -178,7 +201,7 @@ export class ReportingFilingService implements OnModuleInit {
       requestId,
     );
 
-    this.completeReportJob(job, requestId);
+    this.scheduleReportJobCompletion(job.jobId, requestId);
 
     return {
       jobId: job.jobId,
@@ -216,6 +239,12 @@ export class ReportingFilingService implements OnModuleInit {
     };
 
     this.filingPackages = [filingPackage, ...this.filingPackages];
+    this.persistChanges(
+      {
+        filingPackages: [this.cloneStoredFilingPackage(filingPackage)],
+      },
+      "queue_filing_package",
+    );
     this.recordAudit(
       {
         actorId: null,
@@ -233,7 +262,7 @@ export class ReportingFilingService implements OnModuleInit {
       requestId,
     );
 
-    this.completeFilingPackage(filingPackage, command, requestId);
+    this.scheduleFilingPackageCompletion(filingPackage.packageId, requestId);
 
     return {
       packageId: filingPackage.packageId,
@@ -252,11 +281,83 @@ export class ReportingFilingService implements OnModuleInit {
     );
   }
 
-  private completeReportJob(job: StoredReportJob, requestId?: string) {
+  private scheduleReportJobCompletion(jobId: string, requestId?: string) {
+    if (this.scheduledReportJobIds.has(jobId)) {
+      return;
+    }
+
+    this.scheduledReportJobIds.add(jobId);
+    queueMicrotask(() => {
+      void this.runReportJob(jobId, requestId).finally(() => {
+        this.scheduledReportJobIds.delete(jobId);
+      });
+    });
+  }
+
+  private scheduleFilingPackageCompletion(
+    packageId: string,
+    requestId?: string,
+  ) {
+    if (this.scheduledFilingPackageIds.has(packageId)) {
+      return;
+    }
+
+    this.scheduledFilingPackageIds.add(packageId);
+    queueMicrotask(() => {
+      void this.runFilingPackage(packageId, requestId).finally(() => {
+        this.scheduledFilingPackageIds.delete(packageId);
+      });
+    });
+  }
+
+  private async runReportJob(jobId: string, requestId?: string) {
+    const job = this.reportJobs.find(
+      (candidateJob) => candidateJob.jobId === jobId,
+    );
+    if (!job || (job.status !== "queued" && job.status !== "running")) {
+      return;
+    }
+
+    try {
+      this.startReportJob(job);
+      this.completeReportJob(job, requestId);
+    } catch (error) {
+      this.failReportJob(job, error, requestId);
+    }
+  }
+
+  private async runFilingPackage(packageId: string, requestId?: string) {
+    const filingPackage = this.filingPackages.find(
+      (candidatePackage) => candidatePackage.packageId === packageId,
+    );
+    if (
+      !filingPackage ||
+      (filingPackage.status !== "queued" && filingPackage.status !== "running")
+    ) {
+      return;
+    }
+
+    try {
+      this.startFilingPackage(filingPackage);
+      this.completeFilingPackage(filingPackage, requestId);
+    } catch (error) {
+      this.failFilingPackage(filingPackage, error, requestId);
+    }
+  }
+
+  private startReportJob(job: StoredReportJob) {
     const updatedAt = new Date().toISOString();
     job.status = "running";
     job.updatedAt = updatedAt;
+    this.persistChanges(
+      {
+        reportJobs: [this.cloneStoredReportJob(job)],
+      },
+      "start_report_job",
+    );
+  }
 
+  private completeReportJob(job: StoredReportJob, requestId?: string) {
     if (job.jobType === "dispatch_recording_index") {
       job.rows = this.buildDispatchRecordingIndexRows();
     }
@@ -299,18 +400,61 @@ export class ReportingFilingService implements OnModuleInit {
     );
   }
 
-  private completeFilingPackage(
-    filingPackage: StoredFilingPackage,
-    command: GenerateFilingPackageCommand,
+  private failReportJob(
+    job: StoredReportJob,
+    error: unknown,
     requestId?: string,
   ) {
+    job.status = "failed";
+    job.updatedAt = new Date().toISOString();
+    this.persistChanges(
+      {
+        reportJobs: [this.cloneStoredReportJob(job)],
+      },
+      "fail_report_job",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "reporting-filing",
+        actionName: "fail_report_job",
+        resourceType: "report_job",
+        resourceId: job.jobId,
+        newValuesSummary: {
+          jobType: job.jobType,
+          status: job.status,
+          error:
+            error instanceof Error ? error.message : "unknown reporting error",
+        },
+      },
+      requestId,
+    );
+  }
+
+  private startFilingPackage(filingPackage: StoredFilingPackage) {
     const generatedAt = new Date().toISOString();
     filingPackage.status = "running";
     filingPackage.updatedAt = generatedAt;
+    this.persistChanges(
+      {
+        filingPackages: [this.cloneStoredFilingPackage(filingPackage)],
+      },
+      "start_filing_package",
+    );
+  }
 
-    const itemTypes = this.resolvePackageItemTypes(command.packageType);
+  private completeFilingPackage(
+    filingPackage: StoredFilingPackage,
+    requestId?: string,
+  ) {
+    const generatedAt = new Date().toISOString();
+    const itemTypes = this.resolvePackageItemTypes(filingPackage.packageType);
     const items = itemTypes.map((itemType) =>
-      this.createPackageItem(filingPackage.packageId, itemType, command),
+      this.createPackageItem(filingPackage.packageId, itemType, {
+        packageType: filingPackage.packageType,
+      }),
     );
     const manifestEntries = items.map((item) => ({
       itemId: item.itemId,
@@ -321,8 +465,6 @@ export class ReportingFilingService implements OnModuleInit {
     const checksum = this.computeHash({
       packageId: filingPackage.packageId,
       packageType: filingPackage.packageType,
-      scope: command.scope ?? {},
-      period: command.period ?? {},
       entries: manifestEntries,
     });
     const manifest: FilingPackageManifest = {
@@ -373,7 +515,7 @@ export class ReportingFilingService implements OnModuleInit {
     filingPackage.updatedAt = generatedAt;
     this.persistChanges(
       {
-        filingPackages: [this.cloneFilingPackage(filingPackage)],
+        filingPackages: [this.cloneStoredFilingPackage(filingPackage)],
       },
       "complete_filing_package",
     );
@@ -394,6 +536,39 @@ export class ReportingFilingService implements OnModuleInit {
           itemCount: filingPackage.items.length,
           artifactZipExpiresAt: zipDownloadMetadata.expiresAt,
           artifactPdfExpiresAt: pdfDownloadMetadata.expiresAt,
+        },
+      },
+      requestId,
+    );
+  }
+
+  private failFilingPackage(
+    filingPackage: StoredFilingPackage,
+    error: unknown,
+    requestId?: string,
+  ) {
+    filingPackage.status = "failed";
+    filingPackage.updatedAt = new Date().toISOString();
+    this.persistChanges(
+      {
+        filingPackages: [this.cloneStoredFilingPackage(filingPackage)],
+      },
+      "fail_filing_package",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "reporting-filing",
+        actionName: "generate_filing_package_failed",
+        resourceType: "filing_package",
+        resourceId: filingPackage.packageId,
+        newValuesSummary: {
+          packageType: filingPackage.packageType,
+          status: filingPackage.status,
+          error:
+            error instanceof Error ? error.message : "unknown filing error",
         },
       },
       requestId,
@@ -529,6 +704,29 @@ export class ReportingFilingService implements OnModuleInit {
           }
         : null,
       immutable: true,
+    };
+  }
+
+  private cloneStoredFilingPackage(
+    filingPackage: StoredFilingPackage,
+  ): StoredFilingPackage {
+    return {
+      ...filingPackage,
+      items: filingPackage.items.map((item) => ({ ...item })),
+      manifest: filingPackage.manifest
+        ? {
+            ...filingPackage.manifest,
+            entries: filingPackage.manifest.entries.map((entry) => ({
+              ...entry,
+            })),
+          }
+        : null,
+      downloadMetadata: filingPackage.downloadMetadata
+        ? {
+            zip: { ...filingPackage.downloadMetadata.zip },
+            pdf: { ...filingPackage.downloadMetadata.pdf },
+          }
+        : null,
     };
   }
 

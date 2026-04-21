@@ -28,6 +28,8 @@ from common import (
     command_exists,
     config_path,
     display_name_for,
+    evidence_path,
+    ensure_task_brief,
     load_config,
     load_json,
     load_status,
@@ -44,7 +46,17 @@ from common import (
 )
 from github_bus import sync_github_bus
 from provider_permissions import provider_capabilities as build_provider_capabilities, write_provider_capabilities
-from runtime_state import enqueue_event, load_approval_state, load_event_queue, load_runtime_state, prune_worker_records, queue_event_record, save_runtime_state
+from runtime_state import (
+    clear_dispatch_pause,
+    enqueue_event,
+    load_approval_state,
+    load_event_queue,
+    load_runtime_state,
+    prune_worker_records,
+    queue_event_record,
+    save_runtime_state,
+    upsert_dispatch_pause,
+)
 from watch_events import queue_delivery_event, run_scan, trim_seen_events
 
 
@@ -445,8 +457,16 @@ def build_planning_baton_message(
     current_owner: str,
     primary_file: str,
     target_files: list[str],
+    status: dict[str, Any] | None = None,
 ) -> str:
-    shared_files = [relpath(path) for path in selected_shared_files(config)]
+    shared_files = [
+        relpath(path)
+        for path in selected_shared_files(
+            config,
+            mode="planning",
+            status=status,
+        )
+    ]
     shared_block = "\n".join(f"- {path}" for path in shared_files) if shared_files else "- (none)"
     target_block = "\n".join(f"- {path}" for path in target_files) if target_files else "- (none)"
     return (
@@ -522,8 +542,16 @@ def ensure_planning_baton_dispatch(
             current_owner=current_owner,
             primary_file=primary_file,
             target_files=target_files,
+            status=status,
         ),
-        "context_files": [relpath(path) for path in selected_shared_files(config)],
+        "context_files": [
+            relpath(path)
+            for path in selected_shared_files(
+                config,
+                mode="planning",
+                status=status,
+            )
+        ],
         "target_files": target_files,
         "metadata": {
             "mode": "planning",
@@ -594,6 +622,20 @@ def build_request(config: dict[str, Any], event: dict[str, Any]) -> DeliveryRequ
     model_preference = resolve_agent_model_preference(config, agent)
     if model_preference and "model_preference" not in metadata:
         metadata["model_preference"] = model_preference
+    task_payload = metadata.get("task") if isinstance(metadata.get("task"), dict) else {}
+    mode = str(metadata.get("mode") or "").strip().lower()
+    if mode not in {"planning", "execution", "coordination"}:
+        mode = "planning" if str(task_payload.get("task_class") or "").lower() == "planning" else "execution"
+    context_files = event.get("context_files")
+    if not context_files:
+        context_files = [
+            relpath(path)
+            for path in selected_shared_files(
+                config,
+                mode=mode,
+                task=task_payload,
+            )
+        ]
     return DeliveryRequest(
         agent_id=agent["id"],
         provider=agent.get("provider", agent["id"]),
@@ -603,7 +645,7 @@ def build_request(config: dict[str, Any], event: dict[str, Any]) -> DeliveryRequ
         message=event["message"],
         task_id=event.get("task_id"),
         reason=event.get("reason"),
-        context_files=event.get("context_files", [relpath(path) for path in selected_shared_files(config)]),
+        context_files=context_files,
         target_files=event.get("target_files", []),
         metadata=metadata,
     )
@@ -656,6 +698,8 @@ def start_worker_for_request(
     activity_message: str | None = None,
 ) -> tuple[bool, str | None, dict[str, Any] | None]:
     agent = agent_config_for(config, request.agent_id)
+    if request.task_id:
+        ensure_task_brief(config, task=(request.metadata or {}).get("task"), task_id=request.task_id)
     adapter_name = delivery_mode_override or agent.get("adapter", "file_inbox")
     adapter = build_adapter(adapter_name, config=config, provider_capabilities=provider_report)
     result = adapter.deliver(request)
@@ -701,7 +745,11 @@ def start_worker_for_request(
         "retry_count": 0,
         "next_retry_at": None,
         "last_error": None,
+        "last_error_kind": None,
+        "last_error_summary": None,
+        "last_evidence_ref": None,
     }
+    clear_dispatch_pause(state, task_id=request.task_id, worker_run_id=worker_run_id)
     write_activity_log(
         config,
         {
@@ -910,7 +958,26 @@ def _ignore_embedded_failure_line(stripped: str) -> bool:
         return True
     if re.match(r"^[-*]\s+`[^`]+`:", stripped):
         return True
+    if re.match(r"^(diff --git|index [0-9a-f]+\.\.[0-9a-f]+|@@|--- |\+\+\+ )", stripped):
+        return True
+    if re.match(r"^[+-](?:\s|`|\*|$)", stripped):
+        return True
+    if re.match(r"^[A-Za-z0-9_./-]+\.(?:md|json|ya?ml|ts|tsx|js|jsx|py|sql|sh):\d+[: -]", stripped):
+        return True
     if stripped.startswith(("Reviewer note:", "Review Outcome:", "Impact On Consensus:", "Remaining Question:")):
+        return True
+    embedded_markers = (
+        "current-work.md:",
+        "shared L0",
+        "machine truth",
+        "task object `last_update=",
+        "Auto-reassigned review from",
+        "Auto-reassigned ownership from",
+        "Owner finalized",
+        "Handoff to ",
+        "reviewer-routing",
+    )
+    if any(marker in stripped for marker in embedded_markers):
         return True
     return False
 
@@ -1117,7 +1184,7 @@ def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
             normalized = str(value).strip().lower()
             if normalized and normalized not in default_eligible_statuses:
                 default_eligible_statuses.append(normalized)
-    settings.setdefault("eligible_statuses", default_eligible_statuses or ["todo", "in_progress", "review", "review_approved"])
+    settings.setdefault("eligible_statuses", default_eligible_statuses or ["backlog", "todo", "in_progress", "review", "review_approved"])
     default_fallbacks = {
         "Claude": ["Codex", "Qwen", "Grok", "Gemini"],
         "Gemini": ["Codex", "Qwen", "Claude", "Grok"],
@@ -1174,6 +1241,44 @@ def ordered_idle_agent_names(idle_agent_names: list[str], agent_loads: dict[str,
     return [name for _index, name in indexed]
 
 
+def prune_completed_dispatch_pauses(state: dict[str, Any], status: dict[str, Any]) -> bool:
+    tasks = status.get("tasks", [])
+    if not isinstance(tasks, list):
+        return False
+    task_by_id = {
+        str(task.get("id") or ""): task
+        for task in tasks
+        if str(task.get("id") or "").strip()
+    }
+    active_worker_statuses = {str(value) for value in ready_dispatch_settings(load_config()).get("active_worker_statuses", [])}
+    active_task_ids = {
+        str(worker.get("task_id") or "")
+        for worker in (state.get("workers", {}) or {}).values()
+        if str(worker.get("task_id") or "").strip() and str(worker.get("status") or "") in active_worker_statuses
+    }
+
+    def pause_is_stale_for_updated_task(pause: dict[str, Any]) -> bool:
+        task = task_by_id.get(str(pause.get("task_id") or ""))
+        if not isinstance(task, dict):
+            return False
+        paused_at = str(pause.get("paused_at") or "").strip()
+        last_update = str(task.get("last_update") or "").strip()
+        return bool(paused_at and last_update and last_update > paused_at)
+
+    pauses = list(state.get("dispatch_pauses", []) or [])
+    keep = [
+        pause
+        for pause in pauses
+        if str(task_by_id.get(str(pause.get("task_id") or ""), {}).get("status") or "").strip().lower() not in {"done", "review_approved"}
+        and str(pause.get("task_id") or "") not in active_task_ids
+        and not pause_is_stale_for_updated_task(pause)
+    ]
+    if len(keep) == len(pauses):
+        return False
+    state["dispatch_pauses"] = keep
+    return True
+
+
 def proactive_claim_plan_for_idle_agent(
     config: dict[str, Any],
     *,
@@ -1191,7 +1296,7 @@ def proactive_claim_plan_for_idle_agent(
     if not helper_settings.get("enabled", True):
         return None
 
-    allowed_statuses = {str(value).lower() for value in helper_settings.get("task_statuses", ["todo", "in_progress", "review", "review_approved"])}
+    allowed_statuses = {str(value).lower() for value in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}
     task_status = str(task.get("status") or "").lower()
     if task_status not in allowed_statuses:
         return None
@@ -1218,7 +1323,7 @@ def proactive_claim_plan_for_idle_agent(
         counterpart_agent = reviewer
         claim_role = "owner"
         reason = "owned_in_progress_dispatch"
-    elif task_status == "todo" and dependencies_satisfied(task, task_map, dependency_done_statuses):
+    elif task_status in {"todo", "backlog"} and dependencies_satisfied(task, task_map, dependency_done_statuses):
         assigned_agent = owner
         counterpart_agent = reviewer
         claim_role = "owner"
@@ -1362,6 +1467,78 @@ def sync_status_pipeline(config: dict[str, Any]) -> bool:
     return False
 
 
+def brief_reason_text(text: str | None, max_length: int = 240) -> str:
+    raw = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(raw) <= max_length:
+        return raw
+    clipped = raw[: max_length - 1].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0]
+    return clipped + "…"
+
+
+def summarize_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str) -> tuple[str, str]:
+    failure = classify_worker_failure(config, worker, reason)
+    label = str(failure.get("label") or "worker failure").strip()
+    summary = brief_reason_text(reason, max_length=220)
+    if label and label.lower() not in summary.lower():
+        summary = f"{label}: {summary}"
+    return label or "worker failure", summary
+
+
+def record_worker_evidence(config: dict[str, Any], worker: dict[str, Any], reason: str) -> str:
+    run_id = str(worker.get("run_id") or new_runtime_id("worker")).strip()
+    path = evidence_path(run_id)
+    label, summary = summarize_worker_failure(config, worker, reason)
+    payload = {
+        "created_at": utc_now(),
+        "provider": worker.get("provider"),
+        "task_id": worker.get("task_id"),
+        "worker_run_id": run_id,
+        "queue_event_id": worker.get("queue_event_id"),
+        "kind": label,
+        "summary": summary,
+        "log_path": worker.get("log_path"),
+        "payload_path": worker.get("payload_path"),
+        "raw_message": reason,
+    }
+    write_json(path, payload)
+    return relpath(path)
+
+
+def upsert_worker_dispatch_pause(
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    *,
+    failure_kind: str,
+    summary: str,
+    raw_ref: str,
+    blocked_until: str | None = None,
+) -> None:
+    upsert_dispatch_pause(
+        state,
+        {
+            "provider": worker.get("provider"),
+            "task_id": worker.get("task_id"),
+            "worker_run_id": worker.get("run_id"),
+            "paused_at": utc_now(),
+            "blocked_until": blocked_until,
+            "failure_kind": failure_kind,
+            "summary": summary,
+            "raw_ref": raw_ref,
+            "mode_bucket": "execution",
+        },
+    )
+
+
+def clear_worker_dispatch_pause(state: dict[str, Any], worker: dict[str, Any]) -> None:
+    clear_dispatch_pause(
+        state,
+        task_id=str(worker.get("task_id") or "") or None,
+        worker_run_id=str(worker.get("run_id") or "") or None,
+    )
+
+
 def persist_task_reassignment(
     config: dict[str, Any],
     *,
@@ -1371,6 +1548,7 @@ def persist_task_reassignment(
     message: str,
     handoff_to: str | None = None,
     handoff_from: str | None = None,
+    evidence_ref: str | None = None,
 ) -> bool:
     status_path = config_path(config, "status_file")
     status = load_status(config)
@@ -1385,7 +1563,13 @@ def persist_task_reassignment(
     task["owner"] = new_owner
     task["reviewer"] = new_reviewer
     task["last_update"] = timestamp
-    task["next"] = message
+    short_message = brief_reason_text(message, max_length=280)
+    task["next"] = short_message
+    if evidence_ref:
+        refs = list(task.get("evidence_refs", []) or [])
+        if evidence_ref not in refs:
+            refs.append(evidence_ref)
+        task["evidence_refs"] = refs
 
     for handoff in status.get("handoffs", []) or []:
         if handoff.get("task_id") != task_id or handoff.get("status") == "done":
@@ -1401,7 +1585,7 @@ def persist_task_reassignment(
                 "task_id": task_id,
                 "from": handoff_from or old_owner or old_reviewer or new_owner,
                 "to": handoff_to,
-                "message": message,
+                "message": short_message,
                 "status": "pending",
                 "created_at": timestamp,
             }
@@ -1444,11 +1628,11 @@ def maybe_reassign_task_after_worker_failure(
     dispatch_settings = ready_dispatch_settings(config)
     review_statuses = {str(value).lower() for value in dispatch_settings.get("review_statuses", ["review"])}
     finalize_statuses = {str(value).lower() for value in dispatch_settings.get("finalize_statuses", ["review_approved"])}
-    owned_statuses = {str(value).lower() for value in dispatch_settings.get("owned_statuses", ["in_progress", "todo"])}
+    owned_statuses = {str(value).lower() for value in dispatch_settings.get("owned_statuses", ["in_progress", "todo", "backlog"])}
 
     failing_agent = display_name_for(config, str(worker.get("agent_id") or worker.get("provider") or ""))
-    failure = classify_worker_failure(config, worker, reason)
-    failure_label = failure.get("label", "provider failure")
+    failure_label, failure_summary = summarize_worker_failure(config, worker, reason)
+    evidence_ref = str(worker.get("last_evidence_ref") or "").strip() or None
     owner = str(task.get("owner") or "")
     reviewer = str(task.get("reviewer") or "")
 
@@ -1457,9 +1641,9 @@ def maybe_reassign_task_after_worker_failure(
         new_reviewer = first_viable_agent(config, candidates, exclude={owner, reviewer}, state=state)
         if not new_reviewer:
             return None
-        message = (
-            f"Auto-reassigned review from {reviewer} to {new_reviewer} after repeated {failing_agent} {failure_label}: {reason}"
-        )
+        message = f"Auto-reassigned review from {reviewer} to {new_reviewer} after repeated {failing_agent} {failure_summary}"
+        if evidence_ref:
+            message += f" (raw_ref: {evidence_ref})"
         if not persist_task_reassignment(
             config,
             task_id=task_id,
@@ -1468,6 +1652,7 @@ def maybe_reassign_task_after_worker_failure(
             message=message,
             handoff_to=new_reviewer,
             handoff_from=reviewer,
+            evidence_ref=evidence_ref,
         ):
             return None
         write_activity_log(
@@ -1498,9 +1683,9 @@ def maybe_reassign_task_after_worker_failure(
         new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={new_owner}, state=state)
         if not new_reviewer:
             return None
-        message = (
-            f"Auto-reassigned ownership from {owner} to {new_owner} after repeated {failing_agent} {failure_label}: {reason}"
-        )
+        message = f"Auto-reassigned ownership from {owner} to {new_owner} after repeated {failing_agent} {failure_summary}"
+        if evidence_ref:
+            message += f" (raw_ref: {evidence_ref})"
         if not persist_task_reassignment(
             config,
             task_id=task_id,
@@ -1508,6 +1693,7 @@ def maybe_reassign_task_after_worker_failure(
             new_reviewer=new_reviewer,
             message=message,
             handoff_from=owner,
+            evidence_ref=evidence_ref,
         ):
             return None
         write_activity_log(
@@ -1601,6 +1787,12 @@ def maybe_trigger_retry_or_fallback(
 ) -> tuple[bool, bool]:
     retry = worker_retry_settings(config, worker.get("provider"))
     failure = classify_worker_failure(config, worker, reason)
+    failure_kind, failure_summary = summarize_worker_failure(config, worker, reason)
+    evidence_ref = record_worker_evidence(config, worker, reason)
+    worker["last_error"] = failure_summary
+    worker["last_error_kind"] = failure_kind
+    worker["last_error_summary"] = failure_summary
+    worker["last_evidence_ref"] = evidence_ref
     max_attempts = int(retry.get("max_attempts", 5))
     retry_count = int(worker.get("retry_count", 0))
     request = request_for_worker(config, worker)
@@ -1615,20 +1807,28 @@ def maybe_trigger_retry_or_fallback(
         finalize_queue_event_record(config, state, worker, "completed")
         return True, True
     if retry_count < max_attempts:
-        schedule_worker_retry(config, worker, reason)
+        schedule_worker_retry(config, worker, failure_summary)
+        upsert_worker_dispatch_pause(
+            state,
+            worker,
+            failure_kind=failure_kind,
+            summary=failure_summary,
+            raw_ref=evidence_ref,
+            blocked_until=worker.get("next_retry_at"),
+        )
         write_activity_log(
             config,
             {
                 "type": "worker_retry_scheduled",
                 "provider": worker.get("provider"),
                 "task_id": worker.get("task_id"),
-                "message": f"Transient worker failure detected ({failure.get('label')}); retry {worker.get('retry_count')} scheduled at {worker.get('next_retry_at')}: {reason}",
+                "message": f"Transient worker failure detected ({failure_kind}); retry {worker.get('retry_count')} scheduled at {worker.get('next_retry_at')}: {failure_summary} (raw_ref: {evidence_ref})",
                 "worker_run_id": worker["run_id"],
                 "next_retry_at": worker.get("next_retry_at"),
             },
         )
         console_log(
-            f"retry scheduled: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} next={worker.get('next_retry_at')}",
+            f"retry scheduled: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure_kind} next={worker.get('next_retry_at')}",
             quiet=SUPERVISOR_LOG_QUIET,
         )
         return True, True
@@ -1662,6 +1862,13 @@ def maybe_trigger_retry_or_fallback(
                 worker["status"] = "fallback"
                 worker["fallback_run_id"] = outcome
                 worker["last_event_at"] = utc_now()
+                upsert_worker_dispatch_pause(
+                    state,
+                    worker,
+                    failure_kind=failure_kind,
+                    summary=failure_summary,
+                    raw_ref=evidence_ref,
+                )
                 return True, True
     return False, False
 
@@ -1672,6 +1879,12 @@ def finalize_terminal_worker_outcome(
     worker: dict[str, Any],
     reason: str,
 ) -> bool:
+    failure_kind, failure_summary = summarize_worker_failure(config, worker, reason)
+    evidence_ref = record_worker_evidence(config, worker, reason)
+    worker["last_error"] = failure_summary
+    worker["last_error_kind"] = failure_kind
+    worker["last_error_summary"] = failure_summary
+    worker["last_evidence_ref"] = evidence_ref
     reassigned_to = maybe_reassign_task_after_worker_failure(
         config,
         worker,
@@ -1682,27 +1895,39 @@ def finalize_terminal_worker_outcome(
     if reassigned_to:
         worker["status"] = "reassigned"
         worker["reassigned_to"] = reassigned_to
-        worker["last_error"] = reason
         worker["last_event_at"] = utc_now()
+        upsert_worker_dispatch_pause(
+            state,
+            worker,
+            failure_kind=failure_kind,
+            summary=failure_summary,
+            raw_ref=evidence_ref,
+        )
         finalize_queue_event_record(config, state, worker, "completed")
         return True
 
     worker["status"] = "failed"
     worker["last_event_at"] = utc_now()
-    worker["last_error"] = reason
+    upsert_worker_dispatch_pause(
+        state,
+        worker,
+        failure_kind=failure_kind,
+        summary=failure_summary,
+        raw_ref=evidence_ref,
+    )
     write_activity_log(
         config,
         {
             "type": "worker_failed",
             "provider": worker.get("provider"),
             "task_id": worker.get("task_id"),
-            "message": reason,
+            "message": f"{failure_summary} (raw_ref: {evidence_ref})",
             "worker_run_id": worker["run_id"],
             "pr_url": worker.get("pr_url"),
             "session_url": worker.get("session_url"),
         },
     )
-    finalize_queue_event_record(config, state, worker, "failed", reason)
+    finalize_queue_event_record(config, state, worker, "failed", f"{failure_summary} (raw_ref: {evidence_ref})")
     return False
 
 
@@ -2379,7 +2604,7 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("enabled", True)
     settings.setdefault("review_statuses", ["review"])
     settings.setdefault("finalize_statuses", ["review_approved"])
-    settings.setdefault("owned_statuses", ["in_progress", "todo"])
+    settings.setdefault("owned_statuses", ["in_progress", "todo", "backlog"])
     legacy_done_statuses = settings.get("done_statuses", ["done", "review_approved"])
     settings.setdefault("dependency_done_statuses", ["done"])
     settings.setdefault("worker_terminal_statuses", legacy_done_statuses)
@@ -2392,7 +2617,7 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
 def helper_claim_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(ready_dispatch_settings(config).get("helper_claim", {}) or {})
     settings.setdefault("enabled", True)
-    settings.setdefault("task_statuses", ["todo", "in_progress", "review", "review_approved"])
+    settings.setdefault("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])
     settings.setdefault("availability_first", True)
     settings.setdefault("allow_any_idle_lane", True)
     settings.setdefault("prefer_assigned_when_idle", True)
@@ -2470,7 +2695,7 @@ def task_is_sidecar(task: dict[str, Any]) -> bool:
 
 
 def sidecar_statuses() -> set[str]:
-    return {"todo", "in_progress", "review", "review_approved", "blocked", "done"}
+    return {"backlog", "todo", "in_progress", "review", "review_approved", "blocked", "done"}
 
 
 def existing_sidecar_signatures(status: dict[str, Any]) -> set[str]:
@@ -2507,9 +2732,9 @@ def task_phase_priority(task: dict[str, Any], task_map: dict[str, dict[str, Any]
         return 1
     if status == "review_approved":
         return 2
-    if status == "todo" and dependencies_satisfied(task, task_map, dependency_done_statuses):
+    if status in {"todo", "backlog"} and dependencies_satisfied(task, task_map, dependency_done_statuses):
         return 3
-    if status == "todo":
+    if status in {"todo", "backlog"}:
         return 4
     if status == "blocked":
         return 5
@@ -2558,7 +2783,7 @@ def agent_has_dispatchable_primary_work(
             continue
         if task_status == "in_progress" and dependencies_satisfied(task, task_map, dependency_done_statuses):
             return True
-        if task_status == "todo" and dependencies_satisfied(task, task_map, dependency_done_statuses):
+        if task_status in {"todo", "backlog"} and dependencies_satisfied(task, task_map, dependency_done_statuses):
             return True
     return False
 
@@ -2703,7 +2928,7 @@ def build_dynamic_sidecar_candidates(
         if signature in existing_signatures:
             continue
         parent_status = str(parent.get("status") or "").lower()
-        if kind in {"review_packet", "acceptance_packet"} and parent_status == "todo" and not dependencies_satisfied(parent, task_map, dependency_done_statuses):
+        if kind in {"review_packet", "acceptance_packet"} and parent_status in {"todo", "backlog"} and not dependencies_satisfied(parent, task_map, dependency_done_statuses):
             continue
         activation_dependencies = [
             dep_id
@@ -2884,6 +3109,8 @@ def finalize_queue_event_record(config: dict[str, Any], state: dict[str, Any], w
     record["processed_at"] = utc_now()
     if error:
         record["error"] = error
+    else:
+        record.pop("error", None)
 
 
 
@@ -2999,7 +3226,7 @@ def current_dispatch_event_key(config: dict[str, Any], event: dict[str, Any], ta
     elif reason == "owned_in_progress_dispatch":
         eligible = task_status == "in_progress" and task.get(owner_field) == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses)
     elif reason == "owned_ready_dispatch":
-        eligible = task_status == "todo" and task.get(owner_field) == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses)
+        eligible = task_status in {"todo", "backlog"} and task.get(owner_field) == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses)
 
     if not eligible:
         return None
@@ -3046,7 +3273,7 @@ def dispatch_priority_for_task(
     ):
         return 2
     if (
-        task_status == "todo"
+        task_status in {"todo", "backlog"}
         and task.get(owner_field) == agent_name
         and dependencies_satisfied(task, {str(task.get("id") or ""): task}, dependency_done_statuses)
     ):
@@ -3162,7 +3389,7 @@ def higher_priority_ready_task_exists(
         ):
             candidate_priority = 2
         elif (
-            task_status == "todo"
+            task_status in {"todo", "backlog"}
             and task.get(owner_field) == agent_name
             and dependencies_satisfied(task, task_map, dependency_done_statuses)
         ):
@@ -3187,7 +3414,7 @@ def worker_matches_current_assignment(
     settings = ready_dispatch_settings(config)
     review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
     finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    owned_statuses = {str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo"])}
+    owned_statuses = {str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo", "backlog"])}
     dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
     schema = config.get("schema", {})
     owner_field = schema.get("assignee_field", "owner")
@@ -3280,7 +3507,7 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
     task_map = {task.get(task_id_field): task for task in tasks}
     review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
     finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
-    owned_statuses = [str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo"])]
+    owned_statuses = [str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo", "backlog"])]
     dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
     max_tasks_per_agent = max(1, int(settings.get("max_tasks_per_agent", 1)))
@@ -3337,11 +3564,11 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
             elif task_status == "in_progress" and task_owner == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses):
                 reason = "owned_in_progress_dispatch"
                 priority = 2
-            elif task_status == "todo" and task_owner == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses):
+            elif task_status in {"todo", "backlog"} and task_owner == target_agent and dependencies_satisfied(task, task_map, dependency_done_statuses):
                 reason = "owned_ready_dispatch"
                 priority = 3
 
-            helper_claim_allowed_statuses = {str(v).lower() for v in helper_settings.get("task_statuses", ["todo", "in_progress", "review", "review_approved"])}
+            helper_claim_allowed_statuses = {str(v).lower() for v in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}
             helper_claim_plan = None
             if (
                 task_status in helper_claim_allowed_statuses
@@ -3702,7 +3929,7 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
             continue
         task_id = str(task.get("id") or "")
         task_status = str(task.get("status") or "").lower()
-        if task_status not in {str(v).lower() for v in helper_settings.get("task_statuses", ["todo", "in_progress", "review", "review_approved"])}:
+        if task_status not in {str(v).lower() for v in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}:
             continue
         if task_id in active_task_ids or task_id in pending_task_ids:
             continue
@@ -3816,6 +4043,7 @@ def run_once(
     changed = poll_workers(config, state) or changed
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
+    changed = prune_completed_dispatch_pauses(state, status) or changed
     expire_quota_pauses(state)
     if desired_focus_mode == "planning":
         changed = ensure_planning_baton_dispatch(config, state, status) or changed
@@ -3827,6 +4055,7 @@ def run_once(
     changed = poll_workers(config, state) or changed
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
+    changed = prune_completed_dispatch_pauses(state, status) or changed
     changed = sync_github_bus(config, state) or changed
     trim_worker_history(state, int(config.get("supervisor", {}).get("max_worker_history", 200)))
     trim_seen_events(state, int(config.get("watcher", {}).get("max_seen_events", 2000)))

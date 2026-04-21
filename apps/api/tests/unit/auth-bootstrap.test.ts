@@ -5,6 +5,7 @@ import { ApiRequestError } from "../../src/common/api-envelope";
 import {
   BootstrapAuthGuard,
   InternalKeyMiddleware,
+  JwtAuthService,
   OpenRoute,
   RequireScopes,
   extractBootstrapRequestIdentity,
@@ -233,6 +234,92 @@ describe("bootstrap auth guard", () => {
       realm: "ops",
     });
     expect(request.identity?.scopes).toContain("dispatch:read");
+  });
+
+  it("accepts verified bearer tokens and marks authMode as jwt_bearer", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const jwtAuthService = new JwtAuthService();
+    const token = jwtAuthService.sign(
+      {
+        authMode: "bootstrap_headers",
+        actorType: "platform_admin",
+        actorId: "platform-admin-001",
+        realm: "platform",
+        tenantId: null,
+        roleFamilies: ["platform"],
+        roles: ["platform_admin"],
+        scopes: ["foundation:write"],
+        requestId: "req-jwt-001",
+      },
+      { expiresIn: "10m" },
+    );
+    const guard = new BootstrapAuthGuard(new Reflector(), jwtAuthService);
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      method: "POST",
+      originalUrl: "/api/platform-admin/public-info",
+    };
+
+    const context = createExecutionContext(request);
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(request.identity).toMatchObject({
+      authMode: "jwt_bearer",
+      actorType: "platform_admin",
+      actorId: "platform-admin-001",
+      realm: "platform",
+    });
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+  });
+
+  it("rejects bearer tokens with the wrong audience", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const signingService = new JwtAuthService();
+    delete process.env.JWT_AUDIENCE;
+    process.env.JWT_AUDIENCE = "wrong-audience";
+    const wrongAudienceToken = signingService.sign(
+      {
+        authMode: "bootstrap_headers",
+        actorType: "platform_admin",
+        actorId: "platform-admin-001",
+        realm: "platform",
+        tenantId: null,
+        roleFamilies: ["platform"],
+        roles: ["platform_admin"],
+        scopes: ["foundation:write"],
+        requestId: "req-jwt-002",
+      },
+      { expiresIn: "10m" },
+    );
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const guard = new BootstrapAuthGuard(new Reflector(), new JwtAuthService());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        authorization: `Bearer ${wrongAudienceToken}`,
+      },
+      method: "POST",
+      originalUrl: "/api/platform-admin/public-info",
+    };
+
+    const context = createExecutionContext(request);
+
+    expect(() => guard.canActivate(context)).toThrowError(ApiRequestError);
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
   });
 });
 

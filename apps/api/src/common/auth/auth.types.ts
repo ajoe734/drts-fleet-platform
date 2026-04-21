@@ -27,10 +27,14 @@ export const AUTH_ROLE_FAMILIES = [
 
 export type AuthRoleFamily = (typeof AUTH_ROLE_FAMILIES)[number];
 
+export const AUTH_MODES = ["bootstrap_headers", "jwt_bearer"] as const;
+
+export type AuthMode = (typeof AUTH_MODES)[number];
+
 export const AUTH_MODE = "bootstrap_headers" as const;
 
 export interface BootstrapRequestIdentity {
-  authMode: typeof AUTH_MODE;
+  authMode: AuthMode;
   actorType: AuthActorType;
   actorId: string | null;
   realm: AuthRealm;

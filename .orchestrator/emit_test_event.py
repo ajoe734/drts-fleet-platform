@@ -30,11 +30,12 @@ def main() -> int:
     agent = agent_config_for(config, args.agent)
     message = (
         "你被喚醒了。\n\n"
-        "請閱讀 ai-status.json、current-work.md、ai-activity-log.jsonl，找出目前分配給你或等待你回應的 task，然後直接繼續工作。\n\n"
+        "請閱讀這次 dispatch 提供的 machine context，找出目前分配給你或等待你回應的 task，然後直接繼續工作。\n\n"
         f"Task ID: {args.task_id}\n"
         f"原因: {args.reason}\n"
         f"標題: {args.title}\n"
     )
+    task_payload = {"id": args.task_id, "artifacts": [], "next": args.title}
     event = {
         "event_id": new_runtime_id("evt"),
         "created_at": utc_now(),
@@ -45,9 +46,9 @@ def main() -> int:
         "provider": agent.get("provider", agent["id"]),
         "reason": args.reason,
         "message": message,
-        "context_files": [relpath(path) for path in selected_shared_files(config)],
+        "context_files": [relpath(path) for path in selected_shared_files(config, mode="execution", task=task_payload)],
         "target_files": [],
-        "metadata": {"title": args.title, "manual_test": True},
+        "metadata": {"title": args.title, "manual_test": True, "mode": "execution", "task": task_payload},
     }
     enqueue_event(config, event)
     if args.dispatch_now:

@@ -112,7 +112,9 @@ describe("owned mobility task events", () => {
   it("emits order and dispatch job updates to the ops dispatch stream", async () => {
     const { service } = createOwnedMobilityService();
     const streamPromise = firstValueFrom(
-      service.streamOpsDispatchEvents().pipe(take(2), toArray(), timeout(1_000)),
+      service
+        .streamOpsDispatchEvents()
+        .pipe(take(2), toArray(), timeout(1_000)),
     );
 
     const order = service.createPassengerOrder({
@@ -222,5 +224,75 @@ describe("owned mobility task events", () => {
         etaMinutes: 2,
       }),
     ]);
+  });
+
+  it("recomputes dispatch job ETA snapshots when the board reloads", () => {
+    const regulatoryRegistryService = {
+      getEligibleCandidates: vi
+        .fn()
+        .mockReturnValueOnce([
+          {
+            driverId: "driver-001",
+            vehicleId: "vehicle-001",
+            etaMinutes: 4,
+            operatingArea: "taipei",
+            serviceBuckets: ["standard_taxi"],
+          },
+        ])
+        .mockReturnValue([
+          {
+            driverId: "driver-001",
+            vehicleId: "vehicle-001",
+            etaMinutes: 2,
+            operatingArea: "taipei",
+            serviceBuckets: ["standard_taxi"],
+          },
+        ]),
+      getVehicleDispatchability: vi.fn(() => true),
+      getDriverAvailability: vi.fn(() => true),
+    };
+    const auditNotificationService = {
+      recordNotification: vi.fn(),
+      recordAuditLog: vi.fn(),
+    };
+    const callcenterService = {
+      registerRecordingAttachmentListener: vi.fn(),
+    };
+    const taskEventsService = new OwnedMobilityTaskEventsService(
+      new EventEmitter2(),
+    );
+    const opsDispatchEventsService = new OpsDispatchEventsService(
+      new EventEmitter2(),
+    );
+    const service = new OwnedMobilityService(
+      regulatoryRegistryService as never,
+      auditNotificationService as never,
+      callcenterService as never,
+      taskEventsService,
+      opsDispatchEventsService,
+      undefined,
+      undefined,
+    );
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Pickup", lat: 25.04776, lng: 121.51706 },
+      dropoff: { address: "Dropoff" },
+      passenger: { name: "Rider One", phone: "0912000000" },
+    });
+
+    service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    expect(service.listDispatchJobs()).toEqual([
+      expect.objectContaining({
+        orderId: order.orderId,
+        latestEtaMinutes: 2,
+      }),
+    ]);
+    expect(
+      regulatoryRegistryService.getEligibleCandidates,
+    ).toHaveBeenNthCalledWith(2, "standard_taxi", {
+      lat: 25.04776,
+      lng: 121.51706,
+    });
   });
 });

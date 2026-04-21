@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import { DatabaseService } from "../../common/db";
 import type {
   PlatformEligibility,
+  PlatformCode,
   PlatformPresenceRecord,
   PlatformPresenceStatus,
 } from "@drts/contracts";
@@ -115,7 +116,7 @@ export class PlatformPresenceRepository {
 
     return {
       driverId: row.driver_id,
-      platformCode: row.platform_code,
+      platformCode: row.platform_code as PlatformCode,
       accountId: row.account_id,
       status: (row.online_status as PlatformPresenceStatus) ?? "offline",
       eligibility: (row.eligibility as PlatformEligibility) ?? "pending",

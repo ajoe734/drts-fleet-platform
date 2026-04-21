@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import { DatabaseService } from "../../common/db";
-import type { MoneyAmount } from "@drts/contracts";
+import type { MoneyAmount, PlatformCode } from "@drts/contracts";
 
 export interface PlatformEarningsAggregateRow {
   platform_code: string;
@@ -12,7 +12,7 @@ export interface PlatformEarningsAggregateRow {
 }
 
 export interface PlatformEarningsAggregateItem {
-  platformCode: string;
+  platformCode: PlatformCode;
   grossEarning: MoneyAmount;
   serviceFee: MoneyAmount;
   subsidy: MoneyAmount;
@@ -49,7 +49,7 @@ export class PlatformEarningsRepository {
       );
 
       return result.rows.map((row) => ({
-        platformCode: row.platform_code,
+        platformCode: row.platform_code as PlatformCode,
         grossEarning: {
           currency: row.currency_code,
           amountMinor: Number(row.gross_minor ?? 0),

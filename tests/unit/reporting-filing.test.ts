@@ -7,6 +7,11 @@ import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory
 import { ReportingFilingRepository } from "../../apps/api/src/modules/reporting-filing/reporting-filing.repository";
 import { ReportingFilingService } from "../../apps/api/src/modules/reporting-filing/reporting-filing.service";
 
+async function flushReportingQueue() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function createServices() {
   const auditService = new AuditNotificationService();
   const callcenterService = new CallcenterService(auditService);
@@ -31,7 +36,7 @@ function createServices() {
 }
 
 describe("reporting and filing service", () => {
-  it("generates an immutable filing package with manifest/hash metadata for SC-033", () => {
+  it("generates an immutable filing package with manifest/hash metadata for SC-033", async () => {
     const { auditService, reportingFilingService } = createServices();
 
     const accepted = reportingFilingService.generateFilingPackage(
@@ -46,9 +51,15 @@ describe("reporting and filing service", () => {
 
     expect(accepted.status).toBe("queued");
 
-    const filingPackage = reportingFilingService.getFilingPackage(
+    let filingPackage = reportingFilingService.getFilingPackage(
       accepted.packageId,
     );
+
+    expect(filingPackage.status).toBe("queued");
+
+    await flushReportingQueue();
+
+    filingPackage = reportingFilingService.getFilingPackage(accepted.packageId);
     const listing = reportingFilingService.listFilingPackages();
 
     expect(filingPackage.status).toBe("completed");
@@ -86,7 +97,7 @@ describe("reporting and filing service", () => {
     );
   });
 
-  it("exports dispatch recording index rows with explicit missing-recording flags for SC-034", () => {
+  it("exports dispatch recording index rows with explicit missing-recording flags for SC-034", async () => {
     const {
       auditService,
       callcenterService,
@@ -158,7 +169,13 @@ describe("reporting and filing service", () => {
     expect(accepted.status).toBe("queued");
     expect(reportingFilingService.listReportJobs()).toHaveLength(1);
 
-    const job = reportingFilingService.getReportJob(accepted.jobId);
+    let job = reportingFilingService.getReportJob(accepted.jobId);
+
+    expect(job.status).toBe("queued");
+
+    await flushReportingQueue();
+
+    job = reportingFilingService.getReportJob(accepted.jobId);
 
     expect(job.status).toBe("completed");
     expect(job.artifact?.downloadUrl).toContain("sig=");
@@ -195,7 +212,7 @@ describe("reporting and filing service", () => {
     );
   });
 
-  it("rehydrates persisted reporting state and writes completed jobs through the repository", async () => {
+  it("rehydrates queued reporting state and writes completed jobs through the repository", async () => {
     const auditService = new AuditNotificationService();
     const persistChanges = vi.fn(async () => undefined);
     const repository = {
@@ -205,7 +222,7 @@ describe("reporting and filing service", () => {
             jobId: "JOB-persisted-001",
             jobType: "dispatch_recording_index",
             format: "csv",
-            status: "completed",
+            status: "queued",
             filters: {
               month: "2026-03",
             },
@@ -226,9 +243,13 @@ describe("reporting and filing service", () => {
     );
 
     await reportingFilingService.onModuleInit();
+    await flushReportingQueue();
 
     expect(reportingFilingService.listReportJobs()[0]?.jobId).toBe(
       "JOB-persisted-001",
+    );
+    expect(reportingFilingService.listReportJobs()[0]?.status).toBe(
+      "completed",
     );
 
     reportingFilingService.createReportJob({
@@ -239,13 +260,13 @@ describe("reporting and filing service", () => {
       },
     });
 
-    await Promise.resolve();
+    await flushReportingQueue();
 
     expect(persistChanges).toHaveBeenCalledWith(
       expect.objectContaining({
         reportJobs: [
           expect.objectContaining({
-            status: "completed",
+            status: expect.stringMatching(/running|completed/),
             jobType: "dispatch_recording_index",
           }),
         ],

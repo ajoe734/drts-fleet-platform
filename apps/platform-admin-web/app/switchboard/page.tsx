@@ -13,6 +13,14 @@ import type {
   PlacardVersionRecord,
   PublicInfoVersionRecord,
 } from "@drts/contracts";
+import { getPlacardVersionCodePrecheckMessage } from "./placard-version-code";
+import {
+  formatPlacardSourceOptionLabel,
+  getPlacardSourceSelectionHint,
+  getPreferredPlacardSourceVersion,
+  isPlacardSourceSelectionBlocked,
+  PLACARD_RETIRED_SOURCE_AUDIT_NOTE,
+} from "./placard-source";
 
 type PlacardFormState = {
   versionCode: string;
@@ -126,7 +134,7 @@ export default function SwitchboardPage() {
   );
 
   useEffect(() => {
-    const preferredVersion = publishedVersions[0] ?? publicInfo[0];
+    const preferredVersion = getPreferredPlacardSourceVersion(publicInfo);
     if (!preferredVersion || placardForm.publicInfoVersionId) {
       return;
     }
@@ -138,6 +146,14 @@ export default function SwitchboardPage() {
 
   const selectedPublicInfoVersion =
     publicInfoById[placardForm.publicInfoVersionId] ?? null;
+  const versionCodePrecheckMessage = useMemo(
+    () =>
+      getPlacardVersionCodePrecheckMessage(placardForm.versionCode, placards),
+    [placardForm.versionCode, placards],
+  );
+  const placardSourceBlocked = isPlacardSourceSelectionBlocked(
+    selectedPublicInfoVersion,
+  );
 
   async function handleCreatePublicInfo(event: React.FormEvent) {
     event.preventDefault();
@@ -488,8 +504,12 @@ export default function SwitchboardPage() {
                 >
                   <option value="">Select source version</option>
                   {publicInfo.map((version) => (
-                    <option key={version.versionId} value={version.versionId}>
-                      {version.title} ({version.status})
+                    <option
+                      key={version.versionId}
+                      value={version.versionId}
+                      disabled={isPlacardSourceSelectionBlocked(version)}
+                    >
+                      {formatPlacardSourceOptionLabel(version)}
                     </option>
                   ))}
                 </select>
@@ -538,19 +558,27 @@ export default function SwitchboardPage() {
               </label>
             </div>
             <p style={{ marginTop: 12, marginBottom: 0, color: "#6b7280" }}>
-              {selectedPublicInfoVersion
-                ? selectedPublicInfoVersion.status === "published"
-                  ? "Published source selected: generated placard will inherit the live disclosure timestamp."
-                  : "Draft source selected: generated placard stays draft until the linked public info is published."
-                : "Select a source public info version to keep placard lineage traceable."}
+              {getPlacardSourceSelectionHint(selectedPublicInfoVersion)}
             </p>
+            {placardSourceBlocked && (
+              <p style={{ marginTop: 8, marginBottom: 0, color: "#92400e" }}>
+                {PLACARD_RETIRED_SOURCE_AUDIT_NOTE}
+              </p>
+            )}
+            {versionCodePrecheckMessage && (
+              <p style={{ marginTop: 8, marginBottom: 0, color: "#b45309" }}>
+                {versionCodePrecheckMessage}
+              </p>
+            )}
             <div style={actionsStyle}>
               <button
                 className="admin-btn admin-btn--primary"
                 type="submit"
                 disabled={
                   creatingPlacard ||
-                  placardForm.publicInfoVersionId.trim() === ""
+                  placardForm.publicInfoVersionId.trim() === "" ||
+                  placardSourceBlocked ||
+                  versionCodePrecheckMessage !== null
                 }
               >
                 {creatingPlacard ? "Generating..." : "Generate placard version"}

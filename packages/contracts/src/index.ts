@@ -122,7 +122,7 @@ export interface IdentityContext {
     | "driver_user";
   actorId: string | null;
   realm: "system" | "platform" | "tenant" | "ops" | "driver";
-  authMode: "bootstrap_headers";
+  authMode: "bootstrap_headers" | "jwt_bearer";
   roleFamilies: Array<"platform" | "tenant" | "ops" | "driver">;
   roles: string[];
   scopes: string[];
@@ -1042,6 +1042,11 @@ export interface PublishPublicInfoVersionCommand {
   effectiveTo?: string | null;
 }
 
+export interface RetirePublicInfoVersionCommand {
+  retiredBy?: string | null;
+  effectiveTo?: string | null;
+}
+
 export interface PlacardVersionRecord {
   placardVersionId: string;
   versionCode: string;
@@ -1062,6 +1067,10 @@ export interface GeneratePlacardVersionCommand {
   publicInfoVersionId: string;
   templateName: string;
   artifactFileId?: string | null;
+  publishedAt?: string | null;
+}
+
+export interface PublishPlacardVersionCommand {
   publishedAt?: string | null;
 }
 

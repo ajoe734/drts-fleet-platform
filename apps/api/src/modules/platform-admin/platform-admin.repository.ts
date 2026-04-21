@@ -19,6 +19,7 @@ export type PlatformAdminState = {
 export type PersistPlatformAdminChanges = {
   publicInfoVersions?: readonly PublicInfoVersionRecord[];
   placardVersions?: readonly PlacardVersionRecord[];
+  deletedPublicInfoVersionIds?: readonly string[];
 };
 
 @Injectable()
@@ -105,6 +106,15 @@ export class PlatformAdminRepository {
             version.updatedAt,
             JSON.stringify(version),
           ],
+        ),
+      );
+    }
+
+    for (const versionId of changes.deletedPublicInfoVersionIds ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `DELETE FROM admin.phase1_public_info_versions WHERE version_id = $1`,
+          [versionId],
         ),
       );
     }

@@ -22,6 +22,7 @@ SMOKE_API_PATH_PREFIX="${SMOKE_API_PATH_PREFIX:-/api}"
 SMOKE_ACTOR_TYPE="${SMOKE_ACTOR_TYPE:-system}"
 SMOKE_ACTOR_ID="${SMOKE_ACTOR_ID:-smoke-system-001}"
 SMOKE_REALM="${SMOKE_REALM:-}"   # leave blank to derive from SMOKE_ACTOR_TYPE
+SMOKE_AUTH_BEARER_TOKEN="${SMOKE_AUTH_BEARER_TOKEN:-}"
 SMOKE_INTERNAL_KEY="${SMOKE_INTERNAL_KEY:-${DRTS_INTERNAL_KEY:-}}"
 
 # Seed data IDs — must match infra/seeds/S0002__demo_operational_seed.sql.
@@ -80,7 +81,11 @@ http_call() {
     -H "X-Request-ID: smoke-$(date +%s%N | head -c 16)"
   )
 
-  # Bootstrap auth headers — the API uses x-actor-type/x-actor-id/x-realm/x-tenant-id.
+  if [[ -n "${SMOKE_AUTH_BEARER_TOKEN:-}" ]]; then
+    curl_args+=(-H "Authorization: Bearer ${SMOKE_AUTH_BEARER_TOKEN}")
+  fi
+
+  # Bootstrap auth headers remain available for local dev and phased migration.
   if [[ -n "${SMOKE_ACTOR_TYPE:-}" ]]; then
     curl_args+=(
       -H "x-actor-type: ${SMOKE_ACTOR_TYPE}"

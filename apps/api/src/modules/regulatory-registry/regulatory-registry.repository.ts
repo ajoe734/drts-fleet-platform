@@ -435,6 +435,38 @@ export class RegulatoryRegistryRepository {
     };
   }
 
+  async listLatestDriverLocations(): Promise<DriverLocationSnapshot[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const result = await this.databaseService!.query<DriverLocationRow>(
+      `
+        SELECT
+          driver_id,
+          lat,
+          lng,
+          accuracy_m,
+          recorded_at,
+          updated_at
+        FROM ops.phase1_driver_locations
+        ORDER BY updated_at DESC, driver_id ASC
+      `,
+    );
+
+    return result.rows.map((row) => ({
+      driverId: row.driver_id,
+      lat: this.parseNumericValue(row.lat, "lat"),
+      lng: this.parseNumericValue(row.lng, "lng"),
+      accuracyM:
+        row.accuracy_m === null
+          ? null
+          : this.parseNumericValue(row.accuracy_m, "accuracy_m"),
+      recordedAt: this.toIsoString(row.recorded_at),
+      updatedAt: this.toIsoString(row.updated_at),
+    }));
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(

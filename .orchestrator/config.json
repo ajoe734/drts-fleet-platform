@@ -56,7 +56,13 @@
     "enabled": true,
     "after_attempts": 2,
     "reassign_on_terminal_failure": true,
-    "eligible_statuses": ["todo", "in_progress", "review", "review_approved"],
+    "eligible_statuses": [
+      "backlog",
+      "todo",
+      "in_progress",
+      "review",
+      "review_approved"
+    ],
     "owner_fallbacks": {
       "Claude": ["Codex", "Codex2", "Qwen", "Copilot", "Gemini"],
       "Gemini": ["Codex", "Codex2", "Qwen", "Claude", "Copilot"],
@@ -374,7 +380,7 @@
     "enabled": true,
     "review_statuses": ["review"],
     "finalize_statuses": ["review_approved"],
-    "owned_statuses": ["in_progress", "todo"],
+    "owned_statuses": ["in_progress", "todo", "backlog"],
     "dependency_done_statuses": ["done"],
     "worker_terminal_statuses": ["done", "review_approved"],
     "active_worker_statuses": [
@@ -387,7 +393,13 @@
     ],
     "helper_claim": {
       "enabled": true,
-      "task_statuses": ["todo", "in_progress", "review", "review_approved"],
+      "task_statuses": [
+        "backlog",
+        "todo",
+        "in_progress",
+        "review",
+        "review_approved"
+      ],
       "availability_first": true,
       "allow_any_idle_lane": true,
       "prefer_assigned_when_idle": true,

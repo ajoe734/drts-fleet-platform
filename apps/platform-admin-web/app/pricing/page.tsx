@@ -28,6 +28,11 @@ type FeePlanFormState = {
   reimbursementMode: "platform_funded" | "mixed";
 };
 
+type PublishRuleFormState = {
+  effectiveFrom: string;
+  effectiveTo: string;
+};
+
 const EMPTY_PRICING_FORM: PricingFormState = {
   ruleName: "",
   version: "",
@@ -44,6 +49,42 @@ const EMPTY_FEE_PLAN_FORM: FeePlanFormState = {
   reimbursementMode: "platform_funded",
 };
 
+const EMPTY_PUBLISH_RULE_FORM: PublishRuleFormState = {
+  effectiveFrom: "",
+  effectiveTo: "",
+};
+
+function normalizeDateTimeLocalValue(value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return { localValue: "", isoValue: null };
+  }
+
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) {
+    return { localValue: normalized, isoValue: null };
+  }
+
+  const localValue = [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, "0"),
+    String(parsed.getDate()).padStart(2, "0"),
+  ]
+    .join("-")
+    .concat("T")
+    .concat(
+      [
+        String(parsed.getHours()).padStart(2, "0"),
+        String(parsed.getMinutes()).padStart(2, "0"),
+      ].join(":"),
+    );
+
+  return {
+    localValue,
+    isoValue: parsed.toISOString(),
+  };
+}
+
 export default function PricingPage() {
   const client = usePlatformAdminClient();
   const [rules, setRules] = useState<PlatformPricingRuleRecord[]>([]);
@@ -58,6 +99,15 @@ export default function PricingPage() {
     useState<PricingFormState>(EMPTY_PRICING_FORM);
   const [feePlanForm, setFeePlanForm] =
     useState<FeePlanFormState>(EMPTY_FEE_PLAN_FORM);
+  const [publishRuleFormRuleId, setPublishRuleFormRuleId] = useState<
+    string | null
+  >(null);
+  const [publishRuleForm, setPublishRuleForm] = useState(
+    EMPTY_PUBLISH_RULE_FORM,
+  );
+  const [publishRuleFormError, setPublishRuleFormError] = useState<
+    string | null
+  >(null);
   const [creatingPricingRule, setCreatingPricingRule] = useState(false);
   const [publishingRuleId, setPublishingRuleId] = useState<string | null>(null);
   const [publishingFeePlan, setPublishingFeePlan] = useState(false);
@@ -112,13 +162,74 @@ export default function PricingPage() {
     }
   }
 
+  function openPublishRuleForm(rule: PlatformPricingRuleRecord) {
+    const normalizedEffectiveFrom = normalizeDateTimeLocalValue(
+      rule.effectiveFrom ?? "",
+    );
+    const normalizedEffectiveTo = normalizeDateTimeLocalValue(
+      rule.effectiveTo ?? "",
+    );
+    setError(null);
+    setPublishRuleFormError(null);
+    setPublishRuleFormRuleId(rule.ruleId);
+    setPublishRuleForm({
+      effectiveFrom: normalizedEffectiveFrom.localValue,
+      effectiveTo: normalizedEffectiveTo.localValue,
+    });
+  }
+
+  function closePublishRuleForm() {
+    setPublishRuleFormRuleId(null);
+    setPublishRuleForm(EMPTY_PUBLISH_RULE_FORM);
+    setPublishRuleFormError(null);
+  }
+
   async function handlePublishRule(ruleId: string) {
+    const normalizedEffectiveFrom = normalizeDateTimeLocalValue(
+      publishRuleForm.effectiveFrom,
+    );
+    const normalizedEffectiveTo = normalizeDateTimeLocalValue(
+      publishRuleForm.effectiveTo,
+    );
+
+    if (
+      publishRuleForm.effectiveFrom.trim() &&
+      !normalizedEffectiveFrom.isoValue
+    ) {
+      setPublishRuleFormError(
+        "Effective from must be a valid local date and time.",
+      );
+      return;
+    }
+
+    if (publishRuleForm.effectiveTo.trim() && !normalizedEffectiveTo.isoValue) {
+      setPublishRuleFormError(
+        "Effective to must be a valid local date and time.",
+      );
+      return;
+    }
+
+    if (
+      normalizedEffectiveFrom.isoValue &&
+      normalizedEffectiveTo.isoValue &&
+      normalizedEffectiveTo.isoValue < normalizedEffectiveFrom.isoValue
+    ) {
+      setPublishRuleFormError(
+        "Effective to must be later than or equal to effective from.",
+      );
+      return;
+    }
+
     setPublishingRuleId(ruleId);
     setError(null);
+    setPublishRuleFormError(null);
     try {
       await client.publishPlatformPricingRule(ruleId, {
+        effectiveFrom: normalizedEffectiveFrom.isoValue,
+        effectiveTo: normalizedEffectiveTo.isoValue,
         publishedBy: "platform-admin-web",
       });
+      closePublishRuleForm();
       await loadData();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -573,15 +684,97 @@ export default function PricingPage() {
                   </td>
                   <td>
                     {rule.status === "draft" ? (
-                      <button
-                        className="admin-btn admin-btn--secondary"
-                        onClick={() => void handlePublishRule(rule.ruleId)}
-                        disabled={publishingRuleId === rule.ruleId}
-                      >
-                        {publishingRuleId === rule.ruleId
-                          ? "Publishing..."
-                          : "Publish draft"}
-                      </button>
+                      <div style={{ display: "grid", gap: 10, minWidth: 260 }}>
+                        <button
+                          className="admin-btn admin-btn--secondary"
+                          onClick={() =>
+                            publishRuleFormRuleId === rule.ruleId
+                              ? closePublishRuleForm()
+                              : openPublishRuleForm(rule)
+                          }
+                          disabled={publishingRuleId === rule.ruleId}
+                        >
+                          {publishRuleFormRuleId === rule.ruleId
+                            ? "Hide publish form"
+                            : "Publish draft"}
+                        </button>
+                        {publishRuleFormRuleId === rule.ruleId ? (
+                          <div
+                            style={{
+                              display: "grid",
+                              gap: 8,
+                              padding: 12,
+                              borderRadius: 12,
+                              background: "#f8fafc",
+                              border: "1px solid rgba(148,163,184,0.24)",
+                            }}
+                          >
+                            {publishRuleFormError ? (
+                              <p style={{ color: "#dc2626", margin: 0 }}>
+                                {publishRuleFormError}
+                              </p>
+                            ) : null}
+                            <label style={labelStyle}>
+                              Effective from override
+                              <input
+                                type="datetime-local"
+                                value={publishRuleForm.effectiveFrom}
+                                onChange={(event) => {
+                                  setPublishRuleFormError(null);
+                                  setPublishRuleForm((current) => ({
+                                    ...current,
+                                    effectiveFrom: event.target.value,
+                                  }));
+                                }}
+                                style={inputStyle}
+                                max={publishRuleForm.effectiveTo || undefined}
+                              />
+                            </label>
+                            <label style={labelStyle}>
+                              Effective to override
+                              <input
+                                type="datetime-local"
+                                value={publishRuleForm.effectiveTo}
+                                onChange={(event) => {
+                                  setPublishRuleFormError(null);
+                                  setPublishRuleForm((current) => ({
+                                    ...current,
+                                    effectiveTo: event.target.value,
+                                  }));
+                                }}
+                                style={inputStyle}
+                                min={publishRuleForm.effectiveFrom || undefined}
+                              />
+                            </label>
+                            <p style={{ ...subcopyStyle, margin: 0 }}>
+                              Leave a field blank to keep the draft's current
+                              schedule boundary.
+                            </p>
+                            <div style={actionsStyle}>
+                              <button
+                                className="admin-btn admin-btn--secondary"
+                                type="button"
+                                onClick={closePublishRuleForm}
+                                disabled={publishingRuleId === rule.ruleId}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                className="admin-btn admin-btn--primary"
+                                type="button"
+                                onClick={() =>
+                                  void handlePublishRule(rule.ruleId)
+                                }
+                                disabled={publishingRuleId === rule.ruleId}
+                              >
+                                {publishingRuleId === rule.ruleId
+                                  ? "Publishing..."
+                                  : "Confirm publish"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
                     ) : (
                       <span style={{ color: "#6b7280", fontSize: 12 }}>
                         Immutable history
@@ -616,6 +809,17 @@ const labelStyle: React.CSSProperties = {
   gap: 4,
   fontSize: 13,
   fontWeight: 500,
+};
+
+const subcopyStyle: React.CSSProperties = {
+  color: "#6b7280",
+  fontSize: 12,
+};
+
+const actionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
 };
 
 const inputStyle: React.CSSProperties = {

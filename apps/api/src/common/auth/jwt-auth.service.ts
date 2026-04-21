@@ -33,6 +33,14 @@ export class JwtAuthService {
     return secret;
   }
 
+  private getIssuer(): string | undefined {
+    return process.env.JWT_ISSUER || process.env.OIDC_ISSUER || undefined;
+  }
+
+  private getAudience(): string | undefined {
+    return process.env.JWT_AUDIENCE || process.env.OIDC_AUDIENCE || undefined;
+  }
+
   sign(
     identity: BootstrapRequestIdentity,
     opts?: { expiresIn?: string },
@@ -54,12 +62,17 @@ export class JwtAuthService {
 
     return jwt.sign(payload, this.getSecret(), {
       expiresIn,
+      issuer: this.getIssuer(),
+      audience: this.getAudience(),
     } as jwt.SignOptions);
   }
 
   verify(token: string): JwtIdentityPayload | null {
     try {
-      return jwt.verify(token, this.getSecret()) as JwtIdentityPayload;
+      return jwt.verify(token, this.getSecret(), {
+        issuer: this.getIssuer(),
+        audience: this.getAudience(),
+      }) as JwtIdentityPayload;
     } catch (err) {
       this.logger.debug(`JWT verification failed: ${(err as Error).message}`);
       return null;
@@ -68,7 +81,7 @@ export class JwtAuthService {
 
   toRequestIdentity(payload: JwtIdentityPayload): BootstrapRequestIdentity {
     return {
-      authMode: "bootstrap_headers",
+      authMode: "jwt_bearer",
       actorType: payload.actorType,
       actorId: payload.sub,
       realm: payload.realm,

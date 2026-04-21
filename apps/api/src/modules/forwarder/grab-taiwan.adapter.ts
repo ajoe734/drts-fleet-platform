@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { PLATFORM_CODE_GRAB_TAIWAN } from "@drts/contracts";
 
 import type {
   ForwarderAdapterAcceptInput,
@@ -12,7 +13,7 @@ import type {
   ForwarderAdapterRejectInput,
 } from "./forwarder-adapter.interface";
 
-export const GRAB_TAIWAN_PLATFORM_CODE = "grab_taiwan";
+export const GRAB_TAIWAN_PLATFORM_CODE = PLATFORM_CODE_GRAB_TAIWAN;
 
 @Injectable()
 export class GrabTaiwanAdapter implements ForwarderAdapterInterface {

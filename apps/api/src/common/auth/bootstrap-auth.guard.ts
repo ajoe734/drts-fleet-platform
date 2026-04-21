@@ -189,7 +189,7 @@ export class BootstrapAuthGuard implements CanActivate {
       throw new ApiRequestError(
         401,
         "AUTH_REQUIRED",
-        "Bootstrap auth headers are required for this route.",
+        "Bearer token or bootstrap auth headers are required for this route.",
         {
           route: request.originalUrl ?? request.url,
           method: request.method ?? "GET",

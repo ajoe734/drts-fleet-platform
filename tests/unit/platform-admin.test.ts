@@ -111,6 +111,75 @@ describe("platform admin service", () => {
       "platform-admin-jwt-001",
     );
   });
+
+  it("controller forwards the verified identity actorId to delete draft public info", () => {
+    const service = {
+      deleteDraftPublicInfoVersion: vi.fn(() => ({
+        versionId: "public-info-draft-001",
+        status: "draft",
+      })),
+    } as unknown as PlatformAdminService;
+    const controller = new PlatformAdminController(service);
+    const identity: BootstrapRequestIdentity = {
+      authMode: "bootstrap_headers",
+      actorType: "platform_admin",
+      actorId: "platform-admin-jwt-011",
+      realm: "platform",
+      tenantId: null,
+      roleFamilies: ["platform"],
+      roles: ["platform_admin"],
+      scopes: ["platform:write"],
+      requestId: "req-789",
+    };
+
+    controller.deleteDraftPublicInfoVersion(
+      "public-info-draft-001",
+      identity,
+      "req-789",
+    );
+
+    expect(service.deleteDraftPublicInfoVersion).toHaveBeenCalledWith(
+      "public-info-draft-001",
+      "req-789",
+      "platform-admin-jwt-011",
+    );
+  });
+
+  it("controller forwards the verified identity actorId to publish placard", () => {
+    const service = {
+      publishPlacardVersion: vi.fn(() => ({
+        placardVersionId: "placard-001",
+        publishedAt: "2026-04-19T00:00:00Z",
+      })),
+    } as unknown as PlatformAdminService;
+    const controller = new PlatformAdminController(service);
+    const identity: BootstrapRequestIdentity = {
+      authMode: "bootstrap_headers",
+      actorType: "platform_admin",
+      actorId: "platform-admin-jwt-021",
+      realm: "platform",
+      tenantId: null,
+      roleFamilies: ["platform"],
+      roles: ["platform_admin"],
+      scopes: ["platform:write"],
+      requestId: "req-placard-publish",
+    };
+
+    controller.publishPlacardVersion(
+      "placard-001",
+      {},
+      identity,
+      "req-placard-publish",
+    );
+
+    expect(service.publishPlacardVersion).toHaveBeenCalledWith(
+      "placard-001",
+      {},
+      "req-placard-publish",
+      "platform-admin-jwt-021",
+    );
+  });
+
   it("rehydrates persisted platform-admin state and writes placard changes through the repository", async () => {
     const auditService = new AuditNotificationService();
     const persistChanges = vi.fn(async () => undefined);

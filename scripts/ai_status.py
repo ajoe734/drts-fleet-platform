@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +67,7 @@ AGENT_ALIASES = {
 }
 
 STATUS_LABELS = {
+    "backlog": "backlog",
     "todo": "todo",
     "in_progress": "in_progress",
     "review": "review",
@@ -82,8 +85,8 @@ DEPENDENCY_DONE_STATUSES = {"done"}
 EXTERNAL_TASK_PREFIXES = {"OC", "RS", "LP", "OSS", "SPIKE"}
 FIRST_PROMPT_PRIORITY = [
     "AI_COLLABORATION_GUIDE.md",
-    "current-work.md",
     "ai-status.json",
+    "current-work.md",
     "SUPERVISOR_OPERATING_MODEL.md",
     "MULTI_LLM_CONSENSUS_WORKFLOW.md",
     "PHASE1_DISCUSSION_ASSIGNMENTS.md",
@@ -103,6 +106,11 @@ OPTIONAL_CURRENT_WORK_REFERENCES = (
     ("CANONICAL_DOCUMENT_MAP.md", "Canonical map"),
     ("PHASE1_OPEN_QUESTIONS.md", "Open questions"),
 )
+NON_CANONICAL_LAYER_FILES = {
+    "ai-activity-log.jsonl",
+    "current-work.md",
+    "docs-site/index.html",
+}
 
 
 def default_canonical_document_layers() -> dict[str, list[str]]:
@@ -110,7 +118,6 @@ def default_canonical_document_layers() -> dict[str, list[str]]:
         "L0 Collaboration": [
             "AI_COLLABORATION_GUIDE.md",
             "ai-status.json",
-            "current-work.md",
         ],
         "L1 Product Truth": [
             "phase1_system_analysis_v1.md",
@@ -139,6 +146,16 @@ def flatten_canonical_document_layers(layers: dict[str, list[str]]) -> list[str]
     return flattened
 
 
+def short_summary(text: Any, max_length: int = 280) -> str:
+    raw = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(raw) <= max_length:
+        return raw
+    clipped = raw[: max_length - 1].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0]
+    return clipped + "…"
+
+
 def sync_canonical_document_metadata(state: dict[str, Any]) -> None:
     layers = state.get("canonical_document_layers")
     if not isinstance(layers, dict) or not layers:
@@ -147,7 +164,11 @@ def sync_canonical_document_metadata(state: dict[str, Any]) -> None:
         normalized_layers: dict[str, list[str]] = {}
         for key, value in layers.items():
             if isinstance(value, list):
-                normalized_layers[str(key)] = [str(item) for item in value]
+                normalized_layers[str(key)] = [
+                    str(item)
+                    for item in value
+                    if str(item).strip() and str(item) not in NON_CANONICAL_LAYER_FILES
+                ]
         if not normalized_layers:
             normalized_layers = default_canonical_document_layers()
         layers = normalized_layers
@@ -191,8 +212,8 @@ def build_onboarding_prompt(state: dict[str, Any]) -> str:
         prompt_files = FIRST_PROMPT_PRIORITY[:3]
 
     parts = [f"Read {human_join(prompt_files)} first."]
-    if "ai-activity-log.jsonl" in canonical_files:
-        parts.append("Use ai-activity-log.jsonl when you need recent history.")
+    parts.append("Use current-work.md only as a human summary view.")
+    parts.append("Use ai-activity-log.jsonl only when you need recent history.")
     parts.append("Treat generated views as derived from machine-readable state.")
     if state.get("execution_mode") == "discussion_planning":
         discussion_artifacts = state.get("discussion_artifacts", {})
@@ -210,7 +231,7 @@ def build_onboarding_prompt(state: dict[str, Any]) -> str:
         )
         parts.append("Do not create supervisor tasks until the consensus packet is accepted by the human.")
     else:
-        parts.append("Follow the canonical lifecycle todo -> in_progress -> review -> review_approved -> done.")
+        parts.append("Follow the canonical lifecycle backlog/todo -> in_progress -> review -> review_approved -> done.")
         parts.append("Use scripts/ai-status.sh for every state change.")
     return " ".join(parts)
 
@@ -408,8 +429,15 @@ def load_logs() -> list[dict[str, Any]]:
     return logs
 
 
+def atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    tmp_path.replace(path)
+
+
 def save_state(state: dict[str, Any]) -> None:
-    STATUS_FILE.write_text(json.dumps(state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    atomic_write_text(STATUS_FILE, json.dumps(state, indent=2, ensure_ascii=False) + "\n")
 
 
 def append_log(entry: dict[str, Any]) -> None:
@@ -560,11 +588,14 @@ def validate_state(state: dict[str, Any]) -> None:
     normalize_state_agents(state)
     for task in state["tasks"]:
         ensure_agent(task["owner"])
-        ensure_agent(task["reviewer"])
-        if task["owner"] == task["reviewer"]:
+        reviewer = canonical_agent_name(task.get("reviewer"))
+        if reviewer:
+            ensure_agent(reviewer)
+        if reviewer and task["owner"] == reviewer:
             raise SystemExit(f"Task {task['id']} has identical owner and reviewer")
-        if task["status"] == "blocked" and not task.get("waiting_for"):
-            raise SystemExit(f"Blocked task {task['id']} is missing waiting_for")
+        waiting_for = canonical_agent_name(task.get("waiting_for"))
+        if waiting_for:
+            ensure_agent(waiting_for)
 
     for blocker in state.get("blockers", []):
         ensure_agent(blocker["owner"])
@@ -615,7 +646,7 @@ def recompute_agents(state: dict[str, Any]) -> None:
         owned = by_owner.get(name, [])
         active = [task for task in owned if task["status"] in {"in_progress", "review", "blocked"}]
         approved = [task for task in owned if task["status"] == "review_approved"]
-        queued = [task for task in owned if task["status"] == "todo"]
+        queued = [task for task in owned if task["status"] in {"todo", "backlog"}]
         ready = [
             task
             for task in queued
@@ -767,6 +798,7 @@ def recompute_workload(state: dict[str, Any]) -> None:
             "active": 0,
             "blocked": 0,
             "done": 0,
+            "backlog": 0,
             "review": 0,
             "review_approved": 0,
             "todo": 0,
@@ -917,7 +949,7 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     ]
 
     for agent in state["agents"]:
-        next_text = agent.get("next") or "No active assignment"
+        next_text = (agent.get("next") or "No active assignment")[:200]
         lines.append(f"- `{agent['name']}`: {', '.join(agent['capability_lane'])}; next: {next_text}")
 
     lines.extend(
@@ -939,22 +971,19 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     )
     append_layer_table(lines, external_tasks)
 
-    lines.extend(["", "## Task Board", "", "| ID | Phase | Task | 中文說明 | Owner | Reviewer | Status | Depends On | Last Update | Next |", "|---|---|---|---|---|---|---|---|---|---|"])
+    lines.extend(["", "## Task Board (active only)", "", "| ID | Phase | Task | Owner | Status | Depends On |", "|---|---|---|---|---|---|"])
 
-    for task in state["tasks"]:
+    active_board_tasks = [t for t in state["tasks"] if t.get("status") != "done"]
+    for task in active_board_tasks:
         depends = ", ".join(f"`{item}`" for item in task.get("depends_on", [])) or "-"
         lines.append(
-            "| `{id}` | {phase} | {title} | {summary} | {owner} | {reviewer} | {status} | {depends} | {last_update} | {next} |".format(
+            "| `{id}` | {phase} | {title} | {owner} | {status} | {depends} |".format(
                 id=cell(task["id"]),
                 phase=cell(task["phase"]),
                 title=cell(display_task_title(task)),
-                summary=cell(task.get("summary_zh") or "-"),
                 owner=cell(task["owner"]),
-                reviewer=cell(task["reviewer"]),
                 status=cell(task["status"]),
                 depends=cell(depends),
-                last_update=cell(task.get("last_update") or "-"),
-                next=cell(task.get("next") or "-"),
             )
         )
 
@@ -978,8 +1007,8 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     else:
         lines.append("| _(none)_ | - | - | - | - |")
 
-    lines.extend(["", "## Review Notes", "", "| Task | Reviewer | 修正重點 | Review File |", "|---|---|---|---|"])
-    review_tasks = [task for task in state["tasks"] if task.get("review_notes_zh")]
+    lines.extend(["", "## Review Notes (active tasks)", "", "| Task | Reviewer | 修正重點 | Review File |", "|---|---|---|---|"])
+    review_tasks = [task for task in state["tasks"] if task.get("review_notes_zh") and task.get("status") != "done"]
     if review_tasks:
         for task in review_tasks:
             note_html = "<br>".join(task.get("review_notes_zh", []))
@@ -989,10 +1018,10 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     else:
         lines.append("| _(none)_ | - | - | - |")
 
-    lines.extend(["", "## Completion Evidence", "", "| Task | Commit | Subject | LLM Agent | Reviewer | Recorded At |", "|---|---|---|---|---|---|"])
+    lines.extend(["", "## Completion Evidence (last 10)", "", "| Task | Commit | Subject | LLM Agent | Reviewer | Recorded At |", "|---|---|---|---|---|---|"])
     completion_tasks = [task for task in state["tasks"] if task.get("status") == "done" and task.get("commit_hash")]
     if completion_tasks:
-        for task in completion_tasks:
+        for task in completion_tasks[-10:]:
             lines.append(
                 "| `{task_id}` | {commit_hash} | {subject} | {agent} | {reviewer} | {recorded_at} |".format(
                     task_id=cell(task["id"]),
@@ -1014,7 +1043,7 @@ def write_current_work(state: dict[str, Any], logs: list[dict[str, Any]]) -> Non
     else:
         lines.append("- No checkpoints yet.")
 
-    CURRENT_WORK_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(CURRENT_WORK_FILE, "\n".join(lines) + "\n")
 
 
 def sync_docs_site() -> None:
@@ -1156,7 +1185,7 @@ def command_assign(state: dict[str, Any], args: list[str]) -> None:
             "phase": os.environ.get("TASK_PHASE", "Unassigned"),
             "owner": owner,
             "reviewer": reviewer,
-            "status": "todo",
+            "status": "backlog",
             "depends_on": parse_csv_env("TASK_DEPENDS_ON"),
             "artifacts": parse_csv_env("TASK_ARTIFACTS"),
             "acceptance": parse_csv_env("TASK_ACCEPTANCE"),
@@ -1223,7 +1252,7 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
     if task.get("owner") != actor:
         raise SystemExit(f"Only the owner ({task.get('owner')}) can progress {task_id}")
     timestamp = iso_now()
-    if task["status"] in {"todo", "review_approved"}:
+    if task["status"] in {"backlog", "todo", "review_approved"}:
         task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message

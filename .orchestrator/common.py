@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ORCHESTRATOR_DIR = ROOT / ".orchestrator"
 DEFAULT_CONFIG_PATH = ORCHESTRATOR_DIR / "config.json"
 LOCAL_CONFIG_PATH = ORCHESTRATOR_DIR / "config.local.json"
+TASK_BRIEFS_DIR = ORCHESTRATOR_DIR / "task-briefs"
+EVIDENCE_DIR = ORCHESTRATOR_DIR / "evidence"
+AI_GUIDE_PATH = ROOT / "AI_COLLABORATION_GUIDE.md"
 
 
 def utc_now() -> str:
@@ -25,6 +28,54 @@ def utc_now() -> str:
 
 def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    ensure_parent(path)
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    tmp_path.write_text(content, encoding=encoding)
+    tmp_path.replace(path)
+
+
+def _strip_js_comments(text: str) -> str:
+    """Strip JS-style // and /* */ comments from JSON-with-comments, but NOT
+    inside string literals.  A naive regex like r'//.*$' also eats '://' in
+    URLs, producing unclosed strings and JSONDecodeErrors."""
+    result: list[str] = []
+    i = 0
+    n = len(text)
+    in_string = False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            if ch == "\\" and i + 1 < n:
+                result.append(ch)
+                result.append(text[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+            result.append(ch)
+            i += 1
+        else:
+            if ch == '"':
+                in_string = True
+                result.append(ch)
+                i += 1
+            elif ch == "/" and i + 1 < n and text[i + 1] == "/":
+                # line comment — skip to end of line
+                while i < n and text[i] != "\n":
+                    i += 1
+            elif ch == "/" and i + 1 < n and text[i + 1] == "*":
+                # block comment — skip to */
+                i += 2
+                while i + 1 < n and not (text[i] == "*" and text[i + 1] == "/"):
+                    i += 1
+                i += 2  # skip closing */
+            else:
+                result.append(ch)
+                i += 1
+    return "".join(result)
 
 
 def load_json(path: Path, default: Any | None = None) -> Any:
@@ -36,15 +87,23 @@ def load_json(path: Path, default: Any | None = None) -> Any:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        sanitized = re.sub(r"//.*?$", "", text, flags=re.MULTILINE)
-        sanitized = re.sub(r"/\*.*?\*/", "", sanitized, flags=re.DOTALL)
+        sanitized = _strip_js_comments(text)
         sanitized = re.sub(r",(\s*[}\]])", r"\1", sanitized)
-        return json.loads(sanitized)
+        try:
+            return json.loads(sanitized)
+        except json.JSONDecodeError as exc:
+            if exc.msg != "Extra data":
+                raise
+            decoder = json.JSONDecoder()
+            payload, end = decoder.raw_decode(sanitized)
+            trailing = sanitized[end:].strip()
+            if trailing.startswith("{") or trailing.startswith("["):
+                return payload
+            raise
 
 
 def write_json(path: Path, payload: Any) -> None:
-    ensure_parent(path)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -215,19 +274,25 @@ def snapshot_task(task: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any
         "owner": task.get(schema["assignee_field"]),
         "reviewer": task.get(schema["reviewer_field"]),
         "artifacts": list(task.get(schema.get("artifacts_field", "artifacts"), []) or []),
+        "depends_on": list(task.get("depends_on", []) or []),
         "next": task.get(schema.get("next_field", "next")),
         "last_update": task.get(schema.get("last_update_field", "last_update")),
     }
     for key in (
+        "title",
+        "summary_zh",
         "task_class",
         "auto_generated",
         "helper_parent",
         "helper_kind",
         "mutates_canonical",
         "auto_created_by",
+        "planning_ref",
     ):
         if key in task:
             payload[key] = task.get(key)
+    if "evidence_refs" in task:
+        payload["evidence_refs"] = list(task.get("evidence_refs", []) or [])
     return payload
 
 
@@ -235,13 +300,230 @@ def load_status(config: dict[str, Any]) -> dict[str, Any]:
     return load_json(config_path(config, "status_file"), default={}) or {}
 
 
-def selected_shared_files(config: dict[str, Any]) -> list[Path]:
+def _unique_paths(paths: list[Path]) -> list[Path]:
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        marker = str(path)
+        if marker in seen or not path.exists():
+            continue
+        seen.add(marker)
+        unique.append(path)
+    return unique
+
+
+def _status_tasks(config: dict[str, Any], status: dict[str, Any]) -> list[dict[str, Any]]:
+    schema = config.get("schema", {})
+    tasks_path = schema.get("tasks_path", "tasks")
+    tasks = status.get(tasks_path, [])
+    return tasks if isinstance(tasks, list) else []
+
+
+def _status_task_by_id(config: dict[str, Any], status: dict[str, Any], task_id: str | None) -> dict[str, Any] | None:
+    if not task_id:
+        return None
+    for task in _status_tasks(config, status):
+        if str(task.get("id") or "") == str(task_id):
+            return task
+    return None
+
+
+def _merge_task_payload(
+    config: dict[str, Any],
+    *,
+    task: dict[str, Any] | None = None,
+    task_id: str | None = None,
+    status: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if isinstance(status, dict):
+        resolved_status = status
+    elif config.get("paths", {}).get("status_file"):
+        resolved_status = load_status(config)
+    else:
+        resolved_status = {}
+    live_task = _status_task_by_id(config, resolved_status, task_id or ((task or {}).get("id")))
+    if not live_task and not task:
+        return None
+    merged = deepcopy(live_task or {})
+    if task:
+        merged.update({key: value for key, value in task.items() if value not in (None, "", [], {})})
+    return merged
+
+
+def _normalize_summary(text: Any, max_length: int = 280) -> str:
+    raw = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(raw) <= max_length:
+        return raw
+    clipped = raw[: max_length - 1].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0]
+    return clipped + "…"
+
+
+def _discussion_artifact_paths(status: dict[str, Any]) -> list[Path]:
+    artifacts = status.get("discussion_artifacts")
+    result: list[Path] = []
+    if isinstance(artifacts, dict):
+        candidates = artifacts.values()
+    elif isinstance(artifacts, list):
+        candidates = artifacts
+    else:
+        candidates = []
+    for candidate in candidates:
+        value = str(candidate).strip()
+        if not value:
+            continue
+        path = resolve_path(value)
+        if path is not None:
+            result.append(path)
+
+    workspace = str(status.get("discussion_workspace") or "").strip()
+    if workspace:
+        workspace_path = resolve_path(workspace)
+        if workspace_path and workspace_path.exists():
+            for name in ("planning-session.json", "starter-draft.md", "consensus-packet.md", "supervisor-queue.md"):
+                result.append(workspace_path / name)
+    return _unique_paths(result)
+
+
+def task_brief_path(task_id: str) -> Path:
+    return TASK_BRIEFS_DIR / f"{task_id}.md"
+
+
+def evidence_path(run_id: str) -> Path:
+    return EVIDENCE_DIR / f"{run_id}.json"
+
+
+def build_task_brief(
+    config: dict[str, Any],
+    task: dict[str, Any],
+    *,
+    runtime_state: dict[str, Any] | None = None,
+) -> str:
+    task_id = str(task.get("id") or "").strip() or "UNKNOWN"
+    title = str(task.get("title") or task.get("summary_zh") or "").strip()
+    status_value = str(task.get("status") or "").strip() or "-"
+    owner = str(task.get("owner") or "").strip() or "-"
+    reviewer = str(task.get("reviewer") or "").strip() or "-"
+    next_text = _normalize_summary(task.get("next") or "No short handoff yet.")
+    planning_ref = str(task.get("planning_ref") or "").strip()
+    artifacts = [str(item) for item in task.get("artifacts", []) if str(item).strip()]
+    depends_on = [str(item) for item in task.get("depends_on", []) if str(item).strip()]
+    evidence_refs = [str(item) for item in task.get("evidence_refs", []) if str(item).strip()]
+    pauses = [
+        pause
+        for pause in (runtime_state or {}).get("dispatch_pauses", [])
+        if str(pause.get("task_id") or "") == task_id
+    ]
+
+    lines = [f"# Task Brief: {task_id}", ""]
+    if title:
+        lines.extend([title, ""])
+    lines.extend(
+        [
+            f"- Status: `{status_value}`",
+            f"- Owner: `{owner}`",
+            f"- Reviewer: `{reviewer}`",
+        ]
+    )
+    if planning_ref:
+        lines.append(f"- Planning Ref: `{planning_ref}`")
+    if task.get("last_update"):
+        lines.append(f"- Last Update: `{task['last_update']}`")
+    lines.extend(["", "## Short Summary", "", next_text or "-", "", "## Dependencies", ""])
+    if depends_on:
+        lines.extend([f"- `{item}`" for item in depends_on])
+    else:
+        lines.append("- None")
+    lines.extend(["", "## Artifacts", ""])
+    if artifacts:
+        lines.extend([f"- `{item}`" for item in artifacts])
+    else:
+        lines.append("- None listed")
+    if evidence_refs:
+        lines.extend(["", "## Evidence Refs", ""])
+        lines.extend([f"- `{item}`" for item in evidence_refs[:8]])
+    if pauses:
+        lines.extend(["", "## Runtime Pauses", ""])
+        for pause in pauses[:5]:
+            summary = _normalize_summary(pause.get("summary") or pause.get("failure_kind") or "Paused")
+            raw_ref = str(pause.get("raw_ref") or "").strip()
+            suffix = f" (`{raw_ref}`)" if raw_ref else ""
+            lines.append(f"- {summary}{suffix}")
+    lines.extend(
+        [
+            "",
+            "## Guardrails",
+            "",
+            "- Use `scripts/ai-status.sh` or `python3 scripts/ai_status.py` for state changes.",
+            "- Treat `current-work.md` as a human summary, not canonical machine context.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def ensure_task_brief(
+    config: dict[str, Any],
+    *,
+    task: dict[str, Any] | None = None,
+    task_id: str | None = None,
+    status: dict[str, Any] | None = None,
+    runtime_state: dict[str, Any] | None = None,
+) -> Path | None:
+    merged_task = _merge_task_payload(config, task=task, task_id=task_id, status=status)
+    if not merged_task:
+        return None
+    task_id_value = str(merged_task.get("id") or "").strip()
+    if not task_id_value:
+        return None
+    path = task_brief_path(task_id_value)
+    ensure_parent(path)
+    path.write_text(build_task_brief(config, merged_task, runtime_state=runtime_state), encoding="utf-8")
+    return path
+
+
+def selected_shared_files(
+    config: dict[str, Any],
+    *,
+    mode: str = "execution",
+    task: dict[str, Any] | None = None,
+    task_id: str | None = None,
+    status: dict[str, Any] | None = None,
+    runtime_state: dict[str, Any] | None = None,
+) -> list[Path]:
     files: list[Path] = []
-    for key in ("status_file", "current_work", "activity_log", "dashboard"):
-        path = config.get("paths", {}).get(key)
-        if path:
-            files.append(config_path(config, key))
-    return files
+    if AI_GUIDE_PATH.exists():
+        files.append(AI_GUIDE_PATH)
+
+    if isinstance(status, dict):
+        resolved_status = status
+    elif config.get("paths", {}).get("status_file"):
+        resolved_status = load_status(config)
+    else:
+        resolved_status = {}
+    mode_value = str(mode or "execution").strip().lower()
+
+    if mode_value == "planning":
+        files.extend(_discussion_artifact_paths(resolved_status))
+        return _unique_paths(files)
+
+    if mode_value == "coordination":
+        if config.get("paths", {}).get("status_file"):
+            files.append(config_path(config, "status_file"))
+        return _unique_paths(files)
+
+    brief_path = ensure_task_brief(
+        config,
+        task=task,
+        task_id=task_id or ((task or {}).get("id") if isinstance(task, dict) else None),
+        status=resolved_status,
+        runtime_state=runtime_state,
+    )
+    if brief_path is not None:
+        files.append(brief_path)
+    elif config.get("paths", {}).get("status_file"):
+        files.append(config_path(config, "status_file"))
+    return _unique_paths(files)
 
 
 def serialize_shared_files(paths: list[Path]) -> str:
