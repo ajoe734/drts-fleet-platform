@@ -38,11 +38,16 @@ Tests 03–04 are gracefully skippable when staging DB is empty (they log a warn
 ## Running
 
 ```bash
-# Against staging — bootstrap auth, no login required
+# Against staging — bootstrap auth (current default before IAP cutover)
 export SMOKE_API_URL=https://api-staging.drts.internal   # bare origin, no /api suffix
 export SMOKE_ACTOR_TYPE=system
 export SMOKE_ACTOR_ID=smoke-system-001
 export SMOKE_TENANT_ID=10000000-0000-0000-0000-000000000201   # TEN_ACME from S0002 seed
+./scripts/run-smoke-tests.sh
+
+# Against protected staging — bearer token preferred
+export SMOKE_API_URL=https://api-staging.drts.internal
+export SMOKE_AUTH_BEARER_TOKEN="$(gcloud auth print-identity-token)"
 ./scripts/run-smoke-tests.sh
 
 # Against local dev
@@ -59,22 +64,29 @@ See `scripts/run-smoke-tests.sh --help` for the full option reference.
 
 ## Auth model
 
-**The API uses bootstrap-header authentication — there is no `/api/auth/login` endpoint.**
+**The smoke harness now supports both Bearer-token auth and legacy bootstrap-header auth.**
+
+Preferred order:
+
+1. set `SMOKE_AUTH_BEARER_TOKEN` when the target staging service is protected by IAP / OIDC
+2. use bootstrap headers for local dev or phased pre-cutover staging
+
+There is still no `/api/auth/login` endpoint.
 
 `lib/helpers.sh` sends the following headers automatically on every request:
 
-| Header                | Env var              | Default                                                          |
-| --------------------- | -------------------- | ---------------------------------------------------------------- |
-| `x-actor-type`        | `SMOKE_ACTOR_TYPE`   | `system`                                                         |
-| `x-actor-id`          | `SMOKE_ACTOR_ID`     | `smoke-system-001`                                               |
-| `x-realm`             | `SMOKE_REALM`        | derived from actor type                                          |
-| `x-tenant-id`         | `SMOKE_TENANT_ID`    | S0002 TEN_ACME UUID                                              |
-| `x-drts-internal-key` | `SMOKE_INTERNAL_KEY` | unset by default; required when staging sets `DRTS_INTERNAL_KEY` |
+| Header                | Env var                   | Default                                                          |
+| --------------------- | ------------------------- | ---------------------------------------------------------------- |
+| `authorization`       | `SMOKE_AUTH_BEARER_TOKEN` | unset; preferred when staging requires Bearer auth               |
+| `x-actor-type`        | `SMOKE_ACTOR_TYPE`        | `system`                                                         |
+| `x-actor-id`          | `SMOKE_ACTOR_ID`          | `smoke-system-001`                                               |
+| `x-realm`             | `SMOKE_REALM`             | derived from actor type                                          |
+| `x-tenant-id`         | `SMOKE_TENANT_ID`         | S0002 TEN_ACME UUID                                              |
+| `x-drts-internal-key` | `SMOKE_INTERNAL_KEY`      | unset by default; required when staging sets `DRTS_INTERNAL_KEY` |
 
-The default `system` actor type covers all six smoke routes because route auth policy adds
-`system` to every protected route group's `allowedRealms`, and the `system` preset includes
-the required `tenant:*`, `dispatch:*`, `driver:*`, `tenant:billing:*`, and `reports:*` scopes.
-No password, token fetch, or user account is required for smoke runs.
+When `SMOKE_AUTH_BEARER_TOKEN` is present, the API uses the verified Bearer token first.
+Bootstrap headers stay useful for local development and for any temporary staging phase before
+Cloud IAP / OIDC is enforced.
 
 ## Staging URL and `/api` path prefix
 
@@ -108,20 +120,21 @@ Confirm the correct base URL from the Cloud Run service URL in the `WE-003` depl
 
 ## Environment variables
 
-| Variable                | Default                                | Description                                                                  |
-| ----------------------- | -------------------------------------- | ---------------------------------------------------------------------------- |
-| `SMOKE_API_URL`         | `http://localhost:3001`                | API bare origin — no trailing slash, no path prefix (see note above)         |
-| `SMOKE_API_PATH_PREFIX` | `/api`                                 | Prepended to every path; matches NestJS global prefix — set `""` to skip     |
-| `SMOKE_ACTOR_TYPE`      | `system`                               | Bootstrap auth actor type (`x-actor-type` header)                            |
-| `SMOKE_ACTOR_ID`        | `smoke-system-001`                     | Bootstrap auth actor ID (`x-actor-id` header)                                |
-| `SMOKE_REALM`           | _(derived from actor type)_            | Override only when realm differs from actor-type default                     |
-| `SMOKE_TENANT_ID`       | `10000000-0000-0000-0000-000000000201` | TEN_ACME from S0002 seed; sent as `x-tenant-id`                              |
-| `SMOKE_INTERNAL_KEY`    | _(unset)_                              | Optional internal gate header; defaults from `DRTS_INTERNAL_KEY` if exported |
-| `SMOKE_DRIVER_ID`       | `10000000-0000-0000-0000-000000000381` | 張司機 from S0002 seed; used in dispatch assign                              |
-| `SMOKE_VEHICLE_ID`      | `10000000-0000-0000-0000-000000000351` | ABC-1234 from S0002 seed; used in dispatch assign                            |
-| `SMOKE_TIMEOUT`         | `30`                                   | curl timeout per request (seconds)                                           |
-| `SMOKE_POLL_INTERVAL`   | `3`                                    | Seconds between status polls                                                 |
-| `SMOKE_POLL_MAX`        | `20`                                   | Max poll attempts for async jobs                                             |
+| Variable                  | Default                                | Description                                                                  |
+| ------------------------- | -------------------------------------- | ---------------------------------------------------------------------------- |
+| `SMOKE_API_URL`           | `http://localhost:3001`                | API bare origin — no trailing slash, no path prefix (see note above)         |
+| `SMOKE_API_PATH_PREFIX`   | `/api`                                 | Prepended to every path; matches NestJS global prefix — set `""` to skip     |
+| `SMOKE_AUTH_BEARER_TOKEN` | _(unset)_                              | Preferred Bearer token for protected staging / IAP                           |
+| `SMOKE_ACTOR_TYPE`        | `system`                               | Bootstrap auth actor type (`x-actor-type` header)                            |
+| `SMOKE_ACTOR_ID`          | `smoke-system-001`                     | Bootstrap auth actor ID (`x-actor-id` header)                                |
+| `SMOKE_REALM`             | _(derived from actor type)_            | Override only when realm differs from actor-type default                     |
+| `SMOKE_TENANT_ID`         | `10000000-0000-0000-0000-000000000201` | TEN_ACME from S0002 seed; sent as `x-tenant-id`                              |
+| `SMOKE_INTERNAL_KEY`      | _(unset)_                              | Optional internal gate header; defaults from `DRTS_INTERNAL_KEY` if exported |
+| `SMOKE_DRIVER_ID`         | `10000000-0000-0000-0000-000000000381` | 張司機 from S0002 seed; used in dispatch assign                              |
+| `SMOKE_VEHICLE_ID`        | `10000000-0000-0000-0000-000000000351` | ABC-1234 from S0002 seed; used in dispatch assign                            |
+| `SMOKE_TIMEOUT`           | `30`                                   | curl timeout per request (seconds)                                           |
+| `SMOKE_POLL_INTERVAL`     | `3`                                    | Seconds between status polls                                                 |
+| `SMOKE_POLL_MAX`          | `20`                                   | Max poll attempts for async jobs                                             |
 
 ## Exit codes
 

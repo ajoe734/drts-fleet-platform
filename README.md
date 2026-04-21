@@ -1,18 +1,18 @@
 # drts-fleet-platform
 
-Bootstrap monorepo for the DRTS fleet platform.
+Core monorepo for the DRTS fleet platform.
 
 This repository contains:
 
-- tenant portal web
 - platform admin web
 - ops console web
 - driver mobile app
 - backend API
+- a frozen internal tenant-portal reference shell (`apps/tenant-portal-web`)
 - docs, infra, and scripts
 - local multi-LLM orchestrator control plane
 - tracked Phase 1 specification files and extracted reference bundles
-- seed architecture and planning docs for pre-implementation review
+- accepted planning, closeout, and authority records
 
 Phase 1 focuses on fleet management and dispatch compliance core. Phase 2 may add autonomous-driving management capabilities such as FSD, ODD, and Tesla-related integrations.
 
@@ -20,13 +20,22 @@ Phase 1 focuses on fleet management and dispatch compliance core. Phase 2 may ad
 
 The repo is in `supervisor_managed_execution` mode.
 
-The planning session `20260413T025550Z-repo-gap-reassessment-v3` has been accepted by the human gate. Waves 1–8 implementation tasks are complete. Wave 9 execution tasks are now active.
+The broader blueprint-completion and master-closeout execution waves are
+substantially complete. The repo truth currently says:
+
+- core Phase 1 operator surfaces are implemented in code
+- rollout evidence, tenant boundary, finance/reporting completeness, and
+  integration hardening are closed
+- the only remaining product-critical blocker is `GAP-P2S3-001`
+  (Cloud IAP / OIDC JWT production cutover)
+- Passenger App / Web, Call Point / Concierge Portal, and AV / live-board scope
+  remain explicit deferred or future-gated families
 
 Current working rule:
 
 - the supervisor has two continuous modes: `discussion_planning` and `supervisor_managed_execution`
-- the consensus packet for the repo-gap-reassessment-v3 session was accepted on 2026-04-13
-- Wave 9 tasks (Bucket A and Bucket B) are assigned and in progress through the supervisor task lifecycle
+- accepted planning archives explain how the current execution backlog was formed
+- current execution truth lives in `ai-status.json` and `current-work.md`
 - if implementation discovers unresolved design semantics, the supervisor routes back into `discussion_planning` without restarting the control plane
 
 Dashboard mirror: `docs-site/index.html` (regenerated via `./scripts/sync-state.sh`).
@@ -36,6 +45,8 @@ Canonical starting points:
 - `AI_COLLABORATION_GUIDE.md`
 - `ai-status.json`
 - `current-work.md`
+- `docs/README.md`
+- `docs/00-context/current-system-blueprint-alignment-audit-20260421.md`
 - `MULTI_LLM_CONSENSUS_WORKFLOW.md`
 - `PHASE1_DISCUSSION_ASSIGNMENTS.md`
 - `CANONICAL_DOCUMENT_MAP.md`

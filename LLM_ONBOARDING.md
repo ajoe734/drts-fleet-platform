@@ -8,7 +8,7 @@ Start with these files in order:
 
 1. `AI_COLLABORATION_GUIDE.md`
 2. `ai-status.json`
-3. `current-work.md`
+3. `current-work.md` as a human summary only
 4. `MULTI_LLM_CONSENSUS_WORKFLOW.md`
 5. `PHASE1_DISCUSSION_ASSIGNMENTS.md`
 6. `CANONICAL_DOCUMENT_MAP.md`
@@ -40,7 +40,7 @@ Use that output as the first prompt in Claude Code, Codex CLI, Gemini CLI, Copil
 ## 3. Shared Truth Rules
 
 - `ai-status.json` is the machine-readable source of truth for current collaboration mode, next steps, and later task state
-- `ai-activity-log.jsonl` is append-only history
+- `ai-activity-log.jsonl` is append-only history and not default machine context
 - `current-work.md` is generated from state and is not the write source
 - `docs-site/` is a read-only dashboard mirror, not the place to edit status
 - seed design docs are provisional until the consensus packet is accepted

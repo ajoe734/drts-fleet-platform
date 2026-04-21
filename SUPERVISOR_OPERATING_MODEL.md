@@ -32,8 +32,11 @@ Purpose:
 Primary artifacts:
 
 - `ai-status.json`
-- `current-work.md`
-- `ai-activity-log.jsonl`
+- `.orchestrator/task-briefs/<task-id>.md`
+- `.orchestrator/state.json`
+- `.orchestrator/evidence/<run-id>.json`
+- `current-work.md` as a human summary
+- `ai-activity-log.jsonl` as append-only history
 - the accepted consensus packet
 
 Control-plane rule:

@@ -34,7 +34,7 @@ The dashboard and supervisor are only allowed to speak from machine truth.
 Hard rules:
 
 - if the repo has official remaining work, that work must exist in `ai-status.json` before anyone claims the project is incomplete
-- if the repo has official accepted backlog, that backlog must be mirrored into `current-work.md` and `docs-site/current-work.md` through the normal sync flow
+- if the repo has official accepted backlog, that backlog may be summarized into `current-work.md` and `docs-site/current-work.md` through the normal sync flow
 - if a discussion round creates or confirms new official backlog, the supervisor must record those tasks in `ai-status.json` before returning to execution or reporting status to a human
 - no lane may keep authoritative backlog only in chat, memory, or ad hoc notes
 - if verbal status and control-plane status diverge, fix `ai-status.json` first, then continue discussion or execution
@@ -54,7 +54,7 @@ Read these layers in order before starting work.
 
 1. `AI_COLLABORATION_GUIDE.md`
 2. `ai-status.json`
-3. `current-work.md`
+3. `current-work.md` as a human summary only
 
 ### L1 Product Truth
 
@@ -92,8 +92,8 @@ Seed design artifacts live outside the canonical layers. They are discussion inp
 1. latest explicit user instruction
 2. `AI_COLLABORATION_GUIDE.md`
 3. `ai-status.json`
-4. `current-work.md`
-5. `ai-activity-log.jsonl`
+4. `current-work.md` as a derived human summary
+5. `ai-activity-log.jsonl` when recent history is needed
 
 ### Product semantics and business truth
 

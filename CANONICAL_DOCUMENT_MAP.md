@@ -4,9 +4,9 @@ This file defines how collaboration state, Phase 1 product truth, execution rule
 
 ## 1. Current Mode
 
-- Active mode: `discussion_planning`
-- Meaning: the repo is in multi-LLM reading, review, and synthesis mode
-- Constraint: no supervisor or auto worker implementation fan-out until the human accepts the consensus packet
+- Active mode: `supervisor_managed_execution`
+- Meaning: accepted planning has already been converted into execution / closeout truth
+- Constraint: current execution truth should be read from `ai-status.json` and `current-work.md`; historical planning workspaces are context, not the live task board
 - Supported modes overall: `discussion_planning` and `supervisor_managed_execution`
 
 ## 2. Canonical Layers
@@ -85,6 +85,10 @@ Important:
 
 ## 5. Stable Reference Locations
 
+- Documentation index:
+  - `docs/README.md`
+- Current code-backed audit:
+  - `docs/00-context/current-system-blueprint-alignment-audit-20260421.md`
 - Core specs:
   - `phase1_system_analysis_v1.md`
   - `phase1_prd_detailed_v1.md`
