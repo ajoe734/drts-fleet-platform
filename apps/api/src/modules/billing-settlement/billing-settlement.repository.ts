@@ -33,6 +33,11 @@ export type LiveSettlementTripRecord = {
   orderId: string;
   completedAt: string;
   grossEarning: MoneyAmount;
+  subsidy?: MoneyAmount;
+  platformFundedDiscount?: MoneyAmount;
+  pricingVersionSnapshot?: string;
+  eligibleForTenantInvoice?: boolean;
+  eligibleForDriverStatement?: boolean;
 };
 
 export type BillingSettlementState = {

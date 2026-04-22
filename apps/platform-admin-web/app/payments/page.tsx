@@ -13,8 +13,6 @@ import type {
   TenantInvoiceRecord,
 } from "@drts/contracts";
 
-const DEMO_TENANT_ID = "tenant-demo-001";
-
 function toDateInputValue(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -74,7 +72,7 @@ export default function PaymentsPage() {
   const [invoiceFilter, setInvoiceFilter] = useState<
     "all" | "paid" | "draft" | "issued"
   >("all");
-  const [invoiceTenantId, setInvoiceTenantId] = useState(DEMO_TENANT_ID);
+  const [invoiceTenantId, setInvoiceTenantId] = useState("");
   const [invoicePeriodStart, setInvoicePeriodStart] = useState(
     defaults.periodStart,
   );
@@ -115,11 +113,16 @@ export default function PaymentsPage() {
 
   async function handleGenerateInvoice(event: React.FormEvent) {
     event.preventDefault();
+    const tenantId = invoiceTenantId.trim();
+    if (!tenantId) {
+      setError("Tenant ID is required to generate an invoice.");
+      return;
+    }
     setInvoicePending(true);
     setError(null);
     try {
       await client.generateInvoice({
-        tenantId: invoiceTenantId.trim() || DEMO_TENANT_ID,
+        tenantId,
         periodStart: toPeriodStartIso(invoicePeriodStart),
         periodEnd: toPeriodEndIso(invoicePeriodEnd),
       });
@@ -296,6 +299,7 @@ export default function PaymentsPage() {
                 <input
                   value={invoiceTenantId}
                   onChange={(event) => setInvoiceTenantId(event.target.value)}
+                  placeholder="tenant-uuid-or-slug"
                   style={inputStyle}
                 />
               </label>
@@ -323,7 +327,7 @@ export default function PaymentsPage() {
             <button
               type="submit"
               className="admin-btn admin-btn--primary"
-              disabled={invoicePending}
+              disabled={invoicePending || !invoiceTenantId.trim()}
             >
               {invoicePending ? "Generating..." : "Generate invoice"}
             </button>

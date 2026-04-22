@@ -38,7 +38,6 @@ import {
   type ControlledDownloadMetadata,
 } from "../reporting-filing/download-signing.util";
 
-const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_CURRENCY = "NTD";
 const LIVE_SETTLEMENT_PRICING_VERSION = "tenant-pricing-live";
 
@@ -67,80 +66,9 @@ type ReimbursementBatchFilters = {
   statementId?: string;
 };
 
-const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
-  {
-    settlementId: "settlement-202603-001",
-    tenantId: DEMO_TENANT_ID,
-    driverId: "drv-demo-001",
-    orderId: "order-demo-031",
-    completedAt: "2026-03-05T09:40:00Z",
-    grossEarning: {
-      currency: DEFAULT_CURRENCY,
-      amountMinor: 120000,
-    },
-    subsidy: {
-      currency: DEFAULT_CURRENCY,
-      amountMinor: 5000,
-    },
-    platformFundedDiscount: {
-      currency: DEFAULT_CURRENCY,
-      amountMinor: 0,
-    },
-    pricingVersionSnapshot: "tenant-pricing-v1",
-    eligibleForTenantInvoice: true,
-    eligibleForDriverStatement: true,
-  },
-  {
-    settlementId: "settlement-202603-002",
-    tenantId: DEMO_TENANT_ID,
-    driverId: "drv-demo-001",
-    orderId: "order-demo-032",
-    completedAt: "2026-03-18T18:20:00Z",
-    grossEarning: {
-      currency: DEFAULT_CURRENCY,
-      amountMinor: 80000,
-    },
-    subsidy: {
-      currency: DEFAULT_CURRENCY,
-      amountMinor: 0,
-    },
-    platformFundedDiscount: {
-      currency: DEFAULT_CURRENCY,
-      amountMinor: 20000,
-    },
-    pricingVersionSnapshot: "tenant-pricing-v1",
-    eligibleForTenantInvoice: true,
-    eligibleForDriverStatement: true,
-  },
-  {
-    settlementId: "settlement-202603-003",
-    tenantId: DEMO_TENANT_ID,
-    driverId: "drv-demo-002",
-    orderId: "order-demo-033",
-    completedAt: "2026-03-22T12:00:00Z",
-    grossEarning: {
-      currency: DEFAULT_CURRENCY,
-      amountMinor: 150000,
-    },
-    subsidy: {
-      currency: DEFAULT_CURRENCY,
-      amountMinor: 10000,
-    },
-    platformFundedDiscount: {
-      currency: DEFAULT_CURRENCY,
-      amountMinor: 0,
-    },
-    pricingVersionSnapshot: "tenant-pricing-v1",
-    eligibleForTenantInvoice: true,
-    eligibleForDriverStatement: true,
-  },
-];
-
 @Injectable()
 export class BillingSettlementService implements OnModuleInit {
-  private tenantBillingProfiles = new Map<string, TenantBillingProfile>([
-    [DEMO_TENANT_ID, this.createDefaultBillingProfile(DEMO_TENANT_ID)],
-  ]);
+  private tenantBillingProfiles = new Map<string, TenantBillingProfile>();
 
   private tenantInvoices: StoredTenantInvoice[] = [];
 
@@ -162,13 +90,6 @@ export class BillingSettlementService implements OnModuleInit {
   private readonly downloadExpiryMinutes =
     DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES;
 
-  private settlementTrips = SETTLEMENT_TRIP_SEED.map((trip) => ({
-    ...trip,
-    grossEarning: { ...trip.grossEarning },
-    subsidy: { ...trip.subsidy },
-    platformFundedDiscount: { ...trip.platformFundedDiscount },
-  }));
-
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
@@ -182,23 +103,6 @@ export class BillingSettlementService implements OnModuleInit {
 
     try {
       const persistedState = await this.billingSettlementRepository.loadState();
-      const hasPersistedState =
-        persistedState.tenantBillingProfiles.length > 0 ||
-        persistedState.tenantInvoices.length > 0 ||
-        persistedState.driverFeePlans.length > 0 ||
-        persistedState.driverStatements.length > 0 ||
-        persistedState.reimbursementBatches.length > 0;
-
-      if (!hasPersistedState) {
-        this.persistChanges(
-          {
-            tenantBillingProfiles: this.listStoredTenantBillingProfiles(),
-          },
-          "module init bootstrap",
-        );
-        return;
-      }
-
       this.tenantBillingProfiles = new Map(
         persistedState.tenantBillingProfiles.map((profile) => [
           profile.tenantId,
@@ -226,7 +130,7 @@ export class BillingSettlementService implements OnModuleInit {
   }
 
   getTenantBillingProfile(tenantId: string) {
-    return this.cloneBillingProfile(this.requireTenantBillingProfile(tenantId));
+    return this.cloneBillingProfile(this.resolveTenantBillingProfile(tenantId));
   }
 
   updateTenantBillingProfile(
@@ -938,26 +842,12 @@ export class BillingSettlementService implements OnModuleInit {
     periodStart: string,
     periodEnd: string,
   ) {
-    const seededTrips = this.listSeedSettlementTripsInPeriod(
-      tenantId,
-      periodStart,
-      periodEnd,
-    );
     const liveTrips = await this.listLiveSettlementTripsInPeriod(
       tenantId,
       periodStart,
       periodEnd,
     );
-    const tripMap = new Map<string, SettlementTripSnapshot>();
-
-    for (const trip of seededTrips) {
-      tripMap.set(trip.orderId, trip);
-    }
-    for (const trip of liveTrips) {
-      tripMap.set(trip.orderId, trip);
-    }
-
-    return [...tripMap.values()].sort((left, right) =>
+    return [...liveTrips].sort((left, right) =>
       right.completedAt.localeCompare(left.completedAt),
     );
   }
@@ -967,26 +857,12 @@ export class BillingSettlementService implements OnModuleInit {
     driverId?: string,
   ) {
     const { periodStart, periodEnd } = this.getPeriodMonthRange(periodMonth);
-    const seededTrips = this.settlementTrips.filter(
-      (trip) =>
-        this.toPeriodMonth(trip.completedAt) === periodMonth &&
-        (!driverId || trip.driverId === driverId),
-    );
     const liveTrips = await this.listLiveDriverStatementTripsInPeriod(
       periodStart,
       periodEnd,
       driverId,
     );
-    const tripMap = new Map<string, SettlementTripSnapshot>();
-
-    for (const trip of seededTrips) {
-      tripMap.set(trip.orderId, trip);
-    }
-    for (const trip of liveTrips) {
-      tripMap.set(trip.orderId, trip);
-    }
-
-    return [...tripMap.values()].sort((left, right) =>
+    return [...liveTrips].sort((left, right) =>
       right.completedAt.localeCompare(left.completedAt),
     );
   }
@@ -1049,22 +925,6 @@ export class BillingSettlementService implements OnModuleInit {
     }
   }
 
-  private listSeedSettlementTripsInPeriod(
-    tenantId: string,
-    periodStart: string,
-    periodEnd: string,
-  ) {
-    const start = new Date(periodStart).getTime();
-    const end = new Date(periodEnd).getTime();
-
-    return this.settlementTrips.filter((trip) => {
-      const completedAt = new Date(trip.completedAt).getTime();
-      return (
-        trip.tenantId === tenantId && completedAt >= start && completedAt <= end
-      );
-    });
-  }
-
   private mapLiveTripToSettlementSnapshot(
     trip: LiveSettlementTripRecord,
   ): SettlementTripSnapshot {
@@ -1075,11 +935,14 @@ export class BillingSettlementService implements OnModuleInit {
       orderId: trip.orderId,
       completedAt: trip.completedAt,
       grossEarning: { ...trip.grossEarning },
-      subsidy: this.money(0),
-      platformFundedDiscount: this.money(0),
-      pricingVersionSnapshot: LIVE_SETTLEMENT_PRICING_VERSION,
-      eligibleForTenantInvoice: true,
-      eligibleForDriverStatement: true,
+      subsidy: trip.subsidy ? { ...trip.subsidy } : this.money(0),
+      platformFundedDiscount: trip.platformFundedDiscount
+        ? { ...trip.platformFundedDiscount }
+        : this.money(0),
+      pricingVersionSnapshot:
+        trip.pricingVersionSnapshot ?? LIVE_SETTLEMENT_PRICING_VERSION,
+      eligibleForTenantInvoice: trip.eligibleForTenantInvoice ?? true,
+      eligibleForDriverStatement: trip.eligibleForDriverStatement ?? true,
     };
   }
 
@@ -1161,38 +1024,23 @@ export class BillingSettlementService implements OnModuleInit {
     };
   }
 
-  private createDefaultBillingProfile(tenantId: string): TenantBillingProfile {
-    const normalizedTenantId = tenantId.trim() || DEMO_TENANT_ID;
-    const emailLocalPart = normalizedTenantId
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-
+  private buildEmptyBillingProfile(tenantId: string): TenantBillingProfile {
+    const normalizedTenantId = tenantId.trim();
     return {
       tenantId: normalizedTenantId,
-      invoiceTitle:
-        normalizedTenantId === DEMO_TENANT_ID
-          ? "DRTS Fleet Platform Demo Tenant"
-          : `Tenant ${normalizedTenantId}`,
-      taxId: normalizedTenantId === DEMO_TENANT_ID ? "12345678" : null,
-      address:
-        normalizedTenantId === DEMO_TENANT_ID ? "Taichung Port District" : null,
-      contactName: "Tenant Billing Owner",
-      email: `billing@${emailLocalPart || "tenant"}.example.com`,
-      updatedAt: "2026-03-01T00:00:00Z",
+      invoiceTitle: "",
+      taxId: null,
+      address: null,
+      contactName: null,
+      email: "",
+      updatedAt: new Date().toISOString(),
     };
   }
 
-  private requireTenantBillingProfile(tenantId: string) {
+  private resolveTenantBillingProfile(tenantId: string) {
     return (
       this.tenantBillingProfiles.get(tenantId) ??
-      this.createDefaultBillingProfile(tenantId)
-    );
-  }
-
-  private listStoredTenantBillingProfiles() {
-    return [...this.tenantBillingProfiles.values()].map((profile) =>
-      this.cloneBillingProfile(profile),
+      this.buildEmptyBillingProfile(tenantId)
     );
   }
 
