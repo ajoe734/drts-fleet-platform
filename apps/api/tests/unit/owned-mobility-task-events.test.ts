@@ -1,11 +1,19 @@
+import { EventEmitter } from "node:events";
+
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { firstValueFrom, take, timeout, toArray } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
 
 import { resolveRouteAuthPolicy } from "../../src/common/auth";
+import { DatabaseService } from "../../src/common/db";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
+
+class FakePgClient extends EventEmitter {
+  readonly query = vi.fn(async () => ({ rows: [] }));
+  readonly release = vi.fn();
+}
 
 function createOwnedMobilityService() {
   const regulatoryRegistryService = {
@@ -98,6 +106,106 @@ describe("owned mobility task events", () => {
         },
       },
     });
+  });
+
+  it("bridges driver task events through the Postgres notification bus when enabled", async () => {
+    const notificationClient = new FakePgClient();
+    const databaseService = {
+      isEnabled: vi.fn(() => true),
+      connect: vi.fn(async () => notificationClient),
+      query: vi.fn(async () => ({ rows: [] })),
+    } as unknown as DatabaseService;
+    const regulatoryRegistryService = {
+      getEligibleCandidates: vi.fn(() => [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 4,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ]),
+      getVehicleDispatchability: vi.fn(() => true),
+      getDriverAvailability: vi.fn(() => true),
+    };
+    const auditNotificationService = {
+      recordNotification: vi.fn(),
+      recordAuditLog: vi.fn(),
+    };
+    const callcenterService = {
+      registerRecordingAttachmentListener: vi.fn(),
+    };
+    const taskEventsService = new OwnedMobilityTaskEventsService(
+      new EventEmitter2(),
+      databaseService,
+    );
+    await taskEventsService.onModuleInit();
+    const opsDispatchEventsService = new OpsDispatchEventsService(
+      new EventEmitter2(),
+    );
+    const service = new OwnedMobilityService(
+      regulatoryRegistryService as never,
+      auditNotificationService as never,
+      callcenterService as never,
+      taskEventsService,
+      opsDispatchEventsService,
+      undefined,
+      undefined,
+    );
+    const streamPromise = firstValueFrom(
+      service
+        .streamDriverTaskEvents("driver-001")
+        .pipe(take(1), timeout(1_000)),
+    );
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Pickup" },
+      dropoff: { address: "Dropoff" },
+      passenger: { name: "Rider One", phone: "0912000000" },
+    });
+    const dispatchJob = service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    service.assignDispatch({
+      dispatchJobId: dispatchJob.dispatchJobId,
+      driverId: "driver-001",
+      vehicleId: "vehicle-001",
+    });
+
+    const notifyCall = vi
+      .mocked(databaseService.query)
+      .mock.calls.find(([query]) => String(query).includes("pg_notify"));
+    expect(notifyCall).toBeDefined();
+    expect(vi.mocked(databaseService.connect)).toHaveBeenCalledTimes(1);
+    expect(notificationClient.query).toHaveBeenCalledWith(
+      "LISTEN owned_mobility_driver_task_events",
+    );
+
+    const payload = notifyCall?.[1]?.[1];
+    notificationClient.emit("notification", {
+      channel: "owned_mobility_driver_task_events",
+      payload,
+      processId: 1,
+    });
+
+    const event = await streamPromise;
+
+    expect(event.type).toBe("task_assigned");
+    expect(event.data).toMatchObject({
+      eventType: "task_assigned",
+      data: {
+        task: {
+          driverId: "driver-001",
+          status: "pending_acceptance",
+        },
+      },
+    });
+
+    await taskEventsService.onModuleDestroy();
+
+    expect(notificationClient.query).toHaveBeenCalledWith(
+      "UNLISTEN owned_mobility_driver_task_events",
+    );
+    expect(notificationClient.release).toHaveBeenCalledTimes(1);
   });
 
   it("protects ops dispatch event streams with the ops auth policy", () => {

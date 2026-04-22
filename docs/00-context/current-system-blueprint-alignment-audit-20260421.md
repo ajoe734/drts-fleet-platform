@@ -33,7 +33,6 @@ The biggest remaining gaps are:
 - some backend slices still rely on seed/fallback behavior instead of durable
   source-of-truth persistence
 - the forwarder adapter remains stubbed
-- driver-task SSE is still single-instance in-memory
 - passenger / concierge / AV live-board surfaces remain explicitly deferred or
   future-gated
 - external repo `tenant-commute-hub` is directionally aligned, but this repo
@@ -109,6 +108,17 @@ production tenant UI to the external repo:
 - `docs/02-architecture/authority/fbp-007-tenant-portal-web-sunset.md`
 - `docs/02-architecture/authority/rgp-002-authority-map.md`
 
+### 4. Driver-task SSE now fans out through an external Postgres bridge
+
+`apps/api/src/modules/owned-mobility/owned-mobility-task-events.service.ts`
+now bridges driver-task stream events through PostgreSQL `LISTEN/NOTIFY` when
+`DATABASE_URL` is configured, then re-emits those notifications into the local
+NestJS SSE observers. This closes the earlier single-instance production
+dependency without changing the existing `/api/driver/task-events` contract.
+
+The in-memory `EventEmitter2` path remains only as the no-database fallback for
+unit tests or local bootstrap scenarios.
+
 ## Code-Verified Residual Gaps
 
 ### 1. `GAP-P2S3-001` is still not fully closed
@@ -155,15 +165,7 @@ stub for accept / reject / complete / heartbeat / earnings.
 This means the forwarder family exists structurally, but external-partner
 production parity is not fully closed.
 
-### 4. Driver-task SSE is still single-instance only
-
-`apps/api/src/modules/owned-mobility/owned-mobility-task-events.service.ts`
-still documents that multi-instance fan-out needs a later Redis/pub-sub follow-up.
-
-That is good enough for the current baseline, but it is not full operational
-hardening for horizontally scaled runtime.
-
-### 5. Driver onboarding still falls back to a placeholder path
+### 4. Driver onboarding still falls back to a placeholder path
 
 `apps/driver-app/app/onboarding.tsx` now performs real connectivity checks and
 shows a real workstation entry when they pass, but it still falls back to a
@@ -172,7 +174,7 @@ placeholder onboarding screen when they do not.
 This is no longer a blank shell, but it is still not a full production-grade
 onboarding/provisioning flow.
 
-### 6. Platform admin authority is broad, but not perfectly hardened
+### 5. Platform admin authority is broad, but not perfectly hardened
 
 `apps/api/src/modules/platform-admin/platform-admin.service.ts` prefers the
 reviewer/identity path when present, but `publishPublicInfoVersion()` can still
