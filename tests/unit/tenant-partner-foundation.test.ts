@@ -422,25 +422,12 @@ describe("tenant partner foundation service", () => {
       webhookId: otherWebhook.webhookId,
     });
 
-    expect(
-      tenantPartnerService.getNotificationPreferences(TENANT_ID).subscriptions,
-    ).toEqual([
-      {
-        eventType: "reservation.failed",
-        channel: "ops_console",
-        enabled: true,
-      },
-      {
-        eventType: "tenant.sla.threshold_breached",
-        channel: "webhook",
-        enabled: true,
-      },
-    ]);
-    expect(tenantPartnerService.listPassengers(TENANT_ID)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ tenantId: TENANT_ID }),
-      ]),
-    );
+    expect(tenantPartnerService.getNotificationPreferences(TENANT_ID)).toEqual({
+      tenantId: TENANT_ID,
+      subscriptions: [],
+      updatedAt: "1970-01-01T00:00:00.000Z",
+    });
+    expect(tenantPartnerService.listPassengers(TENANT_ID)).toEqual([]);
     expect(tenantPartnerService.listPassengers(OTHER_TENANT_ID)).toEqual([
       expect.objectContaining({
         passengerId: otherPassenger.passengerId,
@@ -818,5 +805,51 @@ describe("tenant partner foundation service", () => {
         ]),
       }),
     );
+  });
+
+  it("keeps empty persistence state explicit and avoids bootstrap writes", async () => {
+    const auditService = new AuditNotificationService();
+    const persistChanges = vi.fn(async () => undefined);
+    const repository = {
+      loadState: vi.fn(async () => ({
+        notificationPreferences: [],
+        webhookEndpoints: [],
+        webhookDeliveries: [],
+        slaProfiles: [],
+        passengers: [],
+        addresses: [],
+        userRoles: [],
+        apiKeys: [],
+      })),
+      persistChanges,
+      reportPersistenceFailure: vi.fn(),
+    } as unknown as TenantPartnerRepository;
+
+    const tenantPartnerService = new TenantPartnerService(
+      auditService,
+      repository,
+    );
+
+    await tenantPartnerService.onModuleInit();
+
+    expect(tenantPartnerService.getNotificationPreferences(TENANT_ID)).toEqual({
+      tenantId: TENANT_ID,
+      subscriptions: [],
+      updatedAt: "1970-01-01T00:00:00.000Z",
+    });
+    expect(tenantPartnerService.getSlaProfile(TENANT_ID)).toEqual({
+      tenantId: TENANT_ID,
+      waitThresholdMin: 0,
+      arrivalThresholdMin: 0,
+      completionThresholdMin: 0,
+      updatedAt: "1970-01-01T00:00:00.000Z",
+    });
+    expect(tenantPartnerService.listPassengers(TENANT_ID)).toEqual([]);
+    expect(tenantPartnerService.listAddresses(TENANT_ID)).toEqual([]);
+    expect(tenantPartnerService.listTenantUsers(TENANT_ID)).toEqual([]);
+    expect(tenantPartnerService.listApiKeys(TENANT_ID)).toEqual([]);
+    expect(tenantPartnerService.listWebhookEndpoints(TENANT_ID)).toEqual([]);
+    expect(tenantPartnerService.listWebhookDeliveries(TENANT_ID)).toEqual([]);
+    expect(persistChanges).not.toHaveBeenCalled();
   });
 });

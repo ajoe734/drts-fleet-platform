@@ -48,8 +48,6 @@ import {
   type WebhookRetryPolicy,
 } from "./webhook-dispatch.service";
 
-const DEMO_TENANT_ID = "tenant-demo-001";
-
 type WebhookSecretRotationRecord = {
   secretVersion: number;
   rotatedAt: string;
@@ -104,68 +102,6 @@ const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
   retryableStatusCodes: [408, 429, 500, 502, 503, 504],
 };
 
-const PASSENGER_SEED: TenantPassengerRecord[] = [
-  {
-    passengerId: "passenger-demo-001",
-    tenantId: DEMO_TENANT_ID,
-    fullName: "王小美",
-    employeeNo: "E1001",
-    departmentName: "總務部",
-    mobile: "0911-000-001",
-    email: "xiaomei.wang@acme.example",
-    activeFlag: true,
-    metadata: {
-      preferredLanguage: "zh-TW",
-    },
-    createdAt: "2026-04-10T00:00:00.000Z",
-    updatedAt: "2026-04-10T00:00:00.000Z",
-  },
-  {
-    passengerId: "passenger-demo-002",
-    tenantId: DEMO_TENANT_ID,
-    fullName: "陳大文",
-    employeeNo: "E1002",
-    departmentName: "業務部",
-    mobile: "0911-000-002",
-    email: "dawen.chen@acme.example",
-    activeFlag: true,
-    metadata: {
-      costCenter: "sales",
-    },
-    createdAt: "2026-04-10T00:05:00.000Z",
-    updatedAt: "2026-04-10T00:05:00.000Z",
-  },
-];
-
-const ADDRESS_SEED: TenantAddressRecord[] = [
-  {
-    addressId: "address-demo-001",
-    tenantId: DEMO_TENANT_ID,
-    ownerPassengerId: "passenger-demo-001",
-    addressName: "Acme HQ",
-    addressText: "台北市信義區市府路 1 號",
-    lat: 25.0375,
-    lng: 121.5637,
-    tags: ["office"],
-    activeFlag: true,
-    createdAt: "2026-04-10T00:00:00.000Z",
-    updatedAt: "2026-04-10T00:00:00.000Z",
-  },
-];
-
-const USER_ROLE_SEED: TenantUserRoleRecord[] = [
-  {
-    userId: "tenant-user-demo-001",
-    tenantId: DEMO_TENANT_ID,
-    email: "admin@acme.example",
-    displayName: "Acme Tenant Admin",
-    roleCode: "tenant_admin",
-    status: "active",
-    invitedAt: "2026-04-10T00:00:00.000Z",
-    updatedAt: "2026-04-10T00:00:00.000Z",
-  },
-];
-
 const TENANT_ROLE_CATALOG: TenantRoleCatalogRecord[] = [
   {
     roleCode: "tenant_admin",
@@ -197,52 +133,26 @@ const TENANT_ROLE_CATALOG: TenantRoleCatalogRecord[] = [
   },
 ];
 
-const API_KEY_SEED: StoredTenantApiKeyRecord[] = [
-  {
-    apiKeyId: "tenant-api-key-demo-001",
-    tenantId: DEMO_TENANT_ID,
-    keyName: "Acme Integration Key",
-    keyPrefix: "acme_live_",
-    maskedSuffix: "****demo",
-    scopes: ["tenant:bookings:write", "tenant:reports:read"],
-    lastUsedAt: null,
-    expiresAt: "2027-04-10T00:00:00.000Z",
-    revokedAt: null,
-    createdAt: "2026-04-10T00:00:00.000Z",
-    keyHash: "sha256:demo-acme-key",
-  },
-];
-
 @Injectable()
 export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private notificationPreferences = new Map<
     string,
     TenantNotificationPreferences
-  >([
-    [DEMO_TENANT_ID, this.createDefaultNotificationPreferences(DEMO_TENANT_ID)],
-  ]);
+  >();
 
   private webhookEndpoints: StoredWebhookEndpoint[] = [];
 
   private webhookDeliveries: StoredWebhookDelivery[] = [];
 
-  private slaProfiles = new Map<string, TenantSlaProfile>([
-    [DEMO_TENANT_ID, this.createDefaultSlaProfile(DEMO_TENANT_ID)],
-  ]);
+  private slaProfiles = new Map<string, TenantSlaProfile>();
 
-  private passengers = PASSENGER_SEED.map((passenger) =>
-    this.clonePassenger(passenger),
-  );
+  private passengers: TenantPassengerRecord[] = [];
 
-  private addresses = ADDRESS_SEED.map((address) => this.cloneAddress(address));
+  private addresses: TenantAddressRecord[] = [];
 
-  private userRoles = USER_ROLE_SEED.map((userRole) =>
-    this.cloneUserRole(userRole),
-  );
+  private userRoles: TenantUserRoleRecord[] = [];
 
-  private apiKeys = API_KEY_SEED.map((apiKey) =>
-    this.cloneStoredApiKey(apiKey),
-  );
+  private apiKeys: StoredTenantApiKeyRecord[] = [];
 
   private readonly retryTimers = new Map<
     string,
@@ -264,44 +174,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const persistedState = await this.tenantPartnerRepository.loadState();
-      const hasPersistedState =
-        persistedState.notificationPreferences.length > 0 ||
-        persistedState.slaProfiles.length > 0 ||
-        persistedState.webhookEndpoints.length > 0 ||
-        persistedState.webhookDeliveries.length > 0 ||
-        persistedState.passengers.length > 0 ||
-        persistedState.addresses.length > 0 ||
-        persistedState.userRoles.length > 0 ||
-        persistedState.apiKeys.length > 0;
-
-      if (!hasPersistedState) {
-        this.persistChanges(
-          {
-            notificationPreferences: Array.from(
-              this.notificationPreferences.values(),
-              (preferences) => this.cloneNotificationPreferences(preferences),
-            ),
-            slaProfiles: Array.from(this.slaProfiles.values(), (profile) =>
-              this.cloneSlaProfile(profile),
-            ),
-            passengers: this.passengers.map((passenger) =>
-              this.clonePassenger(passenger),
-            ),
-            addresses: this.addresses.map((address) =>
-              this.cloneAddress(address),
-            ),
-            userRoles: this.userRoles.map((userRole) =>
-              this.cloneUserRole(userRole),
-            ),
-            apiKeys: this.apiKeys.map((apiKey) =>
-              this.cloneStoredApiKey(apiKey),
-            ),
-          },
-          "module init bootstrap",
-        );
-        return;
-      }
-
       this.notificationPreferences = new Map(
         persistedState.notificationPreferences.map((preferences) => [
           preferences.tenantId,
@@ -349,9 +221,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   getNotificationPreferences(tenantId: string) {
-    return this.cloneNotificationPreferences(
-      this.getOrCreateNotificationPreferences(tenantId),
-    );
+    const existing = this.notificationPreferences.get(tenantId);
+    if (existing) {
+      return this.cloneNotificationPreferences(existing);
+    }
+
+    return this.buildEmptyNotificationPreferences(tenantId);
   }
 
   updateNotificationPreferences(
@@ -1498,7 +1373,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   getSlaProfile(tenantId: string) {
-    return { ...this.getOrCreateSlaProfile(tenantId) };
+    const existing = this.slaProfiles.get(tenantId);
+    return existing
+      ? this.cloneSlaProfile(existing)
+      : this.buildEmptySlaProfile(tenantId);
   }
 
   updateSlaProfile(
@@ -1745,59 +1623,34 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private getOrCreateNotificationPreferences(tenantId: string) {
-    const existing = this.notificationPreferences.get(tenantId);
-    if (existing) {
-      return existing;
-    }
-
-    const created = this.createDefaultNotificationPreferences(tenantId);
-    this.notificationPreferences.set(
-      tenantId,
-      this.cloneNotificationPreferences(created),
-    );
-    return created;
-  }
-
   private getOrCreateSlaProfile(tenantId: string) {
     const existing = this.slaProfiles.get(tenantId);
     if (existing) {
       return existing;
     }
 
-    const created = this.createDefaultSlaProfile(tenantId);
+    const created = this.buildEmptySlaProfile(tenantId);
     this.slaProfiles.set(tenantId, this.cloneSlaProfile(created));
     return created;
   }
 
-  private createDefaultNotificationPreferences(
+  private buildEmptyNotificationPreferences(
     tenantId: string,
   ): TenantNotificationPreferences {
     return {
       tenantId,
-      subscriptions: [
-        {
-          eventType: "reservation.failed",
-          channel: "ops_console",
-          enabled: true,
-        },
-        {
-          eventType: "tenant.sla.threshold_breached",
-          channel: "webhook",
-          enabled: true,
-        },
-      ],
-      updatedAt: "2026-04-10T00:00:00.000Z",
+      subscriptions: [],
+      updatedAt: new Date(0).toISOString(),
     };
   }
 
-  private createDefaultSlaProfile(tenantId: string): TenantSlaProfile {
+  private buildEmptySlaProfile(tenantId: string): TenantSlaProfile {
     return {
       tenantId,
-      waitThresholdMin: 10,
-      arrivalThresholdMin: 15,
-      completionThresholdMin: 90,
-      updatedAt: "2026-04-10T00:00:00.000Z",
+      waitThresholdMin: 0,
+      arrivalThresholdMin: 0,
+      completionThresholdMin: 0,
+      updatedAt: new Date(0).toISOString(),
     };
   }
 
