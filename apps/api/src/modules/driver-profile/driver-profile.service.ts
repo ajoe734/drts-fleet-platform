@@ -18,47 +18,6 @@ const DEMO_DRIVER_ALIASES: Record<string, string> = {
   "driver-demo-001": "drv-demo-001",
 };
 
-const DRIVER_PROFILE_SEED: DriverProfileRecord[] = [
-  {
-    driverId: "drv-demo-001",
-    name: "Driver Demo One",
-    phone: "+886-912-000-001",
-    email: "driver.one@example.com",
-    photoUrl: null,
-    emergencyContact: {
-      name: "Demo Contact One",
-      phone: "+886-912-100-001",
-      relationship: "spouse",
-    },
-    bankAccount: {
-      bankName: "Demo Bank",
-      accountName: "Driver Demo One",
-      accountNumberMasked: "****0001",
-    },
-    updatedAt: "2026-04-17T00:00:00.000Z",
-  },
-  {
-    driverId: "drv-demo-002",
-    name: "Driver Demo Two",
-    phone: "+886-912-000-002",
-    email: "driver.two@example.com",
-    photoUrl: null,
-    emergencyContact: null,
-    bankAccount: null,
-    updatedAt: "2026-04-17T00:00:00.000Z",
-  },
-  {
-    driverId: "drv-demo-003",
-    name: "Driver Demo Three",
-    phone: null,
-    email: null,
-    photoUrl: null,
-    emergencyContact: null,
-    bankAccount: null,
-    updatedAt: "2026-04-17T00:00:00.000Z",
-  },
-];
-
 function cloneEmergencyContact(
   contact: DriverProfileEmergencyContact | null,
 ): DriverProfileEmergencyContact | null {
@@ -73,13 +32,6 @@ function cloneBankAccount(
 
 @Injectable()
 export class DriverProfileService implements OnModuleInit {
-  private readonly seedProfiles = new Map(
-    DRIVER_PROFILE_SEED.map((profile) => [
-      profile.driverId,
-      this.clone(profile),
-    ]),
-  );
-
   private readonly profiles = new Map<string, DriverProfileRecord>();
 
   constructor(
@@ -209,16 +161,11 @@ export class DriverProfileService implements OnModuleInit {
       return this.clone(existing);
     }
 
-    const seeded = this.seedProfiles.get(driverId);
-    if (seeded) {
-      return this.clone(seeded);
-    }
-
     return this.buildEmptyProfile(driverId);
   }
 
   private profileExists(driverId: string): boolean {
-    return this.profiles.has(driverId) || this.seedProfiles.has(driverId);
+    return this.profiles.has(driverId);
   }
 
   private resolveDriverId(actorId?: string | null): string {
