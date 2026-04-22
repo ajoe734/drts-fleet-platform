@@ -311,7 +311,13 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                 statements.map((statement) => (
                   <tr key={statement.statementId}>
                     <td>{statement.receiptNo}</td>
-                    <td>{statement.driverId}</td>
+                    <td>
+                      <Link
+                        href={`/drivers/${encodeURIComponent(statement.driverId)}`}
+                      >
+                        {statement.driverId}
+                      </Link>
+                    </td>
                     <td>{statement.periodMonth}</td>
                     <td>{statement.payoutStatus}</td>
                     <td>
