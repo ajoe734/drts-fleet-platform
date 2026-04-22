@@ -334,7 +334,7 @@ assert_status "200"
 # because a forwarded order must never be owned-dispatched by DRTS.
 OWNED_JOB_FOR_FORWARDED=$(echo "$RESP_BODY" | \
   jq -r --arg oid "$MIRROR_ORDER_ID" \
-    '.data.items[] | select(.orderId == $oid) | .dispatchJobId' \
+    '.data.items[] | select((.orderId // .order_id) == $oid) | (.dispatchJobId // .dispatch_job_id)' \
   2>/dev/null | head -1 || true)
 
 if [[ -n "$OWNED_JOB_FOR_FORWARDED" ]]; then
