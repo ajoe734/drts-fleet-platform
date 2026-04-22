@@ -116,9 +116,10 @@ Likely cause: The forwarder in-memory store or persistence layer lost the record
 Expected in environments without seed data applied. To enable Phase 2:
 
 1. Confirm seed `infra/seeds/S0002__demo_operational_seed.sql` has been applied.
-2. Confirm driver `10000000-0000-0000-0000-000000000381` is registered in the regulatory registry with `dispatchableFlag = true` and `exclusivityApproved = true`.
+2. Confirm vehicle `10000000-0000-0000-0000-000000000351` satisfies all three vehicle eligibility fields in the regulatory registry: `dispatchableFlag = true`, `exclusivityApproved = true`, `insuranceStatus = "valid"`.
 3. Confirm vehicle `10000000-0000-0000-0000-000000000351` supports the `standard_taxi` service bucket.
-4. Re-run with `E2E_SEED_DRIVER_ID` and `E2E_SEED_VEHICLE_ID` pointing to eligible seed pairs.
+4. Confirm driver `10000000-0000-0000-0000-000000000381` satisfies both driver eligibility fields: `workState = "available"` and `licensesValid = true`.
+5. Re-run with `E2E_SEED_DRIVER_ID` and `E2E_SEED_VEHICLE_ID` pointing to eligible seed pairs.
 
 ### Symptom: E2E-002 Phase 3 skips with "No forwarded task found in driver task list"
 

@@ -150,9 +150,11 @@ if echo "$RESP_STATUS" | grep -qE "^(200|201)$"; then
   log_ok "Broadcast complete: status=${BROADCAST_STATUS:-broadcasted} candidateCount=${CANDIDATE_COUNT:-0}"
 elif echo "$RESP_BODY" | grep -q "NO_ELIGIBLE_FORWARDER_CANDIDATES"; then
   log_warn "Phase 2 SKIP: No eligible forwarder candidates in regulatory registry."
-  log_warn "Expected in environments without seed S0002 applied or without dispatchable drivers."
-  log_warn "Triage: verify driver ${E2E_SEED_DRIVER_ID} is registered, dispatchable, and"
-  log_warn "        vehicle ${E2E_SEED_VEHICLE_ID} supports standard_taxi service bucket."
+  log_warn "Expected in environments without seed S0002 applied or without eligible fleet."
+  log_warn "Triage: vehicle ${E2E_SEED_VEHICLE_ID} must have dispatchableFlag=true,"
+  log_warn "        exclusivityApproved=true, insuranceStatus=valid, and support the"
+  log_warn "        standard_taxi service bucket. Driver ${E2E_SEED_DRIVER_ID} must have"
+  log_warn "        workState=available and licensesValid=true in the regulatory registry."
   save_evidence "$SCENARIO" "forwarder" "phase2" "SKIPPED_no_eligible_candidates"
   PHASE2_SKIPPED=1
 else
@@ -322,23 +324,26 @@ log_surface "Ops Console — verify no owned dispatch_assignment created"
 
 switch_actor "ops_user" "e2e-ops-001"
 
-log_step "3.5 — GET /dispatch/tasks (verify no owned job for forwarded task)"
+log_step "3.5 — GET /dispatch/tasks (verify no owned dispatch job for forwarded mirror order)"
 http_call GET "/dispatch/tasks"
 assert_status "200"
 
-# Check that there is no dispatch job whose forwardedTaskId matches our task
+# DispatchJobRecord exposes: dispatchJobId, orderId, status, mode, latestEtaMinutes,
+# createdAt, updatedAt.  There is no sourceTaskId or forwardedTaskId field.
+# The correct negative check: no dispatch job should carry the mirror order's orderId,
+# because a forwarded order must never be owned-dispatched by DRTS.
 OWNED_JOB_FOR_FORWARDED=$(echo "$RESP_BODY" | \
-  jq -r --arg tid "$FORWARDED_TASK_ID" \
-    '.data.items[] | select((.sourceTaskId // .source_task_id) == $tid or (.forwardedTaskId // .forwarded_task_id) == $tid) | (.dispatchJobId // .dispatch_job_id)' \
+  jq -r --arg oid "$MIRROR_ORDER_ID" \
+    '.data.items[] | select(.orderId == $oid) | .dispatchJobId' \
   2>/dev/null | head -1 || true)
 
 if [[ -n "$OWNED_JOB_FOR_FORWARDED" ]]; then
-  log_fail "Found owned dispatch_assignment for forwarded task — this violates E2E-002 pass criteria."
-  log_fail "dispatchJobId=${OWNED_JOB_FOR_FORWARDED}"
+  log_fail "Found owned dispatch job for forwarded mirror order — this violates E2E-002 pass criteria."
+  log_fail "dispatchJobId=${OWNED_JOB_FOR_FORWARDED} orderId=${MIRROR_ORDER_ID}"
   log_fail "Cross-ref: UAT E2E-002 pass criteria: 'No owned dispatch_assignment created'."
   exit 1
 else
-  log_ok "No owned dispatch job found for forwarded task — correct."
+  log_ok "No owned dispatch job found for mirror order ${MIRROR_ORDER_ID} — correct."
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
