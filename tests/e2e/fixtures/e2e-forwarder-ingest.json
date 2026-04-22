@@ -1,0 +1,8 @@
+{
+  "platformCode": "grab_taiwan",
+  "externalOrderId": "__EXTERNAL_ORDER_ID__",
+  "payload": {
+    "serviceBucket": "standard_taxi",
+    "origin": "E2E-002-forwarded-order"
+  }
+}
