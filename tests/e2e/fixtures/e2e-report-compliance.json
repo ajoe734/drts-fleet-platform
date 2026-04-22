@@ -1,9 +1,7 @@
 {
-  "reportType": "trip_compliance",
+  "jobType": "dispatch_recording_index",
   "format": "csv",
   "filters": {
-    "tenantId": "__TENANT_ID__",
-    "periodStart": "__PERIOD_START__",
-    "periodEnd": "__PERIOD_END__"
+    "month": "__MONTH__"
   }
 }
