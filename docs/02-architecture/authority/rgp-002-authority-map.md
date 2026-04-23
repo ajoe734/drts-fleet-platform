@@ -13,6 +13,7 @@ Primary citations:
 - phase1_prd_detailed_v1.md (Sections 2–9, especially 7: Information Architecture)
 - phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/03_api_examples_and_error_contracts.md (Sections 3.2, 3.3, 3.18, 3.19)
 - docs/02-architecture/consensus/sessions/20260413T025550Z-repo-gap-reassessment-v3/consensus-packet.md (Bucket A decisions; C4 boundary notes)
+- docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md
 
 ---
 
@@ -20,7 +21,7 @@ Primary citations:
 
 - Planning artifact only; does not change product semantics or runtime code.
 - Defines cross-repo authority boundaries so that `tenant-commute-hub` remains UI-only and consumes contracts produced by `drts-fleet-platform`.
-- Mirrors the accepted consensus packet: Phase 1 closeout remains core-repo scoped; `tenant-commute-hub` annex audit is a separate, blocked follow-up. See: docs/02-architecture/consensus/sessions/20260413T025550Z-repo-gap-reassessment-v3/consensus-packet.md.
+- Mirrors the accepted consensus packet: Phase 1 closeout remains core-repo scoped; the local annex audit has now been completed, and it shows a split state between a cutover-in-progress workspace checkout and a Supabase-first clean `origin/main`. On `2026-04-23`, that gap progressed through open PRs to merged remote `main` branches in both repos after passing local live smoke. Remaining cross-repo work is residual consumer-hardening, not access discovery. See: docs/02-architecture/consensus/sessions/20260413T025550Z-repo-gap-reassessment-v3/consensus-packet.md and `RGX-010`.
 
 ---
 
@@ -89,8 +90,14 @@ Explicit rules to prevent cross-repo authority drift:
 
 Minimum client-side obligations for `tenant-commute-hub`:
 
-- Headers: `Authorization`, `X-Request-Id`, `Idempotency-Key` (for POST commands), optional `X-Tenant-Code` for Platform admin cross-tenant actions. Ref: dev-pack §3.2.2.
+- Current observed states are split: the local workspace checkout uses caller-type bootstrap headers via shared `@drts/api-client`, while clean `origin/main` still uses Supabase auth. Any convergence to bearer / OIDC or another app-auth model must be explicit and repo-wide rather than silently introduced per page or branch. Ref: `packages/api-client/src/index.ts`; `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`; `RGX-010`.
+- Request tracing / idempotency: `X-Request-Id` must remain present and `Idempotency-Key` must remain present on POST commands. Ref: dev-pack §3.2.2, §3.2.6.
 - Envelope contract: all responses carry `data/meta`; lists carry `items[]` + `page_info`. Ref: dev-pack §§3.2.3–3.2.5.
+- Runtime normalization: JSON on the wire stays `snake_case`, but frontend
+  runtime objects may be normalized to `camelCase` by shared
+  `@drts/api-client`. Page code should rely on that shared client behavior
+  instead of reimplementing per-page shape transforms. Ref:
+  `packages/api-client/src/index.ts`; `RGX-010`.
 - Error handling: handle registry errors and business constraints using the standard error envelope and codes. Ref: dev-pack §3.3.
 - Enum/field casing: send/accept snake_case; do not transform canonical enum values. Ref: dev-pack §3.18.
 - Auth scopes: requests must present realms/scopes appropriate to the surface; server enforces RBAC. Ref: service contracts §3.1 and Phase 1 hardening (W7-001B posture summarized in §7).
@@ -108,14 +115,19 @@ Minimum client-side obligations for `tenant-commute-hub`:
 ## 7) Alignment With Accepted Consensus
 
 - Phase 1 completion remains core-repo scoped; `tenant-commute-hub` staging readiness is not a gate for current Phase 1 closeout. Ref: consensus-packet.md Human Gate Outcome.
-- `tenant-commute-hub` posture: UI-only; consumes contracts from `drts-fleet-platform`. Detailed code-level posture is deferred to a blocked annex audit. Ref: consensus-packet.md §C4 and “Items Safe to Convert”.
+- `tenant-commute-hub` target posture is still UI-only and contract-consuming. The 2026-04-22 annex audit shows that the local workspace checkout is broadly aligned with that target, but clean remote `main` is not yet there and still carries Supabase authority. Ref: consensus-packet.md §C4, `RGX-010`.
 - Auth/RBAC and wire-contract conformance (snake_case, envelopes) are already enforced server-side per accepted W7-001B/W7-001D outcomes captured in repo history and service contracts §7.1 and dev-pack §§3.2, 3.18.
 
 ---
 
 ## 8) Open Questions (tracked)
 
-- Annex Audit (RGX-010): Confirm `tenant-commute-hub` code does not implement forbidden authority (e.g., local rule evaluation, state mutation, non-conforming envelopes). Blocked until code access is granted. Ref: .orchestrator/task-briefs/RGX-010-SIDECAR-ACCEPTANCE.md; consensus-packet.md §C4.
+- Residual post-merge remediation: after the cutover landing, remove repo-B
+  local bootstrap identity authority so `tenant-commute-hub` no longer
+  fabricates session / role context in production flow. Ref: `RGX-010`.
+- Optional audit refresh: replace the historical `2026-04-22` clean-clone
+  Supabase snapshot with a fresh post-merge annex check if the team wants a new
+  evidence packet tied strictly to current remote `main`. Ref: `RGX-010`.
 - Future Phase scope: If Phase 2 introduces new cross-repo flows (e.g., AV), this map must be updated in tandem with consensus decisions.
 
 ---
