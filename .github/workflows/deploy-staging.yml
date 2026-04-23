@@ -329,6 +329,22 @@ jobs:
           echo "platform_admin=$(resolve_flag "${PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
           echo "ops_console=$(resolve_flag "${OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve API secret mounts
+        id: api_secrets
+        run: |
+          set -euo pipefail
+
+          secret_args="DATABASE_URL=drts-staging-db-url:latest,API_KEY_SALT=drts-staging-api-key-salt:latest,JWT_SECRET=drts-staging-jwt-secret:latest"
+
+          if gcloud secrets describe drts-staging-internal-key --project "$PROJECT_ID" >/dev/null 2>&1; then
+            secret_args="${secret_args},DRTS_INTERNAL_KEY=drts-staging-internal-key:latest"
+            echo "::notice::Including optional DRTS_INTERNAL_KEY secret in drts-api deploy."
+          else
+            echo "::warning::Optional secret drts-staging-internal-key not found; deploying drts-api without DRTS_INTERNAL_KEY."
+          fi
+
+          printf 'api=%s\n' "$secret_args" >> "$GITHUB_OUTPUT"
+
       - name: Deploy — api
         run: |
           IMAGE="${{ env.REGISTRY }}/api:${{ needs.build-push.outputs.image_tag }}"
@@ -340,7 +356,7 @@ jobs:
             --port   3001 \
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "DATABASE_URL=drts-staging-db-url:latest,API_KEY_SALT=drts-staging-api-key-salt:latest,JWT_SECRET=drts-staging-jwt-secret:latest,DRTS_INTERNAL_KEY=drts-staging-internal-key:latest" \
+            --set-secrets "${{ steps.api_secrets.outputs.api }}" \
             --set-env-vars "NODE_ENV=production,API_PORT=3001" \
             ${{ steps.exposure.outputs.api }} \
             --min-instances 0 \
