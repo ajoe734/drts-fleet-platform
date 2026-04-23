@@ -25,5 +25,9 @@ Current posture:
 - the master closeout wave is complete except for `GAP-P2S3-001`
 - rollout evidence, tenant boundary, finance/reporting completeness, and
   integration hardening have been closed
+- current Phase 1 demand entry is third-party / partner / tenant / operator
+  driven rather than a first-party passenger app
+- passenger receipt UI remains out of the current Phase 1 completion bar
+- Cloud IAP / OIDC cutover follows a staged internal control-plane topology
 - Passenger App / Web, Call Point / Concierge Portal, and AV / live-board scope
   remain explicit deferred or future-gated families rather than hidden gaps

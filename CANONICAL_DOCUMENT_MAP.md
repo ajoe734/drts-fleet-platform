@@ -24,7 +24,17 @@ This file defines how collaboration state, Phase 1 product truth, execution rule
 - `phase1_service_contracts_v1.md`
 - `phase1_migration_plan_v1.md`
 
-Optional future addition:
+### L1.5 Accepted System Design Decisions
+
+These are scoped superseding records used during execution when a human-accepted
+decision temporarily overrides older conflicting L1 wording without rewriting
+the canonical PRD / SA files in the same wave.
+
+- `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`
+- `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
+- `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
+
+Optional future addition beyond the accepted packets above:
 
 - if a dedicated system design file is introduced, add it explicitly here and update precedence notes in the same change
 
@@ -64,12 +74,13 @@ These files are intentionally editable and reviewable. They are inputs to consen
 ### Product semantics and business truth
 
 1. latest explicit user instruction
-2. `phase1_prd_detailed_v1.md`
-3. `phase1_system_analysis_v1.md`
-4. `phase1_service_contracts_v1.md`
-5. `phase1_migration_plan_v1.md`
-6. L2 execution-rule documents
-7. OpenAPI examples, UI skeletons, generated artifacts, and local placeholders
+2. accepted decision packets within their explicit scoped conflict area
+3. `phase1_prd_detailed_v1.md`
+4. `phase1_system_analysis_v1.md`
+5. `phase1_service_contracts_v1.md`
+6. `phase1_migration_plan_v1.md`
+7. L2 execution-rule documents
+8. OpenAPI examples, UI skeletons, generated artifacts, and local placeholders
 
 ### Design proposals before consensus
 
@@ -80,6 +91,8 @@ These files are intentionally editable and reviewable. They are inputs to consen
 Important:
 
 - provisional design docs must not override product truth
+- accepted decision packets may temporarily supersede older L1 wording, but
+  only within the scope they name explicitly
 - extracted zip docs are now stable repo-local references and should be cited by path
 - if a future system design file is added, it must be inserted explicitly rather than assumed
 
@@ -89,11 +102,15 @@ Important:
   - `docs/README.md`
 - Current code-backed audit:
   - `docs/00-context/current-system-blueprint-alignment-audit-20260421.md`
+- Cross-repo code-backed annex audit:
+  - `docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md`
 - Core specs:
   - `phase1_system_analysis_v1.md`
   - `phase1_prd_detailed_v1.md`
   - `phase1_service_contracts_v1.md`
   - `phase1_migration_plan_v1.md`
+- Accepted system-design decisions:
+  - `docs/01-decisions/`
 - Extracted execution pack:
   - `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/`
 - Extracted DB bundle:
@@ -107,5 +124,6 @@ When two documents conflict:
 
 1. pick the higher-precedence source for the relevant scope
 2. cite the exact file and section
-3. record the conflict in the review round or open questions
-4. do not convert the interpretation into implementation work until the consensus packet or the human resolves it
+3. if an accepted decision packet already covers the conflict, follow it within scope and defer L1 edits to controlled design sync
+4. otherwise record the conflict in the review round or open questions
+5. do not convert the interpretation into implementation work until the consensus packet or the human resolves it

@@ -6,6 +6,10 @@ Status: seed delivery-order proposal for multi-LLM review. This file is not the 
 
 This roadmap is the current proposal for Phase 1 delivery order. It is not the supervisor task board yet, and it should be challenged against the canonical product truth during the consensus workflow.
 
+Execution-scoped design overrides accepted on `2026-04-22` now live under
+`docs/01-decisions/` and should be used when older L1 wording conflicts with
+the current implementation blueprint.
+
 ## Wave 0: Canonical Architecture Bootstrap
 
 - specialize the repo from imported orchestrator seed state to DRTS Phase 1
@@ -28,7 +32,7 @@ Exit gate:
 
 ## Wave 2: Owned Standard Taxi Core
 
-- passenger and call-center order creation
+- operator and call-center order creation
 - geocode and service-area validation
 - order classification
 - realtime dispatch
@@ -51,7 +55,7 @@ Exit gate:
 
 ## Wave 5: Billing, Reporting, and Filing
 
-- receipts, invoices, driver statements, reimbursements
+- tenant / partner invoices, driver statements, reimbursements, canonical financial records
 - report jobs and artifact lifecycle
 - filing package generation and manifesting
 
@@ -78,8 +82,9 @@ gate conditions, and promotion criteria for each family.
 ### Passenger App / Web (missing_surface_future_gated)
 
 - PRD §9.1.1
-- End-consumer-facing order creation, live tracking, receipt download, trip history
-- No repo landing zone exists; deferred pending human topology decision
+- Future-option end-consumer surface only; it is not part of the current Phase 1 completion bar
+- Current Phase 1 demand entry is third-party ride-hailing, partner / tenant channel, and operator / backoffice manual entry
+- No passenger receipt center is planned for the current Phase 1 execution mode
 - Do not treat as complete; do not remove from master plan
 
 ### Call Point / Concierge Portal (missing_surface_future_gated)
@@ -87,7 +92,7 @@ gate conditions, and promotion criteria for each family.
 - PRD §9.1.3
 - Concierge-assisted order entry, CTI screen-pop, assisted booking workflow
 - Backend callcenter module exists but no dedicated frontend surface
-- Deferred pending human topology decision (extend ops-console-web vs. new app)
+- Existing ops-console callcenter flow remains the Phase 1 operator path; a distinct concierge frontend stays deferred
 - Do not treat as complete; do not remove from master plan
 
 ### AV / ODD / Tesla / ROC Live-Board (future_gated)

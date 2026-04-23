@@ -36,6 +36,15 @@ Supporting repo-local orientation:
 - `DEVELOPMENT_WORKBREAKDOWN.md`
 - `CANONICAL_DOCUMENT_MAP.md`
 
+## Accepted System Design Decisions
+
+Use these when a scoped human-accepted decision temporarily supersedes older
+L1 wording without rewriting the canonical PRD / SA in the same execution wave.
+
+- `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`
+- `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
+- `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
+
 ## Current System Truth
 
 Use these when the question is about what is actually implemented and what
@@ -49,11 +58,15 @@ remains open now.
   Short repo posture summary.
 - `docs/00-context/current-system-blueprint-alignment-audit-20260421.md`
   Code-verified alignment and residual gaps.
+- `docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md`
+  Cross-repo code-backed annex audit comparing the local workspace checkout and
+  a clean clone of `tenant-commute-hub` `origin/main`.
 
 ## Runbooks, Rollout, and Evidence
 
 - `docs/03-runbooks/master-system-closeout-checklist.md`
 - `docs/03-runbooks/execution-next-wave-task-board.md`
+- `docs/03-runbooks/execution-mode-candidate-backlog.md`
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
 - `docs/03-runbooks/phase1-rollout.md`
 - `docs/04-uat/phase1-uat-checklist.md`
@@ -65,6 +78,7 @@ remains open now.
 - `docs/02-architecture/repo-structure.md`
 - `docs/02-architecture/tenant-commute-hub-boundary.md`
 - `docs/02-architecture/authority/rgp-002-authority-map.md`
+- `docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md`
 - `docs/02-architecture/authority/fbp-005-tenant-bff-parity-matrix.md`
 - `docs/02-architecture/authority/fbp-006-tenant-commute-hub-cutover-spec.md`
 - `docs/02-architecture/authority/fbp-007-tenant-portal-web-sunset.md`
