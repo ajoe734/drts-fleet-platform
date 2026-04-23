@@ -2,14 +2,23 @@
 
 ## Purpose
 
-This board reflects the current supervisor-managed execution wave materialized from
-`docs/03-runbooks/master-system-closeout-checklist.md`.
+This board reflects the current supervisor-managed execution board after the
+system closeout wave and the newly materialized post-closeout hardening /
+parity / evidence wave.
 
 It is the practical bridge between:
 
 - the broader system-closeout blueprint
 - the current `ai-status.json` execution backlog
 - the one remaining external auth blocker
+- the repo-executable next-wave backlog now opened from
+  `docs/03-runbooks/execution-mode-candidate-backlog.md`
+
+## Decision Anchors
+
+- `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`
+- `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
+- `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
 
 ## 1. Execution-Ready Now
 
@@ -56,7 +65,7 @@ These tasks were real and materialized; only one remains open now.
 1. `GAP-P2S3-001`
    - status: `blocked`
    - owner: `Gemini`
-   - objective: Cloud IAP / OIDC JWT production, replacing bootstrap-header trust
+   - objective: Cloud IAP / OIDC JWT production for the staged internal control-plane cutover, replacing bootstrap-header trust
    - blocker: manual GCP / Cloud IAP / IAM / secret setup still required before repo execution can proceed
    - unblock path: `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
 
@@ -65,11 +74,41 @@ These tasks were real and materialized; only one remains open now.
 If supervisor execution mode keeps running, the intended behavior is:
 
 1. keep `GAP-P2S3-001` visible but blocked as the only active product-critical blocker
-2. use `docs/03-runbooks/master-system-closeout-checklist.md` as the planning anchor for any remaining closeout work
-3. avoid reopening the closeout narrative unless execution truth changes again
+2. allow the post-closeout execution slices to proceed in parallel where their dependency graph permits
+3. use `docs/03-runbooks/master-system-closeout-checklist.md` plus `docs/03-runbooks/execution-mode-candidate-backlog.md` as the planning anchors
+4. avoid reopening product-surface scope that is intentionally out of strategy or externally gated
 
 ## 5. Current Interpretation
 
 - The switchboard follow-up wave is already closed.
-- The substantive closeout wave (`MSC-R1-001`, `MSC-T1-001`, `MSC-P1-001`, `MSC-F1-001`, `MSC-I1-001`) and the final narrative sync (`MSC-N1-001`) are now done.
+- The substantive closeout wave (`MSC-R1-001`, `MSC-T1-001`, `MSC-P1-001`, `MSC-F1-001`, `MSC-I1-001`) and the final narrative sync (`MSC-N1-001`) are done.
+- A fresh repo-only execution wave is now open for hardening, workflow parity, and evidence expansion.
 - The final “all-clear” narrative still cannot close until `GAP-P2S3-001` is unblocked.
+
+## 6. Materialized Post-Closeout Wave
+
+On `2026-04-22`, the repo-executable candidates were materialized into
+`ai-status.json` so the supervisor and auto workers could start execution.
+
+Current active families:
+
+1. `EMC-H1-001` through `EMC-H1-004`
+   - persistence and source-of-truth hardening
+2. `EMC-H2-001`
+   - driver-task runtime bus externalization
+3. `EMC-W1-001` through `EMC-W1-003`
+   - workflow parity and authority hardening
+4. `EMC-I1-001` and `EMC-I1-002`
+   - evidence expansion and repo-controlled automation
+
+Execution notes:
+
+1. `EMC-X1-001` remains partner-gated, while `EMC-X1-002` has now progressed through annex audit, PR landing, and merge: `ajoe734/tenant-commute-hub#1` and `ajoe734/drts-fleet-platform#1` are both merged, local live smoke passed through the landing branch plus local `drts-api`, and the backend merge was taken with explicit owner risk acceptance despite unrelated clean-branch CI debt; the remaining remainder is the residual identity-hardening slice if the team wants stricter pure-consumer posture
+2. first-party Passenger App / Web and passenger-surface receipt UI remain intentionally out of scope
+3. `GAP-P2S3-001` stays visible as the only product-critical blocker even while this wave runs
+4. staged identity-cutover planning now assumes internal control-plane callers move first; tenant, driver, adapter, and webhook flows are not default IAP targets
+
+## 7. Backlog Source
+
+For the detailed rationale, ordering, and non-materialized remainder, use
+`docs/03-runbooks/execution-mode-candidate-backlog.md`.
