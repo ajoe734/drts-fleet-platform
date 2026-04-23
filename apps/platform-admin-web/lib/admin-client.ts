@@ -7,14 +7,15 @@
 
 import { useMemo, useCallback, useState, useEffect } from "react";
 import { createPlatformAdminClient, ApiClient } from "@drts/api-client";
+import { getRuntimeApiBaseUrl } from "./runtime-config";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 const ACTOR_ID = "platform-admin-web-bootstrap";
 
 export function usePlatformAdminClient() {
+  const apiBaseUrl = getRuntimeApiBaseUrl();
   const client = useMemo(
-    () => createPlatformAdminClient(API_BASE_URL, ACTOR_ID),
-    [],
+    () => createPlatformAdminClient(apiBaseUrl, ACTOR_ID),
+    [apiBaseUrl],
   );
   return client;
 }

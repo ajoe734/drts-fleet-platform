@@ -3,25 +3,28 @@
  */
 
 import { createOpsClient, ApiClient } from "@drts/api-client";
+import { getRuntimeApiBaseUrl } from "./runtime-config";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 const DEMO_ACTOR_ID = "demo-ops-user";
 
-let _client: ApiClient | null = null;
+const clientCache = new Map<string, ApiClient>();
 
 export function getOpsClient(): ApiClient {
-  if (!_client) {
-    _client = createOpsClient(API_URL, DEMO_ACTOR_ID);
+  const apiUrl = getRuntimeApiBaseUrl();
+  const cachedClient = clientCache.get(apiUrl);
+  if (cachedClient) {
+    return cachedClient;
   }
-  return _client;
+
+  const client = createOpsClient(apiUrl, DEMO_ACTOR_ID);
+  clientCache.set(apiUrl, client);
+  return client;
 }
 
 export function createOpsDispatchEventSource(): EventSource {
-  const url = new URL("/api/ops/dispatch-events", API_URL);
+  const url = new URL("/api/ops/dispatch-events", getRuntimeApiBaseUrl());
   url.searchParams.set("actorType", "ops_user");
   url.searchParams.set("actorId", DEMO_ACTOR_ID);
   url.searchParams.set("realm", "ops");
   return new EventSource(url.toString());
 }
-
-export { API_URL };
