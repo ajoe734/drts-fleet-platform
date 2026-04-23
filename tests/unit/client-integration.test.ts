@@ -544,4 +544,85 @@ describe("W8-001A shared api client list handling", () => {
       },
     ]);
   });
+
+  it("converts snake_case wire payloads into camelCase client records", async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            items: [
+              {
+                booking_id: "booking-001",
+                order_status: "created",
+                business_dispatch_subtype: "enterprise_dispatch",
+                reservation_window_start: "2026-04-23T00:00:00.000Z",
+                passenger: {
+                  name: "Smoke Passenger",
+                },
+                pickup: {
+                  address: "1 Smoke Plaza",
+                },
+                dropoff: {
+                  address: "99 Destination Ave",
+                },
+              },
+            ],
+          },
+        }),
+        text: async () => "",
+      } as Response;
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+    const bookings = await client.listTenantBookings();
+
+    expect(bookings).toEqual([
+      {
+        bookingId: "booking-001",
+        orderStatus: "created",
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-23T00:00:00.000Z",
+        passenger: {
+          name: "Smoke Passenger",
+        },
+        pickup: {
+          address: "1 Smoke Plaza",
+        },
+        dropoff: {
+          address: "99 Destination Ave",
+        },
+      },
+    ]);
+  });
+
+  it("converts snake_case accepted command responses into camelCase fields", async () => {
+    const fetchMock = vi.fn(async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            job_id: "JOB-001",
+            status: "queued",
+          },
+        }),
+        text: async () => "",
+      } as Response;
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+    const accepted = await client.createTenantReportJob({
+      jobType: "trip_summary",
+      format: "csv",
+    });
+
+    expect(accepted).toEqual({
+      jobId: "JOB-001",
+      status: "queued",
+    });
+  });
 });
