@@ -30,7 +30,14 @@ interface TokenRequest {
   url?: string;
 }
 
-const TENANT_BOOTSTRAP_EXPIRES_IN = "8h";
+type JwtExpiresIn = NonNullable<
+  Extract<
+    NonNullable<Parameters<JwtAuthService["sign"]>[1]>["expiresIn"],
+    string
+  >
+>;
+
+const TENANT_BOOTSTRAP_EXPIRES_IN: JwtExpiresIn = "8h";
 
 @Controller("auth")
 export class AuthController {
@@ -62,7 +69,8 @@ export class AuthController {
       );
     }
 
-    const expiresIn = identity.actorType === "system" ? "1h" : "8h";
+    const expiresIn: JwtExpiresIn =
+      identity.actorType === "system" ? "1h" : "8h";
     const token = this.signJwt(identity, expiresIn);
     return { token, expiresIn };
   }
@@ -234,7 +242,7 @@ export class AuthController {
 
   private signJwt(
     identity: Parameters<JwtAuthService["sign"]>[0],
-    expiresIn: string,
+    expiresIn: JwtExpiresIn,
   ) {
     try {
       return this.jwtAuthService.sign(identity, { expiresIn });

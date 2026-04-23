@@ -18,8 +18,10 @@ export interface JwtIdentityPayload {
   scopes: string[];
 }
 
-const DEFAULT_EXPIRES_IN = "8h";
-const SERVICE_EXPIRES_IN = "1h";
+type JwtExpiresIn = Extract<NonNullable<jwt.SignOptions["expiresIn"]>, string>;
+
+const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
+const SERVICE_EXPIRES_IN: JwtExpiresIn = "1h";
 
 @Injectable()
 export class JwtAuthService {
@@ -41,7 +43,7 @@ export class JwtAuthService {
     return process.env.JWT_AUDIENCE || process.env.OIDC_AUDIENCE || undefined;
   }
 
-  private buildJwtOptions(expiresIn?: string): jwt.SignOptions {
+  private buildJwtOptions(expiresIn?: JwtExpiresIn): jwt.SignOptions {
     const issuer = this.getIssuer();
     const audience = this.getAudience();
     const options: jwt.SignOptions = {};
@@ -76,7 +78,7 @@ export class JwtAuthService {
 
   sign(
     identity: BootstrapRequestIdentity,
-    opts?: { expiresIn?: string },
+    opts?: { expiresIn?: JwtExpiresIn },
   ): string {
     const payload: JwtIdentityPayload = {
       sub: identity.actorId,
