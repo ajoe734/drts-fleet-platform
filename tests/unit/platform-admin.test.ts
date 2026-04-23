@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import type { BootstrapRequestIdentity } from "../../apps/api/src/common/auth";
 import { PlatformAdminController } from "../../apps/api/src/modules/platform-admin/platform-admin.controller";
@@ -26,6 +27,7 @@ describe("platform admin service", () => {
         effectiveFrom: "2026-07-01T00:00:00Z",
       },
       "public-info-publish-request",
+      "platform-admin-jwt-001",
     );
 
     expect(publishedVersion.status).toBe("published");
@@ -77,6 +79,47 @@ describe("platform admin service", () => {
     );
   });
 
+  it("rejects public info publish when no verified identity actorId is provided", () => {
+    const auditService = new AuditNotificationService();
+    const platformAdminService = new PlatformAdminService(auditService);
+
+    const draftVersion = platformAdminService.createPublicInfoVersion(
+      {
+        title: "2026 Q4 公開資訊版 B",
+      },
+      "public-info-create-request",
+    );
+
+    let thrown: unknown;
+    try {
+      platformAdminService.publishPublicInfoVersion(
+        draftVersion.versionId,
+        {
+          publishedBy: "forged-body-actor",
+        },
+        "public-info-publish-request",
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ApiRequestError);
+    expect((thrown as ApiRequestError).status).toBe(401);
+    expect((thrown as ApiRequestError).response.error.code).toBe(
+      "PLATFORM_ADMIN_IDENTITY_REQUIRED",
+    );
+    expect(
+      auditService
+        .listAuditLogs()
+        .filter((entry) => entry.actionName === "publish_public_info_version"),
+    ).toHaveLength(0);
+    expect(
+      auditService
+        .listAuditLogs()
+        .some((entry) => entry.actionName === "create_public_info_version"),
+    ).toBe(true);
+  });
+
   it("controller forwards the verified identity actorId to publish public info", () => {
     const service = {
       publishPublicInfoVersion: vi.fn(() => ({
@@ -110,6 +153,32 @@ describe("platform admin service", () => {
       "req-123",
       "platform-admin-jwt-001",
     );
+  });
+
+  it("controller rejects public info publish when identity is missing", () => {
+    const service = {
+      publishPublicInfoVersion: vi.fn(),
+    } as unknown as PlatformAdminService;
+    const controller = new PlatformAdminController(service);
+
+    let thrown: unknown;
+    try {
+      controller.publishPublicInfoVersion(
+        "public-info-001",
+        { publishedBy: "body-actor" },
+        null,
+        "req-123",
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ApiRequestError);
+    expect((thrown as ApiRequestError).status).toBe(401);
+    expect((thrown as ApiRequestError).response.error.code).toBe(
+      "PLATFORM_ADMIN_IDENTITY_REQUIRED",
+    );
+    expect(service.publishPublicInfoVersion).not.toHaveBeenCalled();
   });
 
   it("controller forwards the verified identity actorId to delete draft public info", () => {
