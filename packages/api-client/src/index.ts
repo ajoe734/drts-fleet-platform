@@ -144,6 +144,29 @@ interface ListEnvelope<T> {
   items: T[];
 }
 
+function snakeToCamelCase(key: string): string {
+  return key.replace(/_([a-z])/g, (_match, letter: string) =>
+    letter.toUpperCase(),
+  );
+}
+
+function deepToCamelCase(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => deepToCamelCase(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => [
+        snakeToCamelCase(key),
+        deepToCamelCase(nestedValue),
+      ]),
+    );
+  }
+
+  return value;
+}
+
 function createRequestToken(): string {
   if (
     typeof globalThis.crypto !== "undefined" &&
@@ -253,7 +276,7 @@ export class ApiClient {
       }
 
       const envelope: ApiSuccessEnvelope<T> = await response.json();
-      return envelope.data;
+      return deepToCamelCase(envelope.data) as T;
     } finally {
       clearTimeout(timeoutId);
     }

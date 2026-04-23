@@ -308,6 +308,26 @@ export class TenantPartnerController {
     );
   }
 
+  @Post("tenant/webhooks/test")
+  async sendTestWebhook(
+    @Body() command: SendTestWebhookCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = await this.tenantPartnerService.sendTestWebhook(
+      this.requireTenantId(tenantId),
+      command,
+      requestId,
+    );
+    return toApiSuccessEnvelope(
+      result ?? {
+        deliveryId: null,
+        httpStatus: 404,
+      },
+      requestId,
+    );
+  }
+
   @Post("tenant/webhooks/:webhookId")
   updateWebhookEndpoint(
     @Param("webhookId") webhookId: string,
@@ -339,26 +359,6 @@ export class TenantPartnerController {
         requestId,
       ) ?? {
         status: "not_found",
-      },
-      requestId,
-    );
-  }
-
-  @Post("tenant/webhooks/test")
-  async sendTestWebhook(
-    @Body() command: SendTestWebhookCommand,
-    @Headers("x-tenant-id") tenantId?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    const result = await this.tenantPartnerService.sendTestWebhook(
-      this.requireTenantId(tenantId),
-      command,
-      requestId,
-    );
-    return toApiSuccessEnvelope(
-      result ?? {
-        deliveryId: null,
-        httpStatus: 404,
       },
       requestId,
     );
