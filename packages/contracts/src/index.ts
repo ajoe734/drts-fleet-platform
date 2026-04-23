@@ -130,6 +130,29 @@ export interface IdentityContext {
   supportedExecutionModes: SupervisorExecutionMode[];
 }
 
+export interface CreateTenantBootstrapSessionCommand {
+  email: string;
+  fullName?: string;
+  roleCode?: string;
+  tenantId?: string;
+}
+
+export interface TenantPortalProfile {
+  id: string;
+  tenantId: string;
+  fullName: string;
+  email: string;
+  roleCode: string;
+}
+
+export interface TenantBootstrapSession {
+  accessToken: string;
+  tokenType: "Bearer";
+  expiresIn: string;
+  profile: TenantPortalProfile;
+  identity: IdentityContext;
+}
+
 export interface TenantPartnerSummary {
   supportedRoots: Array<"tenant" | "partner" | "site" | "call_point">;
   sourceOfTruth: "tenant_partner_service" | "foundation_bootstrap_placeholder";

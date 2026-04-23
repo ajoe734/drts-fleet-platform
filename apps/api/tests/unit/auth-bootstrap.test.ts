@@ -2,6 +2,9 @@ import { Reflector } from "@nestjs/core";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { AuthController } from "../../src/modules/auth/auth.controller";
+import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import {
   BootstrapAuthGuard,
   InternalKeyMiddleware,
@@ -131,6 +134,65 @@ describe("bootstrap auth guard", () => {
     );
 
     expect(guard.canActivate(context)).toBe(true);
+  });
+
+  it("still resolves bearer identity on OpenRoute endpoints when a token is present", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const jwtAuthService = new JwtAuthService();
+    const token = jwtAuthService.sign(
+      {
+        authMode: "bootstrap_headers",
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roleFamilies: ["tenant"],
+        roles: ["tenant_admin"],
+        scopes: ["tenant:read"],
+        requestId: "req-open-jwt-001",
+      },
+      { expiresIn: "10m" },
+    );
+    const guard = new BootstrapAuthGuard(new Reflector(), jwtAuthService);
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      method: "GET",
+      originalUrl: "/api/identity/context",
+    };
+    class PublicHandler {
+      handler() {}
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(
+      PublicHandler.prototype,
+      "handler",
+    );
+    expect(descriptor).toBeDefined();
+    if (!descriptor) {
+      throw new Error("expected descriptor");
+    }
+    OpenRoute()(PublicHandler.prototype, "handler", descriptor);
+
+    const context = createExecutionContext(
+      request,
+      PublicHandler.prototype.handler,
+      PublicHandler,
+    );
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(request.identity).toMatchObject({
+      authMode: "jwt_bearer",
+      actorId: "tenant-admin-001",
+      tenantId: "tenant-demo-001",
+    });
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
   });
 
   it("rejects decorator-scoped endpoints when scopes are missing", () => {
@@ -410,6 +472,47 @@ describe("internal key middleware", () => {
     ).not.toThrow();
   });
 
+  it("allows public tenant role-catalog reads without the internal key", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {},
+          method: "GET",
+          originalUrl: "/api/tenant/roles",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
+  it("allows tenant bootstrap-session issuance without the internal key", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {},
+          method: "POST",
+          originalUrl: "/api/auth/tenant/bootstrap-session",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
+  it("allows bearer-authenticated tenant routes without the internal key", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {
+            authorization: "Bearer session-token-001",
+          },
+          method: "GET",
+          originalUrl: "/api/tenant/passengers",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
   it("rejects uncovered admin routes without the internal key", () => {
     expect(() =>
       validateInternalKey(
@@ -528,5 +631,81 @@ describe("internal key middleware", () => {
     }
 
     expect(next).toHaveBeenCalledOnce();
+  });
+});
+
+describe("tenant bootstrap-session auth controller", () => {
+  it("issues a bearer session envelope for tenant portal login", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const controller = new AuthController(
+      new JwtAuthService(),
+      new TenantPartnerService(new AuditNotificationService()),
+    );
+
+    const response = controller.issueTenantBootstrapSession(
+      {
+        email: "tenant.admin@example.com",
+        fullName: "Tenant Admin",
+        roleCode: "tenant_ops_admin",
+      },
+      "req-tenant-bootstrap-001",
+    );
+
+    expect(response.data).toMatchObject({
+      tokenType: "Bearer",
+      expiresIn: "8h",
+      profile: {
+        email: "tenant.admin@example.com",
+        roleCode: "tenant_ops_admin",
+        tenantId: "tenant-demo-001",
+      },
+      identity: {
+        actorType: "tenant_admin",
+        authMode: "jwt_bearer",
+        realm: "tenant",
+        roles: ["tenant_ops_admin"],
+        tenantId: "tenant-demo-001",
+      },
+    });
+    expect(response.data.accessToken).toMatch(/\S+/);
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+  });
+
+  it("prefers the server-side tenant user record when the email already exists", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const controller = new AuthController(
+      new JwtAuthService(),
+      new TenantPartnerService(new AuditNotificationService()),
+    );
+
+    const response = controller.issueTenantBootstrapSession(
+      {
+        email: "admin@acme.example",
+        fullName: "Requested Name",
+        roleCode: "tenant_viewer",
+      },
+      "req-tenant-bootstrap-002",
+    );
+
+    expect(response.data.profile).toMatchObject({
+      id: "tenant-user-demo-001",
+      fullName: "Acme Tenant Admin",
+      email: "admin@acme.example",
+      roleCode: "tenant_admin",
+      tenantId: "tenant-demo-001",
+    });
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
   });
 });

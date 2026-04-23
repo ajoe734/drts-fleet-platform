@@ -29,6 +29,7 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import { OpenRoute } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { TenantPartnerService } from "./tenant-partner.service";
 
@@ -133,12 +134,9 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/roles")
+  @OpenRoute()
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listTenantRoles(
-    @Headers("x-tenant-id") tenantId?: string,
-    @Headers("x-request-id") requestId?: string,
-  ) {
-    this.requireTenantId(tenantId);
+  listTenantRoles(@Headers("x-request-id") requestId?: string) {
     const items = this.tenantPartnerService.listTenantRoles();
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }

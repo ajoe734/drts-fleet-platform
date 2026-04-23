@@ -105,6 +105,11 @@ export class BootstrapAuthGuard implements CanActivate {
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
+    const request = context
+      .switchToHttp()
+      .getRequest<AuthenticatedRequestLike>();
+    const requestUrl = request.originalUrl ?? request.url ?? "";
+    const baseHeaders = asHeaderRecord(request.headers);
     const isOpenRoute =
       this.reflector.getAllAndOverride<boolean>(AUTH_OPEN_ROUTE_KEY, [
         context.getHandler(),
@@ -112,14 +117,9 @@ export class BootstrapAuthGuard implements CanActivate {
       ]) ?? false;
 
     if (isOpenRoute) {
+      this.populateOpenRouteIdentity(request, baseHeaders, requestUrl);
       return true;
     }
-
-    const request = context
-      .switchToHttp()
-      .getRequest<AuthenticatedRequestLike>();
-    const requestUrl = request.originalUrl ?? request.url ?? "";
-    const baseHeaders = asHeaderRecord(request.headers);
 
     // JWT fast-path: verify Bearer token if present
     if (this.jwtAuthService) {
@@ -204,6 +204,38 @@ export class BootstrapAuthGuard implements CanActivate {
     this.assertScopesAllowed(identity, policy.requiredScopes, request);
 
     return true;
+  }
+
+  private populateOpenRouteIdentity(
+    request: AuthenticatedRequestLike,
+    baseHeaders: Record<string, string | string[] | undefined>,
+    requestUrl: string,
+  ) {
+    if (this.jwtAuthService) {
+      const token = extractBearerToken(baseHeaders);
+      if (token) {
+        const payload = this.jwtAuthService.verify(token);
+        if (payload) {
+          request.identity = this.jwtAuthService.toRequestIdentity(payload);
+          return;
+        }
+        throw new ApiRequestError(
+          401,
+          "JWT_INVALID",
+          "Bearer token is invalid or expired.",
+          { route: requestUrl },
+        );
+      }
+    }
+
+    const anonymousIdentity = extractBootstrapRequestIdentity(baseHeaders, {
+      allowAnonymous: true,
+      method: request.method ?? undefined,
+      requestUrl: requestUrl || undefined,
+    });
+    if (anonymousIdentity) {
+      request.identity = anonymousIdentity;
+    }
   }
 
   private assertRealmAllowed(

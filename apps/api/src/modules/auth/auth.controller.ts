@@ -1,10 +1,27 @@
-import { Controller, Post, Req } from "@nestjs/common";
+import { Body, Controller, Headers, Post, Req } from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
 
-import { ApiRequestError } from "../../common/api-envelope";
+import type {
+  CreateTenantBootstrapSessionCommand,
+  IdentityContext,
+  TenantBootstrapSession,
+  TenantPortalProfile,
+  TenantRoleCatalogRecord,
+  TenantUserRoleRecord,
+} from "@drts/contracts";
+
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
+import { OpenRoute } from "../../common/auth";
+import { AUTH_SCOPE_PRESETS } from "../../common/auth/auth.constants";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
 import type { AuthBootstrapHeaders } from "../../common/auth/auth.types";
+import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 
 interface TokenRequest {
   headers: AuthBootstrapHeaders & { "x-drts-internal-key"?: string };
@@ -13,9 +30,14 @@ interface TokenRequest {
   url?: string;
 }
 
+const TENANT_BOOTSTRAP_EXPIRES_IN = "8h";
+
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly jwtAuthService: JwtAuthService) {}
+  constructor(
+    private readonly jwtAuthService: JwtAuthService,
+    private readonly tenantPartnerService: TenantPartnerService,
+  ) {}
 
   @Post("token")
   issueToken(@Req() request: TokenRequest): {
@@ -41,7 +63,197 @@ export class AuthController {
     }
 
     const expiresIn = identity.actorType === "system" ? "1h" : "8h";
-    const token = this.jwtAuthService.sign(identity, { expiresIn });
+    const token = this.signJwt(identity, expiresIn);
     return { token, expiresIn };
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("tenant/bootstrap-session")
+  issueTenantBootstrapSession(
+    @Body() command: CreateTenantBootstrapSessionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const normalizedEmail = command.email?.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new ApiRequestError(400, "FIELD_REQUIRED", "email is required.", {
+        field: "email",
+      });
+    }
+
+    const tenantId =
+      command.tenantId?.trim() ||
+      this.tenantPartnerService.getDefaultTenantId();
+    const existingUser =
+      this.tenantPartnerService
+        .listTenantUsers(tenantId)
+        .find((user) => user.email === normalizedEmail) ?? null;
+
+    if (existingUser?.status === "suspended") {
+      throw new ApiRequestError(
+        403,
+        "TENANT_USER_SUSPENDED",
+        "The tenant user is suspended and cannot start a portal session.",
+        {
+          email: normalizedEmail,
+          tenantId,
+        },
+      );
+    }
+
+    const roleCatalog = this.tenantPartnerService.listTenantRoles();
+    const resolvedRoleCode = this.resolveRoleCode(
+      roleCatalog,
+      existingUser,
+      command.roleCode,
+    );
+    const profile = this.buildTenantPortalProfile(
+      tenantId,
+      normalizedEmail,
+      command.fullName,
+      existingUser,
+      resolvedRoleCode,
+    );
+    const identity = this.buildIdentityContext(profile);
+    const token = this.signJwt(
+      {
+        authMode: "bootstrap_headers",
+        actorType: identity.actorType,
+        actorId: identity.actorId,
+        realm: identity.realm,
+        tenantId: identity.tenantId,
+        roleFamilies: identity.roleFamilies,
+        roles: identity.roles,
+        scopes: identity.scopes,
+        requestId: requestId ?? null,
+      },
+      TENANT_BOOTSTRAP_EXPIRES_IN,
+    );
+    const session: TenantBootstrapSession = {
+      accessToken: token,
+      tokenType: "Bearer",
+      expiresIn: TENANT_BOOTSTRAP_EXPIRES_IN,
+      profile,
+      identity,
+    };
+
+    return toApiSuccessEnvelope(session, requestId);
+  }
+
+  private resolveRoleCode(
+    roleCatalog: TenantRoleCatalogRecord[],
+    existingUser: TenantUserRoleRecord | null,
+    requestedRoleCode?: string,
+  ): string {
+    if (existingUser?.roleCode?.trim()) {
+      return existingUser.roleCode.trim();
+    }
+
+    const normalizedRequestedRole = requestedRoleCode?.trim();
+    if (normalizedRequestedRole) {
+      const requestedRoleSupported = roleCatalog.some(
+        (role) => role.roleCode === normalizedRequestedRole,
+      );
+      if (!requestedRoleSupported) {
+        throw new ApiRequestError(
+          400,
+          "UNSUPPORTED_TENANT_ROLE",
+          "The tenant role code is not supported.",
+          {
+            roleCode: normalizedRequestedRole,
+          },
+        );
+      }
+      return normalizedRequestedRole;
+    }
+
+    return (
+      roleCatalog.find((role) => role.assignable)?.roleCode ?? "tenant_admin"
+    );
+  }
+
+  private buildTenantPortalProfile(
+    tenantId: string,
+    email: string,
+    requestedFullName: string | undefined,
+    existingUser: TenantUserRoleRecord | null,
+    roleCode: string,
+  ): TenantPortalProfile {
+    const fullName =
+      existingUser?.displayName?.trim() ||
+      requestedFullName?.trim() ||
+      this.deriveFallbackDisplayName(email);
+
+    return {
+      id: existingUser?.userId?.trim() || this.deriveActorId(email),
+      tenantId,
+      fullName,
+      email,
+      roleCode,
+    };
+  }
+
+  private buildIdentityContext(profile: TenantPortalProfile): IdentityContext {
+    return {
+      actorType: "tenant_admin",
+      actorId: profile.id,
+      realm: "tenant",
+      authMode: "jwt_bearer",
+      roleFamilies: ["tenant"],
+      roles: [profile.roleCode],
+      scopes: [...AUTH_SCOPE_PRESETS.tenant_admin],
+      tenantId: profile.tenantId,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+  }
+
+  private deriveFallbackDisplayName(email: string): string {
+    const localPart = email.split("@", 1)[0]?.trim();
+    if (!localPart) {
+      return "Tenant User";
+    }
+
+    return localPart
+      .split(/[._-]+/)
+      .filter(Boolean)
+      .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+      .join(" ");
+  }
+
+  private deriveActorId(email: string): string {
+    const slug =
+      email
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "tenant-portal-user";
+    return `tenant-portal-${slug}`;
+  }
+
+  private signJwt(
+    identity: Parameters<JwtAuthService["sign"]>[0],
+    expiresIn: string,
+  ) {
+    try {
+      return this.jwtAuthService.sign(identity, { expiresIn });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes("JWT_SECRET environment variable is not set")
+      ) {
+        throw new ApiRequestError(
+          503,
+          "JWT_NOT_CONFIGURED",
+          "JWT session issuance is not configured for this environment.",
+          {
+            requiredEnv: "JWT_SECRET",
+          },
+        );
+      }
+
+      throw error;
+    }
   }
 }

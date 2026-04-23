@@ -306,6 +306,72 @@ describe("W8-001A shared api client list handling", () => {
     );
   });
 
+  it("targets the tenant bootstrap-session auth route for tenant portal login", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          access_token: "jwt-token-001",
+          token_type: "Bearer",
+          expires_in: "8h",
+          profile: {
+            id: "tenant-user-001",
+            tenant_id: "tenant-demo-001",
+            full_name: "Tenant User",
+            email: "tenant.admin@example.com",
+            role_code: "tenant_admin",
+          },
+          identity: {
+            actor_type: "tenant_admin",
+            actor_id: "tenant-user-001",
+            realm: "tenant",
+            auth_mode: "jwt_bearer",
+            role_families: ["tenant"],
+            roles: ["tenant_admin"],
+            scopes: ["tenant:read", "tenant:write"],
+            tenant_id: "tenant-demo-001",
+            supported_execution_modes: [
+              "discussion_planning",
+              "supervisor_managed_execution",
+            ],
+          },
+        },
+      }),
+      text: async () => "",
+    } as Response);
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await expect(
+      client.createTenantBootstrapSession({
+        email: "tenant.admin@example.com",
+        fullName: "Tenant User",
+        roleCode: "tenant_admin",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        accessToken: "jwt-token-001",
+        tokenType: "Bearer",
+        expiresIn: "8h",
+        profile: expect.objectContaining({
+          tenantId: "tenant-demo-001",
+          roleCode: "tenant_admin",
+        }),
+        identity: expect.objectContaining({
+          authMode: "jwt_bearer",
+          tenantId: "tenant-demo-001",
+        }),
+      }),
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:3001/api/auth/tenant/bootstrap-session",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("targets the platform-admin delete draft public info route with DELETE", async () => {
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
