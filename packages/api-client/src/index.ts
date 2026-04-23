@@ -22,6 +22,7 @@ import type {
   ComplaintExportViewRecord,
   ComplaintTimelineEntry,
   CompleteCallbackTaskCommand,
+  CreateTenantBootstrapSessionCommand,
   CreateDriverProfileCommand,
   CreateOwnedOrderCommand,
   CreatePublicInfoVersionCommand,
@@ -100,6 +101,7 @@ import type {
   ShiftRecord,
   TenantAddressRecord,
   TenantApiKeyRecord,
+  TenantBootstrapSession,
   TenantInvoiceRecord,
   TenantPassengerRecord,
   TenantRoleCatalogRecord,
@@ -309,6 +311,17 @@ export class ApiClient {
 
   async getIdentityContext() {
     return this.get("/api/identity/context");
+  }
+
+  async createTenantBootstrapSession(
+    command: CreateTenantBootstrapSessionCommand,
+  ): Promise<TenantBootstrapSession> {
+    return this.post<TenantBootstrapSession>(
+      "/api/auth/tenant/bootstrap-session",
+      {
+        body: command,
+      },
+    );
   }
 
   // ── Owned Mobility: Orders ──

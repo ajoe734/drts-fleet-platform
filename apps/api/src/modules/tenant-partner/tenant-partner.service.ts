@@ -635,6 +635,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((userRole) => this.cloneUserRole(userRole));
   }
 
+  getDefaultTenantId() {
+    return DEMO_TENANT_ID;
+  }
+
   listTenantRoles() {
     return TENANT_ROLE_CATALOG.map((role) => ({ ...role }));
   }
