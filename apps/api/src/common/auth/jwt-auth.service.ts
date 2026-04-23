@@ -41,6 +41,39 @@ export class JwtAuthService {
     return process.env.JWT_AUDIENCE || process.env.OIDC_AUDIENCE || undefined;
   }
 
+  private buildJwtOptions(expiresIn?: string): jwt.SignOptions {
+    const issuer = this.getIssuer();
+    const audience = this.getAudience();
+    const options: jwt.SignOptions = {};
+
+    if (expiresIn) {
+      options.expiresIn = expiresIn;
+    }
+    if (issuer) {
+      options.issuer = issuer;
+    }
+    if (audience) {
+      options.audience = audience;
+    }
+
+    return options;
+  }
+
+  private buildJwtVerifyOptions(): jwt.VerifyOptions {
+    const issuer = this.getIssuer();
+    const audience = this.getAudience();
+    const options: jwt.VerifyOptions = {};
+
+    if (issuer) {
+      options.issuer = issuer;
+    }
+    if (audience) {
+      options.audience = audience;
+    }
+
+    return options;
+  }
+
   sign(
     identity: BootstrapRequestIdentity,
     opts?: { expiresIn?: string },
@@ -60,19 +93,16 @@ export class JwtAuthService {
         ? SERVICE_EXPIRES_IN
         : DEFAULT_EXPIRES_IN);
 
-    return jwt.sign(payload, this.getSecret(), {
-      expiresIn,
-      issuer: this.getIssuer(),
-      audience: this.getAudience(),
-    } as jwt.SignOptions);
+    return jwt.sign(payload, this.getSecret(), this.buildJwtOptions(expiresIn));
   }
 
   verify(token: string): JwtIdentityPayload | null {
     try {
-      return jwt.verify(token, this.getSecret(), {
-        issuer: this.getIssuer(),
-        audience: this.getAudience(),
-      }) as JwtIdentityPayload;
+      return jwt.verify(
+        token,
+        this.getSecret(),
+        this.buildJwtVerifyOptions(),
+      ) as JwtIdentityPayload;
     } catch (err) {
       this.logger.debug(`JWT verification failed: ${(err as Error).message}`);
       return null;

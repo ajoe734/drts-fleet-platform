@@ -342,6 +342,47 @@ describe("bootstrap auth guard", () => {
     delete process.env.JWT_AUDIENCE;
   });
 
+  it("accepts bearer tokens even when issuer and audience are not configured", () => {
+    process.env.JWT_SECRET = "test-secret";
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+
+    const jwtAuthService = new JwtAuthService();
+    const token = jwtAuthService.sign(
+      {
+        authMode: "bootstrap_headers",
+        actorType: "tenant_admin",
+        actorId: "tenant-admin-001",
+        realm: "tenant",
+        tenantId: "tenant-demo-001",
+        roleFamilies: ["tenant"],
+        roles: ["tenant_admin"],
+        scopes: ["tenant:read"],
+        requestId: "req-jwt-no-claims-001",
+      },
+      { expiresIn: "10m" },
+    );
+    const guard = new BootstrapAuthGuard(new Reflector(), jwtAuthService);
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+      method: "GET",
+      originalUrl: "/api/identity/context",
+    };
+
+    const context = createExecutionContext(request);
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(request.identity).toMatchObject({
+      authMode: "jwt_bearer",
+      actorId: "tenant-admin-001",
+      tenantId: "tenant-demo-001",
+    });
+
+    delete process.env.JWT_SECRET;
+  });
+
   it("rejects bearer tokens with the wrong audience", () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
@@ -707,5 +748,37 @@ describe("tenant bootstrap-session auth controller", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+  });
+
+  it("still issues a tenant bearer session when issuer and audience are unset", () => {
+    process.env.JWT_SECRET = "test-secret";
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+
+    const controller = new AuthController(
+      new JwtAuthService(),
+      new TenantPartnerService(new AuditNotificationService()),
+    );
+
+    const response = controller.issueTenantBootstrapSession(
+      {
+        email: "tenant.viewer@example.com",
+        fullName: "Tenant Viewer",
+        roleCode: "tenant_viewer",
+      },
+      "req-tenant-bootstrap-003",
+    );
+
+    expect(response.data).toMatchObject({
+      tokenType: "Bearer",
+      profile: {
+        email: "tenant.viewer@example.com",
+        roleCode: "tenant_viewer",
+        tenantId: "tenant-demo-001",
+      },
+    });
+    expect(response.data.accessToken).toMatch(/\S+/);
+
+    delete process.env.JWT_SECRET;
   });
 });
