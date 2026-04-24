@@ -10,6 +10,10 @@ It separates the work into:
 
 Use this document when deciding whether `GAP-P2S3-001` can move from `blocked` to active implementation.
 
+Execution anchor:
+
+- `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
+
 ## Current Block
 
 `GAP-P2S3-001` is blocked because the target state is not a repo-only code slice.
@@ -20,17 +24,29 @@ Use this document when deciding whether `GAP-P2S3-001` can move from `blocked` t
 - Repo-side groundwork is now partially in place: the API accepts verified Bearer JWTs, marks them as `jwt_bearer`, the smoke harness can send Bearer tokens, and staging deploy exposure is now configurable per service.
 - The remaining blocker is now narrower but still external-facing: repo truth still lacks a complete IAP evidence handoff (audience / issuer / protected scope / caller assumptions), and the closeout path has not yet removed bootstrap trust as the claimed production mechanism.
 
+## Accepted Topology
+
+`GAP-P2S3-001` now follows an accepted staged rollout model:
+
+1. Stage 0: API OIDC / Bearer readiness without changing ingress.
+2. Stage 1: internal control-plane API protection first.
+3. Stage 2: internal control-plane web surfaces second.
+4. Stage 3: tenant portal remains application-auth-first by default.
+5. Stage 4: driver, partner-adapter, and webhook paths must not depend on IAP.
+
 ## Human Fast Path
 
 If someone needs the shortest possible unblock path, do these first:
 
 1. Confirm the exact **GCP project**, **region**, and **Cloud Run service** covered by `GAP-P2S3-001`.
-2. In **GCP Console**, enable **Cloud IAP for the target Cloud Run service** and finish the required OAuth / IAP app setup.
-3. Record the **expected audience / client id** that the API must verify.
-4. Grant the CI / staging caller the IAM access it needs to call the protected service and obtain the right token.
-5. Hand the repo team these concrete inputs: protected service scope, audience / issuer assumptions, and any required env vars / secrets.
+2. Confirm the Stage 1 / Stage 2 cutover scope for the internal control-plane path before enabling IAP.
+3. In **GCP Console**, enable **Cloud IAP for the target internal control-plane service path** and finish the required OAuth / IAP app setup.
+4. Keep tenant / driver / adapter / webhook paths outside that default IAP boundary.
+5. Record the **expected audience / client id** that the protected internal path must verify.
+6. Grant the CI / staging caller the IAM access it needs to call the protected service and obtain the right token.
+7. Hand the repo team these concrete inputs: protected service scope, audience / issuer assumptions, and any required env vars / secrets.
 
-Once those five items are done, the repo-side `D-1` work can move from blocked planning into implementation.
+Once those seven items are done, the repo-side `D-1` work can move from blocked planning into implementation.
 
 ## GCP Console 操作版
 
@@ -40,8 +56,9 @@ Once those five items are done, the repo-side `D-1` work can move from blocked p
 
 - [ ] 確認這次要保護的是哪個 GCP project。
 - [ ] 確認 region。
-- [ ] 確認要先保護的 Cloud Run 服務名稱，至少要明確知道 `drts-api` 是否是第一波。
-- [ ] 如果 `platform-admin-web` / `ops-console-web` 也要一起納入，先在這一步說清楚，不要等 repo 改完才決定。
+- [ ] 確認 Stage 1 要先保護哪些 internal control-plane API / ingress path。
+- [ ] 確認 Stage 2 是否同時納入 `platform-admin-web` / `ops-console-web`。
+- [ ] 確認 `tenant-commute-hub`、Driver App、partner adapters、webhook callbacks 不在預設 IAP 邊界內。
 
 ### 2. 在 GCP Console 啟用 Cloud IAP
 
@@ -69,7 +86,7 @@ Once those five items are done, the repo-side `D-1` work can move from blocked p
 - [ ] 明確告知 repo 實作端：project、region、service scope。
 - [ ] 明確告知：audience / client id、issuer、允許 caller。
 - [ ] 明確告知：還需要哪些 env vars / secrets。
-- [ ] 如果只保護 `drts-api`，也明講；如果三個 Cloud Run 服務都要一起上 IAP，也明講。
+- [ ] 如果這一波只切 internal control-plane API，也明講；如果 Stage 2 要同時納入 internal web surfaces，也明講。
 
 ### 完成判定
 
@@ -84,9 +101,10 @@ Once those five items are done, the repo-side `D-1` work can move from blocked p
 `GAP-P2S3-001` is only ready for closeout when all of the following are true:
 
 1. Cloud IAP and the required GCP-side prerequisites are configured.
-2. The API verifies Bearer tokens / OIDC assertions instead of treating bootstrap headers as the production trust model.
-3. Staging deploy and health verification reflect the new auth surface.
-4. Smoke / E2E / ops docs no longer describe bootstrap-header auth as the default production path.
+2. The internal control-plane path verifies Bearer tokens / OIDC assertions instead of treating bootstrap headers as the production trust model.
+3. Tenant, driver, partner, and webhook flows still use their intended non-IAP auth boundaries.
+4. Staging deploy and health verification reflect the new staged auth surface.
+5. Smoke / E2E / ops docs no longer describe bootstrap-header auth as the default production path.
 
 ## D-0 Manual / Infra Provisioning Checklist
 
@@ -100,10 +118,10 @@ These items require a human with the right GCP access.
 
 ### Cloud IAP Setup
 
-- [ ] Enable Cloud IAP for the target Cloud Run service(s).
+- [ ] Enable Cloud IAP for the target internal control-plane service path(s).
 - [ ] Complete the required OAuth consent screen / IAP app configuration.
 - [ ] Confirm the expected audience / client id that the API should trust.
-- [ ] Decide whether only `drts-api` moves behind IAP first, or whether `platform-admin-web` / `ops-console-web` move in the same wave.
+- [ ] Confirm the staged order instead of a universal cutover: internal control-plane API first, internal web surfaces second, tenant / driver / partner / webhook paths excluded by default.
 
 ### IAM / Token Path
 
@@ -131,6 +149,7 @@ These items can proceed once D-0 is clear enough to give the repo concrete input
 ### API Runtime
 
 - [x] Introduce the JWT / OIDC verification path for protected API traffic.
+- [ ] Keep caller-type separation explicit so tenant / driver / partner / webhook traffic does not inherit an admin-only IAP assumption.
 - [~] Stop treating free-form bootstrap actor headers as the production trust path. _(Repo now prefers verified Bearer tokens when present, but bootstrap headers remain as a phased fallback until IAP cutover is complete.)_
 - [ ] Document whether `x-drts-internal-key` remains as local-only / break-glass fallback or is removed from staging.
 - [ ] Keep health or other approved public exceptions explicit and narrow.
@@ -138,6 +157,7 @@ These items can proceed once D-0 is clear enough to give the repo concrete input
 ### Deployment / CI
 
 - [~] Update `.github/workflows/deploy-staging.yml` so the protected service no longer relies on `--allow-unauthenticated`. _(The workflow now supports `--no-allow-unauthenticated` per service via repo vars, but the actual staging flip still depends on D-0/IAP inputs.)_
+- [ ] Scope the protected ingress to the internal control-plane path only; do not force tenant / driver / webhook traffic behind the same boundary.
 - [ ] Add or update the GitHub Actions auth flow used to obtain the required token for verification.
 - [ ] Make health / post-deploy verification prove the new auth surface, not just Cloud Run readiness.
 

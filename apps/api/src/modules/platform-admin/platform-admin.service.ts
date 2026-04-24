@@ -312,9 +312,10 @@ export class PlatformAdminService implements OnModuleInit {
       );
     }
     const publishedAt = new Date().toISOString();
-    const publishedBy =
-      this.normalizeNullableText(publisherActorId) ??
-      this.normalizeNullableText(command.publishedBy);
+    const publishedBy = this.requirePlatformAdminActorId(
+      publisherActorId,
+      "publish public info versions",
+    );
     const previousPublished = this.publicInfoVersions.find(
       (candidate) =>
         candidate.status === "published" &&
@@ -1043,6 +1044,22 @@ export class PlatformAdminService implements OnModuleInit {
     return {
       ...rule,
     };
+  }
+
+  private requirePlatformAdminActorId(
+    actorId: string | null | undefined,
+    action: string,
+  ) {
+    const normalizedActorId = this.normalizeNullableText(actorId);
+    if (!normalizedActorId) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "PLATFORM_ADMIN_IDENTITY_REQUIRED",
+        `Platform admin routes require an authenticated actorId to ${action}.`,
+      );
+    }
+
+    return normalizedActorId;
   }
 
   private normalizeNullableText(value: string | null | undefined) {
