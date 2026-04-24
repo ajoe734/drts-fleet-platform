@@ -45,6 +45,10 @@ describe("billing settlement repository", () => {
     expect(query.mock.calls[0]?.[0]).toContain(
       "COALESCE(tasks.record->>'completedAt', '') ~",
     );
+    expect(query.mock.calls[0]?.[0]).toContain(
+      "tasks.record->>'completedAt' >= $2",
+    );
+    expect(query.mock.calls[0]?.[0]).not.toContain("::timestamptz");
     expect(trips).toEqual([
       {
         tenantId: "tenant-demo-001",
