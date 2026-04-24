@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import type { DriverStatementRecord } from "@drts/contracts";
-import { AppShellCard } from "@drts/ui-web";
+import { PageHeader } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 import { formatCompactNumber, formatMinorCurrency } from "@/lib/ops-analytics";
 
@@ -156,30 +156,29 @@ export default async function DriverEarningsPage({
 
   if (driversResult.error) {
     return (
-      <main className="app-grid">
-        <AppShellCard
+      <>
+        <PageHeader
           title="Driver Earnings"
-          description={`Unable to load driver registry data for ${driverId}.`}
-        >
-          <div style={errorBannerStyle}>
-            <strong>Driver registry unavailable:</strong> {driversResult.error}
-          </div>
-          <p style={mutedCopyStyle}>
-            This is a degraded read-only state. The driver may exist, but ops
-            cannot verify it until the registry endpoint recovers.
-          </p>
-          <div style={footerLinksStyle}>
-            <Link className="route-link" href="/drivers">
-              <strong>Back to drivers</strong> Return to the registry and retry
-              once the API recovers.
-            </Link>
-            <Link className="route-link" href="/revenue">
-              <strong>Revenue overview</strong> Compare fleet-wide revenue while
-              registry data is degraded.
-            </Link>
-          </div>
-        </AppShellCard>
-      </main>
+          subtitle={`Unable to load driver registry data for ${driverId}.`}
+        />
+        <div style={errorBannerStyle}>
+          <strong>Driver registry unavailable:</strong> {driversResult.error}
+        </div>
+        <p style={mutedCopyStyle}>
+          This is a degraded read-only state. The driver may exist, but ops
+          cannot verify it until the registry endpoint recovers.
+        </p>
+        <div style={footerLinksStyle}>
+          <Link href="/drivers">
+            <strong>Back to drivers</strong> Return to the registry and retry
+            once the API recovers.
+          </Link>
+          <Link href="/revenue">
+            <strong>Revenue overview</strong> Compare fleet-wide revenue while
+            registry data is degraded.
+          </Link>
+        </div>
+      </>
     );
   }
 
@@ -209,174 +208,170 @@ export default async function DriverEarningsPage({
   );
 
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Driver Earnings"
-        description={`Read-only ops drilldown for ${driver.name} (${driver.driverId}). Mirrors billing-settlement statements with the gross, service fee, subsidy, and net values required by OC-017.`}
-      >
-        {statementsResult.error && (
-          <div style={errorBannerStyle}>
-            <strong>Settlement data unavailable:</strong>{" "}
-            {statementsResult.error}
-          </div>
-        )}
-        <section style={heroGridStyle}>
-          <div style={identityCardStyle}>
-            <p style={eyebrowStyle}>Driver</p>
-            <h2 style={{ margin: 0 }}>{driver.name}</h2>
-            <div style={metaListStyle}>
-              <span style={metaPillStyle}>{driver.driverId}</span>
-              <span style={metaPillStyle}>{driver.workState}</span>
-              <span style={metaPillStyle}>
-                {driver.licensesValid ? "licenses valid" : "license review"}
-              </span>
-            </div>
-          </div>
-          <div style={identityCardStyle}>
-            <p style={eyebrowStyle}>Ops Note</p>
-            <p style={mutedCopyStyle}>
-              Earnings are read-only in ops console. Statement generation and
-              payout actions remain in finance workflows.
-            </p>
-          </div>
-        </section>
-
-        <section style={summaryGridStyle}>
-          {[
-            {
-              label: "Statements",
-              value: statementsResult.error
-                ? "Unavailable"
-                : formatCompactNumber(driverStatements.length),
-              note: statementsResult.error
-                ? "Statement service unavailable"
-                : latestStatement
-                  ? `Latest period ${latestStatement.periodMonth}`
-                  : "No periods generated yet",
-            },
-            {
-              label: "Gross",
-              value: statementsResult.error
-                ? "Unavailable"
-                : formatMinorCurrency(totals.grossMinor),
-              note: statementsResult.error
-                ? "Retry when statement service recovers"
-                : "Revenue before fees and subsidy",
-            },
-            {
-              label: "Service fee",
-              value: statementsResult.error
-                ? "Unavailable"
-                : formatMinorCurrency(totals.serviceFeeMinor),
-              note: statementsResult.error
-                ? "Retry when statement service recovers"
-                : "Platform fee retained from gross",
-            },
-            {
-              label: "Subsidy",
-              value: statementsResult.error
-                ? "Unavailable"
-                : formatMinorCurrency(totals.subsidyMinor),
-              note: statementsResult.error
-                ? "Retry when statement service recovers"
-                : "Support programs credited to driver",
-            },
-            {
-              label: "Net",
-              value: statementsResult.error
-                ? "Unavailable"
-                : formatMinorCurrency(totals.netMinor),
-              note: statementsResult.error
-                ? "Payout detail unavailable during degraded mode"
-                : latestStatement
-                  ? `Latest payout ${latestStatement.payoutStatus}`
-                  : "Awaiting statement generation",
-            },
-          ].map((card) => (
-            <div key={card.label} style={summaryCardStyle}>
-              <span>{card.label}</span>
-              <strong style={{ fontSize: "1.4rem" }}>{card.value}</strong>
-              <small>{card.note}</small>
-            </div>
-          ))}
-        </section>
-
-        <section style={{ ...cardStyle, marginBottom: "1rem" }}>
-          <div style={panelHeadStyle}>
-            <div>
-              <p style={eyebrowStyle}>Earnings</p>
-              <h3 style={{ margin: 0 }}>Statement history</h3>
-            </div>
-            <span style={mutedCopyStyle}>Read-only by design</span>
-          </div>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={tableCellStyle}>Period</th>
-                <th style={tableCellStyle}>Statement</th>
-                <th style={tableCellStyle}>Fee plan</th>
-                <th style={tableCellStyle}>Gross</th>
-                <th style={tableCellStyle}>Service fee</th>
-                <th style={tableCellStyle}>Subsidy</th>
-                <th style={tableCellStyle}>Net</th>
-                <th style={tableCellStyle}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {statementsResult.error ? (
-                <tr>
-                  <td colSpan={8} style={tableCellStyle}>
-                    Driver statements could not be loaded. Retry when the
-                    billing-settlement service recovers.
-                  </td>
-                </tr>
-              ) : driverStatements.length > 0 ? (
-                driverStatements.map((statement) => (
-                  <tr key={statement.statementId}>
-                    <td style={tableCellStyle}>{statement.periodMonth}</td>
-                    <td style={tableCellStyle}>
-                      <div>{statement.receiptNo}</div>
-                      <small style={rowMetaStyle}>
-                        {statement.statementId}
-                      </small>
-                    </td>
-                    <td style={tableCellStyle}>{statement.feePlanVersion}</td>
-                    <td style={tableCellStyle}>
-                      {formatMinorCurrency(statement.grossEarning.amountMinor)}
-                    </td>
-                    <td style={tableCellStyle}>
-                      {formatMinorCurrency(statement.serviceFee.amountMinor)}
-                    </td>
-                    <td style={tableCellStyle}>
-                      {formatMinorCurrency(statement.subsidy.amountMinor)}
-                    </td>
-                    <td style={tableCellStyle}>
-                      {formatMinorCurrency(statement.netAmount.amountMinor)}
-                    </td>
-                    <td style={tableCellStyle}>{statement.payoutStatus}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={8} style={tableCellStyle}>
-                    No statements generated yet for this driver.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
-
-        <div style={footerLinksStyle}>
-          <Link className="route-link" href="/drivers">
-            <strong>Back to drivers</strong> Return to the registry list.
-          </Link>
-          <Link className="route-link" href="/revenue">
-            <strong>Revenue overview</strong> Compare this drilldown against the
-            fleet-wide settlement pulse.
-          </Link>
+        subtitle={`${driver.name} · ${driver.driverId}`}
+      />
+      {statementsResult.error && (
+        <div style={errorBannerStyle}>
+          <strong>Settlement data unavailable:</strong> {statementsResult.error}
         </div>
-      </AppShellCard>
-    </main>
+      )}
+      <section style={heroGridStyle}>
+        <div style={identityCardStyle}>
+          <p style={eyebrowStyle}>Driver</p>
+          <h2 style={{ margin: 0 }}>{driver.name}</h2>
+          <div style={metaListStyle}>
+            <span style={metaPillStyle}>{driver.driverId}</span>
+            <span style={metaPillStyle}>{driver.workState}</span>
+            <span style={metaPillStyle}>
+              {driver.licensesValid ? "licenses valid" : "license review"}
+            </span>
+          </div>
+        </div>
+        <div style={identityCardStyle}>
+          <p style={eyebrowStyle}>Ops Note</p>
+          <p style={mutedCopyStyle}>
+            Earnings are read-only in ops console. Statement generation and
+            payout actions remain in finance workflows.
+          </p>
+        </div>
+      </section>
+
+      <section style={summaryGridStyle}>
+        {[
+          {
+            label: "Statements",
+            value: statementsResult.error
+              ? "Unavailable"
+              : formatCompactNumber(driverStatements.length),
+            note: statementsResult.error
+              ? "Statement service unavailable"
+              : latestStatement
+                ? `Latest period ${latestStatement.periodMonth}`
+                : "No periods generated yet",
+          },
+          {
+            label: "Gross",
+            value: statementsResult.error
+              ? "Unavailable"
+              : formatMinorCurrency(totals.grossMinor),
+            note: statementsResult.error
+              ? "Retry when statement service recovers"
+              : "Revenue before fees and subsidy",
+          },
+          {
+            label: "Service fee",
+            value: statementsResult.error
+              ? "Unavailable"
+              : formatMinorCurrency(totals.serviceFeeMinor),
+            note: statementsResult.error
+              ? "Retry when statement service recovers"
+              : "Platform fee retained from gross",
+          },
+          {
+            label: "Subsidy",
+            value: statementsResult.error
+              ? "Unavailable"
+              : formatMinorCurrency(totals.subsidyMinor),
+            note: statementsResult.error
+              ? "Retry when statement service recovers"
+              : "Support programs credited to driver",
+          },
+          {
+            label: "Net",
+            value: statementsResult.error
+              ? "Unavailable"
+              : formatMinorCurrency(totals.netMinor),
+            note: statementsResult.error
+              ? "Payout detail unavailable during degraded mode"
+              : latestStatement
+                ? `Latest payout ${latestStatement.payoutStatus}`
+                : "Awaiting statement generation",
+          },
+        ].map((card) => (
+          <div key={card.label} style={summaryCardStyle}>
+            <span>{card.label}</span>
+            <strong style={{ fontSize: "1.4rem" }}>{card.value}</strong>
+            <small>{card.note}</small>
+          </div>
+        ))}
+      </section>
+
+      <section style={{ ...cardStyle, marginBottom: "1rem" }}>
+        <div style={panelHeadStyle}>
+          <div>
+            <p style={eyebrowStyle}>Earnings</p>
+            <h3 style={{ margin: 0 }}>Statement history</h3>
+          </div>
+          <span style={mutedCopyStyle}>Read-only by design</span>
+        </div>
+        <table style={tableStyle}>
+          <thead>
+            <tr>
+              <th style={tableCellStyle}>Period</th>
+              <th style={tableCellStyle}>Statement</th>
+              <th style={tableCellStyle}>Fee plan</th>
+              <th style={tableCellStyle}>Gross</th>
+              <th style={tableCellStyle}>Service fee</th>
+              <th style={tableCellStyle}>Subsidy</th>
+              <th style={tableCellStyle}>Net</th>
+              <th style={tableCellStyle}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {statementsResult.error ? (
+              <tr>
+                <td colSpan={8} style={tableCellStyle}>
+                  Driver statements could not be loaded. Retry when the
+                  billing-settlement service recovers.
+                </td>
+              </tr>
+            ) : driverStatements.length > 0 ? (
+              driverStatements.map((statement) => (
+                <tr key={statement.statementId}>
+                  <td style={tableCellStyle}>{statement.periodMonth}</td>
+                  <td style={tableCellStyle}>
+                    <div>{statement.receiptNo}</div>
+                    <small style={rowMetaStyle}>{statement.statementId}</small>
+                  </td>
+                  <td style={tableCellStyle}>{statement.feePlanVersion}</td>
+                  <td style={tableCellStyle}>
+                    {formatMinorCurrency(statement.grossEarning.amountMinor)}
+                  </td>
+                  <td style={tableCellStyle}>
+                    {formatMinorCurrency(statement.serviceFee.amountMinor)}
+                  </td>
+                  <td style={tableCellStyle}>
+                    {formatMinorCurrency(statement.subsidy.amountMinor)}
+                  </td>
+                  <td style={tableCellStyle}>
+                    {formatMinorCurrency(statement.netAmount.amountMinor)}
+                  </td>
+                  <td style={tableCellStyle}>{statement.payoutStatus}</td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={8} style={tableCellStyle}>
+                  No statements generated yet for this driver.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </section>
+
+      <div style={footerLinksStyle}>
+        <Link href="/drivers">
+          <strong>Back to drivers</strong> Return to the registry list.
+        </Link>
+        <Link href="/revenue">
+          <strong>Revenue overview</strong> Compare this drilldown against the
+          fleet-wide settlement pulse.
+        </Link>
+      </div>
+    </>
   );
 }
