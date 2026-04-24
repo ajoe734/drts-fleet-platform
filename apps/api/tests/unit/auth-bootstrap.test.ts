@@ -688,9 +688,7 @@ describe("tenant bootstrap-session auth controller", () => {
 
     const response = controller.issueTenantBootstrapSession(
       {
-        email: "tenant.admin@example.com",
-        fullName: "Tenant Admin",
-        roleCode: "tenant_ops_admin",
+        email: "ops@acme.example",
       },
       "req-tenant-bootstrap-001",
     );
@@ -699,7 +697,7 @@ describe("tenant bootstrap-session auth controller", () => {
       tokenType: "Bearer",
       expiresIn: "8h",
       profile: {
-        email: "tenant.admin@example.com",
+        email: "ops@acme.example",
         roleCode: "tenant_ops_admin",
         tenantId: "tenant-demo-001",
       },
@@ -708,6 +706,10 @@ describe("tenant bootstrap-session auth controller", () => {
         authMode: "jwt_bearer",
         realm: "tenant",
         roles: ["tenant_ops_admin"],
+        scopes: expect.arrayContaining([
+          "tenant:write",
+          "tenant:webhooks:write",
+        ]),
         tenantId: "tenant-demo-001",
       },
     });
@@ -731,8 +733,6 @@ describe("tenant bootstrap-session auth controller", () => {
     const response = controller.issueTenantBootstrapSession(
       {
         email: "admin@acme.example",
-        fullName: "Requested Name",
-        roleCode: "tenant_viewer",
       },
       "req-tenant-bootstrap-002",
     );
@@ -762,9 +762,7 @@ describe("tenant bootstrap-session auth controller", () => {
 
     const response = controller.issueTenantBootstrapSession(
       {
-        email: "tenant.viewer@example.com",
-        fullName: "Tenant Viewer",
-        roleCode: "tenant_viewer",
+        email: "viewer@acme.example",
       },
       "req-tenant-bootstrap-003",
     );
@@ -772,12 +770,47 @@ describe("tenant bootstrap-session auth controller", () => {
     expect(response.data).toMatchObject({
       tokenType: "Bearer",
       profile: {
-        email: "tenant.viewer@example.com",
+        email: "viewer@acme.example",
         roleCode: "tenant_viewer",
         tenantId: "tenant-demo-001",
       },
+      identity: {
+        roles: ["tenant_viewer"],
+        scopes: expect.arrayContaining(["tenant:read", "reports:read"]),
+      },
     });
     expect(response.data.accessToken).toMatch(/\S+/);
+
+    delete process.env.JWT_SECRET;
+  });
+
+  it("rejects bootstrap session issuance for emails without an invited tenant user", () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const controller = new AuthController(
+      new JwtAuthService(),
+      new TenantPartnerService(new AuditNotificationService()),
+    );
+
+    try {
+      controller.issueTenantBootstrapSession(
+        {
+          email: "unknown@acme.example",
+        },
+        "req-tenant-bootstrap-004",
+      );
+      throw new Error("Expected tenant bootstrap session issuance to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "TENANT_USER_NOT_INVITED",
+          message: "No active tenant user was found for this email.",
+        },
+      });
+    }
 
     delete process.env.JWT_SECRET;
   });

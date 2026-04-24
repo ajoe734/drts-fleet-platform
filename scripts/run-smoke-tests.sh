@@ -32,9 +32,11 @@
 #   SMOKE_POLL_MAX           Max poll attempts for async jobs (default: 20)
 #
 # Auth model:
-#   The API uses bootstrap-header auth — there is NO /api/auth/login endpoint.
-#   lib/helpers.sh sends x-actor-type, x-actor-id, x-realm, and x-tenant-id headers
-#   directly.  No password, token fetch, or user account is required.
+#   Protected staging can now sit behind Cloud IAP / OIDC.
+#   Set SMOKE_AUTH_BEARER_TOKEN to satisfy the outer IAP boundary when targeting the
+#   protected control-plane host. During the phased cutover, lib/helpers.sh still sends
+#   bootstrap caller headers for the application-level identity path.
+#   There is still no /api/auth/login endpoint for this smoke suite.
 #   Use SMOKE_ACTOR_TYPE=system (default) for the full suite. The auth policy includes
 #   the `system` realm for every protected smoke route, and the `system` preset includes
 #   the required tenant/dispatch/driver/billing/report scopes.
@@ -52,7 +54,8 @@ STATE_FILE="/tmp/drts-smoke-state-$$.json"
 export SMOKE_STATE_FILE="$STATE_FILE"
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
-# Bootstrap auth — no login endpoint; headers sent by lib/helpers.sh automatically.
+# Default to local direct API access. For the protected staging host, set
+# SMOKE_AUTH_BEARER_TOKEN and point SMOKE_API_URL to the IAP host.
 # Seed IDs must match infra/seeds/S0002__demo_operational_seed.sql.
 export SMOKE_API_URL="${SMOKE_API_URL:-http://localhost:3001}"
 export SMOKE_ACTOR_TYPE="${SMOKE_ACTOR_TYPE:-system}"
@@ -130,7 +133,13 @@ echo -e "  API URL    : ${CYAN}${SMOKE_API_URL}${RESET}"
 echo -e "  Tenant     : ${SMOKE_TENANT_ID}"
 echo -e "  Driver     : ${SMOKE_DRIVER_ID}"
 echo -e "  Vehicle    : ${SMOKE_VEHICLE_ID}"
-echo -e "  Actor type : ${SMOKE_ACTOR_TYPE} (bootstrap headers — no login required)"
+if [[ -n "${SMOKE_AUTH_BEARER_TOKEN:-}" ]]; then
+  auth_label="Bearer + bootstrap"
+else
+  auth_label="Bootstrap headers"
+fi
+echo -e "  Auth       : ${auth_label}"
+echo -e "  Actor type : ${SMOKE_ACTOR_TYPE}"
 echo -e "  Started    : $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 echo ""
 

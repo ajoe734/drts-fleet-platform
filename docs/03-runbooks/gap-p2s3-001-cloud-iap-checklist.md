@@ -24,6 +24,24 @@ Execution anchor:
 - Repo-side groundwork is now partially in place: the API accepts verified Bearer JWTs, marks them as `jwt_bearer`, the smoke harness can send Bearer tokens, and staging deploy exposure is now configurable per service.
 - The remaining blocker is now narrower but still external-facing: repo truth still lacks a complete IAP evidence handoff (audience / issuer / protected scope / caller assumptions), and the closeout path has not yet removed bootstrap trust as the claimed production mechanism.
 
+Observed operator probe on `2026-04-24`:
+
+- The current workspace is pointed at GCP project `autotaxi-492811`.
+- Human interactive `gcloud auth login` for `edna@cctech-support.com` is now complete, so repo automation is no longer blocked on the VM-scoped compute credential.
+- The active non-interactive `gcloud` principal was previously `1071409254673-compute@developer.gserviceaccount.com`, which could not inspect Cloud Run / Secret Manager state because the issued token returned `ACCESS_TOKEN_SCOPE_INSUFFICIENT`.
+- Concrete D-0 values confirmed from GCP:
+  - project: `autotaxi-492811`
+  - region: `us-central1`
+  - protected staging hosts: `https://staging.drts-fleet.cctech-support.com`, `https://ops.staging.drts-fleet.cctech-support.com`, `https://api.staging.drts-fleet.cctech-support.com`
+  - IAP audience / client id: `1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
+  - IAP accessor baseline: `domain:cctech-support.com`
+  - CI / deploy verifier principal additionally granted: `serviceAccount:github-actions-deployer@autotaxi-492811.iam.gserviceaccount.com`
+- Runtime split confirmed:
+  - internal control-plane hosts are routed through the external HTTPS LB + IAP
+  - tenant portal still uses the direct Cloud Run API URL and is therefore outside the default IAP boundary
+- Remaining external propagation caveat:
+  - multi-host managed TLS certificate `drts-ssl-cert-v2` is now attached to `drts-https-proxy`, but as of `2026-04-24` it still reports `PROVISIONING / FAILED_NOT_VISIBLE`; until Google finishes certificate issuance, `api.staging...` and `ops.staging...` may continue to present the old single-domain certificate.
+
 ## Accepted Topology
 
 `GAP-P2S3-001` now follows an accepted staged rollout model:
@@ -112,35 +130,35 @@ These items require a human with the right GCP access.
 
 ### Project / Access
 
-- [ ] Confirm the target GCP project, region, and Cloud Run services covered by this migration.
-- [ ] Confirm who owns GCP Console execution for Cloud IAP enablement.
-- [ ] Confirm the runtime service account and GitHub WIF deployer identity that staging uses today.
+- [x] Confirm the target GCP project, region, and Cloud Run services covered by this migration.
+- [x] Confirm who owns GCP Console execution for Cloud IAP enablement.
+- [x] Confirm the runtime service account and GitHub WIF deployer identity that staging uses today.
 
 ### Cloud IAP Setup
 
-- [ ] Enable Cloud IAP for the target internal control-plane service path(s).
-- [ ] Complete the required OAuth consent screen / IAP app configuration.
-- [ ] Confirm the expected audience / client id that the API should trust.
-- [ ] Confirm the staged order instead of a universal cutover: internal control-plane API first, internal web surfaces second, tenant / driver / partner / webhook paths excluded by default.
+- [~] Enable Cloud IAP for the target internal control-plane service path(s). _(Enabled and routed, but the multi-host managed certificate is still provisioning.)_
+- [x] Complete the required OAuth consent screen / IAP app configuration.
+- [x] Confirm the expected audience / client id that the API should trust.
+- [x] Confirm the staged order instead of a universal cutover: internal control-plane API first, internal web surfaces second, tenant / driver / partner / webhook paths excluded by default.
 
 ### IAM / Token Path
 
-- [ ] Confirm which principal is allowed to call the protected service in CI / staging verification.
-- [ ] Grant the required IAM roles so GitHub Actions or the designated verification identity can mint or obtain the needed token.
-- [ ] Confirm the service-to-service path used by smoke / E2E and health checks after migration.
+- [x] Confirm which principal is allowed to call the protected service in CI / staging verification.
+- [x] Grant the required IAM roles so GitHub Actions or the designated verification identity can mint or obtain the needed token.
+- [x] Confirm the service-to-service path used by smoke / E2E and health checks after migration.
 
 ### Secrets / Vars / Environment
 
-- [ ] Provision any required env vars / secrets for JWT audience, issuer, or allowed identity configuration.
-- [ ] Confirm whether JWKS discovery is sufficient or whether additional secret material is required.
-- [ ] Record the exact staging values or references the repo implementation should read.
+- [x] Provision any required env vars / secrets for JWT audience, issuer, or allowed identity configuration.
+- [x] Confirm whether JWKS discovery is sufficient or whether additional secret material is required.
+- [x] Record the exact staging values or references the repo implementation should read.
 
 ### Manual Evidence To Capture
 
-- [ ] Cloud IAP enabled screenshot or equivalent operator evidence.
-- [ ] OAuth / IAP application identifier and expected audience value.
-- [ ] IAM grant confirmation for the CI / verification principal.
-- [ ] Final list of env vars / secrets the repo work may assume exist.
+- [x] Cloud IAP enabled screenshot or equivalent operator evidence.
+- [x] OAuth / IAP application identifier and expected audience value.
+- [x] IAM grant confirmation for the CI / verification principal.
+- [x] Final list of env vars / secrets the repo work may assume exist.
 
 ## D-1 Repo Implementation Checklist
 
@@ -156,10 +174,10 @@ These items can proceed once D-0 is clear enough to give the repo concrete input
 
 ### Deployment / CI
 
-- [~] Update `.github/workflows/deploy-staging.yml` so the protected service no longer relies on `--allow-unauthenticated`. _(The workflow now supports `--no-allow-unauthenticated` per service via repo vars, but the actual staging flip still depends on D-0/IAP inputs.)_
-- [ ] Scope the protected ingress to the internal control-plane path only; do not force tenant / driver / webhook traffic behind the same boundary.
-- [ ] Add or update the GitHub Actions auth flow used to obtain the required token for verification.
-- [ ] Make health / post-deploy verification prove the new auth surface, not just Cloud Run readiness.
+- [x] Update `.github/workflows/deploy-staging.yml` so the protected service no longer relies on `--allow-unauthenticated`.
+- [x] Scope the protected ingress to the internal control-plane path only; do not force tenant / driver / webhook traffic behind the same boundary.
+- [x] Add or update the GitHub Actions auth flow used to obtain the required token for verification.
+- [x] Make health / post-deploy verification prove the new auth surface, not just Cloud Run readiness.
 
 ### Tests / Verification
 
@@ -171,8 +189,8 @@ These items can proceed once D-0 is clear enough to give the repo concrete input
 ### Docs / Operations
 
 - [x] Update `tests/smoke/README.md` and any related operational notes to describe the new auth flow.
-- [ ] Record how engineers or CI obtain the token needed for smoke / E2E.
-- [ ] Update any rollout or recovery notes affected by the auth change.
+- [x] Record how engineers or CI obtain the token needed for smoke / E2E.
+- [x] Update any rollout or recovery notes affected by the auth change.
 
 ## Recommended Execution Order
 

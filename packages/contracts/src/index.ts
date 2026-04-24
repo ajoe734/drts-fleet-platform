@@ -132,8 +132,6 @@ export interface IdentityContext {
 
 export interface CreateTenantBootstrapSessionCommand {
   email: string;
-  fullName?: string;
-  roleCode?: string;
   tenantId?: string;
 }
 

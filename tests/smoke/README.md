@@ -38,16 +38,12 @@ Tests 03–04 are gracefully skippable when staging DB is empty (they log a warn
 ## Running
 
 ```bash
-# Against staging — bootstrap auth (current default before IAP cutover)
-export SMOKE_API_URL=https://api-staging.drts.internal   # bare origin, no /api suffix
+# Against protected staging — IAP bearer token + bootstrap app identity
+export SMOKE_API_URL=https://api.staging.drts-fleet.cctech-support.com   # bare origin, no /api suffix
+export SMOKE_AUTH_BEARER_TOKEN="$(./scripts/print-staging-iap-token.sh)"
 export SMOKE_ACTOR_TYPE=system
 export SMOKE_ACTOR_ID=smoke-system-001
 export SMOKE_TENANT_ID=10000000-0000-0000-0000-000000000201   # TEN_ACME from S0002 seed
-./scripts/run-smoke-tests.sh
-
-# Against protected staging — bearer token preferred
-export SMOKE_API_URL=https://api-staging.drts.internal
-export SMOKE_AUTH_BEARER_TOKEN="$(gcloud auth print-identity-token)"
 ./scripts/run-smoke-tests.sh
 
 # Against local dev
@@ -64,12 +60,13 @@ See `scripts/run-smoke-tests.sh --help` for the full option reference.
 
 ## Auth model
 
-**The smoke harness now supports both Bearer-token auth and legacy bootstrap-header auth.**
+**The smoke harness now supports both IAP/OIDC Bearer auth and legacy bootstrap-header auth.**
 
 Preferred order:
 
 1. set `SMOKE_AUTH_BEARER_TOKEN` when the target staging service is protected by IAP / OIDC
-2. use bootstrap headers for local dev or phased pre-cutover staging
+2. keep bootstrap headers for the application-level actor / realm identity during the phased control-plane cutover
+3. use bootstrap-only headers for local dev or direct non-IAP paths
 
 There is still no `/api/auth/login` endpoint.
 
@@ -84,9 +81,9 @@ There is still no `/api/auth/login` endpoint.
 | `x-tenant-id`         | `SMOKE_TENANT_ID`         | S0002 TEN_ACME UUID                                              |
 | `x-drts-internal-key` | `SMOKE_INTERNAL_KEY`      | unset by default; required when staging sets `DRTS_INTERNAL_KEY` |
 
-When `SMOKE_AUTH_BEARER_TOKEN` is present, the API uses the verified Bearer token first.
-Bootstrap headers stay useful for local development and for any temporary staging phase before
-Cloud IAP / OIDC is enforced.
+When `SMOKE_AUTH_BEARER_TOKEN` is present, the outer IAP boundary is satisfied first.
+Bootstrap headers still carry the application-level caller identity for the current staged
+control-plane migration.
 
 ## Staging URL and `/api` path prefix
 
@@ -98,15 +95,15 @@ path before building the curl URL. This matches the NestJS global prefix configu
 
 ```bash
 # Correct — bare origin only:
-export SMOKE_API_URL=https://api-staging.drts.internal
-# helpers.sh produces: https://api-staging.drts.internal/api/tenant/bookings  ✓
+export SMOKE_API_URL=https://api.staging.drts-fleet.cctech-support.com
+# helpers.sh produces: https://api.staging.drts-fleet.cctech-support.com/api/tenant/bookings  ✓
 ```
 
 Do **not** append `/api` to `SMOKE_API_URL` — that would double-prefix every path:
 
 ```bash
 # Wrong:
-export SMOKE_API_URL=https://api-staging.drts.internal/api
+export SMOKE_API_URL=https://api.staging.drts-fleet.cctech-support.com/api
 # helpers.sh would produce: .../api/api/tenant/bookings  ✗
 ```
 
@@ -117,6 +114,29 @@ export SMOKE_API_PATH_PREFIX=""
 ```
 
 Confirm the correct base URL from the Cloud Run service URL in the `WE-003` deploy config.
+
+## Printing an IAP token
+
+The repo includes a helper for the current staging IAP client:
+
+```bash
+./scripts/print-staging-iap-token.sh
+```
+
+Defaults:
+
+- project: `autotaxi-492811`
+- IAP client id / audience: `1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
+- impersonated service account: `github-actions-deployer@autotaxi-492811.iam.gserviceaccount.com`
+
+Override with:
+
+```bash
+DRTS_GCP_PROJECT_ID=autotaxi-492811 \
+DRTS_STAGING_IAP_CLIENT_ID=...apps.googleusercontent.com \
+DRTS_STAGING_TOKEN_SERVICE_ACCOUNT=github-actions-deployer@autotaxi-492811.iam.gserviceaccount.com \
+./scripts/print-staging-iap-token.sh
+```
 
 ## Environment variables
 
