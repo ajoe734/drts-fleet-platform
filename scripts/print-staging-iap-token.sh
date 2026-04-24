@@ -8,6 +8,7 @@ IMPERSONATE_SERVICE_ACCOUNT="${DRTS_STAGING_TOKEN_SERVICE_ACCOUNT:-github-action
 
 if [[ -n "${IMPERSONATE_SERVICE_ACCOUNT}" ]]; then
   gcloud auth print-identity-token \
+    --include-email \
     --project "${PROJECT_ID}" \
     --impersonate-service-account "${IMPERSONATE_SERVICE_ACCOUNT}" \
     --audiences "${IAP_CLIENT_ID}"
@@ -15,5 +16,6 @@ if [[ -n "${IMPERSONATE_SERVICE_ACCOUNT}" ]]; then
 fi
 
 gcloud auth print-identity-token \
+  --include-email \
   --project "${PROJECT_ID}" \
   --audiences "${IAP_CLIENT_ID}"
