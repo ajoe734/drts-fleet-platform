@@ -477,6 +477,7 @@ jobs:
     name: API health check
     runs-on: ubuntu-latest
     needs: deploy
+    if: ${{ always() && needs.deploy.result == 'success' }}
 
     steps:
       - name: Checkout
