@@ -6,6 +6,8 @@ const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =
   "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
 const RUN_APP_HOST_SUFFIX = ".a.run.app";
+const NEXT_CHILD_BOOT_RETRY_ATTEMPTS = 10;
+const NEXT_CHILD_BOOT_RETRY_DELAY_MS = 500;
 const REQUEST_HEADER_BLOCKLIST = new Set([
   "connection",
   "content-length",
@@ -32,6 +34,10 @@ const internalPort = Number(internalPortArg);
 
 function resolveTargetOrigin() {
   return process.env.DRTS_API_URL || DEFAULT_API_BASE_URL;
+}
+
+function resolveTargetAudience(targetUrl) {
+  return process.env.DRTS_API_AUTH_AUDIENCE || targetUrl.origin;
 }
 
 function isRunAppTarget(targetUrl) {
@@ -84,9 +90,9 @@ function copyRequestHeaders(req, targetUrl, { forwardAuthorization }) {
   return headers;
 }
 
-async function mintMetadataIdentityToken(targetUrl) {
+async function mintMetadataIdentityToken(audience) {
   const metadataUrl = new URL(METADATA_IDENTITY_TOKEN_URL);
-  metadataUrl.searchParams.set("audience", targetUrl.origin);
+  metadataUrl.searchParams.set("audience", audience);
   metadataUrl.searchParams.set("format", "full");
 
   try {
@@ -99,7 +105,7 @@ async function mintMetadataIdentityToken(targetUrl) {
 
     if (!response.ok) {
       console.error("[control-plane-proxy] metadata token request failed", {
-        audience: targetUrl.origin,
+        audience,
         status: response.status,
       });
       return null;
@@ -108,7 +114,7 @@ async function mintMetadataIdentityToken(targetUrl) {
     return response.text();
   } catch (error) {
     console.error("[control-plane-proxy] metadata token request errored", {
-      audience: targetUrl.origin,
+      audience,
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
@@ -116,7 +122,8 @@ async function mintMetadataIdentityToken(targetUrl) {
 }
 
 async function applyUpstreamAuth(headers, req, targetUrl) {
-  if (!isRunAppTarget(targetUrl)) {
+  const targetAudience = resolveTargetAudience(targetUrl);
+  if (!process.env.DRTS_API_AUTH_AUDIENCE && !isRunAppTarget(targetUrl)) {
     const authorization = req.headers.authorization;
     if (authorization) {
       headers.set("authorization", authorization);
@@ -124,14 +131,22 @@ async function applyUpstreamAuth(headers, req, targetUrl) {
     return;
   }
 
-  const metadataToken = await mintMetadataIdentityToken(targetUrl);
+  const metadataToken = await mintMetadataIdentityToken(targetAudience);
   if (metadataToken) {
-    headers.set("x-serverless-authorization", `Bearer ${metadataToken}`);
+    if (process.env.DRTS_API_AUTH_AUDIENCE) {
+      headers.set("authorization", `Bearer ${metadataToken}`);
+    } else {
+      headers.set("x-serverless-authorization", `Bearer ${metadataToken}`);
+    }
     return;
   }
 
   if (req.headers.authorization) {
-    headers.set("x-serverless-authorization", req.headers.authorization);
+    if (process.env.DRTS_API_AUTH_AUDIENCE) {
+      headers.set("authorization", req.headers.authorization);
+    } else {
+      headers.set("x-serverless-authorization", req.headers.authorization);
+    }
   }
 }
 
@@ -202,16 +217,36 @@ async function forwardNextRequest(req, res, requestUrl) {
       ? undefined
       : await readRequestBody(req);
 
-  const upstream = await fetch(targetUrl, {
-    method,
-    headers,
-    body,
-    cache: "no-store",
-    redirect: "manual",
-    duplex: body ? "half" : undefined,
-  });
+  let lastError = null;
+  for (
+    let attempt = 1;
+    attempt <= NEXT_CHILD_BOOT_RETRY_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      const upstream = await fetch(targetUrl, {
+        method,
+        headers,
+        body,
+        cache: "no-store",
+        redirect: "manual",
+        duplex: body ? "half" : undefined,
+      });
 
-  writeResponse(res, upstream);
+      writeResponse(res, upstream);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === NEXT_CHILD_BOOT_RETRY_ATTEMPTS) {
+        break;
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, NEXT_CHILD_BOOT_RETRY_DELAY_MS),
+      );
+    }
+  }
+
+  throw lastError;
 }
 
 const child = spawn(process.execPath, [childEntry], {
