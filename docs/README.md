@@ -59,12 +59,12 @@ remains open now.
 - `docs/00-context/current-system-blueprint-alignment-audit-20260421.md`
   Code-verified alignment and residual gaps.
 - `docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md`
-  Cross-repo code-backed annex audit comparing the local workspace checkout and
-  a clean clone of `tenant-commute-hub` `origin/main`.
+  Cross-repo code-backed annex audit capturing the historical workspace-vs-clean-clone split state, plus later addenda for the merged remote-baseline closeout.
 
 ## Runbooks, Rollout, and Evidence
 
 - `docs/03-runbooks/master-system-closeout-checklist.md`
+- `docs/03-runbooks/cross-repo-gap-matrix-20260424.md`
 - `docs/03-runbooks/execution-next-wave-task-board.md`
 - `docs/03-runbooks/execution-mode-candidate-backlog.md`
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`

@@ -16,7 +16,7 @@ Use it to separate:
 
 ## Current Reality Snapshot
 
-As of `2026-04-20`, the switchboard follow-up wave is closed and the master closeout wave narrative is synced.
+As of `2026-04-24`, the switchboard follow-up wave is closed and the master closeout wave narrative is synced.
 The current shared-truth gap is now:
 
 - one major external auth blocker: `GAP-P2S3-001`
@@ -117,7 +117,7 @@ The PRD still includes customer / call-entry surfaces that are not fully closed 
 
 - [x] Re-check receipts / invoices / driver statements / reimbursements against the PRD completion bar
 - [x] Re-check regulatory reporting and filing-package generation against the PRD completion bar
-- [~] Confirm these flows are not only backend-capable but operationally reviewable in the intended UI / workflow. _(Backoffice/operator review path is confirmed; passenger receipt UI remains deferred with the passenger surface.)_
+- [x] Confirm these flows are not only backend-capable but operationally reviewable in the intended UI / workflow. _(Backoffice/operator review path is confirmed; ops console now supports `Drivers -> select driver -> Earnings`; passenger receipt UI remains deferred with the passenger surface.)_
 
 ## E. Integration and Operational Hardening
 

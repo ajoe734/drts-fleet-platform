@@ -47,12 +47,12 @@ This is an audit packet only. It does not change canonical product truth.
 
 ### 1. Receipts / invoices / driver statements / reimbursements
 
-| Capability          | Repo authority                                                                                                                                                                                              | Reviewable workflow                                                                                                                                                                                                                                                        | Verdict                                                                                                                                                          |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Passenger receipt   | `IssuePassengerReceiptCommand` and `PassengerReceiptRecord` exist in `packages/contracts/src/index.ts`, but no runtime route/service/UI implementation was found under `apps/api` or any client surface     | No passenger-facing or tenant-facing receipt workflow exists in this repo                                                                                                                                                                                                  | `DEFERRED`, not complete. This must stay explicitly tied to the passenger-surface defer decision rather than be narrated as implemented.                         |
-| Tenant invoice      | `apps/api/src/modules/billing-settlement/billing-settlement.controller.ts` exposes tenant billing profile + invoice generate/list/get routes; service/repository keep artifact URLs and tenant-scoped truth | Tenant review path exists in `apps/tenant-portal-web/app/billing/page.tsx`; finance operator path exists in `apps/platform-admin-web/app/payments/page.tsx`; smoke/E2E anchors exist in `tests/smoke/05-billing-invoice.sh` and `tests/e2e/E2E-001-enterprise-dispatch.sh` | `PASS`                                                                                                                                                           |
-| Driver statement    | `apps/api/src/modules/billing-settlement/` generates immutable statement records from published fee plans and live/persisted trip data                                                                      | Full finance review exists in `apps/platform-admin-web/app/payments/page.tsx`; driver self-view exists in `apps/driver-app/app/earnings.tsx`; ops-only visibility exists in `apps/ops-console-web/app/revenue/page.tsx`                                                    | `PARTIAL` for workflow alignment. Backend authority is present, but the exact UAT path `Drivers -> select driver -> Earnings` is not implemented in ops-console. |
-| Reimbursement batch | `apps/api/src/modules/billing-settlement/billing-settlement.controller.ts` exposes list/get/approve/pay; service keeps remittance proof and payout-status propagation authoritative                         | `apps/platform-admin-web/app/payments/page.tsx` provides approve/pay controls and remittance-proof entry; `apps/platform-admin-web/app/pricing/page.tsx` provides upstream fee-plan publication                                                                            | `PASS`                                                                                                                                                           |
+| Capability          | Repo authority                                                                                                                                                                                              | Reviewable workflow                                                                                                                                                                                                                                                                                                              | Verdict                                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Passenger receipt   | `IssuePassengerReceiptCommand` and `PassengerReceiptRecord` exist in `packages/contracts/src/index.ts`, but no runtime route/service/UI implementation was found under `apps/api` or any client surface     | No passenger-facing or tenant-facing receipt workflow exists in this repo                                                                                                                                                                                                                                                        | `DEFERRED`, not complete. This must stay explicitly tied to the passenger-surface defer decision rather than be narrated as implemented. |
+| Tenant invoice      | `apps/api/src/modules/billing-settlement/billing-settlement.controller.ts` exposes tenant billing profile + invoice generate/list/get routes; service/repository keep artifact URLs and tenant-scoped truth | Tenant review path exists in `apps/tenant-portal-web/app/billing/page.tsx`; finance operator path exists in `apps/platform-admin-web/app/payments/page.tsx`; smoke/E2E anchors exist in `tests/smoke/05-billing-invoice.sh` and `tests/e2e/E2E-001-enterprise-dispatch.sh`                                                       | `PASS`                                                                                                                                   |
+| Driver statement    | `apps/api/src/modules/billing-settlement/` generates immutable statement records from published fee plans and live/persisted trip data                                                                      | Full finance review exists in `apps/platform-admin-web/app/payments/page.tsx`; driver self-view exists in `apps/driver-app/app/earnings.tsx`; ops visibility now includes `apps/ops-console-web/app/drivers/page.tsx` -> `apps/ops-console-web/app/drivers/[driverId]/page.tsx` plus `apps/ops-console-web/app/revenue/page.tsx` | `PASS`                                                                                                                                   |
+| Reimbursement batch | `apps/api/src/modules/billing-settlement/billing-settlement.controller.ts` exposes list/get/approve/pay; service keeps remittance proof and payout-status propagation authoritative                         | `apps/platform-admin-web/app/payments/page.tsx` provides approve/pay controls and remittance-proof entry; `apps/platform-admin-web/app/pricing/page.tsx` provides upstream fee-plan publication                                                                                                                                  | `PASS`                                                                                                                                   |
 
 ### 2. Regulatory reporting and filing-package generation
 
@@ -82,7 +82,7 @@ Current repo truth does **not** include:
 
 This does not automatically reopen implementation scope, because the passenger-facing surface is already being handled as an explicit deferred-scope decision in the closeout track. The critical closeout rule is: final Phase 1 narrative must say passenger receipt is deferred with the passenger surface, not silently counted as completed finance scope.
 
-### B. Driver-statement review path drifts from UAT wording
+### B. Driver-statement review path is now aligned to UAT wording
 
 `docs/04-uat/phase1-uat-scenarios.md` `OC-017` says:
 
@@ -90,16 +90,12 @@ This does not automatically reopen implementation scope, because the passenger-f
 - show `gross`, `service_fee`, `subsidy`, `net` per period
 - remain read-only from ops
 
-Current repo state is close but not exact:
+Current repo state now matches that operator path:
 
-- `apps/ops-console-web/app/drivers/page.tsx` is registry-only and has no driver-detail earnings drilldown
-- `apps/ops-console-web/app/revenue/page.tsx` shows statement pulse and net totals, but not the full `gross/service_fee/subsidy/net` detail per driver in a dedicated drilldown
-- `apps/platform-admin-web/app/payments/page.tsx` is the only full-detail review surface that renders statement period, fee plan, gross, service fee, subsidy, net, and payout state
-
-Conclusion: finance/compliance reviewability exists, but the current reviewable workflow lives in platform-admin payments rather than the exact ops-console path named in `OC-017`. Final closeout should either:
-
-1. explicitly say authoritative statement review is a finance/platform-admin workflow, or
-2. treat ops-console driver-detail earnings parity as follow-up work instead of claiming the exact UAT path already exists
+- `apps/ops-console-web/app/drivers/page.tsx` links each driver into a dedicated earnings drilldown
+- `apps/ops-console-web/app/drivers/[driverId]/page.tsx` renders the read-only per-period `gross/service_fee/subsidy/net` breakdown required by `OC-017`
+- `apps/ops-console-web/app/revenue/page.tsx` still provides fleet-wide settlement pulse and also links driver statement rows into the same drilldown
+- `apps/platform-admin-web/app/payments/page.tsx` remains the authoritative finance workflow for approval / payout actions, but it is no longer the only place where ops can review detailed statement values
 
 ---
 
@@ -124,12 +120,12 @@ During verification, `tests/unit/reporting-filing.test.ts` initially exposed a r
 
 `MSC-F1-001` is ready for review with the following audit conclusion:
 
-> Tenant invoices, driver-statement generation, reimbursements, report jobs, and filing-package generation are implemented with backend authority and reviewable operator or tenant workflows. However, passenger receipt remains explicitly deferred with the passenger surface, and the exact ops-console driver-earnings workflow named by `OC-017` is not present as written; authoritative detailed statement review currently lives in platform-admin payments.
+> Tenant invoices, driver-statement generation, reimbursements, report jobs, and filing-package generation are implemented with backend authority and reviewable operator or tenant workflows. Passenger receipt remains explicitly deferred with the passenger surface, while the ops-console driver-earnings workflow named by `OC-017` is now present through `Drivers -> select driver -> Earnings`.
 
 This means final system closeout may claim finance/reporting operational completeness only if it keeps both caveats explicit:
 
 1. passenger receipt is deferred, not implemented
-2. detailed statement review is finance/platform-admin-led unless ops-console parity is added later
+2. passenger receipt remains deferred even though the rest of the finance/reporting review path is operationally complete
 
 ---
 

@@ -192,35 +192,28 @@ the partner or cross-repo dependency stated up front.
 - Type: cross-repo audit / remediation
 - Objective: confirm the remote cutover landing, retire the now-superseded
   Supabase authority posture that used to exist on clean remote `main`, and
-  then close the remaining bootstrap-identity drift so `tenant-commute-hub` can
-  be treated as a pure consumer of `drts-fleet-platform`.
-- Current execution status on `2026-04-23`:
+  close the tenant identity-bootstrap drift so `tenant-commute-hub` can be
+  treated as a pure consumer of `drts-fleet-platform`.
+- Current execution status on `2026-04-24`:
   1. PR `ajoe734/tenant-commute-hub#1` merged the tenant landing branch
      `feat/tenant-bff-foundation-landing-20260422` to remote `main`
   2. PR `ajoe734/drts-fleet-platform#1` merged the backend compatibility branch
      `fix/tenant-cross-repo-compat-20260423` to remote `main`
   3. targeted local live smoke passes end-to-end through the tenant landing
      branch plus local `drts-api`
-  4. the backend merge was taken with explicit owner risk acceptance because
-     clean-branch CI still failed in unrelated files, but remote baseline truth
-     for the cutover is now closed
-- Suggested landing order:
-  1. push the already-committed portability / shim support that is ahead of
-     `origin/main`
-  2. land the dirty-worktree BFF foundation slice
-     (`package.json`, `AuthContext`, `drtsApi`, route convergence, Supabase
-     client removal)
-  3. land the tenant page migration slice and remove leftover Supabase config /
-     migrations
-  4. follow with a separate identity-hardening slice to remove local bootstrap
-     session and role derivation
+  4. PR `ajoe734/tenant-commute-hub#3` merged the identity-hardening slice
+     `feat/tenant-identity-hardening-20260424` to remote `main`
+  5. PR `ajoe734/drts-fleet-platform#12` merged the companion backend auth
+     alignment to remote `main`
+  6. the former tenant identity-hardening remainder is therefore no longer a
+     live code gap on remote `main`
 - Primary anchors:
   - `docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md`
   - `docs/02-architecture/authority/rgp-002-authority-map.md`
   - `docs/02-architecture/tenant-commute-hub-boundary.md`
 - Cross-repo dependency:
-  - optional follow-on clean-clone re-audit plus a separate identity-hardening
-    slice if the team wants stricter pure-consumer posture evidence
+  - optional fresh annex supplement if the team wants a current remote-main-only
+    evidence packet after the historical split-state audit
 
 ## D. Do Not Materialize Under Current Strategy
 
