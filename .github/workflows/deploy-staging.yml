@@ -369,6 +369,31 @@ jobs:
           echo "api_origin=${api_origin}" >> "$GITHUB_OUTPUT"
           echo "iap_client_id=${iap_client_id}" >> "$GITHUB_OUTPUT"
 
+      - name: Ensure control-plane runtime can invoke drts-api
+        run: |
+          gcloud run services add-iam-policy-binding drts-api \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --member "serviceAccount:${{ steps.runtime_sa.outputs.email }}" \
+            --role "roles/run.invoker"
+
+      - name: Ensure control-plane runtime can access API IAP
+        id: api_iap_access
+        continue-on-error: true
+        run: |
+          gcloud iap web add-iam-policy-binding \
+            --resource-type=cloud-run \
+            --service=drts-api \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --member "serviceAccount:${{ steps.runtime_sa.outputs.email }}" \
+            --role "roles/iap.httpsResourceAccessor"
+
+      - name: Note manual API IAP binding fallback
+        if: steps.api_iap_access.outcome == 'failure'
+        run: |
+          echo "::warning::GitHub deploy identity cannot mutate API IAP policy; continuing because runtime access may already be provisioned manually."
+
       - name: Resolve API secret mounts
         id: api_secrets
         run: |
@@ -424,7 +449,7 @@ jobs:
             --port   3002 \
             --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.api_url.outputs.url }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
+            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
             ${{ steps.exposure.outputs.platform_admin }} \
             --min-instances 0 \
             --max-instances 2 \
@@ -439,7 +464,7 @@ jobs:
             --port   3003 \
             --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.api_url.outputs.url }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
+            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
             ${{ steps.exposure.outputs.ops_console }} \
             --min-instances 0 \
             --max-instances 2 \
