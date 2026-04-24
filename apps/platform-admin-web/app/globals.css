@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+:root {
+  --accent: #0f766e;
+}
+
 * {
   box-sizing: border-box;
 }
