@@ -378,6 +378,8 @@ jobs:
             --role "roles/run.invoker"
 
       - name: Ensure control-plane runtime can access API IAP
+        id: api_iap_access
+        continue-on-error: true
         run: |
           gcloud iap web add-iam-policy-binding \
             --resource-type=cloud-run \
@@ -386,6 +388,11 @@ jobs:
             --project "$PROJECT_ID" \
             --member "serviceAccount:${{ steps.runtime_sa.outputs.email }}" \
             --role "roles/iap.httpsResourceAccessor"
+
+      - name: Note manual API IAP binding fallback
+        if: steps.api_iap_access.outcome == 'failure'
+        run: |
+          echo "::warning::GitHub deploy identity cannot mutate API IAP policy; continuing because runtime access may already be provisioned manually."
 
       - name: Resolve API secret mounts
         id: api_secrets
