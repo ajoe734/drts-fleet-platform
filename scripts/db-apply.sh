@@ -3,16 +3,46 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MIGRATIONS_DIR="${ROOT_DIR}/infra/migrations"
+CURRENT_FILE=""
+CURRENT_VERSION=""
+LAST_ERROR=""
+CURRENT_EXIT_CODE=""
 
 # shellcheck source=./db-common.sh
 source "${ROOT_DIR}/scripts/db-common.sh"
 ensure_database_url
 
+on_error() {
+  local status=$?
+  local message
+  if [[ -n "${CURRENT_FILE:-}" ]]; then
+    message="[error] migration failed while applying ${CURRENT_VERSION} (${CURRENT_FILE})"
+  else
+    message="[error] migration runner exited before completing the current migration batch"
+  fi
+  if [[ -n "${LAST_ERROR:-}" ]]; then
+    message="${message}: ${LAST_ERROR}"
+  fi
+  echo "$message" >&2
+  if [[ -w /dev/termination-log ]]; then
+    printf '%s\n' "$message" > /dev/termination-log || true
+  fi
+  if [[ -n "${CURRENT_EXIT_CODE:-}" ]]; then
+    exit "$CURRENT_EXIT_CODE"
+  fi
+  exit "$status"
+}
+
+trap on_error ERR
+
 table_exists() {
   run_psql -tAc "SELECT to_regclass('admin.schema_migrations') IS NOT NULL;" | tr -d '[:space:]'
 }
 
+ordinal=10
+
 for file in $(find "$MIGRATIONS_DIR" -maxdepth 1 -type f -name 'V*.sql' | sort); do
+  ordinal=$((ordinal + 1))
   filename="$(basename "$file")"
   version="${filename%%__*}"
   if [[ "$(table_exists)" == "t" ]]; then
@@ -23,8 +53,22 @@ for file in $(find "$MIGRATIONS_DIR" -maxdepth 1 -type f -name 'V*.sql' | sort);
     fi
   fi
 
+  CURRENT_FILE="$filename"
+  CURRENT_VERSION="$version"
+  CURRENT_EXIT_CODE="$ordinal"
+  LAST_ERROR=""
   echo "[apply] $(basename "$file")"
-  run_psql_file "$file"
+  migration_stderr="$(mktemp)"
+  if ! run_psql_file "$file" 2> >(tee "$migration_stderr" >&2); then
+    LAST_ERROR="$(tail -n 20 "$migration_stderr" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | cut -c1-1500)"
+    rm -f "$migration_stderr"
+    false
+  fi
+  rm -f "$migration_stderr"
+  echo "[ok] $(basename "$file")"
+  CURRENT_FILE=""
+  CURRENT_VERSION=""
+  CURRENT_EXIT_CODE=""
 
   if [[ "$(table_exists)" == "t" ]]; then
     checksum="$(sha256sum "$file" | awk '{print $1}')"
