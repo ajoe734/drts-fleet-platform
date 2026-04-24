@@ -164,6 +164,36 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     invitedAt: "2026-04-10T00:00:00.000Z",
     updatedAt: "2026-04-10T00:00:00.000Z",
   },
+  {
+    userId: "tenant-user-demo-002",
+    tenantId: DEMO_TENANT_ID,
+    email: "ops@acme.example",
+    displayName: "Acme Tenant Ops",
+    roleCode: "tenant_ops_admin",
+    status: "active",
+    invitedAt: "2026-04-10T00:10:00.000Z",
+    updatedAt: "2026-04-10T00:10:00.000Z",
+  },
+  {
+    userId: "tenant-user-demo-003",
+    tenantId: DEMO_TENANT_ID,
+    email: "finance@acme.example",
+    displayName: "Acme Tenant Finance",
+    roleCode: "tenant_finance_admin",
+    status: "active",
+    invitedAt: "2026-04-10T00:20:00.000Z",
+    updatedAt: "2026-04-10T00:20:00.000Z",
+  },
+  {
+    userId: "tenant-user-demo-004",
+    tenantId: DEMO_TENANT_ID,
+    email: "viewer@acme.example",
+    displayName: "Acme Tenant Viewer",
+    roleCode: "tenant_viewer",
+    status: "active",
+    invitedAt: "2026-04-10T00:30:00.000Z",
+    updatedAt: "2026-04-10T00:30:00.000Z",
+  },
 ];
 
 const TENANT_ROLE_CATALOG: TenantRoleCatalogRecord[] = [

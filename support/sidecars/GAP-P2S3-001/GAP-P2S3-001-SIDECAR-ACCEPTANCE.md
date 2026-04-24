@@ -26,6 +26,11 @@
 
 - 父任務 `GAP-P2S3-001` 在 machine truth 中目前是 `blocked`，Owner=`Gemini`，Reviewer unset，且 task note 直接標記：
   - `NEEDS_HUMAN_GCP_CONSOLE: Cloud IAP setup requires manual GCP Console operations (OAuth consent screen, IAP app config). Estimated 1-2h human work before AI can proceed with code changes.`
+- `2026-04-24` 的實機 probe 已把外部 blocker 從抽象狀態縮成具體條件：
+  - workspace 目前對到的 GCP project 是 `autotaxi-492811`
+  - active `gcloud` principal `1071409254673-compute@developer.gserviceaccount.com` 對 Cloud Run / Secret Manager 檢視回 `ACCESS_TOKEN_SCOPE_INSUFFICIENT`
+  - stored human account `ajoe734@cctech-support.com` 需要 interactive reauth，無法在非互動 session 直接用於 IAP / IAM 探查
+  - 因此 parent 目前不是卡在「不知道要做什麼」，而是卡在「需要人類互動式登入或具足夠 OAuth scopes 的執行環境」
 - 本 sidecar `GAP-P2S3-001-SIDECAR-ACCEPTANCE` 在 machine truth 中目前是 `review_approved`，Owner=`Codex`、Reviewer=`Codex2`、artifact path=`support/sidecars/GAP-P2S3-001/GAP-P2S3-001-SIDECAR-ACCEPTANCE.md`、`last_update=2026-04-17T20:13:52Z`。
 - `ai-activity-log.jsonl` / `current-work.md` 顯示此 sidecar 在 `2026-04-17T20:02Z` 到 `20:13Z` 間曾多次於 `Qwen` 與 `Codex2` reviewer routing 之間擺動，主因是 repeated `401 invalid access token or token expired`；但 shared L0 最新穩定狀態已由 `Codex2` 在 `2026-04-17T20:13:52Z` 給出 `review_approved`，且 orchestrator 已在 `2026-04-17T20:14:00Z` 將 `owned_finalize_dispatch` 交回 owner `Codex`。正式 reviewer gate 因此已滿足，當前只剩 owner closeout。
 - accepted consensus packet 也把 parent 固定為「`Gemini + 人工`、`XL`、`使用者確認後才能開始`」，不是純 repo 內 code slice。

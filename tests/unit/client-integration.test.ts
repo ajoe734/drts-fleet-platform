@@ -347,8 +347,6 @@ describe("W8-001A shared api client list handling", () => {
     await expect(
       client.createTenantBootstrapSession({
         email: "tenant.admin@example.com",
-        fullName: "Tenant User",
-        roleCode: "tenant_admin",
       }),
     ).resolves.toEqual(
       expect.objectContaining({

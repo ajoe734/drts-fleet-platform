@@ -139,3 +139,60 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
   ],
   driver_user: ["owned:read", "driver:read", "driver:write", "dispatch:read"],
 };
+
+export const AUTH_TENANT_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =
+  {
+    tenant_admin: [
+      "identity:read",
+      "audit:read",
+      "tenant:read",
+      "tenant:write",
+      "tenant:webhooks:read",
+      "tenant:webhooks:write",
+      "tenant:sla:read",
+      "tenant:sla:write",
+      "tenant:billing:read",
+      "tenant:billing:write",
+      "reports:read",
+      "reports:write",
+    ],
+    tenant_ops_admin: [
+      "identity:read",
+      "audit:read",
+      "tenant:read",
+      "tenant:write",
+      "tenant:webhooks:read",
+      "tenant:webhooks:write",
+      "tenant:sla:read",
+      "tenant:sla:write",
+      "tenant:billing:read",
+      "reports:read",
+      "reports:write",
+    ],
+    tenant_finance_admin: [
+      "identity:read",
+      "audit:read",
+      "tenant:read",
+      "tenant:webhooks:read",
+      "tenant:sla:read",
+      "tenant:billing:read",
+      "tenant:billing:write",
+      "reports:read",
+      "reports:write",
+    ],
+    tenant_viewer: [
+      "identity:read",
+      "audit:read",
+      "tenant:read",
+      "tenant:webhooks:read",
+      "tenant:sla:read",
+      "tenant:billing:read",
+      "reports:read",
+    ],
+  };
+
+export function getTenantRoleScopes(
+  roleCode: string,
+): readonly string[] | null {
+  return AUTH_TENANT_ROLE_SCOPE_PRESETS[roleCode] ?? null;
+}

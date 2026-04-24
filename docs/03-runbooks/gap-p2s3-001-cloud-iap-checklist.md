@@ -24,6 +24,15 @@ Execution anchor:
 - Repo-side groundwork is now partially in place: the API accepts verified Bearer JWTs, marks them as `jwt_bearer`, the smoke harness can send Bearer tokens, and staging deploy exposure is now configurable per service.
 - The remaining blocker is now narrower but still external-facing: repo truth still lacks a complete IAP evidence handoff (audience / issuer / protected scope / caller assumptions), and the closeout path has not yet removed bootstrap trust as the claimed production mechanism.
 
+Observed operator probe on `2026-04-24`:
+
+- The current workspace is pointed at GCP project `autotaxi-492811`.
+- The active non-interactive `gcloud` principal (`1071409254673-compute@developer.gserviceaccount.com`) cannot inspect Cloud Run / Secret Manager state for this task because the issued token returns `ACCESS_TOKEN_SCOPE_INSUFFICIENT`.
+- The stored human account (`ajoe734@cctech-support.com`) requires interactive reauthentication, so it cannot be used from a non-interactive Codex session.
+- As a result, `D-0` is still blocked on either:
+  - a human interactive `gcloud` / GCP Console session, or
+  - rerunning the task from a machine whose active principal already has sufficient OAuth scopes for Cloud Run / IAP inspection.
+
 ## Accepted Topology
 
 `GAP-P2S3-001` now follows an accepted staged rollout model:

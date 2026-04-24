@@ -15,7 +15,7 @@ import {
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
 import { OpenRoute } from "../../common/auth";
-import { AUTH_SCOPE_PRESETS } from "../../common/auth/auth.constants";
+import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
@@ -109,16 +109,26 @@ export class AuthController {
       );
     }
 
+    if (!existingUser) {
+      throw new ApiRequestError(
+        403,
+        "TENANT_USER_NOT_INVITED",
+        "No active tenant user was found for this email.",
+        {
+          email: normalizedEmail,
+          tenantId,
+        },
+      );
+    }
+
     const roleCatalog = this.tenantPartnerService.listTenantRoles();
-    const resolvedRoleCode = this.resolveRoleCode(
+    const resolvedRoleCode = this.resolveExistingUserRoleCode(
       roleCatalog,
       existingUser,
-      command.roleCode,
     );
     const profile = this.buildTenantPortalProfile(
       tenantId,
       normalizedEmail,
-      command.fullName,
       existingUser,
       resolvedRoleCode,
     );
@@ -148,52 +158,53 @@ export class AuthController {
     return toApiSuccessEnvelope(session, requestId);
   }
 
-  private resolveRoleCode(
+  private resolveExistingUserRoleCode(
     roleCatalog: TenantRoleCatalogRecord[],
-    existingUser: TenantUserRoleRecord | null,
-    requestedRoleCode?: string,
+    existingUser: TenantUserRoleRecord,
   ): string {
-    if (existingUser?.roleCode?.trim()) {
-      return existingUser.roleCode.trim();
-    }
-
-    const normalizedRequestedRole = requestedRoleCode?.trim();
-    if (normalizedRequestedRole) {
-      const requestedRoleSupported = roleCatalog.some(
-        (role) => role.roleCode === normalizedRequestedRole,
+    const existingRoleCode = existingUser.roleCode?.trim();
+    if (!existingRoleCode) {
+      throw new ApiRequestError(
+        500,
+        "TENANT_USER_ROLE_MISCONFIGURED",
+        "The tenant user is missing a supported role assignment.",
+        {
+          email: existingUser.email,
+          tenantId: existingUser.tenantId,
+        },
       );
-      if (!requestedRoleSupported) {
-        throw new ApiRequestError(
-          400,
-          "UNSUPPORTED_TENANT_ROLE",
-          "The tenant role code is not supported.",
-          {
-            roleCode: normalizedRequestedRole,
-          },
-        );
-      }
-      return normalizedRequestedRole;
     }
 
-    return (
-      roleCatalog.find((role) => role.assignable)?.roleCode ?? "tenant_admin"
+    const supportedRole = roleCatalog.some(
+      (role) => role.roleCode === existingRoleCode,
     );
+    if (!supportedRole) {
+      throw new ApiRequestError(
+        500,
+        "TENANT_USER_ROLE_MISCONFIGURED",
+        "The tenant user references an unsupported role assignment.",
+        {
+          email: existingUser.email,
+          tenantId: existingUser.tenantId,
+          roleCode: existingRoleCode,
+        },
+      );
+    }
+
+    return existingRoleCode;
   }
 
   private buildTenantPortalProfile(
     tenantId: string,
     email: string,
-    requestedFullName: string | undefined,
-    existingUser: TenantUserRoleRecord | null,
+    existingUser: TenantUserRoleRecord,
     roleCode: string,
   ): TenantPortalProfile {
     const fullName =
-      existingUser?.displayName?.trim() ||
-      requestedFullName?.trim() ||
-      this.deriveFallbackDisplayName(email);
+      existingUser.displayName?.trim() || this.deriveFallbackDisplayName(email);
 
     return {
-      id: existingUser?.userId?.trim() || this.deriveActorId(email),
+      id: existingUser.userId?.trim() || this.deriveActorId(email),
       tenantId,
       fullName,
       email,
@@ -202,6 +213,18 @@ export class AuthController {
   }
 
   private buildIdentityContext(profile: TenantPortalProfile): IdentityContext {
+    const scopes = getTenantRoleScopes(profile.roleCode);
+    if (!scopes) {
+      throw new ApiRequestError(
+        500,
+        "TENANT_ROLE_SCOPE_MISCONFIGURED",
+        "No scope preset is configured for the tenant role.",
+        {
+          roleCode: profile.roleCode,
+        },
+      );
+    }
+
     return {
       actorType: "tenant_admin",
       actorId: profile.id,
@@ -209,7 +232,7 @@ export class AuthController {
       authMode: "jwt_bearer",
       roleFamilies: ["tenant"],
       roles: [profile.roleCode],
-      scopes: [...AUTH_SCOPE_PRESETS.tenant_admin],
+      scopes: [...scopes],
       tenantId: profile.tenantId,
       supportedExecutionModes: [
         "discussion_planning",
