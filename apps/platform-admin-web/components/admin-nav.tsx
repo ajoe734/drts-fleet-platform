@@ -1,50 +1,51 @@
-/**
- * Platform Admin Web - Navigation Sidebar
- * Provides consistent navigation across all admin pages.
- */
-
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { AppSidebar } from "@drts/ui-web";
+import {
+  Shield,
+  Users,
+  Truck,
+  Radio,
+  DollarSign,
+  CreditCard,
+  Activity,
+  Bell,
+  ClipboardList,
+  Flag,
+  LayoutDashboard,
+} from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/", label: "Home" },
-  { href: "/tenants", label: "Tenants" },
-  { href: "/users", label: "Users" },
-  { href: "/fleet", label: "Fleet" },
-  { href: "/switchboard", label: "Switchboard" },
-  { href: "/pricing", label: "Pricing" },
-  { href: "/payments", label: "Payments" },
-  { href: "/health", label: "Health" },
-  { href: "/notices", label: "Notices" },
-  { href: "/audit", label: "Audit" },
-  { href: "/feature-flags", label: "Feature Flags" },
+  { href: "/", label: "Home", icon: <LayoutDashboard size={16} /> },
+  { href: "/tenants", label: "Tenants", icon: <Shield size={16} /> },
+  { href: "/users", label: "Users", icon: <Users size={16} /> },
+  { href: "/fleet", label: "Fleet & Devices", icon: <Truck size={16} /> },
+  { href: "/switchboard", label: "Switchboard", icon: <Radio size={16} /> },
+  {
+    href: "/pricing",
+    label: "Pricing & Split",
+    icon: <DollarSign size={16} />,
+  },
+  { href: "/payments", label: "Payments", icon: <CreditCard size={16} /> },
+  { href: "/health", label: "Health & Quotas", icon: <Activity size={16} /> },
+  { href: "/notices", label: "Notices", icon: <Bell size={16} /> },
+  { href: "/audit", label: "Audit Trail", icon: <ClipboardList size={16} /> },
+  { href: "/feature-flags", label: "Feature Flags", icon: <Flag size={16} /> },
 ];
 
 export function AdminNav() {
-  const pathname = usePathname();
-  const currentPath = pathname || "";
+  const rawPathname = usePathname();
+  const pathname = rawPathname ?? "";
 
   return (
-    <nav className="admin-nav">
-      <div className="admin-nav-header">
-        <span className="admin-nav-title">Platform Admin</span>
-      </div>
-      <ul className="admin-nav-list">
-        {NAV_ITEMS.map((item) => (
-          <li key={item.href} className="admin-nav-item">
-            <Link
-              href={item.href}
-              className={`admin-nav-link ${
-                currentPath === item.href ? "active" : ""
-              }`}
-            >
-              {item.label}
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </nav>
+    <AppSidebar
+      brand="DRTS Fleet"
+      brandSub="Platform Admin"
+      brandIcon={<Shield size={16} color="white" />}
+      navItems={NAV_ITEMS}
+      currentPath={pathname}
+      footer="Staging Environment"
+    />
   );
 }

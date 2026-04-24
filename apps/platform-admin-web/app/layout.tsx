@@ -8,12 +8,20 @@ export const dynamic = "force-dynamic";
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>
+      <body style={{ margin: 0, display: "flex", minHeight: "100vh" }}>
         <RuntimeConfigScript />
-        <div className="admin-layout">
-          <AdminNav />
-          <main className="admin-content">{children}</main>
-        </div>
+        <AdminNav />
+        <main
+          style={{
+            flex: 1,
+            minWidth: 0,
+            padding: "32px",
+            background: "#f8fafc",
+            minHeight: "100vh",
+          }}
+        >
+          {children}
+        </main>
       </body>
     </html>
   );

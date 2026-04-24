@@ -1,11 +1,12 @@
-import Link from "next/link";
 import type { VehicleRegistryRecord } from "@drts/contracts";
-import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
+import { PageHeader } from "@drts/ui-web";
+import { Card } from "@drts/ui-web";
+import { DataTable, Tr, Td } from "@drts/ui-web";
+import { Badge } from "@drts/ui-web";
 
 export default async function VehiclesPage() {
   const client = getOpsClient();
-
   let vehicles: VehicleRegistryRecord[] = [];
   let error: string | null = null;
 
@@ -16,50 +17,60 @@ export default async function VehiclesPage() {
   }
 
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Vehicles Registry"
-        description={`Fetched from /api/regulatory-registry/vehicles. ${vehicles.length} vehicle(s) found.`}
-      >
-        {error && (
-          <div className="error-banner">
-            <strong>Error:</strong> {error}
-          </div>
-        )}
-        {vehicles.length > 0 ? (
-          <div className="data-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Vehicle ID</th>
-                  <th>Plate</th>
-                  <th>Area</th>
-                  <th>Insurance</th>
-                  <th>Dispatchable</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vehicles.map((vehicle) => (
-                  <tr key={vehicle.vehicleId}>
-                    <td>{vehicle.vehicleId}</td>
-                    <td>{vehicle.plateNo}</td>
-                    <td>{vehicle.operatingArea}</td>
-                    <td>{vehicle.insuranceStatus}</td>
-                    <td>{vehicle.dispatchableFlag ? "✅" : "❌"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="empty-state">
-            No vehicles registered. Add via regulatory registry.
-          </p>
-        )}
-        <Link className="route-link" href="/">
-          <strong>Back to home</strong> Return to ops console overview.
-        </Link>
-      </AppShellCard>
-    </main>
+        subtitle={`${vehicles.length} vehicle(s) registered`}
+      />
+
+      {error && (
+        <div
+          style={{
+            background: "#fee2e2",
+            border: "1px solid #fca5a5",
+            borderRadius: "8px",
+            padding: "12px 16px",
+            color: "#b91c1c",
+            fontSize: "13.5px",
+            marginBottom: "20px",
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Vehicle ID" },
+            { label: "Plate" },
+            { label: "Operating Area" },
+            { label: "Insurance" },
+            { label: "Dispatchable" },
+          ]}
+          empty="No vehicles registered."
+        >
+          {vehicles.map((v) => (
+            <Tr key={v.vehicleId}>
+              <Td mono>{v.vehicleId}</Td>
+              <Td>{v.plateNo}</Td>
+              <Td>{v.operatingArea}</Td>
+              <Td>
+                <Badge
+                  variant={v.insuranceStatus === "valid" ? "green" : "red"}
+                >
+                  {v.insuranceStatus}
+                </Badge>
+              </Td>
+              <Td>
+                <Badge variant={v.dispatchableFlag ? "green" : "gray"}>
+                  {v.dispatchableFlag ? "Yes" : "No"}
+                </Badge>
+              </Td>
+            </Tr>
+          ))}
+        </DataTable>
+      </Card>
+    </>
   );
 }
