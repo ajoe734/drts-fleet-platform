@@ -14,7 +14,8 @@ points so the team can answer three different questions quickly:
 - `docs/03-runbooks/master-system-closeout-checklist.md`
   Current closeout definition for the whole system.
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
-  The only remaining product-critical blocker runbook.
+  Closeout runbook for the protected control-plane auth migration and its
+  staged fallback policy.
 
 ## Canonical Blueprint
 

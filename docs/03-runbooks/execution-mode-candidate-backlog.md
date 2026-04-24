@@ -1,10 +1,10 @@
 # Execution-Mode Candidate Backlog
 
-Status: sections A and B materialized in `ai-status.json` on `2026-04-22`;
-section C remains candidate-only; `EMC-X1-001` is still partner-gated and
-`EMC-X1-002` now has annex-audit evidence, merged cross-repo landings, and
-passing local live smoke, but is still not materialized in `ai-status.json`;
-section D remains intentionally out of scope
+Status: sections A and B were materialized in `ai-status.json` on
+`2026-04-22`; `GAP-P2S3-001` is now closed on remote `main`; section C remains
+candidate-only; `EMC-X1-001` is still partner-gated and `EMC-X1-002` now has
+annex-audit evidence plus merged cross-repo landings; section D remains
+intentionally out of scope
 
 ## Purpose
 
@@ -19,8 +19,9 @@ It exists to answer a narrower question than the master closeout checklist:
 
 ## Guardrails
 
-- This document does **not** change current shared truth: `GAP-P2S3-001`
-  remains the only active product-critical blocker.
+- This document does **not** reopen current shared truth: `GAP-P2S3-001` is
+  now closed on the protected control-plane path, and the visible remainder is
+  external-gated or intentionally deferred rather than an active repo blocker.
 - Current product-entry and receipt strategy is ratified by
   `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`.
 - Current staged auth-cutover topology is ratified by
@@ -264,7 +265,7 @@ draft candidate labels.
 
 ## G. Relationship To Current Shared Truth
 
-- `GAP-P2S3-001` remains the only active product-critical blocker.
+- `GAP-P2S3-001` is no longer the active blocker story.
 - Nothing in this runbook should be read as reopening the closeout narrative by
   default.
 - Use this file as the backlog source for any future expansion beyond the

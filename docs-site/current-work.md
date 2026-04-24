@@ -3,11 +3,11 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-04-22T06:39:00Z
+Last updated: 2026-04-24T14:16:32Z
 
 ## Objective
 
-Master closeout narrative is now synced: rollout evidence, tenant boundary, product-surface decisions, finance/reporting completeness, and integration hardening are closed; GAP-P2S3-001 remains the only external product-critical blocker, and deferred passenger / concierge / live-board scope stays explicit.
+Repo/runtime closeout is now synced: protected control-plane auth cutover is closed on staging, tenant cross-repo hardening is merged, and the remaining visible delta is limited to external-gated integrations plus consciously deferred passenger / concierge / live-board scope.
 
 ## Current Sprint
 
@@ -37,7 +37,7 @@ Master closeout narrative is now synced: rollout evidence, tenant boundary, prod
 ## Active Slices
 
 - `Claude`: governance-review, architecture-arbitration, control-plane; next: Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.
-- `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: No active assignment
+- `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
 - `Codex`: contracts, schema, state-system, acceptance; next: Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.
 - `Qwen`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
@@ -47,74 +47,58 @@ Master closeout narrative is now synced: rollout evidence, tenant boundary, prod
 
 ### Primary Project Work
 
-| ID             | Phase | Task                                                                   | Owner  | Status  | Depends On | 中文說明 |
-| -------------- | ----- | ---------------------------------------------------------------------- | ------ | ------- | ---------- | -------- |
-| `GAP-P2S3-001` | P2-S3 | auth: Cloud IAP / OIDC JWT production — replace bootstrap header trust | Gemini | blocked | -          | -        |
+| ID | Phase | Task | Owner | Status | Depends On | 中文說明 |
+|---|---|---|---|---|---|---|
+| _(none)_ | - | - | - | - | - | - |
 
 ### External / Upstream Integration Work
 
-| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
-| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
-| _(none)_ | -     | -    | -     | -      | -          | -        |
+| ID | Phase | Task | Owner | Status | Depends On | 中文說明 |
+|---|---|---|---|---|---|---|
+| _(none)_ | - | - | - | - | - | - |
 
 ## Task Board (active only)
 
-| ID             | Phase | Task                                                                   | Owner  | Status  | Depends On |
-| -------------- | ----- | ---------------------------------------------------------------------- | ------ | ------- | ---------- |
-| `GAP-P2S3-001` | P2-S3 | auth: Cloud IAP / OIDC JWT production — replace bootstrap header trust | Gemini | blocked | -          |
+| ID | Phase | Task | Owner | Status | Depends On |
+|---|---|---|---|---|---|
 
 ## Handoff Queue
 
-| Task     | From | To  | Message | Status | Created At |
-| -------- | ---- | --- | ------- | ------ | ---------- |
-| _(none)_ | -    | -   | -       | -      | -          |
+| Task | From | To | Message | Status | Created At |
+|---|---|---|---|---|---|
+| _(none)_ | - | - | - | - | - |
 
 ## Blockers
 
-| Task     | Owner | Waiting For | Message | Status |
-| -------- | ----- | ----------- | ------- | ------ |
-| _(none)_ | -     | -           | -       | -      |
+| Task | Owner | Waiting For | Message | Status |
+|---|---|---|---|---|
+| _(none)_ | - | - | - | - |
 
 ## Review Notes (active tasks)
 
-| Task     | Reviewer | 修正重點 | Review File |
-| -------- | -------- | -------- | ----------- |
-| _(none)_ | -        | -        | -           |
+| Task | Reviewer | 修正重點 | Review File |
+|---|---|---|---|
+| _(none)_ | - | - | - |
 
 ## Completion Evidence (last 10)
 
-| Task                            | Commit                                   | Subject                                                                          | LLM Agent | Reviewer | Recorded At          |
-| ------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `EMC-H1-002`                    | d4ff866                                  | fix(EMC-H1-002): remove driver-profile seeded fallback                           | Codex     | Claude   | 2026-04-22T05:39:53Z |
-| `EMC-H1-003`                    | 4c27586                                  | fix(EMC-H1-003): harden platform earnings db aggregation                         | Codex2    | Claude   | 2026-04-22T05:47:44Z |
-| `EMC-H1-004`                    | f6ef9e5845a054949d6bd8b160ca90fc8cd98179 | fix(EMC-H1-004): harden billing settlement truth sources                         | Codex     | Claude   | 2026-04-22T05:56:13Z |
-| `EMC-H2-001`                    | 284e0cd                                  | chore(EMC-H2-001): finalize closeout metadata                                    | Codex     | Claude   | 2026-04-22T06:14:47Z |
-| `EMC-W1-001`                    | 8cbdda5                                  | feat(EMC-W1-001): add ops-console earnings drilldown parity                      | Codex2    | Codex    | 2026-04-22T06:03:07Z |
-| `EMC-W1-002`                    | 8c4a254                                  | feat(EMC-W1-002): replace onboarding placeholder with degraded-state recovery UX | Claude    | Codex2   | 2026-04-22T06:01:34Z |
-| `EMC-W1-003`                    | 739ea323c3f894bb45433e7dc033c9adc5ed65da | feat(platform-admin): bind public-info publish actor to verified identity        | Codex2    | Claude   | 2026-04-22T06:09:01Z |
-| `EMC-I1-001`                    | 4be98cb                                  | fix(EMC-I1-001): restore camel/snake fallback in E2E-002 §3.5 dispatch check     | Claude    | Codex    | 2026-04-22T06:38:59Z |
-| `EMC-I1-002`                    | 73323dd                                  | test(EMC-I1-002): add phone booking compliance export flow                       | Codex2    | Codex    | 2026-04-22T06:21:17Z |
-| `EMC-I1-001-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                               | Codex2    | Claude   | 2026-04-22T06:30:23Z |
+| Task | Commit | Subject | LLM Agent | Reviewer | Recorded At |
+|---|---|---|---|---|---|
+| `EMC-H1-002` | d4ff866 | fix(EMC-H1-002): remove driver-profile seeded fallback | Codex | Claude | 2026-04-22T05:39:53Z |
+| `EMC-H1-003` | 4c27586 | fix(EMC-H1-003): harden platform earnings db aggregation | Codex2 | Claude | 2026-04-22T05:47:44Z |
+| `EMC-H1-004` | f6ef9e5845a054949d6bd8b160ca90fc8cd98179 | fix(EMC-H1-004): harden billing settlement truth sources | Codex | Claude | 2026-04-22T05:56:13Z |
+| `EMC-H2-001` | 284e0cd | chore(EMC-H2-001): finalize closeout metadata | Codex | Claude | 2026-04-22T06:14:47Z |
+| `EMC-W1-001` | 8cbdda5 | feat(EMC-W1-001): add ops-console earnings drilldown parity | Codex2 | Codex | 2026-04-22T06:03:07Z |
+| `EMC-W1-002` | 8c4a254 | feat(EMC-W1-002): replace onboarding placeholder with degraded-state recovery UX | Claude | Codex2 | 2026-04-22T06:01:34Z |
+| `EMC-W1-003` | 739ea323c3f894bb45433e7dc033c9adc5ed65da | feat(platform-admin): bind public-info publish actor to verified identity | Codex2 | Claude | 2026-04-22T06:09:01Z |
+| `EMC-I1-001` | 4be98cb | fix(EMC-I1-001): restore camel/snake fallback in E2E-002 §3.5 dispatch check | Claude | Codex | 2026-04-22T06:38:59Z |
+| `EMC-I1-002` | 73323dd | test(EMC-I1-002): add phone booking compliance export flow | Codex2 | Codex | 2026-04-22T06:21:17Z |
+| `EMC-I1-001-SIDECAR-ACCEPTANCE` | - | no-commit closeout | Codex2 | Claude | 2026-04-22T06:30:23Z |
 
 ## Latest Checkpoints
 
-- 2026-04-22T06:36:30Z Orchestrator: `EMC-I1-001` Wake-up queued for supervisor: review_ready_dispatch
-- 2026-04-22T06:36:30Z Orchestrator: `EMC-I1-001` Worker started via codex: review_ready_dispatch
-- 2026-04-22T06:36:31Z Orchestrator: `EMC-I1-001` Worker superseded after task responsibility moved to another agent.
-- 2026-04-22T06:36:31Z Orchestrator: SessionEnd: SessionEnd
-- 2026-04-22T06:38:35Z Codex: `EMC-I1-001` Review approved: §3.5 now proves the negative check against DispatchJobRecord via mirror orderId with camel/snake fallback restored, and the Phase 2 eligibility/triage guidance remains aligned in the live-evidence pack. Owner may finalize EMC-I1-001 to done.
-- 2026-04-22T06:38:36Z Orchestrator: `EMC-I1-001` Worker superseded after task responsibility moved to another agent.
-- 2026-04-22T06:38:37Z Orchestrator: `EMC-I1-001` Wake-up queued for supervisor: owned_finalize_dispatch
-- 2026-04-22T06:38:38Z Orchestrator: `EMC-I1-001` Worker started via claude_cli: owned_finalize_dispatch
-- 2026-04-22T06:38:38Z Orchestrator: `EMC-I1-001` Background worker process exited after advancing the task to `review_approved`.
-- 2026-04-22T06:38:39Z Orchestrator: SessionStart: SessionStart
-- 2026-04-22T06:38:42Z Orchestrator: PreToolUse: Read
-- 2026-04-22T06:38:42Z Orchestrator: PostToolUse: Read
-- 2026-04-22T06:38:42Z Orchestrator: PreToolUse: Read
-- 2026-04-22T06:38:43Z Orchestrator: PostToolUse: Read
-- 2026-04-22T06:38:52Z Orchestrator: PreToolUse: Bash
-- 2026-04-22T06:38:53Z Orchestrator: PostToolUse: Bash
-- 2026-04-22T06:38:53Z Orchestrator: PreToolUse: Bash
-- 2026-04-22T06:38:53Z Orchestrator: PostToolUse: Bash
-- 2026-04-22T06:38:59Z Orchestrator: PreToolUse: Bash
-- 2026-04-22T06:38:59Z Claude: `EMC-I1-001` Owner finalized approved task and closed it
+- 2026-04-24T14:15:51Z Codex: `GAP-P2S3-001` Assigned GAP-P2S3-001 to Gemini with reviewer Codex
+- 2026-04-24T14:15:52Z Gemini: `GAP-P2S3-001` Manual GCP prerequisites, protected control-plane proxy migration, and staging verification are complete; moving GAP-P2S3-001 into final canonical closeout review.
+- 2026-04-24T14:15:53Z Gemini: `GAP-P2S3-001` Handoff to Codex: Protected staging auth cutover is merged and verified on remote main; review canonical task-state closeout against the synced runbooks and staging evidence.
+- 2026-04-24T14:15:54Z Codex: `GAP-P2S3-001` Review approved: protected control-plane auth cutover is merged, staging-verified, and ready for final done closure in machine truth.
+- 2026-04-24T14:15:55Z Gemini: `GAP-P2S3-001` Owner finalized GAP-P2S3-001: Cloud IAP / OIDC staged control-plane cutover is closed on protected staging, staging deploy run #24891433989 passed post-merge verification, and the remaining visible delta is limited to documented local/direct-path fallback policy rather than an active repo blocker.

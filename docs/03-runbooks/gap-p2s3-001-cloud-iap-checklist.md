@@ -8,7 +8,8 @@ It separates the work into:
 - **D-0 manual / infra provisioning**: human-operated GCP / IAM / secret / IAP setup
 - **D-1 repo implementation**: code, workflow, test, and verification changes inside this repository
 
-Use this document when deciding whether `GAP-P2S3-001` can move from `blocked` to active implementation.
+Use this document as the closeout record for the staged internal
+control-plane auth migration and the remaining fallback-policy decisions.
 
 Execution anchor:
 
@@ -16,8 +17,10 @@ Execution anchor:
 
 ## Current Block
 
-`GAP-P2S3-001` is no longer blocked on missing GCP / Cloud IAP provisioning inputs.
-The protected staging path is now verified end-to-end for the internal control-plane web surfaces, and the remaining residuals are limited to explicit local/direct-API fallback handling plus canonical task-state sync.
+`GAP-P2S3-001` is no longer blocked and is now closed on the protected staging
+path for the internal control-plane web surfaces.
+The remaining residuals are limited to explicit local/direct-API fallback
+handling policy and historical documentation cleanup.
 
 - The accepted planning packet marks the task as `Gemini + 人工` and says user confirmation is required before work starts.
 - The IAP-protected load-balancer path is now established for the internal control-plane API and web surfaces, and staging deploy defaults are aligned to that protected path.
@@ -80,39 +83,39 @@ Once those seven items are done, the repo-side `D-1` work can move from blocked 
 
 ### 1. 先確認目標服務
 
-- [ ] 確認這次要保護的是哪個 GCP project。
-- [ ] 確認 region。
-- [ ] 確認 Stage 1 要先保護哪些 internal control-plane API / ingress path。
-- [ ] 確認 Stage 2 是否同時納入 `platform-admin-web` / `ops-console-web`。
-- [ ] 確認 `tenant-commute-hub`、Driver App、partner adapters、webhook callbacks 不在預設 IAP 邊界內。
+- [x] 確認這次要保護的是哪個 GCP project。
+- [x] 確認 region。
+- [x] 確認 Stage 1 要先保護哪些 internal control-plane API / ingress path。
+- [x] 確認 Stage 2 是否同時納入 `platform-admin-web` / `ops-console-web`。
+- [x] 確認 `tenant-commute-hub`、Driver App、partner adapters、webhook callbacks 不在預設 IAP 邊界內。
 
 ### 2. 在 GCP Console 啟用 Cloud IAP
 
-- [ ] 打開 GCP Console。
-- [ ] 進入 **Security / Identity-Aware Proxy**。
-- [ ] 找到對應的 Cloud Run 服務。
-- [ ] 啟用 IAP 保護。
-- [ ] 如果系統要求先完成 OAuth consent screen 或 IAP app 設定，就在這一步完成。
+- [x] 打開 GCP Console。
+- [x] 進入 **Security / Identity-Aware Proxy**。
+- [x] 找到對應的 Cloud Run 服務。
+- [x] 啟用 IAP 保護。
+- [x] 如果系統要求先完成 OAuth consent screen 或 IAP app 設定，就在這一步完成。
 
 ### 3. 記錄 repo 端一定會用到的值
 
-- [ ] 記下 IAP / OAuth 對應的 **client id / audience**。
-- [ ] 確認 repo 端應該驗哪個 issuer。
-- [ ] 如果有固定允許的 caller identity，也一起記錄。
-- [ ] 把這些值整理成可交接的文字，不要只停留在 Console 畫面。
+- [x] 記下 IAP / OAuth 對應的 **client id / audience**。
+- [x] 確認 repo 端應該驗哪個 issuer。
+- [x] 如果有固定允許的 caller identity，也一起記錄。
+- [x] 把這些值整理成可交接的文字，不要只停留在 Console 畫面。
 
 ### 4. 補齊 CI / staging 呼叫權限
 
-- [ ] 確認 GitHub Actions 或 staging 驗證流程最後是用哪個 principal 呼叫受保護服務。
-- [ ] 給這個 principal 足夠的 IAM 權限，讓它能合法取得 token 並呼叫服務。
-- [ ] 確認這條呼叫路徑未來可以用在 deploy 後 health-check、smoke、或 E2E。
+- [x] 確認 GitHub Actions 或 staging 驗證流程最後是用哪個 principal 呼叫受保護服務。
+- [x] 給這個 principal 足夠的 IAM 權限，讓它能合法取得 token 並呼叫服務。
+- [x] 確認這條呼叫路徑未來可以用在 deploy 後 health-check、smoke、或 E2E。
 
 ### 5. 回填給 repo 實作端
 
-- [ ] 明確告知 repo 實作端：project、region、service scope。
-- [ ] 明確告知：audience / client id、issuer、允許 caller。
-- [ ] 明確告知：還需要哪些 env vars / secrets。
-- [ ] 如果這一波只切 internal control-plane API，也明講；如果 Stage 2 要同時納入 internal web surfaces，也明講。
+- [x] 明確告知 repo 實作端：project、region、service scope。
+- [x] 明確告知：audience / client id、issuer、允許 caller。
+- [x] 明確告知：還需要哪些 env vars / secrets。
+- [x] 如果這一波只切 internal control-plane API，也明講；如果 Stage 2 要同時納入 internal web surfaces，也明講。
 
 ### 完成判定
 
@@ -120,7 +123,7 @@ Once those seven items are done, the repo-side `D-1` work can move from blocked 
 
 - 人工 GCP Console 前置已經不再是模糊 blocker
 - repo 端已經拿到足夠資訊，可以開始做 `D-1`
-- `GAP-P2S3-001` 可以從「純 blocked」往「人工前置已完成、等待 repo implementation」推進
+- `GAP-P2S3-001` 已不再是人工前置未解的 blocker，後續僅保留 closeout 與 fallback policy 記錄
 
 ## Desired End State
 
@@ -175,10 +178,10 @@ These items can proceed once D-0 is clear enough to give the repo concrete input
 ### API Runtime
 
 - [x] Introduce the JWT / OIDC verification path for protected API traffic.
-- [ ] Keep caller-type separation explicit so tenant / driver / partner / webhook traffic does not inherit an admin-only IAP assumption.
+- [x] Keep caller-type separation explicit so tenant / driver / partner / webhook traffic does not inherit an admin-only IAP assumption. _(Protected control-plane hosts are the only default IAP targets; tenant, driver, partner, and webhook paths stay on their own auth boundaries.)_
 - [x] Stop treating free-form bootstrap actor headers as the production trust path. _(Protected `platform-admin-web` / `ops-console-web` now derive caller identity from the IAP-authenticated request and issue server-owned inner Bearer auth; legacy bootstrap helpers remain only for local dev or direct non-IAP diagnostics.)_
-- [ ] Document whether `x-drts-internal-key` remains as local-only / break-glass fallback or is removed from staging.
-- [ ] Keep health or other approved public exceptions explicit and narrow.
+- [x] Document whether `x-drts-internal-key` remains as local-only / break-glass fallback or is removed from staging. _(`x-drts-internal-key` remains a local/direct-path fallback only; it is not part of the protected staging control-plane default path.)_
+- [x] Keep health or other approved public exceptions explicit and narrow. _(Health checks remain intentional exceptions; protected control-plane API verification now proves the authenticated path separately.)_
 
 ### Deployment / CI
 
@@ -191,8 +194,8 @@ These items can proceed once D-0 is clear enough to give the repo concrete input
 
 - [x] Add positive verification for valid Bearer token / assertion acceptance.
 - [x] Add negative verification for invalid, missing, or wrong-audience token rejection.
-- [~] Update smoke / E2E helpers so the default staging path no longer assumes bootstrap headers. _(Protected control-plane web verification is now Bearer-only, but direct API smoke/E2E helpers still keep bootstrap identity as an explicit fallback for local dev and direct non-IAP diagnostics.)_
-- [ ] Keep any temporary fallback behavior explicitly documented if migration is phased.
+- [x] Update smoke / E2E helpers so the default staging path no longer assumes bootstrap headers. _(Protected control-plane verification now mints IAP tokens directly; bootstrap identity remains documented only for local/direct-path diagnostics.)_
+- [x] Keep any temporary fallback behavior explicitly documented if migration is phased.
 
 ### Docs / Operations
 
@@ -224,11 +227,11 @@ When this blocker is finally cleared, the handoff or review summary should inclu
 
 ## Exit Criteria
 
-`GAP-P2S3-001` can move out of `blocked` when:
+`GAP-P2S3-001` moved out of `blocked` on `2026-04-24` when:
 
-- D-0 has named human ownership and completed prerequisites
-- the repo has enough concrete auth inputs to implement against
-- the task is no longer waiting on GCP Console actions as the next critical path step
+- D-0 had named human ownership and completed prerequisites
+- the repo had concrete auth inputs to implement against
+- the next critical path step became repo implementation rather than GCP Console work
 
 `GAP-P2S3-001` can move to `done` only when:
 
@@ -236,6 +239,10 @@ When this blocker is finally cleared, the handoff or review summary should inclu
 - the repo implementation is merged and verified
 - staging verification uses the new auth path
 - bootstrap-header trust is no longer the claimed protected-control-plane production mechanism
+
+`GAP-P2S3-001` is now considered `done` for the protected internal
+control-plane path because those four conditions are met on remote `main` and
+verified by staging deploy run `#24891433989`.
 
 ## Repo Anchors
 

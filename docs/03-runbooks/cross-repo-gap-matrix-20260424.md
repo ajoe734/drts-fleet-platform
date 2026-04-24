@@ -1,6 +1,6 @@
 # Cross-Repo Gap Matrix — 2026-04-24
 
-Status: planning + closeout-sync artifact  
+Status: closeout-sync artifact  
 Owner: Codex  
 Reviewer: Claude  
 Updated: 2026-04-24
@@ -21,7 +21,7 @@ It separates:
 
 Baseline references used for this matrix:
 
-- `drts-fleet-platform` `origin/main` at `bbe4a87a8d5b04c0e9e223ddfb2b2b9010afc6b5`
+- `drts-fleet-platform` `origin/main` at `42bd15d9848ad38874c1a36e67408620a668f922`
 - `tenant-commute-hub` `origin/main` at `2a3acf2736b5e37eea82998c58f5466a0bc7ca78`
 
 ---
@@ -32,11 +32,11 @@ Baseline references used for this matrix:
 | ---------------- | ---------------------------------------------------- | --------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `closed`         | Tenant BFF cutover                                   | both                  | closed on remote baseline                    | Landed through `ajoe734/tenant-commute-hub#1` plus companion backend/client compatibility in `ajoe734/drts-fleet-platform#1`.                                                                                                                                      |
 | `closed`         | Tenant identity hardening                            | both                  | closed on remote baseline                    | Landed through `ajoe734/tenant-commute-hub#3` plus backend auth alignment in `ajoe734/drts-fleet-platform#12`. Tenant remote `main` is now email-only bootstrap with server-issued Bearer session; no local role picker or `localStorage` session restore remains. |
-| `repo-local`     | `GAP-P2S3-001` protected control-plane trust cleanup | `drts-fleet-platform` | verified on `ajoe734/drts-fleet-platform#26` | Protected staging now verifies `platform-admin-web` / `ops-console-web` through server-issued inner Bearer auth on the control-plane proxy path. Remaining residuals are canonical task-state sync plus local/direct-path fallback documentation.                  |
-| `repo-local`     | Staging deploy verifier token path                   | `drts-fleet-platform` | fixed in the `2026-04-24` cleanup branch     | GitHub Actions health-check now mints an IAP ID token directly instead of relying on the broken `gcloud auth print-identity-token --audiences` path.                                                                                                               |
-| `repo-local`     | Tenant bootstrap JWT `authMode` drift                | `drts-fleet-platform` | fixed in the `2026-04-24` cleanup branch     | Tenant bootstrap session tokens now carry `authMode: jwt_bearer` consistently in both the response identity and the signed JWT payload.                                                                                                                            |
-| `repo-local`     | Ops driver earnings drilldown parity (`OC-017`)      | `drts-fleet-platform` | fixed in the `2026-04-24` cleanup branch     | `ops-console-web` now supports `Drivers -> select driver -> Earnings`, and revenue rows link into the same read-only drilldown.                                                                                                                                    |
-| `repo-local`     | Authority / boundary / closeout doc truth sync       | `drts-fleet-platform` | fixed in the `2026-04-24` cleanup branch     | Historical split-state docs now distinguish the `2026-04-22` / `2026-04-23` audit snapshot from current merged remote-main truth.                                                                                                                                  |
+| `closed`         | `GAP-P2S3-001` protected control-plane trust cleanup | `drts-fleet-platform` | closed on remote baseline                    | Protected staging verifies `platform-admin-web` / `ops-console-web` through server-issued inner Bearer auth on the control-plane proxy path, and merged staging run `#24891433989` passed build, migration, deploy, and IAP-protected API verification.           |
+| `closed`         | Staging deploy verifier token path                   | `drts-fleet-platform` | closed on remote baseline                    | GitHub Actions health-check now mints an IAP ID token directly instead of relying on the broken `gcloud auth print-identity-token --audiences` path.                                                                                                               |
+| `closed`         | Tenant bootstrap JWT `authMode` drift                | `drts-fleet-platform` | closed on remote baseline                    | Tenant bootstrap session tokens now carry `authMode: jwt_bearer` consistently in both the response identity and the signed JWT payload.                                                                                                                            |
+| `closed`         | Ops driver earnings drilldown parity (`OC-017`)      | `drts-fleet-platform` | closed on remote baseline                    | `ops-console-web` now supports `Drivers -> select driver -> Earnings`, and revenue rows link into the same read-only drilldown.                                                                                                                                    |
+| `closed`         | Authority / boundary / closeout doc truth sync       | `drts-fleet-platform` | closed on remote baseline                    | Historical split-state docs now distinguish the `2026-04-22` / `2026-04-23` audit snapshot from current merged remote-main truth.                                                                                                                                  |
 | `external-gated` | Grab Taiwan real adapter (`EMC-X1-001`)              | `drts-fleet-platform` | still external-gated                         | Requires partner API contract, credentials, sandbox, and evidence.                                                                                                                                                                                                 |
 | `deferred`       | Passenger App / Web                                  | strategy-level        | intentionally deferred                       | Remains outside the current completion bar unless product strategy changes.                                                                                                                                                                                        |
 | `deferred`       | Call Point / Concierge Portal                        | strategy-level        | intentionally deferred                       | Remains outside the current completion bar unless product strategy changes.                                                                                                                                                                                        |
@@ -51,8 +51,8 @@ The cross-repo story is no longer "tenant repo still has not integrated."
 The current reality is:
 
 - the tenant repo is already integrated and materially hardened on remote `main`
-- the protected control-plane trust cleanup is now runtime-verified on the current PR branch
-- several repo-local narrative and workflow parity gaps were directly actionable and are closed in the current cleanup branch
+- the protected control-plane trust cleanup is merged and staging-verified on remote `main`
+- several repo-local narrative and workflow parity gaps were directly actionable and are now closed on the remote baseline
 - the rest of the visible delta is either external-gated or intentionally deferred
 
 ---

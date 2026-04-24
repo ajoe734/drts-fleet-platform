@@ -20,14 +20,16 @@ Phase 1 focuses on fleet management and dispatch compliance core. Phase 2 may ad
 
 The repo is in `supervisor_managed_execution` mode.
 
-The broader blueprint-completion and master-closeout execution waves are
-substantially complete. The repo truth currently says:
+The broader blueprint-completion and master-closeout execution waves are now
+materially closed on the current remote baseline. The repo truth currently
+says:
 
 - core Phase 1 operator surfaces are implemented in code
 - rollout evidence, tenant boundary, finance/reporting completeness, and
   integration hardening are closed
-- the only remaining product-critical blocker is `GAP-P2S3-001`
-  (Cloud IAP / OIDC JWT production cutover)
+- the protected control-plane auth cutover (`GAP-P2S3-001`) is closed on
+  protected staging and the remaining visible delta is limited to
+  external-gated integrations plus consciously deferred families
 - Passenger App / Web, Call Point / Concierge Portal, and AV / live-board scope
   remain explicit deferred or future-gated families
 
