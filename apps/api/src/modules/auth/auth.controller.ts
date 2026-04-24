@@ -135,7 +135,7 @@ export class AuthController {
     const identity = this.buildIdentityContext(profile);
     const token = this.signJwt(
       {
-        authMode: "bootstrap_headers",
+        authMode: "jwt_bearer",
         actorType: identity.actorType,
         actorId: identity.actorId,
         realm: identity.realm,

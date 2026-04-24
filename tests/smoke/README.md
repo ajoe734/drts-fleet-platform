@@ -129,6 +129,11 @@ Defaults:
 - IAP client id / audience: `1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
 - impersonated service account: `github-actions-deployer@autotaxi-492811.iam.gserviceaccount.com`
 
+When `DRTS_STAGING_TOKEN_SERVICE_ACCOUNT` is set, the helper always requests
+the token through service-account impersonation. This is the recommended staging
+path because it stays valid even when the active `gcloud` identity is user
+credentials or a workload-identity-derived session.
+
 Override with:
 
 ```bash
