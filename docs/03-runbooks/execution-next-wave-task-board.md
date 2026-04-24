@@ -10,7 +10,7 @@ It is the practical bridge between:
 
 - the broader system-closeout blueprint
 - the current `ai-status.json` execution backlog
-- the one remaining external auth blocker
+- the now-closed protected control-plane auth migration
 - the repo-executable next-wave backlog now opened from
   `docs/03-runbooks/execution-mode-candidate-backlog.md`
 
@@ -60,22 +60,22 @@ These tasks were real and materialized; only one remains open now.
    - depends on: `MSC-R1-001`, `MSC-T1-001`, `MSC-P1-001`, `MSC-F1-001`, `MSC-I1-001`, `GAP-P2S3-001`
    - objective: align `ai-status.json`, `current-work.md`, evidence packets, and control-plane views to one final closeout story
 
-## 3. Visible But Blocked
+## 3. Former Final Blocker
 
 1. `GAP-P2S3-001`
-   - status: `blocked`
+   - status: `done`
    - owner: `Gemini`
    - objective: Cloud IAP / OIDC JWT production for the staged internal control-plane cutover, replacing bootstrap-header trust
-   - blocker: manual GCP / Cloud IAP / IAM / secret setup still required before repo execution can proceed
-   - unblock path: `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
+   - closeout: human GCP / Cloud IAP prerequisites, protected control-plane proxy migration, staging verifier repair, and merged inner-trust cleanup are complete on remote `main`
+   - evidence anchor: `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
 
 ## 4. Dispatch Rule Right Now
 
 If supervisor execution mode keeps running, the intended behavior is:
 
-1. keep `GAP-P2S3-001` visible but blocked as the only active product-critical blocker
-2. allow the post-closeout execution slices to proceed in parallel where their dependency graph permits
-3. use `docs/03-runbooks/master-system-closeout-checklist.md` plus `docs/03-runbooks/execution-mode-candidate-backlog.md` as the planning anchors
+1. treat `GAP-P2S3-001` as closed unless the protected control-plane auth boundary regresses
+2. use `docs/03-runbooks/master-system-closeout-checklist.md` plus `docs/03-runbooks/execution-mode-candidate-backlog.md` as the planning anchors for any new wave
+3. keep external-gated and deferred scope explicit instead of silently reopening it as repo-local backlog
 4. avoid reopening product-surface scope that is intentionally out of strategy or externally gated
 
 ## 5. Current Interpretation
@@ -83,7 +83,7 @@ If supervisor execution mode keeps running, the intended behavior is:
 - The switchboard follow-up wave is already closed.
 - The substantive closeout wave (`MSC-R1-001`, `MSC-T1-001`, `MSC-P1-001`, `MSC-F1-001`, `MSC-I1-001`) and the final narrative sync (`MSC-N1-001`) are done.
 - A fresh repo-only execution wave is now open for hardening, workflow parity, and evidence expansion.
-- The final “all-clear” narrative still cannot close until `GAP-P2S3-001` is unblocked.
+- The former final auth blocker is now closed; any remaining visible delta is external-gated, intentionally deferred, or ordinary follow-on maintenance.
 
 ## 6. Materialized Post-Closeout Wave
 
@@ -105,7 +105,7 @@ Execution notes:
 
 1. `EMC-X1-001` remains partner-gated, while `EMC-X1-002` is now materially closed as code work: `ajoe734/tenant-commute-hub#1` and `#3` plus `ajoe734/drts-fleet-platform#1` and `#12` are merged, local live smoke passed through the landing branch plus local `drts-api`, and the former tenant identity-hardening remainder is no longer a remote-main code gap; only docs/evidence sync remains if the team wants a fresh post-merge annex packet
 2. first-party Passenger App / Web and passenger-surface receipt UI remain intentionally out of scope
-3. `GAP-P2S3-001` stays visible as the only product-critical blocker even while this wave runs
+3. `GAP-P2S3-001` is now historical closeout context rather than the active blocker story
 4. staged identity-cutover planning now assumes internal control-plane callers move first; tenant, driver, adapter, and webhook flows are not default IAP targets
 
 ## 7. Backlog Source

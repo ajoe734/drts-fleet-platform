@@ -22,9 +22,13 @@ act as both implementation host and operational control plane.
 
 Current posture:
 
-- the master closeout wave is complete except for `GAP-P2S3-001`
+- the master closeout wave is repo-locally complete on the current remote
+  baseline
 - rollout evidence, tenant boundary, finance/reporting completeness, and
   integration hardening have been closed
+- protected control-plane auth cutover is verified on staging; the remaining
+  visible delta is external-gated or intentionally deferred rather than a live
+  repo blocker
 - current Phase 1 demand entry is third-party / partner / tenant / operator
   driven rather than a first-party passenger app
 - passenger receipt UI remains out of the current Phase 1 completion bar

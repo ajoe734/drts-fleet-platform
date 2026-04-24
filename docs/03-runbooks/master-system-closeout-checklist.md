@@ -16,16 +16,18 @@ Use it to separate:
 
 ## Current Reality Snapshot
 
-As of `2026-04-24`, the switchboard follow-up wave is closed and the master closeout wave narrative is synced.
-The current repo/runtime gap is now:
+As of `2026-04-24`, the switchboard follow-up wave is closed, the protected
+control-plane auth cutover is merged and staging-verified, and the master
+closeout wave narrative is synced.
+The current visible delta is now:
 
-- one remaining canonical auth task-state sync around `GAP-P2S3-001`
-- a small set of consciously deferred future-gated surfaces captured in `MSC-P1-001`
+- consciously deferred future-gated surfaces captured in `MSC-P1-001`
+- external-gated integrations such as `EMC-X1-001`
 
 This means:
 
 - **gap-fix execution is complete enough to stop being the main story**
-- **the full Phase 1 system is still not yet complete until the remaining auth task-state sync is closed while deferred scope stays explicit**
+- **the repo-local closeout bar is met, while deferred and external-gated scope remains explicit**
 
 ## A. Gap-Fix Wave Closeout
 
@@ -68,7 +70,7 @@ This is the largest remaining product-critical blocker.
 
 ### B-3. Exit condition
 
-- [~] Close `GAP-P2S3-001`. _(Repo/runtime verification is complete on protected staging; canonical L0 task-state sync is still outstanding.)_
+- [x] Close `GAP-P2S3-001`. _(Protected staging deploy run `#24891433989` passed build, migration, deploy, and IAP-protected API verification after the merged inner-trust cleanup.)_
 - [x] Remove the “manual GCP gate” from the current blocker list once human and repo work are both complete
 
 ## C. Rollout / Evidence Closure
@@ -151,12 +153,12 @@ System completion cannot be claimed ambiguously here; these items need an explic
 
 We can honestly say the system is operationally complete only when all of the following are true:
 
-- [ ] the current active execution backlog is closed
-- [~] `GAP-P2S3-001` is no longer blocked. _(Runtime path verified; canonical blocker sync still pending.)_
-- [ ] rollout / staging / evidence blockers are closed
-- [ ] the intended Phase 1 surfaces have explicit completion or explicit defer decisions
-- [ ] `current-work.md`, `ai-status.json`, evidence packets, and rollout docs tell the same story
-- [ ] the remaining gap between “implemented slices” and “operationally complete system” is either closed or consciously deferred by decision
+- [x] the current active execution backlog is closed
+- [x] `GAP-P2S3-001` is no longer blocked
+- [x] rollout / staging / evidence blockers are closed
+- [x] the intended Phase 1 surfaces have explicit completion or explicit defer decisions
+- [x] `current-work.md`, `ai-status.json`, evidence packets, and rollout docs tell the same story
+- [x] the remaining gap between “implemented slices” and “operationally complete system” is either closed or consciously deferred by decision
 
 ## Reference Anchors
 
