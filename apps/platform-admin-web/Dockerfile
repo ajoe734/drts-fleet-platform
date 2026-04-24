@@ -27,6 +27,7 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 
 FROM deps AS build
 COPY apps/platform-admin-web/ apps/platform-admin-web/
+COPY scripts/control-plane-web-proxy.mjs scripts/
 COPY tsconfig.base.json .
 
 RUN pnpm --filter @drts/contracts build && \
@@ -43,6 +44,7 @@ WORKDIR /app
 COPY --from=build /workspace/apps/platform-admin-web/.next/standalone ./
 COPY --from=build /workspace/apps/platform-admin-web/.next/static ./apps/platform-admin-web/.next/static
 COPY --from=build /workspace/apps/platform-admin-web/public ./apps/platform-admin-web/public
+COPY --from=build /workspace/scripts/control-plane-web-proxy.mjs ./scripts/control-plane-web-proxy.mjs
 
 EXPOSE 3002
-CMD ["node", "apps/platform-admin-web/server.js"]
+CMD ["node", "scripts/control-plane-web-proxy.mjs", "apps/platform-admin-web/server.js", "3102"]
