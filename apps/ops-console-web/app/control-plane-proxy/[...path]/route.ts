@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  CONTROL_PLANE_DEFAULT_EMAILS,
+  CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST,
+  issueControlPlaneRequestAuth,
+  stripControlPlaneAuthQueryParams,
+} from "@drts/control-plane-auth";
 
 const DEFAULT_API_BASE_URL = "http://localhost:3001";
 const METADATA_IDENTITY_TOKEN_URL =
@@ -14,6 +20,7 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "x-forwarded-host",
   "x-forwarded-port",
   "x-forwarded-proto",
+  ...CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST,
 ]);
 
 export const dynamic = "force-dynamic";
@@ -21,6 +28,10 @@ export const runtime = "nodejs";
 
 function resolveTargetOrigin(): string {
   return process.env.DRTS_API_URL || DEFAULT_API_BASE_URL;
+}
+
+function resolveTargetAudience(targetUrl: URL): string {
+  return process.env.DRTS_API_AUTH_AUDIENCE || targetUrl.origin;
 }
 
 function isRunAppTarget(targetUrl: URL): boolean {
@@ -34,24 +45,17 @@ function buildTargetUrl(request: NextRequest, path: string[]) {
       : ["api", ...path].join("/");
   const targetUrl = new URL(targetPath, `${resolveTargetOrigin()}/`);
   targetUrl.search = request.nextUrl.search;
+  stripControlPlaneAuthQueryParams(targetUrl);
   return targetUrl;
 }
 
-function copyRequestHeaders(request: NextRequest, targetUrl: URL) {
+function copyRequestHeaders(request: NextRequest) {
   const headers = new Headers();
-  const forwardAuthorization = !isRunAppTarget(targetUrl);
 
   request.headers.forEach((value, key) => {
-    const normalizedKey = key.toLowerCase();
-
-    if (REQUEST_HEADER_BLOCKLIST.has(normalizedKey)) {
+    if (REQUEST_HEADER_BLOCKLIST.has(key.toLowerCase())) {
       return;
     }
-
-    if (normalizedKey === "authorization" && !forwardAuthorization) {
-      return;
-    }
-
     headers.set(key, value);
   });
 
@@ -72,10 +76,10 @@ function copyResponseHeaders(response: Response) {
 }
 
 async function mintMetadataIdentityToken(
-  targetUrl: URL,
+  audience: string,
 ): Promise<string | null> {
   const metadataUrl = new URL(METADATA_IDENTITY_TOKEN_URL);
-  metadataUrl.searchParams.set("audience", targetUrl.origin);
+  metadataUrl.searchParams.set("audience", audience);
   metadataUrl.searchParams.set("format", "full");
 
   try {
@@ -88,7 +92,7 @@ async function mintMetadataIdentityToken(
 
     if (!response.ok) {
       console.error("[control-plane-proxy] metadata token request failed", {
-        audience: targetUrl.origin,
+        audience,
         status: response.status,
       });
       return null;
@@ -97,7 +101,7 @@ async function mintMetadataIdentityToken(
     return response.text();
   } catch (error) {
     console.error("[control-plane-proxy] metadata token request errored", {
-      audience: targetUrl.origin,
+      audience,
       error: error instanceof Error ? error.message : String(error),
     });
     return null;
@@ -109,23 +113,39 @@ async function applyUpstreamAuth(
   request: NextRequest,
   targetUrl: URL,
 ) {
-  if (!isRunAppTarget(targetUrl)) {
-    const authorization = request.headers.get("authorization");
-    if (authorization) {
-      headers.set("authorization", authorization);
+  const controlPlaneAuth = issueControlPlaneRequestAuth({
+    actorType: "ops_user",
+    headers: request.headers,
+    defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,
+    requestId: request.headers.get("x-request-id"),
+    ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
+    ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
+    ...(process.env.JWT_AUDIENCE
+      ? { jwtAudience: process.env.JWT_AUDIENCE }
+      : {}),
+  });
+
+  Object.entries(controlPlaneAuth.headers).forEach(([key, value]) => {
+    headers.set(key, value);
+  });
+
+  if (process.env.DRTS_API_AUTH_AUDIENCE) {
+    const metadataToken = await mintMetadataIdentityToken(
+      resolveTargetAudience(targetUrl),
+    );
+    if (metadataToken) {
+      headers.set("authorization", `Bearer ${metadataToken}`);
     }
     return;
   }
 
-  const metadataToken = await mintMetadataIdentityToken(targetUrl);
-  if (metadataToken) {
-    headers.set("x-serverless-authorization", `Bearer ${metadataToken}`);
+  if (!isRunAppTarget(targetUrl)) {
     return;
   }
 
-  const authorization = request.headers.get("authorization");
-  if (authorization) {
-    headers.set("x-serverless-authorization", authorization);
+  const metadataToken = await mintMetadataIdentityToken(targetUrl.origin);
+  if (metadataToken) {
+    headers.set("x-serverless-authorization", `Bearer ${metadataToken}`);
   }
 }
 
@@ -136,13 +156,9 @@ async function forward(
   const { path } = await params;
   const method = request.method.toUpperCase();
   const targetUrl = buildTargetUrl(request, path);
-  const headers = copyRequestHeaders(request, targetUrl);
+  const headers = copyRequestHeaders(request);
   await applyUpstreamAuth(headers, request, targetUrl);
-  console.info("[control-plane-proxy] forwarding request", {
-    method,
-    path: request.nextUrl.pathname,
-    target: targetUrl.toString(),
-  });
+
   const init: RequestInit = {
     method,
     headers,
@@ -155,10 +171,6 @@ async function forward(
   }
 
   const upstream = await fetch(targetUrl, init);
-  console.info("[control-plane-proxy] upstream response", {
-    status: upstream.status,
-    target: targetUrl.toString(),
-  });
 
   return new NextResponse(upstream.body, {
     status: upstream.status,

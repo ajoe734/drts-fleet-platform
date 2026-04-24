@@ -17,14 +17,8 @@ function rewriteControlPlaneProxyPath(baseUrl: string, path: string): string {
   return path.replace(/^\/api(?=\/|$)/, "") || "/";
 }
 
-export function getOpsClient(): ApiClient {
-  const apiUrl = getRuntimeApiBaseUrl();
-  const cachedClient = clientCache.get(apiUrl);
-  if (cachedClient) {
-    return cachedClient;
-  }
-
-  const client = new ApiClient({
+function createOpsBootstrapClient(apiUrl: string): ApiClient {
+  return new ApiClient({
     baseUrl: apiUrl,
     defaultHeaders: {
       "x-actor-type": "ops_user",
@@ -33,6 +27,21 @@ export function getOpsClient(): ApiClient {
     },
     pathTransform: (path) => rewriteControlPlaneProxyPath(apiUrl, path),
   });
+}
+
+export function getOpsClient(): ApiClient {
+  const apiUrl = getRuntimeApiBaseUrl();
+  const cachedClient = clientCache.get(apiUrl);
+  if (cachedClient) {
+    return cachedClient;
+  }
+
+  const client = apiUrl.startsWith("/control-plane-proxy")
+    ? new ApiClient({
+        baseUrl: apiUrl,
+        pathTransform: (path) => rewriteControlPlaneProxyPath(apiUrl, path),
+      })
+    : createOpsBootstrapClient(apiUrl);
   clientCache.set(apiUrl, client);
   return client;
 }
@@ -44,8 +53,10 @@ export function createOpsDispatchEventSource(): EventSource {
     "/api/ops/dispatch-events",
   );
   const url = new URL(requestPath, apiUrl);
-  url.searchParams.set("actorType", "ops_user");
-  url.searchParams.set("actorId", DEMO_ACTOR_ID);
-  url.searchParams.set("realm", "ops");
+  if (!apiUrl.startsWith("/control-plane-proxy")) {
+    url.searchParams.set("actorType", "ops_user");
+    url.searchParams.set("actorId", DEMO_ACTOR_ID);
+    url.searchParams.set("realm", "ops");
+  }
   return new EventSource(url.toString());
 }

@@ -449,6 +449,7 @@ jobs:
             --port   3002 \
             --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
+            --set-secrets "JWT_SECRET=drts-staging-jwt-secret:latest" \
             --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
             ${{ steps.exposure.outputs.platform_admin }} \
             --min-instances 0 \
@@ -464,6 +465,7 @@ jobs:
             --port   3003 \
             --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
+            --set-secrets "JWT_SECRET=drts-staging-jwt-secret:latest" \
             --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
             ${{ steps.exposure.outputs.ops_console }} \
             --min-instances 0 \
@@ -547,6 +549,8 @@ jobs:
           set -euo pipefail
 
           TOKEN="${{ steps.iap_token.outputs.id_token }}"
+          PLATFORM_ADMIN_ORIGIN="https://staging.drts-fleet.cctech-support.com"
+          OPS_ORIGIN="https://ops.staging.drts-fleet.cctech-support.com"
 
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${TOKEN}" \
@@ -554,10 +558,11 @@ jobs:
 
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${TOKEN}" \
-            -H "x-actor-type: platform_admin" \
-            -H "x-actor-id: deploy-health-platform-admin" \
-            -H "x-realm: platform" \
-            "${CONTROL_PLANE_API_ORIGIN}/api/identity/context" >/dev/null
+            "${PLATFORM_ADMIN_ORIGIN}/control-plane-proxy/identity/context" >/dev/null
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "${OPS_ORIGIN}/control-plane-proxy/identity/context" >/dev/null
 
       - name: Print staging URLs
         run: |

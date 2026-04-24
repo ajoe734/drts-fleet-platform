@@ -192,6 +192,9 @@ importers:
       "@drts/api-client":
         specifier: workspace:*
         version: link:../../packages/api-client
+      "@drts/control-plane-auth":
+        specifier: workspace:*
+        version: link:../../packages/control-plane-auth
       "@drts/contracts":
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -234,6 +237,9 @@ importers:
       "@drts/api-client":
         specifier: workspace:*
         version: link:../../packages/api-client
+      "@drts/control-plane-auth":
+        specifier: workspace:*
+        version: link:../../packages/control-plane-auth
       "@drts/contracts":
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -294,6 +300,16 @@ importers:
       "@drts/contracts":
         specifier: workspace:*
         version: link:../contracts
+
+  packages/control-plane-auth:
+    dependencies:
+      jsonwebtoken:
+        specifier: ^9.0.3
+        version: 9.0.3
+    devDependencies:
+      "@types/jsonwebtoken":
+        specifier: ^9.0.10
+        version: 9.0.10
 
   packages/contracts: {}
 

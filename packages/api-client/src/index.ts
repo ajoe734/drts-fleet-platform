@@ -2,7 +2,7 @@
  * @drts/api-client - Shared API client for DRTS client surfaces
  *
  * Provides a typed fetch wrapper around the Phase 1 API.
- * Uses the BootstrapAuthGuard header-based identity pattern.
+ * Supports both app-issued Bearer auth and legacy bootstrap header fallback.
  */
 
 import type {
@@ -1265,7 +1265,7 @@ export class ApiClient {
 }
 
 /**
- * Factory for creating API clients with Bootstrap Auth headers.
+ * Factory helpers for callers that still rely on bootstrap header auth.
  */
 export function createTenantClient(
   baseUrl: string,

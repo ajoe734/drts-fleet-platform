@@ -9,6 +9,7 @@ import type {
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 const WEBHOOK_DELIVERY_DISCLAIMER = {
   title: "Phase 1 limitation",
@@ -310,20 +311,12 @@ function WebhookList({ webhooks }: { webhooks: TenantWebhookEndpoint[] }) {
                         name="webhookId"
                         value={webhook.webhookId}
                       />
-                      <button
+                      <ConfirmSubmitButton
                         type="submit"
-                        onClick={(e) => {
-                          if (
-                            !confirm(
-                              `Delete webhook endpoint "${webhook.url}"? This action cannot be undone.`,
-                            )
-                          ) {
-                            e.preventDefault();
-                          }
-                        }}
+                        confirmMessage={`Delete webhook endpoint "${webhook.url}"? This action cannot be undone.`}
                       >
                         Delete
-                      </button>
+                      </ConfirmSubmitButton>
                     </form>
                   </td>
                 </tr>
