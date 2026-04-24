@@ -51,6 +51,14 @@ export type PersistBillingSettlementChanges = {
   reimbursementBatches?: readonly ReimbursementBatchRecord[];
 };
 
+const LIVE_TASK_COMPLETED_AT_SQL = `
+  CASE
+    WHEN COALESCE(tasks.record->>'completedAt', '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$'
+      THEN (tasks.record->>'completedAt')::timestamptz
+    ELSE NULL
+  END
+`;
+
 @Injectable()
 export class BillingSettlementRepository {
   private readonly logger = new Logger(BillingSettlementRepository.name);
@@ -168,12 +176,12 @@ export class BillingSettlementRepository {
         INNER JOIN ops.phase1_owned_orders AS orders
           ON orders.order_id = tasks.order_id
         WHERE tasks.status = 'completed'
-          AND COALESCE(tasks.record->>'completedAt', '') <> ''
+          AND ${LIVE_TASK_COMPLETED_AT_SQL} IS NOT NULL
           AND COALESCE(orders.record->>'tenantId', '') = $1
           AND COALESCE(orders.record->>'serviceBucket', '') = 'business_dispatch'
-          AND (tasks.record->>'completedAt')::timestamptz >= $2::timestamptz
-          AND (tasks.record->>'completedAt')::timestamptz <= $3::timestamptz
-        ORDER BY (tasks.record->>'completedAt')::timestamptz DESC
+          AND ${LIVE_TASK_COMPLETED_AT_SQL} >= $2::timestamptz
+          AND ${LIVE_TASK_COMPLETED_AT_SQL} <= $3::timestamptz
+        ORDER BY ${LIVE_TASK_COMPLETED_AT_SQL} DESC
       `,
       [tenantId, periodStart, periodEnd],
     );
@@ -220,12 +228,12 @@ export class BillingSettlementRepository {
         INNER JOIN ops.phase1_owned_orders AS orders
           ON orders.order_id = tasks.order_id
         WHERE tasks.status = 'completed'
-          AND COALESCE(tasks.record->>'completedAt', '') <> ''
+          AND ${LIVE_TASK_COMPLETED_AT_SQL} IS NOT NULL
           AND COALESCE(tasks.record->>'driverId', '') <> ''
           AND COALESCE(orders.record->>'serviceBucket', '') = 'business_dispatch'
-          AND (tasks.record->>'completedAt')::timestamptz >= $1::timestamptz
-          AND (tasks.record->>'completedAt')::timestamptz <= $2::timestamptz
-        ORDER BY (tasks.record->>'completedAt')::timestamptz DESC
+          AND ${LIVE_TASK_COMPLETED_AT_SQL} >= $1::timestamptz
+          AND ${LIVE_TASK_COMPLETED_AT_SQL} <= $2::timestamptz
+        ORDER BY ${LIVE_TASK_COMPLETED_AT_SQL} DESC
       `,
       [periodStart, periodEnd],
     );
@@ -251,12 +259,12 @@ export class BillingSettlementRepository {
         INNER JOIN ops.phase1_owned_orders AS orders
           ON orders.order_id = tasks.order_id
         WHERE tasks.status = 'completed'
-          AND COALESCE(tasks.record->>'completedAt', '') <> ''
+          AND ${LIVE_TASK_COMPLETED_AT_SQL} IS NOT NULL
           AND COALESCE(tasks.record->>'driverId', '') = $1
           AND COALESCE(orders.record->>'serviceBucket', '') = 'business_dispatch'
-          AND (tasks.record->>'completedAt')::timestamptz >= $2::timestamptz
-          AND (tasks.record->>'completedAt')::timestamptz <= $3::timestamptz
-        ORDER BY (tasks.record->>'completedAt')::timestamptz DESC
+          AND ${LIVE_TASK_COMPLETED_AT_SQL} >= $2::timestamptz
+          AND ${LIVE_TASK_COMPLETED_AT_SQL} <= $3::timestamptz
+        ORDER BY ${LIVE_TASK_COMPLETED_AT_SQL} DESC
       `,
       [driverId, periodStart, periodEnd],
     );

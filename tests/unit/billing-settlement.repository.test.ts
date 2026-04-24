@@ -42,6 +42,9 @@ describe("billing settlement repository", () => {
       expect.stringContaining("COALESCE(tasks.record->>'driverId', '') = $1"),
       ["drv-demo-001", "2026-03-01T00:00:00.000Z", "2026-03-31T23:59:59.999Z"],
     );
+    expect(query.mock.calls[0]?.[0]).toContain(
+      "COALESCE(tasks.record->>'completedAt', '') ~",
+    );
     expect(trips).toEqual([
       {
         tenantId: "tenant-demo-001",
