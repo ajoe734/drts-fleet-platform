@@ -369,6 +369,14 @@ jobs:
           echo "api_origin=${api_origin}" >> "$GITHUB_OUTPUT"
           echo "iap_client_id=${iap_client_id}" >> "$GITHUB_OUTPUT"
 
+      - name: Ensure control-plane runtime can invoke drts-api
+        run: |
+          gcloud run services add-iam-policy-binding drts-api \
+            --region "$REGION" \
+            --project "$PROJECT_ID" \
+            --member "serviceAccount:${{ steps.runtime_sa.outputs.email }}" \
+            --role "roles/run.invoker"
+
       - name: Resolve API secret mounts
         id: api_secrets
         run: |
