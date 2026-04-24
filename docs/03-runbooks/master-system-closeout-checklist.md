@@ -55,16 +55,16 @@ This is the largest remaining product-critical blocker.
 
 ### B-1. Human GCP / Cloud IAP prerequisites
 
-- [ ] Complete the manual GCP Console / Cloud IAP / OAuth consent / IAM setup captured in `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
-- [ ] Record the audience / issuer / caller assumptions required by the repo implementation
-- [ ] Confirm the concrete Stage 1 / Stage 2 scope for the accepted staged topology: internal control-plane API first, internal web surfaces second, while tenant / driver / partner / webhook paths stay off the default IAP boundary
+- [~] Complete the manual GCP Console / Cloud IAP / OAuth consent / IAM setup captured in `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
+- [x] Record the audience / issuer / caller assumptions required by the repo implementation
+- [x] Confirm the concrete Stage 1 / Stage 2 scope for the accepted staged topology: internal control-plane API first, internal web surfaces second, while tenant / driver / partner / webhook paths stay off the default IAP boundary
 
 ### B-2. Repo auth migration
 
 - [~] Replace bootstrap-header trust as the claimed production auth path
 - [x] Implement verified Bearer token / OIDC handling in the API
-- [~] update deploy / post-deploy verification to match the new auth model
-- [~] update smoke / E2E / runbooks so they no longer describe bootstrap auth as the default production path
+- [x] update deploy / post-deploy verification to match the new auth model
+- [x] update smoke / E2E / runbooks so they no longer describe bootstrap auth as the default production path
 
 ### B-3. Exit condition
 

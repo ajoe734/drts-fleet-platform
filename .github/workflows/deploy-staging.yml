@@ -355,6 +355,20 @@ jobs:
           echo "platform_admin=$(resolve_flag "${PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
           echo "ops_console=$(resolve_flag "${OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve control-plane staging endpoints
+        id: control_plane
+        env:
+          CONTROL_PLANE_API_ORIGIN: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN }}
+          STAGING_IAP_CLIENT_ID: ${{ vars.STAGING_IAP_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+
+          api_origin="${CONTROL_PLANE_API_ORIGIN:-https://api.staging.drts-fleet.cctech-support.com}"
+          iap_client_id="${STAGING_IAP_CLIENT_ID:-1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com}"
+
+          echo "api_origin=${api_origin}" >> "$GITHUB_OUTPUT"
+          echo "iap_client_id=${iap_client_id}" >> "$GITHUB_OUTPUT"
+
       - name: Resolve API secret mounts
         id: api_secrets
         run: |
@@ -407,8 +421,9 @@ jobs:
             --region "$REGION" \
             --image  "$IMAGE" \
             --port   3002 \
+            --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.api_url.outputs.url }},NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
+            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},NEXT_PUBLIC_API_URL=${{ steps.control_plane.outputs.api_origin }}" \
             ${{ steps.exposure.outputs.platform_admin }} \
             --min-instances 0 \
             --max-instances 2 \
@@ -421,8 +436,9 @@ jobs:
             --region "$REGION" \
             --image  "$IMAGE" \
             --port   3003 \
+            --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.api_url.outputs.url }},NEXT_PUBLIC_API_URL=${{ steps.api_url.outputs.url }}" \
+            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},NEXT_PUBLIC_API_URL=${{ steps.control_plane.outputs.api_origin }}" \
             ${{ steps.exposure.outputs.ops_console }} \
             --min-instances 0 \
             --max-instances 2 \
@@ -448,6 +464,20 @@ jobs:
         with:
           project_id: ${{ env.PROJECT_ID }}
 
+      - name: Resolve protected staging auth endpoints
+        id: control_plane
+        env:
+          CONTROL_PLANE_API_ORIGIN: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN }}
+          STAGING_IAP_CLIENT_ID: ${{ vars.STAGING_IAP_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+
+          api_origin="${CONTROL_PLANE_API_ORIGIN:-https://api.staging.drts-fleet.cctech-support.com}"
+          iap_client_id="${STAGING_IAP_CLIENT_ID:-1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com}"
+
+          echo "api_origin=${api_origin}" >> "$GITHUB_OUTPUT"
+          echo "iap_client_id=${iap_client_id}" >> "$GITHUB_OUTPUT"
+
       - name: Wait for service to be Ready
         run: |
           echo "Waiting for drts-api Cloud Run service to reach Ready=True ..."
@@ -470,6 +500,28 @@ jobs:
             --format "yaml(status)" || true
           exit 1
 
+      - name: Verify IAP-protected control-plane API
+        env:
+          DRTS_GCP_PROJECT_ID: ${{ env.PROJECT_ID }}
+          DRTS_STAGING_IAP_CLIENT_ID: ${{ steps.control_plane.outputs.iap_client_id }}
+          DRTS_STAGING_TOKEN_SERVICE_ACCOUNT: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
+          CONTROL_PLANE_API_ORIGIN: ${{ steps.control_plane.outputs.api_origin }}
+        run: |
+          set -euo pipefail
+
+          TOKEN="$(./scripts/print-staging-iap-token.sh)"
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "${CONTROL_PLANE_API_ORIGIN}/health" >/dev/null
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "x-actor-type: platform_admin" \
+            -H "x-actor-id: deploy-health-platform-admin" \
+            -H "x-realm: platform" \
+            "${CONTROL_PLANE_API_ORIGIN}/api/identity/context" >/dev/null
+
       - name: Print staging URLs
         run: |
           echo "=== Staging deployment complete ==="
@@ -480,3 +532,4 @@ jobs:
               --format "value(status.url)" 2>/dev/null || echo "(not found)")
             echo "  $SVC: $URL"
           done
+          echo "  protected-api-host: ${{ steps.control_plane.outputs.api_origin }}"
