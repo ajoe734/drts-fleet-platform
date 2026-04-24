@@ -1,4 +1,3 @@
-"use client";
 import Link from "next/link";
 import type {
   DriverStatementRecord,
@@ -6,7 +5,6 @@ import type {
   OwnedOrderRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
-import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 import {
   buildRevenueInsights,
@@ -15,6 +13,11 @@ import {
   type RevenueFilters,
   type RevenuePeriod,
 } from "@/lib/ops-analytics";
+import { PageHeader } from "@drts/ui-web";
+import { StatCard } from "@drts/ui-web";
+import { Card, CardHeader, CardBody } from "@drts/ui-web";
+import { DataTable, Tr, Td } from "@drts/ui-web";
+import { Badge } from "@drts/ui-web";
 
 type RevenuePageProps = {
   searchParams?: Record<string, string | string[] | undefined>;
@@ -48,7 +51,6 @@ function resolveFilters(
       : "7d";
   const serviceBucket = firstParam(searchParams?.serviceBucket) ?? "all";
   const vehicleId = firstParam(searchParams?.vehicleId) ?? "all";
-
   return {
     period,
     serviceBucket:
@@ -66,12 +68,40 @@ function buildHref(
   const next = { ...filters, ...overrides };
   const params = new URLSearchParams();
   if (next.period !== "7d") params.set("period", next.period);
-  if (next.serviceBucket !== "all") {
+  if (next.serviceBucket !== "all")
     params.set("serviceBucket", next.serviceBucket);
-  }
   if (next.vehicleId !== "all") params.set("vehicleId", next.vehicleId);
   const query = params.toString();
   return query ? `/revenue?${query}` : "/revenue";
+}
+
+function ChipLink({
+  href,
+  active,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      style={{
+        padding: "5px 12px",
+        borderRadius: "999px",
+        border: `1px solid ${active ? "#0f172a" : "#cbd5e1"}`,
+        textDecoration: "none",
+        color: active ? "#ffffff" : "#475569",
+        background: active ? "#0f172a" : "#ffffff",
+        fontSize: "12.5px",
+        fontWeight: active ? 600 : 400,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </Link>
+  );
 }
 
 export default async function RevenuePage({ searchParams }: RevenuePageProps) {
@@ -92,354 +122,346 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
   const insights = buildRevenueInsights(orders, tasks, statements, filters);
   const vehicleOptions = vehicles
-    .map((vehicle) => vehicle.vehicleId)
-    .sort((left, right) => left.localeCompare(right));
+    .map((v) => v.vehicleId)
+    .sort((a, b) => a.localeCompare(b));
 
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Revenue Overview"
-        description="Ops-facing revenue, trip yield, and settlement pulse built from live order, task, and statement surfaces."
-      >
-        <section className="filter-bar">
-          <div className="filter-group">
-            <span className="filter-label">Period</span>
-            {(["today", "7d", "30d", "all"] as RevenuePeriod[]).map(
-              (period) => (
-                <Link
-                  key={period}
-                  className={
-                    period === filters.period ? "chip chip-active" : "chip"
-                  }
-                  href={buildHref(filters, { period })}
-                >
-                  {period}
-                </Link>
-              ),
-            )}
-          </div>
-          <div className="filter-group">
-            <span className="filter-label">Product</span>
-            {(["all", "standard_taxi", "business_dispatch"] as const).map(
-              (serviceBucket) => (
-                <Link
-                  key={serviceBucket}
-                  className={
-                    serviceBucket === filters.serviceBucket
-                      ? "chip chip-active"
-                      : "chip"
-                  }
-                  href={buildHref(filters, { serviceBucket })}
-                >
-                  {serviceBucket === "all"
-                    ? "all"
-                    : serviceBucket.replace(/_/g, " ")}
-                </Link>
-              ),
-            )}
-          </div>
-        </section>
+        subtitle="Trip yield, settlement pulse, and payout status"
+      />
 
-        <section className="filter-group vehicle-group">
-          <span className="filter-label">Vehicle</span>
-          <Link
-            className={
-              filters.vehicleId === "all" ? "chip chip-active" : "chip"
-            }
-            href={buildHref(filters, { vehicleId: "all" })}
+      {/* Filter bar */}
+      <Card style={{ marginBottom: "20px" }}>
+        <CardBody style={{ padding: "12px 16px" }}>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "16px",
+              alignItems: "center",
+            }}
           >
-            all
-          </Link>
-          {vehicleOptions.map((vehicleId) => (
-            <Link
-              key={vehicleId}
-              className={
-                vehicleId === filters.vehicleId ? "chip chip-active" : "chip"
-              }
-              href={buildHref(filters, { vehicleId })}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span
+                style={{
+                  fontSize: "11.5px",
+                  color: "#64748b",
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                Period
+              </span>
+              <div style={{ display: "flex", gap: "6px" }}>
+                {(["today", "7d", "30d", "all"] as RevenuePeriod[]).map((p) => (
+                  <ChipLink
+                    key={p}
+                    href={buildHref(filters, { period: p })}
+                    active={p === filters.period}
+                  >
+                    {p}
+                  </ChipLink>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <span
+                style={{
+                  fontSize: "11.5px",
+                  color: "#64748b",
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                Product
+              </span>
+              <div style={{ display: "flex", gap: "6px" }}>
+                {(["all", "standard_taxi", "business_dispatch"] as const).map(
+                  (sb) => (
+                    <ChipLink
+                      key={sb}
+                      href={buildHref(filters, { serviceBucket: sb })}
+                      active={sb === filters.serviceBucket}
+                    >
+                      {sb === "all" ? "All" : sb.replace(/_/g, " ")}
+                    </ChipLink>
+                  ),
+                )}
+              </div>
+            </div>
+          </div>
+          {vehicleOptions.length > 0 && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                marginTop: "10px",
+                flexWrap: "wrap",
+              }}
             >
-              {vehicleId}
-            </Link>
-          ))}
-        </section>
-
-        <section className="summary-grid">
-          {[
-            {
-              label: "Completed trips",
-              value: formatCompactNumber(insights.completedTrips),
-              note: "Filtered revenue-bearing trips",
-            },
-            {
-              label: "Recognized revenue",
-              value: formatMinorCurrency(insights.totalRevenueMinor),
-              note: "Completed-task fare plus fixed-price fallback",
-            },
-            {
-              label: "Average trip",
-              value: formatMinorCurrency(insights.averageRevenueMinor),
-              note: "Average revenue per completed trip",
-            },
-            {
-              label: "Queued pipeline",
-              value: formatMinorCurrency(insights.queuedRevenueMinor),
-              note: "Quoted revenue still in active dispatch flow",
-            },
-          ].map((card) => (
-            <div key={card.label} className="summary-card">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
+              <span
+                style={{
+                  fontSize: "11.5px",
+                  color: "#64748b",
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                Vehicle
+              </span>
+              <ChipLink
+                href={buildHref(filters, { vehicleId: "all" })}
+                active={filters.vehicleId === "all"}
+              >
+                All
+              </ChipLink>
+              {vehicleOptions.map((vid) => (
+                <ChipLink
+                  key={vid}
+                  href={buildHref(filters, { vehicleId: vid })}
+                  active={vid === filters.vehicleId}
+                >
+                  {vid}
+                </ChipLink>
+              ))}
             </div>
-          ))}
-        </section>
+          )}
+        </CardBody>
+      </Card>
 
-        <section className="content-grid">
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Breakdown</p>
-                <h3>By product</h3>
-              </div>
+      {/* KPI strip */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: "16px",
+          marginBottom: "20px",
+        }}
+      >
+        <StatCard
+          label="Completed Trips"
+          value={formatCompactNumber(insights.completedTrips)}
+          sub="Revenue-bearing trips"
+          accent="#15803d"
+        />
+        <StatCard
+          label="Recognized Revenue"
+          value={formatMinorCurrency(insights.totalRevenueMinor)}
+          sub="Completed fare + fixed-price"
+          accent="#1d4ed8"
+        />
+        <StatCard
+          label="Average Trip"
+          value={formatMinorCurrency(insights.averageRevenueMinor)}
+          sub="Per completed trip"
+          accent="#7c3aed"
+        />
+        <StatCard
+          label="Queued Pipeline"
+          value={formatMinorCurrency(insights.queuedRevenueMinor)}
+          sub="Still in dispatch flow"
+          accent="#b45309"
+        />
+      </div>
+
+      {/* Breakdowns */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "20px",
+          marginBottom: "20px",
+        }}
+      >
+        <Card>
+          <CardHeader>
+            <div
+              style={{
+                fontSize: "11px",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "#64748b",
+                marginBottom: "2px",
+              }}
+            >
+              Breakdown
             </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Trips</th>
-                  <th>Revenue</th>
-                  <th>Average</th>
-                </tr>
-              </thead>
-              <tbody>
-                {insights.serviceBuckets.length > 0 ? (
-                  insights.serviceBuckets.map((row) => (
-                    <tr key={row.key}>
-                      <td>{row.label}</td>
-                      <td>{formatCompactNumber(row.trips)}</td>
-                      <td>{formatMinorCurrency(row.revenueMinor)}</td>
-                      <td>{formatMinorCurrency(row.averageMinor)}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={4}>
-                      No completed revenue rows for this filter.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Breakdown</p>
-                <h3>By vehicle</h3>
-              </div>
+            <div
+              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
+            >
+              By product
             </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Vehicle</th>
-                  <th>Trips</th>
-                  <th>Revenue</th>
-                  <th>Average</th>
-                </tr>
-              </thead>
-              <tbody>
-                {insights.vehicles.length > 0 ? (
-                  insights.vehicles.map((row) => (
-                    <tr key={row.key}>
-                      <td>{row.label}</td>
-                      <td>{formatCompactNumber(row.trips)}</td>
-                      <td>{formatMinorCurrency(row.revenueMinor)}</td>
-                      <td>{formatMinorCurrency(row.averageMinor)}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={4}>
-                      No vehicle-level revenue for this filter.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
+          </CardHeader>
+          <DataTable
+            columns={[
+              { label: "Product" },
+              { label: "Trips" },
+              { label: "Revenue" },
+              { label: "Average" },
+            ]}
+            empty="No revenue rows for this filter."
+          >
+            {insights.serviceBuckets.map((row) => (
+              <Tr key={row.key}>
+                <Td>{row.label}</Td>
+                <Td>{formatCompactNumber(row.trips)}</Td>
+                <Td>{formatMinorCurrency(row.revenueMinor)}</Td>
+                <Td muted>{formatMinorCurrency(row.averageMinor)}</Td>
+              </Tr>
+            ))}
+          </DataTable>
+        </Card>
 
-        <section className="panel">
-          <div className="panel-head">
+        <Card>
+          <CardHeader>
+            <div
+              style={{
+                fontSize: "11px",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "#64748b",
+                marginBottom: "2px",
+              }}
+            >
+              Breakdown
+            </div>
+            <div
+              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
+            >
+              By vehicle
+            </div>
+          </CardHeader>
+          <DataTable
+            columns={[
+              { label: "Vehicle" },
+              { label: "Trips" },
+              { label: "Revenue" },
+              { label: "Average" },
+            ]}
+            empty="No vehicle revenue for this filter."
+          >
+            {insights.vehicles.map((row) => (
+              <Tr key={row.key}>
+                <Td mono>{row.label}</Td>
+                <Td>{formatCompactNumber(row.trips)}</Td>
+                <Td>{formatMinorCurrency(row.revenueMinor)}</Td>
+                <Td muted>{formatMinorCurrency(row.averageMinor)}</Td>
+              </Tr>
+            ))}
+          </DataTable>
+        </Card>
+      </div>
+
+      {/* Settlement */}
+      <Card>
+        <CardHeader>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
             <div>
-              <p className="eyebrow">Settlement</p>
-              <h3>Driver statement pulse</h3>
+              <div
+                style={{
+                  fontSize: "11px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  color: "#64748b",
+                  marginBottom: "2px",
+                }}
+              >
+                Settlement
+              </div>
+              <div
+                style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
+              >
+                Driver statement pulse
+              </div>
             </div>
-            <span className="panel-note">
-              Statement net total:{" "}
-              {formatMinorCurrency(insights.statementNetMinor)}
+            <span style={{ fontSize: "13.5px", color: "#64748b" }}>
+              Net: {formatMinorCurrency(insights.statementNetMinor)}
             </span>
           </div>
-          <div className="status-strip">
-            {insights.payoutStatuses.length > 0 ? (
-              insights.payoutStatuses.map((item) => (
-                <div key={item.status} className="summary-card">
-                  <span>{item.status}</span>
-                  <strong>{formatCompactNumber(item.count)}</strong>
-                  <small>{formatMinorCurrency(item.netMinor)}</small>
+        </CardHeader>
+        {insights.payoutStatuses.length > 0 && (
+          <div
+            style={{
+              padding: "12px 16px",
+              display: "flex",
+              gap: "12px",
+              flexWrap: "wrap",
+              borderBottom: "1px solid #f1f5f9",
+            }}
+          >
+            {insights.payoutStatuses.map((item) => (
+              <div
+                key={item.status}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: "10px",
+                  background: "#f8fafc",
+                  border: "1px solid #e2e8f0",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "#64748b",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                  }}
+                >
+                  {item.status}
                 </div>
-              ))
-            ) : (
-              <p className="empty-copy">
-                No driver statements available yet for settlement review.
-              </p>
-            )}
+                <div
+                  style={{
+                    fontSize: "20px",
+                    fontWeight: 700,
+                    color: "#0f172a",
+                  }}
+                >
+                  {formatCompactNumber(item.count)}
+                </div>
+                <div style={{ fontSize: "12px", color: "#94a3b8" }}>
+                  {formatMinorCurrency(item.netMinor)}
+                </div>
+              </div>
+            ))}
           </div>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Statement</th>
-                <th>Driver</th>
-                <th>Period</th>
-                <th>Status</th>
-                <th>Net</th>
-              </tr>
-            </thead>
-            <tbody>
-              {statements.length > 0 ? (
-                statements.map((statement) => (
-                  <tr key={statement.statementId}>
-                    <td>{statement.receiptNo}</td>
-                    <td>
-                      <Link
-                        href={`/drivers/${encodeURIComponent(statement.driverId)}`}
-                      >
-                        {statement.driverId}
-                      </Link>
-                    </td>
-                    <td>{statement.periodMonth}</td>
-                    <td>{statement.payoutStatus}</td>
-                    <td>
-                      {formatMinorCurrency(statement.netAmount.amountMinor)}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={5}>No statements generated yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </section>
-
-        <div className="footer-links">
-          <Link className="route-link" href="/dashboard">
-            <strong>Back to dashboard</strong> Return to the operations
-            overview.
-          </Link>
-          <Link className="route-link" href="/reports">
-            <strong>Export reports</strong> Open the reports center for
-            CSV/XLSX/PDF jobs.
-          </Link>
-        </div>
-
-        <style jsx>{`
-          .filter-bar,
-          .filter-group,
-          .summary-grid,
-          .content-grid,
-          .status-strip,
-          .footer-links {
-            display: grid;
-            gap: 0.75rem;
-          }
-          .filter-group {
-            grid-auto-flow: column;
-            grid-auto-columns: max-content;
-            align-items: center;
-            overflow-x: auto;
-            padding-bottom: 0.25rem;
-          }
-          .vehicle-group {
-            margin: 0.75rem 0 1rem;
-          }
-          .filter-label,
-          .eyebrow,
-          .panel-note,
-          .empty-copy {
-            color: #64748b;
-          }
-          .eyebrow {
-            margin: 0 0 0.25rem;
-            font-size: 0.75rem;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-          }
-          .chip {
-            padding: 0.45rem 0.8rem;
-            border-radius: 999px;
-            border: 1px solid #cbd5e1;
-            text-decoration: none;
-            color: #0f172a;
-            background: white;
-          }
-          .chip-active {
-            background: #0f172a;
-            color: white;
-            border-color: #0f172a;
-          }
-          .summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .summary-card,
-          .panel {
-            padding: 1rem;
-            border-radius: 1rem;
-            border: 1px solid #e2e8f0;
-            background: #fff;
-          }
-          .summary-card {
-            display: grid;
-            gap: 0.35rem;
-            background: #f8fafc;
-          }
-          .summary-card strong {
-            font-size: 1.4rem;
-          }
-          .content-grid {
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .panel-head {
-            display: flex;
-            justify-content: space-between;
-            gap: 1rem;
-            align-items: flex-start;
-            margin-bottom: 0.75rem;
-          }
-          .panel h3 {
-            margin: 0;
-          }
-          .table {
-            width: 100%;
-            border-collapse: collapse;
-          }
-          .table th,
-          .table td {
-            padding: 0.75rem 0.5rem;
-            border-bottom: 1px solid #e2e8f0;
-            text-align: left;
-            vertical-align: top;
-          }
-          .footer-links {
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            margin-top: 1rem;
-          }
-        `}</style>
-      </AppShellCard>
-    </main>
+        )}
+        <DataTable
+          columns={[
+            { label: "Statement" },
+            { label: "Driver" },
+            { label: "Period" },
+            { label: "Status" },
+            { label: "Net" },
+          ]}
+          empty="No statements generated yet."
+        >
+          {statements.map((s) => (
+            <Tr key={s.statementId}>
+              <Td mono>{s.receiptNo}</Td>
+              <Td>{s.driverId}</Td>
+              <Td muted>{s.periodMonth}</Td>
+              <Td>
+                <Badge variant={s.payoutStatus === "paid" ? "green" : "yellow"}>
+                  {s.payoutStatus}
+                </Badge>
+              </Td>
+              <Td>{formatMinorCurrency(s.netAmount.amountMinor)}</Td>
+            </Tr>
+          ))}
+        </DataTable>
+      </Card>
+    </>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { AppShellCard } from "@drts/ui-web";
+import { PageHeader } from "@drts/ui-web";
 import type {
   ComplaintCaseRecord,
   ComplaintCategory,
@@ -169,11 +169,12 @@ export default function ComplaintsPage() {
   ).length;
 
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Complaints"
-        description="Complaint hotline and ops case management with assign, note, lifecycle, and export-ready review in one surface."
-      >
+        subtitle="Case management — assign, note, lifecycle, and export-ready review"
+      />
+      <div>
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
@@ -863,7 +864,7 @@ export default function ComplaintsPage() {
             }
           }
         `}</style>
-      </AppShellCard>
-    </main>
+      </div>
+    </>
   );
 }

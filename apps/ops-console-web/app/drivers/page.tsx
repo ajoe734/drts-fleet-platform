@@ -1,11 +1,12 @@
-import Link from "next/link";
 import type { DriverRegistryRecord } from "@drts/contracts";
-import { AppShellCard } from "@drts/ui-web";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { PageHeader } from "@drts/ui-web";
+import { Card } from "@drts/ui-web";
+import { DataTable, Tr, Td } from "@drts/ui-web";
+import { Badge } from "@drts/ui-web";
 
 export default async function DriversPage() {
   const client = await getServerOpsClient();
-
   let drivers: DriverRegistryRecord[] = [];
   let error: string | null = null;
 
@@ -16,62 +17,64 @@ export default async function DriversPage() {
   }
 
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Drivers Registry"
-        description={`Fetched from /api/regulatory-registry/drivers. ${drivers.length} driver(s) found.`}
-      >
-        {error && (
-          <div className="error-banner">
-            <strong>Error:</strong> {error}
-          </div>
-        )}
-        {drivers.length > 0 ? (
-          <div className="data-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Driver ID</th>
-                  <th>Name</th>
-                  <th>Work State</th>
-                  <th>Eligible</th>
-                  <th>Earnings</th>
-                </tr>
-              </thead>
-              <tbody>
-                {drivers.map((driver) => (
-                  <tr key={driver.driverId}>
-                    <td>{driver.driverId}</td>
-                    <td>
-                      <Link
-                        href={`/drivers/${encodeURIComponent(driver.driverId)}`}
-                      >
-                        {driver.name}
-                      </Link>
-                    </td>
-                    <td>{driver.workState}</td>
-                    <td>{driver.licensesValid ? "✅" : "❌"}</td>
-                    <td>
-                      <Link
-                        href={`/drivers/${encodeURIComponent(driver.driverId)}`}
-                      >
-                        View earnings
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="empty-state">
-            No drivers registered. Add via regulatory registry.
-          </p>
-        )}
-        <Link className="route-link" href="/">
-          <strong>Back to home</strong> Return to ops console overview.
-        </Link>
-      </AppShellCard>
-    </main>
+        subtitle={`${drivers.length} driver(s) registered`}
+      />
+
+      {error && (
+        <div
+          style={{
+            background: "#fee2e2",
+            border: "1px solid #fca5a5",
+            borderRadius: "8px",
+            padding: "12px 16px",
+            color: "#b91c1c",
+            fontSize: "13.5px",
+            marginBottom: "20px",
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Driver ID" },
+            { label: "Name" },
+            { label: "Work State" },
+            { label: "License Valid" },
+          ]}
+          empty="No drivers registered."
+        >
+          {drivers.map((d) => (
+            <Tr key={d.driverId}>
+              <Td mono>{d.driverId}</Td>
+              <Td>{d.name}</Td>
+              <Td>
+                <Badge
+                  variant={
+                    d.workState === "available"
+                      ? "green"
+                      : d.workState === "suspended"
+                        ? "red"
+                        : "gray"
+                  }
+                >
+                  {d.workState}
+                </Badge>
+              </Td>
+              <Td>
+                <Badge variant={d.licensesValid ? "green" : "red"}>
+                  {d.licensesValid ? "Valid" : "Invalid"}
+                </Badge>
+              </Td>
+            </Tr>
+          ))}
+        </DataTable>
+      </Card>
+    </>
   );
 }

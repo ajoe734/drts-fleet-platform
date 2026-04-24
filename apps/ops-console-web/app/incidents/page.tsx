@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useDeferredValue, useEffect, useState, useTransition } from "react";
-import { AppShellCard } from "@drts/ui-web";
+import { PageHeader } from "@drts/ui-web";
 import type {
   CreateIncidentCommand,
   IncidentCategory,
@@ -131,11 +131,12 @@ export default function IncidentsPage() {
   }
 
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Incidents"
-        description="ROC incident tracking with filters, timeline review, and link-back into dispatch and vehicle surfaces."
-      >
+        subtitle="ROC incident tracking — filters, timeline review, and dispatch link-back"
+      />
+      <div>
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
@@ -696,8 +697,8 @@ export default function IncidentsPage() {
             }
           }
         `}</style>
-      </AppShellCard>
-    </main>
+      </div>
+    </>
   );
 }
 

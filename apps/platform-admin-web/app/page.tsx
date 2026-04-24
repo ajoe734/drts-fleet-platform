@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AppShellCard } from "@drts/ui-web";
+import { PageHeader, Card, CardBody } from "@drts/ui-web";
 
 const ROUTES = [
   {
@@ -56,25 +56,58 @@ const ROUTES = [
 
 export default function HomePage() {
   return (
-    <div className="app-grid">
-      <div style={{ marginBottom: 8 }}>
-        <span className="pill">Platform Admin Control Plane</span>
-      </div>
-      <AppShellCard
+    <>
+      <PageHeader
         title="Platform Administration"
-        description="Full control plane for platform-wide operations. Select an area below to begin."
-      >
-        <div className="route-list" style={{ marginTop: 16 }}>
-          {ROUTES.map((route) => (
-            <Link key={route.href} href={route.href} className="route-link">
-              <strong>{route.title}</strong>
-              <span style={{ fontSize: 13, color: "#6b7280" }}>
-                {route.desc}
-              </span>
-            </Link>
-          ))}
-        </div>
-      </AppShellCard>
-    </div>
+        subtitle="Full control plane for platform-wide operations"
+      />
+      <Card>
+        <CardBody>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: "12px",
+            }}
+          >
+            {ROUTES.map((route) => (
+              <Link
+                key={route.href}
+                href={route.href}
+                style={{
+                  display: "block",
+                  padding: "16px",
+                  borderRadius: "10px",
+                  border: "1px solid #e2e8f0",
+                  textDecoration: "none",
+                  background: "#f8fafc",
+                  transition: "background 0.1s, border-color 0.1s",
+                }}
+              >
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontSize: "14px",
+                    color: "#0f172a",
+                    marginBottom: "6px",
+                  }}
+                >
+                  {route.title}
+                </div>
+                <div
+                  style={{
+                    fontSize: "12.5px",
+                    color: "#64748b",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {route.desc}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </CardBody>
+      </Card>
+    </>
   );
 }

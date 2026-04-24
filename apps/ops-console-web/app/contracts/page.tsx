@@ -1,11 +1,19 @@
-import Link from "next/link";
 import type { VehicleContractRecord } from "@drts/contracts";
-import { AppShellCard } from "@drts/ui-web";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { PageHeader } from "@drts/ui-web";
+import { Card } from "@drts/ui-web";
+import { DataTable, Tr, Td } from "@drts/ui-web";
+import { Badge } from "@drts/ui-web";
+
+function contractStatusVariant(status: string) {
+  if (status === "active") return "green" as const;
+  if (status === "terminated" || status === "expired") return "red" as const;
+  if (status === "pending") return "yellow" as const;
+  return "gray" as const;
+}
 
 export default async function ContractsPage() {
   const client = await getServerOpsClient();
-
   let contracts: VehicleContractRecord[] = [];
   let error: string | null = null;
 
@@ -16,50 +24,54 @@ export default async function ContractsPage() {
   }
 
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Contracts Registry"
-        description={`Fetched from /api/regulatory-registry/contracts. ${contracts.length} contract(s) found.`}
-      >
-        {error && (
-          <div className="error-banner">
-            <strong>Error:</strong> {error}
-          </div>
-        )}
-        {contracts.length > 0 ? (
-          <div className="data-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Contract ID</th>
-                  <th>Vehicle</th>
-                  <th>Partner</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {contracts.map((contract) => (
-                  <tr key={contract.contractId}>
-                    <td>{contract.contractId}</td>
-                    <td>{contract.vehicleId}</td>
-                    <td>{contract.partnerId}</td>
-                    <td>{contract.contractType}</td>
-                    <td>{contract.status}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="empty-state">
-            No contracts registered. Add via regulatory registry.
-          </p>
-        )}
-        <Link className="route-link" href="/">
-          <strong>Back to home</strong> Return to ops console overview.
-        </Link>
-      </AppShellCard>
-    </main>
+        subtitle={`${contracts.length} contract(s)`}
+      />
+
+      {error && (
+        <div
+          style={{
+            background: "#fee2e2",
+            border: "1px solid #fca5a5",
+            borderRadius: "8px",
+            padding: "12px 16px",
+            color: "#b91c1c",
+            fontSize: "13.5px",
+            marginBottom: "20px",
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <Card>
+        <DataTable
+          columns={[
+            { label: "Contract ID" },
+            { label: "Vehicle" },
+            { label: "Partner" },
+            { label: "Type" },
+            { label: "Status" },
+          ]}
+          empty="No contracts registered."
+        >
+          {contracts.map((c) => (
+            <Tr key={c.contractId}>
+              <Td mono>{c.contractId}</Td>
+              <Td mono>{c.vehicleId}</Td>
+              <Td mono>{c.partnerId}</Td>
+              <Td>{c.contractType}</Td>
+              <Td>
+                <Badge variant={contractStatusVariant(c.status)}>
+                  {c.status}
+                </Badge>
+              </Td>
+            </Tr>
+          ))}
+        </DataTable>
+      </Card>
+    </>
   );
 }

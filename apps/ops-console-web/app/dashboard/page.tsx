@@ -1,4 +1,3 @@
-"use client";
 import Link from "next/link";
 import type {
   DispatchJobRecord,
@@ -12,7 +11,6 @@ import type {
   ShiftRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
-import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 import {
   buildDashboardTrend,
@@ -22,12 +20,11 @@ import {
   formatCompactNumber,
   formatMinorCurrency,
 } from "@/lib/ops-analytics";
+import { PageHeader } from "@drts/ui-web";
+import { StatCard } from "@drts/ui-web";
+import { Card, CardHeader, CardBody } from "@drts/ui-web";
 
-type IdentitySummary = {
-  realm?: string;
-  actorType?: string;
-} | null;
-
+type IdentitySummary = { realm?: string; actorType?: string } | null;
 type HealthPayload = {
   service: string;
   status: string;
@@ -118,331 +115,302 @@ export default async function DashboardPage() {
     },
   );
   const trend = buildDashboardTrend(orders, driverTasks, incidents);
-  const maxTrips = Math.max(1, ...trend.map((point) => point.completedTrips));
+  const maxTrips = Math.max(1, ...trend.map((p) => p.completedTrips));
   const actionItems = [
     dispatch.redispatchOrders > 0
       ? `${dispatch.redispatchOrders} orders need redispatch`
       : null,
     operations.openIncidents > 0
-      ? `${operations.openIncidents} incidents are still open`
+      ? `${operations.openIncidents} open incidents`
       : null,
     operations.overdueMaintenance > 0
-      ? `${operations.overdueMaintenance} maintenance work orders are overdue`
+      ? `${operations.overdueMaintenance} overdue maintenance items`
       : null,
     operations.failedReports > 0
-      ? `${operations.failedReports} report jobs need retry or review`
+      ? `${operations.failedReports} report jobs need review`
       : null,
   ].filter(Boolean) as string[];
 
+  const quickLinks: [string, string][] = [
+    ["/dispatch", "Open dispatch board"],
+    ["/revenue", "Review revenue"],
+    ["/incidents", "Coordinate incidents"],
+    ["/maintenance", "Maintenance backlog"],
+    ["/reports", "Generate reports"],
+  ];
+
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Dashboard"
-        description="Host / OpCo operational overview: KPI, dispatch health, revenue pulse, and exception backlog."
+        subtitle="Operational overview — dispatch health, revenue pulse, and exception backlog"
+      />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: "16px",
+          marginBottom: "24px",
+        }}
       >
-        <div className="dashboard-grid">
-          <section className="hero-panel">
-            <div>
-              <p className="eyebrow">Phase 1 Role Lens</p>
-              <h2>OpCo operates, ROC monitors, Host reads scoped data.</h2>
-              <p className="hero-copy">
-                ROC remains read-only in Phase 1, while OpCo owns assignment and
-                redispatch. Host-facing visibility stays limited to its own
-                vehicles, maintenance, and revenue surfaces.
-              </p>
-            </div>
-            <div className="hero-metrics">
-              <div className="metric-card metric-primary">
-                <span className="metric-label">Today&apos;s revenue</span>
-                <strong>
-                  {formatMinorCurrency(todayRevenue.totalRevenueMinor)}
-                </strong>
-                <span className="metric-subcopy">
-                  {formatCompactNumber(todayRevenue.completedTrips)} completed
-                  trip(s) today
-                </span>
-              </div>
-              <div className="metric-card">
-                <span className="metric-label">Queue depth</span>
-                <strong>{formatCompactNumber(dispatch.queueDepth)}</strong>
-                <span className="metric-subcopy">
-                  {dispatch.averageEtaMinutes
-                    ? `Avg ETA ${dispatch.averageEtaMinutes} min`
-                    : "ETA pending"}
-                </span>
-              </div>
-            </div>
-          </section>
+        <StatCard
+          label="Today's Revenue"
+          value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
+          sub={`${formatCompactNumber(todayRevenue.completedTrips)} completed trips`}
+          accent="#15803d"
+        />
+        <StatCard
+          label="Queue Depth"
+          value={formatCompactNumber(dispatch.queueDepth)}
+          sub={
+            dispatch.averageEtaMinutes
+              ? `Avg ETA ${dispatch.averageEtaMinutes} min`
+              : "ETA pending"
+          }
+          accent="#1d4ed8"
+        />
+        <StatCard
+          label="Active Orders"
+          value={formatCompactNumber(dispatch.activeOrders)}
+          sub="Realtime + reservation"
+          accent="#7c3aed"
+        />
+        <StatCard
+          label="Dispatchable Vehicles"
+          value={formatCompactNumber(operations.dispatchableVehicles)}
+          sub={`${operations.offlineVehicles} offline`}
+          accent="#b45309"
+        />
+        <StatCard
+          label="Online Drivers"
+          value={formatCompactNumber(operations.onlineDrivers)}
+          sub="Active shifts"
+          accent="#0891b2"
+        />
+        <StatCard
+          label="Open Incidents"
+          value={formatCompactNumber(operations.openIncidents)}
+          sub={`${operations.overdueMaintenance} overdue maintenance`}
+          accent="#dc2626"
+        />
+      </div>
 
-          <section className="metric-strip">
-            {[
-              {
-                label: "Active orders",
-                value: dispatch.activeOrders,
-                note: "Across realtime and reservation flows",
-              },
-              {
-                label: "Dispatchable vehicles",
-                value: operations.dispatchableVehicles,
-                note: `${operations.offlineVehicles} offline / blocked`,
-              },
-              {
-                label: "Online drivers",
-                value: operations.onlineDrivers,
-                note: "Active shift count falls back to available drivers",
-              },
-              {
-                label: "Open incidents",
-                value: operations.openIncidents,
-                note: `${operations.overdueMaintenance} overdue maintenance item(s)`,
-              },
-            ].map((metric) => (
-              <div key={metric.label} className="metric-card">
-                <span className="metric-label">{metric.label}</span>
-                <strong>{formatCompactNumber(metric.value)}</strong>
-                <span className="metric-subcopy">{metric.note}</span>
-              </div>
-            ))}
-          </section>
-
-          <section className="trend-panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">7-Day Trend</p>
-                <h3>Completed trips and new order intake</h3>
-              </div>
-              <span className="panel-note">
-                Revenue trend is based on completed driver tasks.
-              </span>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 300px",
+          gap: "20px",
+          marginBottom: "24px",
+        }}
+      >
+        <Card>
+          <CardHeader>
+            <div
+              style={{
+                fontSize: "11px",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "#64748b",
+                marginBottom: "2px",
+              }}
+            >
+              7-Day Trend
             </div>
-            <div className="trend-chart">
+            <div
+              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
+            >
+              Completed trips &amp; order intake
+            </div>
+          </CardHeader>
+          <CardBody>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(7, 1fr)",
+                gap: "8px",
+                alignItems: "end",
+                minHeight: "120px",
+              }}
+            >
               {trend.map((point) => (
-                <div key={point.date} className="trend-column">
+                <div
+                  key={point.date}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                >
                   <div
-                    className="trend-bar"
                     style={{
-                      height: `${Math.max(14, Math.round((point.completedTrips / maxTrips) * 88))}px`,
+                      width: "100%",
+                      maxWidth: "40px",
+                      height: `${Math.max(12, Math.round((point.completedTrips / maxTrips) * 80))}px`,
+                      background: "linear-gradient(180deg, #3b82f6, #06b6d4)",
+                      borderRadius: "4px 4px 2px 2px",
                     }}
-                    title={`${point.label}: ${point.completedTrips} completed trip(s), ${formatMinorCurrency(point.revenueMinor)}`}
+                    title={`${point.label}: ${point.completedTrips} trips, ${formatMinorCurrency(point.revenueMinor)}`}
                   />
-                  <strong>{point.completedTrips}</strong>
-                  <span>{point.label}</span>
-                  <small>{point.createdOrders} new order(s)</small>
+                  <span
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 600,
+                      color: "#0f172a",
+                    }}
+                  >
+                    {point.completedTrips}
+                  </span>
+                  <span style={{ fontSize: "10px", color: "#94a3b8" }}>
+                    {point.label}
+                  </span>
+                  <span style={{ fontSize: "10px", color: "#cbd5e1" }}>
+                    {point.createdOrders} new
+                  </span>
                 </div>
               ))}
             </div>
-          </section>
+          </CardBody>
+        </Card>
 
-          <section className="side-panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Exceptions</p>
-                <h3>Attention queue</h3>
-              </div>
+        <Card>
+          <CardHeader>
+            <div
+              style={{
+                fontSize: "11px",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "#64748b",
+                marginBottom: "2px",
+              }}
+            >
+              Exceptions
             </div>
+            <div
+              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
+            >
+              Attention queue
+            </div>
+          </CardHeader>
+          <CardBody>
             {actionItems.length > 0 ? (
-              <ul className="attention-list">
+              <ul
+                style={{
+                  margin: 0,
+                  paddingLeft: "20px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                }}
+              >
                 {actionItems.map((item) => (
-                  <li key={item}>{item}</li>
+                  <li
+                    key={item}
+                    style={{ fontSize: "13.5px", color: "#dc2626" }}
+                  >
+                    {item}
+                  </li>
                 ))}
               </ul>
             ) : (
-              <p className="empty-copy">
-                No critical exceptions are waiting right now.
+              <p style={{ margin: 0, fontSize: "13.5px", color: "#94a3b8" }}>
+                No critical exceptions right now.
               </p>
             )}
-            <div className="quick-links">
-              {(
-                [
-                  ["/dispatch", "Open dispatch board"],
-                  ["/revenue", "Review revenue breakdown"],
-                  ["/incidents", "Coordinate incidents"],
-                  ["/maintenance", "Check maintenance backlog"],
-                  ["/reports", "Generate operational exports"],
-                ] as Array<[string, string]>
-              ).map(([href, label]) => (
-                <Link key={href} className="route-link" href={href}>
-                  {label}
+            <div
+              style={{
+                marginTop: "16px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "6px",
+              }}
+            >
+              {quickLinks.map(([href, label]) => (
+                <Link
+                  key={href}
+                  href={href}
+                  style={{
+                    display: "block",
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    color: "#1d4ed8",
+                    textDecoration: "none",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                  }}
+                >
+                  {label} →
                 </Link>
               ))}
             </div>
-          </section>
+          </CardBody>
+        </Card>
+      </div>
 
-          <section className="health-panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Runtime</p>
-                <h3>System health and execution context</h3>
+      <Card>
+        <CardHeader>
+          <div
+            style={{
+              fontSize: "11px",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "#64748b",
+              marginBottom: "2px",
+            }}
+          >
+            Runtime
+          </div>
+          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
+            System health &amp; execution context
+          </div>
+        </CardHeader>
+        <CardBody>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+              gap: "16px",
+            }}
+          >
+            {(
+              [
+                ["API Status", health.status],
+                ["Service", health.service],
+                ["Mode", health.mode],
+                ["Execution", health.execution_mode],
+                ["Identity Realm", identity?.realm ?? "anonymous"],
+                ["Actor", identity?.actorType ?? "anonymous"],
+              ] as [string, string][]
+            ).map(([label, value]) => (
+              <div key={label}>
+                <div
+                  style={{
+                    fontSize: "11px",
+                    color: "#64748b",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                  }}
+                >
+                  {label}
+                </div>
+                <div
+                  style={{
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    color: "#0f172a",
+                    marginTop: "4px",
+                  }}
+                >
+                  {value}
+                </div>
               </div>
-            </div>
-            <dl className="health-grid">
-              <div>
-                <dt>API</dt>
-                <dd>{health.status}</dd>
-              </div>
-              <div>
-                <dt>Service</dt>
-                <dd>{health.service}</dd>
-              </div>
-              <div>
-                <dt>Mode</dt>
-                <dd>{health.mode}</dd>
-              </div>
-              <div>
-                <dt>Execution</dt>
-                <dd>{health.execution_mode}</dd>
-              </div>
-              <div>
-                <dt>Identity realm</dt>
-                <dd>{identity?.realm ?? "anonymous"}</dd>
-              </div>
-              <div>
-                <dt>Actor</dt>
-                <dd>{identity?.actorType ?? "anonymous"}</dd>
-              </div>
-            </dl>
-          </section>
-        </div>
-        <style jsx>{`
-          .dashboard-grid {
-            display: grid;
-            gap: 1rem;
-          }
-          .hero-panel,
-          .trend-panel,
-          .side-panel,
-          .health-panel {
-            border: 1px solid #e5e7eb;
-            border-radius: 1rem;
-            padding: 1rem;
-            background: #fff;
-          }
-          .hero-panel {
-            display: grid;
-            gap: 1rem;
-            background:
-              radial-gradient(circle at top left, #f0fdf4, transparent 48%),
-              linear-gradient(135deg, #f8fafc, #fff7ed);
-          }
-          .eyebrow {
-            margin: 0 0 0.25rem;
-            font-size: 0.75rem;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            color: #64748b;
-          }
-          h2,
-          h3 {
-            margin: 0;
-          }
-          .hero-copy {
-            margin: 0.75rem 0 0;
-            color: #334155;
-            line-height: 1.6;
-          }
-          .hero-metrics,
-          .metric-strip,
-          .quick-links,
-          .health-grid {
-            display: grid;
-            gap: 0.75rem;
-          }
-          .metric-strip {
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-          }
-          .hero-metrics {
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          }
-          .metric-card {
-            padding: 0.9rem 1rem;
-            border-radius: 0.9rem;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            display: grid;
-            gap: 0.35rem;
-          }
-          .metric-primary {
-            background: #0f172a;
-            color: white;
-            border-color: #0f172a;
-          }
-          .metric-label {
-            font-size: 0.78rem;
-            color: inherit;
-            opacity: 0.72;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-          }
-          .metric-card strong {
-            font-size: 1.5rem;
-          }
-          .metric-subcopy {
-            color: inherit;
-            opacity: 0.74;
-            font-size: 0.9rem;
-          }
-          .panel-head {
-            display: flex;
-            justify-content: space-between;
-            gap: 1rem;
-            align-items: flex-start;
-            margin-bottom: 1rem;
-          }
-          .panel-note,
-          .empty-copy {
-            color: #64748b;
-          }
-          .trend-chart {
-            display: grid;
-            grid-template-columns: repeat(7, minmax(0, 1fr));
-            gap: 0.75rem;
-            align-items: end;
-          }
-          .trend-column {
-            display: grid;
-            justify-items: center;
-            gap: 0.3rem;
-            color: #475569;
-          }
-          .trend-bar {
-            width: 100%;
-            max-width: 52px;
-            border-radius: 0.9rem 0.9rem 0.35rem 0.35rem;
-            background: linear-gradient(180deg, #0ea5e9, #14b8a6);
-          }
-          .attention-list {
-            margin: 0;
-            padding-left: 1rem;
-            color: #0f172a;
-          }
-          .quick-links {
-            margin-top: 1rem;
-          }
-          .route-link {
-            display: block;
-            padding: 0.85rem 1rem;
-            border-radius: 0.85rem;
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            color: #0f172a;
-            text-decoration: none;
-          }
-          .health-grid {
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-          }
-          .health-grid dt {
-            font-size: 0.8rem;
-            color: #64748b;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-          }
-          .health-grid dd {
-            margin: 0.25rem 0 0;
-            font-weight: 600;
-            color: #0f172a;
-          }
-        `}</style>
-      </AppShellCard>
-    </main>
+            ))}
+          </div>
+        </CardBody>
+      </Card>
+    </>
   );
 }
