@@ -6,6 +6,7 @@ import type {
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export default async function PassengersPage({
   searchParams,
@@ -215,16 +216,12 @@ function PassengerList({
                       name="passengerId"
                       value={p.passengerId}
                     />
-                    <button
+                    <ConfirmSubmitButton
                       type="submit"
-                      onClick={(e) => {
-                        if (!confirm(`Delete passenger "${p.fullName}"?`)) {
-                          e.preventDefault();
-                        }
-                      }}
+                      confirmMessage={`Delete passenger "${p.fullName}"?`}
                     >
                       Delete
-                    </button>
+                    </ConfirmSubmitButton>
                   </form>
                 </td>
               </tr>
