@@ -3,7 +3,7 @@ type RuntimeConfig = {
 };
 
 const DEFAULT_SERVER_API_BASE_URL = "http://localhost:3001";
-const DEFAULT_BROWSER_API_BASE_URL = "/__drts_api__";
+const DEFAULT_BROWSER_API_BASE_URL = "/drts-api-proxy";
 const RUNTIME_CONFIG_WINDOW_KEY = "__DRTS_RUNTIME_CONFIG__";
 
 declare global {
