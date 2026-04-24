@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
-import { AppShellCard } from "@drts/ui-web";
+import { PageHeader } from "@drts/ui-web";
 import type {
   CreateReportJobCommand,
   FilingPackageDetailRecord,
@@ -289,11 +289,12 @@ export default function ReportsPage() {
   const activePresetCategory = jobCategory(jobType);
 
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Reports & Filing Center"
-        description="Create regulatory exports, inspect signed artifacts, and review immutable filing package manifests from the authoritative reporting service."
-      >
+        subtitle="Regulatory exports, signed artifacts, and filing package manifests"
+      />
+      <div>
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
@@ -1120,7 +1121,7 @@ export default function ReportsPage() {
             color: #475569;
           }
         `}</style>
-      </AppShellCard>
-    </main>
+      </div>
+    </>
   );
 }

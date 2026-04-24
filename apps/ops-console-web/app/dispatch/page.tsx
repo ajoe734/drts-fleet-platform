@@ -1,12 +1,13 @@
-"use client";
 import type { DispatchJobRecord, OwnedOrderRecord } from "@drts/contracts";
-import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
 import {
   buildDispatchInsights,
   formatCompactNumber,
   formatMinorCurrency,
 } from "@/lib/ops-analytics";
+import { PageHeader } from "@drts/ui-web";
+import { StatCard } from "@drts/ui-web";
+import { Card, CardBody } from "@drts/ui-web";
 import { DispatchWorkflow } from "./dispatch-workflow";
 
 type DispatchPageProps = {
@@ -43,87 +44,75 @@ export default async function DispatchPage({
   const insights = buildDispatchInsights(orders, dispatchJobs);
 
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Dispatch Console"
-        description="Schedule dispatch, candidate selection, queue triage, and redispatch handling for Phase 1 OpCo operations."
+        subtitle="Queue triage, candidate selection, and redispatch handling"
+      />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: "16px",
+          marginBottom: "20px",
+        }}
       >
-        <section className="summary-grid">
-          {[
-            {
-              label: "Queue depth",
-              value: insights.queueDepth,
-              note: insights.averageEtaMinutes
-                ? `Average ETA ${insights.averageEtaMinutes} min`
-                : "ETA pending",
-            },
-            {
-              label: "Active orders",
-              value: insights.activeOrders,
-              note: "Realtime and reservation orders in flight",
-            },
-            {
-              label: "Needs redispatch",
-              value: insights.redispatchOrders,
-              note: `${insights.exceptionOrders} exception hold order(s)`,
-            },
-            {
-              label: "Queued revenue",
-              value: formatMinorCurrency(insights.queuedRevenueMinor),
-              note: "Quoted value still sitting in dispatch flow",
-            },
-          ].map((card) => (
-            <div key={card.label} className="summary-card">
-              <span>{card.label}</span>
-              <strong>
-                {typeof card.value === "number"
-                  ? formatCompactNumber(card.value)
-                  : card.value}
-              </strong>
-              <small>{card.note}</small>
-            </div>
-          ))}
-        </section>
-
-        <div className="dispatch-note">
-          <strong>Role boundary:</strong> OpCo performs assign / redispatch in
-          Phase 1. ROC keeps a read-only monitoring posture, and Host visibility
-          stays scoped to vehicle-specific outcomes.
-        </div>
-
-        <DispatchWorkflow
-          orders={orders}
-          dispatchJobs={dispatchJobs}
-          focusOrderId={focusOrderId}
+        <StatCard
+          label="Queue Depth"
+          value={formatCompactNumber(insights.queueDepth)}
+          sub={
+            insights.averageEtaMinutes
+              ? `Avg ETA ${insights.averageEtaMinutes} min`
+              : "ETA pending"
+          }
+          accent="#1d4ed8"
         />
+        <StatCard
+          label="Active Orders"
+          value={formatCompactNumber(insights.activeOrders)}
+          sub="Realtime and reservation in flight"
+          accent="#7c3aed"
+        />
+        <StatCard
+          label="Needs Redispatch"
+          value={formatCompactNumber(insights.redispatchOrders)}
+          sub={`${insights.exceptionOrders} exception hold`}
+          accent="#dc2626"
+        />
+        <StatCard
+          label="Queued Revenue"
+          value={formatMinorCurrency(insights.queuedRevenueMinor)}
+          sub="Still in dispatch flow"
+          accent="#15803d"
+        />
+      </div>
 
-        <style jsx>{`
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            gap: 0.75rem;
-            margin-bottom: 1rem;
-          }
-          .summary-card {
-            padding: 0.9rem 1rem;
-            border-radius: 0.9rem;
-            border: 1px solid #e2e8f0;
-            background: #f8fafc;
-            display: grid;
-            gap: 0.35rem;
-          }
-          .summary-card strong {
-            font-size: 1.3rem;
-          }
-          .dispatch-note {
-            margin-bottom: 1rem;
-            padding: 0.9rem 1rem;
-            border-radius: 0.9rem;
-            background: #eff6ff;
-            color: #1d4ed8;
-          }
-        `}</style>
-      </AppShellCard>
-    </main>
+      <Card style={{ marginBottom: "20px" }}>
+        <CardBody>
+          <div
+            style={{
+              background: "#eff6ff",
+              border: "1px solid #bfdbfe",
+              borderRadius: "8px",
+              padding: "12px 16px",
+              color: "#1d4ed8",
+              fontSize: "13.5px",
+            }}
+          >
+            <strong>Role boundary:</strong> OpCo performs assign / redispatch in
+            Phase 1. ROC keeps a read-only monitoring posture. Host visibility
+            is scoped to its own vehicles.
+          </div>
+          <div style={{ marginTop: "16px" }}>
+            <DispatchWorkflow
+              orders={orders}
+              dispatchJobs={dispatchJobs}
+              focusOrderId={focusOrderId}
+            />
+          </div>
+        </CardBody>
+      </Card>
+    </>
   );
 }

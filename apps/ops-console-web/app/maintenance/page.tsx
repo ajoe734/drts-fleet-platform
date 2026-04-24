@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useDeferredValue, useEffect, useState, useTransition } from "react";
-import { AppShellCard } from "@drts/ui-web";
+import { PageHeader } from "@drts/ui-web";
 import type {
   CreateMaintenanceRecordCommand,
   MaintenanceRecord,
@@ -89,11 +89,12 @@ export default function MaintenancePage() {
   ).length;
 
   return (
-    <main className="app-grid">
-      <AppShellCard
+    <>
+      <PageHeader
         title="Vehicle Maintenance"
-        description="Track work orders, highlight overdue service, and link maintenance state back to vehicle operations."
-      >
+        subtitle="Work orders — track overdue service and link back to vehicle operations"
+      />
+      <div>
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
@@ -457,8 +458,8 @@ export default function MaintenancePage() {
             text-decoration: none;
           }
         `}</style>
-      </AppShellCard>
-    </main>
+      </div>
+    </>
   );
 }
 

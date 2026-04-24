@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { AppShellCard } from "@drts/ui-web";
+import { PageHeader } from "@drts/ui-web";
 import type {
   AttachCallRecordingCommand,
   CallbackTaskRecord,
@@ -208,11 +208,12 @@ export default function CallcenterPage() {
   ).length;
 
   return (
-    <main className="app-grid">
-      <AppShellCard
-        title="Callcenter"
-        description="Phone intake, order creation, ETA replies, callback queue, and complaint-hotline transfer in the existing ops console."
-      >
+    <>
+      <PageHeader
+        title="Call Center"
+        subtitle="Phone intake, order creation, ETA replies, callback queue, and complaint transfer"
+      />
+      <div>
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
@@ -1160,7 +1161,7 @@ export default function CallcenterPage() {
             }
           }
         `}</style>
-      </AppShellCard>
-    </main>
+      </div>
+    </>
   );
 }
