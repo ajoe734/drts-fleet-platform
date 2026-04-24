@@ -1,10 +1,10 @@
 import Link from "next/link";
 import type { VehicleRegistryRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 
 export default async function VehiclesPage() {
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
 
   let vehicles: VehicleRegistryRecord[] = [];
   let error: string | null = null;

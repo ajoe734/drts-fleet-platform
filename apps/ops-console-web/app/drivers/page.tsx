@@ -1,10 +1,10 @@
 import Link from "next/link";
 import type { DriverRegistryRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 
 export default async function DriversPage() {
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
 
   let drivers: DriverRegistryRecord[] = [];
   let error: string | null = null;

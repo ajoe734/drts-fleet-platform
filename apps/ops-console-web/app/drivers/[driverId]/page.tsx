@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import type { DriverStatementRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatCompactNumber, formatMinorCurrency } from "@/lib/ops-analytics";
 
 type DriverEarningsPageProps = {
@@ -146,7 +146,7 @@ export default async function DriverEarningsPage({
   params,
 }: DriverEarningsPageProps) {
   const { driverId } = await params;
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
   const [driversResult, statementsResult] = await Promise.all([
     loadWithError(() => client.listDrivers()),
     loadWithError(() => client.listDriverStatements()),

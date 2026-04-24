@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { AppShellCard } from "@drts/ui-web";
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 
 export default async function AttendancePage() {
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
 
   let shifts: unknown[] = [];
   let attendance: unknown[] = [];

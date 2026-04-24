@@ -91,7 +91,8 @@ function includesAll(haystack: string[], needles: string[]): boolean {
 function extractBearerToken(
   headers: Record<string, string | string[] | undefined>,
 ): string | null {
-  const authHeader = headers["authorization"];
+  const authHeader =
+    headers["x-drts-authorization"] ?? headers["authorization"];
   const value = Array.isArray(authHeader) ? authHeader[0] : authHeader;
   if (!value || !value.startsWith("Bearer ")) return null;
   return value.slice(7).trim() || null;

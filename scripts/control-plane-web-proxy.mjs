@@ -168,41 +168,6 @@ function writeResponse(res, upstream) {
   Readable.fromWeb(upstream.body).pipe(res);
 }
 
-async function forwardProxyRequest(req, res, requestUrl) {
-  const method = (req.method || "GET").toUpperCase();
-  const targetUrl = buildTargetUrl(requestUrl);
-  const headers = copyRequestHeaders(req, targetUrl, {
-    forwardAuthorization: !isRunAppTarget(targetUrl),
-  });
-  await applyUpstreamAuth(headers, req, targetUrl);
-  const body =
-    method === "GET" || method === "HEAD"
-      ? undefined
-      : await readRequestBody(req);
-
-  console.info("[control-plane-proxy] forwarding request", {
-    method,
-    path: requestUrl.pathname,
-    target: targetUrl.toString(),
-  });
-
-  const upstream = await fetch(targetUrl, {
-    method,
-    headers,
-    body,
-    cache: "no-store",
-    redirect: "manual",
-    duplex: body ? "half" : undefined,
-  });
-
-  console.info("[control-plane-proxy] upstream response", {
-    status: upstream.status,
-    target: targetUrl.toString(),
-  });
-
-  writeResponse(res, upstream);
-}
-
 async function forwardNextRequest(req, res, requestUrl) {
   const method = (req.method || "GET").toUpperCase();
   const targetUrl = new URL(
@@ -285,11 +250,6 @@ const server = http.createServer(async (req, res) => {
   });
 
   try {
-    if (requestUrl.pathname.startsWith("/control-plane-proxy/")) {
-      await forwardProxyRequest(req, res, requestUrl);
-      return;
-    }
-
     await forwardNextRequest(req, res, requestUrl);
   } catch (error) {
     console.error("[control-plane-proxy] request failed", {

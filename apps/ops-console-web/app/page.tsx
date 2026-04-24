@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AppShellCard } from "@drts/ui-web";
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
 
 function formatApiHost(apiBaseUrl: string): string {
@@ -13,7 +13,7 @@ function formatApiHost(apiBaseUrl: string): string {
 
 export default async function HomePage() {
   const apiBaseUrl = getRuntimeApiBaseUrl();
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
 
   let flagsEnabled = false;
   let moduleStatus = {
