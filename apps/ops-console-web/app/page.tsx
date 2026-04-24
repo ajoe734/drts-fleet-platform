@@ -1,11 +1,20 @@
 import Link from "next/link";
 import { AppShellCard } from "@drts/ui-web";
 import { getOpsClient } from "@/lib/api-client";
+import { getRuntimeApiBaseUrl } from "@/lib/runtime-config";
+
+function formatApiHost(apiBaseUrl: string): string {
+  try {
+    return new URL(apiBaseUrl).host;
+  } catch {
+    return apiBaseUrl;
+  }
+}
 
 export default async function HomePage() {
+  const apiBaseUrl = getRuntimeApiBaseUrl();
   const client = getOpsClient();
 
-  let apiStatus = "unknown";
   let flagsEnabled = false;
   let moduleStatus = {
     dispatch: false,
@@ -14,13 +23,7 @@ export default async function HomePage() {
     reports: false,
     registry: false,
   };
-
-  try {
-    const identity = await client.getIdentityContext();
-    apiStatus = identity ? "connected" : "error";
-  } catch {
-    apiStatus = "disconnected";
-  }
+  const apiHost = formatApiHost(apiBaseUrl);
 
   try {
     const flags = await client.getFeatureFlags();
@@ -54,11 +57,16 @@ export default async function HomePage() {
 
   return (
     <main className="app-grid">
-      <span className="pill">Phase 1 ops integration</span>
+      <span className="pill">Operations Control Plane</span>
       <AppShellCard
         title="Ops Console Web"
-        description={`API status: ${apiStatus}. Feature flags: ${flagsEnabled ? "active" : "fallback"}.`}
+        description={`Protected operations workspace for dispatch, complaints, callcenter, reporting, revenue, and registry workflows. Routed API origin: ${apiHost}.`}
       >
+        <p style={{ margin: 0, color: "#64748b", lineHeight: 1.6 }}>
+          {flagsEnabled
+            ? "Feature-flag snapshot loaded for the current shell request."
+            : "Feature-flag snapshot was unavailable during the shell request, so the homepage keeps default route visibility instead of reporting a false outage."}
+        </p>
         <div className="module-status">
           <h3>Module Status</h3>
           <ul>
