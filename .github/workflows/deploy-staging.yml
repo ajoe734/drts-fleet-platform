@@ -549,6 +549,8 @@ jobs:
           set -euo pipefail
 
           TOKEN="${{ steps.iap_token.outputs.id_token }}"
+          PLATFORM_ADMIN_ORIGIN="https://staging.drts-fleet.cctech-support.com"
+          OPS_ORIGIN="https://ops.staging.drts-fleet.cctech-support.com"
 
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${TOKEN}" \
@@ -556,10 +558,11 @@ jobs:
 
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${TOKEN}" \
-            -H "x-actor-type: platform_admin" \
-            -H "x-actor-id: deploy-health-platform-admin" \
-            -H "x-realm: platform" \
-            "${CONTROL_PLANE_API_ORIGIN}/api/identity/context" >/dev/null
+            "${PLATFORM_ADMIN_ORIGIN}/control-plane-proxy/identity/context" >/dev/null
+
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "${OPS_ORIGIN}/control-plane-proxy/identity/context" >/dev/null
 
       - name: Print staging URLs
         run: |

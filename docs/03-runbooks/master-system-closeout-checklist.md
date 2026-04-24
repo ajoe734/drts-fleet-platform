@@ -17,15 +17,15 @@ Use it to separate:
 ## Current Reality Snapshot
 
 As of `2026-04-24`, the switchboard follow-up wave is closed and the master closeout wave narrative is synced.
-The current shared-truth gap is now:
+The current repo/runtime gap is now:
 
-- one major external auth blocker: `GAP-P2S3-001`
+- one remaining canonical auth task-state sync around `GAP-P2S3-001`
 - a small set of consciously deferred future-gated surfaces captured in `MSC-P1-001`
 
 This means:
 
 - **gap-fix execution is complete enough to stop being the main story**
-- **the full Phase 1 system is still not yet complete because auth cutover remains open while deferred scope stays explicit**
+- **the full Phase 1 system is still not yet complete until the remaining auth task-state sync is closed while deferred scope stays explicit**
 
 ## A. Gap-Fix Wave Closeout
 
@@ -61,15 +61,15 @@ This is the largest remaining product-critical blocker.
 
 ### B-2. Repo auth migration
 
-- [~] Replace bootstrap-header trust as the claimed production auth path
+- [x] Replace bootstrap-header trust as the claimed production auth path. _(Protected `platform-admin-web` / `ops-console-web` now use server-issued inner Bearer auth behind IAP; legacy bootstrap helpers remain only for local/direct-path fallback.)_
 - [x] Implement verified Bearer token / OIDC handling in the API
 - [x] update deploy / post-deploy verification to match the new auth model
 - [x] update smoke / E2E / runbooks so they no longer describe bootstrap auth as the default production path
 
 ### B-3. Exit condition
 
-- [ ] Close `GAP-P2S3-001`
-- [ ] Remove the “manual GCP gate” from the current blocker list once human and repo work are both complete
+- [~] Close `GAP-P2S3-001`. _(Repo/runtime verification is complete on protected staging; canonical L0 task-state sync is still outstanding.)_
+- [x] Remove the “manual GCP gate” from the current blocker list once human and repo work are both complete
 
 ## C. Rollout / Evidence Closure
 
@@ -152,7 +152,7 @@ System completion cannot be claimed ambiguously here; these items need an explic
 We can honestly say the system is operationally complete only when all of the following are true:
 
 - [ ] the current active execution backlog is closed
-- [ ] `GAP-P2S3-001` is no longer blocked
+- [~] `GAP-P2S3-001` is no longer blocked. _(Runtime path verified; canonical blocker sync still pending.)_
 - [ ] rollout / staging / evidence blockers are closed
 - [ ] the intended Phase 1 surfaces have explicit completion or explicit defer decisions
 - [ ] `current-work.md`, `ai-status.json`, evidence packets, and rollout docs tell the same story
