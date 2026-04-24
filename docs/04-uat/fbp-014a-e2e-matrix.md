@@ -265,7 +265,7 @@ export E2E_API_URL=https://api-staging.drts.internal   # bare origin, no /api su
 
 ### Auth model
 
-The E2E suite uses the same bootstrap-header auth as the smoke tests. No login endpoint exists.
+The E2E suite uses the same staged auth model as the smoke tests: IAP Bearer token for the protected outer boundary, plus phased inner bootstrap headers for the application actor identity. No login endpoint exists.
 `tests/e2e/lib/helpers.sh` auto-derives the `x-realm` header from the actor type. Each scenario
 calls `switch_actor TYPE ID [TENANT_ID]` to change the active actor between surface legs.
 

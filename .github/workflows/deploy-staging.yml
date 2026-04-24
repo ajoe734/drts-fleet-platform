@@ -477,6 +477,7 @@ jobs:
     name: API health check
     runs-on: ubuntu-latest
     needs: deploy
+    if: ${{ always() && needs.deploy.result == 'success' }}
 
     steps:
       - name: Checkout
@@ -507,6 +508,16 @@ jobs:
           echo "api_origin=${api_origin}" >> "$GITHUB_OUTPUT"
           echo "iap_client_id=${iap_client_id}" >> "$GITHUB_OUTPUT"
 
+      - name: Mint IAP verification token
+        id: iap_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: ${{ steps.control_plane.outputs.iap_client_id }}
+          id_token_include_email: true
+
       - name: Wait for service to be Ready
         run: |
           echo "Waiting for drts-api Cloud Run service to reach Ready=True ..."
@@ -531,14 +542,11 @@ jobs:
 
       - name: Verify IAP-protected control-plane API
         env:
-          DRTS_GCP_PROJECT_ID: ${{ env.PROJECT_ID }}
-          DRTS_STAGING_IAP_CLIENT_ID: ${{ steps.control_plane.outputs.iap_client_id }}
-          DRTS_STAGING_TOKEN_SERVICE_ACCOUNT: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
           CONTROL_PLANE_API_ORIGIN: ${{ steps.control_plane.outputs.api_origin }}
         run: |
           set -euo pipefail
 
-          TOKEN="$(./scripts/print-staging-iap-token.sh)"
+          TOKEN="${{ steps.iap_token.outputs.id_token }}"
 
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${TOKEN}" \

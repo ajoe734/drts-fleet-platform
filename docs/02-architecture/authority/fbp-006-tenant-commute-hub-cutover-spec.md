@@ -1,6 +1,6 @@
 # FBP-006 `tenant-commute-hub` Cutover And Authority Deletion Spec
 
-Status: execution artifact and local verification record for `FBP-006`; read together with `RGX-010` for post-cutover residual drift
+Status: execution artifact and verification record for `FBP-006`; read together with `RGX-010` for the historical split-state evidence trail
 Owner: Codex  
 Reviewer: Claude  
 Updated: 2026-04-23
@@ -29,18 +29,13 @@ It does four things:
 
 This workspace **does** contain a local checkout of `../tenant-commute-hub`, and `FBP-006` was executed there on 2026-04-15. The cutover and deletion checklist below is therefore both the contract and the local execution record.
 
-Post-audit note on `2026-04-22`:
+Historical note on `2026-04-22`:
 
-- the local workspace checkout aligns broadly with the domain-data cutover
-  direction recorded here
-- clean GitHub `origin/main` does **not** yet reflect that cutover and remains
-  Supabase-first
-- even in the local cutover workspace, repo B still bootstraps tenant session
-  context locally and routes auth through shared bootstrap headers
-
-Read `FBP-006` as the cutover target plus local execution record, and `RGX-010`
-as the code-backed comparison between local workspace state and clean
-remote-main state.
+- the original annex audit captured a real split state: the local workspace was
+  aligned with the BFF cutover direction recorded here, while clean GitHub
+  `origin/main` was still Supabase-first
+- `RGX-010` preserves that historical comparison and should be read as an audit
+  snapshot, not as the current remote-baseline truth
 
 Additional addendum on `2026-04-23`:
 
@@ -54,6 +49,18 @@ Additional addendum on `2026-04-23`:
 - remote baseline truth for the cutover is now closed by merge, although the
   backend merge required explicit owner risk acceptance because GitHub CI still
   showed unrelated clean-branch debt outside the touched files
+
+Additional addendum on `2026-04-24`:
+
+- the remaining tenant identity-hardening slice is now merged into
+  `tenant-commute-hub` remote `main` through `ajoe734/tenant-commute-hub#3`
+- the companion backend auth alignment patch is now merged into
+  `drts-fleet-platform` remote `main` through
+  `ajoe734/drts-fleet-platform#12`
+- remote baseline truth is now stronger than the original cutover landing:
+  tenant bootstrap is email-only, the backend owns role/scopes resolution, and
+  repo B no longer carries `localStorage` session restore or fallback role
+  derivation on `main`
 
 ## 2. Core-Repo Gate Closed Before External Cutover
 
@@ -138,9 +145,10 @@ These are the non-negotiable runtime rules during and after cutover:
    at audit time GitHub `origin/main` still carried Supabase auth and
    authority-bearing flows, so this `FBP-006` state had not yet landed as
    remote baseline truth.
-9. Residual local gap from `RGX-010`: even in the cutover workspace, repo B
-   still carries local bootstrap session / role derivation behavior, so "pure
-   consumer" is not yet fully true for identity bootstrap.
+9. Historical identity note from `RGX-010`: even in the original cutover
+   workspace, repo B still carried local bootstrap session / role derivation
+   behavior, so the stricter "pure consumer" posture was not yet true at that
+   earlier snapshot.
 10. Passed locally on `2026-04-23`: targeted live cross-repo smoke through the
     tenant landing branch and local `drts-api` completed for identity, users,
     passengers, addresses, bookings, API keys, notifications, webhooks, SLA,
@@ -155,9 +163,11 @@ These are the non-negotiable runtime rules during and after cutover:
 13. Merge-risk note: the core-repo merge happened with explicit owner risk
     acceptance because GitHub CI on the clean branch still failed in unrelated
     files outside this cutover patch.
-14. Remaining post-merge gap: repo B still carries local bootstrap session /
-    role derivation behavior, so the stricter "pure passive identity consumer"
-    posture remains follow-on hardening rather than a completed fact.
+14. Completed follow-on on `2026-04-24`: PR
+    `ajoe734/tenant-commute-hub#3` removed local bootstrap session persistence,
+    local role derivation, and fallback role selection from remote `main`,
+    while PR `ajoe734/drts-fleet-platform#12` aligned the backend-issued tenant
+    bootstrap session truth to that posture.
 
 ## 7. Handoff Notes
 

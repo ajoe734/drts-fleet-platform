@@ -1,6 +1,6 @@
 # RGX-010 `tenant-commute-hub` Authority Annex Audit (Workspace vs Clean Clone)
 
-Status: code-backed annex audit comparing the local workspace checkout and a clean `origin/main` clone, with `2026-04-23` merge-closeout and live-smoke addendum  
+Status: code-backed annex audit comparing the local workspace checkout and a clean `origin/main` clone, with `2026-04-23` merge-closeout and `2026-04-24` remote-main identity-hardening addendum  
 Task: `RGX-010` — confirm code-level authority posture after BFF cutover  
 Owner: Codex  
 Reviewer: Claude  
@@ -114,6 +114,26 @@ No code was edited in `tenant-commute-hub` as part of this annex audit.
   drift still exists in `tenant-commute-hub`, so "pure passive consumer" is
   stronger than the current remote-main posture.
 
+### `2026-04-24` addendum
+
+- The residual tenant identity-bootstrap gap noted above is now also closed on
+  remote `main`.
+- `ajoe734/tenant-commute-hub#3`
+  (`feat/tenant-identity-hardening-20260424` ->
+  merge commit `2a3acf2736b5e37eea82998c58f5466a0bc7ca78`) removed
+  `localStorage` session restore, removed local role/fallback-role bootstrap,
+  and converged the tenant login flow to email-only bootstrap backed by the
+  server-issued session.
+- `ajoe734/drts-fleet-platform#12`
+  (`feat/identity-hardening-20260424` ->
+  merge commit `b23d82fb2a2a7843ac1d9bb9401f14d66f469660`) aligned the backend
+  tenant bootstrap flow so repo B no longer supplies role identity to become a
+  valid tenant session.
+- The sections below that describe `window.localStorage`, a fixed role picker,
+  or a clean-clone Supabase baseline remain historically valuable evidence for
+  the `2026-04-22` / `2026-04-23` snapshot, but they are not the current
+  remote-main truth anymore.
+
 ---
 
 ## 4. Evidence From The Local Workspace Checkout
@@ -160,7 +180,7 @@ it still retains local identity bootstrap behavior.
 
 ## 5. Evidence From The Clean `origin/main` Clone
 
-### Remote `main` is still Supabase-first
+### Historical audited clean clone was Supabase-first
 
 In the clean clone at commit `cdf25a5f5f3d7e733695fe96a28877f22e17bf93`:
 
@@ -173,16 +193,17 @@ In the clean clone at commit `cdf25a5f5f3d7e733695fe96a28877f22e17bf93`:
 - `package.json` still depends on `@supabase/supabase-js`
 - `supabase/functions/*` is still present in the clean clone
 
-This means clean remote `main` is still carrying forbidden backend authority by
-the current boundary contract.
+This means the clean remote clone used for the `2026-04-22` audit was carrying
+forbidden backend authority by the current boundary contract.
 
 ### Remote `main` verification
 
 - before installing dependencies, `npm run build` failed because the clean clone
   had no installed packages
 - after `npm ci`, `npm run build` succeeded on `2026-04-22`
-- the successful build does **not** change the authority conclusion; it only
-  confirms that the old Supabase-first tenant portal still compiles cleanly
+- the successful build does **not** change the historical authority conclusion;
+  it only confirms that the old Supabase-first tenant portal compiled cleanly
+  at that earlier snapshot
 
 ---
 
@@ -224,45 +245,17 @@ In short:
   - live cross-repo smoke validated the merged landing path
   - residual identity-bootstrap cleanup still remains if the team wants a
     stricter consumer posture
+- `2026-04-24` closeout note: that stricter identity-bootstrap cleanup is now
+  also merged on remote `main`; the remaining work is documentation and
+  evidence sync, not tenant repo authority remediation.
 
-To close the cross-repo gap, the remaining work is:
+That historical recommended landing sequence has now completed:
 
-1. remove remaining local bootstrap session / role derivation so repo B becomes
-   a stronger passive identity consumer too
-2. decide whether that identity-hardening remainder stays folded into
-   `EMC-X1-002` or becomes a separate follow-on slice
-3. keep all repo-local docs explicit about which claims refer to the historical
-   `2026-04-22` clean-clone snapshot versus the merged `2026-04-23`
-   remote-baseline state
-
-Recommended landing sequence from the current workspace evidence:
-
-1. push the already-committed portability / shim support that is ahead of
-   `origin/main`
-   - current ahead-only commits are:
-     - `84a7913 fix(g-3): add tenant build portability alias fallback`
-     - `75fe079 chore(g-1): remove legacy supabase edge functions`
-   - this carries the Vite alias fallback, local shim files, and Supabase edge
-     function removal into remote history before the larger UI cutover lands
-2. land the BFF foundation slice from the dirty worktree
-   - remove `@supabase/supabase-js` and related lockfile entries
-   - delete `src/integrations/supabase/*`
-   - add `src/lib/drtsApi.ts` / `src/lib/formatting.ts`
-   - replace Supabase auth wiring with local bootstrap-session +
-     `@drts/api-client` wiring in `src/contexts/AuthContext.tsx`
-   - converge route topology in `src/App.tsx` / `src/components/DashboardLayout.tsx`
-3. land the tenant surface migration slice
-   - rewrite the tenant management pages to consume `/api/tenant/*` and shared
-     contracts
-   - add the new `BookingDetail`, `SlaManagement`, and `WebhookManagement`
-     surfaces
-   - delete legacy `CostCenterManagement`
-   - remove remaining local Supabase config / migration artifacts
-4. after the remote cutover is landed, open a separate hardening slice for
-   identity cleanup
-   - remove bootstrap session storage and local role derivation
-   - replace locally fabricated headers with backend-issued identity context
-   - align that step with the main repo's Cloud IAP / OIDC cutover sequence
+1. the BFF cutover landed on remote `main`
+2. the shared-client / backend compatibility fixes landed on remote `main`
+3. the tenant identity-hardening slice landed on remote `main`
+4. the remaining work is now limited to documentation / evidence sync and the
+   repo-internal `GAP-P2S3-001` trust cleanup inside `drts-fleet-platform`
 
 Observed low-risk cleanup that should not block the landing decision:
 
@@ -297,8 +290,8 @@ Observed result:
   additional dirty BFF cutover worktree, and builds successfully
 - local workspace lint passes with warnings only; no local Supabase references
   were returned by the repo-wide `rg` scan
-- clean `origin/main` still reflects Supabase-first authority and also builds
-  after dependencies are installed
+- the historical clean-clone snapshot reflected Supabase-first authority and
+  also built after dependencies were installed
 - the tenant landing branch was merged into remote `main` through
   `ajoe734/tenant-commute-hub#1` and still builds / lints successfully after a
   response-normalization follow-up commit

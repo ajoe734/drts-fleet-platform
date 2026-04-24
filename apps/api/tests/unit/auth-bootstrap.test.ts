@@ -681,8 +681,9 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
 
+    const jwtAuthService = new JwtAuthService();
     const controller = new AuthController(
-      new JwtAuthService(),
+      jwtAuthService,
       new TenantPartnerService(new AuditNotificationService()),
     );
 
@@ -714,6 +715,19 @@ describe("tenant bootstrap-session auth controller", () => {
       },
     });
     expect(response.data.accessToken).toMatch(/\S+/);
+    const verifiedPayload = jwtAuthService.verify(response.data.accessToken);
+    expect(verifiedPayload).toMatchObject({
+      sub: response.data.profile.id,
+      actorType: "tenant_admin",
+      realm: "tenant",
+      tenantId: "tenant-demo-001",
+      roles: ["tenant_ops_admin"],
+      scopes: expect.arrayContaining(["tenant:write", "tenant:webhooks:write"]),
+    });
+    expect(
+      verifiedPayload &&
+        jwtAuthService.toRequestIdentity(verifiedPayload).authMode,
+    ).toBe("jwt_bearer");
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
