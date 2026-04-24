@@ -134,6 +134,8 @@ export interface ApiClientConfig {
   defaultHeaders?: Record<string, string>;
   /** Request timeout in ms (default: 30000) */
   timeout?: number;
+  /** Optional path transform applied before concatenating with baseUrl. */
+  pathTransform?: (path: string) => string;
 }
 
 export interface RequestOptions {
@@ -189,6 +191,7 @@ export class ApiClient {
   private baseUrl: string;
   private defaultHeaders: Record<string, string>;
   private timeout: number;
+  private pathTransform: ((path: string) => string) | undefined;
 
   constructor(config: ApiClientConfig) {
     this.baseUrl = config.baseUrl.replace(/\/$/, "");
@@ -197,6 +200,7 @@ export class ApiClient {
       ...config.defaultHeaders,
     };
     this.timeout = config.timeout ?? 30000;
+    this.pathTransform = config.pathTransform;
   }
 
   /**
@@ -241,7 +245,8 @@ export class ApiClient {
     path: string,
     options?: RequestOptions,
   ): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
+    const requestPath = this.pathTransform ? this.pathTransform(path) : path;
+    const url = `${this.baseUrl}${requestPath}`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
@@ -1306,6 +1311,7 @@ export function createDriverClient(
 export function createPlatformAdminClient(
   baseUrl: string,
   actorId: string,
+  options?: Pick<ApiClientConfig, "pathTransform" | "timeout">,
 ): ApiClient {
   return new ApiClient({
     baseUrl,
@@ -1314,5 +1320,7 @@ export function createPlatformAdminClient(
       "x-actor-id": actorId,
       "x-realm": "platform",
     },
+    ...(options?.timeout !== undefined ? { timeout: options.timeout } : {}),
+    ...(options?.pathTransform ? { pathTransform: options.pathTransform } : {}),
   });
 }
