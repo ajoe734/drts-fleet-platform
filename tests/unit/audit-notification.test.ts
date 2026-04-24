@@ -81,9 +81,10 @@ describe("audit notification persistence baseline", () => {
     });
 
     expect(query).toHaveBeenCalledTimes(1);
-    expect(query.mock.calls[0]?.[1]?.[1]).toBeNull();
-    expect(query.mock.calls[0]?.[1]?.[3]).toBeNull();
-    expect(query.mock.calls[0]?.[1]?.[7]).toBe("complaint-001");
+    const firstCall = query.mock.calls[0] as [string, unknown[]] | undefined;
+    expect(firstCall?.[1]?.[1]).toBeNull();
+    expect(firstCall?.[1]?.[3]).toBeNull();
+    expect(firstCall?.[1]?.[7]).toBe("complaint-001");
   });
 
   it("falls back to the bootstrap seed when repository loading fails", async () => {

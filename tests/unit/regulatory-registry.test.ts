@@ -1,14 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
+import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { RegulatoryRegistryController } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.controller";
 import { RegulatoryRegistryRepository } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+
+function createRegulatoryRegistryService(
+  repository?: RegulatoryRegistryRepository,
+) {
+  return new RegulatoryRegistryService(
+    new OpsDispatchEventsService(new EventEmitter() as never),
+    repository,
+  );
+}
 
 describe("regulatory registry service", () => {
   it("creates regulatory source-of-truth records and updates vehicle eligibility from insurance and exclusivity", async () => {
     const persistChanges = vi.fn(async () => undefined);
     const repository = {
+      isEnabled: vi.fn(() => true),
       loadState: vi.fn(async () => ({
         vehicles: [],
         drivers: [],
@@ -20,7 +32,8 @@ describe("regulatory registry service", () => {
       persistChanges,
       reportPersistenceFailure: vi.fn(),
     } as unknown as RegulatoryRegistryRepository;
-    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+    const regulatoryRegistryService =
+      createRegulatoryRegistryService(repository);
 
     await regulatoryRegistryService.onModuleInit();
 
@@ -125,6 +138,7 @@ describe("regulatory registry service", () => {
   it("rehydrates persisted registry state and writes compliance updates through the repository", async () => {
     const persistChanges = vi.fn(async () => undefined);
     const repository = {
+      isEnabled: vi.fn(() => true),
       loadState: vi.fn(async () => ({
         vehicles: [
           {
@@ -206,7 +220,8 @@ describe("regulatory registry service", () => {
       reportPersistenceFailure: vi.fn(),
     } as unknown as RegulatoryRegistryRepository;
 
-    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+    const regulatoryRegistryService =
+      createRegulatoryRegistryService(repository);
 
     await regulatoryRegistryService.onModuleInit();
 
@@ -261,7 +276,8 @@ describe("regulatory registry service", () => {
       isEnabled: vi.fn(() => true),
       upsertDriverLocation,
     } as unknown as RegulatoryRegistryRepository;
-    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+    const regulatoryRegistryService =
+      createRegulatoryRegistryService(repository);
 
     await expect(
       regulatoryRegistryService.recordDriverLocation({
@@ -285,7 +301,8 @@ describe("regulatory registry service", () => {
       isEnabled: vi.fn(() => true),
       upsertDriverLocation: vi.fn(async () => undefined),
     } as unknown as RegulatoryRegistryRepository;
-    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+    const regulatoryRegistryService =
+      createRegulatoryRegistryService(repository);
 
     await expect(
       regulatoryRegistryService.recordDriverLocation({
@@ -308,7 +325,8 @@ describe("regulatory registry service", () => {
         updatedAt: "2026-04-18T06:00:00.000Z",
       })),
     } as unknown as RegulatoryRegistryRepository;
-    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+    const regulatoryRegistryService =
+      createRegulatoryRegistryService(repository);
 
     const response = await regulatoryRegistryService.getDriverEta(
       "drv-demo-001",
@@ -332,6 +350,7 @@ describe("regulatory registry service", () => {
 
   it("recomputes candidate ETA from live driver locations when a destination is provided", async () => {
     const repository = {
+      isEnabled: vi.fn(() => true),
       loadState: vi.fn(async () => ({
         vehicles: [],
         drivers: [],
@@ -353,7 +372,8 @@ describe("regulatory registry service", () => {
       persistChanges: vi.fn(async () => undefined),
       reportPersistenceFailure: vi.fn(),
     } as unknown as RegulatoryRegistryRepository;
-    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+    const regulatoryRegistryService =
+      createRegulatoryRegistryService(repository);
 
     await regulatoryRegistryService.onModuleInit();
 
@@ -387,7 +407,8 @@ describe("regulatory registry service", () => {
       persistChanges: vi.fn(async () => undefined),
       reportPersistenceFailure: vi.fn(),
     } as unknown as RegulatoryRegistryRepository;
-    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+    const regulatoryRegistryService =
+      createRegulatoryRegistryService(repository);
 
     await regulatoryRegistryService.onModuleInit();
 
@@ -424,7 +445,8 @@ describe("regulatory registry service", () => {
       isEnabled: vi.fn(() => true),
       findLatestDriverLocation: vi.fn(async () => null),
     } as unknown as RegulatoryRegistryRepository;
-    const regulatoryRegistryService = new RegulatoryRegistryService(repository);
+    const regulatoryRegistryService =
+      createRegulatoryRegistryService(repository);
 
     await expect(
       regulatoryRegistryService.getDriverEta(

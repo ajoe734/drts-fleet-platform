@@ -71,7 +71,9 @@ describe("tenant partner foundation service", () => {
     );
     const dispatchedDelivery =
       tenantPartnerService.listWebhookDeliveries(TENANT_ID)[0];
-    const firstRequestInit = fetchMock.mock.calls[0]?.[1];
+    const firstRequestInit = (
+      fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined
+    )?.[1];
 
     expect(webhook.status).toBe("active");
     expect(delivery?.httpStatus).toBe(204);
@@ -93,8 +95,8 @@ describe("tenant partner foundation service", () => {
       firstRequestInit?.headers &&
         "x-drts-webhook-signature" in firstRequestInit.headers,
     ).toBe(true);
-    expect(firstRequestInit?.body).toContain('"delivery_id"');
-    expect(firstRequestInit?.body).not.toContain('"deliveryId"');
+    expect(String(firstRequestInit?.body)).toContain('"delivery_id"');
+    expect(String(firstRequestInit?.body)).not.toContain('"deliveryId"');
     expect(tenantPartnerService.listTenantAudit(TENANT_ID)[0]?.actionName).toBe(
       "send_test_webhook",
     );
@@ -224,8 +226,11 @@ describe("tenant partner foundation service", () => {
       [],
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain('"order_id"');
-    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain("order.completed");
+    const firstRequestInit = (
+      fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined
+    )?.[1];
+    expect(String(firstRequestInit?.body)).toContain('"order_id"');
+    expect(String(firstRequestInit?.body)).toContain("order.completed");
   });
 
   it("rotates webhook secrets and records rotation history", () => {

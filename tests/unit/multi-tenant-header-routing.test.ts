@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { UpdateTenantNotificationsCommand } from "@drts/contracts";
+
 import { BillingSettlementController } from "../../apps/api/src/modules/billing-settlement/billing-settlement.controller";
 import { BillingSettlementService } from "../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
@@ -193,7 +195,7 @@ describe("multi-tenant header controller routing", () => {
     const controller = new TenantPartnerController(tenantPartnerService);
     const requestId = "req-tenant-partner-alpha";
     const headerTenantId = " tenant-alpha ";
-    const notificationCommand = {
+    const notificationCommand: UpdateTenantNotificationsCommand = {
       subscriptions: [
         {
           eventType: "tenant.sla.threshold_breached",
