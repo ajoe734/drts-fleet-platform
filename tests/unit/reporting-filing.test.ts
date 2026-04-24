@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
+import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { ReportingFilingRepository } from "../../apps/api/src/modules/reporting-filing/reporting-filing.repository";
@@ -15,11 +18,15 @@ async function flushReportingQueue() {
 function createServices() {
   const auditService = new AuditNotificationService();
   const callcenterService = new CallcenterService(auditService);
-  const regulatoryRegistryService = new RegulatoryRegistryService();
+  const regulatoryRegistryService = new RegulatoryRegistryService(
+    new OpsDispatchEventsService(new EventEmitter() as never),
+  );
   const ownedMobilityService = new OwnedMobilityService(
     regulatoryRegistryService,
     auditService,
     callcenterService,
+    new OwnedMobilityTaskEventsService(new EventEmitter() as never),
+    new OpsDispatchEventsService(new EventEmitter() as never),
   );
   const reportingFilingService = new ReportingFilingService(auditService);
 

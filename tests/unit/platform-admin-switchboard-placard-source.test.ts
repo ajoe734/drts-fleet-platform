@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { PublicInfoVersionRecord } from "@drts/contracts";
+
 import {
   formatPlacardSourceOptionLabel,
   getPreferredPlacardSourceVersion,
@@ -9,16 +11,23 @@ import {
 } from "../../apps/platform-admin-web/app/switchboard/placard-source";
 
 function makeVersion(
-  overrides: Partial<{
-    versionId: string;
-    title: string;
-    status: "draft" | "published" | "retired";
-  }>,
-) {
+  overrides: Partial<PublicInfoVersionRecord>,
+): PublicInfoVersionRecord {
   return {
     versionId: "version-001",
     title: "Public Info",
-    status: "draft" as const,
+    callPhone: null,
+    complaintPhone: null,
+    callRateText: null,
+    fareText: null,
+    paymentMethodText: null,
+    status: "draft",
+    effectiveFrom: null,
+    effectiveTo: null,
+    publishedBy: null,
+    publishedAt: null,
+    createdAt: "2026-04-24T00:00:00.000Z",
+    updatedAt: "2026-04-24T00:00:00.000Z",
     ...overrides,
   };
 }

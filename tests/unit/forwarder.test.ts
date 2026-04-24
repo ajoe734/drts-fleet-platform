@@ -1,24 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
 import {
   PLATFORM_CODE_LINE_TAXI,
   PLATFORM_CODE_UBER,
 } from "../../packages/contracts/src/platform-codes";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
 import { ForwarderRepository } from "../../apps/api/src/modules/forwarder/forwarder.repository";
 import { ForwarderService } from "../../apps/api/src/modules/forwarder/forwarder.service";
+import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 
 function createServices() {
   const auditService = new AuditNotificationService();
-  const regulatoryRegistryService = new RegulatoryRegistryService();
+  const regulatoryRegistryService = new RegulatoryRegistryService(
+    new OpsDispatchEventsService(new EventEmitter() as never),
+  );
   const callcenterService = new CallcenterService(auditService);
   const ownedMobilityService = new OwnedMobilityService(
     regulatoryRegistryService,
     auditService,
     callcenterService,
+    new OwnedMobilityTaskEventsService(new EventEmitter() as never),
+    new OpsDispatchEventsService(new EventEmitter() as never),
   );
   const forwarderService = new ForwarderService(
     regulatoryRegistryService,
@@ -155,7 +162,9 @@ describe("forwarder service", () => {
 
   it("rehydrates persisted forwarder state and writes sync updates through the repository", async () => {
     const auditService = new AuditNotificationService();
-    const regulatoryRegistryService = new RegulatoryRegistryService();
+    const regulatoryRegistryService = new RegulatoryRegistryService(
+      new OpsDispatchEventsService(new EventEmitter() as never),
+    );
     const persistChanges = vi.fn(async () => undefined);
     const repository = {
       loadState: vi.fn(async () => ({

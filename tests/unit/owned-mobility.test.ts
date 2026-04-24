@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
 import { OwnedMobilityRepository } from "../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
+import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
@@ -14,11 +17,15 @@ function createService(
 ) {
   const auditService = new AuditNotificationService();
   const callcenterService = new CallcenterService(auditService);
-  const regulatoryRegistryService = new RegulatoryRegistryService();
+  const regulatoryRegistryService = new RegulatoryRegistryService(
+    new OpsDispatchEventsService(new EventEmitter() as never),
+  );
   const ownedMobilityService = new OwnedMobilityService(
     regulatoryRegistryService,
     auditService,
     callcenterService,
+    new OwnedMobilityTaskEventsService(new EventEmitter() as never),
+    new OpsDispatchEventsService(new EventEmitter() as never),
     repository,
     tenantPartnerService,
   );
@@ -1050,7 +1057,9 @@ describe("owned mobility service", () => {
   it("rehydrates persisted orders and writes dispatch snapshots through the repository", async () => {
     const auditService = new AuditNotificationService();
     const callcenterService = new CallcenterService(auditService);
-    const regulatoryRegistryService = new RegulatoryRegistryService();
+    const regulatoryRegistryService = new RegulatoryRegistryService(
+      new OpsDispatchEventsService(new EventEmitter() as never),
+    );
     const persistChanges = vi.fn(async () => undefined);
     const repository = {
       loadState: vi.fn(async () => ({
@@ -1128,6 +1137,8 @@ describe("owned mobility service", () => {
       regulatoryRegistryService,
       auditService,
       callcenterService,
+      new OwnedMobilityTaskEventsService(new EventEmitter() as never),
+      new OpsDispatchEventsService(new EventEmitter() as never),
       repository,
     );
 
