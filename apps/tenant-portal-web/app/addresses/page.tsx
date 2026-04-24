@@ -6,6 +6,7 @@ import type {
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export default async function AddressesPage({
   searchParams,
@@ -225,16 +226,12 @@ function AddressList({ addresses }: { addresses: TenantAddressRecord[] }) {
                   {" | "}
                   <form action={deleteAddress} style={{ display: "inline" }}>
                     <input type="hidden" name="addressId" value={a.addressId} />
-                    <button
+                    <ConfirmSubmitButton
                       type="submit"
-                      onClick={(e) => {
-                        if (!confirm(`Delete address "${a.addressName}"?`)) {
-                          e.preventDefault();
-                        }
-                      }}
+                      confirmMessage={`Delete address "${a.addressName}"?`}
                     >
                       Delete
-                    </button>
+                    </ConfirmSubmitButton>
                   </form>
                 </td>
               </tr>

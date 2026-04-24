@@ -8,6 +8,7 @@ import type {
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export default async function ApiKeysPage({
   searchParams,
@@ -227,20 +228,12 @@ function ApiKeyList({ apiKeys }: { apiKeys: TenantApiKeyRecord[] }) {
                           name="apiKeyId"
                           value={key.apiKeyId}
                         />
-                        <button
+                        <ConfirmSubmitButton
                           type="submit"
-                          onClick={(e) => {
-                            if (
-                              !confirm(
-                                `Revoke API key "${key.keyName}"? This action cannot be undone.`,
-                              )
-                            ) {
-                              e.preventDefault();
-                            }
-                          }}
+                          confirmMessage={`Revoke API key "${key.keyName}"? This action cannot be undone.`}
                         >
                           Revoke
-                        </button>
+                        </ConfirmSubmitButton>
                       </form>
                     </>
                   )}

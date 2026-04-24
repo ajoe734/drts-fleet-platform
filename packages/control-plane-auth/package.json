@@ -1,0 +1,21 @@
+{
+  "name": "@drts/control-plane-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.3"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings=0",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

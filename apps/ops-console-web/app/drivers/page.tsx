@@ -1,12 +1,12 @@
 import type { DriverRegistryRecord } from "@drts/contracts";
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
 import { Badge } from "@drts/ui-web";
 
 export default async function DriversPage() {
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
   let drivers: DriverRegistryRecord[] = [];
   let error: string | null = null;
 

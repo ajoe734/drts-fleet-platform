@@ -195,6 +195,66 @@ describe("bootstrap auth guard", () => {
     delete process.env.JWT_AUDIENCE;
   });
 
+  it("prefers x-drts-authorization for app JWTs when outer authorization is used elsewhere", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const jwtAuthService = new JwtAuthService();
+    const token = jwtAuthService.sign(
+      {
+        authMode: "jwt_bearer",
+        actorType: "platform_admin",
+        actorId: "platform-admin-001",
+        realm: "platform",
+        tenantId: null,
+        roleFamilies: ["platform"],
+        roles: ["platform_admin"],
+        scopes: ["foundation:read", "foundation:write"],
+        requestId: "req-open-jwt-002",
+      },
+      { expiresIn: "10m" },
+    );
+    const guard = new BootstrapAuthGuard(new Reflector(), jwtAuthService);
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        authorization: "Bearer outer-iap-token",
+        "x-drts-authorization": `Bearer ${token}`,
+      },
+      method: "GET",
+      originalUrl: "/api/identity/context",
+    };
+    class PublicHandler {
+      handler() {}
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(
+      PublicHandler.prototype,
+      "handler",
+    );
+    expect(descriptor).toBeDefined();
+    if (!descriptor) {
+      throw new Error("expected descriptor");
+    }
+    OpenRoute()(PublicHandler.prototype, "handler", descriptor);
+
+    const context = createExecutionContext(
+      request,
+      PublicHandler.prototype.handler,
+      PublicHandler,
+    );
+
+    expect(guard.canActivate(context)).toBe(true);
+    expect(request.identity).toMatchObject({
+      authMode: "jwt_bearer",
+      actorId: "platform-admin-001",
+      realm: "platform",
+    });
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+  });
+
   it("rejects decorator-scoped endpoints when scopes are missing", () => {
     const guard = new BootstrapAuthGuard(new Reflector());
     const request: AuthenticatedRequestLike = {

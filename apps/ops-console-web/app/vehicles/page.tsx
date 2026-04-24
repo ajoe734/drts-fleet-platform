@@ -1,12 +1,12 @@
 import type { VehicleRegistryRecord } from "@drts/contracts";
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
 import { Badge } from "@drts/ui-web";
 
 export default async function VehiclesPage() {
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
   let vehicles: VehicleRegistryRecord[] = [];
   let error: string | null = null;
 

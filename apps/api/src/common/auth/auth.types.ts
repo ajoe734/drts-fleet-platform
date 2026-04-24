@@ -46,6 +46,8 @@ export interface BootstrapRequestIdentity {
 }
 
 export interface AuthBootstrapHeaders {
+  authorization?: string;
+  "x-drts-authorization"?: string;
   "x-actor-type"?: string;
   "x-actor-id"?: string;
   "x-realm"?: string;

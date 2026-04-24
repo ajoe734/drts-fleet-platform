@@ -17,13 +17,18 @@ Execution anchor:
 ## Current Block
 
 `GAP-P2S3-001` is no longer blocked on missing GCP / Cloud IAP provisioning inputs.
-The remaining closeout work is now limited to the deliberate staged-auth fallback still kept inside the internal control-plane boundary.
+The protected staging path is now verified end-to-end for the internal control-plane web surfaces, and the remaining residuals are limited to explicit local/direct-API fallback handling plus canonical task-state sync.
 
 - The accepted planning packet marks the task as `Gemini + 人工` and says user confirmation is required before work starts.
 - The IAP-protected load-balancer path is now established for the internal control-plane API and web surfaces, and staging deploy defaults are aligned to that protected path.
-- The current API production story still includes bootstrap headers plus `x-drts-internal-key`.
-- Repo-side groundwork is now materially in place: the API accepts verified Bearer JWTs, tenant bootstrap sessions now carry `authMode: jwt_bearer` consistently, the smoke harness can send Bearer tokens, staging deploy exposure is configurable per service, and GitHub Actions health-check verification now mints an IAP ID token directly instead of relying on the broken `gcloud ... --audiences` path.
-- The remaining gap is now repo-local and explicit: bootstrap headers still exist as the phased inner control-plane identity fallback even after the outer IAP boundary is live.
+- The current API runtime still retains bootstrap headers plus `x-drts-internal-key` as an explicit local/direct-path fallback, but protected control-plane web traffic no longer depends on browser-supplied bootstrap identity.
+- Repo-side groundwork is now materially in place: the API accepts verified Bearer JWTs, tenant bootstrap sessions now carry `authMode: jwt_bearer` consistently, the protected `platform-admin-web` / `ops-console-web` proxy routes now mint server-issued inner Bearer auth, and GitHub Actions health-check verification now mints an IAP ID token directly instead of relying on the broken `gcloud ... --audiences` path.
+- Verified on `2026-04-24`:
+  - branch staging deploy run `#24890119736` completed successfully
+  - `https://staging.drts-fleet.cctech-support.com/control-plane-proxy/identity/context` returned `200`
+  - `https://ops.staging.drts-fleet.cctech-support.com/control-plane-proxy/identity/context` returned `200`
+  - `platform-admin` proxy reads for users / tenants / public-info / fleet returned `200`
+  - `ops-console` proxy reads for identity / drivers returned `200`
 
 Observed operator probe on `2026-04-24`:
 
@@ -171,7 +176,7 @@ These items can proceed once D-0 is clear enough to give the repo concrete input
 
 - [x] Introduce the JWT / OIDC verification path for protected API traffic.
 - [ ] Keep caller-type separation explicit so tenant / driver / partner / webhook traffic does not inherit an admin-only IAP assumption.
-- [~] Stop treating free-form bootstrap actor headers as the production trust path. _(Repo now prefers verified Bearer tokens when present, but bootstrap headers remain as a phased fallback until IAP cutover is complete.)_
+- [x] Stop treating free-form bootstrap actor headers as the production trust path. _(Protected `platform-admin-web` / `ops-console-web` now derive caller identity from the IAP-authenticated request and issue server-owned inner Bearer auth; legacy bootstrap helpers remain only for local dev or direct non-IAP diagnostics.)_
 - [ ] Document whether `x-drts-internal-key` remains as local-only / break-glass fallback or is removed from staging.
 - [ ] Keep health or other approved public exceptions explicit and narrow.
 
@@ -186,7 +191,7 @@ These items can proceed once D-0 is clear enough to give the repo concrete input
 
 - [x] Add positive verification for valid Bearer token / assertion acceptance.
 - [x] Add negative verification for invalid, missing, or wrong-audience token rejection.
-- [~] Update smoke / E2E helpers so the default staging path no longer assumes bootstrap headers. _(Smoke now accepts `SMOKE_AUTH_BEARER_TOKEN`; E2E already supports `E2E_AUTH_BEARER_TOKEN`; final default switch waits on protected staging.)_
+- [~] Update smoke / E2E helpers so the default staging path no longer assumes bootstrap headers. _(Protected control-plane web verification is now Bearer-only, but direct API smoke/E2E helpers still keep bootstrap identity as an explicit fallback for local dev and direct non-IAP diagnostics.)_
 - [ ] Keep any temporary fallback behavior explicitly documented if migration is phased.
 
 ### Docs / Operations
@@ -230,7 +235,7 @@ When this blocker is finally cleared, the handoff or review summary should inclu
 - the manual GCP / IAP gate is complete
 - the repo implementation is merged and verified
 - staging verification uses the new auth path
-- bootstrap-header trust is no longer the claimed production mechanism
+- bootstrap-header trust is no longer the claimed protected-control-plane production mechanism
 
 ## Repo Anchors
 

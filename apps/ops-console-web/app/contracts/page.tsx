@@ -1,5 +1,5 @@
 import type { VehicleContractRecord } from "@drts/contracts";
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
@@ -13,7 +13,7 @@ function contractStatusVariant(status: string) {
 }
 
 export default async function ContractsPage() {
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
   let contracts: VehicleContractRecord[] = [];
   let error: string | null = null;
 

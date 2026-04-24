@@ -17,9 +17,14 @@ export function getPlatformAdminClient(apiBaseUrl: string): ApiClient {
     return cachedClient;
   }
 
-  const client = createPlatformAdminClient(apiBaseUrl, ACTOR_ID, {
-    pathTransform: (path) => rewriteControlPlaneProxyPath(apiBaseUrl, path),
-  });
+  const client = apiBaseUrl.startsWith("/control-plane-proxy")
+    ? new ApiClient({
+        baseUrl: apiBaseUrl,
+        pathTransform: (path) => rewriteControlPlaneProxyPath(apiBaseUrl, path),
+      })
+    : createPlatformAdminClient(apiBaseUrl, ACTOR_ID, {
+        pathTransform: (path) => rewriteControlPlaneProxyPath(apiBaseUrl, path),
+      });
   clientCache.set(apiBaseUrl, client);
   return client;
 }

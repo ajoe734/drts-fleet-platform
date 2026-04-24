@@ -38,7 +38,7 @@ Tests 03–04 are gracefully skippable when staging DB is empty (they log a warn
 ## Running
 
 ```bash
-# Against protected staging — IAP bearer token + bootstrap app identity
+# Against protected staging — IAP bearer token + direct API fallback identity
 export SMOKE_API_URL=https://api.staging.drts-fleet.cctech-support.com   # bare origin, no /api suffix
 export SMOKE_AUTH_BEARER_TOKEN="$(./scripts/print-staging-iap-token.sh)"
 export SMOKE_ACTOR_TYPE=system
@@ -62,10 +62,13 @@ See `scripts/run-smoke-tests.sh --help` for the full option reference.
 
 **The smoke harness now supports both IAP/OIDC Bearer auth and legacy bootstrap-header auth.**
 
+Protected `platform-admin-web` / `ops-console-web` staging traffic no longer depends on browser-supplied bootstrap headers; the web proxy now issues server-owned inner Bearer auth after IAP.
+This smoke harness still talks to the API directly, so bootstrap headers remain an explicit fallback for local dev and direct non-IAP diagnostic flows.
+
 Preferred order:
 
 1. set `SMOKE_AUTH_BEARER_TOKEN` when the target staging service is protected by IAP / OIDC
-2. keep bootstrap headers for the application-level actor / realm identity during the phased control-plane cutover
+2. use bootstrap headers only when talking to the API directly and a higher-level identity issuer is not present
 3. use bootstrap-only headers for local dev or direct non-IAP paths
 
 There is still no `/api/auth/login` endpoint.
@@ -82,8 +85,8 @@ There is still no `/api/auth/login` endpoint.
 | `x-drts-internal-key` | `SMOKE_INTERNAL_KEY`      | unset by default; required when staging sets `DRTS_INTERNAL_KEY` |
 
 When `SMOKE_AUTH_BEARER_TOKEN` is present, the outer IAP boundary is satisfied first.
-Bootstrap headers still carry the application-level caller identity for the current staged
-control-plane migration.
+If bootstrap headers are also present, treat them as an explicit direct-API diagnostic fallback,
+not as the claimed production auth model for protected control-plane web traffic.
 
 ## Staging URL and `/api` path prefix
 

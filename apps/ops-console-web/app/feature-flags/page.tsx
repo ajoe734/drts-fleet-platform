@@ -1,4 +1,4 @@
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
@@ -11,7 +11,7 @@ interface FlagRecord {
 }
 
 export default async function FeatureFlagsPage() {
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
   let flags: FlagRecord[] = [];
   let error: string | null = null;
 

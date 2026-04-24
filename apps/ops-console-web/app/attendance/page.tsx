@@ -1,4 +1,4 @@
-import { getOpsClient } from "@/lib/api-client";
+import { getServerOpsClient } from "@/lib/api-client.server";
 import { PageHeader } from "@drts/ui-web";
 import { Card, CardHeader } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
@@ -14,7 +14,7 @@ function formatDt(value: string | undefined): string {
 }
 
 export default async function AttendancePage() {
-  const client = getOpsClient();
+  const client = await getServerOpsClient();
   let shifts: unknown[] = [];
   let attendance: unknown[] = [];
   let error: string | null = null;
