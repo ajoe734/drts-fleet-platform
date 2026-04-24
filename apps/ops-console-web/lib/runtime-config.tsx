@@ -3,7 +3,7 @@ type RuntimeConfig = {
 };
 
 const DEFAULT_SERVER_API_BASE_URL = "http://localhost:3001";
-const DEFAULT_BROWSER_API_BASE_URL = "/api/control-plane-proxy";
+const DEFAULT_BROWSER_API_BASE_URL = "/control-plane-proxy";
 const RUNTIME_CONFIG_WINDOW_KEY = "__DRTS_RUNTIME_CONFIG__";
 
 declare global {

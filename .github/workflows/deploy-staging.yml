@@ -424,7 +424,7 @@ jobs:
             --port   3002 \
             --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.api_url.outputs.url }},NEXT_PUBLIC_API_URL=/api/control-plane-proxy" \
+            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.api_url.outputs.url }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
             ${{ steps.exposure.outputs.platform_admin }} \
             --min-instances 0 \
             --max-instances 2 \
@@ -439,7 +439,7 @@ jobs:
             --port   3003 \
             --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.api_url.outputs.url }},NEXT_PUBLIC_API_URL=/api/control-plane-proxy" \
+            --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.api_url.outputs.url }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
             ${{ steps.exposure.outputs.ops_console }} \
             --min-instances 0 \
             --max-instances 2 \

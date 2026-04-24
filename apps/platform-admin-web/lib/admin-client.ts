@@ -11,11 +11,23 @@ import { getRuntimeApiBaseUrl } from "./runtime-config";
 
 const ACTOR_ID = "platform-admin-web-bootstrap";
 
+function createControlPlanePathTransform(baseUrl: string) {
+  if (!baseUrl.startsWith("/control-plane-proxy")) {
+    return undefined;
+  }
+
+  return (path: string) => path.replace(/^\/api(?=\/|$)/, "") || "/";
+}
+
 export function usePlatformAdminClient() {
   const apiBaseUrl = getRuntimeApiBaseUrl();
+  const pathTransform = createControlPlanePathTransform(apiBaseUrl);
   const client = useMemo(
-    () => createPlatformAdminClient(apiBaseUrl, ACTOR_ID),
-    [apiBaseUrl],
+    () =>
+      pathTransform
+        ? createPlatformAdminClient(apiBaseUrl, ACTOR_ID, { pathTransform })
+        : createPlatformAdminClient(apiBaseUrl, ACTOR_ID),
+    [apiBaseUrl, pathTransform],
   );
   return client;
 }
