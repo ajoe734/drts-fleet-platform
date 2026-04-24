@@ -244,6 +244,10 @@ const server = http.createServer(async (req, res) => {
     req.url || "/",
     `http://${req.headers.host || "localhost"}`,
   );
+  console.info("[control-plane-proxy] inbound request", {
+    host: req.headers.host || "localhost",
+    path: requestUrl.pathname,
+  });
 
   try {
     if (requestUrl.pathname.startsWith("/control-plane-proxy/")) {
