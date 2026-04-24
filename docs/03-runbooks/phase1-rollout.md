@@ -17,12 +17,12 @@ This runbook operationalizes `W8-001B` for the current repo state. It turns the 
 
 The execution-evidence family is now split into child packs plus one synthesis packet:
 
-| Execution family | Current evidence anchor                                              | Shared-truth status     | What to consume                                                                            |
-| ---------------- | -------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------ |
-| Staging deploy   | `support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md` | `done`                  | run `#24522301392`, migrate success, health-check 200, deploy-order and flag-gap decisions |
-| Smoke            | `support/sidecars/FBP-013B/FBP-013B-SMOKE-EVIDENCE-PACK.md`          | `done`                  | 6-case smoke coverage, bootstrap-header auth model, failure triage, smoke-gate boundary    |
-| UAT / sign-off   | `support/sidecars/FBP-013C/FBP-013C-UAT-EVIDENCE-PACK.md`            | `done`                  | 93-scenario coverage math, deferred-item tracker, pilot / production sign-off gate         |
-| Final synthesis  | `support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md`      | active synthesis packet | release / pilot / production decision packet and paired-verification mapping               |
+| Execution family | Current evidence anchor                                              | Shared-truth status     | What to consume                                                                                                              |
+| ---------------- | -------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Staging deploy   | `support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md` | `done`                  | run `#24522301392`, migrate success, health-check 200, deploy-order and flag-gap decisions                                   |
+| Smoke            | `support/sidecars/FBP-013B/FBP-013B-SMOKE-EVIDENCE-PACK.md`          | `done`                  | 6-case smoke coverage, IAP Bearer outer boundary plus phased inner app-identity headers, failure triage, smoke-gate boundary |
+| UAT / sign-off   | `support/sidecars/FBP-013C/FBP-013C-UAT-EVIDENCE-PACK.md`            | `done`                  | 93-scenario coverage math, deferred-item tracker, pilot / production sign-off gate                                           |
+| Final synthesis  | `support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md`      | active synthesis packet | release / pilot / production decision packet and paired-verification mapping                                                 |
 
 Use `ai-status.json` and `current-work.md` for the live task state. Evidence-pack headers
 may reflect the snapshot when each child pack was last revised rather than the final

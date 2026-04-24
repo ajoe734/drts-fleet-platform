@@ -22,7 +22,7 @@ The remaining closeout work is now limited to the deliberate staged-auth fallbac
 - The accepted planning packet marks the task as `Gemini + 人工` and says user confirmation is required before work starts.
 - The IAP-protected load-balancer path is now established for the internal control-plane API and web surfaces, and staging deploy defaults are aligned to that protected path.
 - The current API production story still includes bootstrap headers plus `x-drts-internal-key`.
-- Repo-side groundwork is now partially in place: the API accepts verified Bearer JWTs, marks them as `jwt_bearer`, the smoke harness can send Bearer tokens, and staging deploy exposure is now configurable per service.
+- Repo-side groundwork is now materially in place: the API accepts verified Bearer JWTs, tenant bootstrap sessions now carry `authMode: jwt_bearer` consistently, the smoke harness can send Bearer tokens, staging deploy exposure is configurable per service, and GitHub Actions health-check verification now mints an IAP ID token directly instead of relying on the broken `gcloud ... --audiences` path.
 - The remaining gap is now repo-local and explicit: bootstrap headers still exist as the phased inner control-plane identity fallback even after the outer IAP boundary is live.
 
 Observed operator probe on `2026-04-24`:

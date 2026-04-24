@@ -103,7 +103,7 @@ Current active families:
 
 Execution notes:
 
-1. `EMC-X1-001` remains partner-gated, while `EMC-X1-002` has now progressed through annex audit, PR landing, and merge: `ajoe734/tenant-commute-hub#1` and `ajoe734/drts-fleet-platform#1` are both merged, local live smoke passed through the landing branch plus local `drts-api`, and the backend merge was taken with explicit owner risk acceptance despite unrelated clean-branch CI debt; the remaining remainder is the residual identity-hardening slice if the team wants stricter pure-consumer posture
+1. `EMC-X1-001` remains partner-gated, while `EMC-X1-002` is now materially closed as code work: `ajoe734/tenant-commute-hub#1` and `#3` plus `ajoe734/drts-fleet-platform#1` and `#12` are merged, local live smoke passed through the landing branch plus local `drts-api`, and the former tenant identity-hardening remainder is no longer a remote-main code gap; only docs/evidence sync remains if the team wants a fresh post-merge annex packet
 2. first-party Passenger App / Web and passenger-surface receipt UI remain intentionally out of scope
 3. `GAP-P2S3-001` stays visible as the only product-critical blocker even while this wave runs
 4. staged identity-cutover planning now assumes internal control-plane callers move first; tenant, driver, adapter, and webhook flows are not default IAP targets

@@ -1,0 +1,66 @@
+# Cross-Repo Gap Matrix — 2026-04-24
+
+Status: planning + closeout-sync artifact  
+Owner: Codex  
+Reviewer: Claude  
+Updated: 2026-04-24
+
+## Purpose
+
+This matrix records the real gap state across:
+
+- `drts-fleet-platform`
+- `tenant-commute-hub`
+
+It separates:
+
+1. work already closed on remote baseline
+2. work that remains a true blocker
+3. repo-local cleanup that was directly actionable in the current branch
+4. external-gated or intentionally deferred scope
+
+Baseline references used for this matrix:
+
+- `drts-fleet-platform` `origin/main` at `bbe4a87a8d5b04c0e9e223ddfb2b2b9010afc6b5`
+- `tenant-commute-hub` `origin/main` at `2a3acf2736b5e37eea82998c58f5466a0bc7ca78`
+
+---
+
+## Matrix
+
+| Class            | Item                                            | Repos                 | Current status                           | Notes / next action                                                                                                                                                                                                                                                |
+| ---------------- | ----------------------------------------------- | --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `closed`         | Tenant BFF cutover                              | both                  | closed on remote baseline                | Landed through `ajoe734/tenant-commute-hub#1` plus companion backend/client compatibility in `ajoe734/drts-fleet-platform#1`.                                                                                                                                      |
+| `closed`         | Tenant identity hardening                       | both                  | closed on remote baseline                | Landed through `ajoe734/tenant-commute-hub#3` plus backend auth alignment in `ajoe734/drts-fleet-platform#12`. Tenant remote `main` is now email-only bootstrap with server-issued Bearer session; no local role picker or `localStorage` session restore remains. |
+| `true blocker`   | `GAP-P2S3-001` inner bootstrap trust retirement | `drts-fleet-platform` | still open                               | Cloud IAP / protected staging is live, but bootstrap-header trust still exists as the phased inner control-plane fallback. This remains the only product-critical blocker.                                                                                         |
+| `repo-local`     | Staging deploy verifier token path              | `drts-fleet-platform` | fixed in the `2026-04-24` cleanup branch | GitHub Actions health-check now mints an IAP ID token directly instead of relying on the broken `gcloud auth print-identity-token --audiences` path.                                                                                                               |
+| `repo-local`     | Tenant bootstrap JWT `authMode` drift           | `drts-fleet-platform` | fixed in the `2026-04-24` cleanup branch | Tenant bootstrap session tokens now carry `authMode: jwt_bearer` consistently in both the response identity and the signed JWT payload.                                                                                                                            |
+| `repo-local`     | Ops driver earnings drilldown parity (`OC-017`) | `drts-fleet-platform` | fixed in the `2026-04-24` cleanup branch | `ops-console-web` now supports `Drivers -> select driver -> Earnings`, and revenue rows link into the same read-only drilldown.                                                                                                                                    |
+| `repo-local`     | Authority / boundary / closeout doc truth sync  | `drts-fleet-platform` | fixed in the `2026-04-24` cleanup branch | Historical split-state docs now distinguish the `2026-04-22` / `2026-04-23` audit snapshot from current merged remote-main truth.                                                                                                                                  |
+| `external-gated` | Grab Taiwan real adapter (`EMC-X1-001`)         | `drts-fleet-platform` | still external-gated                     | Requires partner API contract, credentials, sandbox, and evidence.                                                                                                                                                                                                 |
+| `deferred`       | Passenger App / Web                             | strategy-level        | intentionally deferred                   | Remains outside the current completion bar unless product strategy changes.                                                                                                                                                                                        |
+| `deferred`       | Call Point / Concierge Portal                   | strategy-level        | intentionally deferred                   | Remains outside the current completion bar unless product strategy changes.                                                                                                                                                                                        |
+| `deferred`       | AV / ODD / Tesla / ROC live-board family        | strategy-level        | intentionally deferred                   | Future-gated by roadmap and not part of current closeout.                                                                                                                                                                                                          |
+
+---
+
+## Interpretation
+
+The cross-repo story is no longer "tenant repo still has not integrated."
+
+The current reality is:
+
+- the tenant repo is already integrated and materially hardened on remote `main`
+- the remaining live blocker is repo-internal control-plane trust cleanup under `GAP-P2S3-001`
+- several repo-local narrative and workflow parity gaps were directly actionable and are closed in the current cleanup branch
+- the rest of the visible delta is either external-gated or intentionally deferred
+
+---
+
+## Canonical Companions
+
+- `docs/02-architecture/authority/rgp-002-authority-map.md`
+- `docs/02-architecture/tenant-commute-hub-boundary.md`
+- `docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md`
+- `docs/03-runbooks/master-system-closeout-checklist.md`
+- `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`

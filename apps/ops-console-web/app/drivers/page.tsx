@@ -35,15 +35,29 @@ export default async function DriversPage() {
                   <th>Name</th>
                   <th>Work State</th>
                   <th>Eligible</th>
+                  <th>Earnings</th>
                 </tr>
               </thead>
               <tbody>
                 {drivers.map((driver) => (
                   <tr key={driver.driverId}>
                     <td>{driver.driverId}</td>
-                    <td>{driver.name}</td>
+                    <td>
+                      <Link
+                        href={`/drivers/${encodeURIComponent(driver.driverId)}`}
+                      >
+                        {driver.name}
+                      </Link>
+                    </td>
                     <td>{driver.workState}</td>
                     <td>{driver.licensesValid ? "✅" : "❌"}</td>
+                    <td>
+                      <Link
+                        href={`/drivers/${encodeURIComponent(driver.driverId)}`}
+                      >
+                        View earnings
+                      </Link>
+                    </td>
                   </tr>
                 ))}
               </tbody>
