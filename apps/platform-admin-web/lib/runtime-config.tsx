@@ -2,7 +2,8 @@ type RuntimeConfig = {
   apiBaseUrl: string;
 };
 
-const DEFAULT_API_BASE_URL = "http://localhost:3001";
+const DEFAULT_SERVER_API_BASE_URL = "http://localhost:3001";
+const DEFAULT_BROWSER_API_BASE_URL = "/__drts_api__";
 const RUNTIME_CONFIG_WINDOW_KEY = "__DRTS_RUNTIME_CONFIG__";
 
 declare global {
@@ -15,8 +16,12 @@ function resolveServerApiBaseUrl(): string {
   return (
     process.env.DRTS_API_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
-    DEFAULT_API_BASE_URL
+    DEFAULT_SERVER_API_BASE_URL
   );
+}
+
+function resolveBrowserApiBaseUrl(): string {
+  return process.env.NEXT_PUBLIC_API_URL || DEFAULT_BROWSER_API_BASE_URL;
 }
 
 export function getRuntimeApiBaseUrl(): string {
@@ -25,13 +30,13 @@ export function getRuntimeApiBaseUrl(): string {
   }
 
   return (
-    window.__DRTS_RUNTIME_CONFIG__?.apiBaseUrl || resolveServerApiBaseUrl()
+    window.__DRTS_RUNTIME_CONFIG__?.apiBaseUrl || resolveBrowserApiBaseUrl()
   );
 }
 
 export function RuntimeConfigScript() {
   const config: RuntimeConfig = {
-    apiBaseUrl: resolveServerApiBaseUrl(),
+    apiBaseUrl: resolveBrowserApiBaseUrl(),
   };
   const serializedConfig = JSON.stringify(config).replace(/</g, "\\u003c");
 
