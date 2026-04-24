@@ -241,7 +241,33 @@ jobs:
               --execution="$EXECUTION_NAME" \
               --region "$REGION" \
               --project "$PROJECT_ID" \
-              --succeeded \
+              --format='yaml(metadata.name,status.conditions,status.lastAttemptResult,status.logUri)' \
+              || true
+
+            FAILED_TASK="$(gcloud run jobs executions tasks list \
+              --execution="$EXECUTION_NAME" \
+              --region "$REGION" \
+              --project "$PROJECT_ID" \
+              --filter='status.conditions.type=Completed AND status.conditions.status=False' \
+              --format='value(metadata.name)' \
+              2>/dev/null | head -n 1 || true)"
+
+            if [[ -n "$FAILED_TASK" ]]; then
+              echo "Failed task: $FAILED_TASK"
+              gcloud run jobs executions tasks describe "$FAILED_TASK" \
+                --region "$REGION" \
+                --project "$PROJECT_ID" \
+                --format='yaml(metadata.name,status.conditions,status.lastAttemptResult,status.logUri)' \
+                || true
+            fi
+
+            echo "Cloud Run execution logs (best effort):"
+            gcloud logging read \
+              "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"drts-migrate\" AND resource.labels.location=\"${REGION}\" AND labels.\"run.googleapis.com/execution_name\"=\"${EXECUTION_NAME}\"" \
+              --project "$PROJECT_ID" \
+              --order=asc \
+              --limit 200 \
+              --format='table(timestamp,severity,textPayload,jsonPayload.message)' \
               || true
           else
             echo "Unable to resolve status.latestCreatedExecution.name for drts-migrate." >&2
