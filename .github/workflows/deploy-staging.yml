@@ -394,6 +394,7 @@ jobs:
             --region "$REGION" \
             --image  "$IMAGE" \
             --port   3001 \
+            --ingress internal-and-cloud-load-balancing \
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
             --set-secrets "${{ steps.api_secrets.outputs.api }}" \

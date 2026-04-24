@@ -16,13 +16,14 @@ Execution anchor:
 
 ## Current Block
 
-`GAP-P2S3-001` is blocked because the target state is not a repo-only code slice.
+`GAP-P2S3-001` is no longer blocked on missing GCP / Cloud IAP provisioning inputs.
+The remaining closeout work is now limited to the deliberate staged-auth fallback still kept inside the internal control-plane boundary.
 
 - The accepted planning packet marks the task as `Gemini + 人工` and says user confirmation is required before work starts.
-- The IAP-protected load-balancer path is now partially established, but direct Cloud Run access is still open, so staging is not yet protected-by-default.
+- The IAP-protected load-balancer path is now established for the internal control-plane API and web surfaces, and staging deploy defaults are aligned to that protected path.
 - The current API production story still includes bootstrap headers plus `x-drts-internal-key`.
 - Repo-side groundwork is now partially in place: the API accepts verified Bearer JWTs, marks them as `jwt_bearer`, the smoke harness can send Bearer tokens, and staging deploy exposure is now configurable per service.
-- The remaining blocker is now narrower but still external-facing: repo truth still lacks a complete IAP evidence handoff (audience / issuer / protected scope / caller assumptions), and the closeout path has not yet removed bootstrap trust as the claimed production mechanism.
+- The remaining gap is now repo-local and explicit: bootstrap headers still exist as the phased inner control-plane identity fallback even after the outer IAP boundary is live.
 
 Observed operator probe on `2026-04-24`:
 
@@ -40,7 +41,9 @@ Observed operator probe on `2026-04-24`:
   - internal control-plane hosts are routed through the external HTTPS LB + IAP
   - tenant portal still uses the direct Cloud Run API URL and is therefore outside the default IAP boundary
 - Remaining external propagation caveat:
-  - multi-host managed TLS certificate `drts-ssl-cert-v2` is now attached to `drts-https-proxy`, but as of `2026-04-24` it still reports `PROVISIONING / FAILED_NOT_VISIBLE`; until Google finishes certificate issuance, `api.staging...` and `ops.staging...` may continue to present the old single-domain certificate.
+  - the original multi-host managed TLS certificate `drts-ssl-cert-v2` remained stuck at `PROVISIONING / FAILED_NOT_VISIBLE`, so a replacement certificate `drts-ssl-cert-v3` was issued and attached to `drts-https-proxy`.
+  - as of `2026-04-24`, `api.staging...` and `ops.staging...` are already presenting the new multi-SAN certificate and pass normal TLS validation even while Google still reports the replacement certificate as `PROVISIONING`.
+  - `staging.drts-fleet.cctech-support.com` remains safely served by the original single-domain managed certificate, so there is no live certificate mismatch on the admin host.
 
 ## Accepted Topology
 
@@ -136,7 +139,7 @@ These items require a human with the right GCP access.
 
 ### Cloud IAP Setup
 
-- [~] Enable Cloud IAP for the target internal control-plane service path(s). _(Enabled and routed, but the multi-host managed certificate is still provisioning.)_
+- [x] Enable Cloud IAP for the target internal control-plane service path(s). _(Enabled and routed for API + internal web surfaces; replacement managed certificate is already being served on `api.staging...` / `ops.staging...`.)_
 - [x] Complete the required OAuth consent screen / IAP app configuration.
 - [x] Confirm the expected audience / client id that the API should trust.
 - [x] Confirm the staged order instead of a universal cutover: internal control-plane API first, internal web surfaces second, tenant / driver / partner / webhook paths excluded by default.
@@ -189,7 +192,7 @@ These items can proceed once D-0 is clear enough to give the repo concrete input
 ### Docs / Operations
 
 - [x] Update `tests/smoke/README.md` and any related operational notes to describe the new auth flow.
-- [x] Record how engineers or CI obtain the token needed for smoke / E2E.
+- [x] Record how engineers or CI obtain the token needed for smoke / E2E. _(Service-account impersonation must include the `email` claim for IAP acceptance.)_
 - [x] Update any rollout or recovery notes affected by the auth change.
 
 ## Recommended Execution Order
