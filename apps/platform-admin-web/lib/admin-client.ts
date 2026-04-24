@@ -6,30 +6,13 @@
 "use client";
 
 import { useMemo, useCallback, useState, useEffect } from "react";
-import { createPlatformAdminClient, ApiClient } from "@drts/api-client";
+import { ApiClient } from "@drts/api-client";
 import { getRuntimeApiBaseUrl } from "./runtime-config";
-
-const ACTOR_ID = "platform-admin-web-bootstrap";
-
-function createControlPlanePathTransform(baseUrl: string) {
-  if (!baseUrl.startsWith("/control-plane-proxy")) {
-    return undefined;
-  }
-
-  return (path: string) => path.replace(/^\/api(?=\/|$)/, "") || "/";
-}
+import { getPlatformAdminClient } from "./platform-admin-client-factory";
 
 export function usePlatformAdminClient() {
   const apiBaseUrl = getRuntimeApiBaseUrl();
-  const pathTransform = createControlPlanePathTransform(apiBaseUrl);
-  const client = useMemo(
-    () =>
-      pathTransform
-        ? createPlatformAdminClient(apiBaseUrl, ACTOR_ID, { pathTransform })
-        : createPlatformAdminClient(apiBaseUrl, ACTOR_ID),
-    [apiBaseUrl, pathTransform],
-  );
-  return client;
+  return useMemo(() => getPlatformAdminClient(apiBaseUrl), [apiBaseUrl]);
 }
 
 export function useAsyncData<T>(
