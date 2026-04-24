@@ -104,9 +104,17 @@ describe("platform admin service", () => {
     }
 
     expect(thrown).toBeInstanceOf(ApiRequestError);
-    expect((thrown as ApiRequestError).status).toBe(401);
-    expect((thrown as ApiRequestError).response.error.code).toBe(
-      "PLATFORM_ADMIN_IDENTITY_REQUIRED",
+    expect((thrown as ApiRequestError).getStatus()).toBe(401);
+    expect(
+      (thrown as ApiRequestError).getResponse() as {
+        error: { code: string };
+      },
+    ).toEqual(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          code: "PLATFORM_ADMIN_IDENTITY_REQUIRED",
+        }),
+      }),
     );
     expect(
       auditService
@@ -174,9 +182,17 @@ describe("platform admin service", () => {
     }
 
     expect(thrown).toBeInstanceOf(ApiRequestError);
-    expect((thrown as ApiRequestError).status).toBe(401);
-    expect((thrown as ApiRequestError).response.error.code).toBe(
-      "PLATFORM_ADMIN_IDENTITY_REQUIRED",
+    expect((thrown as ApiRequestError).getStatus()).toBe(401);
+    expect(
+      (thrown as ApiRequestError).getResponse() as {
+        error: { code: string };
+      },
+    ).toEqual(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          code: "PLATFORM_ADMIN_IDENTITY_REQUIRED",
+        }),
+      }),
     );
     expect(service.publishPublicInfoVersion).not.toHaveBeenCalled();
   });
