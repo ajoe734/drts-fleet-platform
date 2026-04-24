@@ -138,6 +138,11 @@ async function forward(
   const targetUrl = buildTargetUrl(request, path);
   const headers = copyRequestHeaders(request, targetUrl);
   await applyUpstreamAuth(headers, request, targetUrl);
+  console.info("[control-plane-proxy] forwarding request", {
+    method,
+    path: request.nextUrl.pathname,
+    target: targetUrl.toString(),
+  });
   const init: RequestInit = {
     method,
     headers,
@@ -150,6 +155,10 @@ async function forward(
   }
 
   const upstream = await fetch(targetUrl, init);
+  console.info("[control-plane-proxy] upstream response", {
+    status: upstream.status,
+    target: targetUrl.toString(),
+  });
 
   return new NextResponse(upstream.body, {
     status: upstream.status,
