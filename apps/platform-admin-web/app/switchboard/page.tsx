@@ -7,6 +7,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import type {
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
@@ -70,6 +71,7 @@ function publicInfoStatusBadge(status: PublicInfoVersionRecord["status"]) {
 }
 
 export default function SwitchboardPage() {
+  const { t } = useTranslation();
   const client = usePlatformAdminClient();
   const [publicInfo, setPublicInfo] = useState<PublicInfoVersionRecord[]>([]);
   const [placards, setPlacards] = useState<PlacardVersionRecord[]>([]);
@@ -247,17 +249,14 @@ export default function SwitchboardPage() {
   }
 
   if (loading) {
-    return <div className="admin-empty">Loading switchboard data...</div>;
+    return <div className="admin-empty">{t("switchboard.loading")}</div>;
   }
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Switchboard</h1>
-        <p>
-          Manage public disclosures and seat-back placards from the
-          authoritative platform admin surface.
-        </p>
+        <h1>{t("switchboard.title")}</h1>
+        <p>{t("switchboard.subtitle")}</p>
       </div>
 
       {error && (
@@ -279,27 +278,27 @@ export default function SwitchboardPage() {
       >
         {[
           {
-            label: "Published public info",
+            label: t("switchboard.publishedPublicInfo"),
             value: publishedVersions.length,
-            note: "Live disclosure versions",
+            note: t("switchboard.publishedPublicInfoNote"),
           },
           {
-            label: "Draft public info",
+            label: t("switchboard.draftPublicInfo"),
             value: draftVersions.length,
-            note: "Awaiting compliance publish",
+            note: t("switchboard.draftPublicInfoNote"),
           },
           {
-            label: "Placard versions",
+            label: t("switchboard.placardVersions"),
             value: placards.length,
-            note: "Traceable seat-back outputs",
+            note: t("switchboard.placardVersionsNote"),
           },
           {
-            label: "Placards tied to live info",
+            label: t("switchboard.placardsTiedToLive"),
             value: placards.filter((placard) => {
               const source = publicInfoById[placard.publicInfoVersionId];
               return source?.status === "published";
             }).length,
-            note: "Ready to distribute to fleet",
+            note: t("switchboard.placardsTiedToLiveNote"),
           },
         ].map((card) => (
           <div key={card.label} className="admin-card">
@@ -320,13 +319,13 @@ export default function SwitchboardPage() {
             className={`admin-toggle-btn ${activeTab === "public-info" ? "active" : ""}`}
             onClick={() => setActiveTab("public-info")}
           >
-            Public Info ({publicInfo.length})
+            {t("switchboard.tab.publicInfo")} ({publicInfo.length})
           </button>
           <button
             className={`admin-toggle-btn ${activeTab === "placards" ? "active" : ""}`}
             onClick={() => setActiveTab("placards")}
           >
-            Placards ({placards.length})
+            {t("switchboard.tab.placards")} ({placards.length})
           </button>
         </div>
         {activeTab === "public-info" ? (
@@ -334,7 +333,9 @@ export default function SwitchboardPage() {
             className="admin-btn admin-btn--primary"
             onClick={() => setShowPublicInfoForm((current) => !current)}
           >
-            {showPublicInfoForm ? "Cancel" : "New Public Info Version"}
+            {showPublicInfoForm
+              ? t("common.cancel")
+              : t("switchboard.newPublicInfoVersion")}
           </button>
         ) : (
           <button
@@ -342,23 +343,25 @@ export default function SwitchboardPage() {
             onClick={() => setShowPlacardForm((current) => !current)}
             disabled={publicInfo.length === 0}
           >
-            {showPlacardForm ? "Cancel" : "Generate Placard Version"}
+            {showPlacardForm
+              ? t("common.cancel")
+              : t("switchboard.generatePlacardVersion")}
           </button>
         )}
         <button className="admin-btn admin-btn--secondary" onClick={loadData}>
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
       {activeTab === "public-info" && showPublicInfoForm && (
         <div className="admin-card" style={{ marginBottom: 16 }}>
           <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
-            Create Public Info Version
+            {t("switchboard.newPublicInfoVersion")}
           </h3>
           <form onSubmit={handleCreatePublicInfo}>
             <div style={formGridStyle}>
               <label style={labelStyle}>
-                Version title
+                {t("switchboard.form.title")}
                 <input
                   value={publicInfoForm.title ?? ""}
                   onChange={(event) =>
@@ -372,7 +375,7 @@ export default function SwitchboardPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Call phone
+                {t("switchboard.form.callPhone")}
                 <input
                   value={publicInfoForm.callPhone ?? ""}
                   onChange={(event) =>
@@ -386,7 +389,7 @@ export default function SwitchboardPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Complaint phone
+                {t("switchboard.form.complaintPhone")}
                 <input
                   value={publicInfoForm.complaintPhone ?? ""}
                   onChange={(event) =>
@@ -400,7 +403,7 @@ export default function SwitchboardPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Effective from
+                {t("switchboard.form.effectiveFrom")}
                 <input
                   value={publicInfoForm.effectiveFrom ?? ""}
                   onChange={(event) =>
@@ -414,7 +417,7 @@ export default function SwitchboardPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Effective to
+                {t("switchboard.form.effectiveTo")}
                 <input
                   value={publicInfoForm.effectiveTo ?? ""}
                   onChange={(event) =>
@@ -424,11 +427,11 @@ export default function SwitchboardPage() {
                     }))
                   }
                   style={inputStyle}
-                  placeholder="Optional sunset timestamp"
+                  placeholder={t("switchboard.form.effectiveToHint")}
                 />
               </label>
               <label style={labelStyle}>
-                Call rate text
+                {t("switchboard.form.callRateText")}
                 <input
                   value={publicInfoForm.callRateText ?? ""}
                   onChange={(event) =>
@@ -442,7 +445,7 @@ export default function SwitchboardPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Fare text
+                {t("switchboard.form.fareText")}
                 <input
                   value={publicInfoForm.fareText ?? ""}
                   onChange={(event) =>
@@ -456,7 +459,7 @@ export default function SwitchboardPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Payment methods
+                {t("switchboard.form.paymentMethodText")}
                 <input
                   value={publicInfoForm.paymentMethodText ?? ""}
                   onChange={(event) =>
@@ -476,7 +479,9 @@ export default function SwitchboardPage() {
                 type="submit"
                 disabled={creatingPublicInfo}
               >
-                {creatingPublicInfo ? "Creating..." : "Create draft version"}
+                {creatingPublicInfo
+                  ? t("switchboard.creating")
+                  : t("switchboard.createDraftVersion")}
               </button>
             </div>
           </form>
@@ -486,12 +491,12 @@ export default function SwitchboardPage() {
       {activeTab === "placards" && showPlacardForm && (
         <div className="admin-card" style={{ marginBottom: 16 }}>
           <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
-            Generate Placard Version
+            {t("switchboard.generatePlacardVersion")}
           </h3>
           <form onSubmit={handleGeneratePlacard}>
             <div style={formGridStyle}>
               <label style={labelStyle}>
-                Source public info version
+                {t("switchboard.form.sourceVersion")}
                 <select
                   value={placardForm.publicInfoVersionId}
                   onChange={(event) =>
@@ -502,7 +507,7 @@ export default function SwitchboardPage() {
                   }
                   style={inputStyle}
                 >
-                  <option value="">Select source version</option>
+                  <option value="">—</option>
                   {publicInfo.map((version) => (
                     <option
                       key={version.versionId}
@@ -515,7 +520,7 @@ export default function SwitchboardPage() {
                 </select>
               </label>
               <label style={labelStyle}>
-                Version code
+                {t("switchboard.form.versionCode")}
                 <input
                   value={placardForm.versionCode}
                   onChange={(event) =>
@@ -529,7 +534,7 @@ export default function SwitchboardPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Template name
+                {t("switchboard.form.template")}
                 <input
                   value={placardForm.templateName}
                   onChange={(event) =>
@@ -543,7 +548,7 @@ export default function SwitchboardPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Artifact file ID
+                {t("switchboard.form.artifactFileId")}
                 <input
                   value={placardForm.artifactFileId}
                   onChange={(event) =>
@@ -553,7 +558,7 @@ export default function SwitchboardPage() {
                     }))
                   }
                   style={inputStyle}
-                  placeholder="Optional external asset reference"
+                  placeholder={t("switchboard.form.artifactHint")}
                 />
               </label>
             </div>
@@ -581,7 +586,9 @@ export default function SwitchboardPage() {
                   versionCodePrecheckMessage !== null
                 }
               >
-                {creatingPlacard ? "Generating..." : "Generate placard version"}
+                {creatingPlacard
+                  ? t("switchboard.generating")
+                  : t("switchboard.generatePlacardVersion")}
               </button>
             </div>
           </form>
@@ -591,16 +598,16 @@ export default function SwitchboardPage() {
       <div className="admin-card" style={{ overflowX: "auto" }}>
         {activeTab === "public-info" ? (
           publicInfo.length === 0 ? (
-            <p className="admin-empty">No public info versions available.</p>
+            <p className="admin-empty">{t("switchboard.noPublicInfo")}</p>
           ) : (
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Version</th>
-                  <th>Phones</th>
-                  <th>Fare & Payment</th>
-                  <th>Lifecycle</th>
-                  <th>Actions</th>
+                  <th>{t("switchboard.col.version")}</th>
+                  <th>{t("switchboard.col.phones")}</th>
+                  <th>{t("switchboard.col.fare")}</th>
+                  <th>{t("switchboard.col.lifecycle")}</th>
+                  <th>{t("switchboard.col.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -610,7 +617,7 @@ export default function SwitchboardPage() {
                       <div style={cellTitleStyle}>{version.title}</div>
                       <div style={monoSubcopyStyle}>{version.versionId}</div>
                       <div style={subcopyStyle}>
-                        Created {formatDateTime(version.createdAt)}
+                        {formatDateTime(version.createdAt)}
                       </div>
                     </td>
                     <td>
@@ -618,7 +625,9 @@ export default function SwitchboardPage() {
                       <div>Complaint: {version.complaintPhone ?? "—"}</div>
                     </td>
                     <td>
-                      <div>{version.callRateText ?? "No rate text"}</div>
+                      <div>
+                        {version.callRateText ?? t("switchboard.noRateText")}
+                      </div>
                       <div style={subcopyStyle}>{version.fareText ?? "—"}</div>
                       <div style={subcopyStyle}>
                         {version.paymentMethodText ?? "—"}
@@ -631,13 +640,13 @@ export default function SwitchboardPage() {
                         {version.status}
                       </span>
                       <div style={subcopyStyle}>
-                        Effective {version.effectiveFrom ?? "immediately"}
+                        {version.effectiveFrom ?? "—"}
                       </div>
                       <div style={subcopyStyle}>
-                        Published {formatDateTime(version.publishedAt ?? "")}
+                        {formatDateTime(version.publishedAt ?? "")}
                       </div>
                       <div style={subcopyStyle}>
-                        By {version.publishedBy ?? "pending approval"}
+                        {version.publishedBy ?? "—"}
                       </div>
                     </td>
                     <td>
@@ -654,8 +663,8 @@ export default function SwitchboardPage() {
                             }
                           >
                             {publishingVersionId === version.versionId
-                              ? "Publishing..."
-                              : "Publish"}
+                              ? t("switchboard.publishing")
+                              : t("switchboard.publishDraft")}
                           </button>
                           <button
                             className="admin-btn admin-btn--secondary"
@@ -668,12 +677,14 @@ export default function SwitchboardPage() {
                             }
                           >
                             {deletingVersionId === version.versionId
-                              ? "Deleting..."
-                              : "Delete draft"}
+                              ? t("common.deleting")
+                              : t("switchboard.deleteDraft")}
                           </button>
                         </div>
                       ) : (
-                        <span style={subcopyStyle}>Immutable history</span>
+                        <span style={subcopyStyle}>
+                          {t("switchboard.immutableHistory")}
+                        </span>
                       )}
                     </td>
                   </tr>
@@ -682,17 +693,17 @@ export default function SwitchboardPage() {
             </table>
           )
         ) : placards.length === 0 ? (
-          <p className="admin-empty">No placard versions available.</p>
+          <p className="admin-empty">{t("switchboard.noPlacards")}</p>
         ) : (
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Placard</th>
-                <th>Source Public Info</th>
-                <th>Template</th>
-                <th>Artifact</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>{t("switchboard.col.placardId")}</th>
+                <th>{t("switchboard.col.sourceVersion")}</th>
+                <th>{t("switchboard.col.template")}</th>
+                <th>{t("switchboard.col.artifact")}</th>
+                <th>{t("fleet.col.status")}</th>
+                <th>{t("switchboard.col.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -707,7 +718,7 @@ export default function SwitchboardPage() {
                         {placard.placardVersionId}
                       </div>
                       <div style={subcopyStyle}>
-                        Created {formatDateTime(placard.createdAt)}
+                        {formatDateTime(placard.createdAt)}
                       </div>
                     </td>
                     <td>
@@ -715,7 +726,7 @@ export default function SwitchboardPage() {
                         {sourceVersion?.title ?? placard.publicInfoVersionId}
                       </div>
                       <div style={subcopyStyle}>
-                        Status {sourceVersion?.status ?? "unknown"}
+                        {sourceVersion?.status ?? "unknown"}
                       </div>
                     </td>
                     <td>{placard.templateName}</td>
@@ -724,7 +735,7 @@ export default function SwitchboardPage() {
                         {placard.artifactFileId ?? "pending-artifact-id"}
                       </div>
                       <div style={monoSubcopyStyle}>
-                        Manifest {shortHash(placard.artifactManifestHash)}
+                        {shortHash(placard.artifactManifestHash)}
                       </div>
                       {placard.artifactDownloadUrl ? (
                         <a
@@ -733,13 +744,12 @@ export default function SwitchboardPage() {
                           rel="noreferrer"
                           target="_blank"
                         >
-                          Download signed artifact
+                          {t("payments.downloadPdf")}
                         </a>
                       ) : (
-                        <div style={subcopyStyle}>Pending signed artifact</div>
+                        <div style={subcopyStyle}>—</div>
                       )}
                       <div style={subcopyStyle}>
-                        Expires{" "}
                         {formatDateTime(placard.artifactExpiresAt ?? "")}
                       </div>
                     </td>
@@ -754,7 +764,7 @@ export default function SwitchboardPage() {
                         {placard.publishedAt ? "published" : "draft"}
                       </span>
                       <div style={subcopyStyle}>
-                        Published {formatDateTime(placard.publishedAt ?? "")}
+                        {formatDateTime(placard.publishedAt ?? "")}
                       </div>
                     </td>
                     <td>
@@ -769,11 +779,13 @@ export default function SwitchboardPage() {
                           }
                         >
                           {publishingPlacardId === placard.placardVersionId
-                            ? "Publishing..."
-                            : "Publish"}
+                            ? t("switchboard.publishing")
+                            : t("common.publish")}
                         </button>
                       ) : (
-                        <span style={subcopyStyle}>Immutable history</span>
+                        <span style={subcopyStyle}>
+                          {t("switchboard.immutableHistory")}
+                        </span>
                       )}
                     </td>
                   </tr>

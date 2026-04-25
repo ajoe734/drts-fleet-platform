@@ -373,9 +373,78 @@ const en = {
   "flags.col.tenant": "Tenant",
   "flags.col.value": "Value",
   "flags.col.actions": "Actions",
+  "flags.col.description": "Description",
+  "flags.col.tenantOverride": "Tenant Override",
+  "flags.col.updated": "Updated",
+  "flags.global": "Global",
+  "flags.tenantOverride": "Tenant: {id}",
   "flags.enable": "Enable",
   "flags.disable": "Disable",
   "flags.empty": "No feature flags.",
+
+  // ── Common (additional) ──
+  "common.close": "Close",
+  "common.approve": "Approve",
+  "common.all": "All",
+  "common.immutableHistory": "Immutable history",
+  "common.global": "Global",
+  "common.actions": "Actions",
+
+  // ── Tenants (additional) ──
+  "tenants.configure": "Configure",
+  "tenants.activate": "Activate",
+  "tenants.suspend": "Suspend",
+  "tenants.quotaAllocation": "Quota Allocation",
+  "tenants.quota.drivers": "Drivers:",
+  "tenants.quota.bookings": "Bookings:",
+  "tenants.quota.apiCalls": "API Calls:",
+  "tenants.col.actions": "Actions",
+  "tenants.col.name": "Name",
+  "tenants.col.code": "Code",
+  "tenants.col.id": "ID",
+
+  // ── Payments (additional) ──
+  "payments.approve": "Approve",
+  "payments.saving": "Saving...",
+  "payments.downloadPdf": "Download PDF",
+  "payments.invoicesTitle": "Tenant invoices",
+  "payments.statementsTitle": "Driver statements",
+  "payments.reimbursementsTitle": "Driver reimbursements",
+  "payments.generateInvoiceTitle": "Generate tenant invoice",
+  "payments.generateStatementsTitle": "Generate driver statements",
+
+  // ── Pricing (additional) ──
+  "pricing.platformFunded": "Platform funded",
+  "pricing.mixed": "Mixed",
+  "pricing.sectionCreateDraft": "Create draft platform pricing rule",
+  "pricing.sectionPublishPlan": "Publish settlement fee plan",
+  "pricing.sectionSettlementPlans": "Published settlement fee plans",
+  "pricing.sectionPricingRules": "Platform pricing rules",
+  "pricing.effectiveFromOverride": "Effective from override",
+  "pricing.effectiveToOverride": "Effective to override",
+  "pricing.leaveBlank":
+    "Leave a field blank to keep the draft's current schedule boundary.",
+
+  // ── Notices (additional) ──
+  "notices.resolve": "Resolve",
+  "notices.audience.all": "All",
+  "notices.audience.tenants": "Tenants",
+  "notices.audience.ops": "Ops",
+  "notices.audience.drivers": "Drivers",
+  "notices.maintEnabled": "ENABLED",
+  "notices.maintDisabled": "Disabled",
+  "notices.maintActiveBanner": "MAINTENANCE ACTIVE",
+  "notices.currentStatus": "Current Status",
+  "notices.lastUpdated": "Last Updated",
+
+  // ── Audit (additional) ──
+  "audit.showingOf": "Showing {shown} of {total} record(s)",
+  "audit.col.tenant": "Tenant",
+  "audit.moduleLabel": "Module:",
+  "audit.actorLabel": "Actor Type:",
+
+  // ── Common (more) ──
+  "common.noValues": "No values",
 };
 
 const zh: typeof en = {
@@ -739,9 +808,77 @@ const zh: typeof en = {
   "flags.col.tenant": "租戶",
   "flags.col.value": "值",
   "flags.col.actions": "操作",
+  "flags.col.description": "說明",
+  "flags.col.tenantOverride": "租戶覆寫",
+  "flags.col.updated": "更新時間",
+  "flags.global": "全域",
+  "flags.tenantOverride": "租戶：{id}",
   "flags.enable": "啟用",
   "flags.disable": "停用",
   "flags.empty": "無功能旗標。",
+
+  // ── Common (additional) ──
+  "common.close": "關閉",
+  "common.approve": "核准",
+  "common.all": "全部",
+  "common.immutableHistory": "不可變歷史",
+  "common.global": "全域",
+  "common.actions": "操作",
+
+  // ── Tenants (additional) ──
+  "tenants.configure": "設定",
+  "tenants.activate": "啟用",
+  "tenants.suspend": "暫停",
+  "tenants.quotaAllocation": "配額分配",
+  "tenants.quota.drivers": "司機：",
+  "tenants.quota.bookings": "訂單：",
+  "tenants.quota.apiCalls": "API 呼叫：",
+  "tenants.col.actions": "操作",
+  "tenants.col.name": "名稱",
+  "tenants.col.code": "代碼",
+  "tenants.col.id": "ID",
+
+  // ── Payments (additional) ──
+  "payments.approve": "核准",
+  "payments.saving": "儲存中...",
+  "payments.downloadPdf": "下載 PDF",
+  "payments.invoicesTitle": "租戶發票",
+  "payments.statementsTitle": "司機結算單",
+  "payments.reimbursementsTitle": "司機報銷",
+  "payments.generateInvoiceTitle": "產生租戶發票",
+  "payments.generateStatementsTitle": "產生司機結算單",
+
+  // ── Pricing (additional) ──
+  "pricing.platformFunded": "平台資助",
+  "pricing.mixed": "混合",
+  "pricing.sectionCreateDraft": "建立定價草稿規則",
+  "pricing.sectionPublishPlan": "發布結算費用方案",
+  "pricing.sectionSettlementPlans": "已發布結算費用方案",
+  "pricing.sectionPricingRules": "平台定價規則",
+  "pricing.effectiveFromOverride": "生效時間覆寫",
+  "pricing.effectiveToOverride": "失效時間覆寫",
+  "pricing.leaveBlank": "留空則保留草稿原有時間範圍。",
+
+  // ── Notices (additional) ──
+  "notices.resolve": "解決",
+  "notices.audience.all": "全部",
+  "notices.audience.tenants": "租戶",
+  "notices.audience.ops": "營運",
+  "notices.audience.drivers": "司機",
+  "notices.maintEnabled": "已啟用",
+  "notices.maintDisabled": "已停用",
+  "notices.maintActiveBanner": "維護中",
+  "notices.currentStatus": "目前狀態",
+  "notices.lastUpdated": "最後更新",
+
+  // ── Audit (additional) ──
+  "audit.showingOf": "顯示 {shown} / {total} 筆記錄",
+  "audit.col.tenant": "租戶",
+  "audit.moduleLabel": "模組：",
+  "audit.actorLabel": "操作者類型：",
+
+  // ── Common (more) ──
+  "common.noValues": "無資料",
 };
 
 export const translations: Record<Locale, typeof en> = { en, zh };

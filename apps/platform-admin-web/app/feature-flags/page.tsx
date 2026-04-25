@@ -7,9 +7,11 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import type { FeatureFlag, FeatureFlagSummary } from "@drts/contracts";
 
 export default function FeatureFlagsPage() {
+  const { t } = useTranslation();
   const client = usePlatformAdminClient();
   const [flags, setFlags] = useState<FeatureFlag[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,14 +54,18 @@ export default function FeatureFlagsPage() {
     return true;
   });
 
-  if (loading)
-    return <div className="admin-empty">Loading feature flags...</div>;
+  if (loading) return <div className="admin-empty">{t("flags.loading")}</div>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Feature Flags</h1>
-        <p>Manage platform feature flags with tenant-level override support.</p>
+        <h1>{t("flags.title")}</h1>
+        <p>
+          {t("flags.subtitle", {
+            total: flags.length,
+            enabled: flags.filter((f) => f.enabled).length,
+          })}
+        </p>
       </div>
 
       {error && (
@@ -77,41 +83,41 @@ export default function FeatureFlagsPage() {
             className={`admin-toggle-btn ${filter === "all" ? "active" : ""}`}
             onClick={() => setFilter("all")}
           >
-            All ({flags.length})
+            {t("common.all")} ({flags.length})
           </button>
           <button
             className={`admin-toggle-btn ${filter === "enabled" ? "active" : ""}`}
             onClick={() => setFilter("enabled")}
           >
-            Enabled ({flags.filter((f) => f.enabled).length})
+            {t("common.enabled")} ({flags.filter((f) => f.enabled).length})
           </button>
           <button
             className={`admin-toggle-btn ${filter === "disabled" ? "active" : ""}`}
             onClick={() => setFilter("disabled")}
           >
-            Disabled ({flags.filter((f) => !f.enabled).length})
+            {t("common.disabled")} ({flags.filter((f) => !f.enabled).length})
           </button>
         </div>
         <button className="admin-btn admin-btn--secondary" onClick={loadFlags}>
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
       {filtered.length === 0 ? (
         <div className="admin-card admin-empty">
-          <p>No feature flags found.</p>
+          <p>{t("flags.empty")}</p>
         </div>
       ) : (
         <div className="admin-card" style={{ overflowX: "auto" }}>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Key</th>
-                <th>Status</th>
-                <th>Description</th>
-                <th>Tenant Override</th>
-                <th>Updated</th>
-                <th>Toggle</th>
+                <th>{t("flags.col.flag")}</th>
+                <th>{t("flags.col.status")}</th>
+                <th>{t("flags.col.description")}</th>
+                <th>{t("flags.col.tenantOverride")}</th>
+                <th>{t("flags.col.updated")}</th>
+                <th>{t("flags.col.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -137,7 +143,9 @@ export default function FeatureFlagsPage() {
                           : "admin-badge--neutral"
                       }`}
                     >
-                      {flag.enabled ? "Enabled" : "Disabled"}
+                      {flag.enabled
+                        ? t("common.enabled")
+                        : t("common.disabled")}
                     </span>
                   </td>
                   <td
@@ -156,11 +164,11 @@ export default function FeatureFlagsPage() {
                         className="admin-badge admin-badge--info"
                         style={{ fontSize: 11 }}
                       >
-                        Tenant: {flag.tenantId}
+                        {t("flags.tenantOverride", { id: flag.tenantId })}
                       </span>
                     ) : (
                       <span style={{ fontSize: 12, color: "#9ca3af" }}>
-                        Global
+                        {t("flags.global")}
                       </span>
                     )}
                   </td>

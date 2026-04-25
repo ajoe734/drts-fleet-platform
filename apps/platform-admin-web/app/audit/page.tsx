@@ -11,9 +11,13 @@ import {
   formatDateTime,
   truncate,
 } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import type { AuditLogRecord } from "@drts/contracts";
 
+type TFn = (key: string, params?: Record<string, string | number>) => string;
+
 export default function AuditPage() {
+  const { t } = useTranslation();
   const client = usePlatformAdminClient();
   const [records, setRecords] = useState<AuditLogRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,14 +71,13 @@ export default function AuditPage() {
     ...new Set(records.map((r) => r.actorType).filter(Boolean)),
   ];
 
-  if (loading)
-    return <div className="admin-empty">Loading audit records...</div>;
+  if (loading) return <div className="admin-empty">{t("audit.loading")}</div>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Audit Trail</h1>
-        <p>Review platform audit log entries with filtering capabilities.</p>
+        <h1>{t("audit.title")}</h1>
+        <p>{t("audit.subtitle", { count: records.length })}</p>
       </div>
 
       {error && (
@@ -92,7 +95,7 @@ export default function AuditPage() {
             htmlFor="filter-module"
             style={{ fontSize: 13, fontWeight: 500 }}
           >
-            Module:
+            {t("audit.moduleLabel")}
           </label>
           <select
             id="filter-module"
@@ -105,7 +108,7 @@ export default function AuditPage() {
               fontSize: 13,
             }}
           >
-            <option value="">All</option>
+            <option value="">{t("common.all")}</option>
             {modules.map((m) => (
               <option key={m} value={m}>
                 {m}
@@ -118,7 +121,7 @@ export default function AuditPage() {
             htmlFor="filter-actor"
             style={{ fontSize: 13, fontWeight: 500 }}
           >
-            Actor Type:
+            {t("audit.actorLabel")}
           </label>
           <select
             id="filter-actor"
@@ -131,7 +134,7 @@ export default function AuditPage() {
               fontSize: 13,
             }}
           >
-            <option value="">All</option>
+            <option value="">{t("common.all")}</option>
             {actorTypes.map((a) => (
               <option key={a} value={a}>
                 {a}
@@ -143,34 +146,36 @@ export default function AuditPage() {
           className="admin-btn admin-btn--secondary"
           onClick={loadRecords}
         >
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
       <div className="admin-card" style={{ marginBottom: 12 }}>
         <span style={{ fontSize: 13, color: "#6b7280" }}>
-          Showing {filtered.length} of {records.length} record
-          {records.length !== 1 ? "s" : ""}
+          {t("audit.showingOf", {
+            shown: filtered.length,
+            total: records.length,
+          })}
         </span>
       </div>
 
       {filtered.length === 0 ? (
         <div className="admin-card admin-empty">
-          <p>No audit records found matching the filter.</p>
+          <p>{t("audit.empty")}</p>
         </div>
       ) : (
         <div className="admin-card" style={{ overflowX: "auto" }}>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Audit ID</th>
-                <th>Actor</th>
-                <th>Module</th>
-                <th>Action</th>
-                <th>Resource</th>
-                <th>Tenant</th>
-                <th>Created</th>
-                <th>Details</th>
+                <th>ID</th>
+                <th>{t("audit.col.actor")}</th>
+                <th>{t("audit.col.module")}</th>
+                <th>{t("audit.col.action")}</th>
+                <th>{t("audit.col.resource")}</th>
+                <th>{t("audit.col.tenant")}</th>
+                <th>{t("audit.col.timestamp")}</th>
+                <th>{t("audit.col.details")}</th>
               </tr>
             </thead>
             <tbody>
@@ -218,7 +223,9 @@ export default function AuditPage() {
                             )
                           }
                         >
-                          {expandedAuditId === r.auditId ? "Hide" : "View"}
+                          {expandedAuditId === r.auditId
+                            ? t("audit.collapse")
+                            : t("audit.expand")}
                         </button>
                       ) : (
                         <span style={{ fontSize: 12, color: "#9ca3af" }}>
@@ -239,12 +246,14 @@ export default function AuditPage() {
                           }}
                         >
                           <AuditValueCard
-                            title="Old Values"
+                            title={t("audit.oldValues")}
                             payload={r.oldValuesSummary}
+                            t={t}
                           />
                           <AuditValueCard
-                            title="New Values"
+                            title={t("audit.newValues")}
                             payload={r.newValuesSummary}
+                            t={t}
                           />
                         </div>
                       </td>
@@ -263,9 +272,11 @@ export default function AuditPage() {
 function AuditValueCard({
   title,
   payload,
+  t,
 }: {
   title: string;
   payload: Record<string, unknown> | undefined;
+  t: TFn;
 }) {
   return (
     <div
@@ -289,7 +300,9 @@ function AuditValueCard({
           {JSON.stringify(payload, null, 2)}
         </pre>
       ) : (
-        <span style={{ fontSize: 12, color: "#9ca3af" }}>No values</span>
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>
+          {t("common.noValues") ?? "No values"}
+        </span>
       )}
     </div>
   );
