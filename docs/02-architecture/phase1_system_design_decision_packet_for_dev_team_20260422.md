@@ -11,6 +11,10 @@
 **文件狀態**：已於 `2026-04-22` 經 human review 納入 implementation blueprint；正式可引用版本見 `docs/01-decisions/SD-DP-20260422-001` ~ `003`。  
 **輸入來源**：`system-design-input-requests-20260422.md`
 
+補充：若討論的是 `credit_card_airport_transfer` 的合作銀行多入口、
+partner ingress、或卡別資格驗證，請一併參考
+`docs/02-architecture/phase1-partner-channel-bank-entry-addendum-20260425.md`。
+
 ---
 
 ## 0. Executive Summary
