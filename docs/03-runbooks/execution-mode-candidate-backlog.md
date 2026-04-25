@@ -216,6 +216,44 @@ the partner or cross-repo dependency stated up front.
   - optional fresh annex supplement if the team wants a current remote-main-only
     evidence packet after the historical split-state audit
 
+### `EMC-X1-003` partner-channel ingress and bank-entry bootstrap
+
+- Type: cross-repo productized partner entry
+- Objective: materialize partner-specific entry context for cooperating banks
+  and other direct partner channels without forking into multiple frontend
+  repos.
+- What this means:
+  - one shared frontend codebase may still be reused
+  - but entry must bind canonical `partner_id` / `program_id` / channel context
+  - backend must recognize partner-authenticated callers as a distinct ingress
+    class rather than overloading tenant-admin semantics
+- Primary anchors:
+  - `docs/02-architecture/phase1-partner-channel-bank-entry-addendum-20260425.md`
+  - `docs/02-architecture/phase1_system_design_decision_packet_for_dev_team_20260422.md`
+  - `tenant-commute-hub`
+- Cross-repo dependency:
+  - partner-specific branding / entry requirements
+  - product decision on subdomain vs path vs signed bootstrap
+
+### `EMC-X1-004` credit-card airport-transfer eligibility verification
+
+- Type: partner integration / finance eligibility
+- Objective: add canonical bank-card / benefit eligibility verification before
+  `credit_card_airport_transfer` booking creation and carry the verification
+  truth into booking, audit, and settlement records.
+- What this means:
+  - booking subtype alone is not enough
+  - backend must either verify with issuer / bank inline or validate a
+    partner-issued eligibility reference
+  - resulting verification identifiers and reason codes must persist in
+    authoritative records
+- Primary anchors:
+  - `docs/02-architecture/phase1-partner-channel-bank-entry-addendum-20260425.md`
+  - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
+  - `packages/contracts/src/index.ts`
+- External dependency:
+  - bank / issuer contract, credentials, sandbox, and verification rules
+
 ## D. Do Not Materialize Under Current Strategy
 
 These should **not** be turned into execution-mode work items unless the product
@@ -247,7 +285,7 @@ If the team wants a new repo execution wave, the recommended order is:
    - workflow parity and authority hardening
 4. `EMC-I1-001` and `EMC-I1-002`
    - expand live evidence and automation once the runtime baseline is firmer
-5. `EMC-X1-001` and `EMC-X1-002`
+5. `EMC-X1-001` through `EMC-X1-004`
    - only when external dependencies are explicitly in place
 
 ## F. Materialized On 2026-04-22
