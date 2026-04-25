@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
+import { LanguageProvider } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/server-locale";
 import { Sidebar } from "@/components/sidebar";
 
 import "./globals.css";
@@ -13,23 +15,31 @@ export const metadata: Metadata = {
 
 export const dynamic = "force-dynamic";
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const locale = await getServerLocale();
+
   return (
-    <html lang="en">
+    <html lang={locale}>
       <body style={{ margin: 0, display: "flex", minHeight: "100vh" }}>
         <RuntimeConfigScript />
-        <Sidebar />
-        <main
-          style={{
-            flex: 1,
-            minWidth: 0,
-            padding: "32px",
-            background: "#f8fafc",
-            minHeight: "100vh",
-          }}
-        >
-          {children}
-        </main>
+        <LanguageProvider defaultLocale={locale}>
+          <Sidebar />
+          <main
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: "32px",
+              background: "#f8fafc",
+              minHeight: "100vh",
+            }}
+          >
+            {children}
+          </main>
+        </LanguageProvider>
       </body>
     </html>
   );

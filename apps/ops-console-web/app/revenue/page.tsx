@@ -6,6 +6,8 @@ import type {
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import {
   buildRevenueInsights,
   formatCompactNumber,
@@ -107,7 +109,7 @@ function ChipLink({
 export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const client = getOpsClient();
   const filters = resolveFilters(searchParams);
-  const [orders, tasks, statements, vehicles] = await Promise.all([
+  const [orders, tasks, statements, vehicles, locale] = await Promise.all([
     resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
     resolveOrFallback(() => client.listDriverTasks(), [] as DriverTaskRecord[]),
     resolveOrFallback(
@@ -118,6 +120,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       () => client.listVehicles(),
       [] as VehicleRegistryRecord[],
     ),
+    getServerLocale(),
   ]);
 
   const insights = buildRevenueInsights(orders, tasks, statements, filters);
@@ -128,8 +131,8 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   return (
     <>
       <PageHeader
-        title="Revenue Overview"
-        subtitle="Trip yield, settlement pulse, and payout status"
+        title={t("revenue.title", locale)}
+        subtitle={t("revenue.subtitle", locale)}
       />
 
       {/* Filter bar */}
@@ -153,7 +156,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                   letterSpacing: "0.05em",
                 }}
               >
-                Period
+                {t("revenue.periodLabel", locale)}
               </span>
               <div style={{ display: "flex", gap: "6px" }}>
                 {(["today", "7d", "30d", "all"] as RevenuePeriod[]).map((p) => (
@@ -162,7 +165,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                     href={buildHref(filters, { period: p })}
                     active={p === filters.period}
                   >
-                    {p}
+                    {t(`revenue.period.${p}`, locale)}
                   </ChipLink>
                 ))}
               </div>
@@ -177,7 +180,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                   letterSpacing: "0.05em",
                 }}
               >
-                Product
+                {t("revenue.productLabel", locale)}
               </span>
               <div style={{ display: "flex", gap: "6px" }}>
                 {(["all", "standard_taxi", "business_dispatch"] as const).map(
@@ -187,7 +190,9 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                       href={buildHref(filters, { serviceBucket: sb })}
                       active={sb === filters.serviceBucket}
                     >
-                      {sb === "all" ? "All" : sb.replace(/_/g, " ")}
+                      {sb === "all"
+                        ? t("revenue.bucket.all", locale)
+                        : t(`revenue.bucket.${sb}`, locale)}
                     </ChipLink>
                   ),
                 )}
@@ -213,13 +218,13 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                   letterSpacing: "0.05em",
                 }}
               >
-                Vehicle
+                {t("common.vehicle", locale)}
               </span>
               <ChipLink
                 href={buildHref(filters, { vehicleId: "all" })}
                 active={filters.vehicleId === "all"}
               >
-                All
+                {t("revenue.vehicle.all", locale)}
               </ChipLink>
               {vehicleOptions.map((vid) => (
                 <ChipLink
@@ -245,27 +250,27 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         }}
       >
         <StatCard
-          label="Completed Trips"
+          label={t("revenue.completedTrips", locale)}
           value={formatCompactNumber(insights.completedTrips)}
-          sub="Revenue-bearing trips"
+          sub={t("revenue.completedTripsSub", locale)}
           accent="#15803d"
         />
         <StatCard
-          label="Recognized Revenue"
+          label={t("revenue.recognizedRevenue", locale)}
           value={formatMinorCurrency(insights.totalRevenueMinor)}
-          sub="Completed fare + fixed-price"
+          sub={t("revenue.recognizedRevenueSub", locale)}
           accent="#1d4ed8"
         />
         <StatCard
-          label="Average Trip"
+          label={t("revenue.averageTrip", locale)}
           value={formatMinorCurrency(insights.averageRevenueMinor)}
-          sub="Per completed trip"
+          sub={t("revenue.averageTripSub", locale)}
           accent="#7c3aed"
         />
         <StatCard
-          label="Queued Pipeline"
+          label={t("revenue.queuedPipeline", locale)}
           value={formatMinorCurrency(insights.queuedRevenueMinor)}
-          sub="Still in dispatch flow"
+          sub={t("revenue.queuedPipelineSub", locale)}
           accent="#b45309"
         />
       </div>
@@ -290,22 +295,22 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                 marginBottom: "2px",
               }}
             >
-              Breakdown
+              {t("revenue.breakdownLabel", locale)}
             </div>
             <div
               style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
             >
-              By product
+              {t("revenue.breakdownByProduct", locale)}
             </div>
           </CardHeader>
           <DataTable
             columns={[
-              { label: "Product" },
-              { label: "Trips" },
-              { label: "Revenue" },
-              { label: "Average" },
+              { label: t("revenue.col.product", locale) },
+              { label: t("revenue.col.trips", locale) },
+              { label: t("revenue.col.revenue", locale) },
+              { label: t("revenue.col.average", locale) },
             ]}
-            empty="No revenue rows for this filter."
+            empty={t("revenue.emptyByProduct", locale)}
           >
             {insights.serviceBuckets.map((row) => (
               <Tr key={row.key}>
@@ -329,22 +334,22 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                 marginBottom: "2px",
               }}
             >
-              Breakdown
+              {t("revenue.breakdownLabel", locale)}
             </div>
             <div
               style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
             >
-              By vehicle
+              {t("revenue.breakdownByVehicle", locale)}
             </div>
           </CardHeader>
           <DataTable
             columns={[
-              { label: "Vehicle" },
-              { label: "Trips" },
-              { label: "Revenue" },
-              { label: "Average" },
+              { label: t("revenue.col.vehicle", locale) },
+              { label: t("revenue.col.trips", locale) },
+              { label: t("revenue.col.revenue", locale) },
+              { label: t("revenue.col.average", locale) },
             ]}
-            empty="No vehicle revenue for this filter."
+            empty={t("revenue.emptyByVehicle", locale)}
           >
             {insights.vehicles.map((row) => (
               <Tr key={row.key}>
@@ -378,16 +383,18 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                   marginBottom: "2px",
                 }}
               >
-                Settlement
+                {t("revenue.settlementTitle", locale)}
               </div>
               <div
                 style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
               >
-                Driver statement pulse
+                {t("revenue.settlementSub", locale)}
               </div>
             </div>
             <span style={{ fontSize: "13.5px", color: "#64748b" }}>
-              Net: {formatMinorCurrency(insights.statementNetMinor)}
+              {t("revenue.statementNet", locale, {
+                value: formatMinorCurrency(insights.statementNetMinor),
+              })}
             </span>
           </div>
         </CardHeader>
@@ -439,13 +446,13 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         )}
         <DataTable
           columns={[
-            { label: "Statement" },
-            { label: "Driver" },
-            { label: "Period" },
-            { label: "Status" },
-            { label: "Net" },
+            { label: t("revenue.col.statement", locale) },
+            { label: t("revenue.col.driver", locale) },
+            { label: t("revenue.col.period", locale) },
+            { label: t("revenue.col.status", locale) },
+            { label: t("revenue.col.net", locale) },
           ]}
-          empty="No statements generated yet."
+          empty={t("revenue.emptySettlement", locale)}
         >
           {statements.map((s) => (
             <Tr key={s.statementId}>

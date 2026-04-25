@@ -12,6 +12,8 @@ import type {
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import {
   buildDashboardTrend,
   buildDispatchInsights,
@@ -46,6 +48,7 @@ async function resolveOrFallback<T>(
 
 export default async function DashboardPage() {
   const client = getOpsClient();
+  const locale = await getServerLocale();
   const [
     identity,
     health,
@@ -118,32 +121,40 @@ export default async function DashboardPage() {
   const maxTrips = Math.max(1, ...trend.map((p) => p.completedTrips));
   const actionItems = [
     dispatch.redispatchOrders > 0
-      ? `${dispatch.redispatchOrders} orders need redispatch`
+      ? t("dashboard.exceptions.redispatch", locale, {
+          count: dispatch.redispatchOrders,
+        })
       : null,
     operations.openIncidents > 0
-      ? `${operations.openIncidents} open incidents`
+      ? t("dashboard.exceptions.incidents", locale, {
+          count: operations.openIncidents,
+        })
       : null,
     operations.overdueMaintenance > 0
-      ? `${operations.overdueMaintenance} overdue maintenance items`
+      ? t("dashboard.exceptions.maintenance", locale, {
+          count: operations.overdueMaintenance,
+        })
       : null,
     operations.failedReports > 0
-      ? `${operations.failedReports} report jobs need review`
+      ? t("dashboard.exceptions.reports", locale, {
+          count: operations.failedReports,
+        })
       : null,
   ].filter(Boolean) as string[];
 
   const quickLinks: [string, string][] = [
-    ["/dispatch", "Open dispatch board"],
-    ["/revenue", "Review revenue"],
-    ["/incidents", "Coordinate incidents"],
-    ["/maintenance", "Maintenance backlog"],
-    ["/reports", "Generate reports"],
+    ["/dispatch", t("dashboard.quicklink.dispatch", locale)],
+    ["/revenue", t("dashboard.quicklink.revenue", locale)],
+    ["/incidents", t("dashboard.quicklink.incidents", locale)],
+    ["/maintenance", t("dashboard.quicklink.maintenance", locale)],
+    ["/reports", t("dashboard.quicklink.reports", locale)],
   ];
 
   return (
     <>
       <PageHeader
-        title="Dashboard"
-        subtitle="Operational overview — dispatch health, revenue pulse, and exception backlog"
+        title={t("dashboard.title", locale)}
+        subtitle={t("dashboard.subtitle", locale)}
       />
 
       <div
@@ -155,43 +166,51 @@ export default async function DashboardPage() {
         }}
       >
         <StatCard
-          label="Today's Revenue"
+          label={t("dashboard.todayRevenue", locale)}
           value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
-          sub={`${formatCompactNumber(todayRevenue.completedTrips)} completed trips`}
+          sub={t("dashboard.todayRevenueSub", locale, {
+            trips: formatCompactNumber(todayRevenue.completedTrips),
+          })}
           accent="#15803d"
         />
         <StatCard
-          label="Queue Depth"
+          label={t("dashboard.queueDepth", locale)}
           value={formatCompactNumber(dispatch.queueDepth)}
           sub={
             dispatch.averageEtaMinutes
-              ? `Avg ETA ${dispatch.averageEtaMinutes} min`
-              : "ETA pending"
+              ? t("dashboard.queueDepthSub", locale, {
+                  eta: dispatch.averageEtaMinutes,
+                })
+              : t("dashboard.queueDepthSubPending", locale)
           }
           accent="#1d4ed8"
         />
         <StatCard
-          label="Active Orders"
+          label={t("dashboard.activeOrders", locale)}
           value={formatCompactNumber(dispatch.activeOrders)}
-          sub="Realtime + reservation"
+          sub={t("dashboard.activeOrdersSub", locale)}
           accent="#7c3aed"
         />
         <StatCard
-          label="Dispatchable Vehicles"
+          label={t("dashboard.dispatchableVehicles", locale)}
           value={formatCompactNumber(operations.dispatchableVehicles)}
-          sub={`${operations.offlineVehicles} offline`}
+          sub={t("dashboard.dispatchableVehiclesSub", locale, {
+            count: operations.offlineVehicles,
+          })}
           accent="#b45309"
         />
         <StatCard
-          label="Online Drivers"
+          label={t("dashboard.onlineDrivers", locale)}
           value={formatCompactNumber(operations.onlineDrivers)}
-          sub="Active shifts"
+          sub={t("dashboard.onlineDriversSub", locale)}
           accent="#0891b2"
         />
         <StatCard
-          label="Open Incidents"
+          label={t("dashboard.openIncidents", locale)}
           value={formatCompactNumber(operations.openIncidents)}
-          sub={`${operations.overdueMaintenance} overdue maintenance`}
+          sub={t("dashboard.openIncidentsSub", locale, {
+            count: operations.overdueMaintenance,
+          })}
           accent="#dc2626"
         />
       </div>
@@ -215,12 +234,12 @@ export default async function DashboardPage() {
                 marginBottom: "2px",
               }}
             >
-              7-Day Trend
+              {t("dashboard.trend.title", locale)}
             </div>
             <div
               style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
             >
-              Completed trips &amp; order intake
+              {t("dashboard.trend.subtitle", locale)}
             </div>
           </CardHeader>
           <CardBody>
@@ -285,12 +304,12 @@ export default async function DashboardPage() {
                 marginBottom: "2px",
               }}
             >
-              Exceptions
+              {t("dashboard.exceptions.title", locale)}
             </div>
             <div
               style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
             >
-              Attention queue
+              {t("dashboard.exceptions.subtitle", locale)}
             </div>
           </CardHeader>
           <CardBody>
@@ -315,7 +334,7 @@ export default async function DashboardPage() {
               </ul>
             ) : (
               <p style={{ margin: 0, fontSize: "13.5px", color: "#94a3b8" }}>
-                No critical exceptions right now.
+                {t("dashboard.exceptions.none", locale)}
               </p>
             )}
             <div
@@ -361,10 +380,10 @@ export default async function DashboardPage() {
               marginBottom: "2px",
             }}
           >
-            Runtime
+            {t("dashboard.runtime.title", locale)}
           </div>
           <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
-            System health &amp; execution context
+            {t("dashboard.runtime.subtitle", locale)}
           </div>
         </CardHeader>
         <CardBody>
@@ -377,12 +396,22 @@ export default async function DashboardPage() {
           >
             {(
               [
-                ["API Status", health.status],
-                ["Service", health.service],
-                ["Mode", health.mode],
-                ["Execution", health.execution_mode],
-                ["Identity Realm", identity?.realm ?? "anonymous"],
-                ["Actor", identity?.actorType ?? "anonymous"],
+                [t("dashboard.runtime.apiStatus", locale), health.status],
+                [t("dashboard.runtime.service", locale), health.service],
+                [t("dashboard.runtime.mode", locale), health.mode],
+                [
+                  t("dashboard.runtime.execution", locale),
+                  health.execution_mode,
+                ],
+                [
+                  t("dashboard.runtime.realm", locale),
+                  identity?.realm ?? t("dashboard.runtime.anonymous", locale),
+                ],
+                [
+                  t("dashboard.runtime.actor", locale),
+                  identity?.actorType ??
+                    t("dashboard.runtime.anonymous", locale),
+                ],
               ] as [string, string][]
             ).map(([label, value]) => (
               <div key={label}>

@@ -18,12 +18,14 @@ import {
   INCIDENT_STATUSES,
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { useTranslation } from "@/lib/i18n";
 
 const STATUSES: IncidentStatus[] = [...INCIDENT_STATUSES];
 const SEVERITIES: IncidentSeverity[] = [...INCIDENT_SEVERITIES];
 const CATEGORIES: IncidentCategory[] = [...INCIDENT_CATEGORIES];
 
 export default function IncidentsPage() {
+  const { t } = useTranslation();
   const [records, setRecords] = useState<IncidentRecord[]>([]);
   const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(
@@ -57,7 +59,7 @@ export default function IncidentsPage() {
       setRecords(result);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      setError(e instanceof Error ? e.message : t("common.unknown"));
     } finally {
       setLoading(false);
     }
@@ -71,7 +73,7 @@ export default function IncidentsPage() {
       setTimeline(items);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      setError(e instanceof Error ? e.message : t("common.unknown"));
     }
   }
 
@@ -133,8 +135,8 @@ export default function IncidentsPage() {
   return (
     <>
       <PageHeader
-        title="Incidents"
-        subtitle="ROC incident tracking — filters, timeline review, and dispatch link-back"
+        title={t("incidents.title")}
+        subtitle={t("incidents.subtitle")}
       />
       <div>
         {error && (
@@ -146,32 +148,29 @@ export default function IncidentsPage() {
         <section className="summary-grid">
           {[
             {
-              label: "Open incidents",
+              label: t("incidents.activeCount"),
               value: openCount,
-              note: "Open and investigating cases",
+              note: t("incidents.activeSub"),
+              isCritical: false,
             },
             {
-              label: "Critical severity",
+              label: t("incidents.criticalCount"),
               value: criticalCount,
-              note: "Immediate coordination required",
+              note: t("incidents.criticalSub"),
+              isCritical: true,
             },
             {
-              label: "Cross-linked",
+              label: t("incidents.resolvedCount"),
               value: linkedCount,
-              note: "Connected to order / vehicle / complaint",
+              note: t("incidents.resolvedSub"),
+              isCritical: false,
             },
           ].map((card) => (
             <button
               key={card.label}
-              className={`summary-card ${
-                card.label === "Critical severity" ? "summary-card-alert" : ""
-              }`}
+              className={`summary-card ${card.isCritical ? "summary-card-alert" : ""}`}
               type="button"
-              onClick={
-                card.label === "Critical severity"
-                  ? focusCriticalQueue
-                  : undefined
-              }
+              onClick={card.isCritical ? focusCriticalQueue : undefined}
             >
               <span>{card.label}</span>
               <strong>{card.value}</strong>
@@ -228,7 +227,7 @@ export default function IncidentsPage() {
           <input
             className="search-input"
             type="search"
-            placeholder="Search incident, order, vehicle, or complaint"
+            placeholder={t("incidents.search")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -239,7 +238,7 @@ export default function IncidentsPage() {
               setStatusFilter(event.target.value as IncidentStatus | "all")
             }
           >
-            <option value="all">All statuses</option>
+            <option value="all">{t("incidents.allStatuses")}</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
                 {status}
@@ -253,7 +252,7 @@ export default function IncidentsPage() {
               setSeverityFilter(event.target.value as IncidentSeverity | "all")
             }
           >
-            <option value="all">All severities</option>
+            <option value="all">{t("incidents.allSeverities")}</option>
             {SEVERITIES.map((severity) => (
               <option key={severity} value={severity}>
                 {severity}
@@ -267,7 +266,7 @@ export default function IncidentsPage() {
               setCategoryFilter(event.target.value as IncidentCategory | "all")
             }
           >
-            <option value="all">All categories</option>
+            <option value="all">{t("incidents.allCategories")}</option>
             {CATEGORIES.map((category) => (
               <option key={category} value={category}>
                 {category.replace(/_/g, " ")}
@@ -282,14 +281,14 @@ export default function IncidentsPage() {
               setEditingId(null);
             }}
           >
-            Report incident
+            {t("incidents.createBtn")}
           </button>
           <button
             className="btn"
             type="button"
             onClick={() => void loadRecords()}
           >
-            Refresh
+            {t("common.refresh")}
           </button>
         </div>
 
@@ -319,7 +318,7 @@ export default function IncidentsPage() {
                 setEditingId(null);
                 await loadRecords();
               } catch (e) {
-                setError(e instanceof Error ? e.message : "Unknown error");
+                setError(e instanceof Error ? e.message : t("common.unknown"));
               }
             }}
           />
@@ -332,21 +331,21 @@ export default function IncidentsPage() {
             <section className="panel">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">Registry</p>
-                  <h3>Incident queue</h3>
+                  <p className="eyebrow">{t("incidents.registry")}</p>
+                  <h3>{t("incidents.backlog")}</h3>
                 </div>
                 <span className="panel-note">
-                  {filteredRecords.length} visible incident(s)
+                  {t("incidents.visible", { count: filteredRecords.length })}
                 </span>
               </div>
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Incident</th>
-                    <th>Severity</th>
-                    <th>Status</th>
-                    <th>Links</th>
-                    <th>Actions</th>
+                    <th>{t("incidents.col.incident")}</th>
+                    <th>{t("incidents.col.severity")}</th>
+                    <th>{t("incidents.col.status")}</th>
+                    <th>{t("incidents.col.vehicles")}</th>
+                    <th>{t("incidents.col.actions")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -410,7 +409,7 @@ export default function IncidentsPage() {
                               type="button"
                               onClick={() => setEditingId(record.incidentId)}
                             >
-                              Edit
+                              {t("common.edit")}
                             </button>
                             <button
                               className="btn"
@@ -419,7 +418,7 @@ export default function IncidentsPage() {
                                 void loadTimeline(record.incidentId)
                               }
                             >
-                              Timeline
+                              {t("incidents.timeline")}
                             </button>
                             {record.status !== "resolved" &&
                               record.status !== "closed" && (
@@ -445,12 +444,12 @@ export default function IncidentsPage() {
                                       setError(
                                         e instanceof Error
                                           ? e.message
-                                          : "Unknown error",
+                                          : t("common.unknown"),
                                       );
                                     }
                                   }}
                                 >
-                                  Resolve
+                                  {t("incidents.resolve")}
                                 </button>
                               )}
                           </div>
@@ -459,9 +458,7 @@ export default function IncidentsPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={5}>
-                        No incidents match the current filters.
-                      </td>
+                      <td colSpan={5}>{t("incidents.empty")}</td>
                     </tr>
                   )}
                 </tbody>
@@ -471,8 +468,8 @@ export default function IncidentsPage() {
             <section className="panel">
               <div className="panel-head">
                 <div>
-                  <p className="eyebrow">Timeline</p>
-                  <h3>{selectedIncidentId ?? "Select an incident"}</h3>
+                  <p className="eyebrow">{t("incidents.timeline")}</p>
+                  <h3>{selectedIncidentId ?? t("incidents.selectIncident")}</h3>
                 </div>
               </div>
               {selectedIncidentId ? (
@@ -490,7 +487,7 @@ export default function IncidentsPage() {
                     ))}
                   </ul>
                 ) : (
-                  <p className="empty-copy">No timeline entries available.</p>
+                  <p className="empty-copy">{t("incidents.timelineEmpty")}</p>
                 )
               ) : (
                 <p className="empty-copy">
@@ -502,7 +499,8 @@ export default function IncidentsPage() {
         )}
 
         <Link className="route-link" href="/dashboard">
-          <strong>Back to dashboard</strong> Return to the operations overview.
+          <strong>{t("common.backToDashboard")}</strong>{" "}
+          {t("common.backToDashboardSub")}
         </Link>
 
         <style jsx>{`
@@ -744,6 +742,7 @@ function IncidentForm({
     command: CreateIncidentCommand | UpdateIncidentCommand,
   ) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [pending, startTransition] = useTransition();
   const [title, setTitle] = useState(editingRecord?.title ?? "");
   const [description, setDescription] = useState(
@@ -826,15 +825,19 @@ function IncidentForm({
     <form className="incident-form" onSubmit={handleSubmit}>
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Editor</p>
-          <h3>{isEditing ? "Update incident" : "Report incident"}</h3>
+          <p className="eyebrow">{t("maintenance.form.editor")}</p>
+          <h3>
+            {isEditing
+              ? t("incidents.form.updateTitle")
+              : t("incidents.form.createTitle")}
+          </h3>
         </div>
       </div>
       {!isEditing ? (
         <>
           <div className="form-grid">
             <label>
-              Title
+              {t("incidents.form.title")}
               <input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
@@ -842,7 +845,7 @@ function IncidentForm({
               />
             </label>
             <label>
-              Reported by
+              {t("incidents.form.reportedBy")}
               <input
                 value={reportedBy}
                 onChange={(event) => setReportedBy(event.target.value)}
@@ -850,7 +853,7 @@ function IncidentForm({
               />
             </label>
             <label>
-              Category
+              {t("incidents.form.category")}
               <select
                 value={category}
                 onChange={(event) =>
@@ -865,7 +868,7 @@ function IncidentForm({
               </select>
             </label>
             <label>
-              Severity
+              {t("incidents.form.severity")}
               <select
                 value={severity}
                 onChange={(event) =>
@@ -880,28 +883,28 @@ function IncidentForm({
               </select>
             </label>
             <label>
-              Related order
+              {t("incidents.form.relatedOrder")}
               <input
                 value={relatedOrderId}
                 onChange={(event) => setRelatedOrderId(event.target.value)}
               />
             </label>
             <label>
-              Related vehicle
+              {t("incidents.form.relatedVehicle")}
               <input
                 value={relatedVehicleId}
                 onChange={(event) => setRelatedVehicleId(event.target.value)}
               />
             </label>
             <label>
-              Related driver
+              {t("incidents.form.relatedDriver")}
               <input
                 value={relatedDriverId}
                 onChange={(event) => setRelatedDriverId(event.target.value)}
               />
             </label>
             <label>
-              Occurred at
+              {t("incidents.form.occurredAt")}
               <input
                 type="datetime-local"
                 value={occurredAt}
@@ -909,14 +912,14 @@ function IncidentForm({
               />
             </label>
             <label className="full-width">
-              Location
+              {t("incidents.form.location")}
               <input
                 value={location}
                 onChange={(event) => setLocation(event.target.value)}
               />
             </label>
             <label className="full-width">
-              Description
+              {t("incidents.form.description")}
               <textarea
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
@@ -929,7 +932,7 @@ function IncidentForm({
       ) : (
         <div className="form-grid">
           <label>
-            Status
+            {t("incidents.form.status")}
             <select
               value={status}
               onChange={(event) =>
@@ -944,14 +947,14 @@ function IncidentForm({
             </select>
           </label>
           <label>
-            Assigned to
+            {t("incidents.form.assignedTo")}
             <input
               value={assignedTo}
               onChange={(event) => setAssignedTo(event.target.value)}
             />
           </label>
           <label className="full-width">
-            Resolution note
+            {t("incidents.form.resolutionNote")}
             <textarea
               value={resolutionNote}
               onChange={(event) => setResolutionNote(event.target.value)}
@@ -963,13 +966,13 @@ function IncidentForm({
       <div className="form-actions">
         <button className="btn btn-primary" type="submit" disabled={pending}>
           {pending
-            ? "Saving..."
+            ? t("incidents.form.saving")
             : isEditing
-              ? "Save changes"
-              : "Create incident"}
+              ? t("incidents.form.saveChanges")
+              : t("incidents.form.createRecord")}
         </button>
         <button className="btn" type="button" onClick={onCancel}>
-          Cancel
+          {t("common.cancel")}
         </button>
       </div>
       <style jsx>{`

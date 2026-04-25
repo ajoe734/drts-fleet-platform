@@ -15,7 +15,7 @@ export interface AppSidebarProps {
   brandIcon?: ReactNode;
   navItems: SidebarNavItem[];
   currentPath: string;
-  footer?: string;
+  footer?: ReactNode;
 }
 
 export function AppSidebar({

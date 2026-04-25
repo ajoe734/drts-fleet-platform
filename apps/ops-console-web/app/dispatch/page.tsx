@@ -1,5 +1,7 @@
 import type { DispatchJobRecord, OwnedOrderRecord } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import {
   buildDispatchInsights,
   formatCompactNumber,
@@ -33,12 +35,13 @@ export default async function DispatchPage({
   searchParams,
 }: DispatchPageProps) {
   const client = getOpsClient();
-  const [orders, dispatchJobs] = await Promise.all([
+  const [orders, dispatchJobs, locale] = await Promise.all([
     resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
     resolveOrFallback(
       () => client.listDispatchJobs(),
       [] as DispatchJobRecord[],
     ),
+    getServerLocale(),
   ]);
   const focusOrderId = firstParam(searchParams?.orderId) ?? "";
   const insights = buildDispatchInsights(orders, dispatchJobs);
@@ -46,8 +49,8 @@ export default async function DispatchPage({
   return (
     <>
       <PageHeader
-        title="Dispatch Console"
-        subtitle="Queue triage, candidate selection, and redispatch handling"
+        title={t("dispatch.title", locale)}
+        subtitle={t("dispatch.subtitle", locale)}
       />
 
       <div
@@ -59,31 +62,35 @@ export default async function DispatchPage({
         }}
       >
         <StatCard
-          label="Queue Depth"
+          label={t("dispatch.queueDepth", locale)}
           value={formatCompactNumber(insights.queueDepth)}
           sub={
             insights.averageEtaMinutes
-              ? `Avg ETA ${insights.averageEtaMinutes} min`
-              : "ETA pending"
+              ? t("dispatch.queueDepthSub", locale, {
+                  eta: insights.averageEtaMinutes,
+                })
+              : t("dispatch.queueDepthSubPending", locale)
           }
           accent="#1d4ed8"
         />
         <StatCard
-          label="Active Orders"
+          label={t("dispatch.activeOrders", locale)}
           value={formatCompactNumber(insights.activeOrders)}
-          sub="Realtime and reservation in flight"
+          sub={t("dispatch.activeOrdersSub", locale)}
           accent="#7c3aed"
         />
         <StatCard
-          label="Needs Redispatch"
+          label={t("dispatch.needsRedispatch", locale)}
           value={formatCompactNumber(insights.redispatchOrders)}
-          sub={`${insights.exceptionOrders} exception hold`}
+          sub={t("dispatch.needsRedispatchSub", locale, {
+            count: insights.exceptionOrders,
+          })}
           accent="#dc2626"
         />
         <StatCard
-          label="Queued Revenue"
+          label={t("dispatch.queuedRevenue", locale)}
           value={formatMinorCurrency(insights.queuedRevenueMinor)}
-          sub="Still in dispatch flow"
+          sub={t("dispatch.queuedRevenueSub", locale)}
           accent="#15803d"
         />
       </div>
@@ -100,9 +107,8 @@ export default async function DispatchPage({
               fontSize: "13.5px",
             }}
           >
-            <strong>Role boundary:</strong> OpCo performs assign / redispatch in
-            Phase 1. ROC keeps a read-only monitoring posture. Host visibility
-            is scoped to its own vehicles.
+            <strong>{t("dispatch.roleBoundary", locale)}:</strong>{" "}
+            {t("dispatch.roleBoundaryText", locale)}
           </div>
           <div style={{ marginTop: "16px" }}>
             <DispatchWorkflow

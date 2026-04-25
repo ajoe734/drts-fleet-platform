@@ -1,66 +1,68 @@
+"use client";
+
 import Link from "next/link";
 import { PageHeader, Card, CardBody } from "@drts/ui-web";
-
-const ROUTES = [
-  {
-    href: "/tenants",
-    title: "Tenants",
-    desc: "Tenant CRUD, provisioning, and lifecycle management",
-  },
-  {
-    href: "/users",
-    title: "Users & Roles",
-    desc: "Platform user administration and role assignment",
-  },
-  {
-    href: "/fleet",
-    title: "Fleet & Devices",
-    desc: "Vehicle registry, driver registry, and contract management",
-  },
-  {
-    href: "/switchboard",
-    title: "Switchboard",
-    desc: "Public information, placards, and platform-wide broadcasts",
-  },
-  {
-    href: "/pricing",
-    title: "Pricing & Split",
-    desc: "Pricing rules, revenue split configuration, and payment admin",
-  },
-  {
-    href: "/payments",
-    title: "Payments",
-    desc: "Payment records, settlement status, and financial operations",
-  },
-  {
-    href: "/health",
-    title: "Health & Quotas",
-    desc: "System health monitoring, forwarder adapter status, and quotas",
-  },
-  {
-    href: "/notices",
-    title: "Notices & Maintenance",
-    desc: "Platform-wide notices, incident broadcasts, and maintenance mode",
-  },
-  {
-    href: "/audit",
-    title: "Audit Trail",
-    desc: "Platform audit log with filtering and record inspection",
-  },
-  {
-    href: "/feature-flags",
-    title: "Feature Flags",
-    desc: "Feature flag management with tenant-level overrides",
-  },
-];
+import { useTranslation } from "@/lib/i18n";
 
 export default function HomePage() {
+  const { t } = useTranslation();
+
+  const ROUTES = [
+    {
+      href: "/tenants",
+      titleKey: "home.tenants.title",
+      descKey: "home.tenants.desc",
+    },
+    {
+      href: "/users",
+      titleKey: "home.users.title",
+      descKey: "home.users.desc",
+    },
+    {
+      href: "/fleet",
+      titleKey: "home.fleet.title",
+      descKey: "home.fleet.desc",
+    },
+    {
+      href: "/switchboard",
+      titleKey: "home.switchboard.title",
+      descKey: "home.switchboard.desc",
+    },
+    {
+      href: "/pricing",
+      titleKey: "home.pricing.title",
+      descKey: "home.pricing.desc",
+    },
+    {
+      href: "/payments",
+      titleKey: "home.payments.title",
+      descKey: "home.payments.desc",
+    },
+    {
+      href: "/health",
+      titleKey: "home.health.title",
+      descKey: "home.health.desc",
+    },
+    {
+      href: "/notices",
+      titleKey: "home.notices.title",
+      descKey: "home.notices.desc",
+    },
+    {
+      href: "/audit",
+      titleKey: "home.audit.title",
+      descKey: "home.audit.desc",
+    },
+    {
+      href: "/feature-flags",
+      titleKey: "home.featureFlags.title",
+      descKey: "home.featureFlags.desc",
+    },
+  ];
+
   return (
     <>
-      <PageHeader
-        title="Platform Administration"
-        subtitle="Full control plane for platform-wide operations"
-      />
+      <PageHeader title={t("home.title")} subtitle={t("home.subtitle")} />
       <Card>
         <CardBody>
           <div
@@ -92,7 +94,7 @@ export default function HomePage() {
                     marginBottom: "6px",
                   }}
                 >
-                  {route.title}
+                  {t(route.titleKey)}
                 </div>
                 <div
                   style={{
@@ -101,7 +103,7 @@ export default function HomePage() {
                     lineHeight: 1.5,
                   }}
                 >
-                  {route.desc}
+                  {t(route.descKey)}
                 </div>
               </Link>
             ))}

@@ -1,26 +1,31 @@
 import type { VehicleRegistryRecord } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
 import { Badge } from "@drts/ui-web";
 
 export default async function VehiclesPage() {
-  const client = await getServerOpsClient();
+  const [client, locale] = await Promise.all([
+    getServerOpsClient(),
+    getServerLocale(),
+  ]);
   let vehicles: VehicleRegistryRecord[] = [];
   let error: string | null = null;
 
   try {
     vehicles = await client.listVehicles();
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = e instanceof Error ? e.message : t("common.unknown", locale);
   }
 
   return (
     <>
       <PageHeader
-        title="Vehicles Registry"
-        subtitle={`${vehicles.length} vehicle(s) registered`}
+        title={t("vehicles.title", locale)}
+        subtitle={t("vehicles.subtitle", locale, { count: vehicles.length })}
       />
 
       {error && (
@@ -42,13 +47,13 @@ export default async function VehiclesPage() {
       <Card>
         <DataTable
           columns={[
-            { label: "Vehicle ID" },
-            { label: "Plate" },
-            { label: "Operating Area" },
-            { label: "Insurance" },
-            { label: "Dispatchable" },
+            { label: t("vehicles.col.vehicleId", locale) },
+            { label: t("vehicles.col.plate", locale) },
+            { label: t("vehicles.col.operatingArea", locale) },
+            { label: t("vehicles.col.insurance", locale) },
+            { label: t("vehicles.col.dispatchable", locale) },
           ]}
-          empty="No vehicles registered."
+          empty={t("vehicles.empty", locale)}
         >
           {vehicles.map((v) => (
             <Tr key={v.vehicleId}>
@@ -59,12 +64,16 @@ export default async function VehiclesPage() {
                 <Badge
                   variant={v.insuranceStatus === "valid" ? "green" : "red"}
                 >
-                  {v.insuranceStatus}
+                  {v.insuranceStatus === "valid"
+                    ? t("common.valid", locale)
+                    : t("common.invalid", locale)}
                 </Badge>
               </Td>
               <Td>
                 <Badge variant={v.dispatchableFlag ? "green" : "gray"}>
-                  {v.dispatchableFlag ? "Yes" : "No"}
+                  {v.dispatchableFlag
+                    ? t("common.yes", locale)
+                    : t("common.no", locale)}
                 </Badge>
               </Td>
             </Tr>

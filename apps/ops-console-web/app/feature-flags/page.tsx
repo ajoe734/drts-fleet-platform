@@ -1,4 +1,6 @@
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
@@ -11,7 +13,10 @@ interface FlagRecord {
 }
 
 export default async function FeatureFlagsPage() {
-  const client = await getServerOpsClient();
+  const [client, locale] = await Promise.all([
+    getServerOpsClient(),
+    getServerLocale(),
+  ]);
   let flags: FlagRecord[] = [];
   let error: string | null = null;
 
@@ -19,7 +24,7 @@ export default async function FeatureFlagsPage() {
     const summary = await client.getFeatureFlags();
     flags = summary.flags as FlagRecord[];
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = e instanceof Error ? e.message : t("common.unknown", locale);
   }
 
   const enabled = flags.filter((f) => f.enabled).length;
@@ -27,8 +32,8 @@ export default async function FeatureFlagsPage() {
   return (
     <>
       <PageHeader
-        title="Feature Flags"
-        subtitle={`${flags.length} flags — ${enabled} enabled`}
+        title={t("flags.title", locale)}
+        subtitle={t("flags.subtitle", locale, { total: flags.length, enabled })}
       />
 
       {error && (
@@ -50,18 +55,20 @@ export default async function FeatureFlagsPage() {
       <Card>
         <DataTable
           columns={[
-            { label: "Key" },
-            { label: "Status", width: "100px" },
-            { label: "Description" },
+            { label: t("flags.col.key", locale) },
+            { label: t("flags.col.status", locale), width: "100px" },
+            { label: t("flags.col.description", locale) },
           ]}
-          empty="No flags found."
+          empty={t("flags.empty", locale)}
         >
           {flags.map((f, i) => (
             <Tr key={i}>
               <Td mono>{f.key}</Td>
               <Td>
                 <Badge variant={f.enabled ? "green" : "gray"}>
-                  {f.enabled ? "Enabled" : "Disabled"}
+                  {f.enabled
+                    ? t("common.enabled", locale)
+                    : t("common.disabled", locale)}
                 </Badge>
               </Td>
               <Td muted>{f.description ?? "—"}</Td>

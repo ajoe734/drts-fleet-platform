@@ -1,26 +1,31 @@
 import type { DriverRegistryRecord } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
 import { Badge } from "@drts/ui-web";
 
 export default async function DriversPage() {
-  const client = await getServerOpsClient();
+  const [client, locale] = await Promise.all([
+    getServerOpsClient(),
+    getServerLocale(),
+  ]);
   let drivers: DriverRegistryRecord[] = [];
   let error: string | null = null;
 
   try {
     drivers = await client.listDrivers();
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = e instanceof Error ? e.message : t("common.unknown", locale);
   }
 
   return (
     <>
       <PageHeader
-        title="Drivers Registry"
-        subtitle={`${drivers.length} driver(s) registered`}
+        title={t("drivers.title", locale)}
+        subtitle={t("drivers.subtitle", locale, { count: drivers.length })}
       />
 
       {error && (
@@ -42,12 +47,12 @@ export default async function DriversPage() {
       <Card>
         <DataTable
           columns={[
-            { label: "Driver ID" },
-            { label: "Name" },
-            { label: "Work State" },
-            { label: "License Valid" },
+            { label: t("drivers.col.driverId", locale) },
+            { label: t("drivers.col.name", locale) },
+            { label: t("drivers.col.workState", locale) },
+            { label: t("drivers.col.licenseValid", locale) },
           ]}
-          empty="No drivers registered."
+          empty={t("drivers.empty", locale)}
         >
           {drivers.map((d) => (
             <Tr key={d.driverId}>
@@ -68,7 +73,9 @@ export default async function DriversPage() {
               </Td>
               <Td>
                 <Badge variant={d.licensesValid ? "green" : "red"}>
-                  {d.licensesValid ? "Valid" : "Invalid"}
+                  {d.licensesValid
+                    ? t("common.valid", locale)
+                    : t("common.invalid", locale)}
                 </Badge>
               </Td>
             </Tr>
