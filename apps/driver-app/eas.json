@@ -1,0 +1,44 @@
+{
+  "cli": {
+    "version": ">= 16.19.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "channel": "development",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_DRIVER_ID": "driver-demo-001"
+      }
+    },
+    "development-simulator": {
+      "extends": "development",
+      "ios": {
+        "simulator": true
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "channel": "preview",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://drts-api-kdhu6wzufa-uc.a.run.app",
+        "EXPO_PUBLIC_DRIVER_ID": "driver-demo-001"
+      }
+    },
+    "production": {
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://drts-api-kdhu6wzufa-uc.a.run.app"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
