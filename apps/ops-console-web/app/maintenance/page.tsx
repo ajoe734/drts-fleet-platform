@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useDeferredValue, useEffect, useState, useTransition } from "react";
 import { PageHeader } from "@drts/ui-web";
+import { useTranslation } from "@/lib/i18n";
 import type {
   CreateMaintenanceRecordCommand,
   MaintenanceRecord,
@@ -27,6 +28,7 @@ function formatCost(value: number | null): string {
 }
 
 export default function MaintenancePage() {
+  const { t } = useTranslation();
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,7 +51,7 @@ export default function MaintenancePage() {
       setRecords(await client.listMaintenance());
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      setError(e instanceof Error ? e.message : t("common.unknown"));
     } finally {
       setLoading(false);
     }
@@ -91,8 +93,8 @@ export default function MaintenancePage() {
   return (
     <>
       <PageHeader
-        title="Vehicle Maintenance"
-        subtitle="Work orders — track overdue service and link back to vehicle operations"
+        title={t("maintenance.title")}
+        subtitle={t("maintenance.subtitle")}
       />
       <div>
         {error && (
@@ -104,19 +106,19 @@ export default function MaintenancePage() {
         <section className="summary-grid">
           {[
             {
-              label: "Active work orders",
+              label: t("maintenance.activeOrders"),
               value: activeCount,
-              note: "Scheduled or in-progress maintenance",
+              note: t("maintenance.activeOrdersSub"),
             },
             {
-              label: "Overdue",
+              label: t("maintenance.overdue"),
               value: overdueCount,
-              note: "Past scheduled date and still unresolved",
+              note: t("maintenance.overdueSub"),
             },
             {
-              label: "Completed",
+              label: t("maintenance.completed"),
               value: completedCount,
-              note: "Closed maintenance records",
+              note: t("maintenance.completedSub"),
             },
           ].map((card) => (
             <div key={card.label} className="summary-card">
@@ -131,7 +133,7 @@ export default function MaintenancePage() {
           <input
             className="search-input"
             type="search"
-            placeholder="Search maintenance, vehicle, technician, or notes"
+            placeholder={t("maintenance.search")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -142,7 +144,7 @@ export default function MaintenancePage() {
               setStatusFilter(event.target.value as MaintenanceStatus | "all")
             }
           >
-            <option value="all">All statuses</option>
+            <option value="all">{t("common.allStatuses")}</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
                 {status}
@@ -157,14 +159,14 @@ export default function MaintenancePage() {
               setEditingId(null);
             }}
           >
-            Create work order
+            {t("maintenance.createBtn")}
           </button>
           <button
             className="btn"
             type="button"
             onClick={() => void loadRecords()}
           >
-            Refresh
+            {t("common.refresh")}
           </button>
         </div>
 
@@ -196,35 +198,37 @@ export default function MaintenancePage() {
                 setEditingId(null);
                 await loadRecords();
               } catch (e) {
-                setError(e instanceof Error ? e.message : "Unknown error");
+                setError(e instanceof Error ? e.message : t("common.unknown"));
               }
             }}
           />
         )}
 
         {loading ? (
-          <p>Loading maintenance records...</p>
+          <p>{t("common.loading")}</p>
         ) : (
           <div className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Registry</p>
-                <h3>Maintenance backlog</h3>
+                <p className="eyebrow">{t("maintenance.registry")}</p>
+                <h3>{t("maintenance.backlog")}</h3>
               </div>
               <span className="panel-note">
-                {filteredRecords.length} visible work order(s)
+                {t("maintenance.visibleOrders", {
+                  count: filteredRecords.length,
+                })}
               </span>
             </div>
             <table className="table">
               <thead>
                 <tr>
-                  <th>Work order</th>
-                  <th>Status</th>
-                  <th>Vehicle</th>
-                  <th>Schedule</th>
-                  <th>Technician</th>
-                  <th>Cost</th>
-                  <th>Actions</th>
+                  <th>{t("maintenance.col.workOrder")}</th>
+                  <th>{t("maintenance.col.status")}</th>
+                  <th>{t("maintenance.col.vehicle")}</th>
+                  <th>{t("maintenance.col.schedule")}</th>
+                  <th>{t("maintenance.col.technician")}</th>
+                  <th>{t("maintenance.col.cost")}</th>
+                  <th>{t("maintenance.col.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -260,16 +264,18 @@ export default function MaintenancePage() {
                         </td>
                         <td>
                           <div className="cell-subcopy">
-                            Scheduled:{" "}
-                            {record.scheduledAt
-                              ? new Date(record.scheduledAt).toLocaleString()
-                              : "-"}
+                            {t("common.scheduledAt", {
+                              value: record.scheduledAt
+                                ? new Date(record.scheduledAt).toLocaleString()
+                                : "-",
+                            })}
                           </div>
                           <div className="cell-subcopy">
-                            Completed:{" "}
-                            {record.completedAt
-                              ? new Date(record.completedAt).toLocaleString()
-                              : "-"}
+                            {t("common.completedAt", {
+                              value: record.completedAt
+                                ? new Date(record.completedAt).toLocaleString()
+                                : "-",
+                            })}
                           </div>
                         </td>
                         <td>{record.technician ?? "-"}</td>
@@ -285,7 +291,7 @@ export default function MaintenancePage() {
                                     setEditingId(record.maintenanceId)
                                   }
                                 >
-                                  Edit
+                                  {t("common.edit")}
                                 </button>
                               )}
                             {record.status !== "completed" &&
@@ -307,12 +313,12 @@ export default function MaintenancePage() {
                                       setError(
                                         e instanceof Error
                                           ? e.message
-                                          : "Unknown error",
+                                          : t("common.unknown"),
                                       );
                                     }
                                   }}
                                 >
-                                  Complete
+                                  {t("maintenance.completeBtn")}
                                 </button>
                               )}
                             <button
@@ -329,12 +335,12 @@ export default function MaintenancePage() {
                                   setError(
                                     e instanceof Error
                                       ? e.message
-                                      : "Unknown error",
+                                      : t("common.unknown"),
                                   );
                                 }
                               }}
                             >
-                              Delete
+                              {t("common.delete")}
                             </button>
                           </div>
                         </td>
@@ -343,9 +349,7 @@ export default function MaintenancePage() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={7}>
-                      No maintenance records match the filters.
-                    </td>
+                    <td colSpan={7}>{t("maintenance.empty")}</td>
                   </tr>
                 )}
               </tbody>
@@ -354,7 +358,8 @@ export default function MaintenancePage() {
         )}
 
         <Link className="route-link" href="/dashboard">
-          <strong>Back to dashboard</strong> Return to the operations overview.
+          <strong>{t("common.backToDashboard")}</strong>{" "}
+          {t("common.backToDashboardSub")}
         </Link>
 
         <style jsx>{`
@@ -474,6 +479,7 @@ function MaintenanceForm({
     command: CreateMaintenanceRecordCommand | UpdateMaintenanceRecordCommand,
   ) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [pending, startTransition] = useTransition();
   const [vehicleId, setVehicleId] = useState(editingRecord?.vehicleId ?? "");
   const [type, setType] = useState<MaintenanceType>(
@@ -541,15 +547,19 @@ function MaintenanceForm({
     <form className="maintenance-form" onSubmit={handleSubmit}>
       <div className="panel-head">
         <div>
-          <p className="eyebrow">Editor</p>
-          <h3>{isEditing ? "Update work order" : "Create work order"}</h3>
+          <p className="eyebrow">{t("maintenance.form.editor")}</p>
+          <h3>
+            {isEditing
+              ? t("maintenance.form.updateTitle")
+              : t("maintenance.form.createTitle")}
+          </h3>
         </div>
       </div>
       <div className="form-grid">
         {!isEditing && (
           <>
             <label>
-              Vehicle ID
+              {t("maintenance.form.vehicleId")}
               <input
                 value={vehicleId}
                 onChange={(event) => setVehicleId(event.target.value)}
@@ -557,7 +567,7 @@ function MaintenanceForm({
               />
             </label>
             <label>
-              Type
+              {t("maintenance.form.type")}
               <select
                 value={type}
                 onChange={(event) =>
@@ -572,7 +582,7 @@ function MaintenanceForm({
               </select>
             </label>
             <label className="full-width">
-              Description
+              {t("maintenance.form.description")}
               <textarea
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
@@ -581,7 +591,7 @@ function MaintenanceForm({
               />
             </label>
             <label>
-              Scheduled at
+              {t("maintenance.form.scheduledAt")}
               <input
                 type="datetime-local"
                 value={scheduledAt}
@@ -593,7 +603,7 @@ function MaintenanceForm({
         {isEditing && (
           <>
             <label>
-              Status
+              {t("maintenance.form.status") || t("common.status")}
               <select
                 value={status}
                 onChange={(event) =>
@@ -608,7 +618,7 @@ function MaintenanceForm({
               </select>
             </label>
             <label>
-              Completed at
+              {t("maintenance.form.completedAt")}
               <input
                 type="datetime-local"
                 value={completedAt}
@@ -618,14 +628,14 @@ function MaintenanceForm({
           </>
         )}
         <label>
-          Technician
+          {t("maintenance.form.technician")}
           <input
             value={technician}
             onChange={(event) => setTechnician(event.target.value)}
           />
         </label>
         <label>
-          Cost
+          {t("maintenance.form.cost")}
           <input
             type="number"
             min="0"
@@ -635,7 +645,7 @@ function MaintenanceForm({
           />
         </label>
         <label className="full-width">
-          Notes
+          {t("maintenance.form.notes")}
           <textarea
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
@@ -645,10 +655,14 @@ function MaintenanceForm({
       </div>
       <div className="form-actions">
         <button className="btn btn-primary" type="submit" disabled={pending}>
-          {pending ? "Saving..." : isEditing ? "Save changes" : "Create record"}
+          {pending
+            ? t("maintenance.form.saving")
+            : isEditing
+              ? t("maintenance.form.saveChanges")
+              : t("maintenance.form.createRecord")}
         </button>
         <button className="btn" type="button" onClick={onCancel}>
-          Cancel
+          {t("common.cancel")}
         </button>
       </div>
       <style jsx>{`

@@ -1,5 +1,7 @@
 import type { VehicleContractRecord } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
@@ -13,21 +15,24 @@ function contractStatusVariant(status: string) {
 }
 
 export default async function ContractsPage() {
-  const client = await getServerOpsClient();
+  const [client, locale] = await Promise.all([
+    getServerOpsClient(),
+    getServerLocale(),
+  ]);
   let contracts: VehicleContractRecord[] = [];
   let error: string | null = null;
 
   try {
     contracts = await client.listContracts();
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = e instanceof Error ? e.message : t("common.unknown", locale);
   }
 
   return (
     <>
       <PageHeader
-        title="Contracts Registry"
-        subtitle={`${contracts.length} contract(s)`}
+        title={t("contracts.title", locale)}
+        subtitle={t("contracts.subtitle", locale, { count: contracts.length })}
       />
 
       {error && (
@@ -49,13 +54,13 @@ export default async function ContractsPage() {
       <Card>
         <DataTable
           columns={[
-            { label: "Contract ID" },
-            { label: "Vehicle" },
-            { label: "Partner" },
-            { label: "Type" },
-            { label: "Status" },
+            { label: t("contracts.col.contractId", locale) },
+            { label: t("contracts.col.vehicle", locale) },
+            { label: t("contracts.col.partner", locale) },
+            { label: t("contracts.col.type", locale) },
+            { label: t("contracts.col.status", locale) },
           ]}
-          empty="No contracts registered."
+          empty={t("contracts.empty", locale)}
         >
           {contracts.map((c) => (
             <Tr key={c.contractId}>

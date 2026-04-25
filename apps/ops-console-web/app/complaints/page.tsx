@@ -13,6 +13,7 @@ import type {
 } from "@drts/contracts";
 import { COMPLAINT_CASE_STATUSES, COMPLAINT_CATEGORIES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { useTranslation } from "@/lib/i18n";
 
 const STATUS_OPTIONS: ComplaintCaseStatus[] = [...COMPLAINT_CASE_STATUSES];
 const CATEGORY_OPTIONS: ComplaintCategory[] = [...COMPLAINT_CATEGORIES];
@@ -26,15 +27,14 @@ const INITIAL_CREATE_FORM: CreateComplaintCaseCommand = {
   relatedCallId: "",
 };
 
-function resolveErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown error";
-}
-
 function formatDateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : "-";
 }
 
 export default function ComplaintsPage() {
+  const { t } = useTranslation();
+  const resolveErrorMessage = (error: unknown) =>
+    error instanceof Error ? error.message : t("common.unknown");
   const [records, setRecords] = useState<ComplaintCaseRecord[]>([]);
   const [timeline, setTimeline] = useState<ComplaintTimelineEntry[]>([]);
   const [exportView, setExportView] =
@@ -171,8 +171,8 @@ export default function ComplaintsPage() {
   return (
     <>
       <PageHeader
-        title="Complaints"
-        subtitle="Case management — assign, note, lifecycle, and export-ready review"
+        title={t("complaints.title")}
+        subtitle={t("complaints.subtitle")}
       />
       <div>
         {error && (
@@ -184,24 +184,24 @@ export default function ComplaintsPage() {
         <section className="summary-grid">
           {[
             {
-              label: "Active cases",
+              label: t("complaints.activeCases"),
               value: activeCases,
-              note: "New, assigned, reopened, or under investigation",
+              note: t("complaints.activeCasesSub"),
             },
             {
-              label: "Hotline-linked",
+              label: t("complaints.hotlineLinked"),
               value: hotlineLinked,
-              note: "Cases already tied back to a call session",
+              note: t("complaints.hotlineLinkedSub"),
             },
             {
-              label: "SLA breached",
+              label: t("complaints.slaBreached"),
               value: slaBreached,
-              note: "Needs immediate ROC follow-up",
+              note: t("complaints.slaBreachedSub"),
             },
             {
-              label: "Closed / export-ready",
+              label: t("complaints.closedExport"),
               value: readyForAudit,
-              note: "Candidate cases for audit packet closeout",
+              note: t("complaints.closedExportSub"),
             },
           ].map((card) => (
             <div key={card.label} className="summary-card">
@@ -216,7 +216,7 @@ export default function ComplaintsPage() {
           <input
             className="search-input"
             type="search"
-            placeholder="Search case, order, call, assignee, or category"
+            placeholder={t("complaints.search")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -226,7 +226,7 @@ export default function ComplaintsPage() {
               setStatusFilter(event.target.value as ComplaintCaseStatus | "all")
             }
           >
-            <option value="all">All statuses</option>
+            <option value="all">{t("complaints.allStatuses")}</option>
             {STATUS_OPTIONS.map((status) => (
               <option key={status} value={status}>
                 {status}
@@ -239,7 +239,7 @@ export default function ComplaintsPage() {
               setCategoryFilter(event.target.value as ComplaintCategory | "all")
             }
           >
-            <option value="all">All categories</option>
+            <option value="all">{t("complaints.allCategories")}</option>
             {CATEGORY_OPTIONS.map((category) => (
               <option key={category} value={category}>
                 {category.replace(/_/g, " ")}
@@ -251,24 +251,24 @@ export default function ComplaintsPage() {
             type="button"
             onClick={() => setShowCreate((current) => !current)}
           >
-            {showCreate ? "Hide create form" : "Create complaint"}
+            {showCreate
+              ? t("complaints.hideCreate")
+              : t("complaints.createComplaint")}
           </button>
           <button
             className="btn"
             type="button"
             onClick={() => void loadRecords(selectedCaseNo ?? undefined)}
           >
-            Refresh
+            {t("common.refresh")}
           </button>
         </div>
 
         {showCreate && (
           <section className="panel">
             <div className="panel-head">
-              <h3>New complaint case</h3>
-              <p>
-                Use `caseSource=phone` for hotline cases coming from callcenter.
-              </p>
+              <h3>{t("complaints.createTitle")}</h3>
+              <p>{t("complaints.createNote")}</p>
             </div>
             <form
               className="form-grid"
@@ -287,7 +287,7 @@ export default function ComplaintsPage() {
               }}
             >
               <label>
-                Source
+                {t("complaints.form.source")}
                 <select
                   value={createForm.caseSource}
                   onChange={(event) =>
@@ -305,7 +305,7 @@ export default function ComplaintsPage() {
                 </select>
               </label>
               <label>
-                Category
+                {t("complaints.form.category")}
                 <select
                   value={createForm.category}
                   onChange={(event) =>
@@ -323,7 +323,7 @@ export default function ComplaintsPage() {
                 </select>
               </label>
               <label>
-                Severity
+                {t("complaints.form.severity")}
                 <select
                   value={createForm.severity}
                   onChange={(event) =>
@@ -339,7 +339,7 @@ export default function ComplaintsPage() {
                 </select>
               </label>
               <label>
-                Related order
+                {t("complaints.form.relatedOrder")}
                 <input
                   type="text"
                   value={createForm.relatedOrderId ?? ""}
@@ -352,7 +352,7 @@ export default function ComplaintsPage() {
                 />
               </label>
               <label>
-                Related call
+                {t("complaints.form.relatedCall")}
                 <input
                   type="text"
                   value={createForm.relatedCallId ?? ""}
@@ -365,7 +365,7 @@ export default function ComplaintsPage() {
                 />
               </label>
               <label className="full-span">
-                Description
+                {t("complaints.form.description")}
                 <textarea
                   rows={3}
                   value={createForm.description}
@@ -382,32 +382,36 @@ export default function ComplaintsPage() {
                 type="submit"
                 disabled={busyKey === "create-complaint"}
               >
-                {busyKey === "create-complaint" ? "Creating..." : "Create case"}
+                {busyKey === "create-complaint"
+                  ? t("complaints.form.saving")
+                  : t("complaints.form.createRecord")}
               </button>
             </form>
           </section>
         )}
 
         {loading ? (
-          <p>Loading complaints...</p>
+          <p>{t("complaints.loading")}</p>
         ) : (
           <div className="content-grid">
             <section className="panel">
               <div className="panel-head">
-                <h3>Case list</h3>
-                <p>{filteredRecords.length} result(s)</p>
+                <h3>{t("complaints.caseList")}</h3>
+                <p>
+                  {t("complaints.results", { count: filteredRecords.length })}
+                </p>
               </div>
               <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Case</th>
-                      <th>Category</th>
-                      <th>Status</th>
-                      <th>Assignee</th>
-                      <th>Order</th>
-                      <th>Hotline</th>
-                      <th>Created</th>
+                      <th>{t("complaints.col.case")}</th>
+                      <th>{t("complaints.col.category")}</th>
+                      <th>{t("complaints.col.status")}</th>
+                      <th>{t("complaints.col.assignee")}</th>
+                      <th>{t("complaints.col.order")}</th>
+                      <th>{t("complaints.col.hotline")}</th>
+                      <th>{t("complaints.col.created")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -435,9 +439,11 @@ export default function ComplaintsPage() {
 
             <section className="panel">
               <div className="panel-head">
-                <h3>Case detail</h3>
+                <h3>{t("complaints.caseDetail")}</h3>
                 <p>
-                  {selectedRecord ? selectedRecord.caseNo : "Select a case"}
+                  {selectedRecord
+                    ? selectedRecord.caseNo
+                    : t("complaints.selectCase")}
                 </p>
               </div>
 
@@ -446,28 +452,41 @@ export default function ComplaintsPage() {
                   <section className="detail-card">
                     <div className="detail-grid">
                       <div>
-                        <span className="label">Status</span>
+                        <span className="label">{t("common.status")}</span>
                         <strong>{selectedRecord.status}</strong>
                         <small>
-                          SLA due {formatDateTime(selectedRecord.slaDueAt)}
+                          {t("complaints.detail.slaDue", {
+                            value: formatDateTime(selectedRecord.slaDueAt),
+                          })}
                         </small>
                       </div>
                       <div>
-                        <span className="label">Assignee</span>
+                        <span className="label">
+                          {t("complaints.detail.assignee")}
+                        </span>
                         <strong>
-                          {selectedRecord.assigneeId ?? "Unassigned"}
+                          {selectedRecord.assigneeId ??
+                            t("complaints.unassigned")}
                         </strong>
                         <small>
-                          SLA breach {selectedRecord.slaBreach ? "yes" : "no"}
+                          {t("complaints.detail.slaBreach", {
+                            value: selectedRecord.slaBreach
+                              ? t("common.yes")
+                              : t("common.no"),
+                          })}
                         </small>
                       </div>
                       <div>
-                        <span className="label">Order / call</span>
+                        <span className="label">
+                          {t("complaints.detail.orderCall")}
+                        </span>
                         <strong>{selectedRecord.relatedOrderId ?? "-"}</strong>
                         <small>{selectedRecord.relatedCallId ?? "-"}</small>
                       </div>
                       <div>
-                        <span className="label">Resolution</span>
+                        <span className="label">
+                          {t("complaints.detail.resolution")}
+                        </span>
                         <strong>{selectedRecord.resolutionCode ?? "-"}</strong>
                         <small>{selectedRecord.closingNote ?? "-"}</small>
                       </div>
@@ -488,7 +507,7 @@ export default function ComplaintsPage() {
                             })
                           }
                         >
-                          Mark SLA breach
+                          {t("complaints.markSlaBreach")}
                         </button>
                       )}
                     </div>
@@ -513,10 +532,10 @@ export default function ComplaintsPage() {
                           });
                         }}
                       >
-                        <h4>Assign case</h4>
+                        <h4>{t("complaints.assignCase")}</h4>
                         <input
                           type="text"
-                          placeholder="Assignee ID"
+                          placeholder={t("complaints.assigneeIdPlaceholder")}
                           value={assigneeId}
                           onChange={(event) =>
                             setAssigneeId(event.target.value)
@@ -524,7 +543,9 @@ export default function ComplaintsPage() {
                         />
                         <textarea
                           rows={2}
-                          placeholder="Assignment note"
+                          placeholder={t(
+                            "complaints.assignmentNotePlaceholder",
+                          )}
                           value={assignmentNote}
                           onChange={(event) =>
                             setAssignmentNote(event.target.value)
@@ -535,7 +556,7 @@ export default function ComplaintsPage() {
                           type="submit"
                           disabled={busyKey === "assign-case"}
                         >
-                          Assign
+                          {t("complaints.assign")}
                         </button>
                       </form>
 
@@ -555,10 +576,12 @@ export default function ComplaintsPage() {
                           });
                         }}
                       >
-                        <h4>Add case note</h4>
+                        <h4>{t("complaints.addNote")}</h4>
                         <textarea
                           rows={3}
-                          placeholder="Investigation note"
+                          placeholder={t(
+                            "complaints.investigationNotePlaceholder",
+                          )}
                           value={noteText}
                           onChange={(event) => setNoteText(event.target.value)}
                         />
@@ -567,7 +590,7 @@ export default function ComplaintsPage() {
                           type="submit"
                           disabled={busyKey === "add-note"}
                         >
-                          Save note
+                          {t("complaints.saveNote")}
                         </button>
                       </form>
                     </div>
@@ -591,10 +614,12 @@ export default function ComplaintsPage() {
                           });
                         }}
                       >
-                        <h4>Resolve case</h4>
+                        <h4>{t("complaints.resolveCase")}</h4>
                         <input
                           type="text"
-                          placeholder="Resolution code"
+                          placeholder={t(
+                            "complaints.resolutionCodePlaceholder",
+                          )}
                           value={resolutionCode}
                           onChange={(event) =>
                             setResolutionCode(event.target.value)
@@ -602,7 +627,7 @@ export default function ComplaintsPage() {
                         />
                         <textarea
                           rows={3}
-                          placeholder="Closing note"
+                          placeholder={t("complaints.closingNotePlaceholder")}
                           value={closingNote}
                           onChange={(event) =>
                             setClosingNote(event.target.value)
@@ -614,7 +639,7 @@ export default function ComplaintsPage() {
                             type="submit"
                             disabled={busyKey === "resolve-case"}
                           >
-                            Resolve
+                            {t("complaints.resolve")}
                           </button>
                           <button
                             className="btn"
@@ -633,7 +658,7 @@ export default function ComplaintsPage() {
                               })
                             }
                           >
-                            Close
+                            {t("complaints.close")}
                           </button>
                         </div>
                       </form>
@@ -654,10 +679,10 @@ export default function ComplaintsPage() {
                           });
                         }}
                       >
-                        <h4>Reopen case</h4>
+                        <h4>{t("complaints.reopenCase")}</h4>
                         <textarea
                           rows={3}
-                          placeholder="Why does this case need to be reopened?"
+                          placeholder={t("complaints.reopenReasonPlaceholder")}
                           value={reopenReason}
                           onChange={(event) =>
                             setReopenReason(event.target.value)
@@ -668,23 +693,24 @@ export default function ComplaintsPage() {
                           type="submit"
                           disabled={busyKey === "reopen-case"}
                         >
-                          Reopen
+                          {t("complaints.reopen")}
                         </button>
                       </form>
                     </div>
                   </section>
 
                   <section className="detail-card">
-                    <h4>Timeline + export view</h4>
+                    <h4>{t("complaints.timelineExport")}</h4>
                     <div className="export-banner">
                       <strong>
                         {exportView?.readyForAudit
-                          ? "Ready for audit packet"
-                          : "Not export-ready yet"}
+                          ? t("complaints.readyForAudit")
+                          : t("complaints.notExportReady")}
                       </strong>
                       <small>
-                        Generated{" "}
-                        {formatDateTime(exportView?.exportGeneratedAt)}
+                        {t("complaints.exportGenerated", {
+                          value: formatDateTime(exportView?.exportGeneratedAt),
+                        })}
                       </small>
                     </div>
                     <div className="timeline-list">
@@ -698,23 +724,22 @@ export default function ComplaintsPage() {
                         ))
                       ) : (
                         <p className="empty-state">
-                          No timeline entries yet for this case.
+                          {t("complaints.timelineEmpty")}
                         </p>
                       )}
                     </div>
                   </section>
                 </div>
               ) : (
-                <p className="empty-state">
-                  Select a complaint to review its timeline and export view.
-                </p>
+                <p className="empty-state">{t("complaints.noSelection")}</p>
               )}
             </section>
           </div>
         )}
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong> Return to ops console overview.
+          <strong>{t("complaints.backToHome")}</strong>{" "}
+          {t("complaints.backToHomeSub")}
         </Link>
 
         <style jsx>{`

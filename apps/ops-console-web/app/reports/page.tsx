@@ -20,6 +20,7 @@ import {
   REPORT_OUTPUT_FORMATS,
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { useTranslation } from "@/lib/i18n";
 
 type JobPresetMetadata = {
   label: string;
@@ -121,16 +122,6 @@ function shortHash(value: string | null | undefined) {
   return `${value.slice(0, 12)}...`;
 }
 
-function describeJobType(jobType: string) {
-  const preset = JOB_PRESET_METADATA[jobType as ReportJobType];
-  return (
-    preset ?? {
-      label: jobType.replaceAll("_", " "),
-      description: "Ad hoc report export",
-    }
-  );
-}
-
 function jobCategory(jobType: string) {
   return REGULATORY_JOB_TYPE_SET.has(jobType as ReportJobType)
     ? "Regulatory"
@@ -138,6 +129,7 @@ function jobCategory(jobType: string) {
 }
 
 export default function ReportsPage() {
+  const { t } = useTranslation();
   const [jobs, setJobs] = useState<ReportJobRecord[]>([]);
   const [packages, setPackages] = useState<FilingPackageListRecord[]>([]);
   const [jobDetail, setJobDetail] = useState<ReportJobDetailRecord | null>(
@@ -193,7 +185,7 @@ export default function ReportsPage() {
         setPackageDetail(null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      setError(e instanceof Error ? e.message : t("common.unknown"));
     } finally {
       setLoading(false);
     }
@@ -207,7 +199,7 @@ export default function ReportsPage() {
       setSelectedJobId(jobId);
       setJobDetail(detail);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      setError(e instanceof Error ? e.message : t("common.unknown"));
     } finally {
       setDetailLoadingKey(null);
     }
@@ -221,7 +213,7 @@ export default function ReportsPage() {
       setSelectedPackageId(packageId);
       setPackageDetail(detail);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error");
+      setError(e instanceof Error ? e.message : t("common.unknown"));
     } finally {
       setDetailLoadingKey(null);
     }
@@ -248,7 +240,7 @@ export default function ReportsPage() {
           await loadData();
           await inspectReportJob(accepted.jobId);
         } catch (e) {
-          setError(e instanceof Error ? e.message : "Unknown error");
+          setError(e instanceof Error ? e.message : t("common.unknown"));
         }
       })();
     });
@@ -268,7 +260,7 @@ export default function ReportsPage() {
           await loadData();
           await inspectFilingPackage(accepted.packageId);
         } catch (e) {
-          setError(e instanceof Error ? e.message : "Unknown error");
+          setError(e instanceof Error ? e.message : t("common.unknown"));
         }
       })();
     });
@@ -285,15 +277,11 @@ export default function ReportsPage() {
   const regulatoryJobs = jobs.filter((job) =>
     REGULATORY_JOB_TYPE_SET.has(job.jobType as ReportJobType),
   ).length;
-  const activePreset = describeJobType(jobType);
   const activePresetCategory = jobCategory(jobType);
 
   return (
     <>
-      <PageHeader
-        title="Reports & Filing Center"
-        subtitle="Regulatory exports, signed artifacts, and filing package manifests"
-      />
+      <PageHeader title={t("reports.title")} subtitle={t("reports.subtitle")} />
       <div>
         {error && (
           <div className="error-banner">
@@ -304,24 +292,24 @@ export default function ReportsPage() {
         <section className="summary-grid">
           {[
             {
-              label: "Queued jobs",
+              label: t("reports.queuedJobs"),
               value: queuedReports,
-              note: "Background jobs waiting or running",
+              note: t("reports.queuedJobsSub"),
             },
             {
-              label: "Completed reports",
+              label: t("reports.completedReports"),
               value: completedReports,
-              note: "Ready for signed artifact issue",
+              note: t("reports.completedReportsSub"),
             },
             {
-              label: "Regulatory jobs",
+              label: t("reports.regulatoryJobs"),
               value: regulatoryJobs,
-              note: "Compliance exports in current history",
+              note: t("reports.regulatoryJobsSub"),
             },
             {
-              label: "Artifacts ready",
+              label: t("reports.artifactsReady"),
               value: readyArtifacts + completedPackages,
-              note: "Report downloads plus filing packages",
+              note: t("reports.artifactsReadySub"),
             },
           ].map((card) => (
             <div key={card.label} className="summary-card">
@@ -336,14 +324,16 @@ export default function ReportsPage() {
           <form className="panel" onSubmit={handleReportSubmit}>
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Create report</p>
-                <h3>Background export request</h3>
+                <p className="eyebrow">{t("reports.createReportEyebrow")}</p>
+                <h3>{t("reports.backgroundExport")}</h3>
               </div>
-              <span className="pill">{activePresetCategory}</span>
+              <span className="pill">
+                {t(`reports.category.${activePresetCategory.toLowerCase()}`)}
+              </span>
             </div>
             <div className="form-grid">
               <label>
-                Report type
+                {t("reports.form.type")}
                 <select
                   value={jobType}
                   onChange={(event) =>
@@ -352,16 +342,21 @@ export default function ReportsPage() {
                 >
                   {JOB_PRESETS.map((preset) => (
                     <option key={preset.value} value={preset.value}>
-                      {preset.label}
+                      {t(`reports.type.${preset.value}`)}
                     </option>
                   ))}
                 </select>
                 <small>
-                  {activePreset.description} Category: {activePresetCategory}.
+                  {t(`reports.type.${jobType}.desc`)}{" "}
+                  {t("reports.categoryLabel", {
+                    value: t(
+                      `reports.category.${activePresetCategory.toLowerCase()}`,
+                    ),
+                  })}
                 </small>
               </label>
               <label>
-                Format
+                {t("reports.form.format")}
                 <select
                   value={format}
                   onChange={(event) =>
@@ -376,7 +371,7 @@ export default function ReportsPage() {
                 </select>
               </label>
               <label>
-                Period / tag
+                {t("reports.form.periodTag")}
                 <input
                   value={periodLabel}
                   onChange={(event) => setPeriodLabel(event.target.value)}
@@ -384,11 +379,11 @@ export default function ReportsPage() {
                 />
               </label>
               <label>
-                Vehicle ID
+                {t("reports.form.vehicleId")}
                 <input
                   value={vehicleId}
                   onChange={(event) => setVehicleId(event.target.value)}
-                  placeholder="Optional vehicle scope"
+                  placeholder={t("reports.form.vehicleId")}
                 />
               </label>
             </div>
@@ -398,14 +393,16 @@ export default function ReportsPage() {
                 type="submit"
                 disabled={pending}
               >
-                {pending ? "Submitting..." : "Create report job"}
+                {pending
+                  ? t("reports.form.submitting")
+                  : t("reports.form.createJob")}
               </button>
               <button
                 className="btn"
                 type="button"
                 onClick={() => void loadData()}
               >
-                Refresh
+                {t("common.refresh")}
               </button>
             </div>
           </form>
@@ -413,14 +410,14 @@ export default function ReportsPage() {
           <form className="panel" onSubmit={handlePackageSubmit}>
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Generate filing</p>
-                <h3>Immutable filing package</h3>
+                <p className="eyebrow">{t("reports.generateFiling")}</p>
+                <h3>{t("reports.immutableFiling")}</h3>
               </div>
-              <span className="pill">Compliance bundle</span>
+              <span className="pill">{t("reports.complianceBundle")}</span>
             </div>
             <div className="form-grid">
               <label>
-                Package type
+                {t("reports.form.packageType")}
                 <select
                   value={packageType}
                   onChange={(event) =>
@@ -435,7 +432,7 @@ export default function ReportsPage() {
                 </select>
               </label>
               <label>
-                Filing month
+                {t("reports.form.filingMonth")}
                 <input
                   value={packageMonth}
                   onChange={(event) => setPackageMonth(event.target.value)}
@@ -443,7 +440,7 @@ export default function ReportsPage() {
                 />
               </label>
               <label>
-                Scope channel
+                {t("reports.form.scopeChannel")}
                 <input
                   value={packageScope}
                   onChange={(event) => setPackageScope(event.target.value)}
@@ -457,7 +454,9 @@ export default function ReportsPage() {
                 type="submit"
                 disabled={pending}
               >
-                {pending ? "Submitting..." : "Generate filing package"}
+                {pending
+                  ? t("reports.form.submitting")
+                  : t("reports.form.generatePackage")}
               </button>
             </div>
           </form>
@@ -467,53 +466,63 @@ export default function ReportsPage() {
           <div className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Report detail</p>
+                <p className="eyebrow">{t("reports.reportDetailEyebrow")}</p>
                 <h3>
                   {jobDetail
-                    ? describeJobType(jobDetail.jobType).label
-                    : "Select a report job"}
+                    ? t(`reports.type.${jobDetail.jobType}`)
+                    : t("reports.selectReportJob")}
                 </h3>
               </div>
             </div>
             {selectedJobId && detailLoadingKey === `job:${selectedJobId}` ? (
-              <p>Loading report detail...</p>
+              <p>{t("reports.loadingReportDetail")}</p>
             ) : jobDetail ? (
               <>
                 <div className="detail-stats">
                   <div className="detail-stat">
-                    <span>Status</span>
+                    <span>{t("reports.detail.status")}</span>
                     <strong>{jobDetail.status}</strong>
-                    <small>{jobCategory(jobDetail.jobType)}</small>
+                    <small>
+                      {t(
+                        `reports.category.${jobCategory(jobDetail.jobType).toLowerCase()}`,
+                      )}
+                    </small>
                   </div>
                   <div className="detail-stat">
-                    <span>Format</span>
+                    <span>{t("reports.detail.format")}</span>
                     <strong>{jobDetail.format}</strong>
                     <small>{jobDetail.jobId}</small>
                   </div>
                   <div className="detail-stat">
-                    <span>Created</span>
+                    <span>{t("reports.detail.created")}</span>
                     <strong>{formatDateTime(jobDetail.createdAt)}</strong>
-                    <small>Updated {formatDateTime(jobDetail.updatedAt)}</small>
+                    <small>
+                      {t("reports.detail.updated", {
+                        value: formatDateTime(jobDetail.updatedAt),
+                      })}
+                    </small>
                   </div>
                 </div>
 
                 <div className="detail-section">
-                  <h4>Filters</h4>
+                  <h4>{t("reports.detail.filters")}</h4>
                   {Object.keys(jobDetail.filters).length > 0 ? (
                     <pre className="filters-preview">
                       {JSON.stringify(jobDetail.filters, null, 2)}
                     </pre>
                   ) : (
-                    <p className="cell-subcopy">No filters.</p>
+                    <p className="cell-subcopy">
+                      {t("reports.detail.noFilters")}
+                    </p>
                   )}
                 </div>
 
                 <div className="detail-section">
-                  <h4>Signed artifact</h4>
+                  <h4>{t("reports.detail.signedArtifact")}</h4>
                   {jobDetail.artifact ? (
                     <div className="detail-card-grid">
                       <div className="detail-card">
-                        <span>Manifest</span>
+                        <span>{t("reports.detail.manifest")}</span>
                         <strong>
                           {shortHash(jobDetail.artifact.manifestHash)}
                         </strong>
@@ -522,44 +531,44 @@ export default function ReportsPage() {
                         </small>
                       </div>
                       <div className="detail-card">
-                        <span>Expires</span>
+                        <span>{t("reports.detail.expires")}</span>
                         <strong>
                           {formatDateTime(
                             jobDetail.artifact.downloadMetadata.expiresAt,
                           )}
                         </strong>
-                        <small>Backend-issued signed URL</small>
+                        <small>{t("reports.detail.backendSignedUrl")}</small>
                       </div>
                       <div className="detail-card">
-                        <span>Download</span>
+                        <span>{t("reports.download")}</span>
                         <a
                           className="inline-link"
                           href={jobDetail.artifact.downloadMetadata.downloadUrl}
                           rel="noreferrer"
                           target="_blank"
                         >
-                          Open signed artifact
+                          {t("reports.detail.openSignedArtifact")}
                         </a>
                         <small>{jobDetail.artifact.artifactType}</small>
                       </div>
                     </div>
                   ) : (
                     <p className="cell-subcopy">
-                      Artifact pending. No signed download has been issued yet.
+                      {t("reports.detail.artifactPending")}
                     </p>
                   )}
                 </div>
 
                 {jobDetail.rows && jobDetail.rows.length > 0 ? (
                   <div className="detail-section">
-                    <h4>Dispatch recording rows</h4>
+                    <h4>{t("reports.detail.dispatchRows")}</h4>
                     <table className="table compact-table">
                       <thead>
                         <tr>
-                          <th>Order</th>
-                          <th>Call</th>
-                          <th>Recording</th>
-                          <th>Missing</th>
+                          <th>{t("reports.col.order")}</th>
+                          <th>{t("reports.col.call")}</th>
+                          <th>{t("reports.col.recording")}</th>
+                          <th>{t("reports.col.missing")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -571,7 +580,11 @@ export default function ReportsPage() {
                             </td>
                             <td>{row.callId ?? "—"}</td>
                             <td>{row.recordingId ?? "—"}</td>
-                            <td>{row.missingRecording ? "Yes" : "No"}</td>
+                            <td>
+                              {row.missingRecording
+                                ? t("common.yes")
+                                : t("common.no")}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -581,8 +594,7 @@ export default function ReportsPage() {
               </>
             ) : (
               <p className="cell-subcopy">
-                Select a report job to inspect signed download metadata and any
-                dispatch-recording rows.
+                {t("reports.detail.selectReportDetail")}
               </p>
             )}
           </div>
@@ -590,112 +602,128 @@ export default function ReportsPage() {
           <div className="panel">
             <div className="panel-head">
               <div>
-                <p className="eyebrow">Package detail</p>
+                <p className="eyebrow">{t("reports.packageDetailEyebrow")}</p>
                 <h3>
                   {packageDetail
-                    ? `${packageDetail.packageType} manifest`
-                    : "Select a filing package"}
+                    ? t("reports.packageManifest", {
+                        type: packageDetail.packageType,
+                      })
+                    : t("reports.selectFilingPackage")}
                 </h3>
               </div>
             </div>
             {selectedPackageId &&
             detailLoadingKey === `package:${selectedPackageId}` ? (
-              <p>Loading package detail...</p>
+              <p>{t("reports.loadingPackageDetail")}</p>
             ) : packageDetail ? (
               <>
                 <div className="detail-stats">
                   <div className="detail-stat">
-                    <span>Status</span>
+                    <span>{t("reports.detail.status")}</span>
                     <strong>{packageDetail.status}</strong>
                     <small>
                       {packageDetail.immutable ? "immutable" : "mutable"}
                     </small>
                   </div>
                   <div className="detail-stat">
-                    <span>Generated</span>
+                    <span>{t("reports.detail.generated")}</span>
                     <strong>{formatDateTime(packageDetail.generatedAt)}</strong>
                     <small>{packageDetail.packageId}</small>
                   </div>
                   <div className="detail-stat">
-                    <span>Checksum</span>
+                    <span>{t("reports.detail.checksum")}</span>
                     <strong>
                       {shortHash(packageDetail.manifest?.checksum)}
                     </strong>
-                    <small>{packageDetail.items.length} package item(s)</small>
+                    <small>
+                      {t("reports.detail.packageItems", {
+                        count: packageDetail.items.length,
+                      })}
+                    </small>
                   </div>
                 </div>
 
                 <div className="detail-section">
-                  <h4>Signed downloads</h4>
+                  <h4>{t("reports.detail.signedDownloads")}</h4>
                   {packageDetail.downloadMetadata ? (
                     <div className="detail-card-grid">
                       <div className="detail-card">
-                        <span>ZIP bundle</span>
+                        <span>{t("reports.detail.zipBundle")}</span>
                         <a
                           className="inline-link"
                           href={packageDetail.downloadMetadata.zip.downloadUrl}
                           rel="noreferrer"
                           target="_blank"
                         >
-                          Open signed ZIP
+                          {t("reports.detail.openSignedZip")}
                         </a>
                         <small>
-                          Expires{" "}
-                          {formatDateTime(
-                            packageDetail.downloadMetadata.zip.expiresAt,
-                          )}
+                          {t("reports.detail.expiresAt", {
+                            value: formatDateTime(
+                              packageDetail.downloadMetadata.zip.expiresAt,
+                            ),
+                          })}
                         </small>
                       </div>
                       <div className="detail-card">
-                        <span>PDF bundle</span>
+                        <span>{t("reports.detail.pdfBundle")}</span>
                         <a
                           className="inline-link"
                           href={packageDetail.downloadMetadata.pdf.downloadUrl}
                           rel="noreferrer"
                           target="_blank"
                         >
-                          Open signed PDF
+                          {t("reports.detail.openSignedPdf")}
                         </a>
                         <small>
-                          Expires{" "}
-                          {formatDateTime(
-                            packageDetail.downloadMetadata.pdf.expiresAt,
-                          )}
+                          {t("reports.detail.expiresAt", {
+                            value: formatDateTime(
+                              packageDetail.downloadMetadata.pdf.expiresAt,
+                            ),
+                          })}
                         </small>
                       </div>
                     </div>
                   ) : (
                     <p className="cell-subcopy">
-                      Package artifacts are still pending.
+                      {t("reports.detail.packagePending")}
                     </p>
                   )}
                 </div>
 
                 <div className="detail-section">
-                  <h4>Manifest entries</h4>
+                  <h4>{t("reports.detail.manifestEntries")}</h4>
                   {packageDetail.manifest ? (
                     <>
                       <div className="manifest-summary">
                         <span>
-                          Manifest {packageDetail.manifest.manifestId}
+                          {t("reports.detail.manifestId", {
+                            id: packageDetail.manifest.manifestId,
+                          })}
                         </span>
                         <span>
-                          {packageDetail.manifest.entryCount} immutable entr
-                          {packageDetail.manifest.entryCount === 1
-                            ? "y"
-                            : "ies"}
+                          {t("reports.detail.immutableEntries", {
+                            count: packageDetail.manifest.entryCount,
+                            suffix:
+                              packageDetail.manifest.entryCount === 1
+                                ? "entry"
+                                : "entries",
+                          })}
                         </span>
                         <span>
-                          Generated{" "}
-                          {formatDateTime(packageDetail.manifest.generatedAt)}
+                          {t("reports.detail.manifestGenerated", {
+                            value: formatDateTime(
+                              packageDetail.manifest.generatedAt,
+                            ),
+                          })}
                         </span>
                       </div>
                       <table className="table compact-table">
                         <thead>
                           <tr>
-                            <th>Item</th>
-                            <th>Artifact</th>
-                            <th>Manifest hash</th>
+                            <th>{t("reports.col.item")}</th>
+                            <th>{t("reports.col.artifactCol")}</th>
+                            <th>{t("reports.col.manifestHash")}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -720,16 +748,14 @@ export default function ReportsPage() {
                     </>
                   ) : (
                     <p className="cell-subcopy">
-                      Manifest pending. The package has not completed
-                      generation.
+                      {t("reports.detail.manifestPending")}
                     </p>
                   )}
                 </div>
               </>
             ) : (
               <p className="cell-subcopy">
-                Select a filing package to inspect its immutable manifest and
-                backend-issued signed downloads.
+                {t("reports.detail.selectPackageDetail")}
               </p>
             )}
           </div>
@@ -738,25 +764,25 @@ export default function ReportsPage() {
         <section className="panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">Report jobs</p>
-              <h3>Recent jobs</h3>
+              <p className="eyebrow">{t("reports.reportJobsEyebrow")}</p>
+              <h3>{t("reports.recentJobs")}</h3>
             </div>
             <span className="panel-note">
-              {jobs.length} total report job(s)
+              {t("reports.totalJobs", { count: jobs.length })}
             </span>
           </div>
           {loading ? (
-            <p>Loading report jobs...</p>
+            <p>{t("reports.loadingJobs")}</p>
           ) : (
             <table className="table">
               <thead>
                 <tr>
-                  <th>Job</th>
-                  <th>Category</th>
-                  <th>Status</th>
-                  <th>Filters</th>
-                  <th>Artifact</th>
-                  <th>Actions</th>
+                  <th>{t("reports.col.job")}</th>
+                  <th>{t("reports.col.category")}</th>
+                  <th>{t("reports.col.status")}</th>
+                  <th>{t("reports.col.filters")}</th>
+                  <th>{t("reports.col.artifact")}</th>
+                  <th>{t("reports.col.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -765,18 +791,24 @@ export default function ReportsPage() {
                     <tr key={job.jobId}>
                       <td>
                         <div className="cell-title">
-                          {describeJobType(job.jobType).label}
+                          {t(`reports.type.${job.jobType}`)}
                         </div>
                         <div className="cell-subcopy">{job.jobId}</div>
                         <div className="cell-subcopy">
                           {formatDateTime(job.createdAt)} • {job.format}
                         </div>
                       </td>
-                      <td>{jobCategory(job.jobType)}</td>
+                      <td>
+                        {t(
+                          `reports.category.${jobCategory(job.jobType).toLowerCase()}`,
+                        )}
+                      </td>
                       <td>
                         <div>{job.status}</div>
                         <div className="cell-subcopy">
-                          Updated {formatDateTime(job.updatedAt)}
+                          {t("reports.detail.updated", {
+                            value: formatDateTime(job.updatedAt),
+                          })}
                         </div>
                       </td>
                       <td>
@@ -785,7 +817,9 @@ export default function ReportsPage() {
                             {JSON.stringify(job.filters, null, 2)}
                           </pre>
                         ) : (
-                          <span className="cell-subcopy">No filters</span>
+                          <span className="cell-subcopy">
+                            {t("reports.detail.noFiltersShort")}
+                          </span>
                         )}
                       </td>
                       <td>
@@ -797,14 +831,18 @@ export default function ReportsPage() {
                               target="_blank"
                               rel="noreferrer"
                             >
-                              Download {job.artifact.artifactType}
+                              {t("reports.downloadArtifact", {
+                                type: job.artifact.artifactType,
+                              })}
                             </a>
                             <span className="cell-subcopy">
                               {shortHash(job.artifact.manifestHash)}
                             </span>
                           </div>
                         ) : (
-                          <span className="cell-subcopy">Pending artifact</span>
+                          <span className="cell-subcopy">
+                            {t("reports.detail.pendingArtifact")}
+                          </span>
                         )}
                       </td>
                       <td>
@@ -815,15 +853,15 @@ export default function ReportsPage() {
                           disabled={detailLoadingKey === `job:${job.jobId}`}
                         >
                           {detailLoadingKey === `job:${job.jobId}`
-                            ? "Loading..."
-                            : "Inspect"}
+                            ? t("reports.loading")
+                            : t("reports.inspect")}
                         </button>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6}>No report jobs yet.</td>
+                    <td colSpan={6}>{t("reports.noJobs")}</td>
                   </tr>
                 )}
               </tbody>
@@ -834,26 +872,26 @@ export default function ReportsPage() {
         <section className="panel">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">Filing packages</p>
-              <h3>Immutable package history</h3>
+              <p className="eyebrow">{t("reports.filingPackagesEyebrow")}</p>
+              <h3>{t("reports.packageHistory")}</h3>
             </div>
             <span className="panel-note">
-              {packages.length} package(s) generated
+              {t("reports.packagesGenerated", { count: packages.length })}
             </span>
           </div>
           {loading ? (
-            <p>Loading filing packages...</p>
+            <p>{t("reports.loadingPackages")}</p>
           ) : (
             <table className="table">
               <thead>
                 <tr>
-                  <th>Package</th>
-                  <th>Status</th>
-                  <th>Manifest</th>
-                  <th>Items</th>
-                  <th>Generated</th>
-                  <th>Artifacts</th>
-                  <th>Actions</th>
+                  <th>{t("reports.col.package")}</th>
+                  <th>{t("reports.col.status")}</th>
+                  <th>{t("reports.col.manifest")}</th>
+                  <th>{t("reports.col.items")}</th>
+                  <th>{t("reports.col.generated")}</th>
+                  <th>{t("reports.col.artifacts")}</th>
+                  <th>{t("reports.col.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -874,7 +912,9 @@ export default function ReportsPage() {
                         {pkg.manifestHash ? (
                           <code>{shortHash(pkg.manifestHash)}</code>
                         ) : (
-                          <span className="cell-subcopy">Pending manifest</span>
+                          <span className="cell-subcopy">
+                            {t("reports.pendingManifest")}
+                          </span>
                         )}
                       </td>
                       <td>{pkg.items.length}</td>
@@ -903,7 +943,7 @@ export default function ReportsPage() {
                           ) : null}
                           {!pkg.artifactZipUrl && !pkg.artifactPdfUrl ? (
                             <span className="cell-subcopy">
-                              Pending artifact
+                              {t("reports.detail.pendingArtifact")}
                             </span>
                           ) : null}
                         </div>
@@ -920,15 +960,15 @@ export default function ReportsPage() {
                           }
                         >
                           {detailLoadingKey === `package:${pkg.packageId}`
-                            ? "Loading..."
-                            : "Inspect"}
+                            ? t("reports.loading")
+                            : t("reports.inspect")}
                         </button>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7}>No filing packages generated yet.</td>
+                    <td colSpan={7}>{t("reports.noPackages")}</td>
                   </tr>
                 )}
               </tbody>
@@ -938,10 +978,12 @@ export default function ReportsPage() {
 
         <div className="footer-links">
           <Link className="route-link" href="/revenue">
-            <strong>Revenue view</strong> Return to live revenue analysis.
+            <strong>{t("reports.revenueView")}</strong>{" "}
+            {t("reports.revenueViewSub")}
           </Link>
           <Link className="route-link" href="/dashboard">
-            <strong>Dashboard</strong> Return to the operations overview.
+            <strong>{t("common.backToDashboard")}</strong>{" "}
+            {t("reports.backToDashboardSub")}
           </Link>
         </div>
 

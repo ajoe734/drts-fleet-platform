@@ -15,6 +15,7 @@ import type {
 } from "@drts/contracts";
 import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
+import { useTranslation } from "@/lib/i18n";
 
 interface DispatchWorkflowProps {
   orders: OwnedOrderRecord[];
@@ -34,14 +35,14 @@ function getQueueState(
   return "pending";
 }
 
-function getQueueStateLabel(state: QueueState): string {
+function getQueueStateKey(state: QueueState): string {
   switch (state) {
     case "pending":
-      return "Pending";
+      return "dispatch.workflow.queue.pending";
     case "reserved":
-      return "Reserved";
+      return "dispatch.workflow.queue.reserved";
     case "exception":
-      return "Exception Hold";
+      return "dispatch.workflow.queue.exception";
   }
 }
 
@@ -77,6 +78,7 @@ export function DispatchWorkflow({
   dispatchJobs,
   focusOrderId = "",
 }: DispatchWorkflowProps) {
+  const { t } = useTranslation();
   const client = getOpsClient();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +130,7 @@ export function DispatchWorkflow({
         setError(
           reloadError instanceof Error
             ? reloadError.message
-            : "Failed to refresh dispatch board",
+            : t("dispatch.workflow.refreshFailed"),
         );
       });
     }, 300);
@@ -182,7 +184,7 @@ export function DispatchWorkflow({
         setError(
           parseError instanceof Error
             ? parseError.message
-            : "Failed to process dispatch event",
+            : t("dispatch.workflow.eventFailed"),
         );
       }
     };
@@ -264,7 +266,11 @@ export function DispatchWorkflow({
       const items = await client.listDispatchCandidates(jobId);
       setCandidates((prev) => ({ ...prev, [jobId]: items }));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to fetch candidates");
+      setError(
+        e instanceof Error
+          ? e.message
+          : t("dispatch.workflow.loadCandidatesFailed"),
+      );
     } finally {
       setLoading(null);
     }
@@ -277,7 +283,9 @@ export function DispatchWorkflow({
       await action();
       await reloadDispatchState();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Dispatch action failed");
+      setError(
+        e instanceof Error ? e.message : t("dispatch.workflow.actionFailed"),
+      );
     } finally {
       setLoading(null);
     }
@@ -335,37 +343,33 @@ export function DispatchWorkflow({
         <input
           className="search-input"
           type="search"
-          placeholder="Search by order, dispatch job, product, or status"
+          placeholder={t("dispatch.workflow.search")}
           value={searchValue}
           onChange={(event) => setSearchValue(event.target.value)}
         />
         <div className="filter-chip-group">
-          {(
-            [
-              ["all", "All"],
-              ["attention", "Needs attention"],
-              ["queued", "Queued only"],
-            ] as const
-          ).map(([value, label]) => (
+          {(["all", "attention", "queued"] as const).map((value) => (
             <button
               key={value}
               className={value === filterMode ? "chip chip-active" : "chip"}
               type="button"
               onClick={() => setFilterMode(value)}
             >
-              {label}
+              {t(
+                `dispatch.workflow.filter${value.charAt(0).toUpperCase() + value.slice(1)}`,
+              )}
             </button>
           ))}
         </div>
       </div>
 
       <div className="stream-banner">
-        <strong>Live dispatch:</strong>{" "}
+        <strong>{t("dispatch.workflow.live")}:</strong>{" "}
         {streamStatus === "live"
-          ? "connected"
+          ? t("dispatch.workflow.liveConnected")
           : streamStatus === "retrying"
-            ? "reconnecting"
-            : "connecting"}
+            ? t("dispatch.workflow.liveReconnecting")
+            : t("dispatch.workflow.liveConnecting")}
       </div>
 
       <div className="queue-summary">
@@ -375,27 +379,30 @@ export function DispatchWorkflow({
             className={`queue-card ${getQueueStateColor(state)}`}
           >
             <strong>{queueCounts[state]}</strong>
-            <span>{getQueueStateLabel(state)}</span>
+            <span>{t(getQueueStateKey(state))}</span>
           </div>
         ))}
       </div>
 
       <div className="results-note">
-        Showing {filteredOrders.length} order(s) from {liveOrders.length} total.
+        {t("dispatch.workflow.showing", {
+          visible: filteredOrders.length,
+          total: liveOrders.length,
+        })}
       </div>
 
       <div className="data-table">
         <table>
           <thead>
             <tr>
-              <th>Order</th>
-              <th>Product</th>
-              <th>Queue</th>
-              <th>Dispatch</th>
-              <th>Revenue</th>
-              <th>ETA</th>
-              <th>Candidates</th>
-              <th>Actions</th>
+              <th>{t("dispatch.workflow.col.order")}</th>
+              <th>{t("dispatch.workflow.col.product")}</th>
+              <th>{t("dispatch.workflow.col.queue")}</th>
+              <th>{t("dispatch.workflow.col.dispatch")}</th>
+              <th>{t("dispatch.workflow.col.revenue")}</th>
+              <th>{t("dispatch.workflow.col.eta")}</th>
+              <th>{t("dispatch.workflow.col.candidates")}</th>
+              <th>{t("dispatch.workflow.col.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -411,7 +418,7 @@ export function DispatchWorkflow({
                 const isExceptionHold = order.status === "exception_hold";
                 const etaInfo = job
                   ? formatEta(job.latestEtaMinutes, job.updatedAt)
-                  : { display: "-", tooltip: "No job" };
+                  : { display: "-", tooltip: t("dispatch.workflow.noJobEta") };
                 const isFocused = focusOrderId === order.orderId;
 
                 return (
@@ -448,9 +455,9 @@ export function DispatchWorkflow({
                     <td>
                       <span
                         className={`queue-badge ${getQueueStateColor(queueState)}`}
-                        title={getQueueStateLabel(queueState)}
+                        title={t(getQueueStateKey(queueState))}
                       >
-                        {getQueueStateLabel(queueState)}
+                        {t(getQueueStateKey(queueState))}
                       </span>
                       <div className="cell-subcopy">{order.status}</div>
                     </td>
@@ -462,7 +469,9 @@ export function DispatchWorkflow({
                           <div className="cell-subcopy">{job.mode}</div>
                         </div>
                       ) : (
-                        <span className="cell-subcopy">No dispatch job</span>
+                        <span className="cell-subcopy">
+                          {t("dispatch.workflow.noJob")}
+                        </span>
                       )}
                     </td>
                     <td>
@@ -473,8 +482,8 @@ export function DispatchWorkflow({
                       </div>
                       <div className="cell-subcopy">
                         {order.fixedPrice
-                          ? "Fixed-price booking"
-                          : "Metered / TBD"}
+                          ? t("dispatch.workflow.fixedPrice")
+                          : t("dispatch.workflow.metered")}
                       </div>
                     </td>
                     <td>
@@ -499,7 +508,9 @@ export function DispatchWorkflow({
                                   }))
                                 }
                               >
-                                <option value="">Select candidate</option>
+                                <option value="">
+                                  {t("dispatch.workflow.selectCandidate")}
+                                </option>
                                 {jobCandidates.map((candidate) => (
                                   <option
                                     key={`${candidate.vehicleId}|${candidate.driverId}`}
@@ -511,7 +522,9 @@ export function DispatchWorkflow({
                                 ))}
                               </select>
                               <div className="cell-subcopy">
-                                {jobCandidates.length} candidate(s)
+                                {t("dispatch.workflow.candidateCount", {
+                                  count: jobCandidates.length,
+                                })}
                               </div>
                             </>
                           ) : (
@@ -522,14 +535,14 @@ export function DispatchWorkflow({
                               disabled={loading === job.dispatchJobId}
                             >
                               {loading === job.dispatchJobId
-                                ? "Loading..."
-                                : "View candidates"}
+                                ? t("common.loading")
+                                : t("dispatch.workflow.viewCandidates")}
                             </button>
                           )}
                         </div>
                       ) : (
                         <span className="cell-subcopy">
-                          Awaiting dispatch job
+                          {t("dispatch.workflow.awaitingJob")}
                         </span>
                       )}
                     </td>
@@ -545,7 +558,7 @@ export function DispatchWorkflow({
                             type="button"
                             onClick={() => handleAssign(job.dispatchJobId)}
                           >
-                            Assign
+                            {t("dispatch.workflow.assign")}
                           </button>
                         )}
                         {job && job.status === "assigned" && (
@@ -555,7 +568,7 @@ export function DispatchWorkflow({
                             type="button"
                             onClick={() => handleReassign(job.dispatchJobId)}
                           >
-                            Reassign
+                            {t("dispatch.workflow.reassign")}
                           </button>
                         )}
                         {(isRedispatchRequired || isExceptionHold) && (
@@ -565,7 +578,7 @@ export function DispatchWorkflow({
                             type="button"
                             onClick={() => handleRedispatch(order.orderId)}
                           >
-                            Redispatch
+                            {t("dispatch.workflow.redispatch")}
                           </button>
                         )}
                       </div>
@@ -575,9 +588,7 @@ export function DispatchWorkflow({
               })
             ) : (
               <tr>
-                <td colSpan={8}>
-                  No orders match the current dispatch search and filter mode.
-                </td>
+                <td colSpan={8}>{t("dispatch.workflow.noOrders")}</td>
               </tr>
             )}
           </tbody>

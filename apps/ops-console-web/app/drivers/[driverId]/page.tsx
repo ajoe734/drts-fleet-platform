@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import type { DriverStatementRecord } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
 import { formatCompactNumber, formatMinorCurrency } from "@/lib/ops-analytics";
 
@@ -146,7 +148,10 @@ export default async function DriverEarningsPage({
   params,
 }: DriverEarningsPageProps) {
   const { driverId } = await params;
-  const client = await getServerOpsClient();
+  const [client, locale] = await Promise.all([
+    getServerOpsClient(),
+    getServerLocale(),
+  ]);
   const [driversResult, statementsResult] = await Promise.all([
     loadWithError(() => client.listDrivers()),
     loadWithError(() => client.listDriverStatements()),
@@ -158,24 +163,22 @@ export default async function DriverEarningsPage({
     return (
       <>
         <PageHeader
-          title="Driver Earnings"
+          title={t("driverEarnings.title", locale)}
           subtitle={`Unable to load driver registry data for ${driverId}.`}
         />
         <div style={errorBannerStyle}>
-          <strong>Driver registry unavailable:</strong> {driversResult.error}
+          <strong>{t("driverEarnings.registryUnavailable", locale)}</strong>{" "}
+          {driversResult.error}
         </div>
-        <p style={mutedCopyStyle}>
-          This is a degraded read-only state. The driver may exist, but ops
-          cannot verify it until the registry endpoint recovers.
-        </p>
+        <p style={mutedCopyStyle}>{t("driverEarnings.degradedNote", locale)}</p>
         <div style={footerLinksStyle}>
           <Link href="/drivers">
-            <strong>Back to drivers</strong> Return to the registry and retry
-            once the API recovers.
+            <strong>{t("driverEarnings.backToDrivers", locale)}</strong>{" "}
+            {t("driverEarnings.backToDriversErrorSub", locale)}
           </Link>
           <Link href="/revenue">
-            <strong>Revenue overview</strong> Compare fleet-wide revenue while
-            registry data is degraded.
+            <strong>{t("driverEarnings.revenueOverview", locale)}</strong>{" "}
+            {t("driverEarnings.revenueOverviewDegradedSub", locale)}
           </Link>
         </div>
       </>
@@ -210,31 +213,36 @@ export default async function DriverEarningsPage({
   return (
     <>
       <PageHeader
-        title="Driver Earnings"
-        subtitle={`${driver.name} · ${driver.driverId}`}
+        title={t("driverEarnings.title", locale)}
+        subtitle={t("driverEarnings.subtitle", locale, {
+          name: driver.name,
+          driverId: driver.driverId,
+        })}
       />
       {statementsResult.error && (
         <div style={errorBannerStyle}>
-          <strong>Settlement data unavailable:</strong> {statementsResult.error}
+          <strong>{t("driverEarnings.settlementsError", locale)}</strong>{" "}
+          {statementsResult.error}
         </div>
       )}
       <section style={heroGridStyle}>
         <div style={identityCardStyle}>
-          <p style={eyebrowStyle}>Driver</p>
+          <p style={eyebrowStyle}>{t("driverEarnings.driverLabel", locale)}</p>
           <h2 style={{ margin: 0 }}>{driver.name}</h2>
           <div style={metaListStyle}>
             <span style={metaPillStyle}>{driver.driverId}</span>
             <span style={metaPillStyle}>{driver.workState}</span>
             <span style={metaPillStyle}>
-              {driver.licensesValid ? "licenses valid" : "license review"}
+              {driver.licensesValid
+                ? t("driverEarnings.licensesValid", locale)
+                : t("driverEarnings.licenseReview", locale)}
             </span>
           </div>
         </div>
         <div style={identityCardStyle}>
-          <p style={eyebrowStyle}>Ops Note</p>
+          <p style={eyebrowStyle}>{t("driverEarnings.opsNote", locale)}</p>
           <p style={mutedCopyStyle}>
-            Earnings are read-only in ops console. Statement generation and
-            payout actions remain in finance workflows.
+            {t("driverEarnings.readOnlyNote", locale)}
           </p>
         </div>
       </section>
@@ -242,53 +250,57 @@ export default async function DriverEarningsPage({
       <section style={summaryGridStyle}>
         {[
           {
-            label: "Statements",
+            label: t("driverEarnings.statements", locale),
             value: statementsResult.error
-              ? "Unavailable"
+              ? t("driverEarnings.unavailable", locale)
               : formatCompactNumber(driverStatements.length),
             note: statementsResult.error
-              ? "Statement service unavailable"
+              ? t("driverEarnings.serviceUnavailable", locale)
               : latestStatement
-                ? `Latest period ${latestStatement.periodMonth}`
-                : "No periods generated yet",
+                ? t("driverEarnings.latestPeriod", locale, {
+                    period: latestStatement.periodMonth,
+                  })
+                : t("driverEarnings.noPeriodsYet", locale),
           },
           {
-            label: "Gross",
+            label: t("driverEarnings.gross", locale),
             value: statementsResult.error
-              ? "Unavailable"
+              ? t("driverEarnings.unavailable", locale)
               : formatMinorCurrency(totals.grossMinor),
             note: statementsResult.error
-              ? "Retry when statement service recovers"
-              : "Revenue before fees and subsidy",
+              ? t("driverEarnings.retryWhenRecovered", locale)
+              : t("driverEarnings.revenueBeforeFees", locale),
           },
           {
-            label: "Service fee",
+            label: t("driverEarnings.serviceFee", locale),
             value: statementsResult.error
-              ? "Unavailable"
+              ? t("driverEarnings.unavailable", locale)
               : formatMinorCurrency(totals.serviceFeeMinor),
             note: statementsResult.error
-              ? "Retry when statement service recovers"
-              : "Platform fee retained from gross",
+              ? t("driverEarnings.retryWhenRecovered", locale)
+              : t("driverEarnings.platformFee", locale),
           },
           {
-            label: "Subsidy",
+            label: t("driverEarnings.subsidy", locale),
             value: statementsResult.error
-              ? "Unavailable"
+              ? t("driverEarnings.unavailable", locale)
               : formatMinorCurrency(totals.subsidyMinor),
             note: statementsResult.error
-              ? "Retry when statement service recovers"
-              : "Support programs credited to driver",
+              ? t("driverEarnings.retryWhenRecovered", locale)
+              : t("driverEarnings.supportPrograms", locale),
           },
           {
-            label: "Net",
+            label: t("driverEarnings.net", locale),
             value: statementsResult.error
-              ? "Unavailable"
+              ? t("driverEarnings.unavailable", locale)
               : formatMinorCurrency(totals.netMinor),
             note: statementsResult.error
-              ? "Payout detail unavailable during degraded mode"
+              ? t("driverEarnings.unavailableDegraded", locale)
               : latestStatement
-                ? `Latest payout ${latestStatement.payoutStatus}`
-                : "Awaiting statement generation",
+                ? t("driverEarnings.latestPayout", locale, {
+                    status: latestStatement.payoutStatus,
+                  })
+                : t("driverEarnings.awaitingStatement", locale),
           },
         ].map((card) => (
           <div key={card.label} style={summaryCardStyle}>
@@ -302,30 +314,51 @@ export default async function DriverEarningsPage({
       <section style={{ ...cardStyle, marginBottom: "1rem" }}>
         <div style={panelHeadStyle}>
           <div>
-            <p style={eyebrowStyle}>Earnings</p>
-            <h3 style={{ margin: 0 }}>Statement history</h3>
+            <p style={eyebrowStyle}>
+              {t("driverEarnings.earningsLabel", locale)}
+            </p>
+            <h3 style={{ margin: 0 }}>
+              {t("driverEarnings.statementHistory", locale)}
+            </h3>
           </div>
-          <span style={mutedCopyStyle}>Read-only by design</span>
+          <span style={mutedCopyStyle}>
+            {t("driverEarnings.readOnlyByDesign", locale)}
+          </span>
         </div>
         <table style={tableStyle}>
           <thead>
             <tr>
-              <th style={tableCellStyle}>Period</th>
-              <th style={tableCellStyle}>Statement</th>
-              <th style={tableCellStyle}>Fee plan</th>
-              <th style={tableCellStyle}>Gross</th>
-              <th style={tableCellStyle}>Service fee</th>
-              <th style={tableCellStyle}>Subsidy</th>
-              <th style={tableCellStyle}>Net</th>
-              <th style={tableCellStyle}>Status</th>
+              <th style={tableCellStyle}>
+                {t("driverEarnings.col.period", locale)}
+              </th>
+              <th style={tableCellStyle}>
+                {t("driverEarnings.col.statement", locale)}
+              </th>
+              <th style={tableCellStyle}>
+                {t("driverEarnings.col.feePlan", locale)}
+              </th>
+              <th style={tableCellStyle}>
+                {t("driverEarnings.col.gross", locale)}
+              </th>
+              <th style={tableCellStyle}>
+                {t("driverEarnings.col.serviceFee", locale)}
+              </th>
+              <th style={tableCellStyle}>
+                {t("driverEarnings.col.subsidy", locale)}
+              </th>
+              <th style={tableCellStyle}>
+                {t("driverEarnings.col.net", locale)}
+              </th>
+              <th style={tableCellStyle}>
+                {t("driverEarnings.col.status", locale)}
+              </th>
             </tr>
           </thead>
           <tbody>
             {statementsResult.error ? (
               <tr>
                 <td colSpan={8} style={tableCellStyle}>
-                  Driver statements could not be loaded. Retry when the
-                  billing-settlement service recovers.
+                  {t("driverEarnings.loadError", locale)}
                 </td>
               </tr>
             ) : driverStatements.length > 0 ? (
@@ -355,7 +388,7 @@ export default async function DriverEarningsPage({
             ) : (
               <tr>
                 <td colSpan={8} style={tableCellStyle}>
-                  No statements generated yet for this driver.
+                  {t("driverEarnings.noStatements", locale)}
                 </td>
               </tr>
             )}
@@ -365,11 +398,12 @@ export default async function DriverEarningsPage({
 
       <div style={footerLinksStyle}>
         <Link href="/drivers">
-          <strong>Back to drivers</strong> Return to the registry list.
+          <strong>{t("driverEarnings.backToDrivers", locale)}</strong>{" "}
+          {t("driverEarnings.backToDriversSub", locale)}
         </Link>
         <Link href="/revenue">
-          <strong>Revenue overview</strong> Compare this drilldown against the
-          fleet-wide settlement pulse.
+          <strong>{t("driverEarnings.revenueOverview", locale)}</strong>{" "}
+          {t("driverEarnings.revenueOverviewSub", locale)}
         </Link>
       </div>
     </>

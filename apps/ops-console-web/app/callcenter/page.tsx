@@ -16,6 +16,7 @@ import type {
 } from "@drts/contracts";
 import { CALL_TYPES, COMPLAINT_CATEGORIES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { useTranslation } from "@/lib/i18n";
 
 const CALL_TYPE_OPTIONS = [...CALL_TYPES];
 const COMPLAINT_CATEGORY_OPTIONS: ComplaintCategory[] = [
@@ -54,10 +55,6 @@ const INITIAL_COMPLAINT_TRANSFER_FORM: TransferCallToComplaintCommand = {
   description: "",
 };
 
-function resolveErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unknown error";
-}
-
 function formatDateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : "-";
 }
@@ -67,6 +64,9 @@ function toIsoString(value: string) {
 }
 
 export default function CallcenterPage() {
+  const { t } = useTranslation();
+  const resolveErrorMessage = (error: unknown) =>
+    error instanceof Error ? error.message : t("common.unknown");
   const [sessions, setSessions] = useState<CallSessionRecord[]>([]);
   const [callbacks, setCallbacks] = useState<CallbackTaskRecord[]>([]);
   const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
@@ -210,8 +210,8 @@ export default function CallcenterPage() {
   return (
     <>
       <PageHeader
-        title="Call Center"
-        subtitle="Phone intake, order creation, ETA replies, callback queue, and complaint transfer"
+        title={t("callcenter.title")}
+        subtitle={t("callcenter.subtitle")}
       />
       <div>
         {error && (
@@ -223,24 +223,24 @@ export default function CallcenterPage() {
         <section className="summary-grid">
           {[
             {
-              label: "Open sessions",
+              label: t("callcenter.openSessions"),
               value: openSessions,
-              note: "Active call intakes waiting on next action",
+              note: t("callcenter.openSessionsSub"),
             },
             {
-              label: "Linked orders",
+              label: t("callcenter.linkedOrders"),
               value: bookingLinked,
-              note: "Calls already bound to owned orders",
+              note: t("callcenter.linkedOrdersSub"),
             },
             {
-              label: "Recording pending",
+              label: t("callcenter.recordingPending"),
               value: recordingPending,
-              note: "Calls missing recording callback linkage",
+              note: t("callcenter.recordingPendingSub"),
             },
             {
-              label: "Hotline transfers",
+              label: t("callcenter.hotlineTransfers"),
               value: hotlineTransfers,
-              note: "Calls already converted into complaint cases",
+              note: t("callcenter.hotlineTransfersSub"),
             },
           ].map((card) => (
             <div key={card.label} className="summary-card">
@@ -255,7 +255,7 @@ export default function CallcenterPage() {
           <input
             className="search-input"
             type="search"
-            placeholder="Search call, phone, order, case, or agent"
+            placeholder={t("callcenter.search")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -264,24 +264,24 @@ export default function CallcenterPage() {
             type="button"
             onClick={() => setShowIntake((current) => !current)}
           >
-            {showIntake ? "Hide intake form" : "Open new intake"}
+            {showIntake
+              ? t("callcenter.hideIntake")
+              : t("callcenter.openIntake")}
           </button>
           <button
             className="btn"
             type="button"
             onClick={() => void loadData(selectedCallId ?? undefined)}
           >
-            Refresh
+            {t("common.refresh")}
           </button>
         </div>
 
         {showIntake && (
           <section className="panel">
             <div className="panel-head">
-              <h3>New call intake</h3>
-              <p>
-                Hotline stays inside the existing callcenter + complaint flow.
-              </p>
+              <h3>{t("callcenter.newIntake")}</h3>
+              <p>{t("callcenter.intakeNote")}</p>
             </div>
             <form
               className="form-grid"
@@ -308,7 +308,7 @@ export default function CallcenterPage() {
               }}
             >
               <label>
-                Call type
+                {t("callcenter.form.callType")}
                 <select
                   value={intakeForm.callType}
                   onChange={(event) =>
@@ -327,7 +327,7 @@ export default function CallcenterPage() {
                 </select>
               </label>
               <label>
-                Caller phone
+                {t("callcenter.form.callerPhone")}
                 <input
                   type="text"
                   value={intakeForm.callerPhone}
@@ -340,7 +340,7 @@ export default function CallcenterPage() {
                 />
               </label>
               <label>
-                Agent ID
+                {t("callcenter.form.agentId")}
                 <input
                   type="text"
                   value={intakeForm.agentId ?? ""}
@@ -363,40 +363,44 @@ export default function CallcenterPage() {
                     }))
                   }
                 />
-                Agent identity announced
+                {t("callcenter.form.announced")}
               </label>
               <button
                 className="btn btn-primary"
                 type="submit"
                 disabled={busyKey === "open-intake"}
               >
-                {busyKey === "open-intake" ? "Opening..." : "Open session"}
+                {busyKey === "open-intake"
+                  ? t("callcenter.form.opening")
+                  : t("callcenter.form.openSession")}
               </button>
             </form>
           </section>
         )}
 
         {loading ? (
-          <p>Loading callcenter sessions...</p>
+          <p>{t("callcenter.loading")}</p>
         ) : (
           <div className="content-grid">
             <section className="panel">
               <div className="panel-head">
-                <h3>Sessions</h3>
-                <p>{filteredSessions.length} result(s)</p>
+                <h3>{t("callcenter.sessions")}</h3>
+                <p>
+                  {t("callcenter.results", { count: filteredSessions.length })}
+                </p>
               </div>
               <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Call</th>
-                      <th>Type</th>
-                      <th>Caller</th>
-                      <th>Agent</th>
-                      <th>Status</th>
-                      <th>Order</th>
-                      <th>Complaint</th>
-                      <th>Started</th>
+                      <th>{t("callcenter.col.call")}</th>
+                      <th>{t("callcenter.col.type")}</th>
+                      <th>{t("callcenter.col.caller")}</th>
+                      <th>{t("callcenter.col.agent")}</th>
+                      <th>{t("callcenter.col.status")}</th>
+                      <th>{t("callcenter.col.order")}</th>
+                      <th>{t("callcenter.col.complaint")}</th>
+                      <th>{t("callcenter.col.started")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -427,11 +431,11 @@ export default function CallcenterPage() {
 
             <section className="panel">
               <div className="panel-head">
-                <h3>Session detail</h3>
+                <h3>{t("callcenter.sessionDetail")}</h3>
                 <p>
                   {selectedSession
                     ? `${selectedSession.callId} / ${selectedSession.callType}`
-                    : "Select a session"}
+                    : t("callcenter.selectSession")}
                 </p>
               </div>
 
@@ -440,11 +444,13 @@ export default function CallcenterPage() {
                   <section className="detail-card">
                     <div className="detail-grid">
                       <div>
-                        <span className="label">Identity announced</span>
+                        <span className="label">
+                          {t("callcenter.detail.identityAnnounced")}
+                        </span>
                         <strong>
                           {selectedSession.agentIdentityAnnounced
-                            ? "Yes"
-                            : "No"}
+                            ? t("common.yes")
+                            : t("common.no")}
                         </strong>
                         <small>
                           {formatDateTime(
@@ -453,27 +459,36 @@ export default function CallcenterPage() {
                         </small>
                       </div>
                       <div>
-                        <span className="label">Recording</span>
+                        <span className="label">
+                          {t("callcenter.detail.recording")}
+                        </span>
                         <strong>
-                          {selectedSession.recordingId ?? "Pending"}
+                          {selectedSession.recordingId ??
+                            t("callcenter.detail.recordingPending")}
                         </strong>
                         <small>
                           {selectedSession.providerRecordingRef ?? "-"}
                         </small>
                       </div>
                       <div>
-                        <span className="label">Last ETA reply</span>
+                        <span className="label">
+                          {t("callcenter.detail.lastEtaReply")}
+                        </span>
                         <strong>
                           {selectedSession.lastEtaQuotedMinutes
-                            ? `${selectedSession.lastEtaQuotedMinutes} min`
-                            : "Not sent"}
+                            ? t("callcenter.detail.etaMin", {
+                                value: selectedSession.lastEtaQuotedMinutes,
+                              })
+                            : t("callcenter.detail.etaNotSent")}
                         </strong>
                         <small>
                           {formatDateTime(selectedSession.lastEtaQuotedAt)}
                         </small>
                       </div>
                       <div>
-                        <span className="label">Flags</span>
+                        <span className="label">
+                          {t("callcenter.detail.flags")}
+                        </span>
                         <strong>
                           {selectedSession.flags.length
                             ? selectedSession.flags.join(", ")
@@ -503,7 +518,7 @@ export default function CallcenterPage() {
                             })
                           }
                         >
-                          Mark identity announced
+                          {t("callcenter.markIdentityAnnounced")}
                         </button>
                       )}
                       {selectedSession.status !== "closed" && (
@@ -520,7 +535,7 @@ export default function CallcenterPage() {
                             })
                           }
                         >
-                          Close session
+                          {t("callcenter.closeSession")}
                         </button>
                       )}
                     </div>
@@ -548,10 +563,10 @@ export default function CallcenterPage() {
                           });
                         }}
                       >
-                        <h4>Attach recording callback</h4>
+                        <h4>{t("callcenter.attachRecordingForm")}</h4>
                         <input
                           type="text"
-                          placeholder="Recording ID"
+                          placeholder={t("callcenter.recordingIdPlaceholder")}
                           value={recordingForm.recordingId}
                           onChange={(event) =>
                             setRecordingForm((current) => ({
@@ -562,7 +577,7 @@ export default function CallcenterPage() {
                         />
                         <input
                           type="text"
-                          placeholder="Provider recording ref"
+                          placeholder={t("callcenter.providerRefPlaceholder")}
                           value={recordingForm.providerRecordingRef ?? ""}
                           onChange={(event) =>
                             setRecordingForm((current) => ({
@@ -573,7 +588,7 @@ export default function CallcenterPage() {
                         />
                         <input
                           type="url"
-                          placeholder="Recording URL"
+                          placeholder={t("callcenter.recordingUrlPlaceholder")}
                           value={recordingForm.recordingUrl ?? ""}
                           onChange={(event) =>
                             setRecordingForm((current) => ({
@@ -587,7 +602,7 @@ export default function CallcenterPage() {
                           type="submit"
                           disabled={busyKey === "attach-recording"}
                         >
-                          Attach recording
+                          {t("callcenter.attachRecording")}
                         </button>
                       </form>
 
@@ -606,7 +621,7 @@ export default function CallcenterPage() {
                           });
                         }}
                       >
-                        <h4>Reply ETA</h4>
+                        <h4>{t("callcenter.replyEta")}</h4>
                         <input
                           type="number"
                           min={1}
@@ -620,7 +635,7 @@ export default function CallcenterPage() {
                           type="submit"
                           disabled={busyKey === "quote-eta"}
                         >
-                          Save ETA reply
+                          {t("callcenter.saveEtaReply")}
                         </button>
                       </form>
 
@@ -642,7 +657,7 @@ export default function CallcenterPage() {
                           });
                         }}
                       >
-                        <h4>Callback queue</h4>
+                        <h4>{t("callcenter.callbackQueueForm")}</h4>
                         <input
                           type="datetime-local"
                           value={callbackDueAt}
@@ -652,7 +667,7 @@ export default function CallcenterPage() {
                         />
                         <textarea
                           rows={2}
-                          placeholder="Callback note"
+                          placeholder={t("callcenter.callbackNotePlaceholder")}
                           value={callbackNote}
                           onChange={(event) =>
                             setCallbackNote(event.target.value)
@@ -664,14 +679,16 @@ export default function CallcenterPage() {
                             type="submit"
                             disabled={busyKey === "create-callback"}
                           >
-                            Save callback
+                            {t("callcenter.saveCallback")}
                           </button>
                           {selectedSession.callbackTask?.status ===
                             "pending" && (
                             <>
                               <input
                                 type="text"
-                                placeholder="Completion note"
+                                placeholder={t(
+                                  "callcenter.completionNotePlaceholder",
+                                )}
                                 value={callbackCompleteNote}
                                 onChange={(event) =>
                                   setCallbackCompleteNote(event.target.value)
@@ -698,7 +715,7 @@ export default function CallcenterPage() {
                                   )
                                 }
                               >
-                                Complete callback
+                                {t("callcenter.completeCallback")}
                               </button>
                             </>
                           )}
@@ -739,10 +756,10 @@ export default function CallcenterPage() {
                           });
                         }}
                       >
-                        <h4>Create phone booking</h4>
+                        <h4>{t("callcenter.createPhoneBooking")}</h4>
                         <input
                           type="text"
-                          placeholder="Passenger name"
+                          placeholder={t("callcenter.passengerNamePlaceholder")}
                           value={orderForm.passengerName}
                           onChange={(event) =>
                             setOrderForm((current) => ({
@@ -753,7 +770,9 @@ export default function CallcenterPage() {
                         />
                         <input
                           type="text"
-                          placeholder="Passenger phone"
+                          placeholder={t(
+                            "callcenter.passengerPhonePlaceholder",
+                          )}
                           value={orderForm.passengerPhone}
                           onChange={(event) =>
                             setOrderForm((current) => ({
@@ -764,7 +783,7 @@ export default function CallcenterPage() {
                         />
                         <input
                           type="text"
-                          placeholder="Pickup address"
+                          placeholder={t("callcenter.pickupAddressPlaceholder")}
                           value={orderForm.pickupAddress}
                           onChange={(event) =>
                             setOrderForm((current) => ({
@@ -775,7 +794,9 @@ export default function CallcenterPage() {
                         />
                         <input
                           type="text"
-                          placeholder="Dropoff address"
+                          placeholder={t(
+                            "callcenter.dropoffAddressPlaceholder",
+                          )}
                           value={orderForm.dropoffAddress}
                           onChange={(event) =>
                             setOrderForm((current) => ({
@@ -786,7 +807,7 @@ export default function CallcenterPage() {
                         />
                         <textarea
                           rows={2}
-                          placeholder="Ops note"
+                          placeholder={t("callcenter.opsNotePlaceholder")}
                           value={orderForm.notes}
                           onChange={(event) =>
                             setOrderForm((current) => ({
@@ -800,7 +821,7 @@ export default function CallcenterPage() {
                           type="submit"
                           disabled={busyKey === "create-phone-order"}
                         >
-                          Create order from call
+                          {t("callcenter.createOrderFromCall")}
                         </button>
                       </form>
 
@@ -820,10 +841,12 @@ export default function CallcenterPage() {
                           });
                         }}
                       >
-                        <h4>Bind existing order</h4>
+                        <h4>{t("callcenter.bindExistingOrder")}</h4>
                         <input
                           type="text"
-                          placeholder="Existing order ID"
+                          placeholder={t(
+                            "callcenter.existingOrderIdPlaceholder",
+                          )}
                           value={existingOrderId}
                           onChange={(event) =>
                             setExistingOrderId(event.target.value)
@@ -834,7 +857,7 @@ export default function CallcenterPage() {
                           type="submit"
                           disabled={busyKey === "link-order"}
                         >
-                          Link order to call
+                          {t("callcenter.linkOrderToCall")}
                         </button>
                       </form>
 
@@ -863,7 +886,7 @@ export default function CallcenterPage() {
                           });
                         }}
                       >
-                        <h4>Transfer to complaint</h4>
+                        <h4>{t("callcenter.transferComplaintForm")}</h4>
                         <select
                           value={transferForm.category}
                           onChange={(event) =>
@@ -894,7 +917,9 @@ export default function CallcenterPage() {
                         </select>
                         <textarea
                           rows={3}
-                          placeholder="Complaint description"
+                          placeholder={t(
+                            "callcenter.complaintDescriptionPlaceholder",
+                          )}
                           value={transferForm.description}
                           onChange={(event) =>
                             setTransferForm((current) => ({
@@ -908,39 +933,49 @@ export default function CallcenterPage() {
                           type="submit"
                           disabled={busyKey === "transfer-complaint"}
                         >
-                          Create complaint case
+                          {t("callcenter.createComplaintCase")}
                         </button>
                       </form>
                     </div>
                   </section>
 
                   <section className="detail-card">
-                    <h4>Linked order + dispatch trace</h4>
+                    <h4>{t("callcenter.linkedOrderTrace")}</h4>
                     {selectedOrder ? (
                       <div className="stack">
                         <div className="detail-grid">
                           <div>
-                            <span className="label">Order</span>
+                            <span className="label">
+                              {t("callcenter.detail.order")}
+                            </span>
                             <strong>{selectedOrder.orderNo}</strong>
                             <small>{selectedOrder.orderId}</small>
                           </div>
                           <div>
-                            <span className="label">Status</span>
+                            <span className="label">
+                              {t("callcenter.detail.status")}
+                            </span>
                             <strong>{selectedOrder.status}</strong>
                             <small>
                               ETA{" "}
                               {selectedOrder.etaSnapshot
-                                ? `${selectedOrder.etaSnapshot.etaMinutes} min`
-                                : "pending"}
+                                ? t("callcenter.detail.etaMin", {
+                                    value: selectedOrder.etaSnapshot.etaMinutes,
+                                  })
+                                : t("callcenter.detail.etaPending")}
                             </small>
                           </div>
                           <div>
-                            <span className="label">Pickup</span>
+                            <span className="label">
+                              {t("callcenter.detail.pickup")}
+                            </span>
                             <strong>{selectedOrder.pickup.address}</strong>
                             <small>{selectedOrder.dropoff.address}</small>
                           </div>
                           <div>
-                            <span className="label">Compliance</span>
+                            <span className="label">
+                              {t("callcenter.detail.compliance")}
+                            </span>
                             <strong>
                               {selectedOrder.complianceFlags.join(", ") || "-"}
                             </strong>
@@ -958,22 +993,20 @@ export default function CallcenterPage() {
                             ))
                           ) : (
                             <p className="empty-state">
-                              No dispatch trace entries yet.
+                              {t("callcenter.noDispatchTrace")}
                             </p>
                           )}
                         </div>
                       </div>
                     ) : (
                       <p className="empty-state">
-                        Link or create an order to review dispatch trace.
+                        {t("callcenter.linkOrderFirst")}
                       </p>
                     )}
                   </section>
                 </div>
               ) : (
-                <p className="empty-state">
-                  Select a session to operate the intake workflow.
-                </p>
+                <p className="empty-state">{t("callcenter.noSession")}</p>
               )}
             </section>
           </div>
@@ -981,20 +1014,20 @@ export default function CallcenterPage() {
 
         <section className="panel">
           <div className="panel-head">
-            <h3>Callback queue</h3>
-            <p>{callbacks.length} callback task(s)</p>
+            <h3>{t("callcenter.callbacks")}</h3>
+            <p>{t("callcenter.callbackCount", { count: callbacks.length })}</p>
           </div>
           {callbacks.length > 0 ? (
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Callback</th>
-                    <th>Call</th>
-                    <th>Status</th>
-                    <th>Due</th>
-                    <th>Order</th>
-                    <th>Case</th>
+                    <th>{t("callcenter.col.callbackId")}</th>
+                    <th>{t("callcenter.col.call")}</th>
+                    <th>{t("callcenter.col.status")}</th>
+                    <th>{t("callcenter.col.due")}</th>
+                    <th>{t("callcenter.col.order")}</th>
+                    <th>{t("callcenter.col.case")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1012,14 +1045,13 @@ export default function CallcenterPage() {
               </table>
             </div>
           ) : (
-            <p className="empty-state">
-              No callback tasks yet. Create one from an active session.
-            </p>
+            <p className="empty-state">{t("callcenter.emptyCallbacks")}</p>
           )}
         </section>
 
         <Link className="route-link" href="/">
-          <strong>Back to home</strong> Return to ops console overview.
+          <strong>{t("callcenter.backToHome")}</strong>{" "}
+          {t("callcenter.backToHomeSub")}
         </Link>
 
         <style jsx>{`

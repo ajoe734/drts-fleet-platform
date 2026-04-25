@@ -1,4 +1,6 @@
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
 import { Card, CardHeader } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
@@ -14,7 +16,10 @@ function formatDt(value: string | undefined): string {
 }
 
 export default async function AttendancePage() {
-  const client = await getServerOpsClient();
+  const [client, locale] = await Promise.all([
+    getServerOpsClient(),
+    getServerLocale(),
+  ]);
   let shifts: unknown[] = [];
   let attendance: unknown[] = [];
   let error: string | null = null;
@@ -27,7 +32,7 @@ export default async function AttendancePage() {
     shifts = (shiftsResult as any)?.items ?? shiftsResult ?? [];
     attendance = (attendanceResult as any)?.items ?? attendanceResult ?? [];
   } catch (e) {
-    error = e instanceof Error ? e.message : "Unknown error";
+    error = e instanceof Error ? e.message : t("common.unknown", locale);
   }
 
   const activeShifts = shifts.filter((s: any) => s.status === "active");
@@ -36,8 +41,8 @@ export default async function AttendancePage() {
   return (
     <>
       <PageHeader
-        title="Shift & Attendance"
-        subtitle="Driver shift tracking and attendance records"
+        title={t("attendance.title", locale)}
+        subtitle={t("attendance.subtitle", locale)}
       />
 
       {error && (
@@ -62,7 +67,7 @@ export default async function AttendancePage() {
             <div
               style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
             >
-              Active Shifts
+              {t("attendance.activeShifts", locale)}
               <Badge variant="blue" style={{ marginLeft: "8px" }}>
                 {activeShifts.length}
               </Badge>
@@ -70,13 +75,13 @@ export default async function AttendancePage() {
           </CardHeader>
           <DataTable
             columns={[
-              { label: "Shift ID" },
-              { label: "Driver" },
-              { label: "Vehicle" },
-              { label: "Clocked In" },
-              { label: "Location" },
+              { label: t("attendance.col.shiftId", locale) },
+              { label: t("attendance.col.driver", locale) },
+              { label: t("attendance.col.vehicle", locale) },
+              { label: t("attendance.col.clockedIn", locale) },
+              { label: t("attendance.col.location", locale) },
             ]}
-            empty="No active shifts."
+            empty={t("attendance.emptyShifts", locale)}
           >
             {activeShifts.map((s: any, i: number) => (
               <Tr key={i}>
@@ -95,7 +100,7 @@ export default async function AttendancePage() {
             <div
               style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
             >
-              Attendance Records
+              {t("attendance.attendanceRecords", locale)}
               <Badge variant="gray" style={{ marginLeft: "8px" }}>
                 {attendance.length}
               </Badge>
@@ -103,13 +108,13 @@ export default async function AttendancePage() {
           </CardHeader>
           <DataTable
             columns={[
-              { label: "Attendance ID" },
-              { label: "Driver" },
-              { label: "Date" },
-              { label: "Status" },
-              { label: "Hours" },
+              { label: t("attendance.col.attendanceId", locale) },
+              { label: t("attendance.col.driver", locale) },
+              { label: t("attendance.col.date", locale) },
+              { label: t("attendance.col.status", locale) },
+              { label: t("attendance.col.hours", locale) },
             ]}
-            empty="No attendance records."
+            empty={t("attendance.emptyAttendance", locale)}
           >
             {(attendance as any[]).slice(0, 20).map((a: any, i: number) => (
               <Tr key={i}>
@@ -129,7 +134,11 @@ export default async function AttendancePage() {
                     {a.status ?? "—"}
                   </Badge>
                 </Td>
-                <Td muted>{a.totalHours != null ? `${a.totalHours}h` : "—"}</Td>
+                <Td muted>
+                  {a.totalHours != null
+                    ? t("attendance.hours", locale, { h: a.totalHours })
+                    : "—"}
+                </Td>
               </Tr>
             ))}
           </DataTable>
@@ -140,7 +149,7 @@ export default async function AttendancePage() {
             <div
               style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
             >
-              Completed Shifts
+              {t("attendance.completedShifts", locale)}
               <Badge variant="gray" style={{ marginLeft: "8px" }}>
                 {completedShifts.length}
               </Badge>
@@ -148,14 +157,14 @@ export default async function AttendancePage() {
           </CardHeader>
           <DataTable
             columns={[
-              { label: "Shift ID" },
-              { label: "Driver" },
-              { label: "Status" },
-              { label: "Clocked In" },
-              { label: "Clocked Out" },
-              { label: "Hours" },
+              { label: t("attendance.col.shiftId", locale) },
+              { label: t("attendance.col.driver", locale) },
+              { label: t("attendance.col.status", locale) },
+              { label: t("attendance.col.clockedIn", locale) },
+              { label: t("attendance.col.clockedOut", locale) },
+              { label: t("attendance.col.hours", locale) },
             ]}
-            empty="No completed shifts."
+            empty={t("attendance.emptyCompleted", locale)}
           >
             {(completedShifts as any[])
               .slice(0, 10)
@@ -169,7 +178,9 @@ export default async function AttendancePage() {
                   <Td muted>{formatDt(s.clockedInAt)}</Td>
                   <Td muted>{formatDt(s.clockedOutAt)}</Td>
                   <Td muted>
-                    {s.totalHours != null ? `${s.totalHours}h` : "—"}
+                    {s.totalHours != null
+                      ? t("attendance.hours", locale, { h: s.totalHours })
+                      : "—"}
                   </Td>
                 </Tr>
               ))}
