@@ -134,6 +134,18 @@ No code was edited in `tenant-commute-hub` as part of this annex audit.
   the `2026-04-22` / `2026-04-23` snapshot, but they are not the current
   remote-main truth anymore.
 
+### `2026-04-25` addendum
+
+- The remaining package-portability drift is now narrower and governed.
+- `tenant-commute-hub` still prefers a live sibling `drts-fleet-platform`
+  checkout for local pair-development, but the standalone fallback for
+  `@drts/contracts` is now a managed snapshot synced from the core repo instead
+  of a hand-maintained contract shim.
+- That does **not** create a second authority source: the snapshot is an
+  execution-portability artifact refreshed from the canonical core contract
+  package, while domain-data and identity authority remain exclusively owned by
+  `drts-fleet-platform`.
+
 ---
 
 ## 4. Evidence From The Local Workspace Checkout
@@ -211,13 +223,12 @@ forbidden backend authority by the current boundary contract.
 
 The local workspace checkout is materially ahead of clean remote `main`.
 
-Observed divergence includes:
+Observed divergence at the historical audit snapshot included:
 
 - removal of `src/integrations/supabase/*` in the local worktree
 - deletion of local Supabase migrations and functions in the local worktree
 - addition of `src/lib/drtsApi.ts` and shared-client based BFF usage locally
-- addition of local shim / alias support for `@drts/api-client` and
-  `@drts/contracts`
+- addition of local alias support for `@drts/api-client` and `@drts/contracts`
 - route convergence away from legacy `/dashboard` / `/bookings` /
   `/cost-centers` style topology
 
@@ -254,8 +265,9 @@ That historical recommended landing sequence has now completed:
 1. the BFF cutover landed on remote `main`
 2. the shared-client / backend compatibility fixes landed on remote `main`
 3. the tenant identity-hardening slice landed on remote `main`
-4. the remaining work is now limited to documentation / evidence sync and the
-   repo-internal `GAP-P2S3-001` trust cleanup inside `drts-fleet-platform`
+4. the remaining work is now limited to documentation / evidence sync, managed
+   package-portability hygiene, and the repo-internal `GAP-P2S3-001` trust
+   cleanup inside `drts-fleet-platform`
 
 Observed low-risk cleanup that should not block the landing decision:
 

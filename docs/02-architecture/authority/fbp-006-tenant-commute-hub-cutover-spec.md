@@ -62,6 +62,16 @@ Additional addendum on `2026-04-24`:
   repo B no longer carries `localStorage` session restore or fallback role
   derivation on `main`
 
+Additional addendum on `2026-04-25`:
+
+- `tenant-commute-hub` standalone builds still prefer the live sibling
+  `drts-fleet-platform` checkout when available, but the fallback
+  `@drts/contracts` path is now a managed snapshot synced from the core repo
+  instead of a hand-maintained drift-prone shim
+- this closes the most visible remaining package-portability maintenance debt
+  without reopening tenant authority ownership: repo B still consumes the core
+  contract surface, and the fallback is refreshed from that source of truth
+
 ## 2. Core-Repo Gate Closed Before External Cutover
 
 `FBP-005` left two core-repo BFF gaps that blocked clean repo B cutover. `FBP-006` closes them in `drts-fleet-platform` so repo B no longer needs local fallbacks:
@@ -172,5 +182,7 @@ These are the non-negotiable runtime rules during and after cutover:
 ## 7. Handoff Notes
 
 - This doc is the canonical external-repo handoff for `FBP-006A` through `FBP-006D`.
-- `FBP-007` should not retire `apps/tenant-portal-web` until repo B has passed the verification gate above.
+- `FBP-007` verification gate is already passed on remote `main`; any remaining
+  action around `apps/tenant-portal-web` is now legacy-shell cleanup, not a
+  tenant cutover blocker.
 - If repo B implementation discovers a missing tenant BFF surface beyond the two gaps closed here, reopen the issue as a new core-repo authority task instead of inventing local repo B authority.
