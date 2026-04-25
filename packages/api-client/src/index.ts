@@ -72,6 +72,8 @@ import type {
   NotificationRecord,
   OpenCallSessionCommand,
   OwnedOrderRecord,
+  PartnerChannelEntryRecord,
+  PartnerEligibilityVerificationRecord,
   PlacardVersionRecord,
   PlatformAdminTenantRecord,
   PlatformAdminUserRecord,
@@ -121,6 +123,7 @@ import type {
   UpsertTenantPassengerCommand,
   VehicleContractRecord,
   VehicleRegistryRecord,
+  VerifyPartnerEligibilityCommand,
   WebhookDeliveryRecord,
   CancelOwnedOrderCommand,
   AssignDispatchCommand,
@@ -326,6 +329,35 @@ export class ApiClient {
       {
         body: command,
       },
+    );
+  }
+
+  async listPartnerEntries(): Promise<PartnerChannelEntryRecord[]> {
+    return this.getList<PartnerChannelEntryRecord>("/api/partner/entries");
+  }
+
+  async getPartnerEntry(entrySlug: string): Promise<PartnerChannelEntryRecord> {
+    return this.get<PartnerChannelEntryRecord>(
+      `/api/partner/entries/${encodeURIComponent(entrySlug)}`,
+    );
+  }
+
+  async verifyPartnerEligibility(
+    command: VerifyPartnerEligibilityCommand,
+  ): Promise<PartnerEligibilityVerificationRecord> {
+    return this.post<PartnerEligibilityVerificationRecord>(
+      "/api/partner/eligibility/verify",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async getPartnerEligibilityVerification(
+    eligibilityVerificationId: string,
+  ): Promise<PartnerEligibilityVerificationRecord> {
+    return this.get<PartnerEligibilityVerificationRecord>(
+      `/api/partner/eligibility/${encodeURIComponent(eligibilityVerificationId)}`,
     );
   }
 

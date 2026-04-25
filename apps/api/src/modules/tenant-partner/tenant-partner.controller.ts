@@ -13,6 +13,8 @@ import type {
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
   IssueTenantApiKeyCommand,
+  PartnerChannelEntryRecord,
+  PartnerEligibilityVerificationRecord,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
   TenantPartnerSummary,
@@ -22,6 +24,7 @@ import type {
   UpdateTenantSlaProfileCommand,
   UpsertTenantAddressCommand,
   UpsertTenantPassengerCommand,
+  VerifyPartnerEligibilityCommand,
 } from "@drts/contracts";
 
 import {
@@ -63,6 +66,54 @@ export class TenantPartnerController {
     };
 
     return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("partner/entries")
+  @OpenRoute()
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listPartnerEntries(@Headers("x-request-id") requestId?: string) {
+    const items: PartnerChannelEntryRecord[] =
+      this.tenantPartnerService.listPartnerEntries();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("partner/entries/:entrySlug")
+  @OpenRoute()
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getPartnerEntry(
+    @Param("entrySlug") entrySlug: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getPartnerEntry(entrySlug),
+      requestId,
+    );
+  }
+
+  @Post("partner/eligibility/verify")
+  @OpenRoute()
+  verifyPartnerEligibility(
+    @Body() command: VerifyPartnerEligibilityCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const verification: PartnerEligibilityVerificationRecord =
+      this.tenantPartnerService.verifyPartnerEligibility(command, requestId);
+    return toApiSuccessEnvelope(verification, requestId);
+  }
+
+  @Get("partner/eligibility/:eligibilityVerificationId")
+  @OpenRoute()
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getPartnerEligibilityVerification(
+    @Param("eligibilityVerificationId") eligibilityVerificationId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getPartnerEligibilityVerification(
+        eligibilityVerificationId,
+      ),
+      requestId,
+    );
   }
 
   @Get("tenant/passengers")

@@ -689,4 +689,139 @@ describe("W8-001A shared api client list handling", () => {
       status: "queued",
     });
   });
+
+  it("supports partner entry lookup and eligibility verification flows", async () => {
+    const seen: Array<{
+      path: string;
+      method: string;
+      body?: unknown;
+    }> = [];
+
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        const path = new URL(url).pathname;
+        seen.push({
+          path,
+          method: init?.method ?? "GET",
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+
+        if (path === "/api/partner/entries") {
+          return {
+            ok: true,
+            json: async () => ({
+              data: {
+                items: [
+                  {
+                    entry_slug: "bank-demo-alpha-airport",
+                    partner_id: "partner-bank-demo-001",
+                    tenant_id: "tenant-demo-001",
+                    business_dispatch_subtype: "credit_card_airport_transfer",
+                    eligibility_mode: "bank_card_inline",
+                  },
+                ],
+              },
+            }),
+            text: async () => "",
+          } as Response;
+        }
+
+        if (path === "/api/partner/entries/bank-demo-alpha-airport") {
+          return {
+            ok: true,
+            json: async () => ({
+              data: {
+                entry_slug: "bank-demo-alpha-airport",
+                partner_id: "partner-bank-demo-001",
+                tenant_id: "tenant-demo-001",
+                business_dispatch_subtype: "credit_card_airport_transfer",
+                eligibility_mode: "bank_card_inline",
+              },
+            }),
+            text: async () => "",
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              eligibility_verification_id: "elig-001",
+              tenant_id: "tenant-demo-001",
+              partner_id: "partner-bank-demo-001",
+              partner_program_id: "program-airport-alpha",
+              partner_entry_slug: "bank-demo-alpha-airport",
+              verification_status: "eligible",
+              verification_reason_code: "CARD_PROGRAM_MATCHED",
+            },
+          }),
+          text: async () => "",
+        } as Response;
+      },
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await expect(client.listPartnerEntries()).resolves.toEqual([
+      {
+        entrySlug: "bank-demo-alpha-airport",
+        partnerId: "partner-bank-demo-001",
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        eligibilityMode: "bank_card_inline",
+      },
+    ]);
+    await expect(
+      client.getPartnerEntry("bank-demo-alpha-airport"),
+    ).resolves.toEqual({
+      entrySlug: "bank-demo-alpha-airport",
+      partnerId: "partner-bank-demo-001",
+      tenantId: "tenant-demo-001",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+      eligibilityMode: "bank_card_inline",
+    });
+    await expect(
+      client.verifyPartnerEligibility({
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "2468",
+      }),
+    ).resolves.toEqual({
+      eligibilityVerificationId: "elig-001",
+      tenantId: "tenant-demo-001",
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      verificationStatus: "eligible",
+      verificationReasonCode: "CARD_PROGRAM_MATCHED",
+    });
+
+    expect(seen).toEqual([
+      {
+        path: "/api/partner/entries",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        path: "/api/partner/entries/bank-demo-alpha-airport",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        path: "/api/partner/eligibility/verify",
+        method: "POST",
+        body: {
+          entrySlug: "bank-demo-alpha-airport",
+          cardLast4: "2468",
+        },
+      },
+    ]);
+  });
 });

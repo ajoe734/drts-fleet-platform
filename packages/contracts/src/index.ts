@@ -44,6 +44,27 @@ export const BUSINESS_DISPATCH_SUBTYPES = [
 export type BusinessDispatchSubtype =
   (typeof BUSINESS_DISPATCH_SUBTYPES)[number];
 
+export const PARTNER_ENTRY_AUTH_MODES = [
+  "tenant_portal_bearer",
+  "partner_api_key",
+] as const;
+export type PartnerEntryAuthMode = (typeof PARTNER_ENTRY_AUTH_MODES)[number];
+
+export const PARTNER_ELIGIBILITY_MODES = [
+  "none",
+  "bank_card_inline",
+  "reference_required",
+] as const;
+export type PartnerEligibilityMode = (typeof PARTNER_ELIGIBILITY_MODES)[number];
+
+export const PARTNER_ELIGIBILITY_STATUSES = [
+  "eligible",
+  "ineligible",
+  "manual_review",
+] as const;
+export type PartnerEligibilityStatus =
+  (typeof PARTNER_ELIGIBILITY_STATUSES)[number];
+
 export const DRIVER_WORK_STATES = [
   "available",
   "reserved",
@@ -155,6 +176,49 @@ export interface TenantPartnerSummary {
   supportedRoots: Array<"tenant" | "partner" | "site" | "call_point">;
   sourceOfTruth: "tenant_partner_service" | "foundation_bootstrap_placeholder";
   notes: string[];
+}
+
+export interface PartnerChannelEntryRecord {
+  partnerId: string;
+  partnerCode: string;
+  partnerType: string;
+  programId: string;
+  tenantId: string;
+  bankCode: string | null;
+  entrySlug: string;
+  displayName: string;
+  businessDispatchSubtype: BusinessDispatchSubtype;
+  authMode: PartnerEntryAuthMode;
+  eligibilityMode: PartnerEligibilityMode;
+  entryHost: string | null;
+  entryPath: string | null;
+  themeAccent: string | null;
+  activeFlag: boolean;
+}
+
+export interface VerifyPartnerEligibilityCommand {
+  entrySlug: string;
+  referenceToken?: string;
+  cardLast4?: string;
+  cardholderName?: string;
+  benefitReference?: string;
+  flightNo?: string;
+}
+
+export interface PartnerEligibilityVerificationRecord {
+  eligibilityVerificationId: string;
+  tenantId: string;
+  partnerId: string;
+  partnerProgramId: string;
+  partnerEntrySlug: string;
+  bankCode: string | null;
+  businessDispatchSubtype: BusinessDispatchSubtype;
+  verificationStatus: PartnerEligibilityStatus;
+  verificationReasonCode: string;
+  benefitReference: string | null;
+  issuerAuthorizationRef: string | null;
+  verifiedAt: string;
+  expiresAt: string | null;
 }
 
 export interface RegulatoryRegistrySummary {
@@ -559,6 +623,8 @@ export interface CreateCallCenterOrderCommand {
 
 export interface CreateTenantBookingCommand {
   businessDispatchSubtype: BusinessDispatchSubtype;
+  partnerEntrySlug?: string;
+  eligibilityVerificationId?: string;
   pickup: AddressPayload;
   dropoff: AddressPayload;
   reservationWindowStart: string;
@@ -682,6 +748,11 @@ export interface OwnedOrderRecord {
   orderSource: OwnedOrderSource;
   orderDomain: "owned";
   tenantId: string | null;
+  partnerId: string | null;
+  partnerProgramId: string | null;
+  partnerEntrySlug: string | null;
+  eligibilityVerificationId: string | null;
+  issuerAuthorizationRef: string | null;
   serviceBucket: Phase1ServiceBucket;
   dispatchSemantics: DispatchSemantics;
   businessDispatchSubtype: BusinessDispatchSubtype | null;
@@ -736,6 +807,11 @@ export interface BookingRecord {
   bookingId: string;
   orderId: string;
   tenantId: string;
+  partnerId: string | null;
+  partnerProgramId: string | null;
+  partnerEntrySlug: string | null;
+  eligibilityVerificationId: string | null;
+  issuerAuthorizationRef: string | null;
   status: BookingStatus;
   serviceBucket: "business_dispatch";
   businessDispatchSubtype: BusinessDispatchSubtype;
