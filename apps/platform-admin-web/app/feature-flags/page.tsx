@@ -8,10 +8,11 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import { getPlatformLabel } from "@/lib/localized-labels";
 import type { FeatureFlag, FeatureFlagSummary } from "@drts/contracts";
 
 export default function FeatureFlagsPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [flags, setFlags] = useState<FeatureFlag[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,7 +74,9 @@ export default function FeatureFlagsPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 

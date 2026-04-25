@@ -14,6 +14,7 @@ import type {
 import { MAINTENANCE_STATUSES, MAINTENANCE_TYPES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { isMaintenanceOverdue } from "@/lib/ops-analytics";
+import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
 const STATUSES: MaintenanceStatus[] = [...MAINTENANCE_STATUSES];
 const TYPES: MaintenanceType[] = [...MAINTENANCE_TYPES];
@@ -28,7 +29,7 @@ function formatCost(value: number | null): string {
 }
 
 export default function MaintenancePage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -99,7 +100,7 @@ export default function MaintenancePage() {
       <div>
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
           </div>
         )}
 
@@ -147,7 +148,7 @@ export default function MaintenancePage() {
             <option value="all">{t("common.allStatuses")}</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {formatOpsCodeLabel(locale, status)}
               </option>
             ))}
           </select>
@@ -246,7 +247,7 @@ export default function MaintenancePage() {
                             {record.maintenanceId}
                           </div>
                           <div className="cell-subcopy">
-                            {record.type.replace(/_/g, " ")}
+                            {formatOpsCodeLabel(locale, record.type)}
                           </div>
                           <div className="cell-subcopy">
                             {record.description}
@@ -254,7 +255,7 @@ export default function MaintenancePage() {
                         </td>
                         <td>
                           <span className="status-badge">
-                            {effectiveStatus}
+                            {formatOpsCodeLabel(locale, effectiveStatus)}
                           </span>
                         </td>
                         <td>
@@ -479,7 +480,7 @@ function MaintenanceForm({
     command: CreateMaintenanceRecordCommand | UpdateMaintenanceRecordCommand,
   ) => Promise<void>;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [pending, startTransition] = useTransition();
   const [vehicleId, setVehicleId] = useState(editingRecord?.vehicleId ?? "");
   const [type, setType] = useState<MaintenanceType>(
@@ -576,7 +577,7 @@ function MaintenanceForm({
               >
                 {TYPES.map((value) => (
                   <option key={value} value={value}>
-                    {value.replace(/_/g, " ")}
+                    {formatOpsCodeLabel(locale, value)}
                   </option>
                 ))}
               </select>
@@ -612,7 +613,7 @@ function MaintenanceForm({
               >
                 {STATUSES.map((value) => (
                   <option key={value} value={value}>
-                    {value}
+                    {formatOpsCodeLabel(locale, value)}
                   </option>
                 ))}
               </select>

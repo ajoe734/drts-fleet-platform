@@ -8,6 +8,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   CreatePlatformTenantCommand,
   PlatformAdminTenantRecord,
@@ -56,7 +60,7 @@ function parseQuota(value: string): number {
 }
 
 export default function TenantsPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -205,7 +209,9 @@ export default function TenantsPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -331,7 +337,8 @@ export default function TenantsPage() {
                 {t("tenants.configure")} {selectedTenant.name}
               </h3>
               <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-                Code: <code>{selectedTenant.code}</code>
+                {getPlatformLabel(locale, "code")}:{" "}
+                <code>{selectedTenant.code}</code>
               </p>
             </div>
             <button
@@ -373,7 +380,7 @@ export default function TenantsPage() {
                   {t("tenants.form.status")}
                 </div>
                 <input
-                  value={selectedTenant.status}
+                  value={formatPlatformCodeLabel(locale, selectedTenant.status)}
                   disabled
                   style={inputStyle}
                 />
@@ -461,7 +468,7 @@ export default function TenantsPage() {
                             : "admin-badge--neutral"
                       }`}
                     >
-                      {tenant.status}
+                      {formatPlatformCodeLabel(locale, tenant.status)}
                     </span>
                   </td>
                   <td>

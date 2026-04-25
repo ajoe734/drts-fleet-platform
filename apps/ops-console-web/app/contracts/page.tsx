@@ -1,6 +1,7 @@
 import type { VehicleContractRecord } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
@@ -67,10 +68,10 @@ export default async function ContractsPage() {
               <Td mono>{c.contractId}</Td>
               <Td mono>{c.vehicleId}</Td>
               <Td mono>{c.partnerId}</Td>
-              <Td>{c.contractType}</Td>
+              <Td>{formatOpsCodeLabel(locale, c.contractType)}</Td>
               <Td>
                 <Badge variant={contractStatusVariant(c.status)}>
-                  {c.status}
+                  {formatOpsCodeLabel(locale, c.status)}
                 </Badge>
               </Td>
             </Tr>

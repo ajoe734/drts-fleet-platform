@@ -8,6 +8,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   DriverFeePlanRecord,
   PlatformPricingRuleRecord,
@@ -44,7 +48,7 @@ const EMPTY_PRICING_FORM: PricingFormState = {
 };
 
 const EMPTY_FEE_PLAN_FORM: FeePlanFormState = {
-  planName: "Phase1 Driver Fee Plan",
+  planName: "",
   version: "",
   serviceFeeBps: "1500",
   reimbursementMode: "platform_funded",
@@ -87,8 +91,9 @@ function normalizeDateTimeLocalValue(value: string) {
 }
 
 export default function PricingPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
+  const defaultPlanName = getPlatformLabel(locale, "defaultPlanName");
   const [rules, setRules] = useState<PlatformPricingRuleRecord[]>([]);
   const [feePlans, setFeePlans] = useState<DriverFeePlanRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,8 +104,10 @@ export default function PricingPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [pricingForm, setPricingForm] =
     useState<PricingFormState>(EMPTY_PRICING_FORM);
-  const [feePlanForm, setFeePlanForm] =
-    useState<FeePlanFormState>(EMPTY_FEE_PLAN_FORM);
+  const [feePlanForm, setFeePlanForm] = useState<FeePlanFormState>(() => ({
+    ...EMPTY_FEE_PLAN_FORM,
+    planName: defaultPlanName,
+  }));
   const [publishRuleFormRuleId, setPublishRuleFormRuleId] = useState<
     string | null
   >(null);
@@ -278,7 +285,9 @@ export default function PricingPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -333,7 +342,7 @@ export default function PricingPage() {
               className={`admin-toggle-btn ${filter === value ? "active" : ""}`}
               onClick={() => setFilter(value)}
             >
-              {value}
+              {formatPlatformCodeLabel(locale, value)}
             </button>
           ))}
         </div>
@@ -367,6 +376,7 @@ export default function PricingPage() {
                     }))
                   }
                   required
+                  placeholder={defaultPlanName}
                   style={inputStyle}
                 />
               </label>
@@ -587,12 +597,12 @@ export default function PricingPage() {
                   <td>{(plan.serviceFeeBps / 100).toFixed(2)}%</td>
                   <td>
                     <span className="admin-badge admin-badge--info">
-                      {plan.reimbursementMode}
+                      {formatPlatformCodeLabel(locale, plan.reimbursementMode)}
                     </span>
                   </td>
                   <td>
                     <span className="admin-badge admin-badge--success">
-                      {plan.status}
+                      {formatPlatformCodeLabel(locale, plan.status)}
                     </span>
                   </td>
                   <td>{formatDateTime(plan.publishedAt)}</td>
@@ -628,7 +638,7 @@ export default function PricingPage() {
               <th>{t("pricing.col.version")}</th>
               <th>{t("pricing.col.serviceFee")}</th>
               <th>{t("pricing.col.reimbMode")}</th>
-              <th>{t("tenants.form.applicableTo") ?? "Applicable to"}</th>
+              <th>{getPlatformLabel(locale, "applicableTo")}</th>
               <th>{t("pricing.col.status")}</th>
               <th>{t("notices.col.created")}</th>
               <th>{t("pricing.form.notes")}</th>
@@ -649,7 +659,7 @@ export default function PricingPage() {
                   <td>{(rule.serviceFeeBps / 100).toFixed(2)}%</td>
                   <td>
                     <span className="admin-badge admin-badge--info">
-                      {rule.reimbursementMode}
+                      {formatPlatformCodeLabel(locale, rule.reimbursementMode)}
                     </span>
                   </td>
                   <td>
@@ -667,7 +677,7 @@ export default function PricingPage() {
                             : "admin-badge--neutral"
                       }`}
                     >
-                      {rule.status}
+                      {formatPlatformCodeLabel(locale, rule.status)}
                     </span>
                   </td>
                   <td>

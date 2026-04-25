@@ -14,6 +14,7 @@ import type {
 import { COMPLAINT_CASE_STATUSES, COMPLAINT_CATEGORIES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
+import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
 const STATUS_OPTIONS: ComplaintCaseStatus[] = [...COMPLAINT_CASE_STATUSES];
 const CATEGORY_OPTIONS: ComplaintCategory[] = [...COMPLAINT_CATEGORIES];
@@ -32,7 +33,7 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 export default function ComplaintsPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
   const [records, setRecords] = useState<ComplaintCaseRecord[]>([]);
@@ -177,7 +178,7 @@ export default function ComplaintsPage() {
       <div>
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
           </div>
         )}
 
@@ -229,7 +230,7 @@ export default function ComplaintsPage() {
             <option value="all">{t("complaints.allStatuses")}</option>
             {STATUS_OPTIONS.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {formatOpsCodeLabel(locale, status)}
               </option>
             ))}
           </select>
@@ -242,7 +243,7 @@ export default function ComplaintsPage() {
             <option value="all">{t("complaints.allCategories")}</option>
             {CATEGORY_OPTIONS.map((category) => (
               <option key={category} value={category}>
-                {category.replace(/_/g, " ")}
+                {formatOpsCodeLabel(locale, category)}
               </option>
             ))}
           </select>
@@ -298,10 +299,18 @@ export default function ComplaintsPage() {
                     }))
                   }
                 >
-                  <option value="ops">ops</option>
-                  <option value="phone">phone</option>
-                  <option value="web">web</option>
-                  <option value="app">app</option>
+                  <option value="ops">
+                    {formatOpsCodeLabel(locale, "ops")}
+                  </option>
+                  <option value="phone">
+                    {formatOpsCodeLabel(locale, "phone")}
+                  </option>
+                  <option value="web">
+                    {formatOpsCodeLabel(locale, "web")}
+                  </option>
+                  <option value="app">
+                    {formatOpsCodeLabel(locale, "app")}
+                  </option>
                 </select>
               </label>
               <label>
@@ -317,7 +326,7 @@ export default function ComplaintsPage() {
                 >
                   {CATEGORY_OPTIONS.map((category) => (
                     <option key={category} value={category}>
-                      {category.replace(/_/g, " ")}
+                      {formatOpsCodeLabel(locale, category)}
                     </option>
                   ))}
                 </select>
@@ -334,8 +343,12 @@ export default function ComplaintsPage() {
                     }))
                   }
                 >
-                  <option value="normal">normal</option>
-                  <option value="high">high</option>
+                  <option value="normal">
+                    {formatOpsCodeLabel(locale, "normal")}
+                  </option>
+                  <option value="high">
+                    {formatOpsCodeLabel(locale, "high")}
+                  </option>
                 </select>
               </label>
               <label>
@@ -424,8 +437,8 @@ export default function ComplaintsPage() {
                         onClick={() => setSelectedCaseNo(record.caseNo)}
                       >
                         <td>{record.caseNo}</td>
-                        <td>{record.category}</td>
-                        <td>{record.status}</td>
+                        <td>{formatOpsCodeLabel(locale, record.category)}</td>
+                        <td>{formatOpsCodeLabel(locale, record.status)}</td>
                         <td>{record.assigneeId ?? "-"}</td>
                         <td>{record.relatedOrderId ?? "-"}</td>
                         <td>{record.relatedCallId ?? "-"}</td>
@@ -453,7 +466,9 @@ export default function ComplaintsPage() {
                     <div className="detail-grid">
                       <div>
                         <span className="label">{t("common.status")}</span>
-                        <strong>{selectedRecord.status}</strong>
+                        <strong>
+                          {formatOpsCodeLabel(locale, selectedRecord.status)}
+                        </strong>
                         <small>
                           {t("complaints.detail.slaDue", {
                             value: formatDateTime(selectedRecord.slaDueAt),
@@ -717,7 +732,9 @@ export default function ComplaintsPage() {
                       {timeline.length > 0 ? (
                         timeline.map((entry) => (
                           <div key={entry.entryId} className="timeline-item">
-                            <strong>{entry.action}</strong>
+                            <strong>
+                              {formatOpsCodeLabel(locale, entry.action)}
+                            </strong>
                             <span>{entry.note}</span>
                             <small>{formatDateTime(entry.createdAt)}</small>
                           </div>

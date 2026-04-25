@@ -8,6 +8,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   DriverStatementRecord,
   ReimbursementBatchRecord,
@@ -64,7 +68,7 @@ function reimbursementWorkflow(
 }
 
 export default function PaymentsPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const defaults = getPreviousMonthDefaults();
   const [invoices, setInvoices] = useState<TenantInvoiceRecord[]>([]);
@@ -223,7 +227,9 @@ export default function PaymentsPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -369,7 +375,7 @@ export default function PaymentsPage() {
               }`}
               onClick={() => setInvoiceFilter(value)}
             >
-              {value}
+              {formatPlatformCodeLabel(locale, value)}
             </button>
           ))}
         </div>
@@ -405,9 +411,9 @@ export default function PaymentsPage() {
               <th>{t("payments.col.tenant")}</th>
               <th>{t("payments.col.amount")}</th>
               <th>{t("payments.col.status")}</th>
-              <th>Pricing Snapshot</th>
+              <th>{getPlatformLabel(locale, "pricingSnapshot")}</th>
               <th>{t("payments.col.period")}</th>
-              <th>Artifact</th>
+              <th>{getPlatformLabel(locale, "artifact")}</th>
             </tr>
           </thead>
           <tbody>
@@ -434,7 +440,7 @@ export default function PaymentsPage() {
                             : "admin-badge--warning"
                       }`}
                     >
-                      {invoice.status}
+                      {formatPlatformCodeLabel(locale, invoice.status)}
                     </span>
                   </td>
                   <td>
@@ -491,12 +497,12 @@ export default function PaymentsPage() {
               <th>{t("payments.col.statement")}</th>
               <th>{t("payments.col.driver")}</th>
               <th>{t("payments.col.period")}</th>
-              <th>Fee Plan</th>
-              <th>Gross</th>
-              <th>Service Fee</th>
-              <th>Subsidy</th>
+              <th>{getPlatformLabel(locale, "feePlan")}</th>
+              <th>{getPlatformLabel(locale, "gross")}</th>
+              <th>{getPlatformLabel(locale, "serviceFee")}</th>
+              <th>{getPlatformLabel(locale, "subsidy")}</th>
               <th>{t("payments.col.net")}</th>
-              <th>Payout</th>
+              <th>{getPlatformLabel(locale, "payout")}</th>
             </tr>
           </thead>
           <tbody>
@@ -526,7 +532,7 @@ export default function PaymentsPage() {
                           : "admin-badge--warning"
                       }`}
                     >
-                      {statement.payoutStatus}
+                      {formatPlatformCodeLabel(locale, statement.payoutStatus)}
                     </span>
                   </td>
                 </tr>
@@ -559,11 +565,11 @@ export default function PaymentsPage() {
             <tr>
               <th>{t("payments.col.batch")}</th>
               <th>{t("payments.col.driver")}</th>
-              <th>Statement</th>
-              <th>Total</th>
-              <th>Workflow</th>
-              <th>Remittance</th>
-              <th>Items</th>
+              <th>{getPlatformLabel(locale, "statement")}</th>
+              <th>{getPlatformLabel(locale, "total")}</th>
+              <th>{getPlatformLabel(locale, "workflow")}</th>
+              <th>{getPlatformLabel(locale, "remittance")}</th>
+              <th>{getPlatformLabel(locale, "items")}</th>
               <th>{t("common.actions")}</th>
             </tr>
           </thead>
@@ -585,7 +591,7 @@ export default function PaymentsPage() {
                       {reimbursementWorkflow(
                         batch,
                         t("payments.awaitingApproval"),
-                        "paid",
+                        formatPlatformCodeLabel(locale, "paid"),
                         t("payments.col.approved"),
                       )}
                     </div>
@@ -613,7 +619,10 @@ export default function PaymentsPage() {
                           [batch.batchId]: event.target.value,
                         }))
                       }
-                      placeholder="remit-proof-001"
+                      placeholder={getPlatformLabel(
+                        locale,
+                        "remittanceProofExample",
+                      )}
                       style={{ ...inputStyle, minWidth: 180 }}
                       disabled={batch.status === "paid"}
                     />

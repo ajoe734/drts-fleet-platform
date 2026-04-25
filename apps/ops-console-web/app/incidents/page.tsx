@@ -19,13 +19,14 @@ import {
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
+import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
 const STATUSES: IncidentStatus[] = [...INCIDENT_STATUSES];
 const SEVERITIES: IncidentSeverity[] = [...INCIDENT_SEVERITIES];
 const CATEGORIES: IncidentCategory[] = [...INCIDENT_CATEGORIES];
 
 export default function IncidentsPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [records, setRecords] = useState<IncidentRecord[]>([]);
   const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(
@@ -141,7 +142,7 @@ export default function IncidentsPage() {
       <div>
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
           </div>
         )}
 
@@ -182,11 +183,15 @@ export default function IncidentsPage() {
         <section id="critical-sos-queue" className="sos-queue">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">Priority queue</p>
-              <h3>Critical / SOS queue</h3>
+              <p className="eyebrow">
+                {getOpsLabel(locale, "incidentsPriorityQueue")}
+              </p>
+              <h3>{getOpsLabel(locale, "incidentsCriticalQueue")}</h3>
             </div>
             <span className="panel-note">
-              {criticalQueue.length} active critical incident(s)
+              {getOpsLabel(locale, "incidentsActiveCritical", {
+                count: criticalQueue.length,
+              })}
             </span>
           </div>
           {criticalQueue.length > 0 ? (
@@ -196,21 +201,24 @@ export default function IncidentsPage() {
                   <div>
                     <div className="sos-title-row">
                       <strong className="cell-title">{record.title}</strong>
-                      {renderSeverityBadge(record.severity)}
+                      {renderSeverityBadge(record.severity, locale)}
                     </div>
                     <div className="cell-subcopy">
-                      {record.incidentId} · {record.category.replace(/_/g, " ")}
+                      {record.incidentId} ·{" "}
+                      {formatOpsCodeLabel(locale, record.category)}
                     </div>
                     <div className="cell-subcopy">{record.description}</div>
                   </div>
                   <div className="sos-meta">
-                    <span className="status-pill">{record.status}</span>
+                    <span className="status-pill">
+                      {formatOpsCodeLabel(locale, record.status)}
+                    </span>
                     <button
                       className="btn"
                       type="button"
                       onClick={() => void loadTimeline(record.incidentId)}
                     >
-                      Review timeline
+                      {getOpsLabel(locale, "incidentsReviewTimeline")}
                     </button>
                   </div>
                 </article>
@@ -218,7 +226,7 @@ export default function IncidentsPage() {
             </div>
           ) : (
             <p className="all-clear-copy">
-              No critical incidents. All clear for now.
+              {getOpsLabel(locale, "incidentsAllClear")}
             </p>
           )}
         </section>
@@ -241,7 +249,7 @@ export default function IncidentsPage() {
             <option value="all">{t("incidents.allStatuses")}</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {formatOpsCodeLabel(locale, status)}
               </option>
             ))}
           </select>
@@ -255,7 +263,7 @@ export default function IncidentsPage() {
             <option value="all">{t("incidents.allSeverities")}</option>
             {SEVERITIES.map((severity) => (
               <option key={severity} value={severity}>
-                {severity}
+                {formatOpsCodeLabel(locale, severity)}
               </option>
             ))}
           </select>
@@ -269,7 +277,7 @@ export default function IncidentsPage() {
             <option value="all">{t("incidents.allCategories")}</option>
             {CATEGORIES.map((category) => (
               <option key={category} value={category}>
-                {category.replace(/_/g, " ")}
+                {formatOpsCodeLabel(locale, category)}
               </option>
             ))}
           </select>
@@ -325,7 +333,7 @@ export default function IncidentsPage() {
         )}
 
         {loading ? (
-          <p>Loading incidents...</p>
+          <p>{getOpsLabel(locale, "incidentsLoading")}</p>
         ) : (
           <div className="content-grid">
             <section className="panel">
@@ -365,14 +373,14 @@ export default function IncidentsPage() {
                           <div className="cell-title">{record.title}</div>
                           <div className="cell-subcopy">
                             {record.incidentId} ·{" "}
-                            {record.category.replace(/_/g, " ")}
+                            {formatOpsCodeLabel(locale, record.category)}
                           </div>
                           <div className="cell-subcopy">
                             {record.description}
                           </div>
                         </td>
-                        <td>{renderSeverityBadge(record.severity)}</td>
-                        <td>{record.status}</td>
+                        <td>{renderSeverityBadge(record.severity, locale)}</td>
+                        <td>{formatOpsCodeLabel(locale, record.status)}</td>
                         <td>
                           <div className="link-stack">
                             {record.relatedOrderId && (
@@ -380,24 +388,30 @@ export default function IncidentsPage() {
                                 className="inline-link"
                                 href={`/dispatch?orderId=${encodeURIComponent(record.relatedOrderId)}`}
                               >
-                                Order {record.relatedOrderId}
+                                {getOpsLabel(locale, "order")}{" "}
+                                {record.relatedOrderId}
                               </Link>
                             )}
                             {record.relatedVehicleId && (
                               <Link className="inline-link" href="/vehicles">
-                                Vehicle {record.relatedVehicleId}
+                                {getOpsLabel(locale, "vehicle")}{" "}
+                                {record.relatedVehicleId}
                               </Link>
                             )}
                             {record.relatedComplaintCaseNo && (
                               <Link className="inline-link" href="/complaints">
-                                Complaint {record.relatedComplaintCaseNo}
+                                {getOpsLabel(locale, "complaint")}{" "}
+                                {record.relatedComplaintCaseNo}
                               </Link>
                             )}
                             {!record.relatedOrderId &&
                               !record.relatedVehicleId &&
                               !record.relatedComplaintCaseNo && (
                                 <span className="cell-subcopy">
-                                  No linked entities
+                                  {getOpsLabel(
+                                    locale,
+                                    "incidentsNoLinkedEntities",
+                                  )}
                                 </span>
                               )}
                           </div>
@@ -477,7 +491,9 @@ export default function IncidentsPage() {
                   <ul className="timeline-list">
                     {timeline.map((entry) => (
                       <li key={entry.entryId}>
-                        <strong>{entry.action}</strong>
+                        <strong>
+                          {formatOpsCodeLabel(locale, entry.action)}
+                        </strong>
                         <div>{entry.note}</div>
                         <small>
                           {entry.actor} ·{" "}
@@ -491,7 +507,7 @@ export default function IncidentsPage() {
                 )
               ) : (
                 <p className="empty-copy">
-                  Choose an incident row to inspect timeline and audit flow.
+                  {getOpsLabel(locale, "incidentsSelectHint")}
                 </p>
               )}
             </section>
@@ -725,9 +741,11 @@ function incidentSeverityWeight(severity: IncidentSeverity) {
   }
 }
 
-function renderSeverityBadge(severity: IncidentSeverity) {
+function renderSeverityBadge(severity: IncidentSeverity, locale: "en" | "zh") {
   return (
-    <span className={`severity-badge severity-${severity}`}>{severity}</span>
+    <span className={`severity-badge severity-${severity}`}>
+      {formatOpsCodeLabel(locale, severity)}
+    </span>
   );
 }
 
@@ -742,7 +760,7 @@ function IncidentForm({
     command: CreateIncidentCommand | UpdateIncidentCommand,
   ) => Promise<void>;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [pending, startTransition] = useTransition();
   const [title, setTitle] = useState(editingRecord?.title ?? "");
   const [description, setDescription] = useState(
@@ -862,7 +880,7 @@ function IncidentForm({
               >
                 {CATEGORIES.map((value) => (
                   <option key={value} value={value}>
-                    {value.replace(/_/g, " ")}
+                    {formatOpsCodeLabel(locale, value)}
                   </option>
                 ))}
               </select>
@@ -877,7 +895,7 @@ function IncidentForm({
               >
                 {SEVERITIES.map((value) => (
                   <option key={value} value={value}>
-                    {value}
+                    {formatOpsCodeLabel(locale, value)}
                   </option>
                 ))}
               </select>
@@ -941,7 +959,7 @@ function IncidentForm({
             >
               {STATUSES.map((value) => (
                 <option key={value} value={value}>
-                  {value}
+                  {formatOpsCodeLabel(locale, value)}
                 </option>
               ))}
             </select>

@@ -12,12 +12,16 @@ import {
   truncate,
 } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type { AuditLogRecord } from "@drts/contracts";
 
 type TFn = (key: string, params?: Record<string, string | number>) => string;
 
 export default function AuditPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [records, setRecords] = useState<AuditLogRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -85,7 +89,9 @@ export default function AuditPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -111,7 +117,7 @@ export default function AuditPage() {
             <option value="">{t("common.all")}</option>
             {modules.map((m) => (
               <option key={m} value={m}>
-                {m}
+                {formatPlatformCodeLabel(locale, m)}
               </option>
             ))}
           </select>
@@ -137,7 +143,7 @@ export default function AuditPage() {
             <option value="">{t("common.all")}</option>
             {actorTypes.map((a) => (
               <option key={a} value={a}>
-                {a}
+                {formatPlatformCodeLabel(locale, a)}
               </option>
             ))}
           </select>
@@ -168,7 +174,7 @@ export default function AuditPage() {
           <table className="admin-table">
             <thead>
               <tr>
-                <th>ID</th>
+                <th>{getPlatformLabel(locale, "id")}</th>
                 <th>{t("audit.col.actor")}</th>
                 <th>{t("audit.col.module")}</th>
                 <th>{t("audit.col.action")}</th>
@@ -187,23 +193,29 @@ export default function AuditPage() {
                     </td>
                     <td>
                       <div style={{ fontSize: 12 }}>
-                        <div>{truncate(r.actorId || "system", 16)}</div>
+                        <div>
+                          {truncate(
+                            r.actorId ||
+                              formatPlatformCodeLabel(locale, "system"),
+                            16,
+                          )}
+                        </div>
                         <span
                           className="admin-badge admin-badge--neutral"
                           style={{ fontSize: 10 }}
                         >
-                          {r.actorType}
+                          {formatPlatformCodeLabel(locale, r.actorType)}
                         </span>
                       </div>
                     </td>
-                    <td>{r.moduleName}</td>
+                    <td>{formatPlatformCodeLabel(locale, r.moduleName)}</td>
                     <td>
                       <span className="admin-badge admin-badge--info">
-                        {r.actionName}
+                        {formatPlatformCodeLabel(locale, r.actionName)}
                       </span>
                     </td>
                     <td style={{ fontSize: 12 }}>
-                      {r.resourceType}
+                      {formatPlatformCodeLabel(locale, r.resourceType)}
                       {r.resourceId ? `:${truncate(r.resourceId, 8)}` : ""}
                     </td>
                     <td style={{ fontFamily: "monospace", fontSize: 11 }}>
@@ -301,7 +313,7 @@ function AuditValueCard({
         </pre>
       ) : (
         <span style={{ fontSize: 12, color: "#9ca3af" }}>
-          {t("common.noValues") ?? "No values"}
+          {t("common.noValues")}
         </span>
       )}
     </div>

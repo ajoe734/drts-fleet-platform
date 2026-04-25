@@ -16,6 +16,7 @@ import type {
 import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
+import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
 interface DispatchWorkflowProps {
   orders: OwnedOrderRecord[];
@@ -58,18 +59,22 @@ function getQueueStateColor(state: QueueState): string {
 }
 
 function formatEta(
+  locale: "en" | "zh",
   etaMinutes: number | null | undefined,
   updatedAt?: string,
 ): { display: string; tooltip: string } {
   if (etaMinutes === null || etaMinutes === undefined) {
-    return { display: "N/A", tooltip: "ETA not available" };
+    return {
+      display: "N/A",
+      tooltip: getOpsLabel(locale, "dispatchEtaUnavailable"),
+    };
   }
   const updated = updatedAt
     ? new Date(updatedAt).toLocaleTimeString()
-    : "unknown";
+    : getOpsLabel(locale, "unknown");
   return {
     display: `${etaMinutes} min`,
-    tooltip: `Last updated: ${updated}`,
+    tooltip: getOpsLabel(locale, "dispatchLastUpdated", { value: updated }),
   };
 }
 
@@ -78,7 +83,7 @@ export function DispatchWorkflow({
   dispatchJobs,
   focusOrderId = "",
 }: DispatchWorkflowProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = getOpsClient();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -335,7 +340,7 @@ export function DispatchWorkflow({
     <div className="dispatch-workflow">
       {error && (
         <div className="error-banner">
-          <strong>Error:</strong> {error}
+          <strong>{getOpsLabel(locale, "error")}:</strong> {error}
         </div>
       )}
 
@@ -417,7 +422,7 @@ export function DispatchWorkflow({
                   order.status === "redispatch_required";
                 const isExceptionHold = order.status === "exception_hold";
                 const etaInfo = job
-                  ? formatEta(job.latestEtaMinutes, job.updatedAt)
+                  ? formatEta(locale, job.latestEtaMinutes, job.updatedAt)
                   : { display: "-", tooltip: t("dispatch.workflow.noJobEta") };
                 const isFocused = focusOrderId === order.orderId;
 
@@ -438,17 +443,22 @@ export function DispatchWorkflow({
                       <div className="cell-title">{order.orderNo}</div>
                       <div className="cell-subcopy">{order.orderId}</div>
                       <div className="cell-subcopy">
-                        source: {order.orderSource}
+                        {getOpsLabel(locale, "dispatchSource", {
+                          value: formatOpsCodeLabel(locale, order.orderSource),
+                        })}
                       </div>
                     </td>
                     <td>
                       <div className="cell-title">
-                        {order.serviceBucket.replace(/_/g, " ")}
+                        {formatOpsCodeLabel(locale, order.serviceBucket)}
                       </div>
                       <div className="cell-subcopy">
-                        {order.dispatchSemantics}
+                        {formatOpsCodeLabel(locale, order.dispatchSemantics)}
                         {order.businessDispatchSubtype
-                          ? ` · ${order.businessDispatchSubtype.replace(/_/g, " ")}`
+                          ? ` · ${formatOpsCodeLabel(
+                              locale,
+                              order.businessDispatchSubtype,
+                            )}`
                           : ""}
                       </div>
                     </td>
@@ -459,14 +469,26 @@ export function DispatchWorkflow({
                       >
                         {t(getQueueStateKey(queueState))}
                       </span>
-                      <div className="cell-subcopy">{order.status}</div>
+                      <div className="cell-subcopy">
+                        {formatOpsCodeLabel(locale, order.status)}
+                      </div>
                     </td>
                     <td>
                       {job ? (
                         <div className="dispatch-block">
-                          <div>ID: {job.dispatchJobId.slice(0, 8)}...</div>
-                          <div>Status: {job.status}</div>
-                          <div className="cell-subcopy">{job.mode}</div>
+                          <div>
+                            {getOpsLabel(locale, "dispatchId", {
+                              value: `${job.dispatchJobId.slice(0, 8)}...`,
+                            })}
+                          </div>
+                          <div>
+                            {getOpsLabel(locale, "dispatchStatus", {
+                              value: formatOpsCodeLabel(locale, job.status),
+                            })}
+                          </div>
+                          <div className="cell-subcopy">
+                            {formatOpsCodeLabel(locale, job.mode)}
+                          </div>
                         </div>
                       ) : (
                         <span className="cell-subcopy">

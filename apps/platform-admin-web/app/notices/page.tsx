@@ -9,6 +9,10 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   PlatformNoticeRecord,
   PlatformNoticeSeverity,
@@ -22,7 +26,7 @@ const SEVERITY_OPTIONS: PlatformNoticeSeverity[] = [
 ];
 
 export default function NoticesPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [notices, setNotices] = useState<PlatformNoticeRecord[]>([]);
   const [maintenance, setMaintenance] =
@@ -146,7 +150,9 @@ export default function NoticesPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -289,7 +295,7 @@ export default function NoticesPage() {
                 >
                   {SEVERITY_OPTIONS.map((s) => (
                     <option key={s} value={s}>
-                      {s}
+                      {formatPlatformCodeLabel(locale, s)}
                     </option>
                   ))}
                 </select>
@@ -351,7 +357,7 @@ export default function NoticesPage() {
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>ID</th>
+                  <th>{getPlatformLabel(locale, "id")}</th>
                   <th>{t("notices.col.title")}</th>
                   <th>{t("notices.col.severity")}</th>
                   <th>{t("fleet.col.status")}</th>
@@ -387,7 +393,7 @@ export default function NoticesPage() {
                       <span
                         className={`admin-badge ${getSeverityBadge(n.severity)}`}
                       >
-                        {n.severity}
+                        {formatPlatformCodeLabel(locale, n.severity)}
                       </span>
                     </td>
                     <td>
@@ -400,7 +406,7 @@ export default function NoticesPage() {
                               : "admin-badge--neutral"
                         }`}
                       >
-                        {n.status}
+                        {formatPlatformCodeLabel(locale, n.status)}
                       </span>
                     </td>
                     <td>
@@ -408,7 +414,7 @@ export default function NoticesPage() {
                         className="admin-badge admin-badge--info"
                         style={{ fontSize: 11 }}
                       >
-                        {n.targetAudience}
+                        {formatPlatformCodeLabel(locale, n.targetAudience)}
                       </span>
                     </td>
                     <td style={{ fontSize: 12 }}>
@@ -519,7 +525,10 @@ export default function NoticesPage() {
                   borderRadius: 8,
                   fontSize: 14,
                 }}
-                placeholder="e.g. Scheduled upgrade window"
+                placeholder={getPlatformLabel(
+                  locale,
+                  "maintenanceReasonExample",
+                )}
               />
             </div>
             <button

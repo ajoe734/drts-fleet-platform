@@ -8,6 +8,10 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   VehicleRegistryRecord,
   DriverRegistryRecord,
@@ -15,7 +19,7 @@ import type {
 } from "@drts/contracts";
 
 export default function FleetPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [vehicles, setVehicles] = useState<VehicleRegistryRecord[]>([]);
   const [drivers, setDrivers] = useState<DriverRegistryRecord[]>([]);
@@ -69,7 +73,9 @@ export default function FleetPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -168,7 +174,7 @@ export default function FleetPage() {
                             : "admin-badge--neutral"
                         }`}
                       >
-                        {d.workState || "unknown"}
+                        {formatPlatformCodeLabel(locale, d.workState)}
                       </span>
                     </td>
                     <td>
@@ -214,7 +220,11 @@ export default function FleetPage() {
                     <td style={{ fontFamily: "monospace", fontSize: 12 }}>
                       {c.vehicleId}
                     </td>
-                    <td>{c.contractType || "—"}</td>
+                    <td>
+                      {c.contractType
+                        ? formatPlatformCodeLabel(locale, c.contractType)
+                        : "—"}
+                    </td>
                     <td>
                       <span
                         className={`admin-badge ${
@@ -223,7 +233,7 @@ export default function FleetPage() {
                             : "admin-badge--neutral"
                         }`}
                       >
-                        {c.status || "unknown"}
+                        {formatPlatformCodeLabel(locale, c.status)}
                       </span>
                     </td>
                     <td>{formatDateTime(c.startAt || "")}</td>

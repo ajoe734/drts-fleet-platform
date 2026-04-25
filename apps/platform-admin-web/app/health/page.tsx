@@ -8,6 +8,10 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 
 interface AdapterHealth {
   adapterId: string;
@@ -24,7 +28,7 @@ interface QuotaStatus {
 }
 
 export default function HealthPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [adapters, setAdapters] = useState<AdapterHealth[]>([]);
   const [quotas, setQuotas] = useState<QuotaStatus[]>([]);
@@ -113,7 +117,9 @@ export default function HealthPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -166,7 +172,7 @@ export default function HealthPage() {
                       <span
                         className={`admin-badge ${getAdapterBadge(a.status)}`}
                       >
-                        {a.status}
+                        {formatPlatformCodeLabel(locale, a.status)}
                       </span>
                     </td>
                     <td>

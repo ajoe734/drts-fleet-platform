@@ -8,6 +8,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
@@ -19,8 +23,8 @@ import {
   formatPlacardSourceOptionLabel,
   getPlacardSourceSelectionHint,
   getPreferredPlacardSourceVersion,
+  getPlacardRetiredSourceAuditNote,
   isPlacardSourceSelectionBlocked,
-  PLACARD_RETIRED_SOURCE_AUDIT_NOTE,
 } from "./placard-source";
 
 type PlacardFormState = {
@@ -71,7 +75,7 @@ function publicInfoStatusBadge(status: PublicInfoVersionRecord["status"]) {
 }
 
 export default function SwitchboardPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [publicInfo, setPublicInfo] = useState<PublicInfoVersionRecord[]>([]);
   const [placards, setPlacards] = useState<PlacardVersionRecord[]>([]);
@@ -150,8 +154,12 @@ export default function SwitchboardPage() {
     publicInfoById[placardForm.publicInfoVersionId] ?? null;
   const versionCodePrecheckMessage = useMemo(
     () =>
-      getPlacardVersionCodePrecheckMessage(placardForm.versionCode, placards),
-    [placardForm.versionCode, placards],
+      getPlacardVersionCodePrecheckMessage(
+        placardForm.versionCode,
+        placards,
+        locale,
+      ),
+    [locale, placardForm.versionCode, placards],
   );
   const placardSourceBlocked = isPlacardSourceSelectionBlocked(
     selectedPublicInfoVersion,
@@ -264,7 +272,9 @@ export default function SwitchboardPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -371,7 +381,11 @@ export default function SwitchboardPage() {
                     }))
                   }
                   style={inputStyle}
-                  placeholder="2026 Q3 公開資訊版"
+                  placeholder={
+                    locale === "en"
+                      ? "2026 Q3 public info"
+                      : "2026 Q3 公開資訊版"
+                  }
                 />
               </label>
               <label style={labelStyle}>
@@ -441,7 +455,7 @@ export default function SwitchboardPage() {
                     }))
                   }
                   style={inputStyle}
-                  placeholder="依表計費"
+                  placeholder={locale === "en" ? "Metered pricing" : "依表計費"}
                 />
               </label>
               <label style={labelStyle}>
@@ -455,7 +469,11 @@ export default function SwitchboardPage() {
                     }))
                   }
                   style={inputStyle}
-                  placeholder="夜間與偏遠加成依公告"
+                  placeholder={
+                    locale === "en"
+                      ? "Night and remote surcharges per notice"
+                      : "夜間與偏遠加成依公告"
+                  }
                 />
               </label>
               <label style={labelStyle}>
@@ -469,7 +487,11 @@ export default function SwitchboardPage() {
                     }))
                   }
                   style={inputStyle}
-                  placeholder="現金、信用卡、企業簽單"
+                  placeholder={
+                    locale === "en"
+                      ? "Cash, credit card, corporate charge"
+                      : "現金、信用卡、企業簽單"
+                  }
                 />
               </label>
             </div>
@@ -514,7 +536,7 @@ export default function SwitchboardPage() {
                       value={version.versionId}
                       disabled={isPlacardSourceSelectionBlocked(version)}
                     >
-                      {formatPlacardSourceOptionLabel(version)}
+                      {formatPlacardSourceOptionLabel(version, locale)}
                     </option>
                   ))}
                 </select>
@@ -563,11 +585,11 @@ export default function SwitchboardPage() {
               </label>
             </div>
             <p style={{ marginTop: 12, marginBottom: 0, color: "#6b7280" }}>
-              {getPlacardSourceSelectionHint(selectedPublicInfoVersion)}
+              {getPlacardSourceSelectionHint(selectedPublicInfoVersion, locale)}
             </p>
             {placardSourceBlocked && (
               <p style={{ marginTop: 8, marginBottom: 0, color: "#92400e" }}>
-                {PLACARD_RETIRED_SOURCE_AUDIT_NOTE}
+                {getPlacardRetiredSourceAuditNote(locale)}
               </p>
             )}
             {versionCodePrecheckMessage && (
@@ -621,8 +643,14 @@ export default function SwitchboardPage() {
                       </div>
                     </td>
                     <td>
-                      <div>Call: {version.callPhone ?? "—"}</div>
-                      <div>Complaint: {version.complaintPhone ?? "—"}</div>
+                      <div>
+                        {getPlatformLabel(locale, "call")}:{" "}
+                        {version.callPhone ?? "—"}
+                      </div>
+                      <div>
+                        {getPlatformLabel(locale, "complaint")}:{" "}
+                        {version.complaintPhone ?? "—"}
+                      </div>
                     </td>
                     <td>
                       <div>
@@ -637,7 +665,7 @@ export default function SwitchboardPage() {
                       <span
                         className={`admin-badge ${publicInfoStatusBadge(version.status)}`}
                       >
-                        {version.status}
+                        {formatPlatformCodeLabel(locale, version.status)}
                       </span>
                       <div style={subcopyStyle}>
                         {version.effectiveFrom ?? "—"}
@@ -726,13 +754,17 @@ export default function SwitchboardPage() {
                         {sourceVersion?.title ?? placard.publicInfoVersionId}
                       </div>
                       <div style={subcopyStyle}>
-                        {sourceVersion?.status ?? "unknown"}
+                        {formatPlatformCodeLabel(
+                          locale,
+                          sourceVersion?.status ?? "unknown",
+                        )}
                       </div>
                     </td>
                     <td>{placard.templateName}</td>
                     <td>
                       <div style={monoSubcopyStyle}>
-                        {placard.artifactFileId ?? "pending-artifact-id"}
+                        {placard.artifactFileId ??
+                          getPlatformLabel(locale, "pendingArtifactId")}
                       </div>
                       <div style={monoSubcopyStyle}>
                         {shortHash(placard.artifactManifestHash)}
@@ -761,7 +793,10 @@ export default function SwitchboardPage() {
                             : "admin-badge--warning"
                         }`}
                       >
-                        {placard.publishedAt ? "published" : "draft"}
+                        {formatPlatformCodeLabel(
+                          locale,
+                          placard.publishedAt ? "published" : "draft",
+                        )}
                       </span>
                       <div style={subcopyStyle}>
                         {formatDateTime(placard.publishedAt ?? "")}
