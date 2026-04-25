@@ -21,7 +21,7 @@ It separates:
 
 Baseline references used for this matrix:
 
-- `drts-fleet-platform` `origin/main` at `42bd15d9848ad38874c1a36e67408620a668f922`
+- `drts-fleet-platform` `origin/main` at `2320134b43356764be0c150e9f8aa9b08ed28319`
 - `tenant-commute-hub` `origin/main` at `2a3acf2736b5e37eea82998c58f5466a0bc7ca78`
 
 ---
@@ -33,6 +33,7 @@ Baseline references used for this matrix:
 | `closed`         | Tenant BFF cutover                                   | both                  | closed on remote baseline                    | Landed through `ajoe734/tenant-commute-hub#1` plus companion backend/client compatibility in `ajoe734/drts-fleet-platform#1`.                                                                                                                                      |
 | `closed`         | Tenant identity hardening                            | both                  | closed on remote baseline                    | Landed through `ajoe734/tenant-commute-hub#3` plus backend auth alignment in `ajoe734/drts-fleet-platform#12`. Tenant remote `main` is now email-only bootstrap with server-issued Bearer session; no local role picker or `localStorage` session restore remains. |
 | `closed`         | `GAP-P2S3-001` protected control-plane trust cleanup | `drts-fleet-platform` | closed on remote baseline                    | Protected staging verifies `platform-admin-web` / `ops-console-web` through server-issued inner Bearer auth on the control-plane proxy path, and merged staging run `#24891433989` passed build, migration, deploy, and IAP-protected API verification.           |
+| `closed`         | Tenant standalone contract snapshot drift            | both                  | closed with managed fallback path            | `tenant-commute-hub` still prefers the live sibling core checkout for local pair-dev, but standalone builds now consume a managed snapshot synced from `drts-fleet-platform` contracts instead of a hand-maintained drift-prone shim.                             |
 | `closed`         | Staging deploy verifier token path                   | `drts-fleet-platform` | closed on remote baseline                    | GitHub Actions health-check now mints an IAP ID token directly instead of relying on the broken `gcloud auth print-identity-token --audiences` path.                                                                                                               |
 | `closed`         | Tenant bootstrap JWT `authMode` drift                | `drts-fleet-platform` | closed on remote baseline                    | Tenant bootstrap session tokens now carry `authMode: jwt_bearer` consistently in both the response identity and the signed JWT payload.                                                                                                                            |
 | `closed`         | Ops driver earnings drilldown parity (`OC-017`)      | `drts-fleet-platform` | closed on remote baseline                    | `ops-console-web` now supports `Drivers -> select driver -> Earnings`, and revenue rows link into the same read-only drilldown.                                                                                                                                    |

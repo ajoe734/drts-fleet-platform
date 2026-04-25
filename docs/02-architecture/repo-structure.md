@@ -21,7 +21,7 @@ This repository uses a `pnpm` workspace with `turborepo`.
 ## Applications
 
 - `apps/api`: NestJS API bootstrap with a health endpoint placeholder
-- `apps/tenant-portal-web`: Next.js tenant-facing placeholder shell
+- `apps/tenant-portal-web`: Next.js legacy tenant portal reference shell retained under sunset; not a production tenant UI
 - `apps/platform-admin-web`: Next.js platform administration placeholder shell
 - `apps/ops-console-web`: Next.js operations console placeholder shell
 - `apps/driver-app`: Expo Router mobile placeholder shell
