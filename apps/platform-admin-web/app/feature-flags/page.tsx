@@ -1,15 +1,35 @@
-/**
- * Feature Flags Page
- * Feature flag management with tenant-level overrides.
- */
-
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import type { FeatureFlag, FeatureFlagSummary } from "@drts/contracts";
 
+function featureFlagDescription(locale: string, flag: FeatureFlag) {
+  if (locale !== "zh") return flag.description || "—";
+
+  const descriptions: Record<string, string> = {
+    "driver-app.earnings": "啟用司機 App 收益讀模型",
+    "driver-app.incidents": "啟用司機 App 事故回報",
+    "driver-app.shift": "啟用司機 App 班次與出勤追蹤",
+    "driver-app.tasks": "啟用司機 App 任務生命週期",
+    "ops-console.callcenter": "啟用營運後台客服中心工作階段檢視",
+    "ops-console.complaint": "啟用營運後台投訴案件管理",
+    "ops-console.dispatch": "啟用營運後台派車調度板",
+    "ops-console.reports": "啟用營運後台報表任務管理",
+    "phase1.read-models": "啟用 Phase 1 讀模型介面",
+    "phase1.smoke-paths": "啟用 Phase 1 smoke test 端點",
+    "tenant-portal.billing": "啟用租戶入口帳務檢視",
+    "tenant-portal.booking": "啟用租戶入口訂車管理",
+    "tenant-portal.reports": "啟用租戶入口報表任務提交",
+    "tenant-portal.webhooks": "啟用租戶入口 Webhook 管理",
+  };
+
+  return descriptions[flag.key] || flag.description || "—";
+}
+
 export default function FeatureFlagsPage() {
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [flags, setFlags] = useState<FeatureFlag[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,14 +72,55 @@ export default function FeatureFlagsPage() {
     return true;
   });
 
-  if (loading)
-    return <div className="admin-empty">Loading feature flags...</div>;
+  const copy =
+    locale === "zh"
+      ? {
+          title: "功能旗標",
+          description: "管理平台功能旗標，並檢視租戶層級覆寫狀態。",
+          errorLabel: "錯誤",
+          all: "全部",
+          enabled: "已啟用",
+          disabled: "已停用",
+          refresh: "重新整理",
+          empty: "沒有找到功能旗標。",
+          key: "鍵名",
+          status: "狀態",
+          details: "說明",
+          tenantOverride: "租戶覆寫",
+          updated: "更新時間",
+          toggle: "切換",
+          tenantPrefix: "租戶",
+          global: "全域",
+        }
+      : {
+          title: "Feature Flags",
+          description:
+            "Manage platform feature flags with tenant-level override support.",
+          errorLabel: "Error",
+          all: "All",
+          enabled: "Enabled",
+          disabled: "Disabled",
+          refresh: "Refresh",
+          empty: "No feature flags found.",
+          key: "Key",
+          status: "Status",
+          details: "Description",
+          tenantOverride: "Tenant Override",
+          updated: "Updated",
+          toggle: "Toggle",
+          tenantPrefix: "Tenant",
+          global: "Global",
+        };
+
+  if (loading) {
+    return <div className="admin-empty">{t("flags.loading")}</div>;
+  }
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Feature Flags</h1>
-        <p>Manage platform feature flags with tenant-level override support.</p>
+        <h1>{copy.title}</h1>
+        <p>{copy.description}</p>
       </div>
 
       {error && (
@@ -67,7 +128,9 @@ export default function FeatureFlagsPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {copy.errorLabel}: {error}
+          </p>
         </div>
       )}
 
@@ -77,41 +140,41 @@ export default function FeatureFlagsPage() {
             className={`admin-toggle-btn ${filter === "all" ? "active" : ""}`}
             onClick={() => setFilter("all")}
           >
-            All ({flags.length})
+            {copy.all} ({flags.length})
           </button>
           <button
             className={`admin-toggle-btn ${filter === "enabled" ? "active" : ""}`}
             onClick={() => setFilter("enabled")}
           >
-            Enabled ({flags.filter((f) => f.enabled).length})
+            {copy.enabled} ({flags.filter((f) => f.enabled).length})
           </button>
           <button
             className={`admin-toggle-btn ${filter === "disabled" ? "active" : ""}`}
             onClick={() => setFilter("disabled")}
           >
-            Disabled ({flags.filter((f) => !f.enabled).length})
+            {copy.disabled} ({flags.filter((f) => !f.enabled).length})
           </button>
         </div>
         <button className="admin-btn admin-btn--secondary" onClick={loadFlags}>
-          Refresh
+          {copy.refresh}
         </button>
       </div>
 
       {filtered.length === 0 ? (
         <div className="admin-card admin-empty">
-          <p>No feature flags found.</p>
+          <p>{copy.empty}</p>
         </div>
       ) : (
         <div className="admin-card" style={{ overflowX: "auto" }}>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Key</th>
-                <th>Status</th>
-                <th>Description</th>
-                <th>Tenant Override</th>
-                <th>Updated</th>
-                <th>Toggle</th>
+                <th>{copy.key}</th>
+                <th>{copy.status}</th>
+                <th>{copy.details}</th>
+                <th>{copy.tenantOverride}</th>
+                <th>{copy.updated}</th>
+                <th>{copy.toggle}</th>
               </tr>
             </thead>
             <tbody>
@@ -137,7 +200,7 @@ export default function FeatureFlagsPage() {
                           : "admin-badge--neutral"
                       }`}
                     >
-                      {flag.enabled ? "Enabled" : "Disabled"}
+                      {flag.enabled ? copy.enabled : copy.disabled}
                     </span>
                   </td>
                   <td
@@ -148,7 +211,7 @@ export default function FeatureFlagsPage() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {flag.description || "—"}
+                    {featureFlagDescription(locale, flag)}
                   </td>
                   <td>
                     {flag.tenantId ? (
@@ -156,11 +219,11 @@ export default function FeatureFlagsPage() {
                         className="admin-badge admin-badge--info"
                         style={{ fontSize: 11 }}
                       >
-                        Tenant: {flag.tenantId}
+                        {copy.tenantPrefix}: {flag.tenantId}
                       </span>
                     ) : (
                       <span style={{ fontSize: 12, color: "#9ca3af" }}>
-                        Global
+                        {copy.global}
                       </span>
                     )}
                   </td>

@@ -1,8 +1,3 @@
-/**
- * Audit Trail Page
- * Platform audit log with filtering and record inspection.
- */
-
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -11,9 +6,25 @@ import {
   formatDateTime,
   truncate,
 } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import type { AuditLogRecord } from "@drts/contracts";
 
+function moduleLabel(locale: string, value: string) {
+  if (locale !== "zh") return value;
+  switch (value) {
+    case "audit-notification":
+      return "稽核與通知";
+    case "dispatch":
+      return "派車";
+    case "foundation":
+      return "基礎設定";
+    default:
+      return value;
+  }
+}
+
 export default function AuditPage() {
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [records, setRecords] = useState<AuditLogRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,14 +78,74 @@ export default function AuditPage() {
     ...new Set(records.map((r) => r.actorType).filter(Boolean)),
   ];
 
-  if (loading)
-    return <div className="admin-empty">Loading audit records...</div>;
+  const copy =
+    locale === "zh"
+      ? {
+          description: "檢視平台稽核記錄，並依模組與操作者類型篩選。",
+          errorLabel: "錯誤",
+          filterModule: "模組",
+          filterActorType: "操作者類型",
+          all: "全部",
+          summary: `顯示 ${filtered.length} / ${records.length} 筆記錄`,
+          empty: "沒有符合目前篩選條件的稽核記錄。",
+          auditId: "稽核編號",
+          actor: "操作者",
+          module: "模組",
+          action: "動作",
+          resource: "資源",
+          tenant: "租戶",
+          created: "建立時間",
+          details: "詳情",
+          system: "系統",
+          noValues: "無資料",
+        }
+      : {
+          description:
+            "Review platform audit log entries with filtering capabilities.",
+          errorLabel: "Error",
+          filterModule: "Module",
+          filterActorType: "Actor Type",
+          all: "All",
+          summary: `Showing ${filtered.length} of ${records.length} records`,
+          empty: "No audit records found matching the filter.",
+          auditId: "Audit ID",
+          actor: "Actor",
+          module: "Module",
+          action: "Action",
+          resource: "Resource",
+          tenant: "Tenant",
+          created: "Created",
+          details: "Details",
+          system: "system",
+          noValues: "No values",
+        };
+
+  const actorTypeLabel = (value: string | null | undefined) => {
+    if (!value) return copy.system;
+    if (locale !== "zh") return value;
+    switch (value) {
+      case "system":
+        return "系統";
+      case "platform_admin":
+        return "平台管理員";
+      case "ops":
+        return "營運";
+      case "tenant":
+        return "租戶";
+      case "driver":
+        return "司機";
+      default:
+        return value;
+    }
+  };
+
+  if (loading) return <div className="admin-empty">{t("audit.loading")}</div>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Audit Trail</h1>
-        <p>Review platform audit log entries with filtering capabilities.</p>
+        <h1>{t("audit.title")}</h1>
+        <p>{copy.description}</p>
       </div>
 
       {error && (
@@ -82,7 +153,9 @@ export default function AuditPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {copy.errorLabel}: {error}
+          </p>
         </div>
       )}
 
@@ -92,7 +165,7 @@ export default function AuditPage() {
             htmlFor="filter-module"
             style={{ fontSize: 13, fontWeight: 500 }}
           >
-            Module:
+            {copy.filterModule}:
           </label>
           <select
             id="filter-module"
@@ -105,10 +178,10 @@ export default function AuditPage() {
               fontSize: 13,
             }}
           >
-            <option value="">All</option>
+            <option value="">{copy.all}</option>
             {modules.map((m) => (
               <option key={m} value={m}>
-                {m}
+                {moduleLabel(locale, m)}
               </option>
             ))}
           </select>
@@ -118,7 +191,7 @@ export default function AuditPage() {
             htmlFor="filter-actor"
             style={{ fontSize: 13, fontWeight: 500 }}
           >
-            Actor Type:
+            {copy.filterActorType}:
           </label>
           <select
             id="filter-actor"
@@ -131,10 +204,10 @@ export default function AuditPage() {
               fontSize: 13,
             }}
           >
-            <option value="">All</option>
+            <option value="">{copy.all}</option>
             {actorTypes.map((a) => (
               <option key={a} value={a}>
-                {a}
+                {actorTypeLabel(a)}
               </option>
             ))}
           </select>
@@ -143,34 +216,31 @@ export default function AuditPage() {
           className="admin-btn admin-btn--secondary"
           onClick={loadRecords}
         >
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
       <div className="admin-card" style={{ marginBottom: 12 }}>
-        <span style={{ fontSize: 13, color: "#6b7280" }}>
-          Showing {filtered.length} of {records.length} record
-          {records.length !== 1 ? "s" : ""}
-        </span>
+        <span style={{ fontSize: 13, color: "#6b7280" }}>{copy.summary}</span>
       </div>
 
       {filtered.length === 0 ? (
         <div className="admin-card admin-empty">
-          <p>No audit records found matching the filter.</p>
+          <p>{copy.empty}</p>
         </div>
       ) : (
         <div className="admin-card" style={{ overflowX: "auto" }}>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Audit ID</th>
-                <th>Actor</th>
-                <th>Module</th>
-                <th>Action</th>
-                <th>Resource</th>
-                <th>Tenant</th>
-                <th>Created</th>
-                <th>Details</th>
+                <th>{copy.auditId}</th>
+                <th>{copy.actor}</th>
+                <th>{copy.module}</th>
+                <th>{copy.action}</th>
+                <th>{copy.resource}</th>
+                <th>{copy.tenant}</th>
+                <th>{copy.created}</th>
+                <th>{copy.details}</th>
               </tr>
             </thead>
             <tbody>
@@ -182,16 +252,16 @@ export default function AuditPage() {
                     </td>
                     <td>
                       <div style={{ fontSize: 12 }}>
-                        <div>{truncate(r.actorId || "system", 16)}</div>
+                        <div>{truncate(r.actorId || copy.system, 16)}</div>
                         <span
                           className="admin-badge admin-badge--neutral"
                           style={{ fontSize: 10 }}
                         >
-                          {r.actorType}
+                          {actorTypeLabel(r.actorType)}
                         </span>
                       </div>
                     </td>
-                    <td>{r.moduleName}</td>
+                    <td>{moduleLabel(locale, r.moduleName)}</td>
                     <td>
                       <span className="admin-badge admin-badge--info">
                         {r.actionName}
@@ -218,35 +288,40 @@ export default function AuditPage() {
                             )
                           }
                         >
-                          {expandedAuditId === r.auditId ? "Hide" : "View"}
+                          {t("common.view")}
                         </button>
                       ) : (
-                        <span style={{ fontSize: 12, color: "#9ca3af" }}>
-                          —
+                        <span style={{ color: "#9ca3af", fontSize: 12 }}>
+                          {copy.noValues}
                         </span>
                       )}
                     </td>
                   </tr>
                   {expandedAuditId === r.auditId && (
                     <tr>
-                      <td colSpan={8} style={{ background: "#fafafa" }}>
-                        <div
+                      <td colSpan={8}>
+                        <pre
                           style={{
-                            display: "grid",
-                            gridTemplateColumns:
-                              "repeat(auto-fit, minmax(240px, 1fr))",
-                            gap: 12,
+                            margin: 0,
+                            padding: 12,
+                            background: "#0f172a",
+                            color: "#e2e8f0",
+                            borderRadius: 8,
+                            fontSize: 11,
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
                           }}
                         >
-                          <AuditValueCard
-                            title="Old Values"
-                            payload={r.oldValuesSummary}
-                          />
-                          <AuditValueCard
-                            title="New Values"
-                            payload={r.newValuesSummary}
-                          />
-                        </div>
+                          {JSON.stringify(
+                            {
+                              oldValuesSummary: r.oldValuesSummary,
+                              newValuesSummary: r.newValuesSummary,
+                              requestId: r.requestId,
+                            },
+                            null,
+                            2,
+                          )}
+                        </pre>
                       </td>
                     </tr>
                   )}
@@ -255,41 +330,6 @@ export default function AuditPage() {
             </tbody>
           </table>
         </div>
-      )}
-    </div>
-  );
-}
-
-function AuditValueCard({
-  title,
-  payload,
-}: {
-  title: string;
-  payload: Record<string, unknown> | undefined;
-}) {
-  return (
-    <div
-      style={{
-        border: "1px solid #e5e7eb",
-        borderRadius: 10,
-        padding: 12,
-        background: "#fff",
-      }}
-    >
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>{title}</div>
-      {payload ? (
-        <pre
-          style={{
-            margin: 0,
-            fontSize: 12,
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-          }}
-        >
-          {JSON.stringify(payload, null, 2)}
-        </pre>
-      ) : (
-        <span style={{ fontSize: 12, color: "#9ca3af" }}>No values</span>
       )}
     </div>
   );

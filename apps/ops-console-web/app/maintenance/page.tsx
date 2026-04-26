@@ -18,6 +18,42 @@ import { isMaintenanceOverdue } from "@/lib/ops-analytics";
 const STATUSES: MaintenanceStatus[] = [...MAINTENANCE_STATUSES];
 const TYPES: MaintenanceType[] = [...MAINTENANCE_TYPES];
 
+function maintenanceStatusLabel(locale: "en" | "zh", value: string) {
+  if (locale !== "zh") return value;
+  switch (value) {
+    case "scheduled":
+      return "已排程";
+    case "in_progress":
+      return "進行中";
+    case "completed":
+      return "已完成";
+    case "cancelled":
+      return "已取消";
+    case "overdue":
+      return "逾期";
+    default:
+      return value;
+  }
+}
+
+function maintenanceTypeLabel(locale: "en" | "zh", value: string) {
+  if (locale !== "zh") return value.replace(/_/g, " ");
+  switch (value) {
+    case "scheduled_service":
+      return "定期保養";
+    case "repair":
+      return "維修";
+    case "inspection":
+      return "檢驗";
+    case "cleaning":
+      return "清潔";
+    case "tire_service":
+      return "輪胎服務";
+    default:
+      return value.replace(/_/g, " ");
+  }
+}
+
 function formatCost(value: number | null): string {
   if (value === null) return "-";
   return new Intl.NumberFormat("zh-TW", {
@@ -28,7 +64,7 @@ function formatCost(value: number | null): string {
 }
 
 export default function MaintenancePage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -147,7 +183,7 @@ export default function MaintenancePage() {
             <option value="all">{t("common.allStatuses")}</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {maintenanceStatusLabel(locale, status)}
               </option>
             ))}
           </select>
@@ -246,7 +282,7 @@ export default function MaintenancePage() {
                             {record.maintenanceId}
                           </div>
                           <div className="cell-subcopy">
-                            {record.type.replace(/_/g, " ")}
+                            {maintenanceTypeLabel(locale, record.type)}
                           </div>
                           <div className="cell-subcopy">
                             {record.description}
@@ -254,7 +290,7 @@ export default function MaintenancePage() {
                         </td>
                         <td>
                           <span className="status-badge">
-                            {effectiveStatus}
+                            {maintenanceStatusLabel(locale, effectiveStatus)}
                           </span>
                         </td>
                         <td>
@@ -479,7 +515,7 @@ function MaintenanceForm({
     command: CreateMaintenanceRecordCommand | UpdateMaintenanceRecordCommand,
   ) => Promise<void>;
 }) {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [pending, startTransition] = useTransition();
   const [vehicleId, setVehicleId] = useState(editingRecord?.vehicleId ?? "");
   const [type, setType] = useState<MaintenanceType>(
@@ -576,7 +612,7 @@ function MaintenanceForm({
               >
                 {TYPES.map((value) => (
                   <option key={value} value={value}>
-                    {value.replace(/_/g, " ")}
+                    {maintenanceTypeLabel(locale, value)}
                   </option>
                 ))}
               </select>
@@ -612,7 +648,7 @@ function MaintenanceForm({
               >
                 {STATUSES.map((value) => (
                   <option key={value} value={value}>
-                    {value}
+                    {maintenanceStatusLabel(locale, value)}
                   </option>
                 ))}
               </select>

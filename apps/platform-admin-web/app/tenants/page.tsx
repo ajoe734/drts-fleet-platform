@@ -7,6 +7,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import type {
   CreatePlatformTenantCommand,
   PlatformAdminTenantRecord,
@@ -23,13 +24,6 @@ type TenantFormState = {
   monthlyBookings: string;
   monthlyApiCalls: string;
   enabledModules: PlatformTenantModule[];
-};
-
-const MODULE_LABELS: Record<PlatformTenantModule, string> = {
-  enterprise_dispatch: "Enterprise Dispatch",
-  billing: "Billing",
-  reporting: "Reporting",
-  webhooks: "Webhooks",
 };
 
 const EMPTY_FORM: TenantFormState = {
@@ -59,8 +53,46 @@ function parseQuota(value: string): number {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
 }
 
+function moduleLabel(
+  t: ReturnType<typeof useTranslation>["t"],
+  moduleCode: PlatformTenantModule,
+) {
+  switch (moduleCode) {
+    case "enterprise_dispatch":
+      return t("tenants.module.enterpriseDispatch");
+    case "billing":
+      return t("tenants.module.billing");
+    case "reporting":
+      return t("tenants.module.reporting");
+    case "webhooks":
+      return t("tenants.module.webhooks");
+    default:
+      return moduleCode;
+  }
+}
+
+function tenantStatusLabel(
+  locale: ReturnType<typeof useTranslation>["locale"],
+  status: PlatformAdminTenantRecord["status"] | TenantFormState["status"],
+) {
+  if (locale !== "zh") {
+    return status;
+  }
+  switch (status) {
+    case "active":
+      return "啟用中";
+    case "paused":
+      return "已暫停";
+    case "inactive":
+      return "未啟用";
+    default:
+      return status;
+  }
+}
+
 export default function TenantsPage() {
   const client = usePlatformAdminClient();
+  const { locale, t } = useTranslation();
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -187,16 +219,13 @@ export default function TenantsPage() {
     [client, loadTenants],
   );
 
-  if (loading) return <div className="admin-empty">Loading tenants...</div>;
+  if (loading) return <div className="admin-empty">{t("tenants.loading")}</div>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Tenants</h1>
-        <p>
-          Manage tenant lifecycle, contract modules, and platform quota
-          allocations.
-        </p>
+        <h1>{t("tenants.title")}</h1>
+        <p>{t("tenants.subtitle", { count: tenants.length })}</p>
       </div>
 
       {error && (
@@ -204,7 +233,9 @@ export default function TenantsPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {t("common.error")}: {error}
+          </p>
         </div>
       )}
 
@@ -213,19 +244,21 @@ export default function TenantsPage() {
           className="admin-btn admin-btn--primary"
           onClick={() => setShowCreate((current) => !current)}
         >
-          {showCreate ? "Cancel" : "New Tenant"}
+          {showCreate ? t("common.cancel") : t("tenants.newTenant")}
         </button>
         <button
           className="admin-btn admin-btn--secondary"
           onClick={() => void loadTenants()}
         >
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
       {showCreate && (
         <div className="admin-card" style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>Create Tenant</h3>
+          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
+            {t("tenants.createTenant")}
+          </h3>
           <form onSubmit={handleCreate}>
             <div
               style={{
@@ -236,9 +269,9 @@ export default function TenantsPage() {
               }}
             >
               <label>
-                <span className="sr-only">Tenant Name</span>
+                <span className="sr-only">{t("tenants.form.name")}</span>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Name
+                  {t("tenants.form.name")}
                 </div>
                 <input
                   value={createForm.name}
@@ -254,9 +287,9 @@ export default function TenantsPage() {
                 />
               </label>
               <label>
-                <span className="sr-only">Tenant Code</span>
+                <span className="sr-only">{t("tenants.form.code")}</span>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Code
+                  {t("tenants.form.code")}
                 </div>
                 <input
                   value={createForm.code}
@@ -273,7 +306,7 @@ export default function TenantsPage() {
               </label>
               <label>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Status
+                  {t("tenants.form.status")}
                 </div>
                 <select
                   value={createForm.status}
@@ -285,8 +318,12 @@ export default function TenantsPage() {
                   }
                   style={inputStyle}
                 >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
+                  <option value="active">
+                    {tenantStatusLabel(locale, "active")}
+                  </option>
+                  <option value="inactive">
+                    {tenantStatusLabel(locale, "inactive")}
+                  </option>
                 </select>
               </label>
             </div>
@@ -304,7 +341,9 @@ export default function TenantsPage() {
                 creating || !createForm.name.trim() || !createForm.code.trim()
               }
             >
-              {creating ? "Creating..." : "Create Tenant"}
+              {creating
+                ? `${t("tenants.createTenant")}...`
+                : t("tenants.createTenant")}
             </button>
           </form>
         </div>
@@ -323,10 +362,10 @@ export default function TenantsPage() {
           >
             <div>
               <h3 style={{ margin: 0, fontSize: 16 }}>
-                Configure {selectedTenant.name}
+                {t("tenants.detail")} - {selectedTenant.name}
               </h3>
               <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-                Code: <code>{selectedTenant.code}</code>
+                {t("tenants.form.code")}: <code>{selectedTenant.code}</code>
               </p>
             </div>
             <button
@@ -334,7 +373,7 @@ export default function TenantsPage() {
               onClick={() => setSelectedTenantId(null)}
               type="button"
             >
-              Close
+              {t("common.close")}
             </button>
           </div>
 
@@ -349,7 +388,7 @@ export default function TenantsPage() {
             >
               <label>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Name
+                  {t("tenants.form.name")}
                 </div>
                 <input
                   value={editForm.name}
@@ -365,10 +404,10 @@ export default function TenantsPage() {
               </label>
               <label>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Status
+                  {t("tenants.form.status")}
                 </div>
                 <input
-                  value={selectedTenant.status}
+                  value={tenantStatusLabel(locale, selectedTenant.status)}
                   disabled
                   style={inputStyle}
                 />
@@ -386,7 +425,9 @@ export default function TenantsPage() {
               className="admin-btn admin-btn--primary"
               disabled={saving || !editForm.name.trim()}
             >
-              {saving ? "Saving..." : "Save Settings"}
+              {saving
+                ? `${t("tenants.saveSettings")}...`
+                : t("tenants.saveSettings")}
             </button>
           </form>
         </div>
@@ -394,7 +435,7 @@ export default function TenantsPage() {
 
       {tenants.length === 0 ? (
         <div className="admin-card admin-empty">
-          <p>No tenants found. Create one to get started.</p>
+          <p>{t("tenants.empty")}</p>
         </div>
       ) : (
         <div className="admin-card" style={{ overflowX: "auto" }}>
@@ -402,12 +443,12 @@ export default function TenantsPage() {
             <thead>
               <tr>
                 <th>ID</th>
-                <th>Name</th>
-                <th>Code</th>
-                <th>Modules</th>
-                <th>Quotas</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>{t("tenants.col.tenant")}</th>
+                <th>{t("tenants.form.code")}</th>
+                <th>{t("tenants.col.modules")}</th>
+                <th>{t("tenants.col.quotas")}</th>
+                <th>{t("tenants.col.status")}</th>
+                <th>{t("common.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -427,14 +468,23 @@ export default function TenantsPage() {
                         className="admin-badge admin-badge--info"
                         style={{ marginRight: 4, marginBottom: 4 }}
                       >
-                        {MODULE_LABELS[moduleCode]}
+                        {moduleLabel(t, moduleCode)}
                       </span>
                     ))}
                   </td>
                   <td style={{ fontSize: 12 }}>
-                    <div>Drivers: {tenant.quotas.activeDrivers}</div>
-                    <div>Bookings: {tenant.quotas.monthlyBookings}</div>
-                    <div>API Calls: {tenant.quotas.monthlyApiCalls}</div>
+                    <div>
+                      {t("tenants.form.activeDrivers")}:{" "}
+                      {tenant.quotas.activeDrivers}
+                    </div>
+                    <div>
+                      {t("tenants.form.monthlyBookings")}:{" "}
+                      {tenant.quotas.monthlyBookings}
+                    </div>
+                    <div>
+                      {t("tenants.form.monthlyApiCalls")}:{" "}
+                      {tenant.quotas.monthlyApiCalls}
+                    </div>
                   </td>
                   <td>
                     <span
@@ -446,7 +496,7 @@ export default function TenantsPage() {
                             : "admin-badge--neutral"
                       }`}
                     >
-                      {tenant.status}
+                      {tenantStatusLabel(locale, tenant.status)}
                     </span>
                   </td>
                   <td>
@@ -456,7 +506,7 @@ export default function TenantsPage() {
                         onClick={() => setSelectedTenantId(tenant.id)}
                         type="button"
                       >
-                        Configure
+                        {t("tenants.detail")}
                       </button>
                       {tenant.status !== "active" && (
                         <button
@@ -466,7 +516,7 @@ export default function TenantsPage() {
                           }
                           type="button"
                         >
-                          Activate
+                          {locale === "zh" ? "啟用" : "Activate"}
                         </button>
                       )}
                       {tenant.status === "active" && (
@@ -477,7 +527,7 @@ export default function TenantsPage() {
                           }
                           type="button"
                         >
-                          Suspend
+                          {locale === "zh" ? "暫停" : "Suspend"}
                         </button>
                       )}
                     </div>
@@ -499,18 +549,21 @@ function QuotaFields({
   form: TenantFormState;
   setForm: React.Dispatch<React.SetStateAction<TenantFormState>>;
 }) {
+  const { t } = useTranslation();
   const quotaFields: Array<{
     key: "activeDrivers" | "monthlyBookings" | "monthlyApiCalls";
     label: string;
   }> = [
-    { key: "activeDrivers", label: "Active Drivers" },
-    { key: "monthlyBookings", label: "Monthly Bookings" },
-    { key: "monthlyApiCalls", label: "Monthly API Calls" },
+    { key: "activeDrivers", label: t("tenants.form.activeDrivers") },
+    { key: "monthlyBookings", label: t("tenants.form.monthlyBookings") },
+    { key: "monthlyApiCalls", label: t("tenants.form.monthlyApiCalls") },
   ];
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>Quota Allocation</h4>
+      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>
+        {t("tenants.col.quotas")}
+      </h4>
       <div
         style={{
           display: "grid",
@@ -549,9 +602,12 @@ function ModuleFields({
   form: TenantFormState;
   onToggle: (moduleCode: PlatformTenantModule) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div style={{ marginBottom: 16 }}>
-      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>Enabled Modules</h4>
+      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>
+        {t("tenants.form.modules")}
+      </h4>
       <div
         style={{
           display: "grid",
@@ -576,7 +632,7 @@ function ModuleFields({
               checked={form.enabledModules.includes(moduleCode)}
               onChange={() => onToggle(moduleCode)}
             />
-            <span>{MODULE_LABELS[moduleCode]}</span>
+            <span>{moduleLabel(t, moduleCode)}</span>
           </label>
         ))}
       </div>

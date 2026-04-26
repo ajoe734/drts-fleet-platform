@@ -46,6 +46,19 @@ async function resolveOrFallback<T>(
   }
 }
 
+async function loadHealthPayload(): Promise<HealthPayload> {
+  const apiBaseUrl = process.env.DRTS_API_URL ?? "http://localhost:3001";
+  const response = await fetch(new URL("/api/health", apiBaseUrl), {
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Health request failed with status ${response.status}`);
+  }
+
+  return (await response.json()) as HealthPayload;
+}
+
 export default async function DashboardPage() {
   const client = getOpsClient();
   const locale = await getServerLocale();
@@ -67,7 +80,7 @@ export default async function DashboardPage() {
       () => client.getIdentityContext() as Promise<IdentitySummary>,
       null,
     ),
-    resolveOrFallback(() => client.get<HealthPayload>("/api/health"), {
+    resolveOrFallback(loadHealthPayload, {
       service: "api",
       status: "degraded",
       mode: "unknown",

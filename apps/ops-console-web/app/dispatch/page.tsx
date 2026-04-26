@@ -13,7 +13,7 @@ import { Card, CardBody } from "@drts/ui-web";
 import { DispatchWorkflow } from "./dispatch-workflow";
 
 type DispatchPageProps = {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 async function resolveOrFallback<T>(
@@ -35,15 +35,20 @@ export default async function DispatchPage({
   searchParams,
 }: DispatchPageProps) {
   const client = getOpsClient();
-  const [orders, dispatchJobs, locale] = await Promise.all([
-    resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
-    resolveOrFallback(
-      () => client.listDispatchJobs(),
-      [] as DispatchJobRecord[],
-    ),
-    getServerLocale(),
-  ]);
-  const focusOrderId = firstParam(searchParams?.orderId) ?? "";
+  const [orders, dispatchJobs, locale, resolvedSearchParams] =
+    await Promise.all([
+      resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
+      resolveOrFallback(
+        () => client.listDispatchJobs(),
+        [] as DispatchJobRecord[],
+      ),
+      getServerLocale(),
+      (searchParams ??
+        Promise.resolve(
+          {} as Record<string, string | string[] | undefined>,
+        )) as Promise<Record<string, string | string[] | undefined>>,
+    ]);
+  const focusOrderId = firstParam(resolvedSearchParams?.orderId) ?? "";
   const insights = buildDispatchInsights(orders, dispatchJobs);
 
   return (

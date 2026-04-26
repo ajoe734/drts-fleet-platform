@@ -18,6 +18,80 @@ import { useTranslation } from "@/lib/i18n";
 const STATUS_OPTIONS: ComplaintCaseStatus[] = [...COMPLAINT_CASE_STATUSES];
 const CATEGORY_OPTIONS: ComplaintCategory[] = [...COMPLAINT_CATEGORIES];
 
+function complaintStatusLabel(locale: "en" | "zh", value: string) {
+  if (locale !== "zh") return value;
+  switch (value) {
+    case "new":
+      return "新建";
+    case "assigned":
+      return "已指派";
+    case "under_investigation":
+      return "調查中";
+    case "resolved":
+      return "已解決";
+    case "closed":
+      return "已結案";
+    case "reopened":
+      return "重新開啟";
+    default:
+      return value;
+  }
+}
+
+function complaintCategoryLabel(locale: "en" | "zh", value: string) {
+  if (locale !== "zh") return value.replace(/_/g, " ");
+  switch (value) {
+    case "late_arrival":
+      return "延遲抵達";
+    case "no_arrival":
+      return "未到場";
+    case "driver_service":
+      return "司機服務";
+    case "vehicle_condition":
+      return "車況";
+    case "route_issue":
+      return "路線問題";
+    case "fare_dispute":
+      return "車資爭議";
+    case "safety_concern":
+      return "安全疑慮";
+    case "lost_and_found":
+      return "失物招領";
+    case "other":
+      return "其他";
+    default:
+      return value.replace(/_/g, " ");
+  }
+}
+
+function complaintSourceLabel(locale: "en" | "zh", value: string) {
+  if (locale !== "zh") return value;
+  switch (value) {
+    case "ops":
+      return "營運";
+    case "phone":
+      return "電話";
+    case "web":
+      return "網頁";
+    case "app":
+      return "App";
+    default:
+      return value;
+  }
+}
+
+function complaintSeverityLabel(locale: "en" | "zh", value: string) {
+  if (locale !== "zh") return value;
+  switch (value) {
+    case "normal":
+      return "一般";
+    case "high":
+      return "高";
+    default:
+      return value;
+  }
+}
+
 const INITIAL_CREATE_FORM: CreateComplaintCaseCommand = {
   caseSource: "ops",
   category: "fare_dispute",
@@ -32,7 +106,7 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 export default function ComplaintsPage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
   const [records, setRecords] = useState<ComplaintCaseRecord[]>([]);
@@ -229,7 +303,7 @@ export default function ComplaintsPage() {
             <option value="all">{t("complaints.allStatuses")}</option>
             {STATUS_OPTIONS.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {complaintStatusLabel(locale, status)}
               </option>
             ))}
           </select>
@@ -242,7 +316,7 @@ export default function ComplaintsPage() {
             <option value="all">{t("complaints.allCategories")}</option>
             {CATEGORY_OPTIONS.map((category) => (
               <option key={category} value={category}>
-                {category.replace(/_/g, " ")}
+                {complaintCategoryLabel(locale, category)}
               </option>
             ))}
           </select>
@@ -298,10 +372,18 @@ export default function ComplaintsPage() {
                     }))
                   }
                 >
-                  <option value="ops">ops</option>
-                  <option value="phone">phone</option>
-                  <option value="web">web</option>
-                  <option value="app">app</option>
+                  <option value="ops">
+                    {complaintSourceLabel(locale, "ops")}
+                  </option>
+                  <option value="phone">
+                    {complaintSourceLabel(locale, "phone")}
+                  </option>
+                  <option value="web">
+                    {complaintSourceLabel(locale, "web")}
+                  </option>
+                  <option value="app">
+                    {complaintSourceLabel(locale, "app")}
+                  </option>
                 </select>
               </label>
               <label>
@@ -317,7 +399,7 @@ export default function ComplaintsPage() {
                 >
                   {CATEGORY_OPTIONS.map((category) => (
                     <option key={category} value={category}>
-                      {category.replace(/_/g, " ")}
+                      {complaintCategoryLabel(locale, category)}
                     </option>
                   ))}
                 </select>
@@ -334,8 +416,12 @@ export default function ComplaintsPage() {
                     }))
                   }
                 >
-                  <option value="normal">normal</option>
-                  <option value="high">high</option>
+                  <option value="normal">
+                    {complaintSeverityLabel(locale, "normal")}
+                  </option>
+                  <option value="high">
+                    {complaintSeverityLabel(locale, "high")}
+                  </option>
                 </select>
               </label>
               <label>
@@ -424,8 +510,10 @@ export default function ComplaintsPage() {
                         onClick={() => setSelectedCaseNo(record.caseNo)}
                       >
                         <td>{record.caseNo}</td>
-                        <td>{record.category}</td>
-                        <td>{record.status}</td>
+                        <td>
+                          {complaintCategoryLabel(locale, record.category)}
+                        </td>
+                        <td>{complaintStatusLabel(locale, record.status)}</td>
                         <td>{record.assigneeId ?? "-"}</td>
                         <td>{record.relatedOrderId ?? "-"}</td>
                         <td>{record.relatedCallId ?? "-"}</td>
@@ -453,7 +541,9 @@ export default function ComplaintsPage() {
                     <div className="detail-grid">
                       <div>
                         <span className="label">{t("common.status")}</span>
-                        <strong>{selectedRecord.status}</strong>
+                        <strong>
+                          {complaintStatusLabel(locale, selectedRecord.status)}
+                        </strong>
                         <small>
                           {t("complaints.detail.slaDue", {
                             value: formatDateTime(selectedRecord.slaDueAt),

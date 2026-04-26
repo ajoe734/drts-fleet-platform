@@ -22,7 +22,7 @@ import { DataTable, Tr, Td } from "@drts/ui-web";
 import { Badge } from "@drts/ui-web";
 
 type RevenuePageProps = {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 async function resolveOrFallback<T>(
@@ -108,7 +108,9 @@ function ChipLink({
 
 export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const client = getOpsClient();
-  const filters = resolveFilters(searchParams);
+  const resolvedSearchParams = await (searchParams ??
+    Promise.resolve({} as Record<string, string | string[] | undefined>));
+  const filters = resolveFilters(resolvedSearchParams);
   const [orders, tasks, statements, vehicles, locale] = await Promise.all([
     resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
     resolveOrFallback(() => client.listDriverTasks(), [] as DriverTaskRecord[]),
