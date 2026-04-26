@@ -7,6 +7,22 @@ import { Card } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
 import { Badge } from "@drts/ui-web";
 
+function driverWorkStateLabel(locale: string, state: string | undefined) {
+  if (locale !== "zh" || !state) return state ?? "—";
+  switch (state) {
+    case "available":
+      return "可派遣";
+    case "suspended":
+      return "已停權";
+    case "offline":
+      return "離線";
+    case "on_trip":
+      return "行程中";
+    default:
+      return state;
+  }
+}
+
 export default async function DriversPage() {
   const [client, locale] = await Promise.all([
     getServerOpsClient(),
@@ -68,7 +84,7 @@ export default async function DriversPage() {
                         : "gray"
                   }
                 >
-                  {d.workState}
+                  {driverWorkStateLabel(locale, d.workState)}
                 </Badge>
               </Td>
               <Td>

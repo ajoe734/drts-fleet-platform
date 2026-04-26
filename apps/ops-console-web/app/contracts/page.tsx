@@ -14,6 +14,38 @@ function contractStatusVariant(status: string) {
   return "gray" as const;
 }
 
+function contractStatusLabel(locale: string, status: string | undefined) {
+  if (locale !== "zh" || !status) return status ?? "—";
+  switch (status) {
+    case "active":
+      return "生效中";
+    case "terminated":
+      return "已終止";
+    case "expired":
+      return "已到期";
+    case "pending":
+      return "待生效";
+    default:
+      return status;
+  }
+}
+
+function contractTypeLabel(locale: string, contractType: string | undefined) {
+  if (locale !== "zh" || !contractType) return contractType ?? "—";
+  switch (contractType) {
+    case "fleet":
+      return "車隊合約";
+    case "affiliate":
+      return "合作加盟";
+    case "lease":
+      return "租賃合約";
+    case "owner_operator":
+      return "自營駕駛";
+    default:
+      return contractType;
+  }
+}
+
 export default async function ContractsPage() {
   const [client, locale] = await Promise.all([
     getServerOpsClient(),
@@ -67,10 +99,10 @@ export default async function ContractsPage() {
               <Td mono>{c.contractId}</Td>
               <Td mono>{c.vehicleId}</Td>
               <Td mono>{c.partnerId}</Td>
-              <Td>{c.contractType}</Td>
+              <Td>{contractTypeLabel(locale, c.contractType)}</Td>
               <Td>
                 <Badge variant={contractStatusVariant(c.status)}>
-                  {c.status}
+                  {contractStatusLabel(locale, c.status)}
                 </Badge>
               </Td>
             </Tr>

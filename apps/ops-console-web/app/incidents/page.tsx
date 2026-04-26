@@ -25,7 +25,7 @@ const SEVERITIES: IncidentSeverity[] = [...INCIDENT_SEVERITIES];
 const CATEGORIES: IncidentCategory[] = [...INCIDENT_CATEGORIES];
 
 export default function IncidentsPage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [records, setRecords] = useState<IncidentRecord[]>([]);
   const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(
@@ -132,6 +132,42 @@ export default function IncidentsPage() {
     section?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  const categoryLabel = (value: IncidentCategory) => {
+    if (locale !== "zh") return value.replace(/_/g, " ");
+    const labels: Record<IncidentCategory, string> = {
+      safety: "安全",
+      vehicle_damage: "車損",
+      passenger_injury: "乘客受傷",
+      driver_injury: "司機受傷",
+      property_damage: "財損",
+      weather: "天候",
+      traffic: "交通",
+      operational: "營運",
+      other: "其他",
+    };
+    return labels[value];
+  };
+
+  const severityLabel = (value: IncidentSeverity) => {
+    if (locale !== "zh") return value;
+    return {
+      low: "低",
+      medium: "中",
+      high: "高",
+      critical: "嚴重",
+    }[value];
+  };
+
+  const statusLabel = (value: IncidentStatus) => {
+    if (locale !== "zh") return value;
+    return {
+      open: "開啟",
+      investigating: "調查中",
+      resolved: "已處理",
+      closed: "已關閉",
+    }[value];
+  };
+
   return (
     <>
       <PageHeader
@@ -141,7 +177,7 @@ export default function IncidentsPage() {
       <div>
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("common.error")}:</strong> {error}
           </div>
         )}
 
@@ -182,11 +218,17 @@ export default function IncidentsPage() {
         <section id="critical-sos-queue" className="sos-queue">
           <div className="panel-head">
             <div>
-              <p className="eyebrow">Priority queue</p>
-              <h3>Critical / SOS queue</h3>
+              <p className="eyebrow">
+                {locale === "zh" ? "優先佇列" : "Priority queue"}
+              </p>
+              <h3>
+                {locale === "zh" ? "嚴重 / SOS 佇列" : "Critical / SOS queue"}
+              </h3>
             </div>
             <span className="panel-note">
-              {criticalQueue.length} active critical incident(s)
+              {locale === "zh"
+                ? `${criticalQueue.length} 筆進行中的嚴重事件`
+                : `${criticalQueue.length} active critical incident(s)`}
             </span>
           </div>
           {criticalQueue.length > 0 ? (
@@ -196,21 +238,23 @@ export default function IncidentsPage() {
                   <div>
                     <div className="sos-title-row">
                       <strong className="cell-title">{record.title}</strong>
-                      {renderSeverityBadge(record.severity)}
+                      {renderSeverityBadge(record.severity, locale)}
                     </div>
                     <div className="cell-subcopy">
-                      {record.incidentId} · {record.category.replace(/_/g, " ")}
+                      {record.incidentId} · {categoryLabel(record.category)}
                     </div>
                     <div className="cell-subcopy">{record.description}</div>
                   </div>
                   <div className="sos-meta">
-                    <span className="status-pill">{record.status}</span>
+                    <span className="status-pill">
+                      {statusLabel(record.status)}
+                    </span>
                     <button
                       className="btn"
                       type="button"
                       onClick={() => void loadTimeline(record.incidentId)}
                     >
-                      Review timeline
+                      {locale === "zh" ? "查看時間線" : "Review timeline"}
                     </button>
                   </div>
                 </article>
@@ -218,7 +262,9 @@ export default function IncidentsPage() {
             </div>
           ) : (
             <p className="all-clear-copy">
-              No critical incidents. All clear for now.
+              {locale === "zh"
+                ? "目前沒有嚴重事件，現況穩定。"
+                : "No critical incidents. All clear for now."}
             </p>
           )}
         </section>
@@ -241,7 +287,7 @@ export default function IncidentsPage() {
             <option value="all">{t("incidents.allStatuses")}</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {statusLabel(status)}
               </option>
             ))}
           </select>
@@ -255,7 +301,7 @@ export default function IncidentsPage() {
             <option value="all">{t("incidents.allSeverities")}</option>
             {SEVERITIES.map((severity) => (
               <option key={severity} value={severity}>
-                {severity}
+                {severityLabel(severity)}
               </option>
             ))}
           </select>
@@ -269,7 +315,7 @@ export default function IncidentsPage() {
             <option value="all">{t("incidents.allCategories")}</option>
             {CATEGORIES.map((category) => (
               <option key={category} value={category}>
-                {category.replace(/_/g, " ")}
+                {categoryLabel(category)}
               </option>
             ))}
           </select>
@@ -325,7 +371,7 @@ export default function IncidentsPage() {
         )}
 
         {loading ? (
-          <p>Loading incidents...</p>
+          <p>{locale === "zh" ? "載入事件中..." : "Loading incidents..."}</p>
         ) : (
           <div className="content-grid">
             <section className="panel">
@@ -365,14 +411,14 @@ export default function IncidentsPage() {
                           <div className="cell-title">{record.title}</div>
                           <div className="cell-subcopy">
                             {record.incidentId} ·{" "}
-                            {record.category.replace(/_/g, " ")}
+                            {categoryLabel(record.category)}
                           </div>
                           <div className="cell-subcopy">
                             {record.description}
                           </div>
                         </td>
-                        <td>{renderSeverityBadge(record.severity)}</td>
-                        <td>{record.status}</td>
+                        <td>{renderSeverityBadge(record.severity, locale)}</td>
+                        <td>{statusLabel(record.status)}</td>
                         <td>
                           <div className="link-stack">
                             {record.relatedOrderId && (
@@ -725,10 +771,17 @@ function incidentSeverityWeight(severity: IncidentSeverity) {
   }
 }
 
-function renderSeverityBadge(severity: IncidentSeverity) {
-  return (
-    <span className={`severity-badge severity-${severity}`}>{severity}</span>
-  );
+function renderSeverityBadge(severity: IncidentSeverity, locale: "en" | "zh") {
+  const label =
+    locale === "zh"
+      ? {
+          low: "低",
+          medium: "中",
+          high: "高",
+          critical: "嚴重",
+        }[severity]
+      : severity;
+  return <span className={`severity-badge severity-${severity}`}>{label}</span>;
 }
 
 function IncidentForm({

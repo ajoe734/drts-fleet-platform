@@ -64,7 +64,7 @@ function toIsoString(value: string) {
 }
 
 export default function CallcenterPage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
   const [sessions, setSessions] = useState<CallSessionRecord[]>([]);
@@ -207,6 +207,51 @@ export default function CallcenterPage() {
     (session) => session.linkedCaseNo,
   ).length;
 
+  const callTypeLabel = (value: OpenCallSessionCommand["callType"]) => {
+    if (locale !== "zh") return value.replace(/_/g, " ");
+    return {
+      booking: "訂車",
+      complaint: "客訴",
+      callback: "回撥",
+      lost_and_found: "失物招領",
+      general_inquiry: "一般諮詢",
+    }[value];
+  };
+
+  const callStatusLabel = (value: CallSessionRecord["status"]) => {
+    if (locale !== "zh") return value;
+    return value === "active" ? "進行中" : "已關閉";
+  };
+
+  const callbackStatusLabel = (status: string | undefined) => {
+    if (locale !== "zh" || !status) return status ?? "—";
+    switch (status) {
+      case "pending":
+        return "待回撥";
+      case "completed":
+        return "已完成";
+      case "cancelled":
+        return "已取消";
+      default:
+        return status;
+    }
+  };
+
+  const complaintCategoryLabel = (value: ComplaintCategory) => {
+    if (locale !== "zh") return value.replace(/_/g, " ");
+    return {
+      late_arrival: "遲到",
+      no_arrival: "未到場",
+      driver_service: "司機服務",
+      vehicle_condition: "車況",
+      route_issue: "路線問題",
+      fare_dispute: "費率爭議",
+      safety_concern: "安全疑慮",
+      lost_and_found: "失物招領",
+      other: "其他",
+    }[value];
+  };
+
   return (
     <>
       <PageHeader
@@ -216,7 +261,7 @@ export default function CallcenterPage() {
       <div>
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("common.error")}:</strong> {error}
           </div>
         )}
 
@@ -321,7 +366,7 @@ export default function CallcenterPage() {
                 >
                   {CALL_TYPE_OPTIONS.map((callType) => (
                     <option key={callType} value={callType}>
-                      {callType.replace(/_/g, " ")}
+                      {callTypeLabel(callType)}
                     </option>
                   ))}
                 </select>
@@ -415,10 +460,10 @@ export default function CallcenterPage() {
                         onClick={() => setSelectedCallId(session.callId)}
                       >
                         <td>{session.callId}</td>
-                        <td>{session.callType}</td>
+                        <td>{callTypeLabel(session.callType)}</td>
                         <td>{session.callerPhone}</td>
                         <td>{session.agentId ?? "-"}</td>
-                        <td>{session.status}</td>
+                        <td>{callStatusLabel(session.status)}</td>
                         <td>{session.linkedOrderId ?? "-"}</td>
                         <td>{session.linkedCaseNo ?? "-"}</td>
                         <td>{formatDateTime(session.startedAt)}</td>
@@ -434,7 +479,7 @@ export default function CallcenterPage() {
                 <h3>{t("callcenter.sessionDetail")}</h3>
                 <p>
                   {selectedSession
-                    ? `${selectedSession.callId} / ${selectedSession.callType}`
+                    ? `${selectedSession.callId} / ${callTypeLabel(selectedSession.callType)}`
                     : t("callcenter.selectSession")}
                 </p>
               </div>
@@ -491,7 +536,14 @@ export default function CallcenterPage() {
                         </span>
                         <strong>
                           {selectedSession.flags.length
-                            ? selectedSession.flags.join(", ")
+                            ? selectedSession.flags
+                                .map((flag) =>
+                                  locale === "zh" &&
+                                  flag === "recording_pending"
+                                    ? "待補錄音"
+                                    : flag,
+                                )
+                                .join(", ")
                             : "-"}
                         </strong>
                         <small>{formatDateTime(selectedSession.endedAt)}</small>
@@ -898,7 +950,7 @@ export default function CallcenterPage() {
                         >
                           {COMPLAINT_CATEGORY_OPTIONS.map((category) => (
                             <option key={category} value={category}>
-                              {category.replace(/_/g, " ")}
+                              {complaintCategoryLabel(category)}
                             </option>
                           ))}
                         </select>
@@ -912,8 +964,12 @@ export default function CallcenterPage() {
                             }))
                           }
                         >
-                          <option value="normal">normal</option>
-                          <option value="high">high</option>
+                          <option value="normal">
+                            {locale === "zh" ? "一般" : "normal"}
+                          </option>
+                          <option value="high">
+                            {locale === "zh" ? "高" : "high"}
+                          </option>
                         </select>
                         <textarea
                           rows={3}
@@ -955,7 +1011,52 @@ export default function CallcenterPage() {
                             <span className="label">
                               {t("callcenter.detail.status")}
                             </span>
-                            <strong>{selectedOrder.status}</strong>
+                            <strong>
+                              {locale === "zh"
+                                ? selectedOrder.status === "completed"
+                                  ? "已完成"
+                                  : selectedOrder.status === "driver_accepted"
+                                    ? "司機已承接"
+                                    : selectedOrder.status === "cancelled"
+                                      ? "已取消"
+                                      : selectedOrder.status ===
+                                          "enroute_pickup"
+                                        ? "前往接送點"
+                                        : selectedOrder.status ===
+                                            "arrived_pickup"
+                                          ? "已抵達上車點"
+                                          : selectedOrder.status === "on_trip"
+                                            ? "行程中"
+                                            : selectedOrder.status ===
+                                                "ready_for_dispatch"
+                                              ? "待派發"
+                                              : selectedOrder.status ===
+                                                  "assigned"
+                                                ? "已指派"
+                                                : selectedOrder.status ===
+                                                    "preassigned"
+                                                  ? "預指派"
+                                                  : selectedOrder.status ===
+                                                      "proof_pending"
+                                                    ? "待補憑證"
+                                                    : selectedOrder.status ===
+                                                        "dispatch_failed"
+                                                      ? "派發失敗"
+                                                      : selectedOrder.status ===
+                                                          "redispatch_required"
+                                                        ? "需重新派發"
+                                                        : selectedOrder.status ===
+                                                            "exception_hold"
+                                                          ? "例外暫停"
+                                                          : selectedOrder.status ===
+                                                              "recording_pending"
+                                                            ? "待補錄音"
+                                                            : selectedOrder.status ===
+                                                                "created"
+                                                              ? "已建立"
+                                                              : selectedOrder.status
+                                : selectedOrder.status}
+                            </strong>
                             <small>
                               ETA{" "}
                               {selectedOrder.etaSnapshot
@@ -1035,7 +1136,7 @@ export default function CallcenterPage() {
                     <tr key={callback.callbackTaskId}>
                       <td>{callback.callbackTaskId}</td>
                       <td>{callback.callId}</td>
-                      <td>{callback.status}</td>
+                      <td>{callbackStatusLabel(callback.status)}</td>
                       <td>{formatDateTime(callback.dueAt)}</td>
                       <td>{callback.linkedOrderId ?? "-"}</td>
                       <td>{callback.linkedCaseNo ?? "-"}</td>

@@ -7,6 +7,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import type {
   CreatePlatformTenantCommand,
   PlatformAdminTenantRecord,
@@ -23,13 +24,6 @@ type TenantFormState = {
   monthlyBookings: string;
   monthlyApiCalls: string;
   enabledModules: PlatformTenantModule[];
-};
-
-const MODULE_LABELS: Record<PlatformTenantModule, string> = {
-  enterprise_dispatch: "Enterprise Dispatch",
-  billing: "Billing",
-  reporting: "Reporting",
-  webhooks: "Webhooks",
 };
 
 const EMPTY_FORM: TenantFormState = {
@@ -60,6 +54,7 @@ function parseQuota(value: string): number {
 }
 
 export default function TenantsPage() {
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -187,16 +182,80 @@ export default function TenantsPage() {
     [client, loadTenants],
   );
 
-  if (loading) return <div className="admin-empty">Loading tenants...</div>;
+  const moduleLabels =
+    locale === "zh"
+      ? {
+          enterprise_dispatch: "企業派車",
+          billing: "帳務",
+          reporting: "報表",
+          webhooks: "Webhook",
+        }
+      : {
+          enterprise_dispatch: "Enterprise Dispatch",
+          billing: "Billing",
+          reporting: "Reporting",
+          webhooks: "Webhooks",
+        };
+
+  const copy =
+    locale === "zh"
+      ? {
+          description: "管理租戶生命週期、模組授權與平台配額。",
+          errorLabel: "錯誤",
+          title: "租戶",
+          newTenant: "新增租戶",
+          createTitle: "建立租戶",
+          empty: "找不到租戶，請先建立一個租戶。",
+          id: "ID",
+          name: "名稱",
+          code: "代碼",
+          actions: "操作",
+          drivers: "司機",
+          bookings: "訂單",
+          apiCalls: "API 呼叫",
+          configure: "設定",
+          activate: "啟用",
+          suspend: "停用",
+          configureTitle: `設定 ${selectedTenant?.name ?? ""}`,
+          codeLabel: "代碼",
+          quotaTitle: "配額配置",
+          modulesTitle: "啟用模組",
+          statusActive: "啟用中",
+          statusInactive: "已停用",
+        }
+      : {
+          description:
+            "Manage tenant lifecycle, contract modules, and platform quota allocations.",
+          errorLabel: "Error",
+          title: "Tenants",
+          newTenant: "New Tenant",
+          createTitle: "Create Tenant",
+          empty: "No tenants found. Create one to get started.",
+          id: "ID",
+          name: "Name",
+          code: "Code",
+          actions: "Actions",
+          drivers: "Drivers",
+          bookings: "Bookings",
+          apiCalls: "API Calls",
+          configure: "Configure",
+          activate: "Activate",
+          suspend: "Suspend",
+          configureTitle: `Configure ${selectedTenant?.name ?? ""}`,
+          codeLabel: "Code",
+          quotaTitle: "Quota Allocation",
+          modulesTitle: "Enabled Modules",
+          statusActive: "Active",
+          statusInactive: "Inactive",
+        };
+
+  if (loading) return <div className="admin-empty">{t("tenants.loading")}</div>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Tenants</h1>
-        <p>
-          Manage tenant lifecycle, contract modules, and platform quota
-          allocations.
-        </p>
+        <h1>{copy.title}</h1>
+        <p>{copy.description}</p>
       </div>
 
       {error && (
@@ -204,7 +263,9 @@ export default function TenantsPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {copy.errorLabel}: {error}
+          </p>
         </div>
       )}
 
@@ -213,19 +274,21 @@ export default function TenantsPage() {
           className="admin-btn admin-btn--primary"
           onClick={() => setShowCreate((current) => !current)}
         >
-          {showCreate ? "Cancel" : "New Tenant"}
+          {showCreate ? t("common.cancel") : copy.newTenant}
         </button>
         <button
           className="admin-btn admin-btn--secondary"
           onClick={() => void loadTenants()}
         >
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
       {showCreate && (
         <div className="admin-card" style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>Create Tenant</h3>
+          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
+            {copy.createTitle}
+          </h3>
           <form onSubmit={handleCreate}>
             <div
               style={{
@@ -236,9 +299,11 @@ export default function TenantsPage() {
               }}
             >
               <label>
-                <span className="sr-only">Tenant Name</span>
+                <span className="sr-only">
+                  {locale === "zh" ? "租戶名稱" : "Tenant Name"}
+                </span>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Name
+                  {copy.name}
                 </div>
                 <input
                   value={createForm.name}
@@ -249,14 +314,18 @@ export default function TenantsPage() {
                     }))
                   }
                   required
-                  placeholder="Acme Mobility"
+                  placeholder={
+                    locale === "zh" ? "示例企業車隊" : "Acme Mobility"
+                  }
                   style={inputStyle}
                 />
               </label>
               <label>
-                <span className="sr-only">Tenant Code</span>
+                <span className="sr-only">
+                  {locale === "zh" ? "租戶代碼" : "Tenant Code"}
+                </span>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Code
+                  {copy.code}
                 </div>
                 <input
                   value={createForm.code}
@@ -267,13 +336,15 @@ export default function TenantsPage() {
                     }))
                   }
                   required
-                  placeholder="acme_dispatch"
+                  placeholder={
+                    locale === "zh" ? "example_dispatch" : "acme_dispatch"
+                  }
                   style={inputStyle}
                 />
               </label>
               <label>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Status
+                  {t("tenants.form.status")}
                 </div>
                 <select
                   value={createForm.status}
@@ -285,16 +356,27 @@ export default function TenantsPage() {
                   }
                   style={inputStyle}
                 >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
+                  <option value="active">{copy.statusActive}</option>
+                  <option value="inactive">{copy.statusInactive}</option>
                 </select>
               </label>
             </div>
 
-            <QuotaFields form={createForm} setForm={setCreateForm} />
+            <QuotaFields
+              form={createForm}
+              setForm={setCreateForm}
+              title={copy.quotaTitle}
+              labels={{
+                activeDrivers: t("tenants.form.activeDrivers"),
+                monthlyBookings: t("tenants.form.monthlyBookings"),
+                monthlyApiCalls: t("tenants.form.monthlyApiCalls"),
+              }}
+            />
             <ModuleFields
               form={createForm}
               onToggle={(moduleCode) => toggleModule(setCreateForm, moduleCode)}
+              title={copy.modulesTitle}
+              moduleLabels={moduleLabels}
             />
 
             <button
@@ -304,7 +386,7 @@ export default function TenantsPage() {
                 creating || !createForm.name.trim() || !createForm.code.trim()
               }
             >
-              {creating ? "Creating..." : "Create Tenant"}
+              {creating ? t("common.creating") : copy.createTitle}
             </button>
           </form>
         </div>
@@ -322,11 +404,9 @@ export default function TenantsPage() {
             }}
           >
             <div>
-              <h3 style={{ margin: 0, fontSize: 16 }}>
-                Configure {selectedTenant.name}
-              </h3>
+              <h3 style={{ margin: 0, fontSize: 16 }}>{copy.configureTitle}</h3>
               <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-                Code: <code>{selectedTenant.code}</code>
+                {copy.codeLabel}: <code>{selectedTenant.code}</code>
               </p>
             </div>
             <button
@@ -334,7 +414,7 @@ export default function TenantsPage() {
               onClick={() => setSelectedTenantId(null)}
               type="button"
             >
-              Close
+              {t("common.cancel")}
             </button>
           </div>
 
@@ -349,7 +429,7 @@ export default function TenantsPage() {
             >
               <label>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Name
+                  {copy.name}
                 </div>
                 <input
                   value={editForm.name}
@@ -365,7 +445,7 @@ export default function TenantsPage() {
               </label>
               <label>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Status
+                  {t("tenants.form.status")}
                 </div>
                 <input
                   value={selectedTenant.status}
@@ -375,10 +455,21 @@ export default function TenantsPage() {
               </label>
             </div>
 
-            <QuotaFields form={editForm} setForm={setEditForm} />
+            <QuotaFields
+              form={editForm}
+              setForm={setEditForm}
+              title={copy.quotaTitle}
+              labels={{
+                activeDrivers: t("tenants.form.activeDrivers"),
+                monthlyBookings: t("tenants.form.monthlyBookings"),
+                monthlyApiCalls: t("tenants.form.monthlyApiCalls"),
+              }}
+            />
             <ModuleFields
               form={editForm}
               onToggle={(moduleCode) => toggleModule(setEditForm, moduleCode)}
+              title={copy.modulesTitle}
+              moduleLabels={moduleLabels}
             />
 
             <button
@@ -386,7 +477,7 @@ export default function TenantsPage() {
               className="admin-btn admin-btn--primary"
               disabled={saving || !editForm.name.trim()}
             >
-              {saving ? "Saving..." : "Save Settings"}
+              {saving ? t("common.saving") : t("tenants.saveSettings")}
             </button>
           </form>
         </div>
@@ -394,20 +485,20 @@ export default function TenantsPage() {
 
       {tenants.length === 0 ? (
         <div className="admin-card admin-empty">
-          <p>No tenants found. Create one to get started.</p>
+          <p>{copy.empty}</p>
         </div>
       ) : (
         <div className="admin-card" style={{ overflowX: "auto" }}>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Code</th>
-                <th>Modules</th>
-                <th>Quotas</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>{copy.id}</th>
+                <th>{copy.name}</th>
+                <th>{copy.code}</th>
+                <th>{t("tenants.col.modules")}</th>
+                <th>{t("tenants.col.quotas")}</th>
+                <th>{t("tenants.col.status")}</th>
+                <th>{copy.actions}</th>
               </tr>
             </thead>
             <tbody>
@@ -427,14 +518,20 @@ export default function TenantsPage() {
                         className="admin-badge admin-badge--info"
                         style={{ marginRight: 4, marginBottom: 4 }}
                       >
-                        {MODULE_LABELS[moduleCode]}
+                        {moduleLabels[moduleCode]}
                       </span>
                     ))}
                   </td>
                   <td style={{ fontSize: 12 }}>
-                    <div>Drivers: {tenant.quotas.activeDrivers}</div>
-                    <div>Bookings: {tenant.quotas.monthlyBookings}</div>
-                    <div>API Calls: {tenant.quotas.monthlyApiCalls}</div>
+                    <div>
+                      {copy.drivers}: {tenant.quotas.activeDrivers}
+                    </div>
+                    <div>
+                      {copy.bookings}: {tenant.quotas.monthlyBookings}
+                    </div>
+                    <div>
+                      {copy.apiCalls}: {tenant.quotas.monthlyApiCalls}
+                    </div>
                   </td>
                   <td>
                     <span
@@ -446,7 +543,11 @@ export default function TenantsPage() {
                             : "admin-badge--neutral"
                       }`}
                     >
-                      {tenant.status}
+                      {tenant.status === "active"
+                        ? copy.statusActive
+                        : tenant.status === "paused"
+                          ? copy.statusInactive
+                          : tenant.status}
                     </span>
                   </td>
                   <td>
@@ -456,7 +557,7 @@ export default function TenantsPage() {
                         onClick={() => setSelectedTenantId(tenant.id)}
                         type="button"
                       >
-                        Configure
+                        {copy.configure}
                       </button>
                       {tenant.status !== "active" && (
                         <button
@@ -466,7 +567,7 @@ export default function TenantsPage() {
                           }
                           type="button"
                         >
-                          Activate
+                          {copy.activate}
                         </button>
                       )}
                       {tenant.status === "active" && (
@@ -477,7 +578,7 @@ export default function TenantsPage() {
                           }
                           type="button"
                         >
-                          Suspend
+                          {copy.suspend}
                         </button>
                       )}
                     </div>
@@ -495,22 +596,28 @@ export default function TenantsPage() {
 function QuotaFields({
   form,
   setForm,
+  title,
+  labels,
 }: {
   form: TenantFormState;
   setForm: React.Dispatch<React.SetStateAction<TenantFormState>>;
+  title: string;
+  labels: Record<
+    "activeDrivers" | "monthlyBookings" | "monthlyApiCalls",
+    string
+  >;
 }) {
   const quotaFields: Array<{
     key: "activeDrivers" | "monthlyBookings" | "monthlyApiCalls";
-    label: string;
   }> = [
-    { key: "activeDrivers", label: "Active Drivers" },
-    { key: "monthlyBookings", label: "Monthly Bookings" },
-    { key: "monthlyApiCalls", label: "Monthly API Calls" },
+    { key: "activeDrivers" },
+    { key: "monthlyBookings" },
+    { key: "monthlyApiCalls" },
   ];
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>Quota Allocation</h4>
+      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>{title}</h4>
       <div
         style={{
           display: "grid",
@@ -521,7 +628,7 @@ function QuotaFields({
         {quotaFields.map((field) => (
           <label key={field.key}>
             <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-              {field.label}
+              {labels[field.key]}
             </div>
             <input
               type="number"
@@ -545,13 +652,17 @@ function QuotaFields({
 function ModuleFields({
   form,
   onToggle,
+  title,
+  moduleLabels,
 }: {
   form: TenantFormState;
   onToggle: (moduleCode: PlatformTenantModule) => void;
+  title: string;
+  moduleLabels: Record<PlatformTenantModule, string>;
 }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>Enabled Modules</h4>
+      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>{title}</h4>
       <div
         style={{
           display: "grid",
@@ -576,7 +687,7 @@ function ModuleFields({
               checked={form.enabledModules.includes(moduleCode)}
               onChange={() => onToggle(moduleCode)}
             />
-            <span>{MODULE_LABELS[moduleCode]}</span>
+            <span>{moduleLabels[moduleCode]}</span>
           </label>
         ))}
       </div>

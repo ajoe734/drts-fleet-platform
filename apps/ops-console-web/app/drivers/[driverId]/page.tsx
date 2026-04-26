@@ -30,8 +30,42 @@ async function loadWithError<T>(
   } catch (error) {
     return {
       data: null,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: error instanceof Error ? error.message : "__unknown__",
     };
+  }
+}
+
+function driverWorkStateLabel(locale: string, state: string | undefined) {
+  if (locale !== "zh" || !state) return state ?? "—";
+  switch (state) {
+    case "available":
+      return "可派遣";
+    case "suspended":
+      return "已停權";
+    case "offline":
+      return "離線";
+    case "on_trip":
+      return "行程中";
+    default:
+      return state;
+  }
+}
+
+function payoutStatusLabel(locale: string, status: string | undefined) {
+  if (locale !== "zh" || !status) return status ?? "—";
+  switch (status) {
+    case "paid":
+      return "已撥款";
+    case "pending":
+      return "待撥款";
+    case "processing":
+      return "處理中";
+    case "failed":
+      return "撥款失敗";
+    case "on_hold":
+      return "暫緩";
+    default:
+      return status;
   }
 }
 
@@ -156,19 +190,31 @@ export default async function DriverEarningsPage({
     loadWithError(() => client.listDrivers()),
     loadWithError(() => client.listDriverStatements()),
   ]);
+  const driversError =
+    driversResult.error === "__unknown__"
+      ? t("common.unknown", locale)
+      : driversResult.error;
+  const statementsError =
+    statementsResult.error === "__unknown__"
+      ? t("common.unknown", locale)
+      : statementsResult.error;
   const drivers = driversResult.data ?? [];
   const statements = statementsResult.data ?? [];
 
-  if (driversResult.error) {
+  if (driversError) {
     return (
       <>
         <PageHeader
           title={t("driverEarnings.title", locale)}
-          subtitle={`Unable to load driver registry data for ${driverId}.`}
+          subtitle={
+            locale === "zh"
+              ? `目前無法載入司機 ${driverId} 的名冊資料。`
+              : `Unable to load driver registry data for ${driverId}.`
+          }
         />
         <div style={errorBannerStyle}>
           <strong>{t("driverEarnings.registryUnavailable", locale)}</strong>{" "}
-          {driversResult.error}
+          {driversError}
         </div>
         <p style={mutedCopyStyle}>{t("driverEarnings.degradedNote", locale)}</p>
         <div style={footerLinksStyle}>
@@ -219,10 +265,10 @@ export default async function DriverEarningsPage({
           driverId: driver.driverId,
         })}
       />
-      {statementsResult.error && (
+      {statementsError && (
         <div style={errorBannerStyle}>
           <strong>{t("driverEarnings.settlementsError", locale)}</strong>{" "}
-          {statementsResult.error}
+          {statementsError}
         </div>
       )}
       <section style={heroGridStyle}>
@@ -231,7 +277,9 @@ export default async function DriverEarningsPage({
           <h2 style={{ margin: 0 }}>{driver.name}</h2>
           <div style={metaListStyle}>
             <span style={metaPillStyle}>{driver.driverId}</span>
-            <span style={metaPillStyle}>{driver.workState}</span>
+            <span style={metaPillStyle}>
+              {driverWorkStateLabel(locale, driver.workState)}
+            </span>
             <span style={metaPillStyle}>
               {driver.licensesValid
                 ? t("driverEarnings.licensesValid", locale)
@@ -251,10 +299,10 @@ export default async function DriverEarningsPage({
         {[
           {
             label: t("driverEarnings.statements", locale),
-            value: statementsResult.error
+            value: statementsError
               ? t("driverEarnings.unavailable", locale)
               : formatCompactNumber(driverStatements.length),
-            note: statementsResult.error
+            note: statementsError
               ? t("driverEarnings.serviceUnavailable", locale)
               : latestStatement
                 ? t("driverEarnings.latestPeriod", locale, {
@@ -264,41 +312,44 @@ export default async function DriverEarningsPage({
           },
           {
             label: t("driverEarnings.gross", locale),
-            value: statementsResult.error
+            value: statementsError
               ? t("driverEarnings.unavailable", locale)
               : formatMinorCurrency(totals.grossMinor),
-            note: statementsResult.error
+            note: statementsError
               ? t("driverEarnings.retryWhenRecovered", locale)
               : t("driverEarnings.revenueBeforeFees", locale),
           },
           {
             label: t("driverEarnings.serviceFee", locale),
-            value: statementsResult.error
+            value: statementsError
               ? t("driverEarnings.unavailable", locale)
               : formatMinorCurrency(totals.serviceFeeMinor),
-            note: statementsResult.error
+            note: statementsError
               ? t("driverEarnings.retryWhenRecovered", locale)
               : t("driverEarnings.platformFee", locale),
           },
           {
             label: t("driverEarnings.subsidy", locale),
-            value: statementsResult.error
+            value: statementsError
               ? t("driverEarnings.unavailable", locale)
               : formatMinorCurrency(totals.subsidyMinor),
-            note: statementsResult.error
+            note: statementsError
               ? t("driverEarnings.retryWhenRecovered", locale)
               : t("driverEarnings.supportPrograms", locale),
           },
           {
             label: t("driverEarnings.net", locale),
-            value: statementsResult.error
+            value: statementsError
               ? t("driverEarnings.unavailable", locale)
               : formatMinorCurrency(totals.netMinor),
-            note: statementsResult.error
+            note: statementsError
               ? t("driverEarnings.unavailableDegraded", locale)
               : latestStatement
                 ? t("driverEarnings.latestPayout", locale, {
-                    status: latestStatement.payoutStatus,
+                    status: payoutStatusLabel(
+                      locale,
+                      latestStatement.payoutStatus,
+                    ),
                   })
                 : t("driverEarnings.awaitingStatement", locale),
           },
@@ -355,7 +406,7 @@ export default async function DriverEarningsPage({
             </tr>
           </thead>
           <tbody>
-            {statementsResult.error ? (
+            {statementsError ? (
               <tr>
                 <td colSpan={8} style={tableCellStyle}>
                   {t("driverEarnings.loadError", locale)}
@@ -382,7 +433,9 @@ export default async function DriverEarningsPage({
                   <td style={tableCellStyle}>
                     {formatMinorCurrency(statement.netAmount.amountMinor)}
                   </td>
-                  <td style={tableCellStyle}>{statement.payoutStatus}</td>
+                  <td style={tableCellStyle}>
+                    {payoutStatusLabel(locale, statement.payoutStatus)}
+                  </td>
                 </tr>
               ))
             ) : (

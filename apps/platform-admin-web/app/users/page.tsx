@@ -15,8 +15,38 @@ const ROLE_CODES: PlatformAdminUserRole[] = [
   "viewer",
 ];
 
+function roleLabel(locale: string, roleCode: PlatformAdminUserRole) {
+  if (locale !== "zh") return roleCode;
+  switch (roleCode) {
+    case "superadmin":
+      return "超級管理員";
+    case "admin":
+      return "管理員";
+    case "operator":
+      return "營運人員";
+    case "viewer":
+      return "檢視者";
+    default:
+      return roleCode;
+  }
+}
+
+function userStatusLabel(locale: string, status: string | undefined) {
+  if (locale !== "zh" || !status) return status ?? "—";
+  switch (status) {
+    case "active":
+      return "啟用中";
+    case "suspended":
+      return "已停用";
+    case "pending":
+      return "待啟用";
+    default:
+      return status;
+  }
+}
+
 export default function UsersPage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [users, setUsers] = useState<PlatformAdminUserRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,7 +124,9 @@ export default function UsersPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {locale === "zh" ? "錯誤" : "Error"}: {error}
+          </p>
         </div>
       )}
 
@@ -223,7 +255,7 @@ export default function UsersPage() {
           <table className="admin-table">
             <thead>
               <tr>
-                <th>ID</th>
+                <th>{locale === "zh" ? "編號" : "ID"}</th>
                 <th>{t("users.col.user")}</th>
                 <th>{t("users.col.role")}</th>
                 <th>{t("users.col.created")}</th>
@@ -245,14 +277,14 @@ export default function UsersPage() {
                   </td>
                   <td>
                     <span className="admin-badge admin-badge--info">
-                      {u.roleCode}
+                      {roleLabel(locale, u.roleCode)}
                     </span>
                   </td>
                   <td>
                     <span
                       className={`admin-badge ${u.status === "active" ? "admin-badge--success" : u.status === "suspended" ? "admin-badge--danger" : "admin-badge--warning"}`}
                     >
-                      {u.status}
+                      {userStatusLabel(locale, u.status)}
                     </span>
                   </td>
                   <td style={{ fontSize: 12 }}>
@@ -265,14 +297,14 @@ export default function UsersPage() {
                         onClick={() => handleUpdateRole(u.userId, "admin")}
                         disabled={u.roleCode === "admin"}
                       >
-                        Admin
+                        {roleLabel(locale, "admin")}
                       </button>
                       <button
                         className="admin-btn admin-btn--secondary admin-btn--sm"
                         onClick={() => handleUpdateRole(u.userId, "viewer")}
                         disabled={u.roleCode === "viewer"}
                       >
-                        Viewer
+                        {roleLabel(locale, "viewer")}
                       </button>
                     </div>
                   </td>

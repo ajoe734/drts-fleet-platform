@@ -57,19 +57,62 @@ function getQueueStateColor(state: QueueState): string {
   }
 }
 
+function localizedQueueValue(locale: string, value: string | undefined) {
+  if (locale !== "zh" || !value) return value ?? "—";
+  switch (value) {
+    case "standard_taxi":
+      return "一般計程車";
+    case "business_dispatch":
+      return "商務派車";
+    case "credit_card_airport_transfer":
+      return "信用卡機場接送";
+    case "broadcast":
+      return "廣播派單";
+    case "reserved":
+      return "預約保留";
+    case "manual":
+      return "人工派遣";
+    case "automatic":
+      return "自動派遣";
+    case "hybrid":
+      return "混合模式";
+    case "assigned":
+      return "已指派";
+    case "pending":
+      return "待處理";
+    case "queued":
+      return "排隊中";
+    case "redispatch_required":
+      return "需重派";
+    case "exception_hold":
+      return "異常暫停";
+    case "enterprise_dispatch":
+      return "企業派車";
+    default:
+      return value.replace(/_/g, " ");
+  }
+}
+
 function formatEta(
+  locale: string,
   etaMinutes: number | null | undefined,
   updatedAt?: string,
 ): { display: string; tooltip: string } {
   if (etaMinutes === null || etaMinutes === undefined) {
-    return { display: "N/A", tooltip: "ETA not available" };
+    return {
+      display: locale === "zh" ? "無資料" : "N/A",
+      tooltip: locale === "zh" ? "尚無 ETA 資料" : "ETA not available",
+    };
   }
   const updated = updatedAt
     ? new Date(updatedAt).toLocaleTimeString()
-    : "unknown";
+    : locale === "zh"
+      ? "未知"
+      : "unknown";
   return {
-    display: `${etaMinutes} min`,
-    tooltip: `Last updated: ${updated}`,
+    display: locale === "zh" ? `${etaMinutes} 分鐘` : `${etaMinutes} min`,
+    tooltip:
+      locale === "zh" ? `最後更新：${updated}` : `Last updated: ${updated}`,
   };
 }
 
@@ -78,7 +121,7 @@ export function DispatchWorkflow({
   dispatchJobs,
   focusOrderId = "",
 }: DispatchWorkflowProps) {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const client = getOpsClient();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -335,7 +378,7 @@ export function DispatchWorkflow({
     <div className="dispatch-workflow">
       {error && (
         <div className="error-banner">
-          <strong>Error:</strong> {error}
+          <strong>{t("common.error")}:</strong> {error}
         </div>
       )}
 
@@ -417,7 +460,7 @@ export function DispatchWorkflow({
                   order.status === "redispatch_required";
                 const isExceptionHold = order.status === "exception_hold";
                 const etaInfo = job
-                  ? formatEta(job.latestEtaMinutes, job.updatedAt)
+                  ? formatEta(locale, job.latestEtaMinutes, job.updatedAt)
                   : { display: "-", tooltip: t("dispatch.workflow.noJobEta") };
                 const isFocused = focusOrderId === order.orderId;
 
@@ -443,12 +486,12 @@ export function DispatchWorkflow({
                     </td>
                     <td>
                       <div className="cell-title">
-                        {order.serviceBucket.replace(/_/g, " ")}
+                        {localizedQueueValue(locale, order.serviceBucket)}
                       </div>
                       <div className="cell-subcopy">
-                        {order.dispatchSemantics}
+                        {localizedQueueValue(locale, order.dispatchSemantics)}
                         {order.businessDispatchSubtype
-                          ? ` · ${order.businessDispatchSubtype.replace(/_/g, " ")}`
+                          ? ` · ${localizedQueueValue(locale, order.businessDispatchSubtype)}`
                           : ""}
                       </div>
                     </td>
@@ -459,14 +502,21 @@ export function DispatchWorkflow({
                       >
                         {t(getQueueStateKey(queueState))}
                       </span>
-                      <div className="cell-subcopy">{order.status}</div>
+                      <div className="cell-subcopy">
+                        {localizedQueueValue(locale, order.status)}
+                      </div>
                     </td>
                     <td>
                       {job ? (
                         <div className="dispatch-block">
                           <div>ID: {job.dispatchJobId.slice(0, 8)}...</div>
-                          <div>Status: {job.status}</div>
-                          <div className="cell-subcopy">{job.mode}</div>
+                          <div>
+                            {t("common.status")}:{" "}
+                            {localizedQueueValue(locale, job.status)}
+                          </div>
+                          <div className="cell-subcopy">
+                            {localizedQueueValue(locale, job.mode)}
+                          </div>
                         </div>
                       ) : (
                         <span className="cell-subcopy">

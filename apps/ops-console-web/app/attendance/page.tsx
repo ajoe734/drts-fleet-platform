@@ -15,6 +15,36 @@ function formatDt(value: string | undefined): string {
   }
 }
 
+function attendanceStatusLabel(locale: string, status: string | undefined) {
+  if (locale !== "zh" || !status) return status ?? "—";
+  switch (status) {
+    case "present":
+      return "出勤";
+    case "absent":
+      return "缺勤";
+    case "late":
+      return "遲到";
+    case "leave":
+      return "請假";
+    default:
+      return status;
+  }
+}
+
+function shiftStatusLabel(locale: string, status: string | undefined) {
+  if (locale !== "zh" || !status) return status ?? "—";
+  switch (status) {
+    case "active":
+      return "進行中";
+    case "completed":
+      return "已完成";
+    case "cancelled":
+      return "已取消";
+    default:
+      return status;
+  }
+}
+
 export default async function AttendancePage() {
   const [client, locale] = await Promise.all([
     getServerOpsClient(),
@@ -131,7 +161,7 @@ export default async function AttendancePage() {
                           : "yellow"
                     }
                   >
-                    {a.status ?? "—"}
+                    {attendanceStatusLabel(locale, a.status)}
                   </Badge>
                 </Td>
                 <Td muted>
@@ -173,7 +203,9 @@ export default async function AttendancePage() {
                   <Td mono>{s.shiftId ?? "—"}</Td>
                   <Td>{s.driverId ?? "—"}</Td>
                   <Td>
-                    <Badge variant="gray">{s.status ?? "—"}</Badge>
+                    <Badge variant="gray">
+                      {shiftStatusLabel(locale, s.status)}
+                    </Badge>
                   </Td>
                   <Td muted>{formatDt(s.clockedInAt)}</Td>
                   <Td muted>{formatDt(s.clockedOutAt)}</Td>

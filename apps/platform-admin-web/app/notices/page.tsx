@@ -8,6 +8,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import type {
   PlatformNoticeRecord,
   PlatformNoticeSeverity,
@@ -21,6 +22,7 @@ const SEVERITY_OPTIONS: PlatformNoticeSeverity[] = [
 ];
 
 export default function NoticesPage() {
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [notices, setNotices] = useState<PlatformNoticeRecord[]>([]);
   const [maintenance, setMaintenance] =
@@ -128,16 +130,99 @@ export default function NoticesPage() {
     }
   };
 
-  if (loading) return <div className="admin-empty">Loading notices...</div>;
+  const copy =
+    locale === "zh"
+      ? {
+          description: "發布平台公告並管理維護模式。",
+          errorLabel: "錯誤",
+          maintenanceActive: "維護中",
+          createTitle: "建立平台公告",
+          audience: "目標對象",
+          noticeId: "公告編號",
+          title: "標題",
+          severity: "嚴重程度",
+          status: "狀態",
+          created: "建立時間",
+          maintenanceTitle: "維護模式",
+          currentStatus: "目前狀態",
+          reason: "原因",
+          lastUpdated: "最後更新",
+          updateMaintenance: "更新維護模式",
+          reasonOptional: "原因（選填）",
+          reasonPlaceholder: "例如：排程升級時段",
+          empty: "目前沒有公告，可新增一則公告來廣播平台更新。",
+          resolve: "解除",
+        }
+      : {
+          description:
+            "Publish platform-wide notices, broadcasts, and manage maintenance windows.",
+          errorLabel: "Error",
+          maintenanceActive: "MAINTENANCE ACTIVE",
+          createTitle: "Create Platform Notice",
+          audience: "Target Audience",
+          noticeId: "Notice ID",
+          title: "Title",
+          severity: "Severity",
+          status: "Status",
+          created: "Created",
+          maintenanceTitle: "Maintenance Mode",
+          currentStatus: "Current Status",
+          reason: "Reason",
+          lastUpdated: "Last Updated",
+          updateMaintenance: "Update Maintenance Mode",
+          reasonOptional: "Reason (optional)",
+          reasonPlaceholder: "e.g. Scheduled upgrade window",
+          empty: "No notices. Create one to broadcast platform-wide updates.",
+          resolve: "Resolve",
+        };
+
+  const severityLabel = (severity: PlatformNoticeSeverity) => {
+    if (locale !== "zh") return severity;
+    switch (severity) {
+      case "critical":
+        return "嚴重";
+      case "warning":
+        return "警告";
+      default:
+        return "資訊";
+    }
+  };
+
+  const audienceLabel = (audience: "all" | "tenants" | "ops" | "drivers") => {
+    if (locale !== "zh") return audience;
+    switch (audience) {
+      case "tenants":
+        return "租戶";
+      case "ops":
+        return "營運";
+      case "drivers":
+        return "司機";
+      default:
+        return "全部";
+    }
+  };
+
+  const noticeStatusLabel = (status: PlatformNoticeRecord["status"]) => {
+    if (locale !== "zh") return status;
+    switch (status) {
+      case "active":
+        return "生效中";
+      case "scheduled":
+        return "已排程";
+      case "resolved":
+        return "已解除";
+      default:
+        return status;
+    }
+  };
+
+  if (loading) return <div className="admin-empty">{t("notices.loading")}</div>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Notices &amp; Maintenance</h1>
-        <p>
-          Publish platform-wide notices, broadcasts, and manage maintenance
-          windows.
-        </p>
+        <h1>{t("notices.title")}</h1>
+        <p>{copy.description}</p>
       </div>
 
       {error && (
@@ -145,7 +230,9 @@ export default function NoticesPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {copy.errorLabel}: {error}
+          </p>
         </div>
       )}
 
@@ -163,10 +250,10 @@ export default function NoticesPage() {
               className="admin-badge admin-badge--danger"
               style={{ fontSize: 12 }}
             >
-              MAINTENANCE ACTIVE
+              {copy.maintenanceActive}
             </span>
             <span style={{ fontSize: 13, color: "#dc2626" }}>
-              {maintenance.reason || "Platform is in maintenance mode."}
+              {maintenance.reason || t("notices.maintActive")}
             </span>
           </div>
         </div>
@@ -178,13 +265,13 @@ export default function NoticesPage() {
             className={`admin-toggle-btn ${activeTab === "notices" ? "active" : ""}`}
             onClick={() => setActiveTab("notices")}
           >
-            Notices ({notices.length})
+            {t("notices.tab.notices")} ({notices.length})
           </button>
           <button
             className={`admin-toggle-btn ${activeTab === "maintenance" ? "active" : ""}`}
             onClick={() => setActiveTab("maintenance")}
           >
-            Maintenance Mode
+            {t("notices.tab.maintenance")}
           </button>
         </div>
         {activeTab === "notices" && (
@@ -192,11 +279,11 @@ export default function NoticesPage() {
             className="admin-btn admin-btn--primary"
             onClick={() => setShowCreate(!showCreate)}
           >
-            {showCreate ? "Cancel" : "New Notice"}
+            {showCreate ? t("common.cancel") : t("notices.newNotice")}
           </button>
         )}
         <button className="admin-btn admin-btn--secondary" onClick={loadData}>
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
@@ -204,7 +291,7 @@ export default function NoticesPage() {
       {activeTab === "notices" && showCreate && (
         <div className="admin-card">
           <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
-            Create Platform Notice
+            {copy.createTitle}
           </h3>
           <form onSubmit={handleCreateNotice}>
             <div style={{ marginBottom: 12 }}>
@@ -217,7 +304,7 @@ export default function NoticesPage() {
                   fontWeight: 500,
                 }}
               >
-                Title
+                {t("notices.form.title")}
               </label>
               <input
                 id="notice-title"
@@ -232,7 +319,7 @@ export default function NoticesPage() {
                   borderRadius: 8,
                   fontSize: 14,
                 }}
-                placeholder="Notice title..."
+                placeholder={t("notices.form.titlePlaceholder")}
               />
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -245,7 +332,7 @@ export default function NoticesPage() {
                   fontWeight: 500,
                 }}
               >
-                Body
+                {t("notices.form.body")}
               </label>
               <textarea
                 id="notice-body"
@@ -261,7 +348,7 @@ export default function NoticesPage() {
                   fontSize: 14,
                   resize: "vertical",
                 }}
-                placeholder="Notice details..."
+                placeholder={t("notices.form.bodyPlaceholder")}
               />
             </div>
             <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
@@ -274,7 +361,7 @@ export default function NoticesPage() {
                     fontWeight: 500,
                   }}
                 >
-                  Severity
+                  {copy.severity}
                 </label>
                 <select
                   value={formSeverity}
@@ -290,7 +377,7 @@ export default function NoticesPage() {
                 >
                   {SEVERITY_OPTIONS.map((s) => (
                     <option key={s} value={s}>
-                      {s}
+                      {severityLabel(s)}
                     </option>
                   ))}
                 </select>
@@ -304,7 +391,7 @@ export default function NoticesPage() {
                     fontWeight: 500,
                   }}
                 >
-                  Target Audience
+                  {copy.audience}
                 </label>
                 <select
                   value={formAudience}
@@ -320,10 +407,10 @@ export default function NoticesPage() {
                     fontSize: 14,
                   }}
                 >
-                  <option value="all">All</option>
-                  <option value="tenants">Tenants</option>
-                  <option value="ops">Ops</option>
-                  <option value="drivers">Drivers</option>
+                  <option value="all">{audienceLabel("all")}</option>
+                  <option value="tenants">{audienceLabel("tenants")}</option>
+                  <option value="ops">{audienceLabel("ops")}</option>
+                  <option value="drivers">{audienceLabel("drivers")}</option>
                 </select>
               </div>
             </div>
@@ -332,7 +419,7 @@ export default function NoticesPage() {
               className="admin-btn admin-btn--primary"
               disabled={creating || !formTitle.trim() || !formBody.trim()}
             >
-              {creating ? "Publishing..." : "Publish Notice"}
+              {creating ? t("notices.publishing") : t("notices.publishNotice")}
             </button>
           </form>
         </div>
@@ -342,20 +429,20 @@ export default function NoticesPage() {
       {activeTab === "notices" &&
         (notices.length === 0 ? (
           <div className="admin-card admin-empty">
-            <p>No notices. Create one to broadcast platform-wide updates.</p>
+            <p>{copy.empty}</p>
           </div>
         ) : (
           <div className="admin-card" style={{ overflowX: "auto" }}>
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Notice ID</th>
-                  <th>Title</th>
-                  <th>Severity</th>
-                  <th>Status</th>
-                  <th>Audience</th>
-                  <th>Created</th>
-                  <th>Actions</th>
+                  <th>{copy.noticeId}</th>
+                  <th>{copy.title}</th>
+                  <th>{copy.severity}</th>
+                  <th>{copy.status}</th>
+                  <th>{copy.audience}</th>
+                  <th>{copy.created}</th>
+                  <th>{t("common.view")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -385,7 +472,7 @@ export default function NoticesPage() {
                       <span
                         className={`admin-badge ${getSeverityBadge(n.severity)}`}
                       >
-                        {n.severity}
+                        {severityLabel(n.severity)}
                       </span>
                     </td>
                     <td>
@@ -398,7 +485,7 @@ export default function NoticesPage() {
                               : "admin-badge--neutral"
                         }`}
                       >
-                        {n.status}
+                        {noticeStatusLabel(n.status)}
                       </span>
                     </td>
                     <td>
@@ -406,7 +493,7 @@ export default function NoticesPage() {
                         className="admin-badge admin-badge--info"
                         style={{ fontSize: 11 }}
                       >
-                        {n.targetAudience}
+                        {audienceLabel(n.targetAudience)}
                       </span>
                     </td>
                     <td style={{ fontSize: 12 }}>
@@ -418,7 +505,7 @@ export default function NoticesPage() {
                           className="admin-btn admin-btn--secondary admin-btn--sm"
                           onClick={() => handleResolve(n.noticeId)}
                         >
-                          Resolve
+                          {copy.resolve}
                         </button>
                       )}
                     </td>
@@ -432,13 +519,15 @@ export default function NoticesPage() {
       {/* Maintenance Mode Panel */}
       {activeTab === "maintenance" && (
         <div className="admin-card">
-          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>Maintenance Mode</h3>
+          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
+            {copy.maintenanceTitle}
+          </h3>
           {maintenance && (
             <div style={{ marginBottom: 20 }}>
               <table className="admin-table">
                 <tbody>
                   <tr>
-                    <th style={{ width: 160 }}>Current Status</th>
+                    <th style={{ width: 160 }}>{copy.currentStatus}</th>
                     <td>
                       <span
                         className={`admin-badge ${
@@ -447,16 +536,20 @@ export default function NoticesPage() {
                             : "admin-badge--success"
                         }`}
                       >
-                        {maintenance.enabled ? "ENABLED" : "Disabled"}
+                        {maintenance.enabled
+                          ? locale === "zh"
+                            ? "啟用"
+                            : "ENABLED"
+                          : t("common.disabled")}
                       </span>
                     </td>
                   </tr>
                   <tr>
-                    <th>Reason</th>
+                    <th>{copy.reason}</th>
                     <td>{maintenance.reason || "—"}</td>
                   </tr>
                   <tr>
-                    <th>Last Updated</th>
+                    <th>{copy.lastUpdated}</th>
                     <td>{formatDateTime(maintenance.updatedAt)}</td>
                   </tr>
                 </tbody>
@@ -465,7 +558,7 @@ export default function NoticesPage() {
           )}
           <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16 }}>
             <h4 style={{ margin: "0 0 12px", fontSize: 14 }}>
-              Update Maintenance Mode
+              {copy.updateMaintenance}
             </h4>
             <div
               style={{
@@ -484,7 +577,9 @@ export default function NoticesPage() {
                 <span className="admin-switch-slider" />
               </label>
               <span style={{ fontSize: 14 }}>
-                {maintEnabled ? "Maintenance mode ON" : "Maintenance mode OFF"}
+                {maintEnabled
+                  ? t("notices.maintenanceModeOn")
+                  : t("notices.maintenanceModeOff")}
               </span>
             </div>
             <div style={{ marginBottom: 12 }}>
@@ -497,7 +592,7 @@ export default function NoticesPage() {
                   fontWeight: 500,
                 }}
               >
-                Reason (optional)
+                {copy.reasonOptional}
               </label>
               <input
                 id="maint-reason"
@@ -512,7 +607,7 @@ export default function NoticesPage() {
                   borderRadius: 8,
                   fontSize: 14,
                 }}
-                placeholder="e.g. Scheduled upgrade window"
+                placeholder={copy.reasonPlaceholder}
               />
             </div>
             <button
@@ -520,7 +615,7 @@ export default function NoticesPage() {
               onClick={handleSetMaintenance}
               disabled={updatingMaint}
             >
-              {updatingMaint ? "Updating..." : "Apply"}
+              {updatingMaint ? t("notices.updating") : t("common.apply")}
             </button>
           </div>
         </div>

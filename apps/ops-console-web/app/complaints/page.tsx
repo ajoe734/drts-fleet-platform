@@ -32,7 +32,7 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 export default function ComplaintsPage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
   const [records, setRecords] = useState<ComplaintCaseRecord[]>([]);
@@ -168,6 +168,45 @@ export default function ComplaintsPage() {
     (record) => record.status === "closed",
   ).length;
 
+  const categoryLabel = (value: ComplaintCategory) => {
+    if (locale !== "zh") return value.replace(/_/g, " ");
+    const labels: Record<ComplaintCategory, string> = {
+      late_arrival: "遲到",
+      no_arrival: "未到場",
+      driver_service: "司機服務",
+      vehicle_condition: "車況",
+      route_issue: "路線問題",
+      fare_dispute: "費率爭議",
+      safety_concern: "安全疑慮",
+      lost_and_found: "失物招領",
+      other: "其他",
+    };
+    return labels[value];
+  };
+
+  const statusLabel = (value: ComplaintCaseStatus) => {
+    if (locale !== "zh") return value;
+    const labels: Record<ComplaintCaseStatus, string> = {
+      new: "新建",
+      assigned: "已指派",
+      under_investigation: "調查中",
+      resolved: "已處理",
+      closed: "已關閉",
+      reopened: "重開",
+    };
+    return labels[value];
+  };
+
+  const sourceLabel = (value: CreateComplaintCaseCommand["caseSource"]) => {
+    if (locale !== "zh") return value;
+    return {
+      ops: "後台",
+      phone: "電話",
+      web: "網頁",
+      app: "App",
+    }[value];
+  };
+
   return (
     <>
       <PageHeader
@@ -177,7 +216,7 @@ export default function ComplaintsPage() {
       <div>
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("common.error")}:</strong> {error}
           </div>
         )}
 
@@ -229,7 +268,7 @@ export default function ComplaintsPage() {
             <option value="all">{t("complaints.allStatuses")}</option>
             {STATUS_OPTIONS.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {statusLabel(status)}
               </option>
             ))}
           </select>
@@ -242,7 +281,7 @@ export default function ComplaintsPage() {
             <option value="all">{t("complaints.allCategories")}</option>
             {CATEGORY_OPTIONS.map((category) => (
               <option key={category} value={category}>
-                {category.replace(/_/g, " ")}
+                {categoryLabel(category)}
               </option>
             ))}
           </select>
@@ -298,10 +337,10 @@ export default function ComplaintsPage() {
                     }))
                   }
                 >
-                  <option value="ops">ops</option>
-                  <option value="phone">phone</option>
-                  <option value="web">web</option>
-                  <option value="app">app</option>
+                  <option value="ops">{sourceLabel("ops")}</option>
+                  <option value="phone">{sourceLabel("phone")}</option>
+                  <option value="web">{sourceLabel("web")}</option>
+                  <option value="app">{sourceLabel("app")}</option>
                 </select>
               </label>
               <label>
@@ -317,7 +356,7 @@ export default function ComplaintsPage() {
                 >
                   {CATEGORY_OPTIONS.map((category) => (
                     <option key={category} value={category}>
-                      {category.replace(/_/g, " ")}
+                      {categoryLabel(category)}
                     </option>
                   ))}
                 </select>
@@ -334,8 +373,12 @@ export default function ComplaintsPage() {
                     }))
                   }
                 >
-                  <option value="normal">normal</option>
-                  <option value="high">high</option>
+                  <option value="normal">
+                    {locale === "zh" ? "一般" : "normal"}
+                  </option>
+                  <option value="high">
+                    {locale === "zh" ? "高" : "high"}
+                  </option>
                 </select>
               </label>
               <label>
@@ -424,8 +467,8 @@ export default function ComplaintsPage() {
                         onClick={() => setSelectedCaseNo(record.caseNo)}
                       >
                         <td>{record.caseNo}</td>
-                        <td>{record.category}</td>
-                        <td>{record.status}</td>
+                        <td>{categoryLabel(record.category)}</td>
+                        <td>{statusLabel(record.status)}</td>
                         <td>{record.assigneeId ?? "-"}</td>
                         <td>{record.relatedOrderId ?? "-"}</td>
                         <td>{record.relatedCallId ?? "-"}</td>
@@ -453,7 +496,7 @@ export default function ComplaintsPage() {
                     <div className="detail-grid">
                       <div>
                         <span className="label">{t("common.status")}</span>
-                        <strong>{selectedRecord.status}</strong>
+                        <strong>{statusLabel(selectedRecord.status)}</strong>
                         <small>
                           {t("complaints.detail.slaDue", {
                             value: formatDateTime(selectedRecord.slaDueAt),

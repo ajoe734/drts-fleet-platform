@@ -28,7 +28,7 @@ function formatCost(value: number | null): string {
 }
 
 export default function MaintenancePage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -90,6 +90,31 @@ export default function MaintenancePage() {
     (record) => record.status === "completed",
   ).length;
 
+  const statusLabel = (value: MaintenanceStatus) => {
+    if (locale !== "zh") return value;
+    return {
+      scheduled: "已排程",
+      in_progress: "進行中",
+      completed: "已完成",
+      cancelled: "已取消",
+      overdue: "逾期",
+    }[value];
+  };
+
+  const typeLabel = (value: MaintenanceType) => {
+    if (locale !== "zh") return value.replace(/_/g, " ");
+    return {
+      scheduled_service: "定期保養",
+      repair: "維修",
+      inspection: "檢查",
+      recall: "召回",
+      tire_replacement: "輪胎更換",
+      oil_change: "換油",
+      brake_service: "煞車保養",
+      other: "其他",
+    }[value];
+  };
+
   return (
     <>
       <PageHeader
@@ -99,7 +124,7 @@ export default function MaintenancePage() {
       <div>
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("common.error")}:</strong> {error}
           </div>
         )}
 
@@ -147,7 +172,7 @@ export default function MaintenancePage() {
             <option value="all">{t("common.allStatuses")}</option>
             {STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {statusLabel(status)}
               </option>
             ))}
           </select>
@@ -246,7 +271,7 @@ export default function MaintenancePage() {
                             {record.maintenanceId}
                           </div>
                           <div className="cell-subcopy">
-                            {record.type.replace(/_/g, " ")}
+                            {typeLabel(record.type)}
                           </div>
                           <div className="cell-subcopy">
                             {record.description}
@@ -254,7 +279,7 @@ export default function MaintenancePage() {
                         </td>
                         <td>
                           <span className="status-badge">
-                            {effectiveStatus}
+                            {statusLabel(effectiveStatus)}
                           </span>
                         </td>
                         <td>
@@ -479,7 +504,7 @@ function MaintenanceForm({
     command: CreateMaintenanceRecordCommand | UpdateMaintenanceRecordCommand,
   ) => Promise<void>;
 }) {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [pending, startTransition] = useTransition();
   const [vehicleId, setVehicleId] = useState(editingRecord?.vehicleId ?? "");
   const [type, setType] = useState<MaintenanceType>(
@@ -510,6 +535,31 @@ function MaintenanceForm({
   const [notes, setNotes] = useState(editingRecord?.notes ?? "");
 
   const isEditing = Boolean(editingRecord);
+
+  const statusLabel = (value: MaintenanceStatus) => {
+    if (locale !== "zh") return value;
+    return {
+      scheduled: "已排程",
+      in_progress: "進行中",
+      completed: "已完成",
+      cancelled: "已取消",
+      overdue: "逾期",
+    }[value];
+  };
+
+  const typeLabel = (value: MaintenanceType) => {
+    if (locale !== "zh") return value.replace(/_/g, " ");
+    return {
+      scheduled_service: "定期保養",
+      repair: "維修",
+      inspection: "檢查",
+      recall: "召回",
+      tire_replacement: "輪胎更換",
+      oil_change: "換油",
+      brake_service: "煞車保養",
+      other: "其他",
+    }[value];
+  };
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -576,7 +626,7 @@ function MaintenanceForm({
               >
                 {TYPES.map((value) => (
                   <option key={value} value={value}>
-                    {value.replace(/_/g, " ")}
+                    {typeLabel(value)}
                   </option>
                 ))}
               </select>
@@ -612,7 +662,7 @@ function MaintenanceForm({
               >
                 {STATUSES.map((value) => (
                   <option key={value} value={value}>
-                    {value}
+                    {statusLabel(value)}
                   </option>
                 ))}
               </select>

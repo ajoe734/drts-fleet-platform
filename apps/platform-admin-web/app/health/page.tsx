@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 
 interface AdapterHealth {
   adapterId: string;
@@ -23,6 +24,7 @@ interface QuotaStatus {
 }
 
 export default function HealthPage() {
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [adapters, setAdapters] = useState<AdapterHealth[]>([]);
   const [quotas, setQuotas] = useState<QuotaStatus[]>([]);
@@ -89,15 +91,57 @@ export default function HealthPage() {
     }
   };
 
-  if (loading) return <div className="admin-empty">Loading health data...</div>;
+  const copy =
+    locale === "zh"
+      ? {
+          description: "監控系統健康、轉發器狀態與資源配額。",
+          errorLabel: "錯誤",
+          updatedAt: "最後更新",
+        }
+      : {
+          description:
+            "Monitor system health, forwarder adapter status, and resource quotas.",
+          errorLabel: "Error",
+          updatedAt: "Last updated",
+        };
+
+  const adapterStatusLabel = (status: AdapterHealth["status"]) => {
+    if (locale !== "zh") return status;
+    switch (status) {
+      case "healthy":
+        return "健康";
+      case "degraded":
+        return "降級";
+      case "unhealthy":
+        return "異常";
+      default:
+        return "未知";
+    }
+  };
+
+  const quotaResourceLabel = (resource: string) => {
+    if (locale !== "zh") return resource;
+    switch (resource) {
+      case "API Requests/min":
+        return t("health.resource.apiRequests");
+      case "Active Drivers":
+        return t("health.resource.activeDrivers");
+      case "Concurrent Bookings":
+        return t("health.resource.concurrent");
+      case "Storage (GB)":
+        return t("health.resource.storage");
+      default:
+        return resource;
+    }
+  };
+
+  if (loading) return <div className="admin-empty">{t("health.loading")}</div>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Health &amp; Quotas</h1>
-        <p>
-          Monitor system health, forwarder adapter status, and resource quotas.
-        </p>
+        <h1>{t("health.title")}</h1>
+        <p>{copy.description}</p>
       </div>
 
       {error && (
@@ -105,7 +149,9 @@ export default function HealthPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {copy.errorLabel}: {error}
+          </p>
         </div>
       )}
 
@@ -115,21 +161,21 @@ export default function HealthPage() {
             className={`admin-toggle-btn ${activeTab === "adapters" ? "active" : ""}`}
             onClick={() => setActiveTab("adapters")}
           >
-            Adapters ({adapters.length})
+            {t("health.tab.adapters")} ({adapters.length})
           </button>
           <button
             className={`admin-toggle-btn ${activeTab === "quotas" ? "active" : ""}`}
             onClick={() => setActiveTab("quotas")}
           >
-            Quotas ({quotas.length})
+            {t("health.tab.quotas")} ({quotas.length})
           </button>
         </div>
         <button className="admin-btn admin-btn--secondary" onClick={loadData}>
-          Refresh
+          {t("common.refresh")}
         </button>
         {lastRefresh && (
           <span style={{ fontSize: 12, color: "#6b7280" }}>
-            Last updated: {lastRefresh}
+            {copy.updatedAt}: {lastRefresh}
           </span>
         )}
       </div>
@@ -137,15 +183,15 @@ export default function HealthPage() {
       <div className="admin-card">
         {activeTab === "adapters" &&
           (adapters.length === 0 ? (
-            <p className="admin-empty">No adapter health data available.</p>
+            <p className="admin-empty">{t("health.noAdapters")}</p>
           ) : (
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Adapter ID</th>
-                  <th>Status</th>
-                  <th>Last Check</th>
-                  <th>Message</th>
+                  <th>{t("health.col.adapter")}</th>
+                  <th>{t("health.col.status")}</th>
+                  <th>{t("health.col.lastCheck")}</th>
+                  <th>{t("health.col.message")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -158,7 +204,7 @@ export default function HealthPage() {
                       <span
                         className={`admin-badge ${getAdapterBadge(a.status)}`}
                       >
-                        {a.status}
+                        {adapterStatusLabel(a.status)}
                       </span>
                     </td>
                     <td>
@@ -184,7 +230,7 @@ export default function HealthPage() {
 
         {activeTab === "quotas" &&
           (quotas.length === 0 ? (
-            <p className="admin-empty">No quota data available.</p>
+            <p className="admin-empty">{t("health.noQuotas")}</p>
           ) : (
             <div>
               {quotas.map((q) => (
@@ -197,7 +243,7 @@ export default function HealthPage() {
                     }}
                   >
                     <span style={{ fontWeight: 500, fontSize: 14 }}>
-                      {q.resource}
+                      {quotaResourceLabel(q.resource)}
                     </span>
                     <span style={{ fontSize: 13, color: "#6b7280" }}>
                       {q.used} / {q.limit} ({q.percentage.toFixed(1)}%)

@@ -35,6 +35,36 @@ type HealthPayload = {
   timestamp: string;
 };
 
+function runtimeValueLabel(locale: string, value: string | undefined) {
+  if (locale !== "zh" || !value) return value ?? "—";
+  switch (value) {
+    case "api":
+      return "API";
+    case "degraded":
+      return "降級";
+    case "healthy":
+      return "健康";
+    case "unknown":
+      return "未知";
+    case "cloud":
+      return "雲端";
+    case "staging":
+      return "測試";
+    case "platform":
+      return "平台";
+    case "platform_admin":
+      return "平台管理員";
+    case "ops":
+      return "營運";
+    case "ops_console":
+      return "營運後台";
+    case "driver":
+      return "司機";
+    default:
+      return value;
+  }
+}
+
 async function resolveOrFallback<T>(
   loader: () => Promise<T>,
   fallback: T,
@@ -433,7 +463,7 @@ export default async function DashboardPage() {
                     marginTop: "4px",
                   }}
                 >
-                  {value}
+                  {runtimeValueLabel(locale, value)}
                 </div>
               </div>
             ))}

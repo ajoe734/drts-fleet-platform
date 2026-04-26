@@ -7,9 +7,11 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
 import type { FeatureFlag, FeatureFlagSummary } from "@drts/contracts";
 
 export default function FeatureFlagsPage() {
+  const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const [flags, setFlags] = useState<FeatureFlag[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,14 +54,45 @@ export default function FeatureFlagsPage() {
     return true;
   });
 
-  if (loading)
-    return <div className="admin-empty">Loading feature flags...</div>;
+  const copy =
+    locale === "zh"
+      ? {
+          description: "管理平台功能旗標，並檢視租戶層級覆寫狀態。",
+          errorLabel: "錯誤",
+          all: "全部",
+          tenantOverride: "租戶覆寫",
+          updated: "更新時間",
+          toggle: "切換",
+          descriptionColumn: "說明",
+          noDescription: "—",
+          tenantPrefix: "租戶",
+          global: "全域",
+          empty: "沒有找到功能旗標。",
+          key: "Key",
+        }
+      : {
+          description:
+            "Manage platform feature flags with tenant-level override support.",
+          errorLabel: "Error",
+          all: "All",
+          tenantOverride: "Tenant Override",
+          updated: "Updated",
+          toggle: "Toggle",
+          descriptionColumn: "Description",
+          noDescription: "—",
+          tenantPrefix: "Tenant",
+          global: "Global",
+          empty: "No feature flags found.",
+          key: "Key",
+        };
+
+  if (loading) return <div className="admin-empty">{t("flags.loading")}</div>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Feature Flags</h1>
-        <p>Manage platform feature flags with tenant-level override support.</p>
+        <h1>{t("flags.title")}</h1>
+        <p>{copy.description}</p>
       </div>
 
       {error && (
@@ -67,7 +100,9 @@ export default function FeatureFlagsPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {copy.errorLabel}: {error}
+          </p>
         </div>
       )}
 
@@ -77,41 +112,41 @@ export default function FeatureFlagsPage() {
             className={`admin-toggle-btn ${filter === "all" ? "active" : ""}`}
             onClick={() => setFilter("all")}
           >
-            All ({flags.length})
+            {copy.all} ({flags.length})
           </button>
           <button
             className={`admin-toggle-btn ${filter === "enabled" ? "active" : ""}`}
             onClick={() => setFilter("enabled")}
           >
-            Enabled ({flags.filter((f) => f.enabled).length})
+            {t("common.enabled")} ({flags.filter((f) => f.enabled).length})
           </button>
           <button
             className={`admin-toggle-btn ${filter === "disabled" ? "active" : ""}`}
             onClick={() => setFilter("disabled")}
           >
-            Disabled ({flags.filter((f) => !f.enabled).length})
+            {t("common.disabled")} ({flags.filter((f) => !f.enabled).length})
           </button>
         </div>
         <button className="admin-btn admin-btn--secondary" onClick={loadFlags}>
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
       {filtered.length === 0 ? (
         <div className="admin-card admin-empty">
-          <p>No feature flags found.</p>
+          <p>{copy.empty}</p>
         </div>
       ) : (
         <div className="admin-card" style={{ overflowX: "auto" }}>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Key</th>
-                <th>Status</th>
-                <th>Description</th>
-                <th>Tenant Override</th>
-                <th>Updated</th>
-                <th>Toggle</th>
+                <th>{copy.key}</th>
+                <th>{t("flags.col.status")}</th>
+                <th>{copy.descriptionColumn}</th>
+                <th>{copy.tenantOverride}</th>
+                <th>{copy.updated}</th>
+                <th>{copy.toggle}</th>
               </tr>
             </thead>
             <tbody>
@@ -137,7 +172,9 @@ export default function FeatureFlagsPage() {
                           : "admin-badge--neutral"
                       }`}
                     >
-                      {flag.enabled ? "Enabled" : "Disabled"}
+                      {flag.enabled
+                        ? t("common.enabled")
+                        : t("common.disabled")}
                     </span>
                   </td>
                   <td
@@ -148,7 +185,7 @@ export default function FeatureFlagsPage() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {flag.description || "—"}
+                    {flag.description || copy.noDescription}
                   </td>
                   <td>
                     {flag.tenantId ? (
@@ -156,11 +193,11 @@ export default function FeatureFlagsPage() {
                         className="admin-badge admin-badge--info"
                         style={{ fontSize: 11 }}
                       >
-                        Tenant: {flag.tenantId}
+                        {copy.tenantPrefix}: {flag.tenantId}
                       </span>
                     ) : (
                       <span style={{ fontSize: 12, color: "#9ca3af" }}>
-                        Global
+                        {copy.global}
                       </span>
                     )}
                   </td>

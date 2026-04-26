@@ -1,5 +1,7 @@
 import type { PlacardVersionRecord } from "@drts/contracts";
 
+type Locale = "en" | "zh";
+
 export function normalizePlacardVersionCode(versionCode: string) {
   return versionCode.trim().toLowerCase();
 }
@@ -26,6 +28,7 @@ export function findPlacardVersionCodeConflict(
 }
 
 export function getPlacardVersionCodePrecheckMessage(
+  locale: Locale,
   versionCode: string,
   placards: readonly Pick<
     PlacardVersionRecord,
@@ -37,5 +40,7 @@ export function getPlacardVersionCodePrecheckMessage(
     return null;
   }
 
-  return `Version code already exists in placard ${conflict.placardVersionId}. Choose a unique code before generating.`;
+  return locale === "zh"
+    ? `版本代碼已存在於提示牌 ${conflict.placardVersionId}，請先改用唯一代碼再產生。`
+    : `Version code already exists in placard ${conflict.placardVersionId}. Choose a unique code before generating.`;
 }

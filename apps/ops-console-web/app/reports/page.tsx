@@ -122,6 +122,55 @@ function shortHash(value: string | null | undefined) {
   return `${value.slice(0, 12)}...`;
 }
 
+function reportStatusLabel(locale: string, value: string | undefined) {
+  if (locale !== "zh" || !value) return value ?? "—";
+  switch (value) {
+    case "queued":
+      return "排隊中";
+    case "running":
+      return "執行中";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失敗";
+    default:
+      return value;
+  }
+}
+
+function reportFormatLabel(locale: string, value: string | undefined) {
+  if (locale !== "zh" || !value) return value ?? "—";
+  switch (value) {
+    case "xlsx":
+      return "Excel";
+    case "csv":
+      return "CSV";
+    case "pdf":
+      return "PDF";
+    default:
+      return value;
+  }
+}
+
+function filingPackageTypeLabel(locale: string, value: string | undefined) {
+  if (locale !== "zh" || !value) return value ?? "—";
+  switch (value) {
+    case "monthly_report":
+      return "月報封包";
+    case "incident_bundle":
+      return "事故封包";
+    case "registry_snapshot":
+      return "名冊快照";
+    default:
+      return value.replace(/_/g, " ");
+  }
+}
+
+function filingMutabilityLabel(locale: string, immutable: boolean | undefined) {
+  if (locale !== "zh") return immutable ? "immutable" : "mutable";
+  return immutable ? "不可變更" : "可編修";
+}
+
 function jobCategory(jobType: string) {
   return REGULATORY_JOB_TYPE_SET.has(jobType as ReportJobType)
     ? "Regulatory"
@@ -129,7 +178,7 @@ function jobCategory(jobType: string) {
 }
 
 export default function ReportsPage() {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [jobs, setJobs] = useState<ReportJobRecord[]>([]);
   const [packages, setPackages] = useState<FilingPackageListRecord[]>([]);
   const [jobDetail, setJobDetail] = useState<ReportJobDetailRecord | null>(
@@ -285,7 +334,7 @@ export default function ReportsPage() {
       <div>
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{t("common.error")}:</strong> {error}
           </div>
         )}
 
@@ -365,7 +414,7 @@ export default function ReportsPage() {
                 >
                   {REPORT_OUTPUT_FORMATS.map((value) => (
                     <option key={value} value={value}>
-                      {value}
+                      {reportFormatLabel(locale, value)}
                     </option>
                   ))}
                 </select>
@@ -375,7 +424,11 @@ export default function ReportsPage() {
                 <input
                   value={periodLabel}
                   onChange={(event) => setPeriodLabel(event.target.value)}
-                  placeholder="2026-04 or 2026-H1"
+                  placeholder={
+                    locale === "zh"
+                      ? "例如 2026-04 或 2026-H1"
+                      : "2026-04 or 2026-H1"
+                  }
                 />
               </label>
               <label>
@@ -426,7 +479,7 @@ export default function ReportsPage() {
                 >
                   {FILING_PACKAGE_TYPES.map((value) => (
                     <option key={value} value={value}>
-                      {value}
+                      {filingPackageTypeLabel(locale, value)}
                     </option>
                   ))}
                 </select>
@@ -444,7 +497,9 @@ export default function ReportsPage() {
                 <input
                   value={packageScope}
                   onChange={(event) => setPackageScope(event.target.value)}
-                  placeholder="ops-console"
+                  placeholder={
+                    locale === "zh" ? "例如 ops-console" : "ops-console"
+                  }
                 />
               </label>
             </div>
@@ -481,7 +536,9 @@ export default function ReportsPage() {
                 <div className="detail-stats">
                   <div className="detail-stat">
                     <span>{t("reports.detail.status")}</span>
-                    <strong>{jobDetail.status}</strong>
+                    <strong>
+                      {reportStatusLabel(locale, jobDetail.status)}
+                    </strong>
                     <small>
                       {t(
                         `reports.category.${jobCategory(jobDetail.jobType).toLowerCase()}`,
@@ -490,7 +547,9 @@ export default function ReportsPage() {
                   </div>
                   <div className="detail-stat">
                     <span>{t("reports.detail.format")}</span>
-                    <strong>{jobDetail.format}</strong>
+                    <strong>
+                      {reportFormatLabel(locale, jobDetail.format)}
+                    </strong>
                     <small>{jobDetail.jobId}</small>
                   </div>
                   <div className="detail-stat">
@@ -606,7 +665,10 @@ export default function ReportsPage() {
                 <h3>
                   {packageDetail
                     ? t("reports.packageManifest", {
-                        type: packageDetail.packageType,
+                        type: filingPackageTypeLabel(
+                          locale,
+                          packageDetail.packageType,
+                        ),
                       })
                     : t("reports.selectFilingPackage")}
                 </h3>
@@ -620,9 +682,11 @@ export default function ReportsPage() {
                 <div className="detail-stats">
                   <div className="detail-stat">
                     <span>{t("reports.detail.status")}</span>
-                    <strong>{packageDetail.status}</strong>
+                    <strong>
+                      {reportStatusLabel(locale, packageDetail.status)}
+                    </strong>
                     <small>
-                      {packageDetail.immutable ? "immutable" : "mutable"}
+                      {filingMutabilityLabel(locale, packageDetail.immutable)}
                     </small>
                   </div>
                   <div className="detail-stat">
@@ -795,7 +859,8 @@ export default function ReportsPage() {
                         </div>
                         <div className="cell-subcopy">{job.jobId}</div>
                         <div className="cell-subcopy">
-                          {formatDateTime(job.createdAt)} • {job.format}
+                          {formatDateTime(job.createdAt)} •{" "}
+                          {reportFormatLabel(locale, job.format)}
                         </div>
                       </td>
                       <td>
@@ -804,7 +869,7 @@ export default function ReportsPage() {
                         )}
                       </td>
                       <td>
-                        <div>{job.status}</div>
+                        <div>{reportStatusLabel(locale, job.status)}</div>
                         <div className="cell-subcopy">
                           {t("reports.detail.updated", {
                             value: formatDateTime(job.updatedAt),
@@ -899,13 +964,15 @@ export default function ReportsPage() {
                   packages.map((pkg) => (
                     <tr key={pkg.packageId}>
                       <td>
-                        <div className="cell-title">{pkg.packageType}</div>
+                        <div className="cell-title">
+                          {filingPackageTypeLabel(locale, pkg.packageType)}
+                        </div>
                         <div className="cell-subcopy">{pkg.packageId}</div>
                       </td>
                       <td>
-                        <div>{pkg.status}</div>
+                        <div>{reportStatusLabel(locale, pkg.status)}</div>
                         <div className="cell-subcopy">
-                          {(pkg.immutable ?? true) ? "immutable" : "mutable"}
+                          {filingMutabilityLabel(locale, pkg.immutable ?? true)}
                         </div>
                       </td>
                       <td>

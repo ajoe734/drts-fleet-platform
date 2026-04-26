@@ -106,6 +106,24 @@ function ChipLink({
   );
 }
 
+function payoutStatusLabel(locale: string, status: string | undefined) {
+  if (locale !== "zh" || !status) return status ?? "—";
+  switch (status) {
+    case "paid":
+      return "已撥款";
+    case "pending":
+      return "待撥款";
+    case "processing":
+      return "處理中";
+    case "failed":
+      return "撥款失敗";
+    case "on_hold":
+      return "暫緩";
+    default:
+      return status;
+  }
+}
+
 export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const client = getOpsClient();
   const filters = resolveFilters(searchParams);
@@ -426,7 +444,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                     letterSpacing: "0.05em",
                   }}
                 >
-                  {item.status}
+                  {payoutStatusLabel(locale, item.status)}
                 </div>
                 <div
                   style={{
@@ -461,7 +479,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               <Td muted>{s.periodMonth}</Td>
               <Td>
                 <Badge variant={s.payoutStatus === "paid" ? "green" : "yellow"}>
-                  {s.payoutStatus}
+                  {payoutStatusLabel(locale, s.payoutStatus)}
                 </Badge>
               </Td>
               <Td>{formatMinorCurrency(s.netAmount.amountMinor)}</Td>
