@@ -14,6 +14,9 @@ points so the team can answer three different questions quickly:
 - `docs/03-runbooks/local-development.md`
   Active environment model for this repo: dedicated project `VM dev` plus
   protected shared `stage`.
+  Machine-specific VM notes belong in `docs/03-runbooks/local-development.local.md`
+  and broader local scratch belongs in `.local/`, both initialized by
+  `./scripts/init-local-workspace.sh`.
 - `docs/03-runbooks/master-system-closeout-checklist.md`
   Current closeout definition for the whole system.
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`

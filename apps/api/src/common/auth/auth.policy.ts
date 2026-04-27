@@ -302,6 +302,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "forwarder/adapters/health" && isReadMethod(upperMethod)) {
+    return {
+      routeKey: `forwarder:adapters:health:${upperMethod}`,
+      requiredScopes: ["forwarder:read"],
+      allowedRealms: baseAllowedRealms("platform", "ops"),
+      description: "Forwarder adapter health",
+    };
+  }
+
   if (routePath.startsWith("forwarder/")) {
     return {
       routeKey: `forwarder:${upperMethod}`,

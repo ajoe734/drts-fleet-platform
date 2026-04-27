@@ -55,6 +55,7 @@ describe("control-plane auth helper", () => {
     expect(payload?.actorType).toBe("platform_admin");
     expect(payload?.realm).toBe("platform");
     expect(payload?.scopes).toContain("foundation:write");
+    expect(payload?.scopes).toContain("forwarder:read");
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;

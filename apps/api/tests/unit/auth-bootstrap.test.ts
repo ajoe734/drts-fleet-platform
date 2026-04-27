@@ -94,6 +94,20 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
+  it("allows platform health views to read forwarder adapter health", () => {
+    const policy = resolveRouteAuthPolicy(
+      "GET",
+      "/api/forwarder/adapters/health",
+    );
+
+    expect(policy).toEqual({
+      routeKey: "forwarder:adapters:health:GET",
+      requiredScopes: ["forwarder:read"],
+      allowedRealms: ["system", "platform", "ops"],
+      description: "Forwarder adapter health",
+    });
+  });
+
   it("resolves driver profile routes to driver-scoped self-service access", () => {
     const policy = resolveRouteAuthPolicy("PATCH", "/api/driver/profile");
 

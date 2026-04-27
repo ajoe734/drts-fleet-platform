@@ -127,10 +127,13 @@ port mappings, current container names, temporary firewall commands, and other
 per-VM review details in:
 
 - `docs/03-runbooks/local-development.local.md`
+- `.local/` for broader machine-only scratch files that are not part of the
+  canonical runbook
 
 That file is intentionally gitignored. Bootstrap it from:
 
 - `docs/03-runbooks/local-development.local.example.md`
+- `./scripts/init-local-workspace.sh`
 - `./scripts/init-local-development-overlay.sh`
 
 Examples of information that should stay in the local overlay instead of this
@@ -140,6 +143,10 @@ canonical runbook:
 - temporary container names such as `drts-we002-*`
 - operator-specific GCP firewall commands
 - ad hoc external-access debugging notes for one machine
+
+Use `.env` / `.env.local` for runtime configuration overrides, and use `.local/`
+for personal notes, scratch payloads, temporary reviewer URLs, and any other
+local-only artifacts that should never be committed.
 
 Common commands:
 

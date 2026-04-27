@@ -92,6 +92,7 @@ const CONTROL_PLANE_SCOPE_PRESETS: Record<ControlPlaneActorType, string[]> = {
     "maintenance:write",
     "reports:read",
     "reports:write",
+    "forwarder:read",
   ],
   ops_user: [
     "identity:read",

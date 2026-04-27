@@ -53,6 +53,20 @@ Canonical starting points:
 - `PHASE1_DISCUSSION_ASSIGNMENTS.md`
 - `CANONICAL_DOCUMENT_MAP.md`
 
+## Local Workspace Hygiene
+
+Machine-specific notes and scratch artifacts should not be written into tracked
+documentation.
+
+- Use `./scripts/init-local-workspace.sh` to create the local-only workspace
+  scaffolding.
+- Use `docs/03-runbooks/local-development.local.md` for VM dev endpoint and
+  review access notes.
+- Use `.local/` for personal scratch files, temporary URLs, ad hoc commands,
+  and other local-only artifacts.
+- Use `.env` / `.env.local` for environment overrides instead of editing
+  tracked defaults.
+
 Seed design inputs:
 
 - `TARGET_ARCHITECTURE.md`
