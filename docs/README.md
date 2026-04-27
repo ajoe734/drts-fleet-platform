@@ -11,6 +11,9 @@ points so the team can answer three different questions quickly:
 
 - `docs/00-context/current-system-blueprint-alignment-audit-20260421.md`
   Code-first audit of current implementation vs. the full Phase 1 blueprint.
+- `docs/03-runbooks/local-development.md`
+  Active environment model for this repo: dedicated project `VM dev` plus
+  protected shared `stage`.
 - `docs/03-runbooks/master-system-closeout-checklist.md`
   Current closeout definition for the whole system.
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
@@ -64,6 +67,7 @@ remains open now.
 
 ## Runbooks, Rollout, and Evidence
 
+- `docs/03-runbooks/local-development.md`
 - `docs/03-runbooks/master-system-closeout-checklist.md`
 - `docs/03-runbooks/cross-repo-gap-matrix-20260424.md`
 - `docs/03-runbooks/execution-next-wave-task-board.md`
