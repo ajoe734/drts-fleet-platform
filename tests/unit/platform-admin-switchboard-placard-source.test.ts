@@ -5,9 +5,9 @@ import type { PublicInfoVersionRecord } from "@drts/contracts";
 import {
   formatPlacardSourceOptionLabel,
   getPreferredPlacardSourceVersion,
+  getPlacardRetiredSourceAuditNote,
   getPlacardSourceSelectionHint,
   isPlacardSourceSelectionBlocked,
-  PLACARD_RETIRED_SOURCE_AUDIT_NOTE,
 } from "../../apps/platform-admin-web/app/switchboard/placard-source";
 
 function makeVersion(
@@ -35,10 +35,13 @@ function makeVersion(
 describe("platform admin switchboard placard source rules", () => {
   it("marks retired sources unavailable in the option label", () => {
     expect(
-      formatPlacardSourceOptionLabel({
-        title: "2026 Q3 Public Info",
-        status: "retired",
-      }),
+      formatPlacardSourceOptionLabel(
+        {
+          title: "2026 Q3 Public Info",
+          status: "retired",
+        },
+        "en",
+      ),
     ).toBe("2026 Q3 Public Info (retired source unavailable)");
   });
 
@@ -49,10 +52,10 @@ describe("platform admin switchboard placard source rules", () => {
     } as const;
 
     expect(isPlacardSourceSelectionBlocked(retiredSource)).toBe(true);
-    expect(getPlacardSourceSelectionHint(retiredSource)).toBe(
+    expect(getPlacardSourceSelectionHint(retiredSource, "en")).toBe(
       "Retired source selected: generate is blocked because placards must be linked to an active draft or published disclosure version.",
     );
-    expect(PLACARD_RETIRED_SOURCE_AUDIT_NOTE).toContain(
+    expect(getPlacardRetiredSourceAuditNote("en")).toContain(
       "cannot be used to generate new placards",
     );
   });
@@ -65,18 +68,24 @@ describe("platform admin switchboard placard source rules", () => {
       }),
     ).toBe(false);
     expect(
-      getPlacardSourceSelectionHint({
-        title: "2026 Q4 Public Info",
-        status: "published",
-      }),
+      getPlacardSourceSelectionHint(
+        {
+          title: "2026 Q4 Public Info",
+          status: "published",
+        },
+        "en",
+      ),
     ).toBe(
       "Published source selected: generated placard will inherit the live disclosure timestamp.",
     );
     expect(
-      getPlacardSourceSelectionHint({
-        title: "2026 Draft Public Info",
-        status: "draft",
-      }),
+      getPlacardSourceSelectionHint(
+        {
+          title: "2026 Draft Public Info",
+          status: "draft",
+        },
+        "en",
+      ),
     ).toBe(
       "Draft source selected: generated placard stays draft until the linked public info is published.",
     );

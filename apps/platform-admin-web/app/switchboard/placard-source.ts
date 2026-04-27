@@ -1,9 +1,9 @@
 import type { PublicInfoVersionRecord } from "@drts/contracts";
-import type { Locale } from "@/lib/translations";
+import type { Locale } from "../../lib/translations";
 import {
   formatPlatformCodeLabel,
   getPlatformLabel,
-} from "@/lib/localized-labels";
+} from "../../lib/localized-labels";
 
 type PlacardSourceVersion =
   | Pick<PublicInfoVersionRecord, "status" | "title">
