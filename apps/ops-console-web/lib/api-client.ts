@@ -52,11 +52,15 @@ export function createOpsDispatchEventSource(): EventSource {
     apiUrl,
     "/api/ops/dispatch-events",
   );
-  // URL constructor requires an absolute base; use origin when apiUrl is a relative path
-  const absoluteBase = apiUrl.startsWith("http")
-    ? apiUrl
-    : window.location.origin;
-  const url = new URL(requestPath, absoluteBase);
+  const url = apiUrl.startsWith("/control-plane-proxy")
+    ? new URL(
+        `${apiUrl.replace(/\/$/, "")}${requestPath}`,
+        window.location.origin,
+      )
+    : new URL(
+        requestPath,
+        apiUrl.startsWith("http") ? apiUrl : window.location.origin,
+      );
   if (!apiUrl.startsWith("/control-plane-proxy")) {
     url.searchParams.set("actorType", "ops_user");
     url.searchParams.set("actorId", DEMO_ACTOR_ID);

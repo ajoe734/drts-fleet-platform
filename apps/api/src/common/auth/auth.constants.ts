@@ -94,6 +94,7 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "maintenance:write",
     "reports:read",
     "reports:write",
+    "forwarder:read",
   ],
   tenant_admin: [
     "identity:read",
