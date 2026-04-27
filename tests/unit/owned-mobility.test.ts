@@ -40,6 +40,7 @@ function createService(
 
 const TENANT_ACME = "tenant-acme-001";
 const TENANT_NEWCO = "tenant-newco-001";
+const PARTNER_TENANT = "tenant-demo-001";
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
 
 function getErrorCode(error: unknown) {
@@ -344,6 +345,106 @@ describe("owned mobility service", () => {
       expect.unreachable("enterprise booking should require signoff proof");
     } catch (error) {
       expect(getErrorCode(error)).toBe("PROOF_REQUIRED");
+    }
+  });
+
+  it("persists partner provenance on eligible airport-transfer bookings", () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const verification = tenantPartnerService.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "2468",
+    });
+    const { ownedMobilityService } = createService(
+      undefined,
+      tenantPartnerService,
+    );
+
+    const created = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        eligibilityVerificationId: verification.eligibilityVerificationId,
+        direction: "pickup",
+        pickup: {
+          address: "桃園機場第二航廈",
+        },
+        dropoff: {
+          address: "台北市信義區松高路11號",
+        },
+        reservationWindowStart: "2026-04-18T10:00:00Z",
+        reservationWindowEnd: "2026-04-18T10:20:00Z",
+        passenger: {
+          name: "陳小姐",
+          phone: "0900123456",
+        },
+        flightNo: "CI-001",
+      },
+      PARTNER_TENANT,
+    );
+
+    const booking = ownedMobilityService.getTenantBooking(
+      PARTNER_TENANT,
+      created.bookingId,
+    );
+    const order = ownedMobilityService.getOrder(created.orderId);
+
+    expect(order).toMatchObject({
+      tenantId: PARTNER_TENANT,
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      eligibilityVerificationId: verification.eligibilityVerificationId,
+      issuerAuthorizationRef: "issuer-auth-bank_demo_alpha-2468",
+      benefitReference: "benefit-bank_demo_alpha-2468",
+    });
+    expect(booking).toMatchObject({
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      eligibilityVerificationId: verification.eligibilityVerificationId,
+      issuerAuthorizationRef: "issuer-auth-bank_demo_alpha-2468",
+      benefitReference: "benefit-bank_demo_alpha-2468",
+    });
+  });
+
+  it("requires eligibility verification for partner airport-transfer entries", () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const { ownedMobilityService } = createService(
+      undefined,
+      tenantPartnerService,
+    );
+
+    try {
+      ownedMobilityService.createTenantBooking(
+        {
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          direction: "pickup",
+          pickup: {
+            address: "桃園機場第二航廈",
+          },
+          dropoff: {
+            address: "台北市信義區松高路11號",
+          },
+          reservationWindowStart: "2026-04-18T10:00:00Z",
+          reservationWindowEnd: "2026-04-18T10:20:00Z",
+          passenger: {
+            name: "陳小姐",
+            phone: "0900123456",
+          },
+          flightNo: "CI-001",
+        },
+        PARTNER_TENANT,
+      );
+      expect.unreachable(
+        "partner airport-transfer booking should require eligibility verification",
+      );
+    } catch (error) {
+      expect(getErrorCode(error)).toBe("ELIGIBILITY_VERIFICATION_REQUIRED");
     }
   });
 

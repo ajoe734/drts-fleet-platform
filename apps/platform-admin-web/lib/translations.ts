@@ -34,6 +34,14 @@ const en = {
   "common.view": "View",
   "common.apply": "Apply",
   "common.hide": "Hide",
+  "common.close": "Close",
+  "common.approve": "Approve",
+  "common.error": "Error",
+  "common.all": "All",
+  "common.immutableHistory": "Immutable history",
+  "common.global": "Global",
+  "common.actions": "Actions",
+  "common.status": "Status",
   "common.loading": "Loading...",
   "common.saving": "Saving...",
   "common.creating": "Creating...",
@@ -382,14 +390,6 @@ const en = {
   "flags.disable": "Disable",
   "flags.empty": "No feature flags.",
 
-  // ── Common (additional) ──
-  "common.close": "Close",
-  "common.approve": "Approve",
-  "common.all": "All",
-  "common.immutableHistory": "Immutable history",
-  "common.global": "Global",
-  "common.actions": "Actions",
-
   // ── Tenants (additional) ──
   "tenants.configure": "Configure",
   "tenants.activate": "Activate",
@@ -481,6 +481,14 @@ const zh: typeof en = {
   "common.view": "查看",
   "common.apply": "套用",
   "common.hide": "隱藏",
+  "common.close": "關閉",
+  "common.approve": "核准",
+  "common.error": "錯誤",
+  "common.all": "全部",
+  "common.immutableHistory": "不可變歷史",
+  "common.global": "全域",
+  "common.actions": "操作",
+  "common.status": "狀態",
   "common.loading": "載入中...",
   "common.saving": "儲存中...",
   "common.creating": "建立中...",
@@ -816,14 +824,6 @@ const zh: typeof en = {
   "flags.enable": "啟用",
   "flags.disable": "停用",
   "flags.empty": "無功能旗標。",
-
-  // ── Common (additional) ──
-  "common.close": "關閉",
-  "common.approve": "核准",
-  "common.all": "全部",
-  "common.immutableHistory": "不可變歷史",
-  "common.global": "全域",
-  "common.actions": "操作",
 
   // ── Tenants (additional) ──
   "tenants.configure": "設定",

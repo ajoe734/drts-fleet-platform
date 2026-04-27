@@ -12,6 +12,29 @@ interface FlagRecord {
   description?: string;
 }
 
+function featureFlagDescription(locale: string, flag: FlagRecord) {
+  if (locale !== "zh") return flag.description ?? "—";
+
+  const descriptions: Record<string, string> = {
+    "driver-app.earnings": "啟用司機 App 收益讀模型",
+    "driver-app.incidents": "啟用司機 App 事故回報",
+    "driver-app.shift": "啟用司機 App 班次與出勤追蹤",
+    "driver-app.tasks": "啟用司機 App 任務生命週期",
+    "ops-console.callcenter": "啟用營運後台客服中心工作階段檢視",
+    "ops-console.complaint": "啟用營運後台投訴案件管理",
+    "ops-console.dispatch": "啟用營運後台派車調度板",
+    "ops-console.reports": "啟用營運後台報表任務管理",
+    "phase1.read-models": "啟用 Phase 1 讀模型介面",
+    "phase1.smoke-paths": "啟用 Phase 1 smoke test 端點",
+    "tenant-portal.billing": "啟用租戶入口帳務檢視",
+    "tenant-portal.booking": "啟用租戶入口訂車管理",
+    "tenant-portal.reports": "啟用租戶入口報表任務提交",
+    "tenant-portal.webhooks": "啟用租戶入口 Webhook 管理",
+  };
+
+  return descriptions[flag.key] || flag.description || "—";
+}
+
 export default async function FeatureFlagsPage() {
   const [client, locale] = await Promise.all([
     getServerOpsClient(),
@@ -71,7 +94,7 @@ export default async function FeatureFlagsPage() {
                     : t("common.disabled", locale)}
                 </Badge>
               </Td>
-              <Td muted>{f.description ?? "—"}</Td>
+              <Td muted>{featureFlagDescription(locale, f)}</Td>
             </Tr>
           ))}
         </DataTable>

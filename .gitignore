@@ -55,3 +55,4 @@ ai-activity-log.jsonl
 docs-site/approval-queue.json
 docs-site/ai-activity-log.jsonl
 docs-site/orchestrator-state.json
+docs/03-runbooks/local-development.local.md

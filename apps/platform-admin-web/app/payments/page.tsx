@@ -102,7 +102,7 @@ export default function PaymentsPage() {
     try {
       const [invoiceRecords, statementRecords, reimbursementRecords] =
         await Promise.all([
-          client.listInvoices(),
+          client.listPlatformInvoices(),
           client.listDriverStatements(),
           client.listReimbursementBatches(),
         ]);
@@ -125,10 +125,16 @@ export default function PaymentsPage() {
     setInvoicePending(true);
     setError(null);
     try {
-      await client.generateInvoice({
-        tenantId: invoiceTenantId.trim() || DEMO_TENANT_ID,
-        periodStart: toPeriodStartIso(invoicePeriodStart),
-        periodEnd: toPeriodEndIso(invoicePeriodEnd),
+      const tenantId = invoiceTenantId.trim() || DEMO_TENANT_ID;
+      await client.post("/api/tenant/invoices/generate", {
+        headers: {
+          "x-tenant-id": tenantId,
+        },
+        body: {
+          tenantId,
+          periodStart: toPeriodStartIso(invoicePeriodStart),
+          periodEnd: toPeriodEndIso(invoicePeriodEnd),
+        },
       });
       await loadFinance();
     } catch (e: unknown) {

@@ -13,6 +13,92 @@ const TENANT_ID = "tenant-demo-001";
 const OTHER_TENANT_ID = "tenant-other-001";
 
 describe("tenant partner foundation service", () => {
+  it("exposes active partner channel entries for bank-specific airport flows", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const entries = tenantPartnerService.listPartnerEntries();
+    const alphaEntry = tenantPartnerService.getPartnerEntry(
+      "bank-demo-alpha-airport",
+    );
+
+    expect(entries).toHaveLength(2);
+    expect(entries.map((entry) => entry.entrySlug)).toEqual(
+      expect.arrayContaining([
+        "bank-demo-alpha-airport",
+        "bank-demo-beta-airport",
+      ]),
+    );
+    expect(alphaEntry).toMatchObject({
+      tenantId: TENANT_ID,
+      partnerCode: "bank_demo_alpha",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+      eligibilityMode: "bank_card_inline",
+    });
+  });
+
+  it("verifies partner eligibility and stores provenance for eligible partner entries", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const verification = tenantPartnerService.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "2468",
+      },
+      "partner-eligibility-request",
+    );
+
+    expect(verification).toMatchObject({
+      tenantId: TENANT_ID,
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      verificationStatus: "eligible",
+      verificationReasonCode: "CARD_PROGRAM_MATCHED",
+      benefitReference: "benefit-bank_demo_alpha-2468",
+      issuerAuthorizationRef: "issuer-auth-bank_demo_alpha-2468",
+    });
+    expect(
+      tenantPartnerService.getPartnerEligibilityVerification(
+        verification.eligibilityVerificationId,
+      ),
+    ).toMatchObject({
+      eligibilityVerificationId: verification.eligibilityVerificationId,
+      verificationStatus: "eligible",
+    });
+    expect(tenantPartnerService.listTenantAudit(TENANT_ID)[0]?.actionName).toBe(
+      "verify_partner_eligibility",
+    );
+  });
+
+  it("marks odd inline-card programs as ineligible and accepts reference-based entries", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const rejected = tenantPartnerService.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "1357",
+    });
+    const acceptedByReference = tenantPartnerService.verifyPartnerEligibility({
+      entrySlug: "bank-demo-beta-airport",
+      referenceToken: "BETA0001",
+    });
+
+    expect(rejected).toMatchObject({
+      verificationStatus: "ineligible",
+      verificationReasonCode: "CARD_PROGRAM_NOT_ELIGIBLE",
+      benefitReference: null,
+      issuerAuthorizationRef: null,
+    });
+    expect(acceptedByReference).toMatchObject({
+      verificationStatus: "eligible",
+      verificationReasonCode: "REFERENCE_ACCEPTED",
+      benefitReference: "BETA0001",
+      issuerAuthorizationRef: "issuer-ref-BETA0001",
+    });
+  });
+
   it("updates tenant notification preferences and writes tenant audit", () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);

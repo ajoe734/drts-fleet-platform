@@ -13,6 +13,8 @@ import type {
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
   IssueTenantApiKeyCommand,
+  PartnerChannelEntryRecord,
+  PartnerEligibilityVerificationRecord,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
   TenantAddressRecord,
@@ -30,6 +32,7 @@ import type {
   UpdateTenantSlaProfileCommand,
   UpsertTenantAddressCommand,
   UpsertTenantPassengerCommand,
+  VerifyPartnerEligibilityCommand,
   WebhookEventPayload,
   WebhookDeliveryRecord,
 } from "@drts/contracts";
@@ -243,6 +246,43 @@ const API_KEY_SEED: StoredTenantApiKeyRecord[] = [
   },
 ];
 
+const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
+  {
+    partnerId: "partner-bank-demo-001",
+    partnerCode: "bank_demo_alpha",
+    partnerType: "bank_partner",
+    programId: "program-airport-alpha",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "BANK_DEMO_ALPHA",
+    entrySlug: "bank-demo-alpha-airport",
+    displayName: "Bank Demo Alpha Airport Transfer",
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    authMode: "tenant_portal_bearer",
+    eligibilityMode: "bank_card_inline",
+    entryHost: null,
+    entryPath: "/partner/bank-demo-alpha-airport",
+    themeAccent: "#0b7285",
+    activeFlag: true,
+  },
+  {
+    partnerId: "partner-bank-demo-002",
+    partnerCode: "bank_demo_beta",
+    partnerType: "bank_partner",
+    programId: "program-airport-beta",
+    tenantId: DEMO_TENANT_ID,
+    bankCode: "BANK_DEMO_BETA",
+    entrySlug: "bank-demo-beta-airport",
+    displayName: "Bank Demo Beta Airport Transfer",
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    authMode: "tenant_portal_bearer",
+    eligibilityMode: "reference_required",
+    entryHost: null,
+    entryPath: "/partner/bank-demo-beta-airport",
+    themeAccent: "#5f3dc4",
+    activeFlag: true,
+  },
+];
+
 @Injectable()
 export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private notificationPreferences = new Map<
@@ -273,6 +313,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private apiKeys = API_KEY_SEED.map((apiKey) =>
     this.cloneStoredApiKey(apiKey),
   );
+
+  private partnerEntries = PARTNER_ENTRY_SEED.map((entry) =>
+    this.clonePartnerEntry(entry),
+  );
+
+  private partnerEligibilityVerifications = new Map<
+    string,
+    PartnerEligibilityVerificationRecord
+  >();
 
   private readonly retryTimers = new Map<
     string,
@@ -671,6 +720,147 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   listTenantRoles() {
     return TENANT_ROLE_CATALOG.map((role) => ({ ...role }));
+  }
+
+  listPartnerEntries() {
+    return this.partnerEntries
+      .filter((entry) => entry.activeFlag)
+      .map((entry) => this.clonePartnerEntry(entry));
+  }
+
+  getPartnerEntry(entrySlug: string) {
+    return this.clonePartnerEntry(this.requirePartnerEntry(entrySlug));
+  }
+
+  verifyPartnerEligibility(
+    command: VerifyPartnerEligibilityCommand,
+    requestId?: string,
+  ) {
+    const entry = this.requirePartnerEntry(command.entrySlug);
+    const verifiedAt = new Date().toISOString();
+    const expiresAt = new Date(
+      Date.parse(verifiedAt) + 30 * 60 * 1000,
+    ).toISOString();
+
+    let verificationStatus: PartnerEligibilityVerificationRecord["verificationStatus"] =
+      "eligible";
+    let verificationReasonCode = "ELIGIBILITY_NOT_REQUIRED";
+    let benefitReference = this.normalizeNullableText(command.benefitReference);
+    let issuerAuthorizationRef: string | null = null;
+
+    if (entry.eligibilityMode === "reference_required") {
+      const referenceToken = this.normalizeNullableText(command.referenceToken);
+      if (!referenceToken) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "REFERENCE_TOKEN_REQUIRED",
+          "referenceToken is required for this partner entry.",
+          {
+            entrySlug: entry.entrySlug,
+          },
+        );
+      }
+
+      verificationReasonCode = "REFERENCE_ACCEPTED";
+      benefitReference = benefitReference ?? referenceToken;
+      issuerAuthorizationRef = `issuer-ref-${referenceToken.slice(-8)}`;
+    } else if (entry.eligibilityMode === "bank_card_inline") {
+      const cardLast4 = command.cardLast4?.trim();
+      if (!cardLast4 || !/^[0-9]{4}$/.test(cardLast4)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "CARD_LAST4_REQUIRED",
+          "cardLast4 must be a four-digit string for inline card eligibility verification.",
+          {
+            entrySlug: entry.entrySlug,
+          },
+        );
+      }
+
+      const lastDigit = Number(cardLast4[3]);
+      if (Number.isNaN(lastDigit)) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "CARD_LAST4_INVALID",
+          "cardLast4 must contain digits only.",
+          {
+            entrySlug: entry.entrySlug,
+          },
+        );
+      }
+
+      if (lastDigit % 2 === 0) {
+        verificationStatus = "eligible";
+        verificationReasonCode = "CARD_PROGRAM_MATCHED";
+        benefitReference =
+          benefitReference ?? `benefit-${entry.partnerCode}-${cardLast4}`;
+        issuerAuthorizationRef = `issuer-auth-${entry.partnerCode}-${cardLast4}`;
+      } else {
+        verificationStatus = "ineligible";
+        verificationReasonCode = "CARD_PROGRAM_NOT_ELIGIBLE";
+      }
+    }
+
+    const verification: PartnerEligibilityVerificationRecord = {
+      eligibilityVerificationId: `elig_${randomUUID()}`,
+      tenantId: entry.tenantId,
+      partnerId: entry.partnerId,
+      partnerProgramId: entry.programId,
+      partnerEntrySlug: entry.entrySlug,
+      bankCode: entry.bankCode,
+      businessDispatchSubtype: entry.businessDispatchSubtype,
+      verificationStatus,
+      verificationReasonCode,
+      benefitReference,
+      issuerAuthorizationRef,
+      verifiedAt,
+      expiresAt: verificationStatus === "eligible" ? expiresAt : null,
+    };
+
+    this.partnerEligibilityVerifications.set(
+      verification.eligibilityVerificationId,
+      this.clonePartnerEligibilityVerification(verification),
+    );
+
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: entry.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "verify_partner_eligibility",
+        resourceType: "partner_eligibility",
+        resourceId: verification.eligibilityVerificationId,
+        newValuesSummary: {
+          partnerId: verification.partnerId,
+          partnerProgramId: verification.partnerProgramId,
+          partnerEntrySlug: verification.partnerEntrySlug,
+          verificationStatus: verification.verificationStatus,
+          verificationReasonCode: verification.verificationReasonCode,
+        },
+      },
+      requestId,
+    );
+
+    return this.clonePartnerEligibilityVerification(verification);
+  }
+
+  getPartnerEligibilityVerification(eligibilityVerificationId: string) {
+    const verification = this.partnerEligibilityVerifications.get(
+      eligibilityVerificationId,
+    );
+    if (!verification) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PARTNER_ELIGIBILITY_NOT_FOUND",
+        "The partner eligibility verification record could not be found.",
+        {
+          eligibilityVerificationId,
+        },
+      );
+    }
+
+    return this.clonePartnerEligibilityVerification(verification);
   }
 
   createTenantUser(
@@ -1734,6 +1924,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private clonePartnerEntry(
+    entry: PartnerChannelEntryRecord,
+  ): PartnerChannelEntryRecord {
+    return {
+      ...entry,
+    };
+  }
+
+  private clonePartnerEligibilityVerification(
+    verification: PartnerEligibilityVerificationRecord,
+  ): PartnerEligibilityVerificationRecord {
+    return {
+      ...verification,
+    };
+  }
+
   private cloneStoredApiKey(
     apiKey: StoredTenantApiKeyRecord,
   ): StoredTenantApiKeyRecord {
@@ -1851,6 +2057,35 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
     return userRole;
+  }
+
+  private requirePartnerEntry(entrySlug: string) {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_REQUIRED",
+        "entrySlug is required.",
+        {},
+      );
+    }
+
+    const entry = this.partnerEntries.find(
+      (candidate) =>
+        candidate.entrySlug === normalizedSlug && candidate.activeFlag,
+    );
+    if (!entry) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PARTNER_ENTRY_NOT_FOUND",
+        "The partner entry could not be found.",
+        {
+          entrySlug: normalizedSlug,
+        },
+      );
+    }
+
+    return entry;
   }
 
   private requireApiKey(tenantId: string, apiKeyId: string) {

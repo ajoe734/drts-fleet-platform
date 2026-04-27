@@ -54,6 +54,15 @@ type TenantBookingResult = {
   status: OwnedOrderRecord["status"];
 };
 
+type PartnerBookingContext = {
+  partnerId: string;
+  partnerProgramId: string;
+  partnerEntrySlug: string;
+  eligibilityVerificationId: string | null;
+  issuerAuthorizationRef: string | null;
+  benefitReference: string | null;
+};
+
 type CallRecordingAttachmentEvent = {
   callId: string;
   recordingId: string;
@@ -185,6 +194,11 @@ export class OwnedMobilityService implements OnModuleInit {
       orderSource: "app",
       orderDomain: "owned",
       tenantId: null,
+      partnerId: null,
+      partnerProgramId: null,
+      partnerEntrySlug: null,
+      eligibilityVerificationId: null,
+      issuerAuthorizationRef: null,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -294,6 +308,11 @@ export class OwnedMobilityService implements OnModuleInit {
       orderSource: "phone",
       orderDomain: "owned",
       tenantId: null,
+      partnerId: null,
+      partnerProgramId: null,
+      partnerEntrySlug: null,
+      eligibilityVerificationId: null,
+      issuerAuthorizationRef: null,
       serviceBucket: "standard_taxi",
       dispatchSemantics: "realtime",
       businessDispatchSubtype: null,
@@ -420,6 +439,7 @@ export class OwnedMobilityService implements OnModuleInit {
       command.direction,
       command.flightNo,
     );
+    const partnerContext = this.resolvePartnerBookingContext(command, tenantId);
 
     const now = new Date().toISOString();
     const orderId = randomUUID();
@@ -435,6 +455,12 @@ export class OwnedMobilityService implements OnModuleInit {
       orderSource: "portal",
       orderDomain: "owned",
       tenantId,
+      partnerId: partnerContext?.partnerId ?? null,
+      partnerProgramId: partnerContext?.partnerProgramId ?? null,
+      partnerEntrySlug: partnerContext?.partnerEntrySlug ?? null,
+      eligibilityVerificationId:
+        partnerContext?.eligibilityVerificationId ?? null,
+      issuerAuthorizationRef: partnerContext?.issuerAuthorizationRef ?? null,
       serviceBucket: "business_dispatch",
       dispatchSemantics: "reservation",
       businessDispatchSubtype: command.businessDispatchSubtype,
@@ -470,7 +496,10 @@ export class OwnedMobilityService implements OnModuleInit {
         : null,
       costCenter: this.normalizeNullableText(command.costCenter),
       vehiclePreference: this.normalizeNullableText(command.vehiclePreference),
-      benefitReference: this.normalizeNullableText(command.benefitReference),
+      benefitReference:
+        this.normalizeNullableText(command.benefitReference) ??
+        partnerContext?.benefitReference ??
+        null,
       direction: command.direction ?? null,
       flightNo: this.normalizeNullableText(command.flightNo),
       terminal: this.normalizeNullableText(command.terminal),
@@ -539,6 +568,7 @@ export class OwnedMobilityService implements OnModuleInit {
           orderId,
           subtype: order.businessDispatchSubtype,
           status: order.status,
+          partnerEntrySlug: order.partnerEntrySlug,
         },
       },
       requestId,
@@ -666,6 +696,22 @@ export class OwnedMobilityService implements OnModuleInit {
         "Booking was not found.",
         {
           bookingId,
+        },
+      );
+    }
+
+    if (
+      order.partnerEntrySlug &&
+      command.businessDispatchSubtype &&
+      command.businessDispatchSubtype !== order.businessDispatchSubtype
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PARTNER_BOOKING_SUBTYPE_IMMUTABLE",
+        "Partner-originated bookings cannot change business dispatch subtype after creation.",
+        {
+          bookingId,
+          partnerEntrySlug: order.partnerEntrySlug,
         },
       );
     }
@@ -2403,6 +2449,11 @@ export class OwnedMobilityService implements OnModuleInit {
       bookingId: order.bookingId,
       orderId: order.orderId,
       tenantId: order.tenantId,
+      partnerId: order.partnerId,
+      partnerProgramId: order.partnerProgramId,
+      partnerEntrySlug: order.partnerEntrySlug,
+      eligibilityVerificationId: order.eligibilityVerificationId,
+      issuerAuthorizationRef: order.issuerAuthorizationRef,
       status:
         order.status === "cancelled"
           ? "cancelled"
@@ -2564,6 +2615,137 @@ export class OwnedMobilityService implements OnModuleInit {
   private normalizeNullableText(value: string | null | undefined) {
     const normalized = value?.trim();
     return normalized ? normalized : null;
+  }
+
+  private resolvePartnerBookingContext(
+    command: CreateTenantBookingCommand,
+    tenantId: string,
+  ): PartnerBookingContext | null {
+    const entrySlug = this.normalizeNullableText(command.partnerEntrySlug);
+    const eligibilityVerificationId = this.normalizeNullableText(
+      command.eligibilityVerificationId,
+    );
+
+    if (!entrySlug && !eligibilityVerificationId) {
+      return null;
+    }
+
+    if (!this.tenantPartnerService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "PARTNER_ENTRY_UNAVAILABLE",
+        "Partner entry services are unavailable for this booking flow.",
+        {
+          tenantId,
+        },
+      );
+    }
+
+    const verification = eligibilityVerificationId
+      ? this.tenantPartnerService.getPartnerEligibilityVerification(
+          eligibilityVerificationId,
+        )
+      : null;
+    const entry = this.tenantPartnerService.getPartnerEntry(
+      entrySlug ?? verification?.partnerEntrySlug ?? "",
+    );
+
+    if (entry.tenantId !== tenantId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_TENANT_MISMATCH",
+        "Partner entry does not belong to the current tenant.",
+        {
+          tenantId,
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+
+    if (entry.businessDispatchSubtype !== command.businessDispatchSubtype) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_SUBTYPE_MISMATCH",
+        "Partner entry requires a different business dispatch subtype.",
+        {
+          entrySlug: entry.entrySlug,
+          expectedBusinessDispatchSubtype: entry.businessDispatchSubtype,
+          actualBusinessDispatchSubtype: command.businessDispatchSubtype,
+        },
+      );
+    }
+
+    if (verification) {
+      if (
+        verification.partnerEntrySlug !== entry.entrySlug ||
+        verification.tenantId !== tenantId ||
+        verification.partnerId !== entry.partnerId ||
+        verification.partnerProgramId !== entry.programId
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "ELIGIBILITY_VERIFICATION_MISMATCH",
+          "Eligibility verification does not match the partner entry or tenant context.",
+          {
+            eligibilityVerificationId: verification.eligibilityVerificationId,
+            entrySlug: entry.entrySlug,
+            tenantId,
+          },
+        );
+      }
+    }
+
+    if (entry.eligibilityMode !== "none") {
+      if (!verification) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "ELIGIBILITY_VERIFICATION_REQUIRED",
+          "This partner entry requires a prior eligibility verification.",
+          {
+            entrySlug: entry.entrySlug,
+            eligibilityMode: entry.eligibilityMode,
+          },
+        );
+      }
+
+      if (verification.verificationStatus !== "eligible") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ELIGIBILITY_NOT_APPROVED",
+          "Partner eligibility verification is not eligible for booking.",
+          {
+            eligibilityVerificationId: verification.eligibilityVerificationId,
+            verificationStatus: verification.verificationStatus,
+          },
+        );
+      }
+
+      if (
+        verification.expiresAt &&
+        Number.isFinite(Date.parse(verification.expiresAt)) &&
+        Date.parse(verification.expiresAt) < Date.now()
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ELIGIBILITY_VERIFICATION_EXPIRED",
+          "Partner eligibility verification has expired.",
+          {
+            eligibilityVerificationId: verification.eligibilityVerificationId,
+            expiresAt: verification.expiresAt,
+          },
+        );
+      }
+    }
+
+    return {
+      partnerId: entry.partnerId,
+      partnerProgramId: entry.programId,
+      partnerEntrySlug: entry.entrySlug,
+      eligibilityVerificationId:
+        verification?.eligibilityVerificationId ?? null,
+      issuerAuthorizationRef: verification?.issuerAuthorizationRef ?? null,
+      benefitReference: verification?.benefitReference ?? null,
+    };
   }
 
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {
