@@ -1,6 +1,6 @@
 import type { PlacardVersionRecord } from "@drts/contracts";
-import type { Locale } from "@/lib/translations";
-import { getPlatformLabel } from "@/lib/localized-labels";
+import type { Locale } from "../../lib/translations";
+import { getPlatformLabel } from "../../lib/localized-labels";
 
 export function normalizePlacardVersionCode(versionCode: string) {
   return versionCode.trim().toLowerCase();

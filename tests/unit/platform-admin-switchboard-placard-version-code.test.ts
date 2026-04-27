@@ -32,6 +32,7 @@ describe("platform admin switchboard placard versionCode precheck", () => {
       getPlacardVersionCodePrecheckMessage(
         "PLACARD-2026-Q3",
         EXISTING_PLACARDS,
+        "en",
       ),
     ).toBe(
       "Version code already exists in placard placard-001. Choose a unique code before generating.",
@@ -44,6 +45,7 @@ describe("platform admin switchboard placard versionCode precheck", () => {
       getPlacardVersionCodePrecheckMessage(
         "placard-2026-q5",
         EXISTING_PLACARDS,
+        "en",
       ),
     ).toBeNull();
   });
