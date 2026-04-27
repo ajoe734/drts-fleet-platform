@@ -1,5 +1,6 @@
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
 import { Card, CardHeader } from "@drts/ui-web";
@@ -131,7 +132,7 @@ export default async function AttendancePage() {
                           : "yellow"
                     }
                   >
-                    {a.status ?? "—"}
+                    {a.status ? formatOpsCodeLabel(locale, a.status) : "—"}
                   </Badge>
                 </Td>
                 <Td muted>
@@ -173,7 +174,9 @@ export default async function AttendancePage() {
                   <Td mono>{s.shiftId ?? "—"}</Td>
                   <Td>{s.driverId ?? "—"}</Td>
                   <Td>
-                    <Badge variant="gray">{s.status ?? "—"}</Badge>
+                    <Badge variant="gray">
+                      {s.status ? formatOpsCodeLabel(locale, s.status) : "—"}
+                    </Badge>
                   </Td>
                   <Td muted>{formatDt(s.clockedInAt)}</Td>
                   <Td muted>{formatDt(s.clockedOutAt)}</Td>

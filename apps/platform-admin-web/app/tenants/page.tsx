@@ -7,6 +7,11 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   CreatePlatformTenantCommand,
   PlatformAdminTenantRecord,
@@ -14,6 +19,8 @@ import type {
   UpdatePlatformTenantSettingsCommand,
 } from "@drts/contracts";
 import { PLATFORM_TENANT_MODULES } from "@drts/contracts";
+
+type TFn = (key: string, params?: Record<string, string | number>) => string;
 
 type TenantFormState = {
   name: string;
@@ -23,13 +30,6 @@ type TenantFormState = {
   monthlyBookings: string;
   monthlyApiCalls: string;
   enabledModules: PlatformTenantModule[];
-};
-
-const MODULE_LABELS: Record<PlatformTenantModule, string> = {
-  enterprise_dispatch: "Enterprise Dispatch",
-  billing: "Billing",
-  reporting: "Reporting",
-  webhooks: "Webhooks",
 };
 
 const EMPTY_FORM: TenantFormState = {
@@ -60,6 +60,7 @@ function parseQuota(value: string): number {
 }
 
 export default function TenantsPage() {
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [tenants, setTenants] = useState<PlatformAdminTenantRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,6 +71,13 @@ export default function TenantsPage() {
   const [editForm, setEditForm] = useState<TenantFormState>(EMPTY_FORM);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const MODULE_LABELS: Record<PlatformTenantModule, string> = {
+    enterprise_dispatch: t("tenants.module.enterpriseDispatch"),
+    billing: t("tenants.module.billing"),
+    reporting: t("tenants.module.reporting"),
+    webhooks: t("tenants.module.webhooks"),
+  };
 
   const selectedTenant = useMemo(
     () => tenants.find((tenant) => tenant.id === selectedTenantId) ?? null,
@@ -187,16 +195,13 @@ export default function TenantsPage() {
     [client, loadTenants],
   );
 
-  if (loading) return <div className="admin-empty">Loading tenants...</div>;
+  if (loading) return <div className="admin-empty">{t("tenants.loading")}</div>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Tenants</h1>
-        <p>
-          Manage tenant lifecycle, contract modules, and platform quota
-          allocations.
-        </p>
+        <h1>{t("tenants.title")}</h1>
+        <p>{t("tenants.subtitle", { count: tenants.length })}</p>
       </div>
 
       {error && (
@@ -204,7 +209,9 @@ export default function TenantsPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -213,19 +220,21 @@ export default function TenantsPage() {
           className="admin-btn admin-btn--primary"
           onClick={() => setShowCreate((current) => !current)}
         >
-          {showCreate ? "Cancel" : "New Tenant"}
+          {showCreate ? t("common.cancel") : t("tenants.newTenant")}
         </button>
         <button
           className="admin-btn admin-btn--secondary"
           onClick={() => void loadTenants()}
         >
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
       {showCreate && (
         <div className="admin-card" style={{ marginBottom: 16 }}>
-          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>Create Tenant</h3>
+          <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
+            {t("tenants.createTenant")}
+          </h3>
           <form onSubmit={handleCreate}>
             <div
               style={{
@@ -236,9 +245,9 @@ export default function TenantsPage() {
               }}
             >
               <label>
-                <span className="sr-only">Tenant Name</span>
+                <span className="sr-only">{t("tenants.form.name")}</span>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Name
+                  {t("tenants.form.name")}
                 </div>
                 <input
                   value={createForm.name}
@@ -254,9 +263,9 @@ export default function TenantsPage() {
                 />
               </label>
               <label>
-                <span className="sr-only">Tenant Code</span>
+                <span className="sr-only">{t("tenants.form.code")}</span>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Code
+                  {t("tenants.form.code")}
                 </div>
                 <input
                   value={createForm.code}
@@ -273,7 +282,7 @@ export default function TenantsPage() {
               </label>
               <label>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Status
+                  {t("tenants.form.status")}
                 </div>
                 <select
                   value={createForm.status}
@@ -285,16 +294,18 @@ export default function TenantsPage() {
                   }
                   style={inputStyle}
                 >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
+                  <option value="active">{t("common.active")}</option>
+                  <option value="inactive">{t("common.inactive")}</option>
                 </select>
               </label>
             </div>
 
-            <QuotaFields form={createForm} setForm={setCreateForm} />
+            <QuotaFields form={createForm} setForm={setCreateForm} t={t} />
             <ModuleFields
               form={createForm}
               onToggle={(moduleCode) => toggleModule(setCreateForm, moduleCode)}
+              moduleLabels={MODULE_LABELS}
+              t={t}
             />
 
             <button
@@ -304,7 +315,7 @@ export default function TenantsPage() {
                 creating || !createForm.name.trim() || !createForm.code.trim()
               }
             >
-              {creating ? "Creating..." : "Create Tenant"}
+              {creating ? t("common.creating") : t("tenants.createTenant")}
             </button>
           </form>
         </div>
@@ -323,10 +334,11 @@ export default function TenantsPage() {
           >
             <div>
               <h3 style={{ margin: 0, fontSize: 16 }}>
-                Configure {selectedTenant.name}
+                {t("tenants.configure")} {selectedTenant.name}
               </h3>
               <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>
-                Code: <code>{selectedTenant.code}</code>
+                {getPlatformLabel(locale, "code")}:{" "}
+                <code>{selectedTenant.code}</code>
               </p>
             </div>
             <button
@@ -334,7 +346,7 @@ export default function TenantsPage() {
               onClick={() => setSelectedTenantId(null)}
               type="button"
             >
-              Close
+              {t("common.close")}
             </button>
           </div>
 
@@ -349,7 +361,7 @@ export default function TenantsPage() {
             >
               <label>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Name
+                  {t("tenants.form.name")}
                 </div>
                 <input
                   value={editForm.name}
@@ -365,20 +377,22 @@ export default function TenantsPage() {
               </label>
               <label>
                 <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-                  Status
+                  {t("tenants.form.status")}
                 </div>
                 <input
-                  value={selectedTenant.status}
+                  value={formatPlatformCodeLabel(locale, selectedTenant.status)}
                   disabled
                   style={inputStyle}
                 />
               </label>
             </div>
 
-            <QuotaFields form={editForm} setForm={setEditForm} />
+            <QuotaFields form={editForm} setForm={setEditForm} t={t} />
             <ModuleFields
               form={editForm}
               onToggle={(moduleCode) => toggleModule(setEditForm, moduleCode)}
+              moduleLabels={MODULE_LABELS}
+              t={t}
             />
 
             <button
@@ -386,7 +400,7 @@ export default function TenantsPage() {
               className="admin-btn admin-btn--primary"
               disabled={saving || !editForm.name.trim()}
             >
-              {saving ? "Saving..." : "Save Settings"}
+              {saving ? t("common.saving") : t("tenants.saveSettings")}
             </button>
           </form>
         </div>
@@ -394,20 +408,20 @@ export default function TenantsPage() {
 
       {tenants.length === 0 ? (
         <div className="admin-card admin-empty">
-          <p>No tenants found. Create one to get started.</p>
+          <p>{t("tenants.empty")}</p>
         </div>
       ) : (
         <div className="admin-card" style={{ overflowX: "auto" }}>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Code</th>
-                <th>Modules</th>
-                <th>Quotas</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>{t("tenants.col.id")}</th>
+                <th>{t("tenants.col.name")}</th>
+                <th>{t("tenants.col.code")}</th>
+                <th>{t("tenants.col.modules")}</th>
+                <th>{t("tenants.col.quotas")}</th>
+                <th>{t("tenants.col.status")}</th>
+                <th>{t("tenants.col.actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -432,9 +446,17 @@ export default function TenantsPage() {
                     ))}
                   </td>
                   <td style={{ fontSize: 12 }}>
-                    <div>Drivers: {tenant.quotas.activeDrivers}</div>
-                    <div>Bookings: {tenant.quotas.monthlyBookings}</div>
-                    <div>API Calls: {tenant.quotas.monthlyApiCalls}</div>
+                    <div>
+                      {t("tenants.quota.drivers")} {tenant.quotas.activeDrivers}
+                    </div>
+                    <div>
+                      {t("tenants.quota.bookings")}{" "}
+                      {tenant.quotas.monthlyBookings}
+                    </div>
+                    <div>
+                      {t("tenants.quota.apiCalls")}{" "}
+                      {tenant.quotas.monthlyApiCalls}
+                    </div>
                   </td>
                   <td>
                     <span
@@ -446,7 +468,7 @@ export default function TenantsPage() {
                             : "admin-badge--neutral"
                       }`}
                     >
-                      {tenant.status}
+                      {formatPlatformCodeLabel(locale, tenant.status)}
                     </span>
                   </td>
                   <td>
@@ -456,7 +478,7 @@ export default function TenantsPage() {
                         onClick={() => setSelectedTenantId(tenant.id)}
                         type="button"
                       >
-                        Configure
+                        {t("tenants.configure")}
                       </button>
                       {tenant.status !== "active" && (
                         <button
@@ -466,7 +488,7 @@ export default function TenantsPage() {
                           }
                           type="button"
                         >
-                          Activate
+                          {t("tenants.activate")}
                         </button>
                       )}
                       {tenant.status === "active" && (
@@ -477,7 +499,7 @@ export default function TenantsPage() {
                           }
                           type="button"
                         >
-                          Suspend
+                          {t("tenants.suspend")}
                         </button>
                       )}
                     </div>
@@ -495,22 +517,26 @@ export default function TenantsPage() {
 function QuotaFields({
   form,
   setForm,
+  t,
 }: {
   form: TenantFormState;
   setForm: React.Dispatch<React.SetStateAction<TenantFormState>>;
+  t: TFn;
 }) {
   const quotaFields: Array<{
     key: "activeDrivers" | "monthlyBookings" | "monthlyApiCalls";
-    label: string;
+    labelKey: string;
   }> = [
-    { key: "activeDrivers", label: "Active Drivers" },
-    { key: "monthlyBookings", label: "Monthly Bookings" },
-    { key: "monthlyApiCalls", label: "Monthly API Calls" },
+    { key: "activeDrivers", labelKey: "tenants.form.activeDrivers" },
+    { key: "monthlyBookings", labelKey: "tenants.form.monthlyBookings" },
+    { key: "monthlyApiCalls", labelKey: "tenants.form.monthlyApiCalls" },
   ];
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>Quota Allocation</h4>
+      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>
+        {t("tenants.quotaAllocation")}
+      </h4>
       <div
         style={{
           display: "grid",
@@ -521,7 +547,7 @@ function QuotaFields({
         {quotaFields.map((field) => (
           <label key={field.key}>
             <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 4 }}>
-              {field.label}
+              {t(field.labelKey)}
             </div>
             <input
               type="number"
@@ -545,13 +571,19 @@ function QuotaFields({
 function ModuleFields({
   form,
   onToggle,
+  moduleLabels,
+  t,
 }: {
   form: TenantFormState;
   onToggle: (moduleCode: PlatformTenantModule) => void;
+  moduleLabels: Record<PlatformTenantModule, string>;
+  t: TFn;
 }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>Enabled Modules</h4>
+      <h4 style={{ margin: "0 0 8px", fontSize: 14 }}>
+        {t("tenants.form.modules")}
+      </h4>
       <div
         style={{
           display: "grid",
@@ -576,7 +608,7 @@ function ModuleFields({
               checked={form.enabledModules.includes(moduleCode)}
               onChange={() => onToggle(moduleCode)}
             />
-            <span>{MODULE_LABELS[moduleCode]}</span>
+            <span>{moduleLabels[moduleCode]}</span>
           </label>
         ))}
       </div>

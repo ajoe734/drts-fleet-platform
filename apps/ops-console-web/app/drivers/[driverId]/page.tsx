@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { CSSProperties } from "react";
 import type { DriverStatementRecord } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
@@ -21,6 +22,7 @@ type LoadResult<T> = {
 
 async function loadWithError<T>(
   loader: () => Promise<T>,
+  locale: Awaited<ReturnType<typeof getServerLocale>>,
 ): Promise<LoadResult<T>> {
   try {
     return {
@@ -30,7 +32,8 @@ async function loadWithError<T>(
   } catch (error) {
     return {
       data: null,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error:
+        error instanceof Error ? error.message : t("common.unknown", locale),
     };
   }
 }
@@ -153,8 +156,8 @@ export default async function DriverEarningsPage({
     getServerLocale(),
   ]);
   const [driversResult, statementsResult] = await Promise.all([
-    loadWithError(() => client.listDrivers()),
-    loadWithError(() => client.listDriverStatements()),
+    loadWithError(() => client.listDrivers(), locale),
+    loadWithError(() => client.listDriverStatements(), locale),
   ]);
   const drivers = driversResult.data ?? [];
   const statements = statementsResult.data ?? [];
@@ -164,7 +167,9 @@ export default async function DriverEarningsPage({
       <>
         <PageHeader
           title={t("driverEarnings.title", locale)}
-          subtitle={`Unable to load driver registry data for ${driverId}.`}
+          subtitle={getOpsLabel(locale, "driverRegistryUnavailableSubtitle", {
+            driverId,
+          })}
         />
         <div style={errorBannerStyle}>
           <strong>{t("driverEarnings.registryUnavailable", locale)}</strong>{" "}
@@ -231,7 +236,9 @@ export default async function DriverEarningsPage({
           <h2 style={{ margin: 0 }}>{driver.name}</h2>
           <div style={metaListStyle}>
             <span style={metaPillStyle}>{driver.driverId}</span>
-            <span style={metaPillStyle}>{driver.workState}</span>
+            <span style={metaPillStyle}>
+              {formatOpsCodeLabel(locale, driver.workState)}
+            </span>
             <span style={metaPillStyle}>
               {driver.licensesValid
                 ? t("driverEarnings.licensesValid", locale)
@@ -298,7 +305,10 @@ export default async function DriverEarningsPage({
               ? t("driverEarnings.unavailableDegraded", locale)
               : latestStatement
                 ? t("driverEarnings.latestPayout", locale, {
-                    status: latestStatement.payoutStatus,
+                    status: formatOpsCodeLabel(
+                      locale,
+                      latestStatement.payoutStatus,
+                    ),
                   })
                 : t("driverEarnings.awaitingStatement", locale),
           },
@@ -382,7 +392,9 @@ export default async function DriverEarningsPage({
                   <td style={tableCellStyle}>
                     {formatMinorCurrency(statement.netAmount.amountMinor)}
                   </td>
-                  <td style={tableCellStyle}>{statement.payoutStatus}</td>
+                  <td style={tableCellStyle}>
+                    {formatOpsCodeLabel(locale, statement.payoutStatus)}
+                  </td>
                 </tr>
               ))
             ) : (

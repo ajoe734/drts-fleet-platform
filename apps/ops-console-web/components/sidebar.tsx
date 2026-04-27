@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { AppSidebar } from "@drts/ui-web";
 import { useTranslation } from "@/lib/i18n";
+import { getOpsLabel } from "@/lib/localized-labels";
 import {
   LayoutDashboard,
   Truck,
@@ -96,7 +97,7 @@ export function Sidebar() {
         <div style={{ display: "grid", gap: "8px" }}>
           <button
             onClick={() => setLocale(locale === "en" ? "zh" : "en")}
-            title="Switch language"
+            title={getOpsLabel(locale, "switchLanguage")}
             style={{
               display: "flex",
               alignItems: "center",

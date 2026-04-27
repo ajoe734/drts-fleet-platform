@@ -21,6 +21,7 @@ import {
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
+import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 
 type JobPresetMetadata = {
   label: string;
@@ -129,7 +130,7 @@ function jobCategory(jobType: string) {
 }
 
 export default function ReportsPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [jobs, setJobs] = useState<ReportJobRecord[]>([]);
   const [packages, setPackages] = useState<FilingPackageListRecord[]>([]);
   const [jobDetail, setJobDetail] = useState<ReportJobDetailRecord | null>(
@@ -285,7 +286,7 @@ export default function ReportsPage() {
       <div>
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
           </div>
         )}
 
@@ -375,7 +376,7 @@ export default function ReportsPage() {
                 <input
                   value={periodLabel}
                   onChange={(event) => setPeriodLabel(event.target.value)}
-                  placeholder="2026-04 or 2026-H1"
+                  placeholder={getOpsLabel(locale, "reportsPeriodExample")}
                 />
               </label>
               <label>
@@ -426,7 +427,7 @@ export default function ReportsPage() {
                 >
                   {FILING_PACKAGE_TYPES.map((value) => (
                     <option key={value} value={value}>
-                      {value}
+                      {formatOpsCodeLabel(locale, value)}
                     </option>
                   ))}
                 </select>
@@ -436,7 +437,7 @@ export default function ReportsPage() {
                 <input
                   value={packageMonth}
                   onChange={(event) => setPackageMonth(event.target.value)}
-                  placeholder="2026-03"
+                  placeholder={getOpsLabel(locale, "reportsClosedMonthExample")}
                 />
               </label>
               <label>
@@ -444,7 +445,7 @@ export default function ReportsPage() {
                 <input
                   value={packageScope}
                   onChange={(event) => setPackageScope(event.target.value)}
-                  placeholder="ops-console"
+                  placeholder={getOpsLabel(locale, "reportsRequestedByExample")}
                 />
               </label>
             </div>
@@ -481,7 +482,9 @@ export default function ReportsPage() {
                 <div className="detail-stats">
                   <div className="detail-stat">
                     <span>{t("reports.detail.status")}</span>
-                    <strong>{jobDetail.status}</strong>
+                    <strong>
+                      {formatOpsCodeLabel(locale, jobDetail.status)}
+                    </strong>
                     <small>
                       {t(
                         `reports.category.${jobCategory(jobDetail.jobType).toLowerCase()}`,
@@ -549,7 +552,12 @@ export default function ReportsPage() {
                         >
                           {t("reports.detail.openSignedArtifact")}
                         </a>
-                        <small>{jobDetail.artifact.artifactType}</small>
+                        <small>
+                          {formatOpsCodeLabel(
+                            locale,
+                            jobDetail.artifact.artifactType,
+                          )}
+                        </small>
                       </div>
                     </div>
                   ) : (
@@ -606,7 +614,10 @@ export default function ReportsPage() {
                 <h3>
                   {packageDetail
                     ? t("reports.packageManifest", {
-                        type: packageDetail.packageType,
+                        type: formatOpsCodeLabel(
+                          locale,
+                          packageDetail.packageType,
+                        ),
                       })
                     : t("reports.selectFilingPackage")}
                 </h3>
@@ -620,9 +631,14 @@ export default function ReportsPage() {
                 <div className="detail-stats">
                   <div className="detail-stat">
                     <span>{t("reports.detail.status")}</span>
-                    <strong>{packageDetail.status}</strong>
+                    <strong>
+                      {formatOpsCodeLabel(locale, packageDetail.status)}
+                    </strong>
                     <small>
-                      {packageDetail.immutable ? "immutable" : "mutable"}
+                      {formatOpsCodeLabel(
+                        locale,
+                        packageDetail.immutable ? "immutable" : "mutable",
+                      )}
                     </small>
                   </div>
                   <div className="detail-stat">
@@ -731,7 +747,7 @@ export default function ReportsPage() {
                             <tr key={entry.itemId}>
                               <td>
                                 <div className="cell-title">
-                                  {entry.itemType}
+                                  {formatOpsCodeLabel(locale, entry.itemType)}
                                 </div>
                                 <div className="cell-subcopy">
                                   {entry.itemId}
@@ -804,7 +820,7 @@ export default function ReportsPage() {
                         )}
                       </td>
                       <td>
-                        <div>{job.status}</div>
+                        <div>{formatOpsCodeLabel(locale, job.status)}</div>
                         <div className="cell-subcopy">
                           {t("reports.detail.updated", {
                             value: formatDateTime(job.updatedAt),
@@ -832,7 +848,10 @@ export default function ReportsPage() {
                               rel="noreferrer"
                             >
                               {t("reports.downloadArtifact", {
-                                type: job.artifact.artifactType,
+                                type: formatOpsCodeLabel(
+                                  locale,
+                                  job.artifact.artifactType,
+                                ),
                               })}
                             </a>
                             <span className="cell-subcopy">
@@ -899,13 +918,18 @@ export default function ReportsPage() {
                   packages.map((pkg) => (
                     <tr key={pkg.packageId}>
                       <td>
-                        <div className="cell-title">{pkg.packageType}</div>
+                        <div className="cell-title">
+                          {formatOpsCodeLabel(locale, pkg.packageType)}
+                        </div>
                         <div className="cell-subcopy">{pkg.packageId}</div>
                       </td>
                       <td>
-                        <div>{pkg.status}</div>
+                        <div>{formatOpsCodeLabel(locale, pkg.status)}</div>
                         <div className="cell-subcopy">
-                          {(pkg.immutable ?? true) ? "immutable" : "mutable"}
+                          {formatOpsCodeLabel(
+                            locale,
+                            (pkg.immutable ?? true) ? "immutable" : "mutable",
+                          )}
                         </div>
                       </td>
                       <td>

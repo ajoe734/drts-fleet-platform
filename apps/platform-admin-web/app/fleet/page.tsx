@@ -7,6 +7,11 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   VehicleRegistryRecord,
   DriverRegistryRecord,
@@ -14,6 +19,7 @@ import type {
 } from "@drts/contracts";
 
 export default function FleetPage() {
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [vehicles, setVehicles] = useState<VehicleRegistryRecord[]>([]);
   const [drivers, setDrivers] = useState<DriverRegistryRecord[]>([]);
@@ -47,13 +53,19 @@ export default function FleetPage() {
     loadData();
   }, [loadData]);
 
-  if (loading) return <div className="admin-empty">Loading fleet data...</div>;
+  if (loading) return <div className="admin-empty">{t("fleet.loading")}</div>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Fleet &amp; Devices</h1>
-        <p>Vehicle registry, driver registry, and contract management.</p>
+        <h1>{t("fleet.title")}</h1>
+        <p>
+          {t("fleet.subtitle", {
+            vehicles: vehicles.length,
+            drivers: drivers.length,
+            contracts: contracts.length,
+          })}
+        </p>
       </div>
 
       {error && (
@@ -61,7 +73,9 @@ export default function FleetPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -71,38 +85,38 @@ export default function FleetPage() {
             className={`admin-toggle-btn ${activeTab === "vehicles" ? "active" : ""}`}
             onClick={() => setActiveTab("vehicles")}
           >
-            Vehicles ({vehicles.length})
+            {t("fleet.tab.vehicles")} ({vehicles.length})
           </button>
           <button
             className={`admin-toggle-btn ${activeTab === "drivers" ? "active" : ""}`}
             onClick={() => setActiveTab("drivers")}
           >
-            Drivers ({drivers.length})
+            {t("fleet.tab.drivers")} ({drivers.length})
           </button>
           <button
             className={`admin-toggle-btn ${activeTab === "contracts" ? "active" : ""}`}
             onClick={() => setActiveTab("contracts")}
           >
-            Contracts ({contracts.length})
+            {t("fleet.tab.contracts")} ({contracts.length})
           </button>
         </div>
         <button className="admin-btn admin-btn--secondary" onClick={loadData}>
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
       <div className="admin-card" style={{ overflowX: "auto" }}>
         {activeTab === "vehicles" &&
           (vehicles.length === 0 ? (
-            <p className="admin-empty">No vehicles registered.</p>
+            <p className="admin-empty">{t("fleet.noVehicles")}</p>
           ) : (
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Vehicle ID</th>
-                  <th>License Plate</th>
-                  <th>Status</th>
-                  <th>Registered</th>
+                  <th>{t("fleet.col.vehicleId")}</th>
+                  <th>{t("fleet.col.plate")}</th>
+                  <th>{t("fleet.col.dispatchable")}</th>
+                  <th>{t("fleet.col.area")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -121,8 +135,8 @@ export default function FleetPage() {
                         }`}
                       >
                         {v.dispatchableFlag
-                          ? "Dispatchable"
-                          : "Not Dispatchable"}
+                          ? t("fleet.dispatchable")
+                          : t("fleet.notDispatchable")}
                       </span>
                     </td>
                     <td>{v.operatingArea || "—"}</td>
@@ -134,15 +148,15 @@ export default function FleetPage() {
 
         {activeTab === "drivers" &&
           (drivers.length === 0 ? (
-            <p className="admin-empty">No drivers registered.</p>
+            <p className="admin-empty">{t("fleet.noDrivers")}</p>
           ) : (
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Driver ID</th>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Registered</th>
+                  <th>{t("fleet.col.driverId")}</th>
+                  <th>{t("fleet.col.name")}</th>
+                  <th>{t("fleet.col.workState")}</th>
+                  <th>{t("fleet.col.license")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -160,7 +174,7 @@ export default function FleetPage() {
                             : "admin-badge--neutral"
                         }`}
                       >
-                        {d.workState || "unknown"}
+                        {formatPlatformCodeLabel(locale, d.workState)}
                       </span>
                     </td>
                     <td>
@@ -172,8 +186,8 @@ export default function FleetPage() {
                         }`}
                       >
                         {d.licensesValid
-                          ? "Licenses Valid"
-                          : "Licenses Expired"}
+                          ? t("fleet.licensesValid")
+                          : t("fleet.licensesExpired")}
                       </span>
                     </td>
                   </tr>
@@ -184,17 +198,17 @@ export default function FleetPage() {
 
         {activeTab === "contracts" &&
           (contracts.length === 0 ? (
-            <p className="admin-empty">No contracts found.</p>
+            <p className="admin-empty">{t("fleet.noContracts")}</p>
           ) : (
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Contract ID</th>
-                  <th>Vehicle ID</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Valid From</th>
-                  <th>Valid To</th>
+                  <th>{t("fleet.col.contractId")}</th>
+                  <th>{t("fleet.col.vehicleId")}</th>
+                  <th>{t("fleet.col.type")}</th>
+                  <th>{t("fleet.col.status")}</th>
+                  <th>{t("pricing.col.effectiveFrom")}</th>
+                  <th>{t("pricing.col.effectiveTo")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -206,7 +220,11 @@ export default function FleetPage() {
                     <td style={{ fontFamily: "monospace", fontSize: 12 }}>
                       {c.vehicleId}
                     </td>
-                    <td>{c.contractType || "—"}</td>
+                    <td>
+                      {c.contractType
+                        ? formatPlatformCodeLabel(locale, c.contractType)
+                        : "—"}
+                    </td>
                     <td>
                       <span
                         className={`admin-badge ${
@@ -215,7 +233,7 @@ export default function FleetPage() {
                             : "admin-badge--neutral"
                         }`}
                       >
-                        {c.status || "unknown"}
+                        {formatPlatformCodeLabel(locale, c.status)}
                       </span>
                     </td>
                     <td>{formatDateTime(c.startAt || "")}</td>

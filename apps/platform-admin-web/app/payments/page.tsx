@@ -7,6 +7,11 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   DriverStatementRecord,
   ReimbursementBatchRecord,
@@ -51,17 +56,19 @@ function formatMoney(
   return `${amount.amountMinor.toLocaleString()} ${amount.currency}`;
 }
 
-function reimbursementWorkflow(batch: ReimbursementBatchRecord) {
-  if (batch.status === "paid") {
-    return "paid";
-  }
-  if (batch.approvedAt) {
-    return "approved";
-  }
-  return "pending approval";
+function reimbursementWorkflow(
+  batch: ReimbursementBatchRecord,
+  awaitingApproval: string,
+  paid: string,
+  approved: string,
+) {
+  if (batch.status === "paid") return paid;
+  if (batch.approvedAt) return approved;
+  return awaitingApproval;
 }
 
 export default function PaymentsPage() {
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const defaults = getPreviousMonthDefaults();
   const [invoices, setInvoices] = useState<TenantInvoiceRecord[]>([]);
@@ -205,17 +212,14 @@ export default function PaymentsPage() {
     .reduce((sum, batch) => sum + batch.totalAmount.amountMinor, 0);
 
   if (loading) {
-    return <div className="admin-empty">Loading finance console...</div>;
+    return <div className="admin-empty">{t("payments.loading")}</div>;
   }
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Finance Console</h1>
-        <p>
-          Authoritative invoice, statement, and reimbursement controls powered
-          by the billing settlement service.
-        </p>
+        <h1>{t("payments.title")}</h1>
+        <p>{t("payments.subtitle")}</p>
       </div>
 
       {error && (
@@ -223,7 +227,9 @@ export default function PaymentsPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -237,24 +243,24 @@ export default function PaymentsPage() {
       >
         {[
           {
-            label: "Invoice total",
+            label: t("payments.invoiceTotal"),
             value: `${totalInvoiceAmountMinor.toLocaleString()} minor`,
-            note: `${filteredInvoices.length} invoice(s) in current filter`,
+            note: `${filteredInvoices.length}`,
           },
           {
-            label: "Statement net",
+            label: t("payments.statementNet"),
             value: `${totalStatementNetMinor.toLocaleString()} minor`,
-            note: `${statements.length} driver statement(s)`,
+            note: `${statements.length}`,
           },
           {
-            label: "Pending reimbursements",
+            label: t("payments.pendingReimbursements"),
             value: `${pendingReimbursementMinor.toLocaleString()} minor`,
-            note: "Awaiting payment proof or remittance",
+            note: t("payments.pendingReimbNote"),
           },
           {
-            label: "Paid reimbursements",
+            label: t("payments.paidReimbursements"),
             value: `${paidReimbursementMinor.toLocaleString()} minor`,
-            note: "Completed finance closeout",
+            note: t("payments.invoiceTotalNote"),
           },
         ].map((card) => (
           <div key={card.label} className="admin-card">
@@ -284,15 +290,11 @@ export default function PaymentsPage() {
         }}
       >
         <div className="admin-card">
-          <h3 style={{ marginTop: 0 }}>Generate tenant invoice</h3>
-          <p style={{ color: "#6b7280", fontSize: 14 }}>
-            Closed-period invoice generation stays server-side. No amount is
-            calculated in the browser.
-          </p>
+          <h3 style={{ marginTop: 0 }}>{t("payments.generateInvoiceTitle")}</h3>
           <form onSubmit={handleGenerateInvoice}>
             <div style={formGridStyle}>
               <label style={labelStyle}>
-                Tenant ID
+                {t("payments.form.tenantId")}
                 <input
                   value={invoiceTenantId}
                   onChange={(event) => setInvoiceTenantId(event.target.value)}
@@ -300,7 +302,7 @@ export default function PaymentsPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Period start
+                {t("payments.form.periodStart")}
                 <input
                   type="date"
                   value={invoicePeriodStart}
@@ -311,7 +313,7 @@ export default function PaymentsPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Period end
+                {t("payments.form.periodEnd")}
                 <input
                   type="date"
                   value={invoicePeriodEnd}
@@ -325,20 +327,21 @@ export default function PaymentsPage() {
               className="admin-btn admin-btn--primary"
               disabled={invoicePending}
             >
-              {invoicePending ? "Generating..." : "Generate invoice"}
+              {invoicePending
+                ? t("payments.generating")
+                : t("payments.generateInvoice")}
             </button>
           </form>
         </div>
 
         <div className="admin-card">
-          <h3 style={{ marginTop: 0 }}>Generate driver statements</h3>
-          <p style={{ color: "#6b7280", fontSize: 14 }}>
-            Requires an active published driver fee plan from the pricing page.
-          </p>
+          <h3 style={{ marginTop: 0 }}>
+            {t("payments.generateStatementsTitle")}
+          </h3>
           <form onSubmit={handleGenerateStatements}>
             <div style={formGridStyle}>
               <label style={labelStyle}>
-                Period month
+                {t("payments.form.periodMonth")}
                 <input
                   value={statementPeriodMonth}
                   onChange={(event) =>
@@ -354,7 +357,9 @@ export default function PaymentsPage() {
               className="admin-btn admin-btn--primary"
               disabled={statementPending}
             >
-              {statementPending ? "Generating..." : "Generate statements"}
+              {statementPending
+                ? t("payments.generating")
+                : t("payments.generateStatements")}
             </button>
           </form>
         </div>
@@ -370,7 +375,7 @@ export default function PaymentsPage() {
               }`}
               onClick={() => setInvoiceFilter(value)}
             >
-              {value}
+              {formatPlatformCodeLabel(locale, value)}
             </button>
           ))}
         </div>
@@ -378,7 +383,7 @@ export default function PaymentsPage() {
           className="admin-btn admin-btn--secondary"
           onClick={() => void loadFinance()}
         >
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
@@ -394,21 +399,21 @@ export default function PaymentsPage() {
             marginBottom: 12,
           }}
         >
-          <h3 style={{ margin: 0 }}>Tenant invoices</h3>
+          <h3 style={{ margin: 0 }}>{t("payments.invoicesTitle")}</h3>
           <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {filteredInvoices.length} record(s)
+            {filteredInvoices.length}
           </span>
         </div>
         <table className="admin-table">
           <thead>
             <tr>
-              <th>Invoice</th>
-              <th>Tenant</th>
-              <th>Amount</th>
-              <th>Status</th>
-              <th>Pricing snapshot</th>
-              <th>Period</th>
-              <th>Artifact</th>
+              <th>{t("payments.col.invoice")}</th>
+              <th>{t("payments.col.tenant")}</th>
+              <th>{t("payments.col.amount")}</th>
+              <th>{t("payments.col.status")}</th>
+              <th>{getPlatformLabel(locale, "pricingSnapshot")}</th>
+              <th>{t("payments.col.period")}</th>
+              <th>{getPlatformLabel(locale, "artifact")}</th>
             </tr>
           </thead>
           <tbody>
@@ -435,7 +440,7 @@ export default function PaymentsPage() {
                             : "admin-badge--warning"
                       }`}
                     >
-                      {invoice.status}
+                      {formatPlatformCodeLabel(locale, invoice.status)}
                     </span>
                   </td>
                   <td>
@@ -452,7 +457,7 @@ export default function PaymentsPage() {
                         target="_blank"
                         rel="noreferrer"
                       >
-                        Download PDF
+                        {t("payments.downloadPdf")}
                       </a>
                     ) : (
                       "—"
@@ -462,7 +467,7 @@ export default function PaymentsPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={7}>No invoice records found.</td>
+                <td colSpan={7}>{t("payments.noInvoices")}</td>
               </tr>
             )}
           </tbody>
@@ -481,23 +486,23 @@ export default function PaymentsPage() {
             marginBottom: 12,
           }}
         >
-          <h3 style={{ margin: 0 }}>Driver statements</h3>
+          <h3 style={{ margin: 0 }}>{t("payments.statementsTitle")}</h3>
           <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {statements.length} statement(s)
+            {statements.length}
           </span>
         </div>
         <table className="admin-table">
           <thead>
             <tr>
-              <th>Statement</th>
-              <th>Driver</th>
-              <th>Period</th>
-              <th>Fee plan</th>
-              <th>Gross</th>
-              <th>Service fee</th>
-              <th>Subsidy</th>
-              <th>Net</th>
-              <th>Payout</th>
+              <th>{t("payments.col.statement")}</th>
+              <th>{t("payments.col.driver")}</th>
+              <th>{t("payments.col.period")}</th>
+              <th>{getPlatformLabel(locale, "feePlan")}</th>
+              <th>{getPlatformLabel(locale, "gross")}</th>
+              <th>{getPlatformLabel(locale, "serviceFee")}</th>
+              <th>{getPlatformLabel(locale, "subsidy")}</th>
+              <th>{t("payments.col.net")}</th>
+              <th>{getPlatformLabel(locale, "payout")}</th>
             </tr>
           </thead>
           <tbody>
@@ -527,14 +532,14 @@ export default function PaymentsPage() {
                           : "admin-badge--warning"
                       }`}
                     >
-                      {statement.payoutStatus}
+                      {formatPlatformCodeLabel(locale, statement.payoutStatus)}
                     </span>
                   </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={9}>No statements generated yet.</td>
+                <td colSpan={9}>{t("payments.noStatements")}</td>
               </tr>
             )}
           </tbody>
@@ -550,22 +555,22 @@ export default function PaymentsPage() {
             marginBottom: 12,
           }}
         >
-          <h3 style={{ margin: 0 }}>Driver reimbursements</h3>
+          <h3 style={{ margin: 0 }}>{t("payments.reimbursementsTitle")}</h3>
           <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {reimbursements.length} batch(es)
+            {reimbursements.length}
           </span>
         </div>
         <table className="admin-table">
           <thead>
             <tr>
-              <th>Batch</th>
-              <th>Driver</th>
-              <th>Statement</th>
-              <th>Total</th>
-              <th>Workflow</th>
-              <th>Remittance proof</th>
-              <th>Items</th>
-              <th>Actions</th>
+              <th>{t("payments.col.batch")}</th>
+              <th>{t("payments.col.driver")}</th>
+              <th>{getPlatformLabel(locale, "statement")}</th>
+              <th>{getPlatformLabel(locale, "total")}</th>
+              <th>{getPlatformLabel(locale, "workflow")}</th>
+              <th>{getPlatformLabel(locale, "remittance")}</th>
+              <th>{getPlatformLabel(locale, "items")}</th>
+              <th>{t("common.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -582,16 +587,23 @@ export default function PaymentsPage() {
                   </td>
                   <td>{formatMoney(batch.totalAmount)}</td>
                   <td>
-                    <div>{reimbursementWorkflow(batch)}</div>
+                    <div>
+                      {reimbursementWorkflow(
+                        batch,
+                        t("payments.awaitingApproval"),
+                        formatPlatformCodeLabel(locale, "paid"),
+                        t("payments.col.approved"),
+                      )}
+                    </div>
                     <div style={{ color: "#6b7280", fontSize: 12 }}>
                       {batch.approvedAt
-                        ? `Approved ${formatDateTime(batch.approvedAt)}`
-                        : "Awaiting approval"}
+                        ? formatDateTime(batch.approvedAt)
+                        : t("payments.awaitingApproval")}
                     </div>
                     <div style={{ color: "#6b7280", fontSize: 12 }}>
                       {batch.paidAt
-                        ? `Paid ${formatDateTime(batch.paidAt)}`
-                        : "Awaiting remittance"}
+                        ? formatDateTime(batch.paidAt)
+                        : t("payments.awaitingRemittance")}
                     </div>
                   </td>
                   <td>
@@ -607,7 +619,10 @@ export default function PaymentsPage() {
                           [batch.batchId]: event.target.value,
                         }))
                       }
-                      placeholder="remit-proof-001"
+                      placeholder={getPlatformLabel(
+                        locale,
+                        "remittanceProofExample",
+                      )}
                       style={{ ...inputStyle, minWidth: 180 }}
                       disabled={batch.status === "paid"}
                     />
@@ -629,7 +644,7 @@ export default function PaymentsPage() {
                           onClick={() => void handleApproveBatch(batch)}
                           disabled={batchActionId === batch.batchId}
                         >
-                          Approve
+                          {t("payments.approve")}
                         </button>
                       )}
                       {batch.status !== "paid" && (
@@ -639,8 +654,8 @@ export default function PaymentsPage() {
                           disabled={batchActionId === batch.batchId}
                         >
                           {batchActionId === batch.batchId
-                            ? "Saving..."
-                            : "Mark paid"}
+                            ? t("payments.saving")
+                            : t("payments.markPaid")}
                         </button>
                       )}
                     </div>
@@ -649,7 +664,7 @@ export default function PaymentsPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={8}>No reimbursement batches generated yet.</td>
+                <td colSpan={8}>{t("payments.noReimbursements")}</td>
               </tr>
             )}
           </tbody>

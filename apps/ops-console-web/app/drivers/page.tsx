@@ -1,6 +1,7 @@
 import type { DriverRegistryRecord } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
@@ -68,7 +69,7 @@ export default async function DriversPage() {
                         : "gray"
                   }
                 >
-                  {d.workState}
+                  {formatOpsCodeLabel(locale, d.workState)}
                 </Badge>
               </Td>
               <Td>

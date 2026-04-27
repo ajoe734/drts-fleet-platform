@@ -1,4 +1,6 @@
 import type { PlacardVersionRecord } from "@drts/contracts";
+import type { Locale } from "@/lib/translations";
+import { getPlatformLabel } from "@/lib/localized-labels";
 
 export function normalizePlacardVersionCode(versionCode: string) {
   return versionCode.trim().toLowerCase();
@@ -31,11 +33,14 @@ export function getPlacardVersionCodePrecheckMessage(
     PlacardVersionRecord,
     "placardVersionId" | "versionCode"
   >[],
+  locale: Locale,
 ) {
   const conflict = findPlacardVersionCodeConflict(versionCode, placards);
   if (!conflict) {
     return null;
   }
 
-  return `Version code already exists in placard ${conflict.placardVersionId}. Choose a unique code before generating.`;
+  return getPlatformLabel(locale, "placardVersionCodeConflict", {
+    placardId: conflict.placardVersionId,
+  });
 }

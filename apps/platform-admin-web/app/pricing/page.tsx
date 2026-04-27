@@ -7,6 +7,11 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   DriverFeePlanRecord,
   PlatformPricingRuleRecord,
@@ -43,7 +48,7 @@ const EMPTY_PRICING_FORM: PricingFormState = {
 };
 
 const EMPTY_FEE_PLAN_FORM: FeePlanFormState = {
-  planName: "Phase1 Driver Fee Plan",
+  planName: "",
   version: "",
   serviceFeeBps: "1500",
   reimbursementMode: "platform_funded",
@@ -86,7 +91,9 @@ function normalizeDateTimeLocalValue(value: string) {
 }
 
 export default function PricingPage() {
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
+  const defaultPlanName = getPlatformLabel(locale, "defaultPlanName");
   const [rules, setRules] = useState<PlatformPricingRuleRecord[]>([]);
   const [feePlans, setFeePlans] = useState<DriverFeePlanRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,8 +104,10 @@ export default function PricingPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [pricingForm, setPricingForm] =
     useState<PricingFormState>(EMPTY_PRICING_FORM);
-  const [feePlanForm, setFeePlanForm] =
-    useState<FeePlanFormState>(EMPTY_FEE_PLAN_FORM);
+  const [feePlanForm, setFeePlanForm] = useState<FeePlanFormState>(() => ({
+    ...EMPTY_FEE_PLAN_FORM,
+    planName: defaultPlanName,
+  }));
   const [publishRuleFormRuleId, setPublishRuleFormRuleId] = useState<
     string | null
   >(null);
@@ -196,16 +205,12 @@ export default function PricingPage() {
       publishRuleForm.effectiveFrom.trim() &&
       !normalizedEffectiveFrom.isoValue
     ) {
-      setPublishRuleFormError(
-        "Effective from must be a valid local date and time.",
-      );
+      setPublishRuleFormError(t("switchboard.err.effectiveFrom"));
       return;
     }
 
     if (publishRuleForm.effectiveTo.trim() && !normalizedEffectiveTo.isoValue) {
-      setPublishRuleFormError(
-        "Effective to must be a valid local date and time.",
-      );
+      setPublishRuleFormError(t("switchboard.err.effectiveTo"));
       return;
     }
 
@@ -214,9 +219,7 @@ export default function PricingPage() {
       normalizedEffectiveTo.isoValue &&
       normalizedEffectiveTo.isoValue < normalizedEffectiveFrom.isoValue
     ) {
-      setPublishRuleFormError(
-        "Effective to must be later than or equal to effective from.",
-      );
+      setPublishRuleFormError(t("switchboard.err.effectiveToOrder"));
       return;
     }
 
@@ -262,19 +265,18 @@ export default function PricingPage() {
   }
 
   if (loading) {
-    return (
-      <div className="admin-empty">Loading pricing and settlement plans...</div>
-    );
+    return <div className="admin-empty">{t("pricing.loading")}</div>;
   }
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Pricing &amp; Settlement Plans</h1>
+        <h1>{t("pricing.title")}</h1>
         <p>
-          Draft platform pricing rules for review, then publish authoritative
-          driver fee plan versions that the settlement service uses for
-          statements and reimbursements.
+          {t("pricing.subtitle", {
+            rules: rules.length,
+            plans: feePlans.length,
+          })}
         </p>
       </div>
 
@@ -283,7 +285,9 @@ export default function PricingPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -297,19 +301,19 @@ export default function PricingPage() {
       >
         {[
           {
-            label: "Platform pricing drafts",
+            label: t("pricing.platformDrafts"),
             value: `${rules.length}`,
-            note: "Cross-tenant commercial templates",
+            note: t("pricing.platformDraftsNote"),
           },
           {
-            label: "Active templates",
+            label: t("pricing.activeTemplates"),
             value: `${rules.filter((rule) => rule.status === "active").length}`,
-            note: "Currently effective pricing rules",
+            note: t("pricing.platformDraftsNote"),
           },
           {
-            label: "Published settlement plans",
+            label: t("pricing.publishedPlans"),
             value: `${feePlans.length}`,
-            note: "Immutable versions used for driver settlement",
+            note: t("pricing.publishedPlansNote"),
           },
         ].map((card) => (
           <div key={card.label} className="admin-card">
@@ -338,7 +342,7 @@ export default function PricingPage() {
               className={`admin-toggle-btn ${filter === value ? "active" : ""}`}
               onClick={() => setFilter(value)}
             >
-              {value}
+              {formatPlatformCodeLabel(locale, value)}
             </button>
           ))}
         </div>
@@ -346,27 +350,23 @@ export default function PricingPage() {
           className="admin-btn admin-btn--primary"
           onClick={() => setShowCreate((current) => !current)}
         >
-          {showCreate ? "Cancel draft" : "New pricing draft"}
+          {showCreate ? t("pricing.cancelDraft") : t("pricing.newPricingDraft")}
         </button>
         <button
           className="admin-btn admin-btn--secondary"
           onClick={() => void loadData()}
         >
-          Refresh
+          {t("common.refresh")}
         </button>
       </div>
 
       {showCreate && (
         <div className="admin-card" style={{ marginBottom: 16 }}>
-          <h3 style={{ marginTop: 0 }}>Create draft platform pricing rule</h3>
-          <p style={{ color: "#6b7280", fontSize: 14 }}>
-            Drafts are planning artifacts. They do not affect driver settlement
-            until a settlement fee plan is published below.
-          </p>
+          <h3 style={{ marginTop: 0 }}>{t("pricing.sectionCreateDraft")}</h3>
           <form onSubmit={handleCreatePricingRule}>
             <div style={formGridStyle}>
               <label style={labelStyle}>
-                Rule name
+                {t("pricing.form.ruleName")}
                 <input
                   value={pricingForm.ruleName}
                   onChange={(event) =>
@@ -376,11 +376,12 @@ export default function PricingPage() {
                     }))
                   }
                   required
+                  placeholder={defaultPlanName}
                   style={inputStyle}
                 />
               </label>
               <label style={labelStyle}>
-                Version
+                {t("pricing.form.version")}
                 <input
                   value={pricingForm.version}
                   onChange={(event) =>
@@ -394,7 +395,7 @@ export default function PricingPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Applicable to
+                {t("pricing.form.applicableTo")}
                 <input
                   value={pricingForm.applicableTo}
                   onChange={(event) =>
@@ -407,7 +408,7 @@ export default function PricingPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Service fee (bps)
+                {t("pricing.form.serviceFeeBps")}
                 <input
                   type="number"
                   min={0}
@@ -423,7 +424,7 @@ export default function PricingPage() {
                 />
               </label>
               <label style={labelStyle}>
-                Reimbursement mode
+                {t("pricing.form.reimbMode")}
                 <select
                   value={pricingForm.reimbursementMode}
                   onChange={(event) =>
@@ -435,13 +436,15 @@ export default function PricingPage() {
                   }
                   style={inputStyle}
                 >
-                  <option value="platform_funded">Platform funded</option>
-                  <option value="mixed">Mixed</option>
+                  <option value="platform_funded">
+                    {t("pricing.platformFunded")}
+                  </option>
+                  <option value="mixed">{t("pricing.mixed")}</option>
                 </select>
               </label>
             </div>
             <label style={labelStyle}>
-              Notes
+              {t("pricing.form.notes")}
               <textarea
                 value={pricingForm.notes}
                 onChange={(event) =>
@@ -463,23 +466,20 @@ export default function PricingPage() {
                 !pricingForm.version.trim()
               }
             >
-              {creatingPricingRule ? "Creating..." : "Create draft"}
+              {creatingPricingRule
+                ? t("pricing.creating")
+                : t("pricing.createDraft")}
             </button>
           </form>
         </div>
       )}
 
       <div className="admin-card" style={{ marginBottom: 16 }}>
-        <h3 style={{ marginTop: 0 }}>Publish settlement fee plan</h3>
-        <p style={{ color: "#6b7280", fontSize: 14 }}>
-          Settlement fee plans live in the billing settlement service and are
-          immutable after publication. Statements and reimbursement batches use
-          these versions directly.
-        </p>
+        <h3 style={{ marginTop: 0 }}>{t("pricing.sectionPublishPlan")}</h3>
         <form onSubmit={handlePublishFeePlan}>
           <div style={formGridStyle}>
             <label style={labelStyle}>
-              Plan name
+              {t("pricing.form.planName")}
               <input
                 value={feePlanForm.planName}
                 onChange={(event) =>
@@ -493,7 +493,7 @@ export default function PricingPage() {
               />
             </label>
             <label style={labelStyle}>
-              Version
+              {t("pricing.form.version")}
               <input
                 value={feePlanForm.version}
                 onChange={(event) =>
@@ -508,7 +508,7 @@ export default function PricingPage() {
               />
             </label>
             <label style={labelStyle}>
-              Service fee (bps)
+              {t("pricing.form.serviceFeeBps")}
               <input
                 type="number"
                 min={0}
@@ -524,7 +524,7 @@ export default function PricingPage() {
               />
             </label>
             <label style={labelStyle}>
-              Reimbursement mode
+              {t("pricing.form.reimbMode")}
               <select
                 value={feePlanForm.reimbursementMode}
                 onChange={(event) =>
@@ -536,8 +536,10 @@ export default function PricingPage() {
                 }
                 style={inputStyle}
               >
-                <option value="platform_funded">Platform funded</option>
-                <option value="mixed">Mixed</option>
+                <option value="platform_funded">
+                  {t("pricing.platformFunded")}
+                </option>
+                <option value="mixed">{t("pricing.mixed")}</option>
               </select>
             </label>
           </div>
@@ -546,7 +548,9 @@ export default function PricingPage() {
             className="admin-btn admin-btn--primary"
             disabled={publishingFeePlan || !feePlanForm.version.trim()}
           >
-            {publishingFeePlan ? "Publishing..." : "Publish settlement plan"}
+            {publishingFeePlan
+              ? t("pricing.publishing")
+              : t("pricing.publishSettlementPlan")}
           </button>
         </form>
       </div>
@@ -563,20 +567,20 @@ export default function PricingPage() {
             marginBottom: 12,
           }}
         >
-          <h3 style={{ margin: 0 }}>Published settlement fee plans</h3>
+          <h3 style={{ margin: 0 }}>{t("pricing.sectionSettlementPlans")}</h3>
           <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {feePlans.length} immutable plan(s)
+            {feePlans.length}
           </span>
         </div>
         <table className="admin-table">
           <thead>
             <tr>
-              <th>Fee plan</th>
-              <th>Version</th>
-              <th>Service fee</th>
-              <th>Reimbursement</th>
-              <th>Status</th>
-              <th>Published</th>
+              <th>{t("pricing.col.plan")}</th>
+              <th>{t("pricing.col.version")}</th>
+              <th>{t("pricing.col.serviceFee")}</th>
+              <th>{t("pricing.col.reimbMode")}</th>
+              <th>{t("pricing.col.status")}</th>
+              <th>{t("notices.col.created")}</th>
             </tr>
           </thead>
           <tbody>
@@ -593,12 +597,12 @@ export default function PricingPage() {
                   <td>{(plan.serviceFeeBps / 100).toFixed(2)}%</td>
                   <td>
                     <span className="admin-badge admin-badge--info">
-                      {plan.reimbursementMode}
+                      {formatPlatformCodeLabel(locale, plan.reimbursementMode)}
                     </span>
                   </td>
                   <td>
                     <span className="admin-badge admin-badge--success">
-                      {plan.status}
+                      {formatPlatformCodeLabel(locale, plan.status)}
                     </span>
                   </td>
                   <td>{formatDateTime(plan.publishedAt)}</td>
@@ -606,7 +610,7 @@ export default function PricingPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={6}>No settlement fee plans published yet.</td>
+                <td colSpan={6}>{t("pricing.noPlans")}</td>
               </tr>
             )}
           </tbody>
@@ -622,23 +626,23 @@ export default function PricingPage() {
             marginBottom: 12,
           }}
         >
-          <h3 style={{ margin: 0 }}>Platform pricing rules</h3>
+          <h3 style={{ margin: 0 }}>{t("pricing.sectionPricingRules")}</h3>
           <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {filteredRules.length} record(s) in current filter
+            {filteredRules.length}
           </span>
         </div>
         <table className="admin-table">
           <thead>
             <tr>
-              <th>Rule</th>
-              <th>Version</th>
-              <th>Service fee</th>
-              <th>Reimbursement</th>
-              <th>Applicable to</th>
-              <th>Status</th>
-              <th>Published</th>
-              <th>Notes</th>
-              <th>Actions</th>
+              <th>{t("pricing.col.rule")}</th>
+              <th>{t("pricing.col.version")}</th>
+              <th>{t("pricing.col.serviceFee")}</th>
+              <th>{t("pricing.col.reimbMode")}</th>
+              <th>{getPlatformLabel(locale, "applicableTo")}</th>
+              <th>{t("pricing.col.status")}</th>
+              <th>{t("notices.col.created")}</th>
+              <th>{t("pricing.form.notes")}</th>
+              <th>{t("common.actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -655,12 +659,12 @@ export default function PricingPage() {
                   <td>{(rule.serviceFeeBps / 100).toFixed(2)}%</td>
                   <td>
                     <span className="admin-badge admin-badge--info">
-                      {rule.reimbursementMode}
+                      {formatPlatformCodeLabel(locale, rule.reimbursementMode)}
                     </span>
                   </td>
                   <td>
                     {rule.applicableTo === "all"
-                      ? "All tenants"
+                      ? t("common.allTenants")
                       : rule.applicableTo}
                   </td>
                   <td>
@@ -673,7 +677,7 @@ export default function PricingPage() {
                             : "admin-badge--neutral"
                       }`}
                     >
-                      {rule.status}
+                      {formatPlatformCodeLabel(locale, rule.status)}
                     </span>
                   </td>
                   <td>
@@ -695,8 +699,8 @@ export default function PricingPage() {
                           disabled={publishingRuleId === rule.ruleId}
                         >
                           {publishRuleFormRuleId === rule.ruleId
-                            ? "Hide publish form"
-                            : "Publish draft"}
+                            ? t("pricing.hidePublishForm")
+                            : t("pricing.publishDraft")}
                         </button>
                         {publishRuleFormRuleId === rule.ruleId ? (
                           <div
@@ -715,7 +719,7 @@ export default function PricingPage() {
                               </p>
                             ) : null}
                             <label style={labelStyle}>
-                              Effective from override
+                              {t("pricing.effectiveFromOverride")}
                               <input
                                 type="datetime-local"
                                 value={publishRuleForm.effectiveFrom}
@@ -731,7 +735,7 @@ export default function PricingPage() {
                               />
                             </label>
                             <label style={labelStyle}>
-                              Effective to override
+                              {t("pricing.effectiveToOverride")}
                               <input
                                 type="datetime-local"
                                 value={publishRuleForm.effectiveTo}
@@ -747,8 +751,7 @@ export default function PricingPage() {
                               />
                             </label>
                             <p style={{ ...subcopyStyle, margin: 0 }}>
-                              Leave a field blank to keep the draft's current
-                              schedule boundary.
+                              {t("pricing.leaveBlank")}
                             </p>
                             <div style={actionsStyle}>
                               <button
@@ -757,7 +760,7 @@ export default function PricingPage() {
                                 onClick={closePublishRuleForm}
                                 disabled={publishingRuleId === rule.ruleId}
                               >
-                                Cancel
+                                {t("common.cancel")}
                               </button>
                               <button
                                 className="admin-btn admin-btn--primary"
@@ -768,8 +771,8 @@ export default function PricingPage() {
                                 disabled={publishingRuleId === rule.ruleId}
                               >
                                 {publishingRuleId === rule.ruleId
-                                  ? "Publishing..."
-                                  : "Confirm publish"}
+                                  ? t("pricing.publishing")
+                                  : t("pricing.confirmPublish")}
                               </button>
                             </div>
                           </div>
@@ -777,7 +780,7 @@ export default function PricingPage() {
                       </div>
                     ) : (
                       <span style={{ color: "#6b7280", fontSize: 12 }}>
-                        Immutable history
+                        {t("common.immutableHistory")}
                       </span>
                     )}
                   </td>
@@ -785,9 +788,7 @@ export default function PricingPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={9}>
-                  No pricing rules found for the selected filter.
-                </td>
+                <td colSpan={9}>{t("pricing.noRules")}</td>
               </tr>
             )}
           </tbody>

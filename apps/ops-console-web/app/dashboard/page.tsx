@@ -12,6 +12,7 @@ import type {
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import {
@@ -285,7 +286,7 @@ export default async function DashboardPage() {
                     {point.label}
                   </span>
                   <span style={{ fontSize: "10px", color: "#cbd5e1" }}>
-                    {point.createdOrders} new
+                    {point.createdOrders} {locale === "en" ? "new" : "新建"}
                   </span>
                 </div>
               ))}
@@ -433,7 +434,7 @@ export default async function DashboardPage() {
                     marginTop: "4px",
                   }}
                 >
-                  {value}
+                  {formatOpsCodeLabel(locale, value)}
                 </div>
               </div>
             ))}

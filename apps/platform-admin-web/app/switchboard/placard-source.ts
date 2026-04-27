@@ -1,4 +1,9 @@
 import type { PublicInfoVersionRecord } from "@drts/contracts";
+import type { Locale } from "@/lib/translations";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 
 type PlacardSourceVersion =
   | Pick<PublicInfoVersionRecord, "status" | "title">
@@ -21,29 +26,36 @@ export function getPreferredPlacardSourceVersion(
 
 export function formatPlacardSourceOptionLabel(
   version: Pick<PublicInfoVersionRecord, "status" | "title">,
+  locale: Locale,
 ) {
   if (version.status === "retired") {
-    return `${version.title} (retired source unavailable)`;
+    return getPlatformLabel(locale, "placardRetiredSourceUnavailable", {
+      title: version.title,
+    });
   }
 
-  return `${version.title} (${version.status})`;
+  return `${version.title} (${formatPlatformCodeLabel(locale, version.status)})`;
 }
 
-export function getPlacardSourceSelectionHint(version: PlacardSourceVersion) {
+export function getPlacardSourceSelectionHint(
+  version: PlacardSourceVersion,
+  locale: Locale,
+) {
   if (!version) {
-    return "Select a source public info version to keep placard lineage traceable.";
+    return getPlatformLabel(locale, "placardSourceNone");
   }
 
   if (version.status === "published") {
-    return "Published source selected: generated placard will inherit the live disclosure timestamp.";
+    return getPlatformLabel(locale, "placardSourcePublished");
   }
 
   if (version.status === "retired") {
-    return "Retired source selected: generate is blocked because placards must be linked to an active draft or published disclosure version.";
+    return getPlatformLabel(locale, "placardSourceRetired");
   }
 
-  return "Draft source selected: generated placard stays draft until the linked public info is published.";
+  return getPlatformLabel(locale, "placardSourceDraft");
 }
 
-export const PLACARD_RETIRED_SOURCE_AUDIT_NOTE =
-  "Retired public info versions remain visible for audit history, but cannot be used to generate new placards.";
+export function getPlacardRetiredSourceAuditNote(locale: Locale) {
+  return getPlatformLabel(locale, "placardRetiredSourceAuditNote");
+}

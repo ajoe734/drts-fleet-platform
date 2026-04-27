@@ -7,6 +7,7 @@ import type {
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { getServerLocale } from "@/lib/server-locale";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { t } from "@/lib/translations";
 import {
   buildRevenueInsights,
@@ -426,7 +427,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                     letterSpacing: "0.05em",
                   }}
                 >
-                  {item.status}
+                  {formatOpsCodeLabel(locale, item.status)}
                 </div>
                 <div
                   style={{
@@ -461,7 +462,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               <Td muted>{s.periodMonth}</Td>
               <Td>
                 <Badge variant={s.payoutStatus === "paid" ? "green" : "yellow"}>
-                  {s.payoutStatus}
+                  {formatOpsCodeLabel(locale, s.payoutStatus)}
                 </Badge>
               </Td>
               <Td>{formatMinorCurrency(s.netAmount.amountMinor)}</Td>

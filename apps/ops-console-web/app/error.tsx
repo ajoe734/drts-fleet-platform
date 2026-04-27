@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslation } from "@/lib/i18n";
 
 export default function Error({
   error,
@@ -9,6 +10,8 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { t } = useTranslation();
+
   useEffect(() => {
     console.error("[ops-console] unhandled page error", error);
   }, [error]);
@@ -29,7 +32,7 @@ export default function Error({
           marginBottom: "8px",
         }}
       >
-        Error
+        {t("common.error")}
       </div>
       <h2
         style={{
@@ -39,7 +42,7 @@ export default function Error({
           margin: "0 0 12px",
         }}
       >
-        Something went wrong
+        {t("common.somethingWrong")}
       </h2>
       <p
         style={{
@@ -49,7 +52,7 @@ export default function Error({
           lineHeight: 1.6,
         }}
       >
-        {error.message || "An unexpected error occurred loading this page."}
+        {error.message || t("common.errorMessage")}
       </p>
       <button
         onClick={reset}
@@ -63,7 +66,7 @@ export default function Error({
           cursor: "pointer",
         }}
       >
-        Try again
+        {t("common.tryAgain")}
       </button>
     </div>
   );

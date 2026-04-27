@@ -17,6 +17,11 @@ import type {
 import { CALL_TYPES, COMPLAINT_CATEGORIES } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatOpsCodeLabel,
+  formatOpsCodeList,
+  getOpsLabel,
+} from "@/lib/localized-labels";
 
 const CALL_TYPE_OPTIONS = [...CALL_TYPES];
 const COMPLAINT_CATEGORY_OPTIONS: ComplaintCategory[] = [
@@ -64,7 +69,7 @@ function toIsoString(value: string) {
 }
 
 export default function CallcenterPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
   const [sessions, setSessions] = useState<CallSessionRecord[]>([]);
@@ -216,7 +221,7 @@ export default function CallcenterPage() {
       <div>
         {error && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
           </div>
         )}
 
@@ -321,7 +326,7 @@ export default function CallcenterPage() {
                 >
                   {CALL_TYPE_OPTIONS.map((callType) => (
                     <option key={callType} value={callType}>
-                      {callType.replace(/_/g, " ")}
+                      {formatOpsCodeLabel(locale, callType)}
                     </option>
                   ))}
                 </select>
@@ -415,10 +420,10 @@ export default function CallcenterPage() {
                         onClick={() => setSelectedCallId(session.callId)}
                       >
                         <td>{session.callId}</td>
-                        <td>{session.callType}</td>
+                        <td>{formatOpsCodeLabel(locale, session.callType)}</td>
                         <td>{session.callerPhone}</td>
                         <td>{session.agentId ?? "-"}</td>
-                        <td>{session.status}</td>
+                        <td>{formatOpsCodeLabel(locale, session.status)}</td>
                         <td>{session.linkedOrderId ?? "-"}</td>
                         <td>{session.linkedCaseNo ?? "-"}</td>
                         <td>{formatDateTime(session.startedAt)}</td>
@@ -434,7 +439,10 @@ export default function CallcenterPage() {
                 <h3>{t("callcenter.sessionDetail")}</h3>
                 <p>
                   {selectedSession
-                    ? `${selectedSession.callId} / ${selectedSession.callType}`
+                    ? `${selectedSession.callId} / ${formatOpsCodeLabel(
+                        locale,
+                        selectedSession.callType,
+                      )}`
                     : t("callcenter.selectSession")}
                 </p>
               </div>
@@ -491,7 +499,7 @@ export default function CallcenterPage() {
                         </span>
                         <strong>
                           {selectedSession.flags.length
-                            ? selectedSession.flags.join(", ")
+                            ? formatOpsCodeList(locale, selectedSession.flags)
                             : "-"}
                         </strong>
                         <small>{formatDateTime(selectedSession.endedAt)}</small>
@@ -898,7 +906,7 @@ export default function CallcenterPage() {
                         >
                           {COMPLAINT_CATEGORY_OPTIONS.map((category) => (
                             <option key={category} value={category}>
-                              {category.replace(/_/g, " ")}
+                              {formatOpsCodeLabel(locale, category)}
                             </option>
                           ))}
                         </select>
@@ -912,8 +920,12 @@ export default function CallcenterPage() {
                             }))
                           }
                         >
-                          <option value="normal">normal</option>
-                          <option value="high">high</option>
+                          <option value="normal">
+                            {formatOpsCodeLabel(locale, "normal")}
+                          </option>
+                          <option value="high">
+                            {formatOpsCodeLabel(locale, "high")}
+                          </option>
                         </select>
                         <textarea
                           rows={3}
@@ -955,7 +967,9 @@ export default function CallcenterPage() {
                             <span className="label">
                               {t("callcenter.detail.status")}
                             </span>
-                            <strong>{selectedOrder.status}</strong>
+                            <strong>
+                              {formatOpsCodeLabel(locale, selectedOrder.status)}
+                            </strong>
                             <small>
                               ETA{" "}
                               {selectedOrder.etaSnapshot
@@ -977,7 +991,10 @@ export default function CallcenterPage() {
                               {t("callcenter.detail.compliance")}
                             </span>
                             <strong>
-                              {selectedOrder.complianceFlags.join(", ") || "-"}
+                              {formatOpsCodeList(
+                                locale,
+                                selectedOrder.complianceFlags,
+                              )}
                             </strong>
                             <small>{selectedOrder.recordingId ?? "-"}</small>
                           </div>
@@ -986,7 +1003,9 @@ export default function CallcenterPage() {
                           {dispatchTrace.length > 0 ? (
                             dispatchTrace.map((trace) => (
                               <div key={trace.traceId} className="trace-item">
-                                <strong>{trace.eventType}</strong>
+                                <strong>
+                                  {formatOpsCodeLabel(locale, trace.eventType)}
+                                </strong>
                                 <span>{trace.message}</span>
                                 <small>{formatDateTime(trace.createdAt)}</small>
                               </div>
@@ -1035,7 +1054,7 @@ export default function CallcenterPage() {
                     <tr key={callback.callbackTaskId}>
                       <td>{callback.callbackTaskId}</td>
                       <td>{callback.callId}</td>
-                      <td>{callback.status}</td>
+                      <td>{formatOpsCodeLabel(locale, callback.status)}</td>
                       <td>{formatDateTime(callback.dueAt)}</td>
                       <td>{callback.linkedOrderId ?? "-"}</td>
                       <td>{callback.linkedCaseNo ?? "-"}</td>

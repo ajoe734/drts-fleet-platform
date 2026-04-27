@@ -3,6 +3,10 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
 import type {
   PlatformAdminUserRecord,
   PlatformAdminUserRole,
@@ -16,7 +20,7 @@ const ROLE_CODES: PlatformAdminUserRole[] = [
 ];
 
 export default function UsersPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [users, setUsers] = useState<PlatformAdminUserRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,7 +98,9 @@ export default function UsersPage() {
           className="admin-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>Error: {error}</p>
+          <p style={{ color: "#dc2626", margin: 0 }}>
+            {getPlatformLabel(locale, "error")}: {error}
+          </p>
         </div>
       )}
 
@@ -196,7 +202,7 @@ export default function UsersPage() {
               >
                 {ROLE_CODES.map((r) => (
                   <option key={r} value={r}>
-                    {r}
+                    {formatPlatformCodeLabel(locale, r)}
                   </option>
                 ))}
               </select>
@@ -223,11 +229,11 @@ export default function UsersPage() {
           <table className="admin-table">
             <thead>
               <tr>
-                <th>ID</th>
+                <th>{getPlatformLabel(locale, "id")}</th>
                 <th>{t("users.col.user")}</th>
                 <th>{t("users.col.role")}</th>
-                <th>{t("users.col.created")}</th>
-                <th>{t("users.col.created")}</th>
+                <th>{getPlatformLabel(locale, "status")}</th>
+                <th>{getPlatformLabel(locale, "updated")}</th>
                 <th></th>
               </tr>
             </thead>
@@ -245,14 +251,14 @@ export default function UsersPage() {
                   </td>
                   <td>
                     <span className="admin-badge admin-badge--info">
-                      {u.roleCode}
+                      {formatPlatformCodeLabel(locale, u.roleCode)}
                     </span>
                   </td>
                   <td>
                     <span
                       className={`admin-badge ${u.status === "active" ? "admin-badge--success" : u.status === "suspended" ? "admin-badge--danger" : "admin-badge--warning"}`}
                     >
-                      {u.status}
+                      {formatPlatformCodeLabel(locale, u.status)}
                     </span>
                   </td>
                   <td style={{ fontSize: 12 }}>
@@ -265,14 +271,14 @@ export default function UsersPage() {
                         onClick={() => handleUpdateRole(u.userId, "admin")}
                         disabled={u.roleCode === "admin"}
                       >
-                        Admin
+                        {formatPlatformCodeLabel(locale, "admin")}
                       </button>
                       <button
                         className="admin-btn admin-btn--secondary admin-btn--sm"
                         onClick={() => handleUpdateRole(u.userId, "viewer")}
                         disabled={u.roleCode === "viewer"}
                       >
-                        Viewer
+                        {formatPlatformCodeLabel(locale, "viewer")}
                       </button>
                     </div>
                   </td>

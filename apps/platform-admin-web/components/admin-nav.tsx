@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { AppSidebar } from "@drts/ui-web";
 import { useTranslation } from "@/lib/i18n";
+import { getPlatformLabel } from "@/lib/localized-labels";
 import {
   Shield,
   Users,
@@ -68,7 +69,7 @@ export function AdminNav() {
         <div style={{ display: "grid", gap: "8px" }}>
           <button
             onClick={() => setLocale(locale === "en" ? "zh" : "en")}
-            title="Switch language"
+            title={getPlatformLabel(locale, "switchLanguage")}
             style={{
               display: "flex",
               alignItems: "center",
