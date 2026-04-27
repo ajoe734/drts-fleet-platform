@@ -120,6 +120,27 @@ Default infrastructure bindings:
 Keep `DEV_INFRA_BIND_ADDRESS` at its default unless there is a deliberate,
 time-boxed operator reason to expose infrastructure ports beyond the VM itself.
 
+## Local Overlay
+
+Machine-specific notes do not belong in this tracked runbook. Put transient
+port mappings, current container names, temporary firewall commands, and other
+per-VM review details in:
+
+- `docs/03-runbooks/local-development.local.md`
+
+That file is intentionally gitignored. Bootstrap it from:
+
+- `docs/03-runbooks/local-development.local.example.md`
+- `./scripts/init-local-development-overlay.sh`
+
+Examples of information that should stay in the local overlay instead of this
+canonical runbook:
+
+- current `430x` Docker review port mappings for one VM
+- temporary container names such as `drts-we002-*`
+- operator-specific GCP firewall commands
+- ad hoc external-access debugging notes for one machine
+
 Common commands:
 
 - `pnpm dev:api`
