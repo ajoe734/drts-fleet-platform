@@ -9,6 +9,7 @@ import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { ReportingFilingRepository } from "../../apps/api/src/modules/reporting-filing/reporting-filing.repository";
 import { ReportingFilingService } from "../../apps/api/src/modules/reporting-filing/reporting-filing.service";
+import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
 async function flushReportingQueue() {
   await Promise.resolve();
@@ -217,6 +218,88 @@ describe("reporting and filing service", () => {
     expect(auditService.listAuditLogs()[0]?.actionName).toBe(
       "complete_report_job",
     );
+  });
+
+  it("exports partner benefit revenue rows for airport-transfer review", async () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+    const verification = tenantPartnerService.verifyPartnerEligibility({
+      entrySlug: "bank-demo-alpha-airport",
+      cardLast4: "2468",
+    });
+    const callcenterService = new CallcenterService(auditService);
+    const regulatoryRegistryService = new RegulatoryRegistryService(
+      new OpsDispatchEventsService(new EventEmitter() as never),
+    );
+    const ownedMobilityService = new OwnedMobilityService(
+      regulatoryRegistryService,
+      auditService,
+      callcenterService,
+      new OwnedMobilityTaskEventsService(new EventEmitter() as never),
+      new OpsDispatchEventsService(new EventEmitter() as never),
+      undefined,
+      tenantPartnerService,
+    );
+    const reportingFilingService = new ReportingFilingService(auditService);
+    reportingFilingService.registerOrderFeedProvider(() =>
+      ownedMobilityService.listOrders(),
+    );
+
+    const created = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        eligibilityVerificationId: verification.eligibilityVerificationId,
+        direction: "pickup",
+        pickup: { address: "桃園機場第二航廈" },
+        dropoff: { address: "台北市信義區松高路11號" },
+        reservationWindowStart: "2026-04-18T10:00:00Z",
+        reservationWindowEnd: "2026-04-18T10:20:00Z",
+        passenger: {
+          name: "陳小姐",
+          phone: "0900123456",
+        },
+        flightNo: "CI-001",
+      },
+      "tenant-demo-001",
+    );
+
+    ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: { address: "台中市政府" },
+        dropoff: { address: "台中高鐵站" },
+        reservationWindowStart: "2026-04-18T12:00:00Z",
+        reservationWindowEnd: "2026-04-18T12:20:00Z",
+        passenger: {
+          name: "一般企業乘客",
+          phone: "0900000000",
+        },
+      },
+      "tenant-demo-001",
+    );
+
+    const accepted = reportingFilingService.createReportJob({
+      jobType: "revenue_summary",
+      format: "xlsx",
+    });
+
+    await flushReportingQueue();
+
+    const job = reportingFilingService.getReportJob(accepted.jobId);
+    expect(job.status).toBe("completed");
+    expect(job.partnerRevenueRows).toEqual([
+      expect.objectContaining({
+        orderId: created.orderId,
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        eligibilityVerificationId: verification.eligibilityVerificationId,
+        issuerAuthorizationRef: "issuer-auth-bank_demo_alpha-2468",
+        benefitReference: "benefit-bank_demo_alpha-2468",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+      }),
+    ]);
   });
 
   it("rehydrates queued reporting state and writes completed jobs through the repository", async () => {

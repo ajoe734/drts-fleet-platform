@@ -54,6 +54,16 @@ type SettlementTripSnapshot = {
   pricingVersionSnapshot: string;
   eligibleForTenantInvoice: boolean;
   eligibleForDriverStatement: boolean;
+  serviceBucket: "business_dispatch";
+  businessDispatchSubtype:
+    | "enterprise_dispatch"
+    | "credit_card_airport_transfer";
+  partnerId: string | null;
+  partnerProgramId: string | null;
+  partnerEntrySlug: string | null;
+  eligibilityVerificationId: string | null;
+  issuerAuthorizationRef: string | null;
+  benefitReference: string | null;
 };
 
 type StoredTenantInvoice = TenantInvoiceRecord & {
@@ -89,6 +99,14 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     pricingVersionSnapshot: "tenant-pricing-v1",
     eligibleForTenantInvoice: true,
     eligibleForDriverStatement: true,
+    serviceBucket: "business_dispatch",
+    businessDispatchSubtype: "enterprise_dispatch",
+    partnerId: null,
+    partnerProgramId: null,
+    partnerEntrySlug: null,
+    eligibilityVerificationId: null,
+    issuerAuthorizationRef: null,
+    benefitReference: null,
   },
   {
     settlementId: "settlement-202603-002",
@@ -111,6 +129,14 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     pricingVersionSnapshot: "tenant-pricing-v1",
     eligibleForTenantInvoice: true,
     eligibleForDriverStatement: true,
+    serviceBucket: "business_dispatch",
+    businessDispatchSubtype: "credit_card_airport_transfer",
+    partnerId: "partner-bank-demo-001",
+    partnerProgramId: "program-airport-alpha",
+    partnerEntrySlug: "bank-demo-alpha-airport",
+    eligibilityVerificationId: "elig-demo-032",
+    issuerAuthorizationRef: "issuer-auth-bank-demo-032",
+    benefitReference: "benefit-bank-demo-032",
   },
   {
     settlementId: "settlement-202603-003",
@@ -133,6 +159,14 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     pricingVersionSnapshot: "tenant-pricing-v1",
     eligibleForTenantInvoice: true,
     eligibleForDriverStatement: true,
+    serviceBucket: "business_dispatch",
+    businessDispatchSubtype: "enterprise_dispatch",
+    partnerId: null,
+    partnerProgramId: null,
+    partnerEntrySlug: null,
+    eligibilityVerificationId: null,
+    issuerAuthorizationRef: null,
+    benefitReference: null,
   },
 ];
 
@@ -316,8 +350,16 @@ export class BillingSettlementService implements OnModuleInit {
     const lines: InvoiceLineRecord[] = eligibleTrips.map((trip) => ({
       lineId: `invoice-line-${randomUUID()}`,
       orderId: trip.orderId,
-      description: `Completed owned trip ${trip.orderId}`,
+      description: this.buildInvoiceLineDescription(trip),
       amount: { ...trip.grossEarning },
+      serviceBucket: trip.serviceBucket,
+      businessDispatchSubtype: trip.businessDispatchSubtype,
+      partnerId: trip.partnerId,
+      partnerProgramId: trip.partnerProgramId,
+      partnerEntrySlug: trip.partnerEntrySlug,
+      eligibilityVerificationId: trip.eligibilityVerificationId,
+      issuerAuthorizationRef: trip.issuerAuthorizationRef,
+      benefitReference: trip.benefitReference,
     }));
     const amount = this.sumMoney(lines.map((line) => line.amount));
     const now = new Date().toISOString();
@@ -390,6 +432,17 @@ export class BillingSettlementService implements OnModuleInit {
     );
 
     return this.cloneInvoice(invoice);
+  }
+
+  private buildInvoiceLineDescription(trip: LiveSettlementTripRecord) {
+    if (
+      trip.businessDispatchSubtype === "credit_card_airport_transfer" &&
+      trip.partnerEntrySlug
+    ) {
+      return `Bank-airport benefit trip ${trip.orderId} (${trip.partnerEntrySlug})`;
+    }
+
+    return `Completed owned trip ${trip.orderId}`;
   }
 
   listTenantInvoices(tenantId: string) {
@@ -1080,6 +1133,15 @@ export class BillingSettlementService implements OnModuleInit {
       pricingVersionSnapshot: LIVE_SETTLEMENT_PRICING_VERSION,
       eligibleForTenantInvoice: true,
       eligibleForDriverStatement: true,
+      serviceBucket: "business_dispatch",
+      businessDispatchSubtype:
+        trip.businessDispatchSubtype ?? "enterprise_dispatch",
+      partnerId: trip.partnerId,
+      partnerProgramId: trip.partnerProgramId,
+      partnerEntrySlug: trip.partnerEntrySlug,
+      eligibilityVerificationId: trip.eligibilityVerificationId,
+      issuerAuthorizationRef: trip.issuerAuthorizationRef,
+      benefitReference: trip.benefitReference,
     };
   }
 

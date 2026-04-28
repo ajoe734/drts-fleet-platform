@@ -33,6 +33,14 @@ export type LiveSettlementTripRecord = {
   orderId: string;
   completedAt: string;
   grossEarning: MoneyAmount;
+  serviceBucket: OwnedOrderRecord["serviceBucket"];
+  businessDispatchSubtype: OwnedOrderRecord["businessDispatchSubtype"];
+  partnerId: string | null;
+  partnerProgramId: string | null;
+  partnerEntrySlug: string | null;
+  eligibilityVerificationId: string | null;
+  issuerAuthorizationRef: string | null;
+  benefitReference: string | null;
 };
 
 export type BillingSettlementState = {
@@ -204,6 +212,14 @@ export class BillingSettlementRepository {
         orderId: order.orderId,
         completedAt: task.completedAt ?? order.updatedAt,
         grossEarning: { ...grossEarning },
+        serviceBucket: order.serviceBucket,
+        businessDispatchSubtype: order.businessDispatchSubtype,
+        partnerId: order.partnerId,
+        partnerProgramId: order.partnerProgramId,
+        partnerEntrySlug: order.partnerEntrySlug,
+        eligibilityVerificationId: order.eligibilityVerificationId,
+        issuerAuthorizationRef: order.issuerAuthorizationRef,
+        benefitReference: order.benefitReference,
       };
     });
   }
@@ -474,6 +490,14 @@ export class BillingSettlementRepository {
         orderId: order.orderId,
         completedAt: task.completedAt ?? order.updatedAt,
         grossEarning: { ...grossEarning },
+        serviceBucket: order.serviceBucket,
+        businessDispatchSubtype: order.businessDispatchSubtype,
+        partnerId: order.partnerId,
+        partnerProgramId: order.partnerProgramId,
+        partnerEntrySlug: order.partnerEntrySlug,
+        eligibilityVerificationId: order.eligibilityVerificationId,
+        issuerAuthorizationRef: order.issuerAuthorizationRef,
+        benefitReference: order.benefitReference,
       };
     });
   }

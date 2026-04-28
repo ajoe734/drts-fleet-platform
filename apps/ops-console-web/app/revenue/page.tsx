@@ -130,6 +130,33 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const vehicleOptions = vehicles
     .map((v) => v.vehicleId)
     .sort((a, b) => a.localeCompare(b));
+  const partnerBenefitRows = orders
+    .filter(
+      (order) =>
+        order.status === "completed" &&
+        order.serviceBucket === "business_dispatch" &&
+        order.businessDispatchSubtype === "credit_card_airport_transfer" &&
+        order.partnerId,
+    )
+    .filter((order) => {
+      if (
+        filters.serviceBucket !== "all" &&
+        order.serviceBucket !== filters.serviceBucket
+      ) {
+        return false;
+      }
+      if (filters.period !== "all") {
+        const days =
+          filters.period === "today" ? 0 : filters.period === "7d" ? 6 : 29;
+        const threshold = new Date();
+        threshold.setHours(0, 0, 0, 0);
+        threshold.setDate(threshold.getDate() - days);
+        if (new Date(order.updatedAt).getTime() < threshold.getTime()) {
+          return false;
+        }
+      }
+      return true;
+    });
 
   return (
     <>
@@ -365,6 +392,65 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
           </DataTable>
         </Card>
       </div>
+
+      <Card style={{ marginBottom: "20px" }}>
+        <CardHeader>
+          <div
+            style={{
+              fontSize: "11px",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "#64748b",
+              marginBottom: "2px",
+            }}
+          >
+            {t("revenue.partnerBenefitTitle", locale)}
+          </div>
+          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
+            {t("revenue.partnerBenefitSub", locale)}
+          </div>
+        </CardHeader>
+        <DataTable
+          columns={[
+            { label: t("revenue.col.order", locale) },
+            { label: t("revenue.col.partner", locale) },
+            { label: t("revenue.col.eligibility", locale) },
+            { label: t("revenue.col.benefit", locale) },
+            { label: t("revenue.col.revenue", locale) },
+          ]}
+          empty={t("revenue.emptyPartnerBenefit", locale)}
+        >
+          {partnerBenefitRows.map((order) => (
+            <Tr key={order.orderId}>
+              <Td>
+                <div>{order.orderNo}</div>
+                <div style={{ color: "#64748b", fontSize: "12px" }}>
+                  {formatOpsCodeLabel(locale, order.businessDispatchSubtype!)}
+                </div>
+              </Td>
+              <Td>
+                <div>{order.partnerId}</div>
+                <div style={{ color: "#64748b", fontSize: "12px" }}>
+                  {order.partnerEntrySlug}
+                </div>
+              </Td>
+              <Td>
+                <div>{order.eligibilityVerificationId ?? "—"}</div>
+                <div style={{ color: "#64748b", fontSize: "12px" }}>
+                  {order.issuerAuthorizationRef ?? "—"}
+                </div>
+              </Td>
+              <Td>
+                <div>{order.benefitReference ?? "—"}</div>
+                <div style={{ color: "#64748b", fontSize: "12px" }}>
+                  {order.partnerProgramId ?? "—"}
+                </div>
+              </Td>
+              <Td>{formatMinorCurrency(order.quotedFare?.amountMinor ?? 0)}</Td>
+            </Tr>
+          ))}
+        </DataTable>
+      </Card>
 
       {/* Settlement */}
       <Card>

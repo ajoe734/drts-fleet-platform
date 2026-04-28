@@ -473,7 +473,7 @@ describe("owned mobility service", () => {
       entrySlug: "bank-demo-alpha-airport",
       cardLast4: "2468",
     });
-    const { ownedMobilityService } = createService(
+    const { auditService, ownedMobilityService } = createService(
       undefined,
       tenantPartnerService,
     );
@@ -523,6 +523,17 @@ describe("owned mobility service", () => {
       eligibilityVerificationId: verification.eligibilityVerificationId,
       issuerAuthorizationRef: "issuer-auth-bank_demo_alpha-2468",
       benefitReference: "benefit-bank_demo_alpha-2468",
+    });
+    expect(auditService.listAuditLogs()[0]).toMatchObject({
+      actionName: "create_tenant_booking",
+      newValuesSummary: {
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        eligibilityVerificationId: verification.eligibilityVerificationId,
+        issuerAuthorizationRef: "issuer-auth-bank_demo_alpha-2468",
+        benefitReference: "benefit-bank_demo_alpha-2468",
+      },
     });
   });
 

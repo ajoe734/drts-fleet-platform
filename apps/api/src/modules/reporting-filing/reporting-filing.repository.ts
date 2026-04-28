@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
+  PartnerRevenueSummaryRowRecord,
   FilingPackageRecord,
   ReportArtifactRecord,
   ReportJobRecord,
@@ -50,6 +51,7 @@ type FilingPackageDownloadMetadata = {
 export type StoredReportJobRecord = ReportJobRecord & {
   artifact: ReportArtifactView | null;
   rows: DispatchRecordingIndexRow[];
+  partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
 };
 
 export type StoredFilingPackageRecord = FilingPackageRecord & {

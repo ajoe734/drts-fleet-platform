@@ -140,14 +140,18 @@ export interface IdentityContext {
     | "platform_admin"
     | "tenant_admin"
     | "ops_user"
-    | "driver_user";
+    | "driver_user"
+    | "partner_api_key";
   actorId: string | null;
-  realm: "system" | "platform" | "tenant" | "ops" | "driver";
+  realm: "system" | "platform" | "tenant" | "ops" | "driver" | "partner";
   authMode: "bootstrap_headers" | "jwt_bearer";
-  roleFamilies: Array<"platform" | "tenant" | "ops" | "driver">;
+  roleFamilies: Array<"platform" | "tenant" | "ops" | "driver" | "partner">;
   roles: string[];
   scopes: string[];
   tenantId: string | null;
+  partnerId?: string | null;
+  partnerProgramId?: string | null;
+  partnerEntrySlug?: string | null;
   supportedExecutionModes: SupervisorExecutionMode[];
 }
 
@@ -169,6 +173,19 @@ export interface TenantBootstrapSession {
   tokenType: "Bearer";
   expiresIn: string;
   profile: TenantPortalProfile;
+  identity: IdentityContext;
+}
+
+export interface CreatePartnerBootstrapSessionCommand {
+  entrySlug: string;
+  apiKey: string;
+}
+
+export interface PartnerBootstrapSession {
+  accessToken: string;
+  tokenType: "Bearer";
+  expiresIn: string;
+  partnerEntry: PartnerChannelEntryRecord;
   identity: IdentityContext;
 }
 
@@ -275,7 +292,12 @@ export interface ProductRuleCatalog {
 export interface AuditLogRecord {
   auditId: string;
   actorId: string | null;
-  actorType: "system" | "platform_admin" | "tenant_admin" | "ops_user";
+  actorType:
+    | "system"
+    | "platform_admin"
+    | "tenant_admin"
+    | "ops_user"
+    | "partner_api_key";
   tenantId: string | null;
   moduleName: string;
   actionName: string;
@@ -1422,6 +1444,14 @@ export interface InvoiceLineRecord {
   orderId: string;
   description: string;
   amount: MoneyAmount;
+  serviceBucket?: Phase1ServiceBucket;
+  businessDispatchSubtype?: BusinessDispatchSubtype | null;
+  partnerId?: string | null;
+  partnerProgramId?: string | null;
+  partnerEntrySlug?: string | null;
+  eligibilityVerificationId?: string | null;
+  issuerAuthorizationRef?: string | null;
+  benefitReference?: string | null;
 }
 
 export interface GenerateTenantInvoiceCommand {
@@ -1622,6 +1652,23 @@ export interface DispatchRecordingIndexRowRecord {
   exportedAt: string;
 }
 
+export interface PartnerRevenueSummaryRowRecord {
+  orderId: string;
+  orderNo: string;
+  tenantId: string | null;
+  partnerId: string;
+  partnerProgramId: string | null;
+  partnerEntrySlug: string;
+  eligibilityVerificationId: string | null;
+  issuerAuthorizationRef: string | null;
+  benefitReference: string | null;
+  businessDispatchSubtype: BusinessDispatchSubtype;
+  status: OwnedOrderStatus;
+  amount: MoneyAmount;
+  completedAt: string | null;
+  exportedAt: string;
+}
+
 export interface ReportJobDetailRecord extends ReportJobRecord {
   artifact:
     | (ReportArtifactRecord & {
@@ -1629,6 +1676,7 @@ export interface ReportJobDetailRecord extends ReportJobRecord {
       })
     | null;
   rows?: DispatchRecordingIndexRowRecord[];
+  partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
 }
 
 export const FILING_PACKAGE_TYPES = [

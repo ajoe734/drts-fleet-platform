@@ -156,6 +156,14 @@ describe("billing settlement service", () => {
             currency: "NTD",
             amountMinor: 150000,
           },
+          serviceBucket: "business_dispatch",
+          businessDispatchSubtype: "credit_card_airport_transfer",
+          partnerId: "partner-bank-demo-001",
+          partnerProgramId: "program-airport-alpha",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          eligibilityVerificationId: "elig-live-001",
+          issuerAuthorizationRef: "issuer-auth-live-001",
+          benefitReference: "benefit-live-001",
         },
       ]),
       persistChanges,
@@ -181,6 +189,18 @@ describe("billing settlement service", () => {
     expect(invoice.status).toBe("issued");
     expect(invoice.lines).toHaveLength(1);
     expect(invoice.lines[0]?.orderId).toBe("live-order-001");
+    expect(invoice.lines[0]).toMatchObject({
+      description:
+        "Bank-airport benefit trip live-order-001 (bank-demo-alpha-airport)",
+      serviceBucket: "business_dispatch",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      eligibilityVerificationId: "elig-live-001",
+      issuerAuthorizationRef: "issuer-auth-live-001",
+      benefitReference: "benefit-live-001",
+    });
     expect(invoice.amount.amountMinor).toBe(150000);
   });
 

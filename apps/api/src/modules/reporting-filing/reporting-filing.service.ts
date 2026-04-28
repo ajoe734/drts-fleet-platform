@@ -10,6 +10,7 @@ import type {
   FilingPackageType,
   GenerateFilingPackageCommand,
   OwnedOrderRecord,
+  PartnerRevenueSummaryRowRecord,
   PackageItemRecord,
   ReportArtifactRecord,
   ReportJobAccepted,
@@ -44,6 +45,7 @@ type DispatchRecordingIndexRow = {
 type ReportJobView = ReportJobRecord & {
   artifact: ReportArtifactView | null;
   rows?: DispatchRecordingIndexRow[];
+  partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
 };
 
 type ReportArtifactView = ReportArtifactRecord & {
@@ -80,6 +82,7 @@ type FilingPackageDownloadMetadata = {
 type StoredReportJob = ReportJobRecord & {
   artifact: ReportArtifactView | null;
   rows: DispatchRecordingIndexRow[];
+  partnerRevenueRows: PartnerRevenueSummaryRowRecord[];
 };
 
 type StoredFilingPackage = FilingPackageRecord & {
@@ -127,7 +130,10 @@ export class ReportingFilingService implements OnModuleInit {
     try {
       const persistedState = await this.reportingFilingRepository.loadState();
       this.reportJobs = persistedState.reportJobs.map((job) =>
-        this.cloneStoredReportJob(job),
+        this.cloneStoredReportJob({
+          ...job,
+          partnerRevenueRows: job.partnerRevenueRows ?? [],
+        }),
       );
       this.filingPackages = persistedState.filingPackages.map((filingPackage) =>
         this.cloneStoredFilingPackage(filingPackage),
@@ -172,6 +178,7 @@ export class ReportingFilingService implements OnModuleInit {
       filters: { ...(command.filters ?? {}) },
       artifact: null,
       rows: [],
+      partnerRevenueRows: [],
       createdAt,
       updatedAt: createdAt,
     };
@@ -361,6 +368,9 @@ export class ReportingFilingService implements OnModuleInit {
     if (job.jobType === "dispatch_recording_index") {
       job.rows = this.buildDispatchRecordingIndexRows();
     }
+    if (job.jobType === "revenue_summary") {
+      job.partnerRevenueRows = this.buildPartnerRevenueSummaryRows();
+    }
 
     const artifactPayload = {
       jobId: job.jobId,
@@ -368,6 +378,7 @@ export class ReportingFilingService implements OnModuleInit {
       format: job.format,
       filters: job.filters,
       rows: job.rows,
+      partnerRevenueRows: job.partnerRevenueRows,
     };
     job.artifact = this.createArtifact("report", job.jobId, artifactPayload);
     job.status = "completed";
@@ -394,6 +405,7 @@ export class ReportingFilingService implements OnModuleInit {
           artifactId: job.artifact.artifactId,
           artifactExpiresAt: job.artifact.expiresAt,
           rowCount: job.rows.length,
+          partnerRevenueRowCount: job.partnerRevenueRows.length,
         },
       },
       requestId,
@@ -591,6 +603,37 @@ export class ReportingFilingService implements OnModuleInit {
       }));
   }
 
+  private buildPartnerRevenueSummaryRows(): PartnerRevenueSummaryRowRecord[] {
+    const exportedAt = new Date().toISOString();
+    return this.orderFeedProvider()
+      .filter(
+        (order) =>
+          order.serviceBucket === "business_dispatch" &&
+          order.businessDispatchSubtype === "credit_card_airport_transfer" &&
+          order.partnerId &&
+          order.partnerEntrySlug,
+      )
+      .map((order) => ({
+        orderId: order.orderId,
+        orderNo: order.orderNo,
+        tenantId: order.tenantId,
+        partnerId: order.partnerId!,
+        partnerProgramId: order.partnerProgramId,
+        partnerEntrySlug: order.partnerEntrySlug!,
+        eligibilityVerificationId: order.eligibilityVerificationId,
+        issuerAuthorizationRef: order.issuerAuthorizationRef,
+        benefitReference: order.benefitReference,
+        businessDispatchSubtype: order.businessDispatchSubtype!,
+        status: order.status,
+        amount: order.quotedFare ?? {
+          currency: "NTD",
+          amountMinor: 0,
+        },
+        completedAt: order.status === "completed" ? order.updatedAt : null,
+        exportedAt,
+      }));
+  }
+
   private createPackageItem(
     packageId: string,
     itemType: string,
@@ -666,6 +709,10 @@ export class ReportingFilingService implements OnModuleInit {
           }
         : null,
       rows: job.rows.map((row) => ({ ...row })),
+      partnerRevenueRows: (job.partnerRevenueRows ?? []).map((row) => ({
+        ...row,
+        amount: { ...row.amount },
+      })),
     };
   }
 
@@ -680,6 +727,10 @@ export class ReportingFilingService implements OnModuleInit {
           }
         : null,
       rows: job.rows.map((row) => ({ ...row })),
+      partnerRevenueRows: (job.partnerRevenueRows ?? []).map((row) => ({
+        ...row,
+        amount: { ...row.amount },
+      })),
     };
   }
 

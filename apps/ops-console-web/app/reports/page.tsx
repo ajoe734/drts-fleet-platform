@@ -599,6 +599,62 @@ export default function ReportsPage() {
                     </table>
                   </div>
                 ) : null}
+
+                {jobDetail.partnerRevenueRows &&
+                jobDetail.partnerRevenueRows.length > 0 ? (
+                  <div className="detail-section">
+                    <h4>{t("reports.detail.partnerRevenueRows")}</h4>
+                    <table className="table compact-table">
+                      <thead>
+                        <tr>
+                          <th>{t("reports.col.order")}</th>
+                          <th>{t("reports.col.partner")}</th>
+                          <th>{t("reports.col.eligibility")}</th>
+                          <th>{t("reports.col.benefit")}</th>
+                          <th>{t("reports.col.amount")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {jobDetail.partnerRevenueRows.map((row) => (
+                          <tr key={row.orderId}>
+                            <td>
+                              <div className="cell-title">{row.orderNo}</div>
+                              <div className="cell-subcopy">
+                                {row.businessDispatchSubtype}
+                              </div>
+                            </td>
+                            <td>
+                              <div className="cell-title">{row.partnerId}</div>
+                              <div className="cell-subcopy">
+                                {row.partnerEntrySlug}
+                              </div>
+                            </td>
+                            <td>
+                              <div className="cell-title">
+                                {row.eligibilityVerificationId ?? "—"}
+                              </div>
+                              <div className="cell-subcopy">
+                                {row.issuerAuthorizationRef ?? "—"}
+                              </div>
+                            </td>
+                            <td>
+                              <div className="cell-title">
+                                {row.benefitReference ?? "—"}
+                              </div>
+                              <div className="cell-subcopy">
+                                {row.partnerProgramId ?? "—"}
+                              </div>
+                            </td>
+                            <td>
+                              {row.amount.currency}{" "}
+                              {(row.amount.amountMinor / 100).toFixed(0)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
               </>
             ) : (
               <p className="cell-subcopy">
