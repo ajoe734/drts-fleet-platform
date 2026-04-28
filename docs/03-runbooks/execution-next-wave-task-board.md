@@ -138,7 +138,7 @@ Dispatch families and status as of 2026-04-28:
 4. `P1PX-DRV-001` and `P1PX-DRV-002` — **done**
    - driver app production identity / device posture and EAS internal build evidence
    - commits: `83a3e4c`, `4a99bdd`
-5. `P1PX-DOC-001` — **done** (this pass)
+5. `P1PX-DOC-001` — **in review** (pending Codex reviewer approval; owner will finalize to done after approval)
    - blueprint and gap-matrix truth sync after implementation slices finish
 
 All P1PX implementation slices are closed. The remaining delta is:

@@ -32,8 +32,14 @@ It exists to answer a narrower question than the master closeout checklist:
 - The IDs below originated as candidate labels in this runbook.
 - `EMC-H1-*`, `EMC-H2-001`, `EMC-W1-*`, and `EMC-I1-*` are now active
   execution-mode tasks in `ai-status.json`.
-- `EMC-X1-*` remain unmaterialized until their partner or cross-repo
-  dependencies are explicitly named and accepted.
+- `EMC-X1-001` remains unmaterialized until the Grab Taiwan partner API contract,
+  credentials, and sandbox are in place.
+- `EMC-X1-002` cross-repo evidence is now present (remote `main` landings
+  confirmed); optional fresh annex supplement only if the team wants a
+  current-main-only evidence packet.
+- `EMC-X1-003` and `EMC-X1-004` baseline implementation has landed via the
+  2026-04-28 P1PX wave; only the external-gated remainder (real bank/issuer
+  credentials, branding assets, partner contract) is still open and unmaterialized.
 - This draft assumes the current product strategy is **not** to build a
   first-party Passenger App / Web for the current execution mode. Passenger
   demand is expected to enter through third-party ride-hailing apps and partner

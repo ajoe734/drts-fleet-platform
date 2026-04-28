@@ -23,7 +23,7 @@ Baseline references used for this matrix:
 
 - `drts-fleet-platform` `origin/main` at `1ab33fc87ff9a3bd5e5f83bb3fa80167923d1408` (original audit baseline)
 - `tenant-commute-hub` `origin/main` at `2a3acf2736b5e37eea82998c58f5466a0bc7ca78` (original audit baseline)
-- `drts-fleet-platform` local branch HEAD at `0519485` after P1PX productization wave (2026-04-28)
+- `drts-fleet-platform` local branch HEAD at `c11e159` after full P1PX productization wave (2026-04-28); wave commits include `83a3e4c` (P1PX-DRV-001), `4a99bdd` (P1PX-DRV-002), `0519485` (P1PX-BE-003), and `c11e159` (P1PX-DOC-001 docs sync)
 
 ---
 
