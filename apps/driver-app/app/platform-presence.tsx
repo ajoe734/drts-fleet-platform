@@ -13,7 +13,7 @@ import type {
   PlatformPresenceRecord,
   PlatformPresenceSummary,
 } from "@drts/contracts";
-import { getDriverClient } from "@/lib/api-client";
+import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
 
 /**
  * Calculate token expiry urgency level and remaining time display.
@@ -29,7 +29,7 @@ function getTokenExpiryInfo(tokenExpiresAt: string | null): {
   isExpiring: boolean;
 } {
   if (!tokenExpiresAt) {
-    return { label: "No expiry set", urgency: "safe", isExpiring: false };
+    return { label: "無到期時間", urgency: "safe", isExpiring: false };
   }
 
   const now = new Date().getTime();
@@ -37,7 +37,7 @@ function getTokenExpiryInfo(tokenExpiresAt: string | null): {
   const remainingMs = expiresAt - now;
 
   if (remainingMs <= 0) {
-    return { label: "Expired", urgency: "expired", isExpiring: true };
+    return { label: "已到期", urgency: "expired", isExpiring: true };
   }
 
   const remainingMinutes = Math.floor(remainingMs / 60000);
@@ -45,7 +45,7 @@ function getTokenExpiryInfo(tokenExpiresAt: string | null): {
 
   if (remainingHours < 1) {
     return {
-      label: `${remainingMinutes}m remaining`,
+      label: `剩餘 ${remainingMinutes} 分鐘`,
       urgency: "urgent",
       isExpiring: true,
     };
@@ -53,14 +53,14 @@ function getTokenExpiryInfo(tokenExpiresAt: string | null): {
 
   if (remainingHours < 24) {
     return {
-      label: `${remainingHours}h ${remainingMinutes % 60}m remaining`,
+      label: `剩餘 ${remainingHours} 小時 ${remainingMinutes % 60} 分鐘`,
       urgency: "warning",
       isExpiring: true,
     };
   }
 
   return {
-    label: `${remainingHours}h remaining`,
+    label: `剩餘 ${remainingHours} 小時`,
     urgency: "safe",
     isExpiring: false,
   };
@@ -111,8 +111,8 @@ function PresenceCard({
     } catch (e: any) {
       console.error("Failed to toggle platform presence:", e.message);
       Alert.alert(
-        "Error",
-        `Failed to toggle ${record.platformCode}: ${e.message}`,
+        "錯誤",
+        `無法切換 ${record.platformCode} 的狀態：${e.message}`,
       );
     } finally {
       setToggling(false);
@@ -121,12 +121,12 @@ function PresenceCard({
 
   const handleReauth = () => {
     Alert.alert(
-      "Re-authenticate Platform",
-      `This will start re-authentication for "${record.platformCode}". You will be redirected to complete the process.`,
+      "重新驗證平台",
+      `即將為「${record.platformCode}」啟動重新驗證。您將被引導完成驗證流程。`,
       [
-        { text: "Cancel", style: "cancel" },
+        { text: "取消", style: "cancel" },
         {
-          text: "Continue",
+          text: "繼續",
           onPress: async () => {
             try {
               await client.setPlatformOnline({
@@ -135,11 +135,11 @@ function PresenceCard({
               });
               await onRefresh();
               Alert.alert(
-                "Re-auth Started",
-                `Please complete authentication for ${record.platformCode}.`,
+                "重新驗證已啟動",
+                `請完成 ${record.platformCode} 的驗證流程。`,
               );
             } catch (e: any) {
-              Alert.alert("Error", e.message);
+              Alert.alert("錯誤", e.message);
             }
           },
         },
@@ -185,18 +185,14 @@ function PresenceCard({
             disabled={toggling}
           >
             <Text style={styles.toggleBtnText}>
-              {toggling
-                ? "..."
-                : record.status === "online"
-                  ? "Offline"
-                  : "Online"}
+              {toggling ? "…" : record.status === "online" ? "下線" : "上線"}
             </Text>
           </TouchableOpacity>
         </View>
       </View>
 
       <View style={styles.cardRow}>
-        <Text style={styles.cardLabel}>Eligibility:</Text>
+        <Text style={styles.cardLabel}>資格狀態：</Text>
         <Text style={[styles.cardValue, { color: eligibilityColor }]}>
           {record.eligibility}
         </Text>
@@ -204,7 +200,7 @@ function PresenceCard({
 
       {record.tokenExpiresAt && (
         <View style={styles.cardRow}>
-          <Text style={styles.cardLabel}>Token:</Text>
+          <Text style={styles.cardLabel}>存取令牌：</Text>
           <Text style={[styles.cardValue, { color: expiryColor }]}>
             {expiryInfo.label}
           </Text>
@@ -214,14 +210,14 @@ function PresenceCard({
       {record.reauthRequired && (
         <TouchableOpacity style={styles.reauthBanner} onPress={handleReauth}>
           <Text style={styles.reauthBannerText}>
-            ⚠️ Re-authentication required — Tap to continue
+            ⚠️ 需要重新驗證 — 點擊繼續
           </Text>
         </TouchableOpacity>
       )}
 
       {record.lastOnlineAt && (
         <View style={styles.cardRow}>
-          <Text style={styles.cardLabel}>Last online:</Text>
+          <Text style={styles.cardLabel}>上次上線：</Text>
           <Text style={styles.cardValue}>
             {new Date(record.lastOnlineAt).toLocaleString()}
           </Text>
@@ -237,7 +233,13 @@ export default function PlatformPresenceScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const isProvisioned = isDriverIdentityProvisioned();
+
   const loadPresence = async () => {
+    if (!isProvisioned) {
+      setLoading(false);
+      return;
+    }
     const client = getDriverClient();
     try {
       const data = await client.getPlatformPresence();
@@ -264,22 +266,33 @@ export default function PlatformPresenceScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" />
-        <Text style={styles.label}>Loading platform status...</Text>
+        <Text style={styles.label}>載入平台狀態中…</Text>
+      </View>
+    );
+  }
+
+  if (!isProvisioned) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorTitle}>裝置尚未配置</Text>
+        <Text style={styles.errorBody}>
+          此裝置尚未分配司機身份，無法顯示平台上線狀態。
+        </Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Platform Presence</Text>
+      <Text style={styles.title}>平台上線狀態</Text>
       <Text style={styles.subtitle}>
-        {summary?.presences.length ?? 0} platform(s) connected
+        已連接 {summary?.presences.length ?? 0} 個平台
       </Text>
 
-      {error && <Text style={styles.error}>Error: {error}</Text>}
+      {error && <Text style={styles.error}>錯誤：{error}</Text>}
 
       {!summary || summary.presences.length === 0 ? (
-        <Text style={styles.empty}>No platforms connected.</Text>
+        <Text style={styles.empty}>尚未連接任何平台。</Text>
       ) : (
         <FlatList
           data={summary.presences}
@@ -298,7 +311,12 @@ export default function PlatformPresenceScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, backgroundColor: "#fff" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
   title: { fontSize: 24, fontWeight: "bold", marginBottom: 4 },
   subtitle: { fontSize: 14, color: "#666", marginBottom: 16 },
   error: { color: "red", marginBottom: 8 },
@@ -368,4 +386,17 @@ const styles = StyleSheet.create({
   },
   cardLabel: { fontSize: 12, color: "#666" },
   cardValue: { fontSize: 12, fontWeight: "500" },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#c0392b",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  errorBody: {
+    fontSize: 14,
+    color: "#444",
+    textAlign: "center",
+    lineHeight: 20,
+  },
 });

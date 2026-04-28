@@ -16,13 +16,17 @@ import type {
   UpdateDriverProfileCommand,
 } from "@drts/contracts";
 import { PlatformBinding } from "@/components/platform-binding";
-import { getDriverClient, getDriverId } from "@/lib/api-client";
+import {
+  getDriverClient,
+  getDriverId,
+  isDriverIdentityProvisioned,
+} from "@/lib/api-client";
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim();
   }
-  return "Request failed";
+  return "要求失敗";
 }
 
 function formatSectionList(labels: string[]): string {
@@ -30,15 +34,15 @@ function formatSectionList(labels: string[]): string {
     return labels[0] ?? "";
   }
   if (labels.length === 2) {
-    return `${labels[0]} and ${labels[1]}`;
+    return `${labels[0]}和${labels[1]}`;
   }
-  return `${labels.slice(0, -1).join(", ")}, and ${labels.at(-1)}`;
+  return `${labels.slice(0, -1).join("、")}和${labels.at(-1)}`;
 }
 
 export default function SettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [language, setLanguage] = useState("en");
+  const [language, setLanguage] = useState("zh-TW");
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [autoAcceptEnabled, setAutoAcceptEnabled] = useState(false);
   const [maxAcceptRadius, setMaxAcceptRadius] = useState("");
@@ -49,9 +53,17 @@ export default function SettingsScreen() {
   const [emergencyPhone, setEmergencyPhone] = useState("");
   const [emergencyRelationship, setEmergencyRelationship] = useState("");
   const router = useRouter();
-  const driverId = getDriverId();
+
+  // Provisioning check — must come after all hook declarations
+  const isProvisioned = isDriverIdentityProvisioned();
+  const driverId = isProvisioned ? getDriverId() : "";
 
   useEffect(() => {
+    if (!isProvisioned) {
+      setLoading(false);
+      return;
+    }
+
     let isActive = true;
     const client = getDriverClient();
 
@@ -68,7 +80,7 @@ export default function SettingsScreen() {
 
       if (settingsResult.status === "fulfilled") {
         const settings = settingsResult.value as DriverSettings;
-        setLanguage(settings.language ?? "en");
+        setLanguage(settings.language ?? "zh-TW");
         setNotificationsEnabled(settings.notificationsEnabled ?? true);
         setAutoAcceptEnabled(settings.autoAcceptEnabled ?? false);
         setMaxAcceptRadius(
@@ -77,7 +89,9 @@ export default function SettingsScreen() {
             : "",
         );
       } else {
-        loadFailures.push(`preferences (${toErrorMessage(settingsResult.reason)})`);
+        loadFailures.push(
+          `偏好設定（${toErrorMessage(settingsResult.reason)}）`,
+        );
       }
 
       if (profileResult.status === "fulfilled") {
@@ -91,13 +105,15 @@ export default function SettingsScreen() {
           driverProfile.emergencyContact?.relationship ?? "",
         );
       } else {
-        loadFailures.push(`profile (${toErrorMessage(profileResult.reason)})`);
+        loadFailures.push(
+          `個人資料（${toErrorMessage(profileResult.reason)}）`,
+        );
       }
 
       if (loadFailures.length > 0) {
         Alert.alert(
-          "Some settings could not be loaded",
-          `Using the available data. Failed to load ${formatSectionList(loadFailures)}.`,
+          "部分設定無法載入",
+          `已使用可用資料。無法載入 ${formatSectionList(loadFailures)}。`,
         );
       }
 
@@ -109,7 +125,7 @@ export default function SettingsScreen() {
     return () => {
       isActive = false;
     };
-  }, [driverId]);
+  }, [driverId, isProvisioned]);
 
   const handleSave = async () => {
     const trimmedProfileName = profileName.trim();
@@ -123,13 +139,12 @@ export default function SettingsScreen() {
     let profileValidationError: string | null = null;
 
     if (!trimmedProfileName) {
-      profileValidationError = "Name is required for the driver profile.";
+      profileValidationError = "司機個人資料需要填寫姓名。";
     } else if (
       hasEmergencyContact &&
       (!trimmedEmergencyName || !trimmedEmergencyPhone)
     ) {
-      profileValidationError =
-        "Emergency contact name and phone are required when adding a contact.";
+      profileValidationError = "新增緊急聯絡人時，姓名和電話為必填欄位。";
     }
 
     setSaving(true);
@@ -162,95 +177,106 @@ export default function SettingsScreen() {
       const failedSections: string[] = [];
 
       if (settingsResult.status === "fulfilled") {
-        savedSections.push("preferences");
+        savedSections.push("偏好設定");
       } else {
-        failedSections.push(`preferences (${toErrorMessage(settingsResult.reason)})`);
+        failedSections.push(
+          `偏好設定（${toErrorMessage(settingsResult.reason)}）`,
+        );
       }
 
       if (profileResult.status === "fulfilled") {
-        savedSections.push("profile");
+        savedSections.push("個人資料");
       } else {
-        failedSections.push(`profile (${toErrorMessage(profileResult.reason)})`);
+        failedSections.push(
+          `個人資料（${toErrorMessage(profileResult.reason)}）`,
+        );
       }
 
       if (failedSections.length === 0) {
-        Alert.alert("Success", "Settings saved successfully.");
+        Alert.alert("儲存成功", "設定已成功儲存。");
         return;
       }
 
       if (savedSections.length === 0) {
-        Alert.alert(
-          "Error",
-          `Unable to save ${formatSectionList(failedSections)}.`,
-        );
+        Alert.alert("錯誤", `無法儲存 ${formatSectionList(failedSections)}。`);
         return;
       }
 
       Alert.alert(
-        "Partial success",
-        `Saved ${formatSectionList(savedSections)}. Failed to save ${formatSectionList(failedSections)}.`,
+        "部分儲存成功",
+        `已儲存 ${formatSectionList(savedSections)}。無法儲存 ${formatSectionList(failedSections)}。`,
       );
     } finally {
       setSaving(false);
     }
   };
 
+  // Guard: device not provisioned
+  if (!isProvisioned) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.errorTitle}>裝置尚未配置</Text>
+        <Text style={styles.errorBody}>
+          此裝置尚未分配司機身份，無法載入設定。
+        </Text>
+      </View>
+    );
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" />
-        <Text style={styles.label}>Loading settings...</Text>
+        <Text style={styles.label}>載入設定中…</Text>
       </View>
     );
   }
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.title}>Settings</Text>
-      <Text style={styles.subtitle}>
-        Profile, preferences, and academy surface.
-      </Text>
+      <Text style={styles.title}>設定</Text>
+      <Text style={styles.subtitle}>個人資料、偏好設定。</Text>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Preferences</Text>
+        <Text style={styles.sectionTitle}>偏好設定</Text>
 
         <View style={styles.row}>
-          <Text style={styles.label}>Language</Text>
+          <Text style={styles.label}>語言</Text>
           <TextInput
             style={styles.input}
             value={language}
             onChangeText={setLanguage}
-            placeholder="en"
+            placeholder="zh-TW"
           />
         </View>
 
         <View style={styles.row}>
-          <Text style={styles.label}>Max Accept Radius (km)</Text>
+          <Text style={styles.label}>最大接單範圍（公里）</Text>
           <TextInput
             style={styles.input}
             value={maxAcceptRadius}
             onChangeText={setMaxAcceptRadius}
-            placeholder="e.g. 10"
+            placeholder="例如：10"
             keyboardType="numeric"
           />
         </View>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Profile</Text>
+        <Text style={styles.sectionTitle}>個人資料</Text>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Name</Text>
+          <Text style={styles.label}>姓名</Text>
           <TextInput
             style={styles.fullInput}
             value={profileName}
             onChangeText={setProfileName}
-            placeholder="Driver name"
+            placeholder="司機姓名"
           />
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Phone</Text>
+          <Text style={styles.label}>電話</Text>
           <TextInput
             style={styles.fullInput}
             value={profilePhone}
@@ -261,7 +287,7 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Email</Text>
+          <Text style={styles.label}>電子郵件</Text>
           <TextInput
             style={styles.fullInput}
             value={profileEmail}
@@ -272,20 +298,20 @@ export default function SettingsScreen() {
           />
         </View>
 
-        <Text style={styles.sectionHint}>Emergency Contact</Text>
+        <Text style={styles.sectionHint}>緊急聯絡人</Text>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Contact Name</Text>
+          <Text style={styles.label}>聯絡人姓名</Text>
           <TextInput
             style={styles.fullInput}
             value={emergencyName}
             onChangeText={setEmergencyName}
-            placeholder="Emergency contact"
+            placeholder="緊急聯絡人姓名"
           />
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Contact Phone</Text>
+          <Text style={styles.label}>聯絡人電話</Text>
           <TextInput
             style={styles.fullInput}
             value={emergencyPhone}
@@ -296,21 +322,21 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>Relationship</Text>
+          <Text style={styles.label}>關係</Text>
           <TextInput
             style={styles.fullInput}
             value={emergencyRelationship}
             onChangeText={setEmergencyRelationship}
-            placeholder="Spouse, sibling, parent..."
+            placeholder="配偶、兄弟姐妹、父母…"
           />
         </View>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Toggles</Text>
+        <Text style={styles.sectionTitle}>開關設定</Text>
 
         <View style={styles.row}>
-          <Text style={styles.label}>Notifications</Text>
+          <Text style={styles.label}>通知</Text>
           <Switch
             value={notificationsEnabled}
             onValueChange={setNotificationsEnabled}
@@ -318,7 +344,7 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.row}>
-          <Text style={styles.label}>Auto-Accept Jobs</Text>
+          <Text style={styles.label}>自動接單</Text>
           <Switch
             value={autoAcceptEnabled}
             onValueChange={setAutoAcceptEnabled}
@@ -330,7 +356,7 @@ export default function SettingsScreen() {
         style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
         onPress={handleSave}
       >
-        {saving ? "Saving..." : "Save Settings"}
+        {saving ? "正在儲存…" : "儲存設定"}
       </Text>
 
       <View style={styles.section}>
@@ -338,7 +364,7 @@ export default function SettingsScreen() {
       </View>
       <View style={styles.footer}>
         <Text style={styles.link} onPress={() => router.push("/earnings")}>
-          View Earnings →
+          查看收益 →
         </Text>
       </View>
     </ScrollView>
@@ -347,7 +373,12 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, backgroundColor: "#fff" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
   title: { fontSize: 24, fontWeight: "bold", marginBottom: 4 },
   subtitle: { fontSize: 14, color: "#666", marginBottom: 24 },
   section: { marginBottom: 24 },
@@ -408,4 +439,17 @@ const styles = StyleSheet.create({
   saveBtnDisabled: { opacity: 0.6 },
   footer: { marginTop: 24, alignItems: "center" },
   link: { color: "#007AFF", fontSize: 16 },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#c0392b",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  errorBody: {
+    fontSize: 14,
+    color: "#444",
+    textAlign: "center",
+    lineHeight: 20,
+  },
 });

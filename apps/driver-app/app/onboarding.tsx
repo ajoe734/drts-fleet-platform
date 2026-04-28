@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
-import { getDriverClient } from "@/lib/api-client";
+import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
 import { PlaceholderScreen } from "@/components/placeholder-screen";
 
 export default function OnboardingScreen() {
@@ -9,7 +9,11 @@ export default function OnboardingScreen() {
   const [identityOk, setIdentityOk] = useState<boolean | null>(null);
   const router = useRouter();
 
+  const provisioned = isDriverIdentityProvisioned();
+
   useEffect(() => {
+    if (!provisioned) return;
+
     const client = getDriverClient();
 
     // Smoke test: feature flags connectivity
@@ -23,69 +27,77 @@ export default function OnboardingScreen() {
       .getIdentityContext()
       .then(() => setIdentityOk(true))
       .catch(() => setIdentityOk(false));
-  }, []);
+  }, [provisioned]);
 
-  const flagsStatus =
-    flagsOk === null ? "checking" : flagsOk ? "active" : "fallback";
-  const identityStatus =
-    identityOk === null
-      ? "checking"
-      : identityOk
-        ? "connected"
-        : "disconnected";
-
-  // If flags are still loading, show a loading state
-  if (flagsOk === null || identityOk === null) {
+  // Device not provisioned — show degraded state instead of binding a demo actor
+  if (!provisioned) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.label}>Initializing driver app...</Text>
+        <Text style={styles.errorTitle}>裝置尚未配置</Text>
+        <Text style={styles.errorBody}>
+          此裝置尚未分配司機身份。請聯繫您的管理人員以配置存取權限。
+        </Text>
+        <Text style={styles.errorHint}>
+          開發環境：設定 EXPO_PUBLIC_DRIVER_ID 環境變數後重新啟動應用程式。
+        </Text>
       </View>
     );
   }
 
-  // If both checks pass, show the real onboarding
+  // Smoke tests still running
+  if (flagsOk === null || identityOk === null) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" />
+        <Text style={styles.label}>正在初始化司機應用程式…</Text>
+      </View>
+    );
+  }
+
+  const flagsStatus = flagsOk ? "已啟用" : "降級";
+  const identityStatus = identityOk ? "已連線" : "無法連線";
+
+  // Both checks passed — show real onboarding
   if (flagsOk && identityOk) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Multi-Platform Workstation</Text>
+        <Text style={styles.title}>多平台工作站</Text>
         <Text style={styles.subtitle}>
-          API: {identityStatus} | Feature flags: {flagsStatus}
+          API：{identityStatus} ｜ 功能旗標：{flagsStatus}
         </Text>
         <Text style={styles.description}>
-          Manage tasks, earnings, and presence across all connected platforms
-          from a single workspace.
+          在單一工作台管理所有已連接平台的任務、收益和上線狀態。
         </Text>
 
         <View style={styles.navSection}>
-          <Text style={styles.navLabel}>Quick Access:</Text>
+          <Text style={styles.navLabel}>快速存取：</Text>
           <Text style={styles.link} onPress={() => router.push("/jobs")}>
-            Jobs Inbox →
+            任務收件匣 →
           </Text>
           <Text style={styles.link} onPress={() => router.push("/earnings")}>
-            Earnings Dashboard →
+            收益儀表板 →
           </Text>
           <Text
             style={styles.link}
             onPress={() => router.push("/platform-presence")}
           >
-            Platform Presence →
+            平台上線狀態 →
           </Text>
           <Text style={styles.link} onPress={() => router.push("/shift")}>
-            Shift & Attendance →
+            班次與出勤 →
           </Text>
         </View>
       </View>
     );
   }
 
-  // Fallback: show placeholder
+  // Partial connectivity — show placeholder
   return (
     <PlaceholderScreen
-      title="Onboarding"
-      description="Placeholder onboarding shell for drivers and safety operators. Identity checks, training gates, and provisioning rules are deferred."
+      title="引導設定"
+      description="身份驗證、訓練關卡及配置規則尚未完成。"
       nextHref="/jobs"
-      nextLabel="Go to Jobs"
+      nextLabel="前往任務"
     />
   );
 }
@@ -102,6 +114,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#fff",
+    padding: 24,
   },
   title: {
     fontSize: 28,
@@ -136,4 +149,24 @@ const styles = StyleSheet.create({
   },
   link: { color: "#007AFF", fontSize: 16, textAlign: "center", marginTop: 12 },
   label: { marginTop: 8, color: "#666" },
+  errorTitle: {
+    fontSize: 22,
+    fontWeight: "bold",
+    color: "#c0392b",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  errorBody: {
+    fontSize: 15,
+    color: "#444",
+    textAlign: "center",
+    lineHeight: 22,
+    marginBottom: 16,
+  },
+  errorHint: {
+    fontSize: 12,
+    color: "#888",
+    textAlign: "center",
+    lineHeight: 18,
+  },
 });

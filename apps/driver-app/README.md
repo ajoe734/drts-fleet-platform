@@ -14,9 +14,33 @@ Implemented / materially wired screens include:
 
 This app is the active Phase 1 driver surface, not a placeholder shell.
 
+## Driver Identity Requirement
+
+Driver identity **must** be explicitly provisioned. There is no silent demo
+fallback. A build without a provisioned identity will display a degraded
+provisioning screen instead of binding a demo actor.
+
+Set one of the following before running or building:
+
+| Variable                | Purpose                                                    |
+| ----------------------- | ---------------------------------------------------------- |
+| `EXPO_PUBLIC_DRIVER_ID` | Explicit driver actor ID for local dev and internal builds |
+| `EXPO_PUBLIC_API_URL`   | Override the API base URL (defaults to staging endpoint)   |
+
+Example local dev invocation:
+
+```bash
+EXPO_PUBLIC_API_URL=http://192.168.1.10:3001 \
+EXPO_PUBLIC_DRIVER_ID=driver-dev-001 \
+pnpm --filter @drts/driver-app dev:client
+```
+
+Production path: device-bound auth token from the backend identity handoff
+flow. See the runbook §Production Identity Handoff.
+
 ## Native Dev Flow
 
-The app is intended to ship as a native Android / iOS app. It now includes:
+The app ships as a native Android / iOS app. It includes:
 
 - Expo native app config in [app.json](./app.json)
 - EAS build profiles in [eas.json](./eas.json)
@@ -35,5 +59,5 @@ The default packaged API target is the direct staging API host
 `https://drts-api-kdhu6wzufa-uc.a.run.app`, not the IAP-protected control-plane
 host. Override with `EXPO_PUBLIC_API_URL` when needed.
 
-For step-by-step setup and installation instructions, see
+For step-by-step setup, build instructions, and environment separation, see
 [Driver App Native Dev Runbook](../../docs/03-runbooks/driver-app-native-dev-runbook.md).

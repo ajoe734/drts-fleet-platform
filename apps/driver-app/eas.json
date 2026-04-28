@@ -11,7 +11,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_DRIVER_ID": "driver-demo-001"
+        "EXPO_PUBLIC_API_URL": "https://drts-api-kdhu6wzufa-uc.a.run.app"
       }
     },
     "development-simulator": {
@@ -27,8 +27,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://drts-api-kdhu6wzufa-uc.a.run.app",
-        "EXPO_PUBLIC_DRIVER_ID": "driver-demo-001"
+        "EXPO_PUBLIC_API_URL": "https://drts-api-kdhu6wzufa-uc.a.run.app"
       }
     },
     "production": {

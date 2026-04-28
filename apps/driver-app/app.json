@@ -49,8 +49,7 @@
       "softwareKeyboardLayoutMode": "pan"
     },
     "extra": {
-      "apiBaseUrl": "https://drts-api-kdhu6wzufa-uc.a.run.app",
-      "driverActorId": "driver-demo-001"
+      "apiBaseUrl": "https://drts-api-kdhu6wzufa-uc.a.run.app"
     }
   }
 }
