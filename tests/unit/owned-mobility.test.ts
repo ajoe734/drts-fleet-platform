@@ -8,6 +8,11 @@ import { OwnedMobilityRepository } from "../../apps/api/src/modules/owned-mobili
 import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import {
+  type PersistTenantPartnerChanges,
+  type TenantPartnerState,
+  type TenantPartnerRepository,
+} from "../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 
@@ -42,6 +47,118 @@ const TENANT_ACME = "tenant-acme-001";
 const TENANT_NEWCO = "tenant-newco-001";
 const PARTNER_TENANT = "tenant-demo-001";
 const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
+
+function clonePartnerState(state: TenantPartnerState): TenantPartnerState {
+  return JSON.parse(JSON.stringify(state)) as TenantPartnerState;
+}
+
+function createMemoryTenantPartnerRepository(): TenantPartnerRepository {
+  const state: TenantPartnerState = {
+    notificationPreferences: [],
+    webhookEndpoints: [],
+    webhookDeliveries: [],
+    slaProfiles: [],
+    partnerEntries: [],
+    partnerEligibilityVerifications: [],
+    passengers: [],
+    addresses: [],
+    userRoles: [],
+    apiKeys: [],
+  };
+
+  const mergeUniqueByKey = <T extends Record<string, unknown>>(
+    items: readonly T[],
+    key: keyof T,
+    existing: T[],
+  ) => {
+    const merged = new Map<string, T>();
+    for (const item of existing) {
+      merged.set(String(item[key]), JSON.parse(JSON.stringify(item)) as T);
+    }
+    for (const item of items) {
+      merged.set(String(item[key]), JSON.parse(JSON.stringify(item)) as T);
+    }
+    return Array.from(merged.values());
+  };
+
+  return {
+    isEnabled: () => true,
+    loadState: vi.fn(async () => clonePartnerState(state)),
+    persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
+      if (changes.notificationPreferences) {
+        state.notificationPreferences = mergeUniqueByKey(
+          changes.notificationPreferences,
+          "tenantId",
+          state.notificationPreferences,
+        );
+      }
+      if (changes.webhookEndpoints) {
+        state.webhookEndpoints = mergeUniqueByKey(
+          changes.webhookEndpoints,
+          "webhookId",
+          state.webhookEndpoints,
+        );
+      }
+      if (changes.webhookDeliveries) {
+        state.webhookDeliveries = mergeUniqueByKey(
+          changes.webhookDeliveries,
+          "deliveryId",
+          state.webhookDeliveries,
+        );
+      }
+      if (changes.slaProfiles) {
+        state.slaProfiles = mergeUniqueByKey(
+          changes.slaProfiles,
+          "tenantId",
+          state.slaProfiles,
+        );
+      }
+      if (changes.partnerEntries) {
+        state.partnerEntries = mergeUniqueByKey(
+          changes.partnerEntries,
+          "entrySlug",
+          state.partnerEntries,
+        );
+      }
+      if (changes.partnerEligibilityVerifications) {
+        state.partnerEligibilityVerifications = mergeUniqueByKey(
+          changes.partnerEligibilityVerifications,
+          "eligibilityVerificationId",
+          state.partnerEligibilityVerifications,
+        );
+      }
+      if (changes.passengers) {
+        state.passengers = mergeUniqueByKey(
+          changes.passengers,
+          "passengerId",
+          state.passengers,
+        );
+      }
+      if (changes.addresses) {
+        state.addresses = mergeUniqueByKey(
+          changes.addresses,
+          "addressId",
+          state.addresses,
+        );
+      }
+      if (changes.userRoles) {
+        state.userRoles = mergeUniqueByKey(
+          changes.userRoles,
+          "userId",
+          state.userRoles,
+        );
+      }
+      if (changes.apiKeys) {
+        state.apiKeys = mergeUniqueByKey(
+          changes.apiKeys,
+          "apiKeyId",
+          state.apiKeys,
+        );
+      }
+    }),
+    reportPersistenceFailure: vi.fn(),
+  } as unknown as TenantPartnerRepository;
+}
 
 function getErrorCode(error: unknown) {
   const response = (
@@ -406,6 +523,64 @@ describe("owned mobility service", () => {
       eligibilityVerificationId: verification.eligibilityVerificationId,
       issuerAuthorizationRef: "issuer-auth-bank_demo_alpha-2468",
       benefitReference: "benefit-bank_demo_alpha-2468",
+    });
+  });
+
+  it("reuses persisted eligibility verification after tenant-partner reload", async () => {
+    const repository = createMemoryTenantPartnerRepository();
+    const firstTenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository,
+    );
+    await firstTenantPartnerService.onModuleInit();
+
+    const verification = firstTenantPartnerService.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "2468",
+      },
+      "owned-mobility-reuse-request",
+    );
+    await Promise.resolve();
+
+    const reloadedTenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository,
+    );
+    await reloadedTenantPartnerService.onModuleInit();
+
+    const { ownedMobilityService } = createService(
+      undefined,
+      reloadedTenantPartnerService,
+    );
+
+    const created = ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        eligibilityVerificationId: verification.eligibilityVerificationId,
+        direction: "pickup",
+        pickup: {
+          address: "桃園機場第二航廈",
+        },
+        dropoff: {
+          address: "台北市信義區松高路11號",
+        },
+        reservationWindowStart: "2026-04-18T10:00:00Z",
+        reservationWindowEnd: "2026-04-18T10:20:00Z",
+        passenger: {
+          name: "陳小姐",
+          phone: "0900123456",
+        },
+        flightNo: "CI-001",
+      },
+      PARTNER_TENANT,
+    );
+
+    expect(ownedMobilityService.getOrder(created.orderId)).toMatchObject({
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      eligibilityVerificationId: verification.eligibilityVerificationId,
+      issuerAuthorizationRef: "issuer-auth-bank_demo_alpha-2468",
     });
   });
 

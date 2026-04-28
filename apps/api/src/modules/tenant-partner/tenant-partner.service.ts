@@ -252,6 +252,7 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     partnerCode: "bank_demo_alpha",
     partnerType: "bank_partner",
     programId: "program-airport-alpha",
+    programCode: "AIRPORT_ALPHA",
     tenantId: DEMO_TENANT_ID,
     bankCode: "BANK_DEMO_ALPHA",
     entrySlug: "bank-demo-alpha-airport",
@@ -262,13 +263,29 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     entryHost: null,
     entryPath: "/partner/bank-demo-alpha-airport",
     themeAccent: "#0b7285",
+    brandingMetadata: {
+      displayName: "Bank Demo Alpha Airport Transfer",
+      themeAccent: "#0b7285",
+      supportEmail: "alpha-airport@bank-demo.example",
+      supportPhone: "0800-000-111",
+    },
+    status: "active",
     activeFlag: true,
+    createdAt: "2026-04-10T00:00:00.000Z",
+    updatedAt: "2026-04-10T00:00:00.000Z",
+    auditMetadata: {
+      source: "seed_bootstrap",
+      requestId: null,
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
   },
   {
     partnerId: "partner-bank-demo-002",
     partnerCode: "bank_demo_beta",
     partnerType: "bank_partner",
     programId: "program-airport-beta",
+    programCode: "AIRPORT_BETA",
     tenantId: DEMO_TENANT_ID,
     bankCode: "BANK_DEMO_BETA",
     entrySlug: "bank-demo-beta-airport",
@@ -279,7 +296,22 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     entryHost: null,
     entryPath: "/partner/bank-demo-beta-airport",
     themeAccent: "#5f3dc4",
+    brandingMetadata: {
+      displayName: "Bank Demo Beta Airport Transfer",
+      themeAccent: "#5f3dc4",
+      supportEmail: "beta-airport@bank-demo.example",
+      supportPhone: "0800-000-222",
+    },
+    status: "active",
     activeFlag: true,
+    createdAt: "2026-04-10T00:10:00.000Z",
+    updatedAt: "2026-04-10T00:10:00.000Z",
+    auditMetadata: {
+      source: "seed_bootstrap",
+      requestId: null,
+      createdBy: "system:seed",
+      updatedBy: "system:seed",
+    },
   },
 ];
 
@@ -343,15 +375,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     try {
       const persistedState = await this.tenantPartnerRepository.loadState();
+      const notificationPreferences =
+        persistedState.notificationPreferences ?? [];
+      const slaProfiles = persistedState.slaProfiles ?? [];
+      const webhookEndpoints = persistedState.webhookEndpoints ?? [];
+      const webhookDeliveries = persistedState.webhookDeliveries ?? [];
+      const partnerEntries = persistedState.partnerEntries ?? [];
+      const partnerEligibilityVerifications =
+        persistedState.partnerEligibilityVerifications ?? [];
+      const passengers = persistedState.passengers ?? [];
+      const addresses = persistedState.addresses ?? [];
+      const userRoles = persistedState.userRoles ?? [];
+      const apiKeys = persistedState.apiKeys ?? [];
       const hasPersistedState =
-        persistedState.notificationPreferences.length > 0 ||
-        persistedState.slaProfiles.length > 0 ||
-        persistedState.webhookEndpoints.length > 0 ||
-        persistedState.webhookDeliveries.length > 0 ||
-        persistedState.passengers.length > 0 ||
-        persistedState.addresses.length > 0 ||
-        persistedState.userRoles.length > 0 ||
-        persistedState.apiKeys.length > 0;
+        notificationPreferences.length > 0 ||
+        slaProfiles.length > 0 ||
+        webhookEndpoints.length > 0 ||
+        webhookDeliveries.length > 0 ||
+        partnerEntries.length > 0 ||
+        partnerEligibilityVerifications.length > 0 ||
+        passengers.length > 0 ||
+        addresses.length > 0 ||
+        userRoles.length > 0 ||
+        apiKeys.length > 0;
 
       if (!hasPersistedState) {
         this.persistChanges(
@@ -362,6 +408,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             ),
             slaProfiles: Array.from(this.slaProfiles.values(), (profile) =>
               this.cloneSlaProfile(profile),
+            ),
+            partnerEntries: this.partnerEntries.map((entry) =>
+              this.clonePartnerEntry(entry),
             ),
             passengers: this.passengers.map((passenger) =>
               this.clonePassenger(passenger),
@@ -382,35 +431,51 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       }
 
       this.notificationPreferences = new Map(
-        persistedState.notificationPreferences.map((preferences) => [
+        notificationPreferences.map((preferences) => [
           preferences.tenantId,
           this.cloneNotificationPreferences(preferences),
         ]),
       );
       this.slaProfiles = new Map(
-        persistedState.slaProfiles.map((profile) => [
+        slaProfiles.map((profile) => [
           profile.tenantId,
           this.cloneSlaProfile(profile),
         ]),
       );
-      this.webhookEndpoints = persistedState.webhookEndpoints.map((endpoint) =>
+      this.partnerEntries =
+        partnerEntries.length > 0
+          ? partnerEntries.map((entry) => this.clonePartnerEntry(entry))
+          : PARTNER_ENTRY_SEED.map((entry) => this.clonePartnerEntry(entry));
+      this.partnerEligibilityVerifications = new Map(
+        partnerEligibilityVerifications.map((verification) => [
+          verification.eligibilityVerificationId,
+          this.clonePartnerEligibilityVerification(verification),
+        ]),
+      );
+      this.webhookEndpoints = webhookEndpoints.map((endpoint) =>
         this.cloneStoredWebhookEndpoint(endpoint),
       );
-      this.webhookDeliveries = persistedState.webhookDeliveries.map(
-        (delivery) => this.cloneStoredWebhookDelivery(delivery),
+      this.webhookDeliveries = webhookDeliveries.map((delivery) =>
+        this.cloneStoredWebhookDelivery(delivery),
       );
-      this.passengers = persistedState.passengers.map((passenger) =>
+      this.passengers = passengers.map((passenger) =>
         this.clonePassenger(passenger),
       );
-      this.addresses = persistedState.addresses.map((address) =>
-        this.cloneAddress(address),
-      );
-      this.userRoles = persistedState.userRoles.map((userRole) =>
+      this.addresses = addresses.map((address) => this.cloneAddress(address));
+      this.userRoles = userRoles.map((userRole) =>
         this.cloneUserRole(userRole),
       );
-      this.apiKeys = persistedState.apiKeys.map((apiKey) =>
-        this.cloneStoredApiKey(apiKey),
-      );
+      this.apiKeys = apiKeys.map((apiKey) => this.cloneStoredApiKey(apiKey));
+      if (partnerEntries.length === 0) {
+        this.persistChanges(
+          {
+            partnerEntries: this.partnerEntries.map((entry) =>
+              this.clonePartnerEntry(entry),
+            ),
+          },
+          "module init partner entry bootstrap",
+        );
+      }
       this.schedulePersistedWebhookRetries();
     } catch (error) {
       this.tenantPartnerRepository.reportPersistenceFailure(
@@ -724,7 +789,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   listPartnerEntries() {
     return this.partnerEntries
-      .filter((entry) => entry.activeFlag)
+      .filter((entry) => entry.activeFlag && entry.status === "active")
       .map((entry) => this.clonePartnerEntry(entry));
   }
 
@@ -747,6 +812,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     let verificationReasonCode = "ELIGIBILITY_NOT_REQUIRED";
     let benefitReference = this.normalizeNullableText(command.benefitReference);
     let issuerAuthorizationRef: string | null = null;
+    let referenceTokenHash: string | null = null;
 
     if (entry.eligibilityMode === "reference_required") {
       const referenceToken = this.normalizeNullableText(command.referenceToken);
@@ -764,6 +830,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       verificationReasonCode = "REFERENCE_ACCEPTED";
       benefitReference = benefitReference ?? referenceToken;
       issuerAuthorizationRef = `issuer-ref-${referenceToken.slice(-8)}`;
+      referenceTokenHash = this.hashReferenceToken(referenceToken);
     } else if (entry.eligibilityMode === "bank_card_inline") {
       const cardLast4 = command.cardLast4?.trim();
       if (!cardLast4 || !/^[0-9]{4}$/.test(cardLast4)) {
@@ -806,20 +873,44 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       tenantId: entry.tenantId,
       partnerId: entry.partnerId,
       partnerProgramId: entry.programId,
+      partnerProgramCode: entry.programCode,
       partnerEntrySlug: entry.entrySlug,
       bankCode: entry.bankCode,
       businessDispatchSubtype: entry.businessDispatchSubtype,
       verificationStatus,
       verificationReasonCode,
+      referenceTokenHash,
       benefitReference,
       issuerAuthorizationRef,
+      requestMetadata: {
+        cardLast4: this.normalizeNullableText(command.cardLast4),
+        cardholderName: this.normalizeNullableText(command.cardholderName),
+        flightNo: this.normalizeNullableText(command.flightNo),
+        requestId: this.normalizeNullableText(requestId),
+      },
       verifiedAt,
       expiresAt: verificationStatus === "eligible" ? expiresAt : null,
+      createdAt: verifiedAt,
+      updatedAt: verifiedAt,
+      auditMetadata: {
+        source: "partner_eligibility_verification",
+        requestId: this.normalizeNullableText(requestId),
+        createdBy: `partner:${entry.partnerId}`,
+        updatedBy: `partner:${entry.partnerId}`,
+      },
     };
 
     this.partnerEligibilityVerifications.set(
       verification.eligibilityVerificationId,
       this.clonePartnerEligibilityVerification(verification),
+    );
+    this.persistChanges(
+      {
+        partnerEligibilityVerifications: [
+          this.clonePartnerEligibilityVerification(verification),
+        ],
+      },
+      "verify_partner_eligibility",
     );
 
     this.recordTenantAudit(
@@ -1929,6 +2020,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   ): PartnerChannelEntryRecord {
     return {
       ...entry,
+      brandingMetadata: entry.brandingMetadata
+        ? { ...entry.brandingMetadata }
+        : null,
+      auditMetadata: { ...entry.auditMetadata },
     };
   }
 
@@ -1937,6 +2032,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   ): PartnerEligibilityVerificationRecord {
     return {
       ...verification,
+      requestMetadata: { ...verification.requestMetadata },
+      auditMetadata: { ...verification.auditMetadata },
     };
   }
 
@@ -2072,7 +2169,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     const entry = this.partnerEntries.find(
       (candidate) =>
-        candidate.entrySlug === normalizedSlug && candidate.activeFlag,
+        candidate.entrySlug === normalizedSlug &&
+        candidate.activeFlag &&
+        candidate.status === "active",
     );
     if (!entry) {
       throw new ApiRequestError(
@@ -2158,6 +2257,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private normalizeNullableText(value: string | null | undefined) {
     const normalized = value?.trim();
     return normalized ? normalized : null;
+  }
+
+  private hashReferenceToken(referenceToken: string) {
+    return `sha256:${createHash("sha256")
+      .update(referenceToken.trim())
+      .digest("hex")}`;
   }
 
   private assertNonBlank(value: string, fieldName: string) {

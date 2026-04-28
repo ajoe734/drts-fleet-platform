@@ -1,9 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type {
+  PartnerChannelEntryRecord,
+  PartnerEligibilityVerificationRecord,
+} from "@drts/contracts";
+
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import {
+  type PersistTenantPartnerChanges,
   type StoredTenantApiKeyRecord,
   TenantPartnerRepository,
+  type TenantPartnerState,
   type StoredWebhookEndpointRecord,
 } from "../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
@@ -11,6 +18,134 @@ import { WebhookDispatchService } from "../../apps/api/src/modules/tenant-partne
 
 const TENANT_ID = "tenant-demo-001";
 const OTHER_TENANT_ID = "tenant-other-001";
+
+function clonePartnerState(state: TenantPartnerState): TenantPartnerState {
+  return JSON.parse(JSON.stringify(state)) as TenantPartnerState;
+}
+
+function createEmptyPartnerState(): TenantPartnerState {
+  return {
+    notificationPreferences: [],
+    webhookEndpoints: [],
+    webhookDeliveries: [],
+    slaProfiles: [],
+    partnerEntries: [],
+    partnerEligibilityVerifications: [],
+    passengers: [],
+    addresses: [],
+    userRoles: [],
+    apiKeys: [],
+  };
+}
+
+function mergeUniqueByKey<T extends Record<string, unknown>>(
+  items: readonly T[],
+  key: keyof T,
+  existing: T[],
+) {
+  const merged = new Map<string, T>();
+  for (const item of existing) {
+    merged.set(String(item[key]), JSON.parse(JSON.stringify(item)) as T);
+  }
+  for (const item of items) {
+    merged.set(String(item[key]), JSON.parse(JSON.stringify(item)) as T);
+  }
+  return Array.from(merged.values());
+}
+
+function createMemoryTenantPartnerRepository(
+  initial?: Partial<TenantPartnerState>,
+) {
+  const state: TenantPartnerState = {
+    ...createEmptyPartnerState(),
+    ...initial,
+  };
+
+  const repository: Pick<
+    TenantPartnerRepository,
+    "loadState" | "persistChanges" | "reportPersistenceFailure"
+  > = {
+    loadState: vi.fn(async () => clonePartnerState(state)),
+    persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
+      if (changes.notificationPreferences) {
+        state.notificationPreferences = mergeUniqueByKey(
+          changes.notificationPreferences,
+          "tenantId",
+          state.notificationPreferences,
+        );
+      }
+      if (changes.webhookEndpoints) {
+        state.webhookEndpoints = mergeUniqueByKey(
+          changes.webhookEndpoints,
+          "webhookId",
+          state.webhookEndpoints,
+        );
+      }
+      if (changes.webhookDeliveries) {
+        state.webhookDeliveries = mergeUniqueByKey(
+          changes.webhookDeliveries,
+          "deliveryId",
+          state.webhookDeliveries,
+        );
+      }
+      if (changes.slaProfiles) {
+        state.slaProfiles = mergeUniqueByKey(
+          changes.slaProfiles,
+          "tenantId",
+          state.slaProfiles,
+        );
+      }
+      if (changes.partnerEntries) {
+        state.partnerEntries = mergeUniqueByKey(
+          changes.partnerEntries as readonly PartnerChannelEntryRecord[],
+          "entrySlug",
+          state.partnerEntries,
+        );
+      }
+      if (changes.partnerEligibilityVerifications) {
+        state.partnerEligibilityVerifications = mergeUniqueByKey(
+          changes.partnerEligibilityVerifications as readonly PartnerEligibilityVerificationRecord[],
+          "eligibilityVerificationId",
+          state.partnerEligibilityVerifications,
+        );
+      }
+      if (changes.passengers) {
+        state.passengers = mergeUniqueByKey(
+          changes.passengers,
+          "passengerId",
+          state.passengers,
+        );
+      }
+      if (changes.addresses) {
+        state.addresses = mergeUniqueByKey(
+          changes.addresses,
+          "addressId",
+          state.addresses,
+        );
+      }
+      if (changes.userRoles) {
+        state.userRoles = mergeUniqueByKey(
+          changes.userRoles,
+          "userId",
+          state.userRoles,
+        );
+      }
+      if (changes.apiKeys) {
+        state.apiKeys = mergeUniqueByKey(
+          changes.apiKeys,
+          "apiKeyId",
+          state.apiKeys,
+        );
+      }
+    }),
+    reportPersistenceFailure: vi.fn(),
+  };
+
+  return {
+    repository: repository as TenantPartnerRepository,
+    snapshot: () => clonePartnerState(state),
+  };
+}
 
 describe("tenant partner foundation service", () => {
   it("exposes active partner channel entries for bank-specific airport flows", () => {
@@ -96,6 +231,67 @@ describe("tenant partner foundation service", () => {
       verificationReasonCode: "REFERENCE_ACCEPTED",
       benefitReference: "BETA0001",
       issuerAuthorizationRef: "issuer-ref-BETA0001",
+    });
+    expect(acceptedByReference.referenceTokenHash).toMatch(/^sha256:/);
+  });
+
+  it("persists partner entries across repository reloads", async () => {
+    const store = createMemoryTenantPartnerRepository();
+    const firstService = new TenantPartnerService(
+      new AuditNotificationService(),
+      store.repository,
+    );
+
+    await firstService.onModuleInit();
+    await Promise.resolve();
+
+    const reloadedService = new TenantPartnerService(
+      new AuditNotificationService(),
+      store.repository,
+    );
+    await reloadedService.onModuleInit();
+
+    expect(store.snapshot().partnerEntries).toHaveLength(2);
+    expect(reloadedService.listPartnerEntries()).toEqual(
+      firstService.listPartnerEntries(),
+    );
+  });
+
+  it("persists eligibility verifications across repository reloads", async () => {
+    const store = createMemoryTenantPartnerRepository();
+    const firstService = new TenantPartnerService(
+      new AuditNotificationService(),
+      store.repository,
+    );
+
+    await firstService.onModuleInit();
+    const verification = firstService.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "2468",
+      },
+      "persisted-verification-request",
+    );
+    await Promise.resolve();
+
+    const reloadedService = new TenantPartnerService(
+      new AuditNotificationService(),
+      store.repository,
+    );
+    await reloadedService.onModuleInit();
+
+    expect(store.snapshot().partnerEligibilityVerifications).toHaveLength(1);
+    expect(
+      reloadedService.getPartnerEligibilityVerification(
+        verification.eligibilityVerificationId,
+      ),
+    ).toMatchObject({
+      eligibilityVerificationId: verification.eligibilityVerificationId,
+      verificationStatus: "eligible",
+      requestMetadata: {
+        cardLast4: "2468",
+        requestId: "persisted-verification-request",
+      },
     });
   });
 

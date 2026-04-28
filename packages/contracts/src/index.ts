@@ -178,11 +178,26 @@ export interface TenantPartnerSummary {
   notes: string[];
 }
 
+export interface PartnerRecordAuditMetadata {
+  source: string | null;
+  requestId: string | null;
+  createdBy: string | null;
+  updatedBy: string | null;
+}
+
+export interface PartnerEntryBrandingMetadata {
+  displayName: string;
+  themeAccent: string | null;
+  supportEmail: string | null;
+  supportPhone: string | null;
+}
+
 export interface PartnerChannelEntryRecord {
   partnerId: string;
   partnerCode: string;
   partnerType: string;
   programId: string;
+  programCode: string | null;
   tenantId: string;
   bankCode: string | null;
   entrySlug: string;
@@ -193,7 +208,12 @@ export interface PartnerChannelEntryRecord {
   entryHost: string | null;
   entryPath: string | null;
   themeAccent: string | null;
+  brandingMetadata: PartnerEntryBrandingMetadata | null;
+  status: "active" | "inactive";
   activeFlag: boolean;
+  createdAt: string;
+  updatedAt: string;
+  auditMetadata: PartnerRecordAuditMetadata;
 }
 
 export interface VerifyPartnerEligibilityCommand {
@@ -210,15 +230,26 @@ export interface PartnerEligibilityVerificationRecord {
   tenantId: string;
   partnerId: string;
   partnerProgramId: string;
+  partnerProgramCode: string | null;
   partnerEntrySlug: string;
   bankCode: string | null;
   businessDispatchSubtype: BusinessDispatchSubtype;
   verificationStatus: PartnerEligibilityStatus;
   verificationReasonCode: string;
+  referenceTokenHash: string | null;
   benefitReference: string | null;
   issuerAuthorizationRef: string | null;
+  requestMetadata: {
+    cardLast4: string | null;
+    cardholderName: string | null;
+    flightNo: string | null;
+    requestId: string | null;
+  };
   verifiedAt: string;
   expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  auditMetadata: PartnerRecordAuditMetadata;
 }
 
 export interface RegulatoryRegistrySummary {

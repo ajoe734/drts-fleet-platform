@@ -1,6 +1,8 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
+  PartnerChannelEntryRecord,
+  PartnerEligibilityVerificationRecord,
   TenantAddressRecord,
   TenantApiKeyRecord,
   TenantNotificationPreferences,
@@ -74,6 +76,8 @@ export type TenantPartnerState = {
   webhookEndpoints: StoredWebhookEndpointRecord[];
   webhookDeliveries: StoredWebhookDeliveryRecord[];
   slaProfiles: TenantSlaProfile[];
+  partnerEntries: PartnerChannelEntryRecord[];
+  partnerEligibilityVerifications: PartnerEligibilityVerificationRecord[];
   passengers: TenantPassengerRecord[];
   addresses: TenantAddressRecord[];
   userRoles: TenantUserRoleRecord[];
@@ -85,6 +89,8 @@ export type PersistTenantPartnerChanges = {
   webhookEndpoints?: readonly StoredWebhookEndpointRecord[];
   webhookDeliveries?: readonly StoredWebhookDeliveryRecord[];
   slaProfiles?: readonly TenantSlaProfile[];
+  partnerEntries?: readonly PartnerChannelEntryRecord[];
+  partnerEligibilityVerifications?: readonly PartnerEligibilityVerificationRecord[];
   passengers?: readonly TenantPassengerRecord[];
   addresses?: readonly TenantAddressRecord[];
   userRoles?: readonly TenantUserRoleRecord[];
@@ -108,6 +114,8 @@ export class TenantPartnerRepository {
         webhookEndpoints: [],
         webhookDeliveries: [],
         slaProfiles: [],
+        partnerEntries: [],
+        partnerEligibilityVerifications: [],
         passengers: [],
         addresses: [],
         userRoles: [],
@@ -120,6 +128,8 @@ export class TenantPartnerRepository {
       webhookEndpointsResult,
       webhookDeliveriesResult,
       slaProfileResult,
+      partnerEntriesResult,
+      partnerEligibilityVerificationsResult,
       passengersResult,
       addressesResult,
       userRolesResult,
@@ -151,6 +161,20 @@ export class TenantPartnerRepository {
           SELECT record
           FROM admin.phase1_tenant_sla_profiles
           ORDER BY updated_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM admin.phase1_partner_channel_entries
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM admin.phase1_partner_eligibility_verifications
+          ORDER BY verified_at DESC, updated_at DESC
         `,
       ),
       this.databaseService!.query<JsonRecordRow>(
@@ -208,6 +232,19 @@ export class TenantPartnerRepository {
           "admin.phase1_tenant_sla_profiles",
         ),
       ),
+      partnerEntries: partnerEntriesResult.rows.map((row) =>
+        this.parseRecord<PartnerChannelEntryRecord>(
+          row.record,
+          "admin.phase1_partner_channel_entries",
+        ),
+      ),
+      partnerEligibilityVerifications:
+        partnerEligibilityVerificationsResult.rows.map((row) =>
+          this.parseRecord<PartnerEligibilityVerificationRecord>(
+            row.record,
+            "admin.phase1_partner_eligibility_verifications",
+          ),
+        ),
       passengers: passengersResult.rows.map((row) =>
         this.parseRecord<TenantPassengerRecord>(
           row.record,
@@ -285,6 +322,93 @@ export class TenantPartnerRepository {
             slaProfile.tenantId,
             slaProfile.updatedAt,
             JSON.stringify(slaProfile),
+          ],
+        ),
+      );
+    }
+
+    for (const entry of changes.partnerEntries ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO admin.phase1_partner_channel_entries (
+              entry_slug,
+              tenant_id,
+              partner_id,
+              program_id,
+              bank_code,
+              status,
+              created_at,
+              updated_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb
+            )
+            ON CONFLICT (entry_slug) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              partner_id = EXCLUDED.partner_id,
+              program_id = EXCLUDED.program_id,
+              bank_code = EXCLUDED.bank_code,
+              status = EXCLUDED.status,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
+          `,
+          [
+            entry.entrySlug,
+            entry.tenantId,
+            entry.partnerId,
+            entry.programId,
+            entry.bankCode,
+            entry.status,
+            entry.createdAt,
+            entry.updatedAt,
+            JSON.stringify(entry),
+          ],
+        ),
+      );
+    }
+
+    for (const verification of changes.partnerEligibilityVerifications ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO admin.phase1_partner_eligibility_verifications (
+              eligibility_verification_id,
+              tenant_id,
+              partner_id,
+              program_id,
+              entry_slug,
+              verification_status,
+              verified_at,
+              updated_at,
+              expires_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb
+            )
+            ON CONFLICT (eligibility_verification_id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              partner_id = EXCLUDED.partner_id,
+              program_id = EXCLUDED.program_id,
+              entry_slug = EXCLUDED.entry_slug,
+              verification_status = EXCLUDED.verification_status,
+              verified_at = EXCLUDED.verified_at,
+              updated_at = EXCLUDED.updated_at,
+              expires_at = EXCLUDED.expires_at,
+              record = EXCLUDED.record
+          `,
+          [
+            verification.eligibilityVerificationId,
+            verification.tenantId,
+            verification.partnerId,
+            verification.partnerProgramId,
+            verification.partnerEntrySlug,
+            verification.verificationStatus,
+            verification.verifiedAt,
+            verification.updatedAt,
+            verification.expiresAt,
+            JSON.stringify(verification),
           ],
         ),
       );
