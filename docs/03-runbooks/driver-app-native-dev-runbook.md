@@ -17,6 +17,8 @@ than the Cloud IAP control-plane host.
 - EAS profiles: `apps/driver-app/eas.json`
 - default packaged API host: `https://drts-api-kdhu6wzufa-uc.a.run.app`
 - driver identity: **must be explicitly provisioned** — no silent demo fallback
+- hosted build CLI: use `npx eas-cli` unless the workstation already has a
+  global `eas` binary installed
 
 ## Driver Identity Provisioning
 
@@ -94,29 +96,64 @@ Android internal development APK:
 
 ```bash
 cd apps/driver-app
-eas build --platform android --profile development
+npx eas-cli build --platform android --profile development
 ```
 
 iOS internal development build:
 
 ```bash
 cd apps/driver-app
-eas build --platform ios --profile development
+npx eas-cli build --platform ios --profile development
 ```
 
 iOS simulator build:
 
 ```bash
 cd apps/driver-app
-eas build --platform ios --profile development-simulator
+npx eas-cli build --platform ios --profile development-simulator
 ```
 
 Internal preview APK:
 
 ```bash
 cd apps/driver-app
-eas build --platform android --profile preview
+npx eas-cli build --platform android --profile preview
 ```
+
+### Hosted Build Credentials
+
+The repo intentionally does not commit Expo or store-signing credentials.
+Operators need these external inputs before the hosted build commands can
+produce artifacts:
+
+| Input                                             | Why It Is Required                                       | Expected Source                                |
+| ------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------- |
+| Expo account access (`eas login` or `EXPO_TOKEN`) | Required before any hosted EAS build can start           | Expo project owner / CI secret manager         |
+| Android signing configuration                     | Required to produce installable Android artifacts on EAS | Expo credentials store or team keystore policy |
+| Apple team access                                 | Required for non-simulator iOS internal builds           | Apple Developer team owner                     |
+
+`development-simulator` is still useful before Apple signing access exists,
+because the simulator profile does not target physical-device distribution.
+
+### Evidence Snapshot (2026-04-28 UTC)
+
+Current repo-side evidence for `P1PX-DRV-002`:
+
+- `pnpm --filter @drts/driver-app exec eas --version` fails because the repo
+  does not vendor a local `eas` binary.
+- `cd apps/driver-app && npx eas-cli --version` succeeds and resolves
+  `eas-cli/18.8.1`.
+- `cd apps/driver-app && npx eas-cli whoami` returns `Not logged in`.
+- Both required verification commands fail at the same first external gate:
+
+```text
+An Expo user account is required to proceed.
+Either log in with eas login or set the EXPO_TOKEN environment variable if you're using EAS CLI on CI
+```
+
+As of `2026-04-28`, this task is therefore still evidence-gated by missing
+Expo account credentials. Android signing and Apple team inputs remain
+downstream external prerequisites once Expo authentication is available.
 
 ### Staging
 

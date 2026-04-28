@@ -53,7 +53,13 @@ Useful commands:
 - `pnpm --filter @drts/driver-app android`
 - `pnpm --filter @drts/driver-app ios`
 - `pnpm --filter @drts/driver-app build:android:development`
+- `cd apps/driver-app && npx eas-cli build --platform android --profile preview`
 - `pnpm --filter @drts/driver-app build:ios:development`
+- `cd apps/driver-app && npx eas-cli build --platform ios --profile development-simulator`
+
+Hosted EAS builds currently assume `npx eas-cli` unless the operator has a
+global `eas` binary installed. The repo does not vendor `eas-cli` as a
+workspace dependency.
 
 The default packaged API target is the direct staging API host
 `https://drts-api-kdhu6wzufa-uc.a.run.app`, not the IAP-protected control-plane
