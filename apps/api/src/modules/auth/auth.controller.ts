@@ -2,8 +2,10 @@ import { Body, Controller, Headers, Post, Req } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  CreatePartnerBootstrapSessionCommand,
   CreateTenantBootstrapSessionCommand,
   IdentityContext,
+  PartnerBootstrapSession,
   TenantBootstrapSession,
   TenantPortalProfile,
   TenantRoleCatalogRecord,
@@ -153,6 +155,48 @@ export class AuthController {
       expiresIn: TENANT_BOOTSTRAP_EXPIRES_IN,
       profile,
       identity,
+    };
+
+    return toApiSuccessEnvelope(session, requestId);
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("partner/bootstrap-session")
+  issuePartnerBootstrapSession(
+    @Body() command: CreatePartnerBootstrapSessionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolved = this.tenantPartnerService.authenticatePartnerBootstrap(
+      command,
+      requestId,
+    );
+    const token = this.signJwt(
+      {
+        authMode: resolved.identity.authMode,
+        actorType: resolved.identity.actorType,
+        actorId: resolved.identity.actorId,
+        realm: resolved.identity.realm,
+        tenantId: resolved.identity.tenantId,
+        partnerId: resolved.identity.partnerId ?? null,
+        partnerProgramId: resolved.identity.partnerProgramId ?? null,
+        partnerEntrySlug: resolved.identity.partnerEntrySlug ?? null,
+        roleFamilies: resolved.identity.roleFamilies,
+        roles: resolved.identity.roles,
+        scopes: resolved.identity.scopes,
+        requestId: requestId ?? null,
+      },
+      "1h",
+    );
+    const session: PartnerBootstrapSession = {
+      accessToken: token,
+      tokenType: "Bearer",
+      expiresIn: "1h",
+      partnerEntry: resolved.partnerEntry,
+      identity: {
+        ...resolved.identity,
+        authMode: "jwt_bearer",
+      },
     };
 
     return toApiSuccessEnvelope(session, requestId);
