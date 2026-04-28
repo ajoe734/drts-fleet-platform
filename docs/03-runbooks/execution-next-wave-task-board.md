@@ -112,3 +112,36 @@ Execution notes:
 
 For the detailed rationale, ordering, and non-materialized remainder, use
 `docs/03-runbooks/execution-mode-candidate-backlog.md`.
+
+## 8. 2026-04-28 Productization Execution Packet
+
+The next actionable productization wave has been split into supervisor-ready
+tasks in:
+
+- `docs/03-runbooks/phase1-productization-execution-packet-20260428.md`
+
+This packet materializes the remaining productization gaps without reopening the
+closed control-plane auth, tenant cutover, or intentionally deferred passenger
+surface decisions.
+
+Dispatch families and status as of 2026-04-28:
+
+1. `P1PX-BE-001` and `P1PX-BE-002` — **done**
+   - partner registry / eligibility persistence and partner-authenticated ingress
+   - commits: `db06e6f`, `4e5c22e`
+2. `P1PX-FE-001` — **done**
+   - `tenant-commute-hub` partner-only booking shell and bank-specific entry branding
+   - commit: `29f27526c20103af5ddd61152d4961d04b314724` (tenant-commute-hub)
+3. `P1PX-BE-003` — **done**
+   - partner truth carry-through into audit, finance, reporting, and operator review
+   - commit: `0519485`
+4. `P1PX-DRV-001` and `P1PX-DRV-002` — **done**
+   - driver app production identity / device posture and EAS internal build evidence
+   - commits: `83a3e4c`, `4a99bdd`
+5. `P1PX-DOC-001` — **done** (this pass)
+   - blueprint and gap-matrix truth sync after implementation slices finish
+
+All P1PX implementation slices are closed. The remaining delta is:
+
+- external-gated: real bank/issuer credentials (`EMC-X1-004`), Grab Taiwan adapter (`EMC-X1-001`), mobile distribution inputs
+- intentionally deferred: first-party passenger app/web, passenger receipt UI, call point/concierge, AV/ODD, live board

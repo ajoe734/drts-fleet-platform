@@ -2,9 +2,12 @@
 
 Status: sections A and B were materialized in `ai-status.json` on
 `2026-04-22`; `GAP-P2S3-001` is now closed on remote `main`; section C remains
-candidate-only; `EMC-X1-001` is still partner-gated and `EMC-X1-002` now has
-annex-audit evidence plus merged cross-repo landings; section D remains
-intentionally out of scope
+candidate-only; `EMC-X1-001` is still partner-gated; `EMC-X1-002` now has
+annex-audit evidence plus merged cross-repo landings; `EMC-X1-003` and
+`EMC-X1-004` baseline implementation has landed via the 2026-04-28 P1PX
+productization wave (P1PX-BE-001, P1PX-BE-002, P1PX-FE-001, P1PX-BE-003) —
+real bank/issuer credentials and partner branding assets remain external-gated;
+section D remains intentionally out of scope
 
 ## Purpose
 
@@ -222,18 +225,22 @@ the partner or cross-repo dependency stated up front.
 - Objective: materialize partner-specific entry context for cooperating banks
   and other direct partner channels without forking into multiple frontend
   repos.
-- What this means:
-  - one shared frontend codebase may still be reused
-  - but entry must bind canonical `partner_id` / `program_id` / channel context
-  - backend must recognize partner-authenticated callers as a distinct ingress
-    class rather than overloading tenant-admin semantics
+- **Baseline implementation status (2026-04-28):** Core backend and frontend
+  baseline has landed via the P1PX productization wave:
+  - `P1PX-BE-001`: partner registry, eligibility persistence
+  - `P1PX-BE-002`: partner-authenticated ingress, API key / signed token guard
+  - `P1PX-FE-001`: partner-only booking shell in `tenant-commute-hub`, Traditional Chinese partner funnel
+  - The shared frontend codebase is confirmed; path-based entries (`/partner/:entrySlug`) are live.
+- Remaining external-gated: bank-specific branding assets, host/subdomain
+  strategy, partner-issued credentials, legal/support copy, program names.
 - Primary anchors:
   - `docs/02-architecture/phase1-partner-channel-bank-entry-addendum-20260425.md`
   - `docs/02-architecture/phase1_system_design_decision_packet_for_dev_team_20260422.md`
+  - `docs/03-runbooks/phase1-productization-execution-packet-20260428.md`
   - `tenant-commute-hub`
 - Cross-repo dependency:
-  - partner-specific branding / entry requirements
-  - product decision on subdomain vs path vs signed bootstrap
+  - partner-specific branding / entry requirements (still external-gated)
+  - product decision on subdomain vs path vs signed bootstrap (path landed; subdomain deferred)
 
 ### `EMC-X1-004` credit-card airport-transfer eligibility verification
 
@@ -241,18 +248,24 @@ the partner or cross-repo dependency stated up front.
 - Objective: add canonical bank-card / benefit eligibility verification before
   `credit_card_airport_transfer` booking creation and carry the verification
   truth into booking, audit, and settlement records.
-- What this means:
-  - booking subtype alone is not enough
-  - backend must either verify with issuer / bank inline or validate a
-    partner-issued eligibility reference
-  - resulting verification identifiers and reason codes must persist in
-    authoritative records
+- **Baseline implementation status (2026-04-28):** Core eligibility persistence
+  and carry-through have landed via the P1PX productization wave:
+  - `P1PX-BE-001`: eligibility verification schema persisted (ID, partner ID,
+    program ID, bank code, card program code, verification status, reason code,
+    benefit reference, issuer auth reference, expiry, audit metadata)
+  - `P1PX-BE-003`: partner eligibility truth is carried through to order, audit,
+    revenue, invoice, and ops console operator review surfaces
+  - Demo eligibility in dev bootstrap only; booking without required eligibility
+    is rejected at the service layer.
+- Remaining external-gated: real bank/issuer API contract, sandbox credentials,
+  allowed test cards, error taxonomy, and inline issuer verification call.
 - Primary anchors:
   - `docs/02-architecture/phase1-partner-channel-bank-entry-addendum-20260425.md`
   - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
   - `packages/contracts/src/index.ts`
+  - `docs/03-runbooks/phase1-productization-execution-packet-20260428.md`
 - External dependency:
-  - bank / issuer contract, credentials, sandbox, and verification rules
+  - bank / issuer contract, credentials, sandbox, and verification rules (still external-gated)
 
 ## D. Do Not Materialize Under Current Strategy
 
@@ -304,6 +317,10 @@ draft candidate labels.
 ## G. Relationship To Current Shared Truth
 
 - `GAP-P2S3-001` is no longer the active blocker story.
+- The 2026-04-28 P1PX productization wave closed the partner channel and driver
+  app baseline implementation. `EMC-X1-003` and `EMC-X1-004` baseline work is
+  now landed; only the external-gated remainder (real credentials, branding
+  assets, bank contract) is still open.
 - Nothing in this runbook should be read as reopening the closeout narrative by
   default.
 - Use this file as the backlog source for any future expansion beyond the

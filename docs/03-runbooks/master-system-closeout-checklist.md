@@ -16,17 +16,18 @@ Use it to separate:
 
 ## Current Reality Snapshot
 
-As of `2026-04-24`, the switchboard follow-up wave is closed, the protected
-control-plane auth cutover is merged and staging-verified, and the master
-closeout wave narrative is synced.
+As of `2026-04-28`, the switchboard follow-up wave is closed, the protected
+control-plane auth cutover is merged and staging-verified, and the P1PX
+productization wave has landed partner channel and driver app baselines.
 The current visible delta is now:
 
-- consciously deferred future-gated surfaces captured in `MSC-P1-001`
-- external-gated integrations such as `EMC-X1-001`
+- external-gated integrations: real bank/issuer credentials, Grab Taiwan real adapter, mobile distribution inputs
+- consciously deferred future-gated surfaces: passenger app/web, passenger receipt UI, call point/concierge, AV/ODD, live board (captured in `MSC-P1-001`)
 
 This means:
 
 - **gap-fix execution is complete enough to stop being the main story**
+- **partner channel and driver app baselines are now landed; only external credentials block productization completion**
 - **the repo-local closeout bar is met, while deferred and external-gated scope remains explicit**
 
 ## A. Gap-Fix Wave Closeout
@@ -114,6 +115,20 @@ The PRD still includes customer / call-entry surfaces that are not fully closed 
 - [x] Decide whether passenger-facing booking / tracking surface is part of the Phase 1 completion bar or remains intentionally deferred
 - [x] Decide whether call point / concierge workflow lands in an existing surface or a separate frontend
 - [x] Confirm the complaint hotline / customer-service operator surface is complete enough for the PRD’s complaint scope
+- [x] Partner-channel bank entry and eligibility verification baseline implemented (P1PX wave). Real bank/issuer credentials and branding remain external-gated.
+
+### D-4a. Partner-channel and driver app productization (P1PX wave — 2026-04-28)
+
+- [x] Partner registry and eligibility persistence (P1PX-BE-001) — durable schema, repository, service, unit tests
+- [x] Partner-authenticated ingress (P1PX-BE-002) — API key / signed token guard, negative tests, audit events
+- [x] Partner-only tenant UI shell and Traditional Chinese booking funnel (P1PX-FE-001) — `tenant-commute-hub`
+- [x] Partner truth carry-through into audit, finance, reporting, operator review (P1PX-BE-003)
+- [x] Driver app production identity and device-binding hardening (P1PX-DRV-001)
+- [x] EAS internal build evidence and external credential blockers documented (P1PX-DRV-002)
+- [x] Blueprint truth sync — gap matrix, task board, backlog, checklist updated (P1PX-DOC-001)
+- [ ] Real bank/issuer API contract, sandbox credentials, allowed test cards — external-gated
+- [ ] Real Grab Taiwan adapter (`EMC-X1-001`) — external-gated
+- [ ] Mobile distribution: Expo account, Apple team, Android keystore, internal tester groups — external-gated
 
 ### D-4. Reporting / filing / finance closure
 
@@ -157,8 +172,10 @@ We can honestly say the system is operationally complete only when all of the fo
 - [x] `GAP-P2S3-001` is no longer blocked
 - [x] rollout / staging / evidence blockers are closed
 - [x] the intended Phase 1 surfaces have explicit completion or explicit defer decisions
+- [x] partner channel and driver app baselines are implemented (P1PX wave done)
 - [x] `current-work.md`, `ai-status.json`, evidence packets, and rollout docs tell the same story
 - [x] the remaining gap between “implemented slices” and “operationally complete system” is either closed or consciously deferred by decision
+- [ ] external-gated: real bank/issuer credentials, Grab adapter, mobile distribution (blocked on partner / external inputs)
 
 ## Reference Anchors
 
