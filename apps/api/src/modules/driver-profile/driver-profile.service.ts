@@ -10,6 +10,11 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  maskEmail,
+  maskName,
+  maskPhone,
+} from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { DriverProfileRepository } from "./driver-profile.repository";
 
@@ -155,7 +160,7 @@ export class DriverProfileService implements OnModuleInit {
         actionName: "create_driver_profile",
         resourceType: "driver_profile",
         resourceId: driverId,
-        newValuesSummary: created as unknown as Record<string, unknown>,
+        newValuesSummary: this.buildAuditSummary(created),
       },
       requestId,
     );
@@ -205,8 +210,8 @@ export class DriverProfileService implements OnModuleInit {
         actionName: "update_driver_profile",
         resourceType: "driver_profile",
         resourceId: driverId,
-        oldValuesSummary: current as unknown as Record<string, unknown>,
-        newValuesSummary: updated as unknown as Record<string, unknown>,
+        oldValuesSummary: this.buildAuditSummary(current),
+        newValuesSummary: this.buildAuditSummary(updated),
       },
       requestId,
     );
@@ -336,6 +341,31 @@ export class DriverProfileService implements OnModuleInit {
       ...profile,
       emergencyContact: cloneEmergencyContact(profile.emergencyContact),
       bankAccount: cloneBankAccount(profile.bankAccount),
+    };
+  }
+
+  private buildAuditSummary(profile: DriverProfileRecord) {
+    return {
+      driverId: profile.driverId,
+      name: maskName(profile.name),
+      phone: maskPhone(profile.phone),
+      email: maskEmail(profile.email),
+      photoConfigured: profile.photoUrl !== null,
+      emergencyContact: profile.emergencyContact
+        ? {
+            name: maskName(profile.emergencyContact.name),
+            phone: maskPhone(profile.emergencyContact.phone),
+            relationship: profile.emergencyContact.relationship,
+          }
+        : null,
+      bankAccount: profile.bankAccount
+        ? {
+            bankName: profile.bankAccount.bankName,
+            accountName: maskName(profile.bankAccount.accountName),
+            accountNumberMasked: profile.bankAccount.accountNumberMasked,
+          }
+        : null,
+      updatedAt: profile.updatedAt,
     };
   }
 

@@ -1,11 +1,12 @@
 import { createHmac } from "node:crypto";
 
+import { resolveControlledDownloadPolicy } from "./sensitive-data-policy";
+
 export const DEFAULT_CONTROLLED_DOWNLOAD_HOST = "https://downloads.drts.local";
-export const DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES = 60;
+export const DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES = 15;
 export const DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID =
-  "phase1-bootstrap-download-key-v1";
-export const DEFAULT_CONTROLLED_DOWNLOAD_SECRET =
-  "phase1-bootstrap-download-secret-v1";
+  "phase1-controlled-download-key-v1";
+export const DEFAULT_CONTROLLED_DOWNLOAD_SECRET = "";
 export const DEFAULT_CONTROLLED_DOWNLOAD_SIGNATURE_VERSION = 1;
 
 export interface ControlledDownloadMetadata {
@@ -39,14 +40,18 @@ export function createControlledDownloadMetadata(
   command: CreateControlledDownloadMetadataCommand,
 ): ControlledDownloadMetadata {
   const signedAt = command.createdAt ?? new Date().toISOString();
-  const ttlMinutes =
-    command.ttlMinutes ?? DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES;
-  const host = command.host ?? DEFAULT_CONTROLLED_DOWNLOAD_HOST;
-  const keyId = command.keyId ?? DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID;
-  const signingSecret =
-    command.signingSecret ?? DEFAULT_CONTROLLED_DOWNLOAD_SECRET;
-  const signatureVersion =
-    command.signatureVersion ?? DEFAULT_CONTROLLED_DOWNLOAD_SIGNATURE_VERSION;
+  const policy = resolveControlledDownloadPolicy(command, {
+    host: DEFAULT_CONTROLLED_DOWNLOAD_HOST,
+    keyId: DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
+    signingSecret: DEFAULT_CONTROLLED_DOWNLOAD_SECRET,
+    ttlMinutes: DEFAULT_CONTROLLED_DOWNLOAD_TTL_MINUTES,
+    signatureVersion: DEFAULT_CONTROLLED_DOWNLOAD_SIGNATURE_VERSION,
+  });
+  const ttlMinutes = policy.ttlMinutes;
+  const host = policy.host;
+  const keyId = policy.keyId;
+  const signingSecret = policy.signingSecret;
+  const signatureVersion = policy.signatureVersion;
   const expiresAt = computeExpiryTimestamp(signedAt, ttlMinutes);
   const canonicalPayload = stableSerialize({
     kind: command.kind,

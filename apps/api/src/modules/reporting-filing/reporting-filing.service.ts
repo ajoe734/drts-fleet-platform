@@ -18,6 +18,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   ReportingFilingRepository,
@@ -220,9 +221,32 @@ export class ReportingFilingService implements OnModuleInit {
     return this.reportJobs.map((job) => this.cloneReportJob(job));
   }
 
-  getReportJob(jobId: string): ReportJobView {
+  getReportJob(jobId: string, requestId?: string): ReportJobView {
     const job = this.requireReportJob(jobId);
-    return this.cloneReportJob(job);
+    const reportJob = this.cloneReportJob(job);
+    this.recordArtifactAccessAudit(
+      {
+        actionName: "issue_report_artifact_download",
+        resourceType: "report_artifact",
+        resourceId: reportJob.artifact?.artifactId ?? null,
+        newValuesSummary: reportJob.artifact
+          ? {
+              jobId: reportJob.jobId,
+              jobType: reportJob.jobType,
+              artifactType: reportJob.artifact.artifactType,
+              manifestHash: reportJob.artifact.manifestHash,
+              expiresAt: reportJob.artifact.expiresAt,
+              ttlMinutes: reportJob.artifact.downloadMetadata.ttlMinutes,
+            }
+          : {
+              jobId: reportJob.jobId,
+              jobType: reportJob.jobType,
+              artifactAvailable: false,
+            },
+      },
+      requestId,
+    );
+    return reportJob;
   }
 
   generateFilingPackage(
@@ -277,9 +301,32 @@ export class ReportingFilingService implements OnModuleInit {
     };
   }
 
-  getFilingPackage(packageId: string): FilingPackageView {
+  getFilingPackage(packageId: string, requestId?: string): FilingPackageView {
     const filingPackage = this.requireFilingPackage(packageId);
-    return this.cloneFilingPackage(filingPackage);
+    const packageView = this.cloneFilingPackage(filingPackage);
+    this.recordArtifactAccessAudit(
+      {
+        actionName: "issue_filing_package_download",
+        resourceType: "filing_package",
+        resourceId: packageView.packageId,
+        newValuesSummary: packageView.downloadMetadata
+          ? {
+              packageId: packageView.packageId,
+              packageType: packageView.packageType,
+              manifestHash: packageView.manifestHash,
+              zipExpiresAt: packageView.downloadMetadata.zip.expiresAt,
+              pdfExpiresAt: packageView.downloadMetadata.pdf.expiresAt,
+              ttlMinutes: packageView.downloadMetadata.zip.ttlMinutes,
+            }
+          : {
+              packageId: packageView.packageId,
+              packageType: packageView.packageType,
+              artifactAvailable: false,
+            },
+      },
+      requestId,
+    );
+    return packageView;
   }
 
   listFilingPackages() {
@@ -594,8 +641,8 @@ export class ReportingFilingService implements OnModuleInit {
       .map((order) => ({
         orderId: order.orderId,
         orderNo: order.orderNo,
-        callId: order.callId,
-        recordingId: order.recordingId,
+        callId: maskOpaqueToken(order.callId, 8, 4),
+        recordingId: maskOpaqueToken(order.recordingId, 8, 4),
         missingRecording:
           order.recordingId === null ||
           order.complianceFlags.includes("recording_pending"),
@@ -621,8 +668,12 @@ export class ReportingFilingService implements OnModuleInit {
         partnerProgramId: order.partnerProgramId,
         partnerEntrySlug: order.partnerEntrySlug!,
         eligibilityVerificationId: order.eligibilityVerificationId,
-        issuerAuthorizationRef: order.issuerAuthorizationRef,
-        benefitReference: order.benefitReference,
+        issuerAuthorizationRef: maskOpaqueToken(
+          order.issuerAuthorizationRef,
+          8,
+          4,
+        ),
+        benefitReference: maskOpaqueToken(order.benefitReference, 8, 4),
         businessDispatchSubtype: order.businessDispatchSubtype!,
         status: order.status,
         amount: order.quotedFare ?? {
@@ -848,6 +899,30 @@ export class ReportingFilingService implements OnModuleInit {
         .join(",")}}`;
     }
     return JSON.stringify(value);
+  }
+
+  private recordArtifactAccessAudit(
+    input: Pick<
+      AuditLogRecord,
+      "actionName" | "resourceType" | "resourceId" | "newValuesSummary"
+    >,
+    requestId?: string,
+  ) {
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "reporting-filing",
+        actionName: input.actionName,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        ...(input.newValuesSummary
+          ? { newValuesSummary: input.newValuesSummary }
+          : {}),
+      },
+      requestId,
+    );
   }
 
   private recordAudit(

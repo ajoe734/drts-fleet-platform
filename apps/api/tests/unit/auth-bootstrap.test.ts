@@ -982,6 +982,8 @@ describe("partner bootstrap-session auth controller", () => {
     process.env.JWT_SECRET = "test-secret";
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
 
     const jwtAuthService = new JwtAuthService();
     const controller = createAuthController(jwtAuthService);
@@ -1031,10 +1033,13 @@ describe("partner bootstrap-session auth controller", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+    delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
   });
 
   it("rejects partner bootstrap-session issuance for an invalid api key", () => {
     process.env.JWT_SECRET = "test-secret";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
 
     const controller = createAuthController(new JwtAuthService());
 
@@ -1049,6 +1054,7 @@ describe("partner bootstrap-session auth controller", () => {
     ).toThrowError(ApiRequestError);
 
     delete process.env.JWT_SECRET;
+    delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
   });
 });
 

@@ -54,7 +54,7 @@ export class ReportingFilingController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.reportingFilingService.getReportJob(jobId),
+      this.reportingFilingService.getReportJob(jobId, requestId),
       requestId,
     );
   }
@@ -65,7 +65,7 @@ export class ReportingFilingController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.reportingFilingService.getReportJob(jobId),
+      this.reportingFilingService.getReportJob(jobId, requestId),
       requestId,
     );
   }
@@ -93,7 +93,7 @@ export class ReportingFilingController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.reportingFilingService.getFilingPackage(packageId),
+      this.reportingFilingService.getFilingPackage(packageId, requestId),
       requestId,
     );
   }

@@ -15,7 +15,9 @@ import {
 
 import type {
   AuditLogRecord,
+  CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
+  PartnerEntryBrandingMetadata,
   CreateTenantUserCommand,
   IdentityContext,
   CreateTenantWebhookEndpointCommand,
@@ -33,6 +35,7 @@ import type {
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
   TenantWebhookEndpointStatus,
+  UpdatePartnerChannelEntryCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
@@ -45,6 +48,13 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  maskAddress,
+  maskEmail,
+  maskName,
+  maskPhone,
+  previewOpaqueValue,
+} from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
   TenantPartnerRepository,
@@ -109,7 +119,13 @@ type RotateWebhookSecretCommand = {
 type PartnerIngressCredentialSeed = {
   entrySlug: string;
   keyId: string;
-  plaintextApiKey: string;
+  apiKeyHash: string;
+};
+
+type PartnerIngressCredentialBootstrap = {
+  entrySlug: string;
+  keyId: string;
+  envVarName: string;
 };
 
 type PartnerIngressResolution = {
@@ -346,19 +362,40 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
   },
 ];
 
-const PARTNER_INGRESS_CREDENTIAL_SEED: readonly PartnerIngressCredentialSeed[] =
+const PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS: readonly PartnerIngressCredentialBootstrap[] =
   [
     {
       entrySlug: "bank-demo-alpha-airport",
       keyId: "partner-key-alpha-demo",
-      plaintextApiKey: "pk_demo_alpha_airport_20260428",
+      envVarName: "PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT",
     },
     {
       entrySlug: "bank-demo-beta-airport",
       keyId: "partner-key-beta-demo",
-      plaintextApiKey: "pk_demo_beta_airport_20260428",
+      envVarName: "PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT",
     },
   ];
+
+function hashPartnerApiKeyValue(apiKey: string) {
+  return createHash("sha256").update(apiKey).digest("hex");
+}
+
+function resolvePartnerIngressCredentialsFromEnv(): readonly PartnerIngressCredentialSeed[] {
+  return PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS.flatMap((bootstrap) => {
+    const plaintextApiKey = process.env[bootstrap.envVarName]?.trim();
+    if (!plaintextApiKey) {
+      return [];
+    }
+
+    return [
+      {
+        entrySlug: bootstrap.entrySlug,
+        keyId: bootstrap.keyId,
+        apiKeyHash: hashPartnerApiKeyValue(plaintextApiKey),
+      },
+    ];
+  });
+}
 
 @Injectable()
 export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
@@ -411,7 +448,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     private readonly tenantPartnerRepository?: TenantPartnerRepository,
     @Optional()
     private readonly webhookDispatchService: WebhookDispatchService = new WebhookDispatchService(),
-    private readonly partnerIngressCredentials: readonly PartnerIngressCredentialSeed[] = PARTNER_INGRESS_CREDENTIAL_SEED,
+    private readonly partnerIngressCredentials: readonly PartnerIngressCredentialSeed[] = resolvePartnerIngressCredentialsFromEnv(),
   ) {}
 
   async onModuleInit() {
@@ -694,9 +731,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         actionName: "upsert_passenger",
         resourceType: "tenant_passenger",
         resourceId: passenger.passengerId,
-        newValuesSummary: {
-          ...this.clonePassenger(passenger),
-        },
+        newValuesSummary: this.buildPassengerAuditSummary(passenger),
       },
       requestId,
     );
@@ -810,9 +845,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         actionName: "upsert_address",
         resourceType: "tenant_address",
         resourceId: address.addressId,
-        newValuesSummary: {
-          ...this.cloneAddress(address),
-        },
+        newValuesSummary: this.buildAddressAuditSummary(address),
       },
       requestId,
     );
@@ -840,8 +873,214 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((entry) => this.clonePartnerEntry(entry));
   }
 
+  listPlatformPartnerEntries() {
+    return this.partnerEntries.map((entry) => this.clonePartnerEntry(entry));
+  }
+
   getPartnerEntry(entrySlug: string) {
     return this.clonePartnerEntry(this.requirePartnerEntry(entrySlug));
+  }
+
+  createPlatformPartnerEntry(
+    command: CreatePartnerChannelEntryCommand,
+    requestId?: string,
+  ) {
+    const now = new Date().toISOString();
+    const tenantId = this.requireNonBlank(command.tenantId, "tenantId");
+    const partnerCode = this.normalizePartnerCode(command.partnerCode);
+    const programId = this.requireNonBlank(command.programId, "programId");
+    const entrySlug = this.normalizeEntrySlug(command.entrySlug);
+
+    if (this.partnerEntries.some((entry) => entry.entrySlug === entrySlug)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PARTNER_ENTRY_CONFLICT",
+        "A partner entry with this slug already exists.",
+        {
+          entrySlug,
+        },
+      );
+    }
+
+    const record: PartnerChannelEntryRecord = {
+      partnerId: `partner_${randomUUID()}`,
+      partnerCode,
+      partnerType: this.requireNonBlank(command.partnerType, "partnerType"),
+      programId,
+      programCode: this.normalizeNullableText(command.programCode),
+      tenantId,
+      bankCode: this.normalizeNullableText(command.bankCode),
+      entrySlug,
+      displayName: this.requireNonBlank(command.displayName, "displayName"),
+      businessDispatchSubtype: command.businessDispatchSubtype,
+      authMode: command.authMode,
+      eligibilityMode: command.eligibilityMode,
+      entryHost: this.normalizeNullableText(command.entryHost),
+      entryPath: this.normalizeNullableText(command.entryPath),
+      themeAccent: this.normalizeNullableText(command.themeAccent),
+      brandingMetadata: this.buildBrandingMetadata(
+        command.displayName,
+        command.themeAccent,
+        command.brandingMetadata ?? null,
+      ),
+      status: command.status ?? "active",
+      activeFlag:
+        command.activeFlag ?? (command.status ?? "active") === "active",
+      createdAt: now,
+      updatedAt: now,
+      auditMetadata: {
+        source: "platform_admin_console",
+        requestId: this.normalizeNullableText(requestId),
+        createdBy: "platform_admin",
+        updatedBy: "platform_admin",
+      },
+    };
+
+    this.partnerEntries = [
+      this.clonePartnerEntry(record),
+      ...this.partnerEntries.filter((entry) => entry.entrySlug !== entrySlug),
+    ];
+    this.persistChanges(
+      {
+        partnerEntries: [this.clonePartnerEntry(record)],
+      },
+      "create_platform_partner_entry",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "create_partner_entry",
+        resourceType: "partner_entry",
+        resourceId: record.entrySlug,
+        newValuesSummary: this.clonePartnerEntry(record) as unknown as Record<
+          string,
+          unknown
+        >,
+      },
+      requestId,
+    );
+
+    return this.clonePartnerEntry(record);
+  }
+
+  updatePlatformPartnerEntry(
+    entrySlug: string,
+    command: UpdatePartnerChannelEntryCommand,
+    requestId?: string,
+  ) {
+    const entry = this.requirePlatformPartnerEntry(entrySlug);
+    const before = this.clonePartnerEntry(entry);
+
+    if (typeof command.tenantId === "string") {
+      entry.tenantId = this.requireNonBlank(command.tenantId, "tenantId");
+    }
+    if (typeof command.partnerCode === "string") {
+      entry.partnerCode = this.normalizePartnerCode(command.partnerCode);
+    }
+    if (typeof command.partnerType === "string") {
+      entry.partnerType = this.requireNonBlank(
+        command.partnerType,
+        "partnerType",
+      );
+    }
+    if (typeof command.programId === "string") {
+      entry.programId = this.requireNonBlank(command.programId, "programId");
+    }
+    if (command.programCode !== undefined) {
+      entry.programCode = this.normalizeNullableText(command.programCode);
+    }
+    if (command.bankCode !== undefined) {
+      entry.bankCode = this.normalizeNullableText(command.bankCode);
+    }
+    if (typeof command.displayName === "string") {
+      entry.displayName = this.requireNonBlank(
+        command.displayName,
+        "displayName",
+      );
+    }
+    if (command.businessDispatchSubtype) {
+      entry.businessDispatchSubtype = command.businessDispatchSubtype;
+    }
+    if (command.authMode) {
+      entry.authMode = command.authMode;
+    }
+    if (command.eligibilityMode) {
+      entry.eligibilityMode = command.eligibilityMode;
+    }
+    if (command.entryHost !== undefined) {
+      entry.entryHost = this.normalizeNullableText(command.entryHost);
+    }
+    if (command.entryPath !== undefined) {
+      entry.entryPath = this.normalizeNullableText(command.entryPath);
+    }
+    if (command.themeAccent !== undefined) {
+      entry.themeAccent = this.normalizeNullableText(command.themeAccent);
+    }
+    if (command.status) {
+      entry.status = command.status;
+      entry.activeFlag = command.status === "active";
+    }
+    if (command.activeFlag !== undefined) {
+      entry.activeFlag = command.activeFlag;
+      entry.status = command.activeFlag ? "active" : "inactive";
+    }
+
+    entry.brandingMetadata = this.buildBrandingMetadata(
+      entry.displayName,
+      entry.themeAccent,
+      command.brandingMetadata,
+      entry.brandingMetadata,
+    );
+    entry.updatedAt = new Date().toISOString();
+    entry.auditMetadata = {
+      ...entry.auditMetadata,
+      source: "platform_admin_console",
+      requestId: this.normalizeNullableText(requestId),
+      updatedBy: "platform_admin",
+    };
+
+    this.persistChanges(
+      {
+        partnerEntries: [this.clonePartnerEntry(entry)],
+      },
+      "update_platform_partner_entry",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: entry.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "update_partner_entry",
+        resourceType: "partner_entry",
+        resourceId: entry.entrySlug,
+        oldValuesSummary: before as unknown as Record<string, unknown>,
+        newValuesSummary: this.clonePartnerEntry(entry) as unknown as Record<
+          string,
+          unknown
+        >,
+      },
+      requestId,
+    );
+
+    return this.clonePartnerEntry(entry);
+  }
+
+  setPlatformPartnerEntryStatus(
+    entrySlug: string,
+    status: "active" | "inactive",
+    requestId?: string,
+  ) {
+    return this.updatePlatformPartnerEntry(
+      entrySlug,
+      {
+        status,
+      },
+      requestId,
+    );
   }
 
   authenticatePartnerBootstrap(
@@ -880,7 +1119,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const providedHash = this.hashPartnerApiKey(apiKey);
-    const expectedHash = this.hashPartnerApiKey(credential.plaintextApiKey);
+    const expectedHash = credential.apiKeyHash;
     if (!this.hashesMatch(providedHash, expectedHash)) {
       this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
         reason: "api_key_invalid",
@@ -1154,9 +1393,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         actionName: "create_tenant_user",
         resourceType: "tenant_user_role",
         resourceId: userRole.userId,
-        newValuesSummary: {
-          ...this.cloneUserRole(userRole),
-        },
+        newValuesSummary: this.buildTenantUserAuditSummary(userRole),
       },
       requestId,
     );
@@ -1193,9 +1430,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         actionName: "update_tenant_role",
         resourceType: "tenant_user_role",
         resourceId: userRole.userId,
-        newValuesSummary: {
-          ...this.cloneUserRole(userRole),
-        },
+        newValuesSummary: this.buildTenantUserAuditSummary(userRole),
       },
       requestId,
     );
@@ -2102,9 +2337,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private toDeliveryResponse(delivery: StoredWebhookDelivery) {
     return {
-      ...delivery,
-      rawBody: { ...delivery.rawBody },
-      retryPolicySnapshot: { ...delivery.retryPolicySnapshot },
+      deliveryId: delivery.deliveryId,
+      webhookId: delivery.webhookId,
+      tenantId: delivery.tenantId,
+      eventType: delivery.eventType,
+      attempt: delivery.attempt,
+      status: delivery.status,
+      httpStatus: delivery.httpStatus,
+      signature: previewOpaqueValue(delivery.signature, 20) ?? "",
+      createdAt: delivery.createdAt,
+      attemptedAt: delivery.attemptedAt,
+      nextAttemptAt: delivery.nextAttemptAt,
+      signatureVersion: delivery.signatureVersion,
+      secretVersion: delivery.secretVersion,
     };
   }
 
@@ -2120,6 +2365,50 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       expiresAt: apiKey.expiresAt,
       revokedAt: apiKey.revokedAt,
       createdAt: apiKey.createdAt,
+    };
+  }
+
+  private buildPassengerAuditSummary(passenger: TenantPassengerRecord) {
+    return {
+      passengerId: passenger.passengerId,
+      tenantId: passenger.tenantId,
+      fullName: maskName(passenger.fullName),
+      employeeNo: passenger.employeeNo,
+      departmentName: passenger.departmentName,
+      mobile: maskPhone(passenger.mobile),
+      email: maskEmail(passenger.email),
+      activeFlag: passenger.activeFlag,
+      metadataKeys: Object.keys(passenger.metadata).sort(),
+      createdAt: passenger.createdAt,
+      updatedAt: passenger.updatedAt,
+    };
+  }
+
+  private buildAddressAuditSummary(address: TenantAddressRecord) {
+    return {
+      addressId: address.addressId,
+      tenantId: address.tenantId,
+      ownerPassengerId: address.ownerPassengerId,
+      addressName: address.addressName,
+      addressText: maskAddress(address.addressText),
+      coordinatesRedacted: address.lat !== null || address.lng !== null,
+      tags: [...address.tags],
+      activeFlag: address.activeFlag,
+      createdAt: address.createdAt,
+      updatedAt: address.updatedAt,
+    };
+  }
+
+  private buildTenantUserAuditSummary(userRole: TenantUserRoleRecord) {
+    return {
+      userId: userRole.userId,
+      tenantId: userRole.tenantId,
+      email: maskEmail(userRole.email),
+      displayName: maskName(userRole.displayName),
+      roleCode: userRole.roleCode,
+      status: userRole.status,
+      invitedAt: userRole.invitedAt,
+      updatedAt: userRole.updatedAt,
     };
   }
 
@@ -2332,6 +2621,34 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return entry;
   }
 
+  private requirePlatformPartnerEntry(entrySlug: string) {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_REQUIRED",
+        "entrySlug is required.",
+        {},
+      );
+    }
+
+    const entry = this.partnerEntries.find(
+      (candidate) => candidate.entrySlug === normalizedSlug,
+    );
+    if (!entry) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PARTNER_ENTRY_NOT_FOUND",
+        "The partner entry could not be found.",
+        {
+          entrySlug: normalizedSlug,
+        },
+      );
+    }
+
+    return entry;
+  }
+
   private normalizePartnerEntryAuthModes() {
     const changedEntries = this.partnerEntries
       .filter((entry) => entry.authMode !== "partner_api_key")
@@ -2363,7 +2680,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private hashPartnerApiKey(apiKey: string) {
-    return createHash("sha256").update(apiKey).digest("hex");
+    return hashPartnerApiKeyValue(apiKey);
   }
 
   private hashesMatch(left: string, right: string) {
@@ -2572,10 +2889,77 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return normalized ? normalized : null;
   }
 
+  private normalizePartnerCode(value: string) {
+    const normalized = this.requireNonBlank(value, "partnerCode")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    if (!normalized) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_CODE_INVALID",
+        "partnerCode must contain letters or numbers.",
+        {
+          partnerCode: value,
+        },
+      );
+    }
+    return normalized;
+  }
+
+  private normalizeEntrySlug(value: string) {
+    const normalized = this.requireNonBlank(value, "entrySlug")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    if (!normalized) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_SLUG_INVALID",
+        "entrySlug must contain letters or numbers.",
+        {
+          entrySlug: value,
+        },
+      );
+    }
+    return normalized;
+  }
+
+  private buildBrandingMetadata(
+    displayName: string,
+    themeAccent: string | null | undefined,
+    brandingMetadata: Partial<PartnerEntryBrandingMetadata> | null | undefined,
+    existingBrandingMetadata?: PartnerEntryBrandingMetadata | null,
+  ): PartnerEntryBrandingMetadata {
+    return {
+      displayName:
+        this.normalizeNullableText(brandingMetadata?.displayName) ??
+        existingBrandingMetadata?.displayName ??
+        displayName,
+      themeAccent:
+        this.normalizeNullableText(brandingMetadata?.themeAccent) ??
+        existingBrandingMetadata?.themeAccent ??
+        this.normalizeNullableText(themeAccent),
+      supportEmail:
+        brandingMetadata?.supportEmail === undefined
+          ? (existingBrandingMetadata?.supportEmail ?? null)
+          : this.normalizeNullableText(brandingMetadata.supportEmail),
+      supportPhone:
+        brandingMetadata?.supportPhone === undefined
+          ? (existingBrandingMetadata?.supportPhone ?? null)
+          : this.normalizeNullableText(brandingMetadata.supportPhone),
+    };
+  }
+
   private hashReferenceToken(referenceToken: string) {
     return `sha256:${createHash("sha256")
       .update(referenceToken.trim())
       .digest("hex")}`;
+  }
+
+  private requireNonBlank(value: string, fieldName: string) {
+    this.assertNonBlank(value, fieldName);
+    return value.trim();
   }
 
   private assertNonBlank(value: string, fieldName: string) {
