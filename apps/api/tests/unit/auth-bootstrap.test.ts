@@ -8,6 +8,7 @@ import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import {
+  AUTH_REALM_PATH_MATRIX,
   BootstrapAuthGuard,
   InternalKeyMiddleware,
   JwtAuthService,
@@ -787,6 +788,21 @@ describe("internal key middleware", () => {
     ).not.toThrow();
   });
 
+  it("allows protected routes when the control-plane inner bearer header is present", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {
+            "x-drts-authorization": "Bearer inner-control-plane-token",
+          },
+          method: "POST",
+          originalUrl: "/api/platform-admin/public-info",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
   it("invokes next() after successful validation", () => {
     const middleware = new InternalKeyMiddleware();
     const next = vi.fn();
@@ -1154,5 +1170,69 @@ describe("driver device-session auth controller", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+  });
+});
+
+describe("auth plane-separation matrix", () => {
+  it("keeps control-plane realms on inner or service bearer paths only", () => {
+    const realmMap = new Map(
+      AUTH_REALM_PATH_MATRIX.map((record) => [record.realm, record]),
+    );
+
+    expect(realmMap.get("system")).toMatchObject({
+      plane: "control_plane",
+      primaryPath: "service_bearer",
+      defaultIapProtected: true,
+      bearerHeader: "authorization",
+    });
+    expect(realmMap.get("platform")).toMatchObject({
+      plane: "control_plane",
+      primaryPath: "control_plane_inner_bearer",
+      defaultIapProtected: true,
+      bearerHeader: "x-drts-authorization",
+    });
+    expect(realmMap.get("ops")).toMatchObject({
+      plane: "control_plane",
+      primaryPath: "control_plane_inner_bearer",
+      defaultIapProtected: true,
+      bearerHeader: "x-drts-authorization",
+    });
+  });
+
+  it("keeps tenant, partner, and driver realms off the default IAP path", () => {
+    const businessRealms = AUTH_REALM_PATH_MATRIX.filter(
+      (record) =>
+        record.realm === "tenant" ||
+        record.realm === "partner" ||
+        record.realm === "driver",
+    );
+
+    expect(businessRealms).toHaveLength(3);
+    expect(businessRealms).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          realm: "tenant",
+          plane: "business_plane",
+          primaryPath: "tenant_bootstrap_bearer",
+          tokenIssuancePath: "/api/auth/tenant/bootstrap-session",
+          defaultIapProtected: false,
+        }),
+        expect.objectContaining({
+          realm: "partner",
+          plane: "business_plane",
+          primaryPath: "partner_bootstrap_bearer",
+          tokenIssuancePath: "/api/auth/partner/bootstrap-session",
+          defaultIapProtected: false,
+        }),
+        expect.objectContaining({
+          realm: "driver",
+          plane: "business_plane",
+          primaryPath: "driver_device_bearer",
+          tokenIssuancePath: "/api/auth/driver/device/register",
+          refreshPath: "/api/auth/driver/device/refresh",
+          defaultIapProtected: false,
+        }),
+      ]),
+    );
   });
 });

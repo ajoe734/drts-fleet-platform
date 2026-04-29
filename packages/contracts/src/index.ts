@@ -155,6 +155,28 @@ export interface IdentityContext {
   supportedExecutionModes: SupervisorExecutionMode[];
 }
 
+export type AuthIngressPlane = "control_plane" | "business_plane";
+
+export type AuthBearerHeader = "authorization" | "x-drts-authorization";
+
+export type AuthPrimaryPath =
+  | "service_bearer"
+  | "control_plane_inner_bearer"
+  | "tenant_bootstrap_bearer"
+  | "partner_bootstrap_bearer"
+  | "driver_device_bearer";
+
+export interface AuthRealmPathRecord {
+  realm: IdentityContext["realm"];
+  plane: AuthIngressPlane;
+  primaryPath: AuthPrimaryPath;
+  bearerHeader: AuthBearerHeader;
+  defaultIapProtected: boolean;
+  tokenIssuancePath: string | null;
+  refreshPath: string | null;
+  productionNotes: string;
+}
+
 export interface CreateTenantBootstrapSessionCommand {
   email: string;
   tenantId?: string;

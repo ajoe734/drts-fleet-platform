@@ -15,6 +15,7 @@ type RequestLike = {
 
 const INTERNAL_KEY_HEADER = "x-drts-internal-key";
 const AUTHORIZATION_HEADER = "authorization";
+const CONTROL_PLANE_AUTH_HEADER = "x-drts-authorization";
 const HEALTH_PATHS = new Set(["/health", "/api/health"]);
 const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET identity/context",
@@ -89,10 +90,11 @@ function hasPublicBootstrapRealm(request: RequestLike): boolean {
 }
 
 function hasBearerAuthorization(request: RequestLike): boolean {
-  const authorization = normalizeHeaderValue(
-    request.headers?.[AUTHORIZATION_HEADER],
-  );
-  return /^Bearer\s+\S+/i.test(authorization);
+  const headerValues = [
+    normalizeHeaderValue(request.headers?.[AUTHORIZATION_HEADER]),
+    normalizeHeaderValue(request.headers?.[CONTROL_PLANE_AUTH_HEADER]),
+  ];
+  return headerValues.some((value) => /^Bearer\s+\S+/i.test(value));
 }
 
 export function validateInternalKey(
