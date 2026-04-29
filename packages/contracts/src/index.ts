@@ -189,6 +189,35 @@ export interface PartnerBootstrapSession {
   identity: IdentityContext;
 }
 
+export interface RegisterDriverDeviceCommand {
+  registrationCode: string;
+  deviceId: string;
+  deviceLabel?: string | null;
+}
+
+export interface RefreshDriverDeviceSessionCommand {
+  refreshToken: string;
+  deviceId: string;
+}
+
+export interface RevokeDriverDeviceBindingCommand {
+  bindingId?: string;
+  deviceId: string;
+}
+
+export interface DriverDeviceProvisioningSession {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: "Bearer";
+  expiresIn: string;
+  refreshExpiresIn: string;
+  driverId: string;
+  deviceId: string;
+  bindingId: string;
+  issuedAt: string;
+  identity: IdentityContext;
+}
+
 export interface TenantPartnerSummary {
   supportedRoots: Array<"tenant" | "partner" | "site" | "call_point">;
   sourceOfTruth: "tenant_partner_service" | "foundation_bootstrap_placeholder";

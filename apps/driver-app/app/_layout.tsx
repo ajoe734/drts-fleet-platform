@@ -8,7 +8,7 @@ import {
   initializeDriverLocationHeartbeat,
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
-import { getDriverClient } from "@/lib/api-client";
+import { getDriverClient, initializeDriverIdentity } from "@/lib/api-client";
 
 export const unstable_settings = {
   initialRouteName: "onboarding",
@@ -22,6 +22,7 @@ function DriverHeartbeatBootstrap() {
 
     const syncWithActiveTrip = async () => {
       try {
+        await initializeDriverIdentity();
         const tasks = await getDriverClient().listDriverTasks();
         const activeTask =
           tasks.find((task) => task.status === "on_trip") ?? null;

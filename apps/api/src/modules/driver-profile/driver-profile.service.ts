@@ -104,6 +104,18 @@ export class DriverProfileService implements OnModuleInit {
     return this.clone(this.resolveBaseProfile(actorId));
   }
 
+  resolveProvisionableDriverId(
+    registrationCode?: string | null,
+  ): string | null {
+    const candidate = registrationCode?.trim();
+    if (!candidate) {
+      return null;
+    }
+
+    const driverId = DEMO_DRIVER_ALIASES[candidate] ?? candidate;
+    return this.profileExists(driverId) ? driverId : null;
+  }
+
   createProfile(
     actorId: string | null | undefined,
     command: CreateDriverProfileCommand,

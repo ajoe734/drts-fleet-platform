@@ -30,7 +30,9 @@ Identity is resolved in priority order:
 
 1. `EXPO_PUBLIC_DRIVER_ID` env var (preferred)
 2. `EXPO_PUBLIC_DRIVER_ACTOR_ID` env var (legacy alias)
-3. `expo.extra.driverActorId` in `app.json` (dev-only override, not in
+3. persisted device-bound provisioning session refreshed from
+   `/api/auth/driver/device/refresh`
+4. `expo.extra.driverActorId` in `app.json` (dev-only override, not in
    production build)
 
 If none of these resolve, the app enters the degraded provisioning state.
@@ -90,7 +92,8 @@ receive their identity assignment through one of:
 - An EAS environment variable set per-build in the EAS dashboard.
 - A tester-specific `.env` file added to the device before the Metro server
   starts (development client only).
-- A future backend provisioning flow (see §Production Identity Handoff below).
+- The app onboarding registration form backed by
+  `/api/auth/driver/device/register`.
 
 Android internal development APK:
 
@@ -173,27 +176,28 @@ come from the backend identity handoff flow (see §Production Identity
 Handoff). The `EXPO_PUBLIC_DRIVER_ID` env var is **not** set in the
 production profile.
 
-## Production Identity Handoff (Design)
+## Production Identity Handoff
 
-The current Phase 1 plan for production-grade driver identity:
+The current Phase 1 implementation for production-grade driver identity:
 
-1. **Device registration**: On first launch, the driver app calls a
-   `/driver/device/register` endpoint with a device fingerprint (Expo
-   `Constants.installationId` or a generated UUID persisted in
-   `SecureStore`).
+1. **Device registration**: On first launch without a dev override, the
+   driver app shows the provisioning form and calls
+   `/api/auth/driver/device/register` with a registration code, generated
+   device ID, and optional device label.
 
-2. **Identity binding**: The backend assigns a `driverId` to the device and
-   returns a short-lived token. The app stores this in `SecureStore`.
+2. **Identity binding**: The backend resolves the registration code to a
+   provisionable driver profile and returns a driver-bound Bearer access token
+   plus refresh token.
 
-3. **Token refresh**: The app refreshes the identity token on each launch or
-   when the stored token approaches expiry.
+3. **Secure persistence**: The app stores the device ID and provisioning
+   session in `expo-secure-store`.
 
-4. **API client hydration**: `api-client.ts` reads the token from
-   `SecureStore` at startup instead of relying on an env var.
+4. **Token refresh**: On later launches, `initializeDriverIdentity()` calls
+   `/api/auth/driver/device/refresh` before hydrating the API client.
 
-This handoff is not yet implemented. The backend endpoint and auth contract
-are gated on the backend mobile auth task. Until that lands, internal builds
-use `EXPO_PUBLIC_DRIVER_ID`.
+5. **Revocation enforcement**: Driver Bearer tokens carry a backend binding
+   reference, and driver routes reject revoked or stale bindings even if the
+   JWT is otherwise well-formed.
 
 The driver app does **not** go through Cloud IAP. It uses direct app-auth
 against the API host.
@@ -202,15 +206,18 @@ against the API host.
 
 After installing the build, confirm:
 
-1. Without `EXPO_PUBLIC_DRIVER_ID` set: onboarding shows "裝置尚未配置"
-   screen — not a demo-bound workspace.
-2. With `EXPO_PUBLIC_DRIVER_ID` set: onboarding screen loads and smoke tests
-   run.
-3. Jobs inbox loads task data.
-4. Trip screen can fetch active task state.
-5. Earnings screen loads summary data.
-6. Platform presence screen loads and shows connected platforms.
-7. App can reach the configured API base without using an IAP login wall.
+1. Without `EXPO_PUBLIC_DRIVER_ID` set and without an existing session:
+   onboarding shows the registration form — not a demo-bound workspace.
+2. With a valid registration code: onboarding stores a backend-issued session
+   and smoke tests run.
+3. With `EXPO_PUBLIC_DRIVER_ID` set: onboarding bypasses registration as an
+   explicit dev override.
+4. Jobs inbox loads task data.
+5. Trip screen can fetch active task state.
+6. Earnings screen loads summary data.
+7. Platform presence screen loads and shows connected platforms.
+8. Revoked bindings fail refresh and return the app to the provisioning form.
+9. App can reach the configured API base without using an IAP login wall.
 
 ## Current Non-Goals
 
@@ -220,5 +227,5 @@ This runbook does not yet cover:
 - Push notification certificates
 - MDM distribution
 - Production mobile release sign-off
-- Real backend device registration / token handoff (design above, not yet
-  implemented)
+- Admin UI / operational runbook for issuing or revoking driver registration
+  codes

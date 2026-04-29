@@ -20,11 +20,13 @@ export interface JwtIdentityPayload {
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];
+  driverBindingId?: string | null;
+  driverDeviceId?: string | null;
 }
 
 type JwtExpiresIn = Extract<NonNullable<jwt.SignOptions["expiresIn"]>, string>;
 
-type JwtSignIdentity =
+type JwtSignIdentityBase =
   | Pick<
       BootstrapRequestIdentity,
       | "authMode"
@@ -41,6 +43,11 @@ type JwtSignIdentity =
       | "requestId"
     >
   | IdentityContext;
+
+type JwtSignIdentity = JwtSignIdentityBase & {
+  driverBindingId?: string | null;
+  driverDeviceId?: string | null;
+};
 
 const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
 const SERVICE_EXPIRES_IN: JwtExpiresIn = "1h";
@@ -110,6 +117,8 @@ export class JwtAuthService {
       roleFamilies: identity.roleFamilies,
       roles: identity.roles,
       scopes: identity.scopes,
+      driverBindingId: identity.driverBindingId ?? null,
+      driverDeviceId: identity.driverDeviceId ?? null,
     };
     const expiresIn =
       opts?.expiresIn ??

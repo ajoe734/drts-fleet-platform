@@ -7,6 +7,7 @@ import {
 import { Reflector } from "@nestjs/core";
 
 import { ApiRequestError } from "../api-envelope";
+import { DriverDeviceSessionService } from "../../modules/auth/driver-device-session.service";
 import {
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
@@ -18,7 +19,7 @@ import type {
 } from "./auth.types";
 import { extractBootstrapRequestIdentity } from "./auth.extractor";
 import { resolveRouteAuthPolicy } from "./auth.policy";
-import { JwtAuthService } from "./jwt-auth.service";
+import { JwtAuthService, type JwtIdentityPayload } from "./jwt-auth.service";
 
 function asHeaderRecord(
   headers: unknown,
@@ -103,6 +104,8 @@ export class BootstrapAuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     @Optional() private readonly jwtAuthService?: JwtAuthService,
+    @Optional()
+    private readonly driverDeviceSessionService?: DriverDeviceSessionService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -128,6 +131,7 @@ export class BootstrapAuthGuard implements CanActivate {
       if (token) {
         const payload = this.jwtAuthService.verify(token);
         if (payload) {
+          this.assertDriverBindingActive(payload, requestUrl);
           request.identity = this.jwtAuthService.toRequestIdentity(payload);
           return true;
         }
@@ -217,6 +221,7 @@ export class BootstrapAuthGuard implements CanActivate {
       if (token) {
         const payload = this.jwtAuthService.verify(token);
         if (payload) {
+          this.assertDriverBindingActive(payload, requestUrl);
           request.identity = this.jwtAuthService.toRequestIdentity(payload);
           return;
         }
@@ -287,6 +292,40 @@ export class BootstrapAuthGuard implements CanActivate {
         method: request.method ?? "GET",
         requiredScopes,
         grantedScopes: identity.scopes,
+      },
+    );
+  }
+
+  private assertDriverBindingActive(
+    payload: JwtIdentityPayload,
+    route: string,
+  ) {
+    if (
+      payload.actorType !== "driver_user" ||
+      !this.driverDeviceSessionService
+    ) {
+      return;
+    }
+
+    if (
+      this.driverDeviceSessionService.isBindingActive(
+        payload.driverBindingId,
+        payload.driverDeviceId,
+        payload.sub,
+      )
+    ) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      401,
+      "DRIVER_DEVICE_SESSION_INVALID",
+      "Driver device session is invalid, revoked, or no longer bound to this device.",
+      {
+        route,
+        bindingId: payload.driverBindingId ?? null,
+        deviceId: payload.driverDeviceId ?? null,
+        actorId: payload.sub,
       },
     );
   }

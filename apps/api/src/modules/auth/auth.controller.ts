@@ -3,9 +3,13 @@ import { Throttle } from "@nestjs/throttler";
 
 import type {
   CreatePartnerBootstrapSessionCommand,
+  DriverDeviceProvisioningSession,
   CreateTenantBootstrapSessionCommand,
   IdentityContext,
   PartnerBootstrapSession,
+  RefreshDriverDeviceSessionCommand,
+  RegisterDriverDeviceCommand,
+  RevokeDriverDeviceBindingCommand,
   TenantBootstrapSession,
   TenantPortalProfile,
   TenantRoleCatalogRecord,
@@ -23,6 +27,9 @@ import { validateInternalKey } from "../../common/auth/internal-key.middleware";
 import { extractBootstrapRequestIdentity } from "../../common/auth/auth.extractor";
 import type { AuthBootstrapHeaders } from "../../common/auth/auth.types";
 import { OPEN_ROUTE_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import type { BootstrapRequestIdentity } from "../../common/auth";
+import { CurrentIdentity } from "../../common/auth";
+import { DriverDeviceSessionService } from "./driver-device-session.service";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 
 interface TokenRequest {
@@ -46,6 +53,7 @@ export class AuthController {
   constructor(
     private readonly jwtAuthService: JwtAuthService,
     private readonly tenantPartnerService: TenantPartnerService,
+    private readonly driverDeviceSessionService: DriverDeviceSessionService,
   ) {}
 
   @Post("token")
@@ -75,6 +83,47 @@ export class AuthController {
       identity.actorType === "system" ? "1h" : "8h";
     const token = this.signJwt(identity, expiresIn);
     return { token, expiresIn };
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("driver/device/register")
+  issueDriverDeviceSession(
+    @Body() command: RegisterDriverDeviceCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const session = this.driverDeviceSessionService.register(command);
+    return toApiSuccessEnvelope<DriverDeviceProvisioningSession>(
+      session,
+      requestId,
+    );
+  }
+
+  @OpenRoute()
+  @Throttle(OPEN_ROUTE_RATE_LIMIT)
+  @Post("driver/device/refresh")
+  refreshDriverDeviceSession(
+    @Body() command: RefreshDriverDeviceSessionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const session = this.driverDeviceSessionService.refresh(command);
+    return toApiSuccessEnvelope<DriverDeviceProvisioningSession>(
+      session,
+      requestId,
+    );
+  }
+
+  @Post("driver/device/revoke")
+  revokeDriverDeviceSession(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: RevokeDriverDeviceBindingCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const result = this.driverDeviceSessionService.revoke(
+      command,
+      identity?.actorId,
+    );
+    return toApiSuccessEnvelope(result, requestId);
   }
 
   @OpenRoute()

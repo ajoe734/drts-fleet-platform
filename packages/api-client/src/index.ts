@@ -45,6 +45,7 @@ import type {
   DispatchTraceLogRecord,
   DriverAcceptTaskCommand,
   DriverArrivedPickupCommand,
+  DriverDeviceProvisioningSession,
   DriverEtaResponse,
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
@@ -92,12 +93,15 @@ import type {
   PublishPublicInfoVersionCommand,
   PublicInfoVersionRecord,
   QuoteCallEtaCommand,
+  RefreshDriverDeviceSessionCommand,
   ReimbursementBatchRecord,
+  RegisterDriverDeviceCommand,
   ReopenComplaintCaseCommand,
   ReportJobAccepted,
   ReportJobDetailRecord,
   ReportJobRecord,
   ResolveComplaintCaseCommand,
+  RevokeDriverDeviceBindingCommand,
   RotateTenantApiKeyCommand,
   SetPlatformMaintenanceModeCommand,
   SetPlatformOfflineCommand,
@@ -1307,6 +1311,41 @@ export class ApiClient {
       body: command,
     });
   }
+
+  async registerDriverDevice(
+    command: RegisterDriverDeviceCommand,
+  ): Promise<DriverDeviceProvisioningSession> {
+    return this.post<DriverDeviceProvisioningSession>(
+      "/api/auth/driver/device/register",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async refreshDriverDeviceSession(
+    command: RefreshDriverDeviceSessionCommand,
+  ): Promise<DriverDeviceProvisioningSession> {
+    return this.post<DriverDeviceProvisioningSession>(
+      "/api/auth/driver/device/refresh",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async revokeDriverDeviceBinding(
+    command: RevokeDriverDeviceBindingCommand,
+  ): Promise<{
+    bindingId: string;
+    deviceId: string;
+    driverId: string;
+    revokedAt: string;
+  }> {
+    return this.post("/api/auth/driver/device/revoke", {
+      body: command,
+    });
+  }
 }
 
 /**
@@ -1351,6 +1390,22 @@ export function createDriverClient(
       "x-realm": "driver",
     },
   });
+}
+
+export function createDriverBearerClient(
+  baseUrl: string,
+  accessToken: string,
+): ApiClient {
+  return new ApiClient({
+    baseUrl,
+    defaultHeaders: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+}
+
+export function createPublicClient(baseUrl: string): ApiClient {
+  return new ApiClient({ baseUrl });
 }
 
 export function createPlatformAdminClient(
