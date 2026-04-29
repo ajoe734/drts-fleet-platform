@@ -13,11 +13,13 @@ import type {
   ActivateInsurancePolicyCommand,
   ActivateVehicleContractCommand,
   ApproveExclusivityCommand,
+  CreateDriverMasterCommand,
   CreateInsurancePolicyCommand,
   CreateVehicleContractCommand,
   DriverLocationHeartbeatCommand,
   RegulatoryRegistrySummary,
   SubmitExclusivityReviewCommand,
+  UpdateDriverMasterLifecycleCommand,
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
 } from "@drts/contracts";
@@ -92,6 +94,17 @@ export class RegulatoryRegistryController {
     );
   }
 
+  @Post("drivers")
+  createDriver(
+    @Body() command: CreateDriverMasterCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryRegistryService.createDriver(command, requestId),
+      requestId,
+    );
+  }
+
   @Post("driver-location")
   async recordDriverLocation(
     @Body() command: DriverLocationHeartbeatCommand,
@@ -128,6 +141,22 @@ export class RegulatoryRegistryController {
   ) {
     return toApiSuccessEnvelope(
       this.regulatoryRegistryService.updateDriverWorkState(driverId, command),
+      requestId,
+    );
+  }
+
+  @Post("drivers/:driverId/lifecycle")
+  updateDriverLifecycle(
+    @Param("driverId") driverId: string,
+    @Body() command: UpdateDriverMasterLifecycleCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryRegistryService.updateDriverLifecycle(
+        driverId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }

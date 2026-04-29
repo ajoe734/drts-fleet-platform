@@ -2,6 +2,8 @@ import { HttpStatus } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 
 function createService() {
@@ -9,6 +11,10 @@ function createService() {
     publishDriverLocationUpdated: vi.fn(),
     publishSupplyLifecycleUpdated: vi.fn(),
   };
+  const auditNotificationService = new AuditNotificationService();
+  const driverProfileService = new DriverProfileService(
+    auditNotificationService,
+  );
   const regulatoryRegistryRepository = {
     isEnabled: vi.fn(() => false),
     persistChanges: vi.fn().mockResolvedValue(undefined),
@@ -17,11 +23,15 @@ function createService() {
 
   const service = new RegulatoryRegistryService(
     opsDispatchEventsService as never,
+    auditNotificationService,
+    driverProfileService,
     regulatoryRegistryRepository as never,
   );
 
   return {
     service,
+    auditNotificationService,
+    driverProfileService,
     opsDispatchEventsService,
     regulatoryRegistryRepository,
   };
@@ -244,5 +254,98 @@ describe("RegulatoryRegistryService", () => {
     expect(vehicleAfterRead?.supplyLifecycle.dispatch.blockedReasons).toEqual([
       "insurance_expired",
     ]);
+  });
+
+  it("creates a driver master with linked profile and lifecycle audit metadata", () => {
+    const { service, auditNotificationService } = createService();
+
+    const created = service.createDriver(
+      {
+        name: "Driver Admin Created",
+        phone: "+886-912-555-666",
+        email: "driver.created@example.com",
+        licensesValid: true,
+      },
+      "req-driver-create-001",
+    );
+
+    expect(created).toMatchObject({
+      name: "Driver Admin Created",
+      lifecycleStatus: "draft",
+      workState: "offline",
+      licensesValid: true,
+      dispatchEligible: false,
+      profileUpdatedAt: expect.any(String),
+      eligibilityBlockedReasons: expect.arrayContaining(["lifecycle_draft"]),
+    });
+
+    const auditLog = auditNotificationService
+      .listAuditLogs()
+      .find((entry) => entry.actionName === "create_driver_master");
+    expect(auditLog?.resourceId).toBe(created.driverId);
+  });
+
+  it("removes suspended and retired drivers from dispatch eligibility", () => {
+    const { service } = createService();
+
+    expect(service.getDriverAvailability("drv-demo-001", "standard_taxi")).toBe(
+      true,
+    );
+
+    const suspended = service.updateDriverLifecycle("drv-demo-001", {
+      lifecycleStatus: "suspended",
+      reason: "manual compliance hold",
+    });
+    expect(suspended.dispatchEligible).toBe(false);
+    expect(suspended.eligibilityBlockedReasons).toContain(
+      "lifecycle_suspended",
+    );
+    expect(service.getDriverAvailability("drv-demo-001", "standard_taxi")).toBe(
+      false,
+    );
+
+    const reactivated = service.updateDriverLifecycle("drv-demo-001", {
+      lifecycleStatus: "active",
+    });
+    expect(reactivated.dispatchEligible).toBe(true);
+
+    const retired = service.updateDriverLifecycle("drv-demo-001", {
+      lifecycleStatus: "retired",
+      reason: "driver retired",
+    });
+    expect(retired.dispatchEligible).toBe(false);
+    expect(retired.eligibilityBlockedReasons).toContain("lifecycle_retired");
+  });
+
+  it("does not fabricate profile metadata for drivers without a stored profile", () => {
+    const { service } = createService();
+
+    (service as { drivers: Array<Record<string, unknown>> }).drivers.unshift({
+      driverId: "drv-no-profile-001",
+      name: "No Profile Driver",
+      supportedServiceBuckets: ["standard_taxi"],
+      workState: "offline",
+      licensesValid: true,
+      lifecycleStatus: "draft",
+      eligibilityBlockedReasons: [],
+      dispatchEligible: false,
+      createdAt: "2026-04-29T00:00:00.000Z",
+      updatedAt: "2026-04-29T00:00:00.000Z",
+      activatedAt: null,
+      suspendedAt: null,
+      retiredAt: null,
+      profileUpdatedAt: null,
+      deviceBindings: [],
+    });
+
+    const listed = service
+      .listDrivers()
+      .find((candidate) => candidate.driverId === "drv-no-profile-001");
+
+    expect(listed).toMatchObject({
+      profileUpdatedAt: null,
+      deviceBindings: [],
+      eligibilityBlockedReasons: ["lifecycle_draft", "work_state_offline"],
+    });
   });
 });

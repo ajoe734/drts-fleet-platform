@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 
 import type {
+  DriverDeviceBindingSummary,
   DriverDeviceProvisioningSession,
   RefreshDriverDeviceSessionCommand,
   RegisterDriverDeviceCommand,
@@ -98,6 +99,10 @@ export class DriverDeviceSessionService {
 
     this.bindingsById.set(binding.bindingId, binding);
     this.activeBindingIdsByDeviceId.set(deviceId, binding.bindingId);
+    this.driverProfileService.recordDeviceBinding(
+      driverId,
+      this.toBindingSummary(binding),
+    );
 
     return this.issueSession(binding);
   }
@@ -139,6 +144,11 @@ export class DriverDeviceSessionService {
     binding.refreshToken = createOpaqueToken("drvrefresh");
     binding.refreshedAt = new Date().toISOString();
     this.bindingsById.set(binding.bindingId, binding);
+    this.driverProfileService.recordDeviceBindingRefresh(
+      binding.driverId,
+      binding.bindingId,
+      binding.refreshedAt,
+    );
 
     return this.issueSession(binding);
   }
@@ -182,6 +192,11 @@ export class DriverDeviceSessionService {
     ) {
       this.activeBindingIdsByDeviceId.delete(binding.deviceId);
     }
+    this.driverProfileService.recordDeviceBindingRevocation(
+      binding.driverId,
+      binding.bindingId,
+      revokedAt,
+    );
 
     return {
       bindingId: binding.bindingId,
@@ -250,6 +265,25 @@ export class DriverDeviceSessionService {
     existing.refreshedAt = existing.revokedAt;
     this.bindingsById.set(existing.bindingId, existing);
     this.activeBindingIdsByDeviceId.delete(deviceId);
+    this.driverProfileService.recordDeviceBindingRevocation(
+      existing.driverId,
+      existing.bindingId,
+      existing.revokedAt,
+    );
+  }
+
+  private toBindingSummary(
+    binding: DriverDeviceBindingRecord,
+  ): DriverDeviceBindingSummary {
+    return {
+      bindingId: binding.bindingId,
+      deviceId: binding.deviceId,
+      deviceLabel: binding.deviceLabel,
+      status: binding.active ? "active" : "revoked",
+      issuedAt: binding.issuedAt,
+      refreshedAt: binding.refreshedAt,
+      revokedAt: binding.revokedAt,
+    };
   }
 
   private issueSession(

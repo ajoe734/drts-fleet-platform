@@ -13,9 +13,10 @@ import {
   getPlatformLabel,
 } from "@/lib/localized-labels";
 import type {
-  VehicleRegistryRecord,
+  CreateDriverMasterCommand,
   DriverRegistryRecord,
   VehicleContractRecord,
+  VehicleRegistryRecord,
 } from "@drts/contracts";
 
 function badgeClassForLifecycle(status: string) {
@@ -24,11 +25,23 @@ function badgeClassForLifecycle(status: string) {
     status === "expired" ||
     status === "terminated" ||
     status === "revoked" ||
-    status === "rejected"
+    status === "rejected" ||
+    status === "retired" ||
+    status === "suspended"
   ) {
     return "admin-badge--warning";
   }
   return "admin-badge--neutral";
+}
+
+function createInitialDriverForm(): CreateDriverMasterCommand {
+  return {
+    name: "",
+    phone: "",
+    email: "",
+    licensesValid: false,
+    supportedServiceBuckets: ["standard_taxi"],
+  };
 }
 
 export default function FleetPage() {
@@ -42,6 +55,11 @@ export default function FleetPage() {
   const [activeTab, setActiveTab] = useState<
     "vehicles" | "drivers" | "contracts"
   >("vehicles");
+  const [driverForm, setDriverForm] = useState<CreateDriverMasterCommand>(
+    createInitialDriverForm(),
+  );
+  const [creatingDriver, setCreatingDriver] = useState(false);
+  const [driverActionId, setDriverActionId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -65,6 +83,50 @@ export default function FleetPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const submitDriver = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      setCreatingDriver(true);
+      setError(null);
+      try {
+        await client.createDriverMaster({
+          ...driverForm,
+          name: driverForm.name.trim(),
+          phone: driverForm.phone?.trim() || null,
+          email: driverForm.email?.trim() || null,
+        });
+        setDriverForm(createInitialDriverForm());
+        await loadData();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setCreatingDriver(false);
+      }
+    },
+    [client, driverForm, loadData],
+  );
+
+  const runDriverLifecycleAction = useCallback(
+    async (
+      driverId: string,
+      lifecycleStatus: DriverRegistryRecord["lifecycleStatus"],
+    ) => {
+      setDriverActionId(`${driverId}:${lifecycleStatus}`);
+      setError(null);
+      try {
+        await client.updateDriverMasterLifecycle(driverId, {
+          lifecycleStatus,
+        });
+        await loadData();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setDriverActionId(null);
+      }
+    },
+    [client, loadData],
+  );
 
   if (loading) return <div className="admin-empty">{t("fleet.loading")}</div>;
 
@@ -117,6 +179,90 @@ export default function FleetPage() {
           {t("common.refresh")}
         </button>
       </div>
+
+      {activeTab === "drivers" && (
+        <div className="admin-card" style={{ marginBottom: 16 }}>
+          <form
+            onSubmit={submitDriver}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: 12,
+              alignItems: "end",
+            }}
+          >
+            <label>
+              <div className="admin-field-label">{t("fleet.col.name")}</div>
+              <input
+                className="admin-input"
+                value={driverForm.name}
+                onChange={(event) =>
+                  setDriverForm((current) => ({
+                    ...current,
+                    name: event.target.value,
+                  }))
+                }
+                required
+              />
+            </label>
+            <label>
+              <div className="admin-field-label">{t("fleet.form.phone")}</div>
+              <input
+                className="admin-input"
+                value={driverForm.phone ?? ""}
+                onChange={(event) =>
+                  setDriverForm((current) => ({
+                    ...current,
+                    phone: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label>
+              <div className="admin-field-label">{t("fleet.form.email")}</div>
+              <input
+                className="admin-input"
+                value={driverForm.email ?? ""}
+                onChange={(event) =>
+                  setDriverForm((current) => ({
+                    ...current,
+                    email: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                minHeight: 40,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={driverForm.licensesValid ?? false}
+                onChange={(event) =>
+                  setDriverForm((current) => ({
+                    ...current,
+                    licensesValid: event.target.checked,
+                  }))
+                }
+              />
+              <span>{t("fleet.form.licensesValid")}</span>
+            </label>
+            <button
+              className="admin-btn"
+              type="submit"
+              disabled={creatingDriver}
+            >
+              {creatingDriver
+                ? t("fleet.creatingDriver")
+                : t("fleet.createDriver")}
+            </button>
+          </form>
+        </div>
+      )}
 
       <div className="admin-card" style={{ overflowX: "auto" }}>
         {activeTab === "vehicles" &&
@@ -237,8 +383,13 @@ export default function FleetPage() {
                 <tr>
                   <th>{t("fleet.col.driverId")}</th>
                   <th>{t("fleet.col.name")}</th>
+                  <th>{t("fleet.col.lifecycle")}</th>
                   <th>{t("fleet.col.workState")}</th>
                   <th>{t("fleet.col.license")}</th>
+                  <th>{t("fleet.col.profile")}</th>
+                  <th>{t("fleet.col.deviceBindings")}</th>
+                  <th>{t("fleet.col.blockedBy")}</th>
+                  <th>{t("fleet.col.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -247,7 +398,26 @@ export default function FleetPage() {
                     <td style={{ fontFamily: "monospace", fontSize: 12 }}>
                       {d.driverId}
                     </td>
-                    <td>{d.name || "—"}</td>
+                    <td>
+                      <div>{d.name || "—"}</div>
+                      <div
+                        style={{
+                          color: "var(--admin-text-muted)",
+                          fontSize: 12,
+                        }}
+                      >
+                        {d.dispatchEligible
+                          ? t("fleet.driverDispatchEligible")
+                          : t("fleet.driverNotEligible")}
+                      </div>
+                    </td>
+                    <td>
+                      <span
+                        className={`admin-badge ${badgeClassForLifecycle(d.lifecycleStatus)}`}
+                      >
+                        {formatPlatformCodeLabel(locale, d.lifecycleStatus)}
+                      </span>
+                    </td>
                     <td>
                       <span
                         className={`admin-badge ${
@@ -271,6 +441,95 @@ export default function FleetPage() {
                           ? t("fleet.licensesValid")
                           : t("fleet.licensesExpired")}
                       </span>
+                    </td>
+                    <td>
+                      <div>
+                        {d.profileUpdatedAt
+                          ? t("fleet.profileReady")
+                          : t("fleet.profileMissing")}
+                      </div>
+                      <div
+                        style={{
+                          color: "var(--admin-text-muted)",
+                          fontSize: 12,
+                        }}
+                      >
+                        {formatDateTime(d.profileUpdatedAt || "")}
+                      </div>
+                    </td>
+                    <td style={{ minWidth: 220 }}>
+                      {d.deviceBindings.length > 0 ? (
+                        d.deviceBindings.map((binding) => (
+                          <div
+                            key={binding.bindingId}
+                            style={{ marginBottom: 8 }}
+                          >
+                            <div
+                              style={{ fontFamily: "monospace", fontSize: 12 }}
+                            >
+                              {binding.deviceId}
+                            </div>
+                            <div
+                              style={{
+                                color: "var(--admin-text-muted)",
+                                fontSize: 12,
+                              }}
+                            >
+                              {binding.deviceLabel || binding.status}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <span>{t("fleet.noDeviceBindings")}</span>
+                      )}
+                    </td>
+                    <td style={{ minWidth: 180 }}>
+                      {d.eligibilityBlockedReasons.length > 0 ? (
+                        d.eligibilityBlockedReasons.map((reason) => (
+                          <div key={reason}>
+                            {formatPlatformCodeLabel(locale, reason)}
+                          </div>
+                        ))
+                      ) : (
+                        <span className="admin-badge admin-badge--success">
+                          {t("fleet.noneBlocked")}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ minWidth: 220 }}>
+                      <div
+                        style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+                      >
+                        {(["active", "suspended", "retired"] as const).map(
+                          (nextStatus) => {
+                            const labelKey =
+                              nextStatus === "active"
+                                ? "fleet.activateDriver"
+                                : nextStatus === "suspended"
+                                  ? "fleet.suspendDriver"
+                                  : "fleet.retireDriver";
+                            const busy =
+                              driverActionId === `${d.driverId}:${nextStatus}`;
+                            return (
+                              <button
+                                key={nextStatus}
+                                className="admin-btn admin-btn--secondary"
+                                disabled={
+                                  busy || d.lifecycleStatus === nextStatus
+                                }
+                                onClick={() =>
+                                  runDriverLifecycleAction(
+                                    d.driverId,
+                                    nextStatus,
+                                  )
+                                }
+                              >
+                                {busy ? t("fleet.updatingDriver") : t(labelKey)}
+                              </button>
+                            );
+                          },
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

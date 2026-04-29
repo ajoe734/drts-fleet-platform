@@ -22,6 +22,7 @@ import type {
   ComplaintExportViewRecord,
   ComplaintTimelineEntry,
   CompleteCallbackTaskCommand,
+  CreateDriverMasterCommand,
   CreatePartnerBootstrapSessionCommand,
   CreateTenantBootstrapSessionCommand,
   CreateDriverProfileCommand,
@@ -117,6 +118,7 @@ import type {
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
   TransferCallToComplaintCommand,
+  UpdateDriverMasterLifecycleCommand,
   UpdateDriverProfileCommand,
   UpdateIncidentCommand,
   UpdateMaintenanceRecordCommand,
@@ -1204,6 +1206,26 @@ export class ApiClient {
   async listDrivers(): Promise<DriverRegistryRecord[]> {
     return this.getList<DriverRegistryRecord>(
       "/api/regulatory-registry/drivers",
+    );
+  }
+
+  async createDriverMaster(
+    command: CreateDriverMasterCommand,
+  ): Promise<DriverRegistryRecord> {
+    return this.post<DriverRegistryRecord>("/api/regulatory-registry/drivers", {
+      body: command,
+    });
+  }
+
+  async updateDriverMasterLifecycle(
+    driverId: string,
+    command: UpdateDriverMasterLifecycleCommand,
+  ): Promise<DriverRegistryRecord> {
+    return this.post<DriverRegistryRecord>(
+      `/api/regulatory-registry/drivers/${encodeURIComponent(driverId)}/lifecycle`,
+      {
+        body: command,
+      },
     );
   }
 

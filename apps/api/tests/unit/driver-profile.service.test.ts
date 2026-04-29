@@ -55,4 +55,46 @@ describe("DriverProfileService sensitive-data governance", () => {
       },
     });
   });
+
+  it("tracks device binding links on the driver profile", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new DriverProfileService(auditNotificationService);
+
+    service.recordDeviceBinding("drv-demo-001", {
+      bindingId: "drvbind_demo_001",
+      deviceId: "ios-demo-001",
+      deviceLabel: "iPhone 17",
+      status: "active",
+      issuedAt: "2026-04-29T00:00:00.000Z",
+      refreshedAt: "2026-04-29T00:00:00.000Z",
+      revokedAt: null,
+    });
+
+    service.recordDeviceBindingRevocation(
+      "drv-demo-001",
+      "drvbind_demo_001",
+      "2026-04-29T01:00:00.000Z",
+    );
+
+    const profile = service.getProfileForDriver("drv-demo-001");
+    expect(profile.deviceBindings).toEqual([
+      expect.objectContaining({
+        bindingId: "drvbind_demo_001",
+        status: "revoked",
+        deviceId: "ios-demo-001",
+      }),
+    ]);
+  });
+
+  it("returns null for missing persisted driver profiles", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new DriverProfileService(auditNotificationService);
+
+    expect(service.findProfileForDriver("drv-missing-001")).toBeNull();
+    expect(service.getProfileForDriver("drv-missing-001")).toMatchObject({
+      driverId: "drv-missing-001",
+      name: "",
+      deviceBindings: [],
+    });
+  });
 });

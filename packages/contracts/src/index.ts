@@ -240,6 +240,16 @@ export interface DriverDeviceProvisioningSession {
   identity: IdentityContext;
 }
 
+export interface DriverDeviceBindingSummary {
+  bindingId: string;
+  deviceId: string;
+  deviceLabel: string | null;
+  status: "active" | "revoked";
+  issuedAt: string;
+  refreshedAt: string;
+  revokedAt: string | null;
+}
+
 export interface TenantPartnerSummary {
   supportedRoots: Array<"tenant" | "partner" | "site" | "call_point">;
   sourceOfTruth: "tenant_partner_service" | "foundation_bootstrap_placeholder";
@@ -1196,6 +1206,16 @@ export interface DriverRegistryRecord {
   supportedServiceBuckets: Phase1ServiceBucket[];
   workState: DriverWorkState;
   licensesValid: boolean;
+  lifecycleStatus: DriverMasterLifecycleStatus;
+  eligibilityBlockedReasons: DriverEligibilityBlockReason[];
+  dispatchEligible: boolean;
+  createdAt: string;
+  updatedAt: string;
+  activatedAt: string | null;
+  suspendedAt: string | null;
+  retiredAt: string | null;
+  profileUpdatedAt: string | null;
+  deviceBindings: DriverDeviceBindingSummary[];
 }
 
 export interface UpdateVehicleComplianceCommand {
@@ -1206,6 +1226,50 @@ export interface UpdateVehicleComplianceCommand {
 
 export interface UpdateDriverWorkStateCommand {
   workState: DriverWorkState;
+}
+
+export const DRIVER_MASTER_LIFECYCLE_STATUSES = [
+  "draft",
+  "active",
+  "suspended",
+  "retired",
+] as const;
+export type DriverMasterLifecycleStatus =
+  (typeof DRIVER_MASTER_LIFECYCLE_STATUSES)[number];
+
+export const DRIVER_ELIGIBILITY_BLOCK_REASONS = [
+  "lifecycle_draft",
+  "lifecycle_suspended",
+  "lifecycle_retired",
+  "licenses_invalid",
+  "work_state_reserved",
+  "work_state_enroute",
+  "work_state_arrived",
+  "work_state_on_trip",
+  "work_state_paused",
+  "work_state_suspended",
+  "work_state_incident_hold",
+  "work_state_offline",
+] as const;
+export type DriverEligibilityBlockReason =
+  (typeof DRIVER_ELIGIBILITY_BLOCK_REASONS)[number];
+
+export interface CreateDriverMasterCommand {
+  driverId?: string;
+  name: string;
+  phone?: string | null;
+  email?: string | null;
+  photoUrl?: string | null;
+  emergencyContact?: DriverProfileEmergencyContact | null;
+  bankAccount?: DriverProfileBankAccount | null;
+  supportedServiceBuckets?: Phase1ServiceBucket[];
+  licensesValid?: boolean;
+  lifecycleStatus?: DriverMasterLifecycleStatus;
+}
+
+export interface UpdateDriverMasterLifecycleCommand {
+  lifecycleStatus: DriverMasterLifecycleStatus;
+  reason?: string | null;
 }
 
 export interface VehicleContractRecord {
@@ -2344,6 +2408,7 @@ export interface DriverProfileRecord {
   photoUrl: string | null;
   emergencyContact: DriverProfileEmergencyContact | null;
   bankAccount: DriverProfileBankAccount | null;
+  deviceBindings: DriverDeviceBindingSummary[];
   updatedAt: string;
 }
 

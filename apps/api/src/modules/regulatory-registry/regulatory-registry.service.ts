@@ -6,13 +6,18 @@ import type {
   ActivateInsurancePolicyCommand,
   ActivateVehicleContractCommand,
   ApproveExclusivityCommand,
+  AuditLogRecord,
+  CreateDriverMasterCommand,
   CreateInsurancePolicyCommand,
+  CreateDriverProfileCommand,
   CreateVehicleContractCommand,
   DispatchExclusivityLifecycleStatus,
   DispatchExclusivityRecord,
+  DriverEligibilityBlockReason,
   DriverEtaResponse,
   DriverLocationHeartbeatCommand,
   DriverLocationSnapshot,
+  DriverMasterLifecycleStatus,
   DriverRegistryRecord,
   InsurancePolicyLifecycleStatus,
   InsurancePolicyRecord,
@@ -20,6 +25,7 @@ import type {
   SupplyDispatchBlockReason,
   SupplyLifecycleTraceRecord,
   SubmitExclusivityReviewCommand,
+  UpdateDriverMasterLifecycleCommand,
   UpdateDriverWorkStateCommand,
   UpdateVehicleComplianceCommand,
   VehicleContractLifecycleStatus,
@@ -30,6 +36,8 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
+import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import {
   RegulatoryRegistryRepository,
   type PersistRegulatoryRegistryChanges,
@@ -44,6 +52,46 @@ type EtaDestination = {
   lat: number;
   lng: number;
 };
+
+function createSeedDriver(
+  input: Pick<
+    DriverRegistryRecord,
+    | "driverId"
+    | "name"
+    | "supportedServiceBuckets"
+    | "workState"
+    | "licensesValid"
+  >,
+): DriverRegistryRecord {
+  const lifecycleStatus: DriverMasterLifecycleStatus =
+    input.workState === "suspended" ? "suspended" : "active";
+  const eligibilityBlockedReasons: DriverEligibilityBlockReason[] = [];
+  if (lifecycleStatus !== "active") {
+    eligibilityBlockedReasons.push("lifecycle_suspended");
+  }
+  if (!input.licensesValid) {
+    eligibilityBlockedReasons.push("licenses_invalid");
+  }
+  if (input.workState !== "available") {
+    eligibilityBlockedReasons.push(
+      `work_state_${input.workState}` as DriverEligibilityBlockReason,
+    );
+  }
+
+  return {
+    ...input,
+    lifecycleStatus,
+    eligibilityBlockedReasons,
+    dispatchEligible: eligibilityBlockedReasons.length === 0,
+    createdAt: SEED_TIMESTAMP,
+    updatedAt: SEED_TIMESTAMP,
+    activatedAt: lifecycleStatus === "active" ? SEED_TIMESTAMP : null,
+    suspendedAt: lifecycleStatus === "suspended" ? SEED_TIMESTAMP : null,
+    retiredAt: null,
+    profileUpdatedAt: null,
+    deviceBindings: [],
+  };
+}
 
 function createEmptySupplyLifecycle(
   evaluatedAt: string,
@@ -120,27 +168,27 @@ const VEHICLE_SEED: VehicleRegistryRecord[] = [
 ];
 
 const DRIVER_SEED: DriverRegistryRecord[] = [
-  {
+  createSeedDriver({
     driverId: "drv-demo-001",
     name: "Driver Demo One",
     supportedServiceBuckets: ["standard_taxi", "business_dispatch"],
     workState: "available",
     licensesValid: true,
-  },
-  {
+  }),
+  createSeedDriver({
     driverId: "drv-demo-002",
     name: "Driver Demo Two",
     supportedServiceBuckets: ["standard_taxi"],
     workState: "offline",
     licensesValid: true,
-  },
-  {
+  }),
+  createSeedDriver({
     driverId: "drv-demo-003",
     name: "Driver Demo Three",
     supportedServiceBuckets: ["standard_taxi"],
     workState: "available",
     licensesValid: false,
-  },
+  }),
 ];
 
 const CONTRACT_SEED: VehicleContractRecord[] = [
@@ -263,6 +311,8 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
   constructor(
     private readonly opsDispatchEventsService: OpsDispatchEventsService,
+    private readonly auditNotificationService: AuditNotificationService,
+    private readonly driverProfileService: DriverProfileService,
     @Optional()
     private readonly regulatoryRegistryRepository?: RegulatoryRegistryRepository,
   ) {
@@ -361,7 +411,146 @@ export class RegulatoryRegistryService implements OnModuleInit {
   }
 
   listDrivers() {
-    return this.drivers.map((driver) => ({ ...driver }));
+    return this.drivers.map((driver) =>
+      this.cloneDriver(this.decorateDriver(driver)),
+    );
+  }
+
+  createDriver(command: CreateDriverMasterCommand, requestId?: string) {
+    const driverId = command.driverId?.trim() || `drv_${randomUUID()}`;
+    this.assertNonBlank(driverId, "driverId");
+    if (this.drivers.some((candidate) => candidate.driverId === driverId)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "DRIVER_ALREADY_EXISTS",
+        "A driver master record already exists for this driver.",
+        { driverId },
+      );
+    }
+
+    const lifecycleStatus = command.lifecycleStatus ?? "draft";
+    const now = new Date().toISOString();
+    const created = this.decorateDriver({
+      driverId,
+      name: command.name.trim(),
+      supportedServiceBuckets: command.supportedServiceBuckets?.length
+        ? [...command.supportedServiceBuckets]
+        : ["standard_taxi"],
+      workState: lifecycleStatus === "active" ? "available" : "offline",
+      licensesValid: command.licensesValid ?? false,
+      lifecycleStatus,
+      eligibilityBlockedReasons: [],
+      dispatchEligible: false,
+      createdAt: now,
+      updatedAt: now,
+      activatedAt: lifecycleStatus === "active" ? now : null,
+      suspendedAt: lifecycleStatus === "suspended" ? now : null,
+      retiredAt: lifecycleStatus === "retired" ? now : null,
+      profileUpdatedAt: null,
+      deviceBindings: [],
+    });
+
+    const profileCommand: CreateDriverProfileCommand = {
+      name: command.name,
+      ...(command.phone === undefined ? {} : { phone: command.phone }),
+      ...(command.email === undefined ? {} : { email: command.email }),
+      ...(command.photoUrl === undefined ? {} : { photoUrl: command.photoUrl }),
+      ...(command.emergencyContact === undefined
+        ? {}
+        : { emergencyContact: command.emergencyContact }),
+      ...(command.bankAccount === undefined
+        ? {}
+        : { bankAccount: command.bankAccount }),
+    };
+    const profile = this.driverProfileService.upsertAdminProfile(
+      driverId,
+      profileCommand,
+      requestId,
+    );
+    created.profileUpdatedAt = profile.updatedAt;
+    created.deviceBindings = profile.deviceBindings.map((binding) => ({
+      ...binding,
+    }));
+
+    this.drivers = [this.cloneDriver(created), ...this.drivers];
+    this.persistChanges(
+      { drivers: [this.cloneDriver(created)] },
+      "create_driver",
+    );
+    this.recordAudit(
+      {
+        actorId: "platform-admin",
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "regulatory-registry",
+        actionName: "create_driver_master",
+        resourceType: "driver_master",
+        resourceId: driverId,
+        newValuesSummary: this.buildDriverAuditSummary(created, null),
+      },
+      requestId,
+    );
+
+    return this.cloneDriver(created);
+  }
+
+  updateDriverLifecycle(
+    driverId: string,
+    command: UpdateDriverMasterLifecycleCommand,
+    requestId?: string,
+  ) {
+    const driver = this.requireDriver(driverId);
+    const previous = this.decorateDriver(driver);
+    const now = new Date().toISOString();
+
+    driver.lifecycleStatus = command.lifecycleStatus;
+    driver.updatedAt = now;
+    if (command.lifecycleStatus === "active") {
+      driver.activatedAt = now;
+      driver.suspendedAt = null;
+      driver.retiredAt = null;
+      if (driver.workState === "suspended" || driver.workState === "offline") {
+        driver.workState = "available";
+      }
+    } else if (command.lifecycleStatus === "suspended") {
+      driver.suspendedAt = now;
+      driver.retiredAt = null;
+      driver.workState = "suspended";
+    } else if (command.lifecycleStatus === "retired") {
+      driver.suspendedAt = null;
+      driver.retiredAt = now;
+      driver.workState = "offline";
+    } else {
+      driver.workState = "offline";
+      driver.activatedAt = null;
+      driver.suspendedAt = null;
+      driver.retiredAt = null;
+    }
+
+    const updated = this.decorateDriver(driver);
+    this.persistChanges(
+      { drivers: [this.cloneDriver(updated)] },
+      "update_driver_lifecycle",
+    );
+    this.recordAudit(
+      {
+        actorId: "platform-admin",
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "regulatory-registry",
+        actionName: "update_driver_master_lifecycle",
+        resourceType: "driver_master",
+        resourceId: driverId,
+        oldValuesSummary: this.buildDriverAuditSummary(previous, null),
+        newValuesSummary: this.buildDriverAuditSummary(
+          updated,
+          command.reason ?? null,
+        ),
+      },
+      requestId,
+    );
+
+    return this.cloneDriver(updated);
   }
 
   async recordDriverLocation(
@@ -843,13 +1032,15 @@ export class RegulatoryRegistryService implements OnModuleInit {
   ) {
     const driver = this.requireDriver(driverId);
     driver.workState = command.workState;
+    driver.updatedAt = new Date().toISOString();
+    const updated = this.decorateDriver(driver);
     this.persistChanges(
       {
-        drivers: [{ ...driver }],
+        drivers: [this.cloneDriver(updated)],
       },
       "update_driver_work_state",
     );
-    return { ...driver };
+    return this.cloneDriver(updated);
   }
 
   getEligibleCandidates(
@@ -871,20 +1062,20 @@ export class RegulatoryRegistryService implements OnModuleInit {
         if (!vehicle || !driver) {
           return null;
         }
+        const decoratedDriver = this.decorateDriver(driver);
         const eligibleVehicle =
           vehicle.supplyLifecycle.dispatch.eligible &&
           vehicle.supportedServiceBuckets.includes(serviceBucket);
         const eligibleDriver =
-          driver.licensesValid &&
-          driver.workState === "available" &&
-          driver.supportedServiceBuckets.includes(serviceBucket);
+          decoratedDriver.dispatchEligible &&
+          decoratedDriver.supportedServiceBuckets.includes(serviceBucket);
         if (!eligibleVehicle || !eligibleDriver) {
           return null;
         }
 
         const etaMinutes = this.resolveCandidateEta(
           pair,
-          driver.driverId,
+          decoratedDriver.driverId,
           destination ?? null,
         );
         if (etaMinutes === null) {
@@ -893,7 +1084,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
 
         return {
           vehicleId: vehicle.vehicleId,
-          driverId: driver.driverId,
+          driverId: decoratedDriver.driverId,
           operatingArea: vehicle.operatingArea,
           serviceBuckets: [...vehicle.supportedServiceBuckets],
           etaMinutes,
@@ -920,10 +1111,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
   }
 
   getDriverAvailability(driverId: string, serviceBucket: Phase1ServiceBucket) {
-    const driver = this.requireDriver(driverId);
+    const driver = this.decorateDriver(this.requireDriver(driverId));
     return (
-      driver.licensesValid &&
-      driver.workState === "available" &&
+      driver.dispatchEligible &&
       driver.supportedServiceBuckets.includes(serviceBucket)
     );
   }
@@ -1378,6 +1568,74 @@ export class RegulatoryRegistryService implements OnModuleInit {
     };
   }
 
+  private cloneDriver(driver: DriverRegistryRecord): DriverRegistryRecord {
+    return {
+      ...driver,
+      supportedServiceBuckets: [...driver.supportedServiceBuckets],
+      eligibilityBlockedReasons: [...driver.eligibilityBlockedReasons],
+      deviceBindings: driver.deviceBindings.map((binding) => ({ ...binding })),
+    };
+  }
+
+  private decorateDriver(driver: DriverRegistryRecord): DriverRegistryRecord {
+    const profile = this.driverProfileService.findProfileForDriver(
+      driver.driverId,
+    );
+    const eligibilityBlockedReasons =
+      this.computeDriverEligibilityBlockedReasons(driver);
+
+    return {
+      ...driver,
+      supportedServiceBuckets: [...driver.supportedServiceBuckets],
+      eligibilityBlockedReasons,
+      dispatchEligible: eligibilityBlockedReasons.length === 0,
+      profileUpdatedAt: profile?.updatedAt ?? null,
+      deviceBindings: profile
+        ? profile.deviceBindings.map((binding) => ({ ...binding }))
+        : [],
+    };
+  }
+
+  private computeDriverEligibilityBlockedReasons(
+    driver: DriverRegistryRecord,
+  ): DriverEligibilityBlockReason[] {
+    const blockedReasons: DriverEligibilityBlockReason[] = [];
+    if (driver.lifecycleStatus === "draft") {
+      blockedReasons.push("lifecycle_draft");
+    } else if (driver.lifecycleStatus === "suspended") {
+      blockedReasons.push("lifecycle_suspended");
+    } else if (driver.lifecycleStatus === "retired") {
+      blockedReasons.push("lifecycle_retired");
+    }
+    if (!driver.licensesValid) {
+      blockedReasons.push("licenses_invalid");
+    }
+    if (driver.workState !== "available") {
+      blockedReasons.push(
+        `work_state_${driver.workState}` as DriverEligibilityBlockReason,
+      );
+    }
+    return blockedReasons;
+  }
+
+  private buildDriverAuditSummary(
+    driver: DriverRegistryRecord,
+    reason: string | null,
+  ) {
+    return {
+      driverId: driver.driverId,
+      lifecycleStatus: driver.lifecycleStatus,
+      workState: driver.workState,
+      licensesValid: driver.licensesValid,
+      dispatchEligible: driver.dispatchEligible,
+      eligibilityBlockedReasons: [...driver.eligibilityBlockedReasons],
+      serviceBuckets: [...driver.supportedServiceBuckets],
+      deviceBindingCount: driver.deviceBindings.length,
+      reason,
+      updatedAt: driver.updatedAt,
+    };
+  }
+
   private cloneSupplyLifecycle(
     lifecycle: VehicleSupplyLifecycleRecord,
   ): VehicleSupplyLifecycleRecord {
@@ -1689,6 +1947,17 @@ export class RegulatoryRegistryService implements OnModuleInit {
           context,
         );
       });
+  }
+
+  private recordAudit(
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
+    requestId?: string,
+  ) {
+    const log = { ...input };
+    if (requestId) {
+      (log as { requestId?: string }).requestId = requestId;
+    }
+    this.auditNotificationService.recordAuditLog(log);
   }
 
   private calculateHaversineDistanceKm(

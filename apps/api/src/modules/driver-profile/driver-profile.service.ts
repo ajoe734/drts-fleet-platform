@@ -3,6 +3,7 @@ import { Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import type {
   AuditLogRecord,
   CreateDriverProfileCommand,
+  DriverDeviceBindingSummary,
   DriverProfileBankAccount,
   DriverProfileEmergencyContact,
   DriverProfileRecord,
@@ -40,6 +41,7 @@ const DRIVER_PROFILE_SEED: DriverProfileRecord[] = [
       accountName: "Driver Demo One",
       accountNumberMasked: "****0001",
     },
+    deviceBindings: [],
     updatedAt: "2026-04-17T00:00:00.000Z",
   },
   {
@@ -50,6 +52,7 @@ const DRIVER_PROFILE_SEED: DriverProfileRecord[] = [
     photoUrl: null,
     emergencyContact: null,
     bankAccount: null,
+    deviceBindings: [],
     updatedAt: "2026-04-17T00:00:00.000Z",
   },
   {
@@ -60,6 +63,7 @@ const DRIVER_PROFILE_SEED: DriverProfileRecord[] = [
     photoUrl: null,
     emergencyContact: null,
     bankAccount: null,
+    deviceBindings: [],
     updatedAt: "2026-04-17T00:00:00.000Z",
   },
 ];
@@ -74,6 +78,12 @@ function cloneBankAccount(
   bankAccount: DriverProfileBankAccount | null,
 ): DriverProfileBankAccount | null {
   return bankAccount ? { ...bankAccount } : null;
+}
+
+function cloneDeviceBindings(
+  deviceBindings: readonly DriverDeviceBindingSummary[],
+): DriverDeviceBindingSummary[] {
+  return deviceBindings.map((binding) => ({ ...binding }));
 }
 
 @Injectable()
@@ -107,6 +117,21 @@ export class DriverProfileService implements OnModuleInit {
 
   getProfile(actorId?: string | null) {
     return this.clone(this.resolveBaseProfile(actorId));
+  }
+
+  getProfileForDriver(driverId: string) {
+    const normalizedDriverId = driverId.trim();
+    this.assertDriverId(normalizedDriverId);
+    return this.clone(this.resolveBaseProfile(normalizedDriverId));
+  }
+
+  findProfileForDriver(driverId: string) {
+    const normalizedDriverId = driverId.trim();
+    this.assertDriverId(normalizedDriverId);
+    const existing =
+      this.profiles.get(normalizedDriverId) ??
+      this.seedProfiles.get(normalizedDriverId);
+    return existing ? this.clone(existing) : null;
   }
 
   resolveProvisionableDriverId(
@@ -219,6 +244,162 @@ export class DriverProfileService implements OnModuleInit {
     return this.clone(updated);
   }
 
+  upsertAdminProfile(
+    driverId: string,
+    command: CreateDriverProfileCommand,
+    requestId?: string,
+  ) {
+    const normalizedDriverId = driverId.trim();
+    this.assertDriverId(normalizedDriverId);
+    const hadExistingProfile = this.profileExists(normalizedDriverId);
+    const current = this.resolveBaseProfile(normalizedDriverId);
+    const updated: DriverProfileRecord = {
+      ...current,
+      name: this.normalizeRequiredText("name", command.name),
+      phone: this.normalizeOptionalText(command.phone) ?? null,
+      email: this.normalizeOptionalText(command.email) ?? null,
+      photoUrl: this.normalizeOptionalText(command.photoUrl) ?? null,
+      emergencyContact:
+        this.normalizeEmergencyContact(command.emergencyContact) ?? null,
+      bankAccount: this.normalizeBankAccount(command.bankAccount) ?? null,
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.profiles.set(normalizedDriverId, this.clone(updated));
+    this.persist(updated, "upsert_admin_profile");
+    this.recordAudit(
+      {
+        actorId: "platform-admin",
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "driver-profile",
+        actionName: hadExistingProfile
+          ? "update_driver_profile_admin"
+          : "create_driver_profile_admin",
+        resourceType: "driver_profile",
+        resourceId: normalizedDriverId,
+        oldValuesSummary: this.buildAuditSummary(current),
+        newValuesSummary: this.buildAuditSummary(updated),
+      },
+      requestId,
+    );
+
+    return this.clone(updated);
+  }
+
+  recordDeviceBinding(
+    driverId: string,
+    binding: DriverDeviceBindingSummary,
+    requestId?: string,
+  ) {
+    const current = this.getProfileForDriver(driverId);
+    const updated: DriverProfileRecord = {
+      ...current,
+      deviceBindings: [
+        { ...binding },
+        ...current.deviceBindings.filter(
+          (candidate) => candidate.bindingId !== binding.bindingId,
+        ),
+      ],
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.profiles.set(updated.driverId, this.clone(updated));
+    this.persist(updated, "record_device_binding");
+    this.recordAudit(
+      {
+        actorId: updated.driverId,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "driver-profile",
+        actionName: "link_driver_device_binding",
+        resourceType: "driver_device_binding",
+        resourceId: binding.bindingId,
+        oldValuesSummary: {
+          driverId: updated.driverId,
+          deviceBindingCount: current.deviceBindings.length,
+        },
+        newValuesSummary: {
+          driverId: updated.driverId,
+          deviceBindingCount: updated.deviceBindings.length,
+          deviceId: binding.deviceId,
+          bindingStatus: binding.status,
+        },
+      },
+      requestId,
+    );
+
+    return this.clone(updated);
+  }
+
+  recordDeviceBindingRefresh(
+    driverId: string,
+    bindingId: string,
+    refreshedAt: string,
+  ) {
+    const current = this.getProfileForDriver(driverId);
+    const updated: DriverProfileRecord = {
+      ...current,
+      deviceBindings: current.deviceBindings.map((binding) =>
+        binding.bindingId === bindingId
+          ? {
+              ...binding,
+              refreshedAt,
+            }
+          : { ...binding },
+      ),
+      updatedAt: refreshedAt,
+    };
+
+    this.profiles.set(updated.driverId, this.clone(updated));
+    this.persist(updated, "record_device_binding_refresh");
+  }
+
+  recordDeviceBindingRevocation(
+    driverId: string,
+    bindingId: string,
+    revokedAt: string,
+    requestId?: string,
+  ) {
+    const current = this.getProfileForDriver(driverId);
+    const updated: DriverProfileRecord = {
+      ...current,
+      deviceBindings: current.deviceBindings.map((binding) =>
+        binding.bindingId === bindingId
+          ? {
+              ...binding,
+              status: "revoked",
+              refreshedAt: revokedAt,
+              revokedAt,
+            }
+          : { ...binding },
+      ),
+      updatedAt: revokedAt,
+    };
+
+    this.profiles.set(updated.driverId, this.clone(updated));
+    this.persist(updated, "record_device_binding_revocation");
+    this.recordAudit(
+      {
+        actorId: updated.driverId,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "driver-profile",
+        actionName: "revoke_driver_device_binding",
+        resourceType: "driver_device_binding",
+        resourceId: bindingId,
+        newValuesSummary: {
+          driverId: updated.driverId,
+          bindingId,
+          revokedAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.clone(updated);
+  }
+
   private resolveBaseProfile(actorId?: string | null): DriverProfileRecord {
     const driverId = this.resolveDriverId(actorId);
     const existing = this.profiles.get(driverId);
@@ -240,15 +421,8 @@ export class DriverProfileService implements OnModuleInit {
 
   private resolveDriverId(actorId?: string | null): string {
     const candidate = actorId?.trim();
-    if (!candidate) {
-      throw new ApiRequestError(
-        401,
-        "DRIVER_IDENTITY_REQUIRED",
-        "Driver profile routes require a bootstrap identity with a driver actorId.",
-      );
-    }
-
-    return DEMO_DRIVER_ALIASES[candidate] ?? candidate;
+    this.assertDriverId(candidate);
+    return DEMO_DRIVER_ALIASES[candidate!] ?? candidate!;
   }
 
   private buildEmptyProfile(driverId: string): DriverProfileRecord {
@@ -260,8 +434,19 @@ export class DriverProfileService implements OnModuleInit {
       photoUrl: null,
       emergencyContact: null,
       bankAccount: null,
+      deviceBindings: [],
       updatedAt: new Date().toISOString(),
     };
+  }
+
+  private assertDriverId(driverId?: string | null) {
+    if (!driverId) {
+      throw new ApiRequestError(
+        401,
+        "DRIVER_IDENTITY_REQUIRED",
+        "Driver profile routes require a bootstrap identity with a driver actorId.",
+      );
+    }
   }
 
   private normalizeRequiredText(field: string, value: string) {
@@ -341,6 +526,7 @@ export class DriverProfileService implements OnModuleInit {
       ...profile,
       emergencyContact: cloneEmergencyContact(profile.emergencyContact),
       bankAccount: cloneBankAccount(profile.bankAccount),
+      deviceBindings: cloneDeviceBindings(profile.deviceBindings),
     };
   }
 
@@ -365,6 +551,15 @@ export class DriverProfileService implements OnModuleInit {
             accountNumberMasked: profile.bankAccount.accountNumberMasked,
           }
         : null,
+      deviceBindings: profile.deviceBindings.map((binding) => ({
+        bindingId: binding.bindingId,
+        deviceId: binding.deviceId,
+        deviceLabel: binding.deviceLabel,
+        status: binding.status,
+        issuedAt: binding.issuedAt,
+        refreshedAt: binding.refreshedAt,
+        revokedAt: binding.revokedAt,
+      })),
       updatedAt: profile.updatedAt,
     };
   }
