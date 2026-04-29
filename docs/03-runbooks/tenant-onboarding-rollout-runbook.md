@@ -6,6 +6,9 @@ Task ref: `OPX-MD-003`
 This runbook defines the standard path for opening a new tenant from initial
 provisioning through sandbox, pilot, and production.
 
+Tenant API key and webhook operating rules are defined in
+`docs/03-runbooks/tenant-api-webhook-governance-runbook.md`.
+
 ## Bootstrap Defaults
 
 Provision every new tenant with these platform-owned defaults:

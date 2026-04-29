@@ -270,6 +270,82 @@ export interface PartnerEntryBrandingMetadata {
   supportPhone: string | null;
 }
 
+export const PARTNER_ELIGIBILITY_ADAPTER_KINDS = [
+  "none",
+  "issuer_card_lookup",
+  "issuer_reference_lookup",
+] as const;
+export type PartnerEligibilityAdapterKind =
+  (typeof PARTNER_ELIGIBILITY_ADAPTER_KINDS)[number];
+
+export const PARTNER_ELIGIBILITY_DECISION_SOURCES = [
+  "not_required",
+  "issuer_realtime",
+  "issuer_reference_lookup",
+  "manual_fallback",
+] as const;
+export type PartnerEligibilityDecisionSource =
+  (typeof PARTNER_ELIGIBILITY_DECISION_SOURCES)[number];
+
+export interface PartnerEligibilityRetryPolicyRecord {
+  timeoutMs: number;
+  maxAttempts: number;
+  initialBackoffMs: number;
+  backoffMultiplier: number;
+  maxBackoffMs: number;
+  retryableErrorCodes: string[];
+}
+
+export interface PartnerEligibilityManualFallbackPolicy {
+  queue: "ops_console";
+  requiredOnTimeout: boolean;
+  requiredOnRetryExhausted: boolean;
+  requiredOnAmbiguousResponse: boolean;
+  requiredAuditFields: Array<"reasonCode" | "requestedBy" | "notes">;
+}
+
+export interface PartnerEligibilitySensitiveDataPolicy {
+  referenceTokenStorage: "hash_only";
+  rawTokenExposure: "never";
+  benefitReferencePolicy: "canonical_internal_masked_exports";
+  issuerAuthorizationReferencePolicy: "canonical_internal_masked_exports";
+  auditExposure: "status_reason_only";
+}
+
+export interface PartnerEligibilityIntegrationContractRecord {
+  contractId: string;
+  adapterCode: string;
+  adapterKind: PartnerEligibilityAdapterKind;
+  adapterVersion: string;
+  eligibilityMode: PartnerEligibilityMode;
+  decisionTtlSeconds: number | null;
+  retryPolicy: PartnerEligibilityRetryPolicyRecord | null;
+  manualFallbackPolicy: PartnerEligibilityManualFallbackPolicy | null;
+  sensitiveDataPolicy: PartnerEligibilitySensitiveDataPolicy | null;
+  notes: string[];
+}
+
+export interface PartnerEligibilityAdapterAttemptRecord {
+  attempt: number;
+  adapterCode: string;
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  status: PartnerEligibilityStatus | "error";
+  reasonCode: string;
+  retryable: boolean;
+  timeoutTriggered: boolean;
+  upstreamHttpStatus: number | null;
+}
+
+export interface PartnerEligibilityManualFallbackRecord {
+  required: boolean;
+  reasonCode: string | null;
+  requestedAt: string | null;
+  requestedBy: string | null;
+  notes: string | null;
+}
+
 export interface PartnerChannelEntryRecord {
   partnerId: string;
   partnerCode: string;
@@ -287,6 +363,7 @@ export interface PartnerChannelEntryRecord {
   entryPath: string | null;
   themeAccent: string | null;
   brandingMetadata: PartnerEntryBrandingMetadata | null;
+  eligibilityContract: PartnerEligibilityIntegrationContractRecord | null;
   status: "active" | "inactive";
   activeFlag: boolean;
   createdAt: string;
@@ -350,9 +427,16 @@ export interface PartnerEligibilityVerificationRecord {
   partnerProgramCode: string | null;
   partnerEntrySlug: string;
   bankCode: string | null;
+  cardProgramCode: string | null;
   businessDispatchSubtype: BusinessDispatchSubtype;
   verificationStatus: PartnerEligibilityStatus;
+  decisionSource: PartnerEligibilityDecisionSource;
   verificationReasonCode: string;
+  adapterCode: string | null;
+  adapterVersion: string | null;
+  contractSnapshot: PartnerEligibilityIntegrationContractRecord | null;
+  attempts: PartnerEligibilityAdapterAttemptRecord[];
+  manualFallback: PartnerEligibilityManualFallbackRecord;
   referenceTokenHash: string | null;
   benefitReference: string | null;
   issuerAuthorizationRef: string | null;
@@ -387,6 +471,14 @@ export interface ProductRuleCatalog {
   dispatchSemantics: DispatchSemantics[];
   businessDispatchSubtypes: BusinessDispatchSubtype[];
   orderDomains: OrderDomain[];
+  pricingAuthority: {
+    canonicalQuotedFareSource: QuotedFareSource;
+    canonicalPricingRuleVersion: string;
+    tenantCanSetQuotedFare: false;
+    partnerCanSetQuotedFare: false;
+    manualOverrideActorTypes: Array<"platform_admin" | "ops_user">;
+    manualOverrideRequiredFields: Array<"actor" | "reason" | "traceId">;
+  };
 }
 
 export interface AuditLogRecord {
@@ -440,13 +532,60 @@ export interface TenantNotificationPreferences {
   updatedAt: string;
 }
 
+export interface WebhookRetryPolicyRecord {
+  maxAttempts: number;
+  initialBackoffSeconds: number;
+  backoffMultiplier: number;
+  maxBackoffSeconds: number;
+  retryableStatusCodes: number[];
+}
+
+export const TENANT_WEBHOOK_DISABLE_REASONS = [
+  "manual_disable",
+  "delivery_failed",
+] as const;
+export type TenantWebhookDisableReason =
+  (typeof TENANT_WEBHOOK_DISABLE_REASONS)[number];
+
+export interface TenantWebhookSecretRotationRecord {
+  secretVersion: number;
+  rotatedAt: string;
+  rotationReason: string | null;
+  secretPreview: string;
+}
+
+export interface TenantWebhookRuntimeMetadata {
+  deliveryCount: number;
+  failedDeliveryCount: number;
+  lastAttemptAt: string | null;
+  lastDeliveredAt: string | null;
+  lastValidatedAt: string | null;
+  nextAttemptAt: string | null;
+  lastSignaturePreview: string | null;
+  disabledAt: string | null;
+  disableReason: TenantWebhookDisableReason | null;
+  retryPolicy: WebhookRetryPolicyRecord;
+  secretRotation: {
+    currentVersion: number;
+    rotatedAt: string;
+    rotationCount: number;
+    history: TenantWebhookSecretRotationRecord[];
+  };
+}
+
 export interface CreateTenantWebhookEndpointCommand {
   url: string;
   secret: string;
   events: string[];
 }
 
-export type TenantWebhookEndpointStatus = "active" | "test_pending";
+export const TENANT_WEBHOOK_ENDPOINT_STATUSES = [
+  "active",
+  "test_pending",
+  "disabled",
+] as const;
+export type TenantWebhookEndpointStatus =
+  (typeof TENANT_WEBHOOK_ENDPOINT_STATUSES)[number];
 
 export interface TenantWebhookEndpoint {
   webhookId: string;
@@ -458,6 +597,9 @@ export interface TenantWebhookEndpoint {
   secretPreview: string;
   createdAt: string;
   updatedAt: string;
+  retryPolicy?: WebhookRetryPolicyRecord;
+  runtimeMetadata?: TenantWebhookRuntimeMetadata;
+  secretHistory?: TenantWebhookSecretRotationRecord[];
 }
 
 export interface UpdateTenantWebhookEndpointCommand {
@@ -496,6 +638,23 @@ export interface TenantSlaProfile {
   updatedAt: string;
 }
 
+export const TENANT_PASSENGER_MASTER_ROLES = [
+  "passenger",
+  "employee",
+  "cardholder",
+  "vip",
+] as const;
+export type TenantPassengerMasterRole =
+  (typeof TENANT_PASSENGER_MASTER_ROLES)[number];
+
+export const TENANT_PASSENGER_QUALITY_ISSUES = [
+  "missing_contact",
+  "missing_employee_no",
+  "duplicate_employee_no",
+] as const;
+export type TenantPassengerQualityIssue =
+  (typeof TENANT_PASSENGER_QUALITY_ISSUES)[number];
+
 export interface TenantPassengerRecord {
   passengerId: string;
   tenantId: string;
@@ -504,6 +663,8 @@ export interface TenantPassengerRecord {
   departmentName: string | null;
   mobile: string | null;
   email: string | null;
+  roles?: TenantPassengerMasterRole[];
+  qualityIssues?: TenantPassengerQualityIssue[];
   activeFlag: boolean;
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -517,9 +678,25 @@ export interface UpsertTenantPassengerCommand {
   departmentName?: string | null;
   mobile?: string | null;
   email?: string | null;
+  roles?: TenantPassengerMasterRole[];
   activeFlag?: boolean;
   metadata?: Record<string, unknown>;
 }
+
+export const TENANT_ADDRESS_GEOCODE_SOURCES = [
+  "none",
+  "manual",
+  "provider",
+] as const;
+export type TenantAddressGeocodeSource =
+  (typeof TENANT_ADDRESS_GEOCODE_SOURCES)[number];
+
+export const TENANT_ADDRESS_QUALITY_ISSUES = [
+  "missing_geocode",
+  "duplicate_normalized_address",
+] as const;
+export type TenantAddressQualityIssue =
+  (typeof TENANT_ADDRESS_QUALITY_ISSUES)[number];
 
 export interface TenantAddressRecord {
   addressId: string;
@@ -527,6 +704,11 @@ export interface TenantAddressRecord {
   ownerPassengerId: string | null;
   addressName: string;
   addressText: string;
+  normalizedAddressText?: string;
+  maskedAddressText?: string;
+  sensitiveFlag?: boolean;
+  geocodeSource?: TenantAddressGeocodeSource;
+  qualityIssues?: TenantAddressQualityIssue[];
   lat: number | null;
   lng: number | null;
   tags: string[];
@@ -540,10 +722,26 @@ export interface UpsertTenantAddressCommand {
   ownerPassengerId?: string | null;
   addressName: string;
   addressText: string;
+  sensitiveFlag?: boolean;
+  geocodeSource?: TenantAddressGeocodeSource;
   lat?: number | null;
   lng?: number | null;
   tags?: string[];
   activeFlag?: boolean;
+}
+
+export interface TenantAddressExportViewRecord {
+  addressId: string;
+  tenantId: string;
+  ownerPassengerId: string | null;
+  addressName: string;
+  maskedAddressText: string | null;
+  sensitiveFlag: boolean;
+  geocodeSource: TenantAddressGeocodeSource;
+  qualityIssues: TenantAddressQualityIssue[];
+  tags: string[];
+  activeFlag: boolean;
+  exportGeneratedAt: string;
 }
 
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
@@ -590,6 +788,30 @@ export interface TenantApiKeyRecord {
   createdAt: string;
 }
 
+export const TENANT_API_KEY_ALLOWED_SCOPES = [
+  "audit:read",
+  "reports:read",
+  "reports:write",
+  "tenant:read",
+  "tenant:write",
+  "tenant:billing:read",
+  "tenant:billing:write",
+  "tenant:sla:read",
+  "tenant:sla:write",
+  "tenant:webhooks:read",
+  "tenant:webhooks:write",
+] as const;
+
+export interface TenantApiKeyGovernancePolicy {
+  allowedScopes: string[];
+  compatibilityAliases: Record<string, string>;
+  defaultLifetimeDays: number;
+  maxLifetimeDays: number;
+  requireExpiry: boolean;
+  breakGlassRequiresPlatformApproval: boolean;
+  revokeEffect: "immediate";
+}
+
 export interface IssueTenantApiKeyCommand {
   keyName: string;
   scopes: string[];
@@ -606,6 +828,26 @@ export interface TenantApiKeyIssued {
   apiKey: TenantApiKeyRecord;
   plaintextKey: string;
   revokedApiKeyId: string | null;
+}
+
+export interface TenantWebhookGovernancePolicy {
+  testEventType: string;
+  autoDisableAfterConsecutiveFailures: number;
+  revalidationRequiredOnCreate: boolean;
+  revalidationRequiredOnEndpointMutation: boolean;
+  revalidationRequiredOnSecretRotation: boolean;
+  deliveryFailureNotificationChannel: NotificationRecord["channel"];
+  retryPolicy: WebhookRetryPolicyRecord;
+}
+
+export interface TenantIntegrationGovernancePackage {
+  tenantId: string;
+  generatedAt: string;
+  apiKeyPolicy: TenantApiKeyGovernancePolicy;
+  webhookPolicy: TenantWebhookGovernancePolicy;
+  baselineWebhookEvents: string[];
+  baselineNotificationSubscriptions: TenantNotificationSubscription[];
+  onboardingChecklist: string[];
 }
 
 export const OWNED_ORDER_SOURCES = [
@@ -689,15 +931,103 @@ export const RESERVATION_HOLD_STATUSES = [
 ] as const;
 export type ReservationHoldStatus = (typeof RESERVATION_HOLD_STATUSES)[number];
 
+// --- Queue-Entry Policy ---
+
+export const QUEUE_ENTRY_POLICY_MAP: Record<
+  DispatchSemantics,
+  {
+    allowsQueueEntry: boolean;
+    requiresSiteCheckIn: boolean;
+    requiresVehicleDispatchable: boolean;
+  }
+> = {
+  realtime: {
+    allowsQueueEntry: true,
+    requiresSiteCheckIn: true,
+    requiresVehicleDispatchable: true,
+  },
+  reservation: {
+    allowsQueueEntry: false,
+    requiresSiteCheckIn: false,
+    requiresVehicleDispatchable: false,
+  },
+  queue: {
+    allowsQueueEntry: true,
+    requiresSiteCheckIn: true,
+    requiresVehicleDispatchable: true,
+  },
+  forwarder_broadcast: {
+    allowsQueueEntry: false,
+    requiresSiteCheckIn: false,
+    requiresVehicleDispatchable: false,
+  },
+} as const;
+
+export const ORDER_SOURCE_DISPATCH_SEMANTICS_MAP: Record<
+  OwnedOrderSource,
+  DispatchSemantics
+> = {
+  app: "realtime",
+  web: "realtime",
+  phone: "realtime",
+  portal: "reservation",
+  api: "reservation",
+  concierge: "realtime",
+} as const;
+
+// --- Reservation Hold State Transitions ---
+
+export const RESERVATION_HOLD_VALID_TRANSITIONS: Record<
+  ReservationHoldStatus,
+  readonly ReservationHoldStatus[]
+> = {
+  none: ["requested"],
+  requested: ["released", "redispatch_queue", "exception_hold"],
+  released: [],
+  redispatch_queue: ["requested", "released", "exception_hold"],
+  exception_hold: ["released"],
+} as const;
+
+// --- Exception-Hold Reason Codes ---
+
+export const EXCEPTION_HOLD_REASON_CODES = [
+  "no_eligible_supply",
+  "confirmation_window_expired",
+  "driver_rejected_in_window",
+  "manual_escalation",
+] as const;
+export type ExceptionHoldReasonCode =
+  (typeof EXCEPTION_HOLD_REASON_CODES)[number];
+
+export interface ExceptionHoldCriteria {
+  isReservation: boolean;
+  isWithinConfirmationWindow: boolean;
+  hasEligibleSupply: boolean;
+  reasonCode: ExceptionHoldReasonCode;
+}
+
+export interface ResolveExceptionHoldCommand {
+  resolution: "release_to_dispatch" | "cancel_order";
+  operatorId: string;
+  reason: string;
+}
+
 export interface AddressPayload {
+  addressId?: string | null;
+  addressName?: string | null;
   address: string;
+  normalizedAddress?: string | null;
+  maskedAddress?: string | null;
+  sensitive?: boolean;
   lat?: number | null;
   lng?: number | null;
 }
 
 export interface PassengerProfile {
+  passengerId?: string | null;
   name: string;
   phone: string;
+  roles?: TenantPassengerMasterRole[];
 }
 
 export interface MoneyAmount {
@@ -779,6 +1109,9 @@ export interface CreateTenantBookingCommand {
   businessDispatchSubtype: BusinessDispatchSubtype;
   partnerEntrySlug?: string;
   eligibilityVerificationId?: string;
+  passengerId?: string;
+  pickupAddressId?: string;
+  dropoffAddressId?: string;
   pickup: AddressPayload;
   dropoff: AddressPayload;
   reservationWindowStart: string;
@@ -802,12 +1135,16 @@ export interface CreateTenantBookingCommand {
   luggageCount?: number;
   notes?: string;
   quotedFare?: MoneyAmount;
+  quotedFareRuleVersion?: string;
   minPhotoCount?: number;
   expenseProofRequired?: boolean;
 }
 
 export interface UpdateTenantBookingCommand {
   businessDispatchSubtype?: BusinessDispatchSubtype;
+  passengerId?: string | null;
+  pickupAddressId?: string | null;
+  dropoffAddressId?: string | null;
   pickup?: AddressPayload;
   dropoff?: AddressPayload;
   reservationWindowStart?: string;
@@ -831,8 +1168,28 @@ export interface UpdateTenantBookingCommand {
   luggageCount?: number | null;
   notes?: string | null;
   quotedFare?: MoneyAmount | null;
+  quotedFareRuleVersion?: string | null;
   minPhotoCount?: number;
   expenseProofRequired?: boolean;
+}
+
+export type QuotedFareSource = "platform_pricing_rule" | "ops_manual_override";
+
+export interface ManualFareOverrideRecord {
+  actorType: "platform_admin" | "ops_user";
+  actorId: string;
+  reason: string;
+  traceId: string;
+  previousQuotedFare: MoneyAmount | null;
+  previousQuotedFareSource: QuotedFareSource;
+  overriddenAt: string;
+}
+
+export interface ApplyManualFareOverrideCommand {
+  fare: MoneyAmount;
+  reason: string;
+  traceId: string;
+  quotedFareRuleVersion?: string | null;
 }
 
 export interface DispatchOrderCommand {
@@ -942,6 +1299,9 @@ export interface OwnedOrderRecord {
   notes: string | null;
   fixedPrice: boolean;
   quotedFare: MoneyAmount | null;
+  quotedFareSource: QuotedFareSource | null;
+  quotedFareRuleVersion: string | null;
+  manualFareOverride: ManualFareOverrideRecord | null;
   proofRequirements: {
     minPhotoCount: number;
     signoffRequired: boolean;
@@ -994,6 +1354,10 @@ export interface BookingRecord {
   terminal: string | null;
   luggageCount: number | null;
   notes: string | null;
+  quotedFare: MoneyAmount | null;
+  quotedFareSource: QuotedFareSource | null;
+  quotedFareRuleVersion: string | null;
+  manualFareOverride: ManualFareOverrideRecord | null;
   orderStatus: OwnedOrderStatus;
   createdAt: string;
   updatedAt: string;

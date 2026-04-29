@@ -53,6 +53,9 @@ secret-governance rules that already apply at runtime.
 
 - `tenant-partner` now hashes partner ingress credentials before comparison and
   no longer keeps plaintext bootstrap partner keys in code.
+- `tenant-partner` eligibility verification now snapshots a formal issuer
+  contract, keeps `referenceToken` as hash-only material, and derives fallback
+  benefit references without persisting the raw token.
 - `driver-profile` and `tenant-partner` audit records now emit masked summaries
   for PII-bearing fields.
 - `reporting-filing` masks recording and partner-reference identifiers in report

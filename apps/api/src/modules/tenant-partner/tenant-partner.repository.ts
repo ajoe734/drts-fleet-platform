@@ -39,8 +39,11 @@ type WebhookRuntimeMetadata = {
   failedDeliveryCount: number;
   lastAttemptAt: string | null;
   lastDeliveredAt: string | null;
+  lastValidatedAt: string | null;
   nextAttemptAt: string | null;
   lastSignaturePreview: string | null;
+  disabledAt: string | null;
+  disableReason: "manual_disable" | "delivery_failed" | null;
   retryPolicy: WebhookRetryPolicy;
   secretRotation: {
     currentVersion: number;

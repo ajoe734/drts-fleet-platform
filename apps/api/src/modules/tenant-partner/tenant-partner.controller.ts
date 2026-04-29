@@ -19,6 +19,8 @@ import type {
   PartnerEligibilityVerificationRecord,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
+  TenantAddressExportViewRecord,
+  TenantIntegrationGovernancePackage,
   TenantPartnerSummary,
   UpdatePartnerChannelEntryCommand,
   UpdateTenantWebhookEndpointCommand,
@@ -160,13 +162,13 @@ export class TenantPartnerController {
   }
 
   @Post("partner/eligibility/verify")
-  verifyPartnerEligibility(
+  async verifyPartnerEligibility(
     @Body() command: VerifyPartnerEligibilityCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     const verification: PartnerEligibilityVerificationRecord =
-      this.tenantPartnerService.verifyPartnerEligibility(
+      await this.tenantPartnerService.verifyPartnerEligibility(
         command,
         requestId,
         identity,
@@ -230,6 +232,18 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  @Get("tenant/addresses/export-view")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listAddressExportView(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantAddressExportViewRecord[] =
+      this.tenantPartnerService.listAddressExportView(
+        this.requireTenantId(tenantId),
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
   @Post("tenant/addresses")
   upsertAddress(
     @Body() command: UpsertTenantAddressCommand,
@@ -374,6 +388,19 @@ export class TenantPartnerController {
       ),
       requestId,
     );
+  }
+
+  @Get("tenant/integration-governance")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getTenantIntegrationGovernancePackage(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const item: TenantIntegrationGovernancePackage =
+      this.tenantPartnerService.getIntegrationGovernancePackage(
+        this.requireTenantId(tenantId),
+      );
+    return toApiSuccessEnvelope(item, requestId);
   }
 
   @Get("tenant/notifications/feed")

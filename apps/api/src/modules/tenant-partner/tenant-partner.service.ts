@@ -7,6 +7,7 @@ import {
 
 import {
   HttpStatus,
+  Inject,
   Injectable,
   OnModuleDestroy,
   OnModuleInit,
@@ -22,19 +23,37 @@ import type {
   IdentityContext,
   CreateTenantWebhookEndpointCommand,
   IssueTenantApiKeyCommand,
+  PartnerEligibilityAdapterAttemptRecord,
   PartnerChannelEntryRecord,
+  PartnerEligibilityDecisionSource,
+  PartnerEligibilityIntegrationContractRecord,
+  PartnerEligibilityManualFallbackPolicy,
+  PartnerEligibilityManualFallbackRecord,
+  PartnerEligibilityRetryPolicyRecord,
+  PartnerEligibilitySensitiveDataPolicy,
   PartnerEligibilityVerificationRecord,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
+  TenantAddressExportViewRecord,
+  TenantAddressGeocodeSource,
+  TenantAddressQualityIssue,
   TenantAddressRecord,
+  TenantApiKeyGovernancePolicy,
   TenantApiKeyIssued,
   TenantNotificationPreferences,
+  TenantPassengerMasterRole,
+  TenantPassengerQualityIssue,
   TenantPassengerRecord,
+  TenantIntegrationGovernancePackage,
   TenantRoleCatalogRecord,
   TenantSlaProfile,
   TenantUserRoleRecord,
+  TenantWebhookDisableReason,
   TenantWebhookEndpoint,
   TenantWebhookEndpointStatus,
+  TenantWebhookGovernancePolicy,
+  TenantWebhookRuntimeMetadata,
+  TenantWebhookSecretRotationRecord,
   UpdatePartnerChannelEntryCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateTenantNotificationsCommand,
@@ -45,6 +64,7 @@ import type {
   VerifyPartnerEligibilityCommand,
   WebhookEventPayload,
   WebhookDeliveryRecord,
+  WebhookRetryPolicyRecord,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -56,6 +76,21 @@ import {
   previewOpaqueValue,
 } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import {
+  BANK_CARD_INLINE_ELIGIBILITY_ADAPTER_CODE,
+  BankCardInlineEligibilityAdapter,
+} from "./bank-card-inline-eligibility.adapter";
+import {
+  PARTNER_ELIGIBILITY_ADAPTERS,
+  PartnerEligibilityAdapterError,
+  type PartnerEligibilityAdapterInput,
+  type PartnerEligibilityAdapterInterface,
+  type PartnerEligibilityAdapterResult,
+} from "./partner-eligibility-adapter.interface";
+import {
+  REFERENCE_TOKEN_ELIGIBILITY_ADAPTER_CODE,
+  ReferenceTokenEligibilityAdapter,
+} from "./reference-token-eligibility.adapter";
 import {
   TenantPartnerRepository,
   type PersistTenantPartnerChanges,
@@ -70,27 +105,11 @@ import {
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 
-type WebhookSecretRotationRecord = {
-  secretVersion: number;
-  rotatedAt: string;
-  rotationReason: string | null;
-  secretPreview: string;
-};
+type WebhookSecretRotationRecord = TenantWebhookSecretRotationRecord;
 
-type WebhookRuntimeMetadata = {
-  deliveryCount: number;
-  failedDeliveryCount: number;
-  lastAttemptAt: string | null;
-  lastDeliveredAt: string | null;
-  nextAttemptAt: string | null;
-  lastSignaturePreview: string | null;
+type WebhookRuntimeMetadata = TenantWebhookRuntimeMetadata & {
   retryPolicy: WebhookRetryPolicy;
-  secretRotation: {
-    currentVersion: number;
-    rotatedAt: string;
-    rotationCount: number;
-    history: WebhookSecretRotationRecord[];
-  };
+  disableReason: TenantWebhookDisableReason | null;
 };
 
 type StoredWebhookEndpoint = TenantWebhookEndpoint & {
@@ -146,6 +165,14 @@ type PartnerEligibilityIdentity = Pick<
   requestId?: string | null;
 };
 
+type PartnerEligibilityExecutionResult = {
+  result: PartnerEligibilityAdapterResult | null;
+  fallbackReasonCode: string;
+  attempts: PartnerEligibilityAdapterAttemptRecord[];
+  adapterCode: string;
+  adapterVersion: string;
+};
+
 const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
   maxAttempts: 5,
   initialBackoffSeconds: 30,
@@ -153,6 +180,79 @@ const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
   maxBackoffSeconds: 900,
   retryableStatusCodes: [408, 429, 500, 502, 503, 504],
 };
+
+const PARTNER_ELIGIBILITY_DECISION_TTL_SECONDS = 30 * 60;
+
+const DEFAULT_PARTNER_ELIGIBILITY_RETRY_POLICY: PartnerEligibilityRetryPolicyRecord =
+  {
+    timeoutMs: 3_000,
+    maxAttempts: 3,
+    initialBackoffMs: 250,
+    backoffMultiplier: 2,
+    maxBackoffMs: 1_000,
+    retryableErrorCodes: [
+      "ISSUER_TIMEOUT",
+      "ISSUER_RATE_LIMIT",
+      "ISSUER_UNAVAILABLE",
+      "ISSUER_5XX",
+    ],
+  };
+
+const DEFAULT_PARTNER_ELIGIBILITY_MANUAL_FALLBACK_POLICY: PartnerEligibilityManualFallbackPolicy =
+  {
+    queue: "ops_console",
+    requiredOnTimeout: true,
+    requiredOnRetryExhausted: true,
+    requiredOnAmbiguousResponse: true,
+    requiredAuditFields: ["reasonCode", "requestedBy", "notes"],
+  };
+
+const DEFAULT_PARTNER_ELIGIBILITY_SENSITIVE_DATA_POLICY: PartnerEligibilitySensitiveDataPolicy =
+  {
+    referenceTokenStorage: "hash_only",
+    rawTokenExposure: "never",
+    benefitReferencePolicy: "canonical_internal_masked_exports",
+    issuerAuthorizationReferencePolicy: "canonical_internal_masked_exports",
+    auditExposure: "status_reason_only",
+  };
+
+const DEFAULT_TENANT_API_KEY_LIFETIME_DAYS = 60;
+const MAX_TENANT_API_KEY_LIFETIME_DAYS = 90;
+
+const CANONICAL_TENANT_API_KEY_SCOPES = new Set<string>([
+  "audit:read",
+  "reports:read",
+  "reports:write",
+  "tenant:read",
+  "tenant:write",
+  "tenant:billing:read",
+  "tenant:billing:write",
+  "tenant:sla:read",
+  "tenant:sla:write",
+  "tenant:webhooks:read",
+  "tenant:webhooks:write",
+]);
+
+const TENANT_API_KEY_SCOPE_ALIASES: Record<string, string> = {
+  "tenant:bookings:write": "tenant:write",
+  "tenant:reports:read": "reports:read",
+};
+
+const DEFAULT_TENANT_WEBHOOK_EVENTS = [
+  "booking.created",
+  "booking.updated",
+  "dispatch.assigned",
+  "invoice.issued",
+];
+
+const TENANT_INTEGRATION_HANDOFF_CHECKLIST = [
+  "Confirm the tenant integration owner and rollback owner before issuing production credentials.",
+  "Issue a scoped sandbox API key with an explicit expiry within the rotation window.",
+  "Configure the tenant webhook endpoint and verify the initial secret preview with the consumer owner.",
+  "Run a tenant.webhook.test delivery and wait for the endpoint to return to active status before cutover.",
+  "Review delivery logs and authority notification feed for repeated failures or auto-disable events.",
+  "Record the planned rotation date and the revocation procedure in the tenant cutover packet.",
+];
 
 const PASSENGER_SEED: TenantPassengerRecord[] = [
   {
@@ -167,6 +267,8 @@ const PASSENGER_SEED: TenantPassengerRecord[] = [
     metadata: {
       preferredLanguage: "zh-TW",
     },
+    roles: ["passenger", "employee"],
+    qualityIssues: [],
     createdAt: "2026-04-10T00:00:00.000Z",
     updatedAt: "2026-04-10T00:00:00.000Z",
   },
@@ -182,6 +284,8 @@ const PASSENGER_SEED: TenantPassengerRecord[] = [
     metadata: {
       costCenter: "sales",
     },
+    roles: ["passenger"],
+    qualityIssues: [],
     createdAt: "2026-04-10T00:05:00.000Z",
     updatedAt: "2026-04-10T00:05:00.000Z",
   },
@@ -194,6 +298,11 @@ const ADDRESS_SEED: TenantAddressRecord[] = [
     ownerPassengerId: "passenger-demo-001",
     addressName: "Acme HQ",
     addressText: "台北市信義區市府路 1 號",
+    normalizedAddressText: "台北市信義區市府路1號",
+    maskedAddressText: "台北市信義區...",
+    sensitiveFlag: false,
+    geocodeSource: "provider",
+    qualityIssues: [],
     lat: 25.0375,
     lng: 121.5637,
     tags: ["office"],
@@ -284,7 +393,7 @@ const API_KEY_SEED: StoredTenantApiKeyRecord[] = [
     keyName: "Acme Integration Key",
     keyPrefix: "acme_live_",
     maskedSuffix: "****demo",
-    scopes: ["tenant:bookings:write", "tenant:reports:read"],
+    scopes: ["tenant:write", "reports:read"],
     lastUsedAt: null,
     expiresAt: "2027-04-10T00:00:00.000Z",
     revokedAt: null,
@@ -316,6 +425,7 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
       supportEmail: "alpha-airport@bank-demo.example",
       supportPhone: "0800-000-111",
     },
+    eligibilityContract: null,
     status: "active",
     activeFlag: true,
     createdAt: "2026-04-10T00:00:00.000Z",
@@ -349,6 +459,7 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
       supportEmail: "beta-airport@bank-demo.example",
       supportPhone: "0800-000-222",
     },
+    eligibilityContract: null,
     status: "active",
     activeFlag: true,
     createdAt: "2026-04-10T00:10:00.000Z",
@@ -449,6 +560,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     @Optional()
     private readonly webhookDispatchService: WebhookDispatchService = new WebhookDispatchService(),
     private readonly partnerIngressCredentials: readonly PartnerIngressCredentialSeed[] = resolvePartnerIngressCredentialsFromEnv(),
+    @Optional()
+    @Inject(PARTNER_ELIGIBILITY_ADAPTERS)
+    private readonly eligibilityAdapters: readonly PartnerEligibilityAdapterInterface[] = [
+      new BankCardInlineEligibilityAdapter(),
+      new ReferenceTokenEligibilityAdapter(),
+    ],
   ) {}
 
   async onModuleInit() {
@@ -582,6 +699,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  getIntegrationGovernancePackage(
+    tenantId: string,
+  ): TenantIntegrationGovernancePackage {
+    return {
+      tenantId,
+      generatedAt: new Date().toISOString(),
+      apiKeyPolicy: this.buildTenantApiKeyGovernancePolicy(),
+      webhookPolicy: this.buildTenantWebhookGovernancePolicy(),
+      baselineWebhookEvents: [...DEFAULT_TENANT_WEBHOOK_EVENTS],
+      baselineNotificationSubscriptions:
+        this.createDefaultNotificationPreferences(tenantId).subscriptions,
+      onboardingChecklist: [...TENANT_INTEGRATION_HANDOFF_CHECKLIST],
+    };
+  }
+
   updateNotificationPreferences(
     tenantId: string,
     command: UpdateTenantNotificationsCommand,
@@ -640,6 +772,27 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((passenger) => this.clonePassenger(passenger));
   }
 
+  getPassengerMasterRecord(tenantId: string, passengerId: string) {
+    const normalizedPassengerId = passengerId.trim();
+    const passenger = this.passengers.find(
+      (candidate) =>
+        candidate.tenantId === tenantId &&
+        candidate.passengerId === normalizedPassengerId,
+    );
+    if (!passenger) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PASSENGER_NOT_FOUND",
+        "The tenant passenger could not be found.",
+        {
+          passengerId: normalizedPassengerId,
+        },
+      );
+    }
+
+    return this.clonePassenger(passenger);
+  }
+
   upsertPassenger(
     tenantId: string,
     command: UpsertTenantPassengerCommand,
@@ -687,6 +840,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           ),
           mobile: this.normalizeNullableText(command.mobile ?? existing.mobile),
           email: this.normalizeNullableText(command.email ?? existing.email),
+          roles: this.normalizePassengerRoles(command.roles ?? existing.roles),
           activeFlag: command.activeFlag ?? existing.activeFlag,
           metadata: {
             ...existing.metadata,
@@ -702,6 +856,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           departmentName: this.normalizeNullableText(command.departmentName),
           mobile: this.normalizeNullableText(command.mobile),
           email: this.normalizeNullableText(command.email),
+          roles: this.normalizePassengerRoles(command.roles),
           activeFlag: command.activeFlag ?? true,
           metadata: {
             ...(command.metadata ?? {}),
@@ -709,6 +864,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           createdAt: now,
           updatedAt: now,
         };
+    passenger.qualityIssues = this.buildPassengerQualityIssues(
+      tenantId,
+      passenger,
+    );
 
     this.passengers = [
       this.clonePassenger(passenger),
@@ -743,6 +902,47 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.addresses
       .filter((address) => address.tenantId === tenantId)
       .map((address) => this.cloneAddress(address));
+  }
+
+  listAddressExportView(tenantId: string): TenantAddressExportViewRecord[] {
+    const generatedAt = new Date().toISOString();
+    return this.addresses
+      .filter((address) => address.tenantId === tenantId)
+      .map((address) => ({
+        addressId: address.addressId,
+        tenantId: address.tenantId,
+        ownerPassengerId: address.ownerPassengerId,
+        addressName: address.addressName,
+        maskedAddressText:
+          address.maskedAddressText ?? maskAddress(address.addressText),
+        sensitiveFlag: address.sensitiveFlag ?? false,
+        geocodeSource: address.geocodeSource ?? "none",
+        qualityIssues: [...(address.qualityIssues ?? [])],
+        tags: [...address.tags],
+        activeFlag: address.activeFlag,
+        exportGeneratedAt: generatedAt,
+      }));
+  }
+
+  getAddressMasterRecord(tenantId: string, addressId: string) {
+    const normalizedAddressId = addressId.trim();
+    const address = this.addresses.find(
+      (candidate) =>
+        candidate.tenantId === tenantId &&
+        candidate.addressId === normalizedAddressId,
+    );
+    if (!address) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "ADDRESS_NOT_FOUND",
+        "The tenant address could not be found.",
+        {
+          addressId: normalizedAddressId,
+        },
+      );
+    }
+
+    return this.cloneAddress(address);
   }
 
   upsertAddress(
@@ -797,6 +997,28 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             address.tenantId === tenantId && address.addressId === addressId,
         ) ?? null)
       : null;
+    const normalizedTags = this.normalizeAddressTags(
+      command.tags ?? existing?.tags,
+    );
+    const sensitiveFlag =
+      (command.sensitiveFlag ?? existing?.sensitiveFlag ?? false) ||
+      normalizedTags.includes("sensitive");
+    if (sensitiveFlag && !normalizedTags.includes("sensitive")) {
+      normalizedTags.push("sensitive");
+    }
+    const lat = command.lat ?? existing?.lat ?? null;
+    const lng = command.lng ?? existing?.lng ?? null;
+    const normalizedAddressText = this.normalizeAddressText(
+      command.addressText,
+    );
+    const maskedAddressText =
+      maskAddress(command.addressText) ??
+      `${command.addressText.trim().slice(0, 3)}...`;
+    const geocodeSource = this.resolveAddressGeocodeSource(
+      command.geocodeSource ?? existing?.geocodeSource,
+      lat,
+      lng,
+    );
 
     const address: TenantAddressRecord = existing
       ? {
@@ -804,9 +1026,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           ownerPassengerId,
           addressName: command.addressName.trim(),
           addressText: command.addressText.trim(),
-          lat: command.lat ?? existing.lat,
-          lng: command.lng ?? existing.lng,
-          tags: [...(command.tags ?? existing.tags)],
+          normalizedAddressText,
+          maskedAddressText,
+          sensitiveFlag,
+          geocodeSource,
+          lat,
+          lng,
+          tags: normalizedTags,
           activeFlag: command.activeFlag ?? existing.activeFlag,
           updatedAt: now,
         }
@@ -816,13 +1042,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           ownerPassengerId,
           addressName: command.addressName.trim(),
           addressText: command.addressText.trim(),
-          lat: command.lat ?? null,
-          lng: command.lng ?? null,
-          tags: [...(command.tags ?? [])],
+          normalizedAddressText,
+          maskedAddressText,
+          sensitiveFlag,
+          geocodeSource,
+          lat,
+          lng,
+          tags: normalizedTags,
           activeFlag: command.activeFlag ?? true,
           createdAt: now,
           updatedAt: now,
         };
+    address.qualityIssues = this.buildAddressQualityIssues(tenantId, address);
 
     this.addresses = [
       this.cloneAddress(address),
@@ -923,6 +1154,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         command.themeAccent,
         command.brandingMetadata ?? null,
       ),
+      eligibilityContract: null,
       status: command.status ?? "active",
       activeFlag:
         command.activeFlag ?? (command.status ?? "active") === "active",
@@ -1167,7 +1399,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  verifyPartnerEligibility(
+  async verifyPartnerEligibility(
     command: VerifyPartnerEligibilityCommand,
     requestId?: string,
     identity?: PartnerEligibilityIdentity | null,
@@ -1175,68 +1407,77 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const entry = this.requirePartnerEntry(command.entrySlug);
     this.assertPartnerEligibilityIdentity(identity, entry, requestId);
     const verifiedAt = new Date().toISOString();
-    const expiresAt = new Date(
-      Date.parse(verifiedAt) + 30 * 60 * 1000,
-    ).toISOString();
+    const normalizedBenefitReference = this.normalizeNullableText(
+      command.benefitReference,
+    );
+    const referenceToken = this.normalizeNullableText(command.referenceToken);
+    const referenceTokenHash = referenceToken
+      ? this.hashReferenceToken(referenceToken)
+      : null;
+    const contract = this.buildPartnerEligibilityContract(entry);
+
+    this.assertPartnerEligibilityCommand(entry, command);
 
     let verificationStatus: PartnerEligibilityVerificationRecord["verificationStatus"] =
       "eligible";
     let verificationReasonCode = "ELIGIBILITY_NOT_REQUIRED";
-    let benefitReference = this.normalizeNullableText(command.benefitReference);
+    let decisionSource: PartnerEligibilityDecisionSource = "not_required";
+    let cardProgramCode = entry.programCode ?? entry.bankCode ?? null;
+    let benefitReference = normalizedBenefitReference;
     let issuerAuthorizationRef: string | null = null;
-    let referenceTokenHash: string | null = null;
+    let adapterCode: string | null = contract?.adapterCode ?? null;
+    let adapterVersion: string | null = contract?.adapterVersion ?? null;
+    let attempts: PartnerEligibilityAdapterAttemptRecord[] = [];
+    let manualFallback: PartnerEligibilityManualFallbackRecord = {
+      required: false,
+      reasonCode: null,
+      requestedAt: null,
+      requestedBy: null,
+      notes: null,
+    };
+    let expiresAt: string | null = null;
 
-    if (entry.eligibilityMode === "reference_required") {
-      const referenceToken = this.normalizeNullableText(command.referenceToken);
-      if (!referenceToken) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "REFERENCE_TOKEN_REQUIRED",
-          "referenceToken is required for this partner entry.",
-          {
-            entrySlug: entry.entrySlug,
-          },
-        );
-      }
+    if (entry.eligibilityMode !== "none" && contract) {
+      const execution = await this.executePartnerEligibilityContract(
+        entry,
+        contract,
+        command,
+        requestId,
+      );
+      attempts = execution.attempts;
+      adapterCode = execution.adapterCode;
+      adapterVersion = execution.adapterVersion;
 
-      verificationReasonCode = "REFERENCE_ACCEPTED";
-      benefitReference = benefitReference ?? referenceToken;
-      issuerAuthorizationRef = `issuer-ref-${referenceToken.slice(-8)}`;
-      referenceTokenHash = this.hashReferenceToken(referenceToken);
-    } else if (entry.eligibilityMode === "bank_card_inline") {
-      const cardLast4 = command.cardLast4?.trim();
-      if (!cardLast4 || !/^[0-9]{4}$/.test(cardLast4)) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "CARD_LAST4_REQUIRED",
-          "cardLast4 must be a four-digit string for inline card eligibility verification.",
-          {
-            entrySlug: entry.entrySlug,
-          },
-        );
-      }
-
-      const lastDigit = Number(cardLast4[3]);
-      if (Number.isNaN(lastDigit)) {
-        throw new ApiRequestError(
-          HttpStatus.BAD_REQUEST,
-          "CARD_LAST4_INVALID",
-          "cardLast4 must contain digits only.",
-          {
-            entrySlug: entry.entrySlug,
-          },
-        );
-      }
-
-      if (lastDigit % 2 === 0) {
-        verificationStatus = "eligible";
-        verificationReasonCode = "CARD_PROGRAM_MATCHED";
+      if (execution.result) {
+        verificationStatus = execution.result.verificationStatus;
+        verificationReasonCode = execution.result.verificationReasonCode;
+        decisionSource = execution.result.decisionSource;
+        cardProgramCode = execution.result.cardProgramCode;
         benefitReference =
-          benefitReference ?? `benefit-${entry.partnerCode}-${cardLast4}`;
-        issuerAuthorizationRef = `issuer-auth-${entry.partnerCode}-${cardLast4}`;
+          execution.result.benefitReference ?? normalizedBenefitReference;
+        issuerAuthorizationRef = execution.result.issuerAuthorizationRef;
+        expiresAt = this.resolveEligibilityExpiry(
+          verifiedAt,
+          execution.result.expiresInSeconds,
+          verificationStatus,
+        );
+        if (verificationStatus === "manual_review") {
+          manualFallback = this.createPartnerEligibilityManualFallback(
+            execution.result.verificationReasonCode,
+            verifiedAt,
+          );
+        }
       } else {
-        verificationStatus = "ineligible";
-        verificationReasonCode = "CARD_PROGRAM_NOT_ELIGIBLE";
+        verificationStatus = "manual_review";
+        verificationReasonCode = execution.fallbackReasonCode;
+        decisionSource = "manual_fallback";
+        benefitReference = normalizedBenefitReference;
+        issuerAuthorizationRef = null;
+        expiresAt = null;
+        manualFallback = this.createPartnerEligibilityManualFallback(
+          execution.fallbackReasonCode,
+          verifiedAt,
+        );
       }
     }
 
@@ -1248,9 +1489,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       partnerProgramCode: entry.programCode,
       partnerEntrySlug: entry.entrySlug,
       bankCode: entry.bankCode,
+      cardProgramCode,
       businessDispatchSubtype: entry.businessDispatchSubtype,
       verificationStatus,
+      decisionSource,
       verificationReasonCode,
+      adapterCode,
+      adapterVersion,
+      contractSnapshot: contract
+        ? this.clonePartnerEligibilityContract(contract)
+        : null,
+      attempts: attempts.map((attempt) => ({ ...attempt })),
+      manualFallback: { ...manualFallback },
       referenceTokenHash,
       benefitReference,
       issuerAuthorizationRef,
@@ -1261,7 +1511,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         requestId: this.normalizeNullableText(requestId),
       },
       verifiedAt,
-      expiresAt: verificationStatus === "eligible" ? expiresAt : null,
+      expiresAt,
       createdAt: verifiedAt,
       updatedAt: verifiedAt,
       auditMetadata: {
@@ -1336,6 +1586,331 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
 
     return this.clonePartnerEligibilityVerification(verification);
+  }
+
+  private assertPartnerEligibilityCommand(
+    entry: PartnerChannelEntryRecord,
+    command: VerifyPartnerEligibilityCommand,
+  ) {
+    if (entry.eligibilityMode === "reference_required") {
+      const referenceToken = this.normalizeNullableText(command.referenceToken);
+      if (!referenceToken) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "REFERENCE_TOKEN_REQUIRED",
+          "referenceToken is required for this partner entry.",
+          {
+            entrySlug: entry.entrySlug,
+          },
+        );
+      }
+      return;
+    }
+
+    if (entry.eligibilityMode !== "bank_card_inline") {
+      return;
+    }
+
+    const cardLast4 = command.cardLast4?.trim();
+    if (!cardLast4 || !/^[0-9]{4}$/.test(cardLast4)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "CARD_LAST4_REQUIRED",
+        "cardLast4 must be a four-digit string for inline card eligibility verification.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+  }
+
+  private async executePartnerEligibilityContract(
+    entry: PartnerChannelEntryRecord,
+    contract: PartnerEligibilityIntegrationContractRecord,
+    command: VerifyPartnerEligibilityCommand,
+    requestId?: string,
+  ): Promise<PartnerEligibilityExecutionResult> {
+    const adapter = this.requirePartnerEligibilityAdapter(contract, entry);
+    const attempts: PartnerEligibilityAdapterAttemptRecord[] = [];
+    const retryPolicy = contract.retryPolicy;
+
+    for (
+      let attempt = 1;
+      attempt <= (retryPolicy?.maxAttempts ?? 1);
+      attempt += 1
+    ) {
+      const startedAt = new Date().toISOString();
+      const startedAtMs = Date.now();
+      try {
+        const result = await this.invokePartnerEligibilityAdapterWithTimeout(
+          adapter,
+          {
+            entry,
+            contract,
+            command,
+            ...(requestId ? { requestId } : {}),
+          },
+          retryPolicy?.timeoutMs ?? 0,
+        );
+        attempts.push({
+          attempt,
+          adapterCode: adapter.adapterCode,
+          startedAt,
+          completedAt: new Date().toISOString(),
+          durationMs: Date.now() - startedAtMs,
+          status: result.verificationStatus,
+          reasonCode: result.verificationReasonCode,
+          retryable: false,
+          timeoutTriggered: false,
+          upstreamHttpStatus: result.upstreamHttpStatus,
+        });
+        return {
+          result,
+          fallbackReasonCode: result.verificationReasonCode,
+          attempts,
+          adapterCode: adapter.adapterCode,
+          adapterVersion: adapter.adapterVersion,
+        };
+      } catch (error) {
+        const adapterError =
+          this.normalizePartnerEligibilityAdapterError(error);
+        attempts.push({
+          attempt,
+          adapterCode: adapter.adapterCode,
+          startedAt,
+          completedAt: new Date().toISOString(),
+          durationMs: Date.now() - startedAtMs,
+          status: "error",
+          reasonCode: adapterError.code,
+          retryable: adapterError.retryable,
+          timeoutTriggered: adapterError.timedOut,
+          upstreamHttpStatus: adapterError.upstreamHttpStatus,
+        });
+        if (
+          !adapterError.retryable ||
+          attempt >= (retryPolicy?.maxAttempts ?? 1)
+        ) {
+          return {
+            result: null,
+            fallbackReasonCode:
+              adapterError.manualFallbackReasonCode ??
+              (adapterError.timedOut
+                ? "ISSUER_TIMEOUT_REVIEW_REQUIRED"
+                : "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED"),
+            attempts,
+            adapterCode: adapter.adapterCode,
+            adapterVersion: adapter.adapterVersion,
+          };
+        }
+        if (retryPolicy) {
+          await this.sleep(
+            this.computePartnerEligibilityRetryDelayMs(retryPolicy, attempt),
+          );
+        }
+      }
+    }
+
+    return {
+      result: null,
+      fallbackReasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+      attempts,
+      adapterCode: adapter.adapterCode,
+      adapterVersion: adapter.adapterVersion,
+    };
+  }
+
+  private requirePartnerEligibilityAdapter(
+    contract: PartnerEligibilityIntegrationContractRecord,
+    entry: PartnerChannelEntryRecord,
+  ) {
+    const adapter = this.eligibilityAdapters.find((candidate) =>
+      candidate.supports(contract, entry),
+    );
+    if (adapter) {
+      return adapter;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.SERVICE_UNAVAILABLE,
+      "PARTNER_ELIGIBILITY_ADAPTER_UNAVAILABLE",
+      "The configured partner eligibility adapter is unavailable.",
+      {
+        entrySlug: entry.entrySlug,
+        adapterCode: contract.adapterCode,
+      },
+    );
+  }
+
+  private async invokePartnerEligibilityAdapterWithTimeout(
+    adapter: PartnerEligibilityAdapterInterface,
+    input: PartnerEligibilityAdapterInput,
+    timeoutMs: number,
+  ) {
+    if (timeoutMs <= 0) {
+      return adapter.verify(input);
+    }
+
+    return await new Promise<PartnerEligibilityAdapterResult>(
+      (resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(
+            new PartnerEligibilityAdapterError(
+              "ISSUER_TIMEOUT",
+              "Issuer eligibility adapter timed out before producing a result.",
+              {
+                retryable: true,
+                timedOut: true,
+                upstreamHttpStatus: 504,
+                manualFallbackReasonCode: "ISSUER_TIMEOUT_REVIEW_REQUIRED",
+              },
+            ),
+          );
+        }, timeoutMs);
+
+        void adapter
+          .verify(input)
+          .then((result) => {
+            clearTimeout(timer);
+            resolve(result);
+          })
+          .catch((error: unknown) => {
+            clearTimeout(timer);
+            reject(error);
+          });
+      },
+    );
+  }
+
+  private normalizePartnerEligibilityAdapterError(error: unknown) {
+    if (error instanceof PartnerEligibilityAdapterError) {
+      return error;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return new PartnerEligibilityAdapterError("ISSUER_UNAVAILABLE", message, {
+      retryable: true,
+      upstreamHttpStatus: 503,
+      manualFallbackReasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+    });
+  }
+
+  private computePartnerEligibilityRetryDelayMs(
+    retryPolicy: PartnerEligibilityRetryPolicyRecord,
+    attempt: number,
+  ) {
+    const calculatedDelay =
+      retryPolicy.initialBackoffMs *
+      retryPolicy.backoffMultiplier ** Math.max(0, attempt - 1);
+    return Math.min(retryPolicy.maxBackoffMs, Math.round(calculatedDelay));
+  }
+
+  private async sleep(delayMs: number) {
+    if (delayMs <= 0) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, delayMs);
+    });
+  }
+
+  private createPartnerEligibilityManualFallback(
+    reasonCode: string,
+    requestedAt: string,
+  ): PartnerEligibilityManualFallbackRecord {
+    return {
+      required: true,
+      reasonCode,
+      requestedAt,
+      requestedBy: "system:auto_fallback",
+      notes: null,
+    };
+  }
+
+  private resolveEligibilityExpiry(
+    verifiedAt: string,
+    expiresInSeconds: number | null,
+    status: PartnerEligibilityVerificationRecord["verificationStatus"],
+  ) {
+    if (status !== "eligible" || !expiresInSeconds || expiresInSeconds <= 0) {
+      return null;
+    }
+
+    return new Date(
+      Date.parse(verifiedAt) + expiresInSeconds * 1_000,
+    ).toISOString();
+  }
+
+  private inferPartnerEligibilityDecisionSource(
+    status: PartnerEligibilityVerificationRecord["verificationStatus"],
+    eligibilityMode: PartnerChannelEntryRecord["eligibilityMode"],
+  ): PartnerEligibilityDecisionSource {
+    if (status === "manual_review") {
+      return "manual_fallback";
+    }
+    if (eligibilityMode === "reference_required") {
+      return "issuer_reference_lookup";
+    }
+    if (eligibilityMode === "bank_card_inline") {
+      return "issuer_realtime";
+    }
+    return "not_required";
+  }
+
+  private buildPartnerEligibilityContract(
+    entry: PartnerChannelEntryRecord,
+  ): PartnerEligibilityIntegrationContractRecord | null {
+    if (entry.eligibilityMode === "none") {
+      return null;
+    }
+
+    if (entry.eligibilityMode === "bank_card_inline") {
+      return {
+        contractId: "partner-eligibility-bank-card-inline-v1",
+        adapterCode: BANK_CARD_INLINE_ELIGIBILITY_ADAPTER_CODE,
+        adapterKind: "issuer_card_lookup",
+        adapterVersion: "v1",
+        eligibilityMode: entry.eligibilityMode,
+        decisionTtlSeconds: PARTNER_ELIGIBILITY_DECISION_TTL_SECONDS,
+        retryPolicy: { ...DEFAULT_PARTNER_ELIGIBILITY_RETRY_POLICY },
+        manualFallbackPolicy: {
+          ...DEFAULT_PARTNER_ELIGIBILITY_MANUAL_FALLBACK_POLICY,
+          requiredAuditFields: [
+            ...DEFAULT_PARTNER_ELIGIBILITY_MANUAL_FALLBACK_POLICY.requiredAuditFields,
+          ],
+        },
+        sensitiveDataPolicy: {
+          ...DEFAULT_PARTNER_ELIGIBILITY_SENSITIVE_DATA_POLICY,
+        },
+        notes: [
+          "Inline issuer lookup remains sandbox-backed until external bank evidence is available.",
+          "Timeouts and retry exhaustion auto-route to ops_console manual review with audit.",
+        ],
+      };
+    }
+
+    return {
+      contractId: "partner-eligibility-reference-required-v1",
+      adapterCode: REFERENCE_TOKEN_ELIGIBILITY_ADAPTER_CODE,
+      adapterKind: "issuer_reference_lookup",
+      adapterVersion: "v1",
+      eligibilityMode: entry.eligibilityMode,
+      decisionTtlSeconds: PARTNER_ELIGIBILITY_DECISION_TTL_SECONDS,
+      retryPolicy: { ...DEFAULT_PARTNER_ELIGIBILITY_RETRY_POLICY },
+      manualFallbackPolicy: {
+        ...DEFAULT_PARTNER_ELIGIBILITY_MANUAL_FALLBACK_POLICY,
+        requiredAuditFields: [
+          ...DEFAULT_PARTNER_ELIGIBILITY_MANUAL_FALLBACK_POLICY.requiredAuditFields,
+        ],
+      },
+      sensitiveDataPolicy: {
+        ...DEFAULT_PARTNER_ELIGIBILITY_SENSITIVE_DATA_POLICY,
+      },
+      notes: [
+        "Reference-token verification stores the token hash only and derives non-secret benefit references.",
+        "Timeouts and retry exhaustion auto-route to ops_console manual review with audit.",
+      ],
+    };
   }
 
   createTenantUser(
@@ -1626,7 +2201,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       tenantId,
       url: normalizedUrl,
       events: normalizedEvents,
-      status: "active",
+      status: "test_pending",
       secretVersion: 1,
       secretPreview,
       secretValue: command.secret,
@@ -1636,8 +2211,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         failedDeliveryCount: 0,
         lastAttemptAt: null,
         lastDeliveredAt: null,
+        lastValidatedAt: null,
         nextAttemptAt: null,
         lastSignaturePreview: null,
+        disabledAt: null,
+        disableReason: null,
         retryPolicy: { ...DEFAULT_WEBHOOK_RETRY_POLICY },
         secretRotation: {
           currentVersion: 1,
@@ -1708,23 +2286,28 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   ) {
     const endpoint = this.requireWebhookEndpoint(tenantId, webhookId);
     const oldValues = this.toWebhookResponse(endpoint);
+    const previousEndpointStatus = endpoint.status;
 
     let changed = false;
+    let requiresRevalidation = false;
+    let requestedStatus: TenantWebhookEndpointStatus | undefined;
 
     if (command.url !== undefined) {
       this.assertNonBlank(command.url, "url");
       endpoint.url = command.url.trim();
       changed = true;
+      requiresRevalidation = true;
     }
 
     if (command.events !== undefined) {
       endpoint.events = this.normalizeWebhookEvents(command.events);
       changed = true;
+      requiresRevalidation = true;
     }
 
     if (command.status !== undefined) {
       this.assertSupportedWebhookStatus(command.status);
-      endpoint.status = command.status;
+      requestedStatus = command.status;
       changed = true;
     }
 
@@ -1739,7 +2322,27 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    endpoint.updatedAt = new Date().toISOString();
+    const now = new Date().toISOString();
+    if (requestedStatus === "disabled") {
+      endpoint.status = "disabled";
+      endpoint.runtimeMetadata.disabledAt = now;
+      endpoint.runtimeMetadata.disableReason = "manual_disable";
+      endpoint.updatedAt = now;
+    } else if (requiresRevalidation || requestedStatus === "test_pending") {
+      this.markWebhookValidationPending(endpoint, now);
+    } else if (requestedStatus === "active") {
+      if (previousEndpointStatus === "disabled") {
+        this.markWebhookValidationPending(endpoint, now);
+      } else {
+        endpoint.status = "active";
+        endpoint.runtimeMetadata.disabledAt = null;
+        endpoint.runtimeMetadata.disableReason = null;
+        endpoint.updatedAt = now;
+      }
+    } else {
+      endpoint.updatedAt = now;
+    }
+
     this.persistChanges(
       {
         webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
@@ -1769,16 +2372,31 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: SendTestWebhookCommand,
     requestId?: string,
   ) {
-    const endpoint = this.webhookEndpoints.find(
-      (webhook) =>
-        webhook.tenantId === tenantId &&
-        webhook.webhookId === command.webhookId,
-    );
-    if (!endpoint) {
-      return null;
-    }
-
+    const endpoint = this.requireWebhookEndpoint(tenantId, command.webhookId);
+    const oldValues = this.toWebhookResponse(endpoint);
     const createdAt = new Date().toISOString();
+    this.markWebhookValidationPending(endpoint, createdAt);
+    this.persistChanges(
+      {
+        webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
+      },
+      "send_test_webhook_pending",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "set_webhook_test_pending",
+        resourceType: "webhook_endpoint",
+        resourceId: endpoint.webhookId,
+        oldValuesSummary: oldValues,
+        newValuesSummary: this.toWebhookResponse(endpoint),
+      },
+      requestId,
+    );
+
     const delivery = this.enqueueWebhookDelivery(
       endpoint,
       "tenant.webhook.test",
@@ -1969,6 +2587,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     payload: Record<string, unknown>,
   ) {
     const previousStatus = delivery.status;
+    const previousEndpointValues = this.toWebhookResponse(endpoint);
     const result = await this.webhookDispatchService.dispatchAttempt({
       url: endpoint.url,
       deliveryId: delivery.deliveryId,
@@ -2007,6 +2626,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           : endpoint.runtimeMetadata.lastDeliveredAt,
       nextAttemptAt: result.nextAttemptAt,
       lastSignaturePreview: result.signature.slice(0, 16),
+      disabledAt: endpoint.runtimeMetadata.disabledAt,
+      disableReason: endpoint.runtimeMetadata.disableReason,
       secretRotation: {
         currentVersion: endpoint.secretVersion,
         rotatedAt: endpoint.runtimeMetadata.secretRotation.rotatedAt,
@@ -2017,6 +2638,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       },
       retryPolicy: { ...endpoint.retryPolicy },
     };
+    this.applyWebhookPostDispatchPolicy(
+      endpoint,
+      delivery,
+      result,
+      previousEndpointValues,
+    );
 
     this.persistChanges(
       {
@@ -2037,6 +2664,81 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     return result;
+  }
+
+  private applyWebhookPostDispatchPolicy(
+    endpoint: StoredWebhookEndpoint,
+    delivery: StoredWebhookDelivery,
+    result: Awaited<ReturnType<WebhookDispatchService["dispatchAttempt"]>>,
+    previousEndpointValues: Record<string, unknown>,
+  ) {
+    if (result.status === "delivered" && endpoint.status === "test_pending") {
+      endpoint.status = "active";
+      endpoint.updatedAt = result.attemptedAt;
+      endpoint.runtimeMetadata.lastValidatedAt = result.attemptedAt;
+      endpoint.runtimeMetadata.disabledAt = null;
+      endpoint.runtimeMetadata.disableReason = null;
+
+      this.recordTenantAudit({
+        actorId: null,
+        actorType: "system",
+        tenantId: endpoint.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "activate_webhook_endpoint",
+        resourceType: "webhook_endpoint",
+        resourceId: endpoint.webhookId,
+        oldValuesSummary: previousEndpointValues,
+        newValuesSummary: this.toWebhookResponse(endpoint) as Record<
+          string,
+          unknown
+        >,
+      });
+      return;
+    }
+
+    if (result.status === "delivery_failed" && endpoint.status !== "disabled") {
+      endpoint.status = "disabled";
+      endpoint.updatedAt = result.attemptedAt;
+      endpoint.runtimeMetadata.disabledAt = result.attemptedAt;
+      endpoint.runtimeMetadata.disableReason = "delivery_failed";
+
+      this.auditNotificationService.recordNotification({
+        tenantId: endpoint.tenantId,
+        channel: "ops_notice",
+        title: "Tenant webhook disabled after repeated delivery failures",
+        message: [
+          `Endpoint ${endpoint.webhookId} (${endpoint.url})`,
+          `failed ${result.attempt} attempts for ${delivery.eventType}`,
+          `and was disabled pending revalidation.`,
+        ].join(" "),
+        status: "unread",
+      });
+      this.recordTenantAudit({
+        actorId: null,
+        actorType: "system",
+        tenantId: endpoint.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "disable_webhook_endpoint",
+        resourceType: "webhook_endpoint",
+        resourceId: endpoint.webhookId,
+        oldValuesSummary: previousEndpointValues,
+        newValuesSummary: this.toWebhookResponse(endpoint) as Record<
+          string,
+          unknown
+        >,
+      });
+    }
+  }
+
+  private markWebhookValidationPending(
+    endpoint: StoredWebhookEndpoint,
+    updatedAt: string,
+  ) {
+    endpoint.status = "test_pending";
+    endpoint.updatedAt = updatedAt;
+    endpoint.runtimeMetadata.disabledAt = null;
+    endpoint.runtimeMetadata.disableReason = null;
+    endpoint.runtimeMetadata.nextAttemptAt = null;
   }
 
   private schedulePersistedWebhookRetries() {
@@ -2124,14 +2826,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   ) {
     this.assertNonBlank(command.secret, "secret");
 
-    const endpoint = this.webhookEndpoints.find(
-      (webhook) =>
-        webhook.tenantId === tenantId &&
-        webhook.webhookId === command.webhookId,
-    );
-    if (!endpoint) {
-      return null;
-    }
+    const endpoint = this.requireWebhookEndpoint(tenantId, command.webhookId);
+    const oldValues = this.toWebhookResponse(endpoint);
 
     const rotatedAt = new Date().toISOString();
     const secretPreview = this.secretPreview(command.secret);
@@ -2146,7 +2842,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     endpoint.secretVersion = rotationRecord.secretVersion;
     endpoint.secretValue = command.secret;
     endpoint.secretPreview = secretPreview;
-    endpoint.updatedAt = rotatedAt;
     endpoint.secretHistory = [...endpoint.secretHistory, rotationRecord];
     endpoint.runtimeMetadata = {
       ...endpoint.runtimeMetadata,
@@ -2157,6 +2852,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         history: endpoint.secretHistory.map((record) => ({ ...record })),
       },
     };
+    this.markWebhookValidationPending(endpoint, rotatedAt);
     this.persistChanges(
       {
         webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
@@ -2173,11 +2869,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         actionName: "rotate_webhook_secret",
         resourceType: "webhook_endpoint",
         resourceId: endpoint.webhookId,
+        oldValuesSummary: oldValues,
         newValuesSummary: {
           secretVersion: endpoint.secretVersion,
           rotationCount: endpoint.secretHistory.length,
           rotationReason,
           secretPreview: endpoint.secretPreview,
+          status: endpoint.status,
         },
       },
       requestId,
@@ -2285,15 +2983,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   ) {
     const now = new Date().toISOString();
     const plaintextKey = `tk_${randomBytes(18).toString("hex")}`;
+    const normalizedScopes = this.normalizeTenantApiKeyScopes(input.scopes);
+    const expiresAt = this.resolveTenantApiKeyExpiry(input.expiresAt);
     const storedApiKey: StoredTenantApiKeyRecord = {
       apiKeyId: `api_key_${randomUUID()}`,
       tenantId,
       keyName: input.keyName.trim(),
       keyPrefix: plaintextKey.slice(0, 12),
       maskedSuffix: this.maskedSuffix(plaintextKey),
-      scopes: [...input.scopes],
+      scopes: normalizedScopes,
       lastUsedAt: null,
-      expiresAt: input.expiresAt,
+      expiresAt,
       revokedAt: null,
       createdAt: now,
       keyHash: this.hashSecret(plaintextKey),
@@ -2304,6 +3004,128 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       plaintextKey,
       revokedApiKeyId,
     };
+  }
+
+  private buildTenantApiKeyGovernancePolicy(): TenantApiKeyGovernancePolicy {
+    return {
+      allowedScopes: [...CANONICAL_TENANT_API_KEY_SCOPES].sort(),
+      compatibilityAliases: { ...TENANT_API_KEY_SCOPE_ALIASES },
+      defaultLifetimeDays: DEFAULT_TENANT_API_KEY_LIFETIME_DAYS,
+      maxLifetimeDays: MAX_TENANT_API_KEY_LIFETIME_DAYS,
+      requireExpiry: true,
+      breakGlassRequiresPlatformApproval: true,
+      revokeEffect: "immediate",
+    };
+  }
+
+  private buildTenantWebhookGovernancePolicy(): TenantWebhookGovernancePolicy {
+    return {
+      testEventType: "tenant.webhook.test",
+      autoDisableAfterConsecutiveFailures:
+        DEFAULT_WEBHOOK_RETRY_POLICY.maxAttempts,
+      revalidationRequiredOnCreate: true,
+      revalidationRequiredOnEndpointMutation: true,
+      revalidationRequiredOnSecretRotation: true,
+      deliveryFailureNotificationChannel: "ops_notice",
+      retryPolicy: this.cloneWebhookRetryPolicy(DEFAULT_WEBHOOK_RETRY_POLICY),
+    };
+  }
+
+  private cloneWebhookRetryPolicy(
+    retryPolicy: WebhookRetryPolicy,
+  ): WebhookRetryPolicyRecord {
+    return {
+      maxAttempts: retryPolicy.maxAttempts,
+      initialBackoffSeconds: retryPolicy.initialBackoffSeconds,
+      backoffMultiplier: retryPolicy.backoffMultiplier,
+      maxBackoffSeconds: retryPolicy.maxBackoffSeconds,
+      retryableStatusCodes: [...retryPolicy.retryableStatusCodes],
+    };
+  }
+
+  private normalizeTenantApiKeyScopes(scopes: string[]): string[] {
+    const normalized = [
+      ...new Set(
+        scopes
+          .map((scope) => this.requireNonBlank(scope, "scope"))
+          .map((scope) => TENANT_API_KEY_SCOPE_ALIASES[scope] ?? scope),
+      ),
+    ];
+
+    if (normalized.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_API_KEY_SCOPES_REQUIRED",
+        "At least one tenant API key scope must be provided.",
+        {},
+      );
+    }
+
+    const unsupported = normalized.filter(
+      (scope) => !CANONICAL_TENANT_API_KEY_SCOPES.has(scope),
+    );
+    if (unsupported.length > 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "UNSUPPORTED_TENANT_API_KEY_SCOPE",
+        "One or more tenant API key scopes are not supported.",
+        {
+          scopes: unsupported,
+          allowedScopes: [...CANONICAL_TENANT_API_KEY_SCOPES].sort(),
+        },
+      );
+    }
+
+    return normalized.sort((left, right) => left.localeCompare(right));
+  }
+
+  private resolveTenantApiKeyExpiry(expiresAt: string | null): string {
+    const now = Date.now();
+    const fallbackExpiry = new Date(
+      now + DEFAULT_TENANT_API_KEY_LIFETIME_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    if (!expiresAt) {
+      return fallbackExpiry;
+    }
+
+    const parsed = Date.parse(expiresAt);
+    if (Number.isNaN(parsed)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_API_KEY_EXPIRY_INVALID",
+        "expiresAt must be a valid ISO timestamp.",
+        {
+          expiresAt,
+        },
+      );
+    }
+    if (parsed <= now) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_API_KEY_EXPIRY_PAST",
+        "expiresAt must be in the future.",
+        {
+          expiresAt,
+        },
+      );
+    }
+
+    const maxExpiry =
+      now + MAX_TENANT_API_KEY_LIFETIME_DAYS * 24 * 60 * 60 * 1000;
+    if (parsed > maxExpiry) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_API_KEY_EXPIRY_TOO_FAR",
+        "expiresAt exceeds the tenant API key maximum lifetime.",
+        {
+          expiresAt,
+          maxLifetimeDays: MAX_TENANT_API_KEY_LIFETIME_DAYS,
+        },
+      );
+    }
+
+    return new Date(parsed).toISOString();
   }
 
   private toWebhookResponse(endpoint: StoredWebhookEndpoint) {
@@ -2377,6 +3199,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       departmentName: passenger.departmentName,
       mobile: maskPhone(passenger.mobile),
       email: maskEmail(passenger.email),
+      roles: [...(passenger.roles ?? [])],
+      qualityIssues: [...(passenger.qualityIssues ?? [])],
       activeFlag: passenger.activeFlag,
       metadataKeys: Object.keys(passenger.metadata).sort(),
       createdAt: passenger.createdAt,
@@ -2391,6 +3215,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ownerPassengerId: address.ownerPassengerId,
       addressName: address.addressName,
       addressText: maskAddress(address.addressText),
+      normalizedAddressText: address.normalizedAddressText ?? null,
+      sensitiveFlag: address.sensitiveFlag ?? false,
+      geocodeSource: address.geocodeSource ?? "none",
+      qualityIssues: [...(address.qualityIssues ?? [])],
       coordinatesRedacted: address.lat !== null || address.lng !== null,
       tags: [...address.tags],
       activeFlag: address.activeFlag,
@@ -2432,6 +3260,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   ): TenantPassengerRecord {
     return {
       ...passenger,
+      roles: [...(passenger.roles ?? [])],
+      qualityIssues: [...(passenger.qualityIssues ?? [])],
       metadata: { ...passenger.metadata },
     };
   }
@@ -2439,6 +3269,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private cloneAddress(address: TenantAddressRecord): TenantAddressRecord {
     return {
       ...address,
+      qualityIssues: [...(address.qualityIssues ?? [])],
       tags: [...address.tags],
     };
   }
@@ -2452,10 +3283,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private clonePartnerEntry(
     entry: PartnerChannelEntryRecord,
   ): PartnerChannelEntryRecord {
+    const eligibilityContract =
+      entry.eligibilityContract ?? this.buildPartnerEligibilityContract(entry);
     return {
       ...entry,
       brandingMetadata: entry.brandingMetadata
         ? { ...entry.brandingMetadata }
+        : null,
+      eligibilityContract: eligibilityContract
+        ? this.clonePartnerEligibilityContract(eligibilityContract)
         : null,
       auditMetadata: { ...entry.auditMetadata },
     };
@@ -2464,10 +3300,74 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private clonePartnerEligibilityVerification(
     verification: PartnerEligibilityVerificationRecord,
   ): PartnerEligibilityVerificationRecord {
+    const entry = this.findPartnerEntryBySlug(verification.partnerEntrySlug);
+    const contract =
+      verification.contractSnapshot ??
+      (entry ? this.buildPartnerEligibilityContract(entry) : null);
+    const decisionSource =
+      verification.decisionSource ??
+      this.inferPartnerEligibilityDecisionSource(
+        verification.verificationStatus,
+        entry?.eligibilityMode ?? "none",
+      );
+    const adapterCode =
+      verification.adapterCode ?? contract?.adapterCode ?? null;
+    const adapterVersion =
+      verification.adapterVersion ?? contract?.adapterVersion ?? null;
+    const manualFallback =
+      verification.manualFallback ??
+      (verification.verificationStatus === "manual_review"
+        ? this.createPartnerEligibilityManualFallback(
+            verification.verificationReasonCode,
+            verification.verifiedAt,
+          )
+        : {
+            required: false,
+            reasonCode: null,
+            requestedAt: null,
+            requestedBy: null,
+            notes: null,
+          });
     return {
       ...verification,
+      cardProgramCode:
+        verification.cardProgramCode ??
+        entry?.programCode ??
+        entry?.bankCode ??
+        null,
+      decisionSource,
+      adapterCode,
+      adapterVersion,
+      contractSnapshot: contract
+        ? this.clonePartnerEligibilityContract(contract)
+        : null,
+      attempts: (verification.attempts ?? []).map((attempt) => ({
+        ...attempt,
+      })),
+      manualFallback: { ...manualFallback },
       requestMetadata: { ...verification.requestMetadata },
       auditMetadata: { ...verification.auditMetadata },
+    };
+  }
+
+  private clonePartnerEligibilityContract(
+    contract: PartnerEligibilityIntegrationContractRecord,
+  ): PartnerEligibilityIntegrationContractRecord {
+    return {
+      ...contract,
+      retryPolicy: contract.retryPolicy ? { ...contract.retryPolicy } : null,
+      manualFallbackPolicy: contract.manualFallbackPolicy
+        ? {
+            ...contract.manualFallbackPolicy,
+            requiredAuditFields: [
+              ...contract.manualFallbackPolicy.requiredAuditFields,
+            ],
+          }
+        : null,
+      sensitiveDataPolicy: contract.sensitiveDataPolicy
+        ? { ...contract.sensitiveDataPolicy }
+        : null,
+      notes: [...contract.notes],
     };
   }
 
@@ -2555,6 +3455,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         {
           eventType: "tenant.sla.threshold_breached",
           channel: "webhook",
+          enabled: true,
+        },
+        {
+          eventType: "tenant.webhook.delivery_failed",
+          channel: "ops_console",
           enabled: true,
         },
       ],
@@ -2889,6 +3794,88 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return normalized ? normalized : null;
   }
 
+  private normalizePassengerRoles(
+    roles: TenantPassengerMasterRole[] | undefined,
+  ): TenantPassengerMasterRole[] {
+    const normalized = [...new Set((roles ?? ["passenger"]).filter(Boolean))];
+    return normalized.length > 0 ? normalized : ["passenger"];
+  }
+
+  private buildPassengerQualityIssues(
+    tenantId: string,
+    passenger: TenantPassengerRecord,
+  ): TenantPassengerQualityIssue[] {
+    const issues: TenantPassengerQualityIssue[] = [];
+    if (!passenger.mobile && !passenger.email) {
+      issues.push("missing_contact");
+    }
+    if (
+      passenger.roles?.includes("employee") &&
+      !this.normalizeNullableText(passenger.employeeNo)
+    ) {
+      issues.push("missing_employee_no");
+    }
+    if (
+      passenger.employeeNo &&
+      this.passengers.some(
+        (candidate) =>
+          candidate.tenantId === tenantId &&
+          candidate.passengerId !== passenger.passengerId &&
+          candidate.employeeNo === passenger.employeeNo,
+      )
+    ) {
+      issues.push("duplicate_employee_no");
+    }
+    return issues;
+  }
+
+  private normalizeAddressTags(tags: string[] | undefined): string[] {
+    const normalized = [
+      ...new Set((tags ?? []).map((tag) => tag.trim()).filter(Boolean)),
+    ];
+    return normalized.sort((left, right) => left.localeCompare(right));
+  }
+
+  private normalizeAddressText(value: string): string {
+    return value.replace(/\s+/g, "").trim();
+  }
+
+  private resolveAddressGeocodeSource(
+    source: TenantAddressGeocodeSource | undefined,
+    lat: number | null,
+    lng: number | null,
+  ): TenantAddressGeocodeSource {
+    const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
+    if (!hasCoordinates) {
+      return "none";
+    }
+    return source ?? "manual";
+  }
+
+  private buildAddressQualityIssues(
+    tenantId: string,
+    address: TenantAddressRecord,
+  ): TenantAddressQualityIssue[] {
+    const issues: TenantAddressQualityIssue[] = [];
+    const hasCoordinates =
+      Number.isFinite(address.lat) && Number.isFinite(address.lng);
+    if (!hasCoordinates) {
+      issues.push("missing_geocode");
+    }
+    if (
+      address.normalizedAddressText &&
+      this.addresses.some(
+        (candidate) =>
+          candidate.tenantId === tenantId &&
+          candidate.addressId !== address.addressId &&
+          candidate.normalizedAddressText === address.normalizedAddressText,
+      )
+    ) {
+      issues.push("duplicate_normalized_address");
+    }
+    return issues;
+  }
+
   private normalizePartnerCode(value: string) {
     const normalized = this.requireNonBlank(value, "partnerCode")
       .toLowerCase()
@@ -2994,7 +3981,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private assertSupportedWebhookStatus(status: TenantWebhookEndpointStatus) {
-    if (status === "active" || status === "test_pending") {
+    if (
+      status === "active" ||
+      status === "test_pending" ||
+      status === "disabled"
+    ) {
       return;
     }
 

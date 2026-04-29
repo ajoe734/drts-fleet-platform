@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import {
+  PartnerEligibilityAdapterError,
+  type PartnerEligibilityAdapterInterface,
+} from "../../src/modules/tenant-partner/partner-eligibility-adapter.interface";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../src/modules/tenant-partner/webhook-dispatch.service";
 
@@ -205,5 +209,275 @@ describe("TenantPartnerService sensitive-data governance", () => {
         }),
       ]),
     );
+  });
+
+  it("publishes the formal eligibility contract and hashes reference tokens instead of persisting raw values", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const entry = service.getPartnerEntry("bank-demo-beta-airport");
+    expect(entry.eligibilityContract).toMatchObject({
+      adapterCode: "issuer_reference_lookup_v1",
+      adapterKind: "issuer_reference_lookup",
+      eligibilityMode: "reference_required",
+      retryPolicy: expect.objectContaining({
+        timeoutMs: 3000,
+        maxAttempts: 3,
+      }),
+      manualFallbackPolicy: expect.objectContaining({
+        queue: "ops_console",
+      }),
+      sensitiveDataPolicy: expect.objectContaining({
+        referenceTokenStorage: "hash_only",
+        rawTokenExposure: "never",
+      }),
+    });
+
+    const rawReferenceToken = "raw-secret-token-987654";
+    const verification = await service.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-beta-airport",
+        referenceToken: rawReferenceToken,
+      },
+      "req-eligibility-reference-001",
+    );
+
+    expect(verification.referenceTokenHash).toMatch(/^sha256:/);
+    expect(verification.referenceTokenHash).not.toContain(rawReferenceToken);
+    expect(verification.benefitReference).not.toBe(rawReferenceToken);
+    expect(verification.benefitReference).not.toContain(rawReferenceToken);
+    expect(verification.issuerAuthorizationRef).not.toContain(
+      rawReferenceToken,
+    );
+    expect(verification).toMatchObject({
+      verificationStatus: "eligible",
+      decisionSource: "issuer_reference_lookup",
+      adapterCode: "issuer_reference_lookup_v1",
+      manualFallback: expect.objectContaining({
+        required: false,
+      }),
+      contractSnapshot: expect.objectContaining({
+        adapterCode: "issuer_reference_lookup_v1",
+      }),
+    });
+    expect(verification.attempts).toEqual([
+      expect.objectContaining({
+        attempt: 1,
+        status: "eligible",
+        reasonCode: "REFERENCE_ACCEPTED",
+      }),
+    ]);
+  });
+
+  it("applies passenger/address governance quality rules and masks export views", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const passenger = service.upsertPassenger("tenant-demo-001", {
+      passengerId: "passenger-governance-001",
+      fullName: "王小美",
+      roles: ["employee", "passenger"],
+    });
+
+    expect(passenger.roles).toEqual(["employee", "passenger"]);
+    expect(passenger.qualityIssues).toEqual(
+      expect.arrayContaining(["missing_contact", "missing_employee_no"]),
+    );
+
+    const address = service.upsertAddress("tenant-demo-001", {
+      addressId: "address-governance-001",
+      ownerPassengerId: passenger.passengerId,
+      addressName: "Sensitive Pickup",
+      addressText: "台北市大安區仁愛路四段 100 號 12 樓",
+      sensitiveFlag: true,
+      tags: ["vip"],
+    });
+
+    expect(address.tags).toEqual(expect.arrayContaining(["sensitive", "vip"]));
+    expect(address.qualityIssues).toEqual(["missing_geocode"]);
+    expect(address.maskedAddressText).not.toContain("100 號 12 樓");
+
+    const [exportView] = service
+      .listAddressExportView("tenant-demo-001")
+      .filter((candidate) => candidate.addressId === address.addressId);
+    expect(exportView).toMatchObject({
+      addressId: address.addressId,
+      sensitiveFlag: true,
+      geocodeSource: "none",
+      qualityIssues: ["missing_geocode"],
+    });
+    expect(exportView.maskedAddressText).not.toContain("100 號 12 樓");
+  });
+
+  it("normalizes tenant API key scopes and enforces the rotation window", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const issued = service.issueApiKey("tenant-demo-001", {
+      keyName: "Sandbox integration key",
+      scopes: ["tenant:bookings:write", "tenant:reports:read"],
+    });
+
+    expect(issued.apiKey.scopes).toEqual(["reports:read", "tenant:write"]);
+    expect(issued.apiKey.expiresAt).not.toBeNull();
+
+    const expiresAt = Date.parse(issued.apiKey.expiresAt ?? "");
+    const now = Date.now();
+    expect(expiresAt).toBeGreaterThan(now + 50 * 24 * 60 * 60 * 1000);
+    expect(expiresAt).toBeLessThan(now + 61 * 24 * 60 * 60 * 1000);
+
+    try {
+      service.issueApiKey("tenant-demo-001", {
+        keyName: "Too long",
+        scopes: ["tenant:write"],
+        expiresAt: new Date(now + 120 * 24 * 60 * 60 * 1000).toISOString(),
+      });
+      throw new Error("Expected tenant API key lifetime validation to fail.");
+    } catch (error) {
+      expect(
+        (
+          error as { getResponse: () => { error: { code: string } } }
+        ).getResponse().error.code,
+      ).toBe("TENANT_API_KEY_EXPIRY_TOO_FAR");
+    }
+
+    const governance =
+      service.getIntegrationGovernancePackage("tenant-demo-001");
+    expect(governance.apiKeyPolicy).toMatchObject({
+      defaultLifetimeDays: 60,
+      maxLifetimeDays: 90,
+      breakGlassRequiresPlatformApproval: true,
+      revokeEffect: "immediate",
+    });
+    expect(governance.apiKeyPolicy.compatibilityAliases).toMatchObject({
+      "tenant:bookings:write": "tenant:write",
+      "tenant:reports:read": "reports:read",
+    });
+    expect(governance.baselineWebhookEvents).toContain("dispatch.assigned");
+  });
+
+  it("falls back to manual review after retry exhaustion with explicit adapter attempt history", async () => {
+    const retryingAdapter: PartnerEligibilityAdapterInterface = {
+      adapterCode: "issuer_reference_lookup_v1",
+      adapterVersion: "v1",
+      supports: (contract) =>
+        contract.adapterCode === "issuer_reference_lookup_v1",
+      async verify() {
+        throw new PartnerEligibilityAdapterError(
+          "ISSUER_UNAVAILABLE",
+          "Sandbox issuer adapter unavailable.",
+          {
+            retryable: true,
+            upstreamHttpStatus: 503,
+            manualFallbackReasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+          },
+        );
+      },
+    };
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      [retryingAdapter],
+    );
+
+    const verification = await service.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-beta-airport",
+        referenceToken: "manual-review-token",
+      },
+      "req-eligibility-review-001",
+    );
+
+    expect(verification).toMatchObject({
+      verificationStatus: "manual_review",
+      decisionSource: "manual_fallback",
+      verificationReasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+      adapterCode: "issuer_reference_lookup_v1",
+      manualFallback: expect.objectContaining({
+        required: true,
+        reasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+        requestedBy: "system:auto_fallback",
+      }),
+    });
+    expect(verification.attempts).toHaveLength(3);
+    expect(
+      verification.attempts.every(
+        (attempt) =>
+          attempt.status === "error" &&
+          attempt.reasonCode === "ISSUER_UNAVAILABLE" &&
+          attempt.retryable === true,
+      ),
+    ).toBe(true);
+  });
+
+  it("disables failing webhook endpoints and returns them to test_pending on secret rotation", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      new WebhookDispatchService(
+        vi.fn(async () => ({
+          ok: false,
+          status: 410,
+        })) as never,
+      ),
+      [],
+    );
+
+    const created = service.createWebhookEndpoint(
+      "tenant-demo-001",
+      {
+        url: "https://tenant.example/webhooks/failing",
+        secret: "whsec_test_failure",
+        events: ["booking.created"],
+      },
+      "req-webhook-create-002",
+    );
+    expect(created.status).toBe("test_pending");
+
+    await service.sendTestWebhook(
+      "tenant-demo-001",
+      {
+        webhookId: created.webhookId,
+      },
+      "req-webhook-test-003",
+    );
+
+    const [disabledWebhook] = service.listWebhookEndpoints("tenant-demo-001");
+    expect(disabledWebhook).toMatchObject({
+      webhookId: created.webhookId,
+      status: "disabled",
+      runtimeMetadata: expect.objectContaining({
+        disableReason: "delivery_failed",
+      }),
+    });
+    expect(auditNotificationService.listNotifications()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tenantId: "tenant-demo-001",
+          channel: "ops_notice",
+          title: "Tenant webhook disabled after repeated delivery failures",
+        }),
+      ]),
+    );
+
+    service.rotateWebhookSecret(
+      "tenant-demo-001",
+      {
+        webhookId: created.webhookId,
+        secret: "whsec_test_rotated",
+        rotationReason: "credential_rollover",
+      },
+      "req-webhook-rotate-004",
+    );
+
+    const [revalidationPending] =
+      service.listWebhookEndpoints("tenant-demo-001");
+    expect(revalidationPending).toMatchObject({
+      webhookId: created.webhookId,
+      status: "test_pending",
+      runtimeMetadata: expect.objectContaining({
+        disableReason: null,
+      }),
+    });
   });
 });
