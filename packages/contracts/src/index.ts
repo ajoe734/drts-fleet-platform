@@ -501,6 +501,70 @@ export interface AuditLogRecord {
   createdAt: string;
 }
 
+export const EVIDENCE_RETENTION_FAMILIES = [
+  "call_recording",
+  "report_artifact",
+  "filing_package",
+  "audit_log",
+  "webhook_delivery",
+  "eligibility_verification",
+  "proof_bundle",
+] as const;
+export type EvidenceRetentionFamily =
+  (typeof EVIDENCE_RETENTION_FAMILIES)[number];
+
+export const EVIDENCE_ACCESS_ACTIONS = [
+  "list",
+  "read",
+  "download",
+  "export",
+] as const;
+export type EvidenceAccessAction = (typeof EVIDENCE_ACCESS_ACTIONS)[number];
+
+export const EVIDENCE_ARCHIVE_TIERS = [
+  "hot_only",
+  "warm_archive",
+  "cold_archive",
+] as const;
+export type EvidenceArchiveTier = (typeof EVIDENCE_ARCHIVE_TIERS)[number];
+
+export interface EvidenceAccessRuleRecord {
+  realms: IdentityContext["realm"][];
+  actorTypes: IdentityContext["actorType"][];
+  requiredScopes: string[];
+  tenantScoped: boolean;
+}
+
+export interface EvidenceLegalHoldPolicyRecord {
+  supported: boolean;
+  placementActors: IdentityContext["actorType"][];
+  releaseActors: IdentityContext["actorType"][];
+  deletionSuppressed: boolean;
+  notes: string[];
+}
+
+export interface EvidenceRetentionPolicyRecord {
+  family: EvidenceRetentionFamily;
+  authorityModule: string;
+  description: string;
+  hotRetentionDays: number;
+  archiveAfterDays: number | null;
+  archiveRetentionDays: number | null;
+  archiveTier: EvidenceArchiveTier;
+  accessRules: EvidenceAccessRuleRecord[];
+  legalHold: EvidenceLegalHoldPolicyRecord;
+  deletionException: string;
+  auditAction: string;
+  notes: string[];
+}
+
+export interface EvidenceGovernanceCatalog {
+  version: string;
+  generatedAt: string;
+  policies: EvidenceRetentionPolicyRecord[];
+  legalHoldWorkflow: string[];
+}
+
 export interface NotificationRecord {
   notificationId: string;
   tenantId: string | null;
@@ -985,7 +1049,7 @@ export const RESERVATION_HOLD_VALID_TRANSITIONS: Record<
   requested: ["released", "redispatch_queue", "exception_hold"],
   released: [],
   redispatch_queue: ["requested", "released", "exception_hold"],
-  exception_hold: ["released"],
+  exception_hold: ["requested", "released"],
 } as const;
 
 // --- Exception-Hold Reason Codes ---
@@ -1084,6 +1148,59 @@ export interface CompletionProofBundle {
   photos: string[];
   signatureId?: string | null;
   expenseItems?: CompletionExpenseItem[];
+}
+
+export const COMPLIANCE_GATE_TYPES = [
+  "recording",
+  "proof",
+  "eligibility",
+] as const;
+export type ComplianceGateType = (typeof COMPLIANCE_GATE_TYPES)[number];
+
+export const COMPLIANCE_GATE_STATES = [
+  "clear",
+  "pending",
+  "blocked",
+  "review_required",
+] as const;
+export type ComplianceGateState = (typeof COMPLIANCE_GATE_STATES)[number];
+
+export const COMPLIANCE_GATE_EVIDENCE_STATES = [
+  "not_required",
+  "missing",
+  "submitted",
+  "verified",
+] as const;
+export type ComplianceGateEvidenceState =
+  (typeof COMPLIANCE_GATE_EVIDENCE_STATES)[number];
+
+export const COMPLIANCE_IMPACT_STAGES = [
+  "dispatch",
+  "completion",
+  "settlement",
+] as const;
+export type ComplianceImpactStage = (typeof COMPLIANCE_IMPACT_STAGES)[number];
+
+export interface ComplianceStageImpact {
+  stage: ComplianceImpactStage;
+  effect: "clear" | "blocked" | "review_required";
+  reason: string;
+}
+
+export interface ComplianceGateRecord {
+  gateType: ComplianceGateType;
+  title: string;
+  state: ComplianceGateState;
+  required: boolean;
+  blocking: boolean;
+  evidenceState: ComplianceGateEvidenceState;
+  evidenceRefs: string[];
+  missingItems: string[];
+  nextAction: string;
+  reviewerLabel: string | null;
+  overrideAllowed: boolean;
+  overrideActors: AuditLogRecord["actorType"][];
+  impacts: ComplianceStageImpact[];
 }
 
 export interface CreateOwnedOrderCommand {
@@ -1307,6 +1424,7 @@ export interface OwnedOrderRecord {
     signoffRequired: boolean;
     expenseProofRequired: boolean;
   };
+  complianceGates?: ComplianceGateRecord[];
   complianceFlags: string[];
   cancelledAt: string | null;
   cancelReason: string | null;
@@ -1358,6 +1476,7 @@ export interface BookingRecord {
   quotedFareSource: QuotedFareSource | null;
   quotedFareRuleVersion: string | null;
   manualFareOverride: ManualFareOverrideRecord | null;
+  complianceGates?: ComplianceGateRecord[];
   orderStatus: OwnedOrderStatus;
   createdAt: string;
   updatedAt: string;
@@ -1437,6 +1556,7 @@ export interface DriverTaskRecord {
   actualDurationSec: number | null;
   fare: MoneyAmount | null;
   proof: CompletionProofBundle | null;
+  complianceGates?: ComplianceGateRecord[];
 }
 
 export type DriverTaskStreamEventType =
@@ -1454,11 +1574,16 @@ export interface DriverTaskStreamEventEnvelope extends DomainEventEnvelope<Drive
 
 export type OpsDispatchStreamEventType =
   | "order_created"
+  | "order_updated"
   | "dispatch_job_updated"
   | "driver_location_updated"
   | "supply_lifecycle_updated";
 
 export interface OpsDispatchOrderCreatedEventData {
+  order: OwnedOrderRecord;
+}
+
+export interface OpsDispatchOrderUpdatedEventData {
   order: OwnedOrderRecord;
 }
 
@@ -1483,6 +1608,7 @@ export interface OpsDispatchSupplyLifecycleUpdatedEventData {
 
 export type OpsDispatchStreamEventData =
   | OpsDispatchOrderCreatedEventData
+  | OpsDispatchOrderUpdatedEventData
   | OpsDispatchJobUpdatedEventData
   | OpsDispatchDriverLocationUpdatedEventData
   | OpsDispatchSupplyLifecycleUpdatedEventData;

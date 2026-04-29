@@ -69,6 +69,10 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import {
+  assertEvidenceAccess,
+  buildEvidenceAccessAuditSummary,
+} from "../../common/evidence-governance";
+import {
   maskAddress,
   maskEmail,
   maskName,
@@ -1563,6 +1567,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   getPartnerEligibilityVerification(
     eligibilityVerificationId: string,
+    requestId?: string,
     identity?: PartnerEligibilityIdentity | null,
   ) {
     const verification = this.partnerEligibilityVerifications.get(
@@ -1583,6 +1588,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       identity,
       verification,
       eligibilityVerificationId,
+    );
+
+    const policy = assertEvidenceAccess({
+      family: "eligibility_verification",
+      identity: identity as IdentityContext | null | undefined,
+      tenantId: verification.tenantId,
+    });
+    this.recordTenantAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: verification.tenantId,
+        moduleName: "tenant-partner",
+        actionName: policy.auditAction,
+        resourceType: "partner_eligibility",
+        resourceId: eligibilityVerificationId,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "read", {
+          partnerEntrySlug: verification.partnerEntrySlug,
+          verificationStatus: verification.verificationStatus,
+        }),
+      },
+      requestId,
     );
 
     return this.clonePartnerEligibilityVerification(verification);
@@ -2804,19 +2833,75 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     await this.dispatchWebhookAttempt(endpoint, delivery, delivery.rawBody);
   }
 
-  listWebhookDeliveries(tenantId: string) {
-    return this.webhookDeliveries
+  listWebhookDeliveries(
+    tenantId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "webhook_delivery",
+      identity,
+      tenantId,
+    });
+    const items = this.webhookDeliveries
       .filter((delivery) => delivery.tenantId === tenantId)
       .map((delivery) => this.toDeliveryResponse(delivery));
+    this.recordTenantAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: policy.auditAction,
+        resourceType: "webhook_delivery",
+        resourceId: null,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
+          itemCount: items.length,
+        }),
+      },
+      requestId,
+    );
+    return items;
   }
 
-  listWebhookDeliveriesByWebhook(tenantId: string, webhookId: string) {
-    return this.webhookDeliveries
+  listWebhookDeliveriesByWebhook(
+    tenantId: string,
+    webhookId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "webhook_delivery",
+      identity,
+      tenantId,
+    });
+    const items = this.webhookDeliveries
       .filter(
         (delivery) =>
           delivery.tenantId === tenantId && delivery.webhookId === webhookId,
       )
       .map((delivery) => this.toDeliveryResponse(delivery));
+    this.recordTenantAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: policy.auditAction,
+        resourceType: "webhook_delivery",
+        resourceId: webhookId,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "read", {
+          itemCount: items.length,
+          webhookId,
+        }),
+      },
+      requestId,
+    );
+    return items;
   }
 
   rotateWebhookSecret(
@@ -2966,10 +3051,37 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return { status: "revoked", apiKeyId };
   }
 
-  listTenantAudit(tenantId: string) {
-    return this.auditNotificationService
-      .listAuditLogs()
+  listTenantAudit(
+    tenantId: string,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "audit_log",
+      identity,
+      tenantId,
+    });
+    const items = this.auditNotificationService
+      .listAuditLogs(identity, requestId)
       .filter((auditLog) => auditLog.tenantId === tenantId);
+    this.recordTenantAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "view_tenant_audit_evidence",
+        resourceType: "audit_log",
+        resourceId: null,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
+          itemCount: items.length,
+        }),
+      },
+      requestId,
+    );
+    return items;
   }
 
   private buildIssuedApiKey(

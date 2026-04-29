@@ -3,7 +3,11 @@ import { randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  AddressPayload,
+  ApplyManualFareOverrideCommand,
   AuditLogRecord,
+  ComplianceGateRecord,
+  ComplianceGateState,
   AssignDispatchCommand,
   BookingRecord,
   CancelOwnedOrderCommand,
@@ -15,6 +19,7 @@ import type {
   DispatchCandidate,
   DispatchJobRecord,
   DispatchOrderCommand,
+  DispatchSemantics,
   DispatchTraceLogRecord,
   DriverAcceptTaskCommand,
   DriverArrivedPickupCommand,
@@ -24,15 +29,26 @@ import type {
   DriverStartTaskCommand,
   DriverTaskRecord,
   EtaSnapshot,
+  ExceptionHoldReasonCode,
+  MoneyAmount,
   OwnedOrderRecord,
+  PassengerProfile,
   QueueCheckInCommand,
   QueueCheckOutCommand,
   QueueEntryRecord,
   RedispatchOrderCommand,
+  ReservationHoldStatus,
+  ResolveExceptionHoldCommand,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
+import {
+  QUEUE_ENTRY_POLICY_MAP,
+  RESERVATION_HOLD_VALID_TRANSITIONS,
+} from "@drts/contracts";
+
 import { ApiRequestError } from "../../common/api-envelope";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { CallcenterService } from "../callcenter/callcenter.service";
@@ -58,6 +74,7 @@ type PartnerBookingContext = {
   partnerId: string;
   partnerProgramId: string;
   partnerEntrySlug: string;
+  eligibilityMode: "none" | "bank_card_inline" | "reference_required";
   eligibilityVerificationId: string | null;
   issuerAuthorizationRef: string | null;
   benefitReference: string | null;
@@ -99,6 +116,11 @@ const MAX_COMPLETION_PROOF_PHOTO_BYTES = 600 * 1024;
 const BASE64_DATA_URL_PREFIX = /^data:[^;]+;base64,/i;
 const BASE64_PAYLOAD_PATTERN =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
+  currency: "NTD",
+  amountMinor: 150000,
+};
+const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
 
 @Injectable()
 export class OwnedMobilityService implements OnModuleInit {
@@ -234,6 +256,9 @@ export class OwnedMobilityService implements OnModuleInit {
       notes: null,
       fixedPrice: false,
       quotedFare: null,
+      quotedFareSource: null,
+      quotedFareRuleVersion: null,
+      manualFareOverride: null,
       proofRequirements: {
         minPhotoCount: 0,
         signoffRequired: false,
@@ -351,6 +376,9 @@ export class OwnedMobilityService implements OnModuleInit {
       notes: command.notes?.trim() || null,
       fixedPrice: false,
       quotedFare: null,
+      quotedFareSource: null,
+      quotedFareRuleVersion: null,
+      manualFareOverride: null,
       proofRequirements: {
         minPhotoCount: 0,
         signoffRequired: false,
@@ -429,17 +457,34 @@ export class OwnedMobilityService implements OnModuleInit {
   createTenantBooking(
     command: CreateTenantBookingCommand,
     tenantId: string,
+    identity?: BootstrapRequestIdentity | null,
     requestId?: string,
   ): TenantBookingResult {
     this.assertNonBlank(tenantId, "tenantId");
-    this.assertAddress(command.pickup.address, "pickup.address");
-    this.assertAddress(command.dropoff.address, "dropoff.address");
+    this.assertTenantChannelCannotSetQuotedFare(command, identity);
     this.assertBookingRules(
       command.businessDispatchSubtype,
       command.direction,
       command.flightNo,
     );
     const partnerContext = this.resolvePartnerBookingContext(command, tenantId);
+    const pickup = this.resolveTenantAddressPayload(
+      tenantId,
+      command.pickupAddressId ?? null,
+      command.pickup,
+      "pickup",
+    );
+    const dropoff = this.resolveTenantAddressPayload(
+      tenantId,
+      command.dropoffAddressId ?? null,
+      command.dropoff,
+      "dropoff",
+    );
+    const passenger = this.resolveTenantPassengerProfile(
+      tenantId,
+      command.passengerId ?? null,
+      command.passenger,
+    );
 
     const now = new Date().toISOString();
     const orderId = randomUUID();
@@ -465,15 +510,9 @@ export class OwnedMobilityService implements OnModuleInit {
       dispatchSemantics: "reservation",
       businessDispatchSubtype: command.businessDispatchSubtype,
       status: "created",
-      pickup: {
-        ...command.pickup,
-      },
-      dropoff: {
-        ...command.dropoff,
-      },
-      passenger: {
-        ...command.passenger,
-      },
+      pickup,
+      dropoff,
+      passenger,
       bookingId,
       bookingType: "oneway",
       etaSnapshot: null,
@@ -506,10 +545,10 @@ export class OwnedMobilityService implements OnModuleInit {
       luggageCount: command.luggageCount ?? null,
       notes: this.normalizeNullableText(command.notes),
       fixedPrice: true,
-      quotedFare: command.quotedFare ?? {
-        currency: "NTD",
-        amountMinor: 150000,
-      },
+      quotedFare: { ...DEFAULT_PLATFORM_QUOTED_FARE },
+      quotedFareSource: "platform_pricing_rule",
+      quotedFareRuleVersion: DEFAULT_PLATFORM_PRICING_RULE_VERSION,
+      manualFareOverride: null,
       proofRequirements: {
         // Enterprise dispatch keeps a photo proof requirement by default; unlike
         // the standard createOrder path, omitting minPhotoCount here must still
@@ -686,9 +725,11 @@ export class OwnedMobilityService implements OnModuleInit {
     tenantId: string,
     bookingId: string,
     command: UpdateTenantBookingCommand,
+    identity?: BootstrapRequestIdentity | null,
     requestId?: string,
   ) {
     this.assertNonBlank(tenantId, "tenantId");
+    this.assertTenantChannelCannotSetQuotedFare(command, identity);
     const order = this.requireBookingOrder(bookingId, tenantId);
     this.assertBookingModifiable(order);
 
@@ -729,22 +770,46 @@ export class OwnedMobilityService implements OnModuleInit {
       nextFlightNo,
     );
 
-    if (command.pickup) {
-      this.assertAddress(command.pickup.address, "pickup.address");
-      order.pickup = {
-        ...command.pickup,
-      };
+    if (command.pickupAddressId !== undefined || command.pickup) {
+      const nextPickupAddressId =
+        command.pickupAddressId !== undefined
+          ? command.pickupAddressId
+          : command.pickup
+            ? null
+            : (order.pickup.addressId ?? null);
+      order.pickup = this.resolveTenantAddressPayload(
+        tenantId,
+        nextPickupAddressId,
+        command.pickup ?? order.pickup,
+        "pickup",
+      );
     }
-    if (command.dropoff) {
-      this.assertAddress(command.dropoff.address, "dropoff.address");
-      order.dropoff = {
-        ...command.dropoff,
-      };
+    if (command.dropoffAddressId !== undefined || command.dropoff) {
+      const nextDropoffAddressId =
+        command.dropoffAddressId !== undefined
+          ? command.dropoffAddressId
+          : command.dropoff
+            ? null
+            : (order.dropoff.addressId ?? null);
+      order.dropoff = this.resolveTenantAddressPayload(
+        tenantId,
+        nextDropoffAddressId,
+        command.dropoff ?? order.dropoff,
+        "dropoff",
+      );
     }
-    if (command.passenger) {
-      order.passenger = {
-        ...command.passenger,
-      };
+    if (command.passengerId !== undefined || command.passenger) {
+      const nextPassengerId =
+        command.passengerId !== undefined
+          ? command.passengerId
+          : command.passenger
+            ? null
+            : (order.passenger.passengerId ?? null);
+      order.passenger = this.resolveTenantPassengerProfile(
+        tenantId,
+        nextPassengerId,
+        command.passenger ?? order.passenger,
+      );
     }
 
     order.businessDispatchSubtype = businessDispatchSubtype;
@@ -793,8 +858,6 @@ export class OwnedMobilityService implements OnModuleInit {
       command.notes === undefined
         ? order.notes
         : this.normalizeNullableText(command.notes);
-    order.quotedFare =
-      command.quotedFare === undefined ? order.quotedFare : command.quotedFare;
     order.proofRequirements = {
       minPhotoCount:
         command.minPhotoCount ?? order.proofRequirements.minPhotoCount,
@@ -861,6 +924,111 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.mapOrderToBooking(order);
   }
 
+  applyManualFareOverride(
+    orderId: string,
+    command: ApplyManualFareOverrideCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ) {
+    const actor = this.requireManualFareOverrideActor(identity);
+    const order = this.requireOrder(orderId);
+    if (!order.fixedPrice) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MANUAL_FARE_OVERRIDE_NOT_SUPPORTED",
+        "Manual fare override is only supported for fixed-price orders.",
+        {
+          orderId,
+        },
+      );
+    }
+    if (["completed", "cancelled"].includes(order.status)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "MANUAL_FARE_OVERRIDE_CLOSED_ORDER",
+        "Manual fare override is not allowed after the order is closed.",
+        {
+          orderId,
+          status: order.status,
+        },
+      );
+    }
+
+    const reason = this.requireNonBlankText(command.reason, "reason");
+    const traceId = this.requireNonBlankText(command.traceId, "traceId");
+    const previousQuotedFare = order.quotedFare
+      ? { ...order.quotedFare }
+      : null;
+    const previousQuotedFareSource =
+      order.quotedFareSource ?? "platform_pricing_rule";
+    const now = new Date().toISOString();
+
+    order.quotedFare = { ...command.fare };
+    order.quotedFareSource = "ops_manual_override";
+    order.quotedFareRuleVersion =
+      this.normalizeNullableText(command.quotedFareRuleVersion) ??
+      order.quotedFareRuleVersion;
+    order.manualFareOverride = {
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      reason,
+      traceId,
+      previousQuotedFare,
+      previousQuotedFareSource,
+      overriddenAt: now,
+    };
+    order.updatedAt = now;
+
+    const traceLog = this.appendTrace(
+      order.orderId,
+      "pricing.manual_override",
+      {
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        reason,
+        traceId,
+        quotedFare: order.quotedFare,
+        quotedFareSource: order.quotedFareSource,
+        quotedFareRuleVersion: order.quotedFareRuleVersion,
+        previousQuotedFare,
+        previousQuotedFareSource,
+      },
+    );
+    this.persistChanges(
+      {
+        orders: [order],
+        dispatchTraceLogs: [traceLog],
+      },
+      "apply_manual_fare_override",
+    );
+    this.recordAudit(
+      {
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        tenantId: order.tenantId,
+        moduleName: "order",
+        actionName: "manual_fare_override",
+        resourceType: "order",
+        resourceId: order.orderId,
+        oldValuesSummary: {
+          quotedFare: previousQuotedFare,
+          quotedFareSource: previousQuotedFareSource,
+        },
+        newValuesSummary: {
+          quotedFare: order.quotedFare,
+          quotedFareSource: order.quotedFareSource,
+          quotedFareRuleVersion: order.quotedFareRuleVersion,
+          traceId,
+          reason,
+        },
+      },
+      requestId,
+    );
+    this.publishOrderUpdate(order, requestId);
+
+    return this.cloneOrder(order);
+  }
+
   dispatchOrder(
     orderId: string,
     command: DispatchOrderCommand,
@@ -882,15 +1050,26 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       );
     }
-
     const candidates = this.regulatoryRegistryService.getEligibleCandidates(
       order.serviceBucket,
       this.resolvePickupEtaDestination(order),
     );
     const now = new Date().toISOString();
     const isReservation = order.dispatchSemantics === "reservation";
-    const shouldEscalateToExceptionHold =
-      isReservation && this.isWithinConfirmationWindow(order, now);
+    const initialReservationHoldStatus = order.reservationHoldStatus;
+    const exceptionHoldEval = this.evaluateExceptionHoldCriteria(
+      order,
+      candidates.length > 0,
+      now,
+      initialReservationHoldStatus,
+    );
+    if (
+      isReservation &&
+      initialReservationHoldStatus === "redispatch_queue" &&
+      !exceptionHoldEval.shouldHold
+    ) {
+      this.transitionReservationHold(order, "requested");
+    }
     const dispatchJob: DispatchJobRecord = {
       dispatchJobId: randomUUID(),
       orderId,
@@ -899,7 +1078,7 @@ export class OwnedMobilityService implements OnModuleInit {
           ? isReservation
             ? "reserved"
             : "matching"
-          : shouldEscalateToExceptionHold
+          : exceptionHoldEval.shouldHold
             ? "failed"
             : isReservation
               ? "queued"
@@ -915,7 +1094,7 @@ export class OwnedMobilityService implements OnModuleInit {
       orderId,
       sequence: this.nextAttemptSequence(dispatchJob.dispatchJobId),
       outcome: candidates.length > 0 ? "candidate_found" : "failed",
-      reasonCode: candidates.length > 0 ? null : "no_eligible_supply",
+      reasonCode: candidates.length > 0 ? null : exceptionHoldEval.reasonCode,
       createdAt: now,
     };
     this.dispatchJobs = [dispatchJob, ...this.dispatchJobs];
@@ -927,35 +1106,40 @@ export class OwnedMobilityService implements OnModuleInit {
     if (candidates.length === 0) {
       shouldPersistOrder = true;
       order.updatedAt = now;
-      if (isReservation && !shouldEscalateToExceptionHold) {
+      if (isReservation && !exceptionHoldEval.shouldHold) {
         order.status = "redispatch_required";
-        order.reservationHoldStatus = "redispatch_queue";
+        this.transitionReservationHold(order, "redispatch_queue");
         traceLogs.push(
           this.appendTrace(orderId, "dispatch.failed", {
             dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: "no_eligible_supply",
+            reasonCode: exceptionHoldEval.reasonCode,
           }),
         );
         traceLogs.push(
           this.appendTrace(orderId, "queue.entry.created", {
             dispatchJobId: dispatchJob.dispatchJobId,
             queueType: "redispatch",
-            reasonCode: "no_eligible_supply",
+            reasonCode: exceptionHoldEval.reasonCode,
           }),
         );
       } else if (isReservation) {
         order.status = "exception_hold";
-        order.reservationHoldStatus = "exception_hold";
+        this.transitionReservationHold(order, "exception_hold");
         traceLogs.push(
           this.appendTrace(orderId, "dispatch.failed", {
             dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: "no_eligible_supply",
+            reasonCode: exceptionHoldEval.reasonCode,
           }),
         );
         traceLogs.push(
           this.appendTrace(orderId, "order.exception_hold", {
             dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: "no_eligible_supply",
+            reasonCode: exceptionHoldEval.reasonCode,
+            exceptionHoldCriteria: {
+              isReservation: true,
+              isWithinConfirmationWindow: true,
+              hasEligibleSupply: false,
+            },
           }),
         );
       } else {
@@ -963,7 +1147,7 @@ export class OwnedMobilityService implements OnModuleInit {
         traceLogs.push(
           this.appendTrace(orderId, "dispatch.failed", {
             dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: "no_eligible_supply",
+            reasonCode: exceptionHoldEval.reasonCode,
           }),
         );
       }
@@ -1083,6 +1267,144 @@ export class OwnedMobilityService implements OnModuleInit {
     );
 
     return this.dispatchOrder(orderId, { mode: "auto" }, requestId);
+  }
+
+  resolveExceptionHold(
+    orderId: string,
+    command: ResolveExceptionHoldCommand,
+    requestId?: string,
+  ) {
+    const order = this.requireOrder(orderId);
+
+    if (order.status !== "exception_hold") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ORDER_NOT_IN_EXCEPTION_HOLD",
+        "Order is not in exception hold state.",
+        {
+          orderId,
+          status: order.status,
+        },
+      );
+    }
+
+    if (order.reservationHoldStatus !== "exception_hold") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "RESERVATION_HOLD_NOT_EXCEPTION",
+        "Reservation hold is not in exception_hold state.",
+        {
+          orderId,
+          reservationHoldStatus: order.reservationHoldStatus,
+        },
+      );
+    }
+
+    const now = new Date().toISOString();
+
+    if (command.resolution === "cancel_order") {
+      this.transitionReservationHold(order, "released");
+      order.reservationHoldExpiresAt = now;
+      const traceLog = this.appendTrace(
+        orderId,
+        "exception_hold.resolved.cancel",
+        {
+          operatorId: command.operatorId,
+          reason: command.reason,
+          resolution: "cancel_order",
+        },
+      );
+      const cancelReason = `Exception hold resolved: ${command.reason}`;
+      order.status = "cancelled";
+      order.cancelledAt = now;
+      order.cancelReason = cancelReason;
+      order.updatedAt = now;
+
+      const dispatchJob = this.findLatestOpenDispatchJob(orderId);
+      if (dispatchJob) {
+        dispatchJob.status = "closed";
+        dispatchJob.updatedAt = now;
+      }
+
+      const cancelTraceLog = this.appendTrace(orderId, "order.cancelled", {
+        reason: cancelReason,
+      });
+      this.persistChanges(
+        {
+          orders: [order],
+          ...(dispatchJob ? { dispatchJobs: [dispatchJob] } : {}),
+          dispatchTraceLogs: [traceLog, cancelTraceLog],
+        },
+        "resolve_exception_hold_cancel",
+      );
+      this.recordAudit(
+        {
+          actorId: command.operatorId,
+          actorType: "ops_user",
+          tenantId: order.tenantId,
+          moduleName: "dispatch",
+          actionName: "resolve_exception_hold",
+          resourceType: "order",
+          resourceId: orderId,
+          newValuesSummary: {
+            resolution: "cancel_order",
+            reason: command.reason,
+            status: order.status,
+          },
+        },
+        requestId,
+      );
+      this.publishTenantOrderWebhook(order, "order.cancelled", now, {
+        cancelledAt: order.cancelledAt,
+        cancelReason: order.cancelReason,
+      });
+      this.publishLatestDispatchJobUpdate(orderId, requestId);
+
+      return this.cloneOrder(order);
+    }
+
+    // resolution === "release_to_dispatch"
+    this.transitionReservationHold(order, "requested");
+    order.status = "ready_for_dispatch";
+    order.reservationHoldExpiresAt = now;
+    order.updatedAt = now;
+
+    const traceLog = this.appendTrace(
+      orderId,
+      "exception_hold.resolved.release",
+      {
+        operatorId: command.operatorId,
+        reason: command.reason,
+        resolution: "release_to_dispatch",
+      },
+    );
+    this.persistChanges(
+      {
+        orders: [order],
+        dispatchTraceLogs: [traceLog],
+      },
+      "resolve_exception_hold_release",
+    );
+    this.recordAudit(
+      {
+        actorId: command.operatorId,
+        actorType: "ops_user",
+        tenantId: order.tenantId,
+        moduleName: "dispatch",
+        actionName: "resolve_exception_hold",
+        resourceType: "order",
+        resourceId: orderId,
+        newValuesSummary: {
+          resolution: "release_to_dispatch",
+          reason: command.reason,
+          status: order.status,
+        },
+      },
+      requestId,
+    );
+    this.publishOrderUpdate(order, requestId);
+
+    return this.cloneOrder(order);
   }
 
   listDispatchJobs() {
@@ -1220,7 +1542,7 @@ export class OwnedMobilityService implements OnModuleInit {
     order.updatedAt = now;
     const traceLogs: DispatchTraceLogRecord[] = [];
     if (order.dispatchSemantics === "reservation") {
-      order.reservationHoldStatus = "released";
+      this.transitionReservationHold(order, "released");
       order.reservationHoldExpiresAt = now;
       traceLogs.push(
         this.appendTrace(order.orderId, "reservation.hold.released", {
@@ -1328,9 +1650,9 @@ export class OwnedMobilityService implements OnModuleInit {
     const traceLogs: DispatchTraceLogRecord[] = [];
     if (
       order.dispatchSemantics === "reservation" &&
-      order.reservationHoldStatus === "requested"
+      ["requested", "redispatch_queue"].includes(order.reservationHoldStatus)
     ) {
-      order.reservationHoldStatus = "released";
+      this.transitionReservationHold(order, "released");
       order.reservationHoldExpiresAt = now;
       traceLogs.push(
         this.appendTrace(order.orderId, "reservation.hold.released", {
@@ -1539,6 +1861,10 @@ export class OwnedMobilityService implements OnModuleInit {
 
   streamOpsDispatchEvents(): Observable<MessageEvent> {
     return this.opsDispatchEventsService?.streamEvents() ?? EMPTY;
+  }
+
+  private publishOrderUpdate(order: OwnedOrderRecord, requestId?: string) {
+    this.opsDispatchEventsService?.publishOrderUpdated(order, requestId);
   }
 
   private publishLatestDispatchJobUpdate(orderId: string, requestId?: string) {
@@ -2044,6 +2370,72 @@ export class OwnedMobilityService implements OnModuleInit {
     }
   }
 
+  private requireNonBlankText(value: string, field: string) {
+    const normalized = value.trim();
+    if (!normalized) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        `${field} is required.`,
+        {
+          field,
+        },
+      );
+    }
+
+    return normalized;
+  }
+
+  private assertTenantChannelCannotSetQuotedFare(
+    command:
+      | Pick<CreateTenantBookingCommand, "quotedFare" | "quotedFareRuleVersion">
+      | Pick<
+          UpdateTenantBookingCommand,
+          "quotedFare" | "quotedFareRuleVersion"
+        >,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (
+      command.quotedFare === undefined &&
+      command.quotedFareRuleVersion === undefined
+    ) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      identity?.actorType === "partner_api_key"
+        ? HttpStatus.FORBIDDEN
+        : HttpStatus.BAD_REQUEST,
+      "PRICING_AUTHORITY_FORBIDDEN",
+      "Tenant and partner booking channels cannot set quoted fare directly.",
+      {
+        actorType: identity?.actorType ?? null,
+        canonicalSource: "platform_pricing_rule",
+      },
+    );
+  }
+
+  private requireManualFareOverrideActor(
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (
+      identity?.actorId &&
+      (identity.actorType === "platform_admin" ||
+        identity.actorType === "ops_user")
+    ) {
+      return {
+        actorId: identity.actorId,
+        actorType: identity.actorType,
+      } as const;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "MANUAL_FARE_OVERRIDE_FORBIDDEN",
+      "Manual fare override requires a platform_admin or ops_user identity.",
+    );
+  }
+
   private assertCompletionProofPhotos(photos: string[]) {
     if (photos.length > MAX_COMPLETION_PROOF_PHOTO_COUNT) {
       throw new ApiRequestError(
@@ -2223,6 +2615,69 @@ export class OwnedMobilityService implements OnModuleInit {
     const reservationStartMs = new Date(order.reservationWindowStart).getTime();
     const thresholdMs = reservationStartMs - confirmationWindowMinutes * 60_000;
     return new Date(now).getTime() >= thresholdMs;
+  }
+
+  private transitionReservationHold(
+    order: OwnedOrderRecord,
+    targetStatus: ReservationHoldStatus,
+  ) {
+    const currentStatus = order.reservationHoldStatus;
+    const allowedTargets = RESERVATION_HOLD_VALID_TRANSITIONS[currentStatus];
+    if (!allowedTargets.includes(targetStatus)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "INVALID_HOLD_TRANSITION",
+        `Cannot transition reservation hold from '${currentStatus}' to '${targetStatus}'.`,
+        {
+          orderId: order.orderId,
+          currentStatus,
+          targetStatus,
+          allowedTargets: [...allowedTargets],
+        },
+      );
+    }
+    order.reservationHoldStatus = targetStatus;
+  }
+
+  private evaluateExceptionHoldCriteria(
+    order: OwnedOrderRecord,
+    hasEligibleSupply: boolean,
+    now: string,
+    holdStatus: ReservationHoldStatus = order.reservationHoldStatus,
+  ): { shouldHold: boolean; reasonCode: ExceptionHoldReasonCode } {
+    const isReservation = order.dispatchSemantics === "reservation";
+    const inWindow = this.isWithinConfirmationWindow(order, now);
+
+    if (!isReservation) {
+      return { shouldHold: false, reasonCode: "no_eligible_supply" };
+    }
+
+    if (inWindow && holdStatus === "redispatch_queue" && !hasEligibleSupply) {
+      return {
+        shouldHold: true,
+        reasonCode: "confirmation_window_expired",
+      };
+    }
+
+    if (inWindow && !hasEligibleSupply) {
+      return { shouldHold: true, reasonCode: "no_eligible_supply" };
+    }
+
+    return { shouldHold: false, reasonCode: "no_eligible_supply" };
+  }
+
+  private assertQueueEntryPolicy(dispatchSemantics: DispatchSemantics) {
+    const policy = QUEUE_ENTRY_POLICY_MAP[dispatchSemantics];
+    if (!policy.allowsQueueEntry) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "QUEUE_ENTRY_NOT_ALLOWED",
+        `Queue entry is not allowed for dispatch semantics '${dispatchSemantics}'.`,
+        {
+          dispatchSemantics,
+        },
+      );
+    }
   }
 
   private nextQueuePosition(siteId: string) {
@@ -2450,6 +2905,7 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
 
+    const complianceGates = this.listComplianceGatesForOrder(order);
     return {
       bookingId: order.bookingId,
       orderId: order.orderId,
@@ -2486,6 +2942,13 @@ export class OwnedMobilityService implements OnModuleInit {
       terminal: order.terminal,
       luggageCount: order.luggageCount,
       notes: order.notes,
+      quotedFare: order.quotedFare ? { ...order.quotedFare } : null,
+      quotedFareSource: order.quotedFareSource,
+      quotedFareRuleVersion: order.quotedFareRuleVersion,
+      manualFareOverride: order.manualFareOverride
+        ? { ...order.manualFareOverride }
+        : null,
+      complianceGates,
       orderStatus: order.status,
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
@@ -2617,9 +3080,399 @@ export class OwnedMobilityService implements OnModuleInit {
     return null;
   }
 
+  private findLatestTaskForOrder(orderId: string) {
+    return (
+      this.driverTasks.find(
+        (candidateTask) => candidateTask.orderId === orderId,
+      ) ?? null
+    );
+  }
+
+  private listComplianceGatesForOrder(
+    order: OwnedOrderRecord,
+    task = this.findLatestTaskForOrder(order.orderId),
+  ): ComplianceGateRecord[] {
+    const gates: ComplianceGateRecord[] = [];
+    const recordingGate = this.buildRecordingGate(order);
+    if (recordingGate) {
+      gates.push(recordingGate);
+    }
+
+    const proofGate = this.buildProofGate(order, task);
+    if (proofGate) {
+      gates.push(proofGate);
+    }
+
+    const eligibilityGate = this.buildEligibilityGate(order);
+    if (eligibilityGate) {
+      gates.push(eligibilityGate);
+    }
+
+    return gates;
+  }
+
+  private buildRecordingGate(
+    order: OwnedOrderRecord,
+  ): ComplianceGateRecord | null {
+    if (order.orderSource !== "phone" && !order.callId) {
+      return null;
+    }
+
+    const hasRecording = Boolean(order.recordingId);
+    const state: ComplianceGateState = hasRecording ? "clear" : "blocked";
+    return {
+      gateType: "recording",
+      title: "Call recording linkage",
+      state,
+      required: true,
+      blocking: !hasRecording,
+      evidenceState: hasRecording ? "verified" : "missing",
+      evidenceRefs: order.recordingId ? [order.recordingId] : [],
+      missingItems: hasRecording ? [] : ["recording_id"],
+      nextAction: hasRecording
+        ? "Recording has been bound to the phone order."
+        : "Attach the call recording callback before dispatching this order.",
+      reviewerLabel: "callcenter / ops compliance",
+      overrideAllowed: false,
+      overrideActors: [],
+      impacts: [
+        {
+          stage: "dispatch",
+          effect: hasRecording ? "clear" : "blocked",
+          reason: hasRecording
+            ? "Dispatch may proceed because recording linkage is present."
+            : "Phone orders stay blocked from dispatch until recording linkage is attached.",
+        },
+        {
+          stage: "completion",
+          effect: "clear",
+          reason:
+            "Recording linkage does not block driver completion once dispatch starts.",
+        },
+        {
+          stage: "settlement",
+          effect: hasRecording ? "clear" : "review_required",
+          reason: hasRecording
+            ? "Recording evidence is available for audit and revenue review."
+            : "Audit and finance exports will require manual follow-up while recording linkage is missing.",
+        },
+      ],
+    };
+  }
+
+  private buildProofGate(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord | null,
+  ): ComplianceGateRecord | null {
+    const { minPhotoCount, signoffRequired, expenseProofRequired } =
+      order.proofRequirements;
+    const required =
+      minPhotoCount > 0 || signoffRequired || expenseProofRequired;
+    const hasProof = Boolean(task?.proof);
+
+    if (!required && !hasProof && order.status !== "proof_pending") {
+      return null;
+    }
+
+    const missingItems: string[] = [];
+    if (minPhotoCount > 0 && !hasProof) {
+      missingItems.push(`photos>=${minPhotoCount}`);
+    }
+    if (signoffRequired && !task?.proof?.signatureId) {
+      missingItems.push("signature");
+    }
+    if (expenseProofRequired && !task?.proof?.expenseItems?.length) {
+      missingItems.push("expense_items");
+    }
+
+    const state: ComplianceGateState =
+      missingItems.length === 0
+        ? "clear"
+        : order.status === "proof_pending" || task?.status === "proof_pending"
+          ? "blocked"
+          : "pending";
+
+    return {
+      gateType: "proof",
+      title: "Completion proof bundle",
+      state,
+      required,
+      blocking: state === "blocked",
+      evidenceState:
+        missingItems.length === 0
+          ? "verified"
+          : hasProof
+            ? "submitted"
+            : "missing",
+      evidenceRefs: [
+        ...(task?.proof?.photos?.length
+          ? [`photos:${task.proof.photos.length}`]
+          : []),
+        ...(task?.proof?.signatureId ? [task.proof.signatureId] : []),
+        ...(task?.proof?.expenseItems?.length
+          ? [`expense_items:${task.proof.expenseItems.length}`]
+          : []),
+      ],
+      missingItems,
+      nextAction:
+        missingItems.length === 0
+          ? "Required completion proof has been captured."
+          : "Driver must submit the required proof bundle before trip completion and settlement closeout.",
+      reviewerLabel: "ops dispatch / finance review",
+      overrideAllowed: false,
+      overrideActors: [],
+      impacts: [
+        {
+          stage: "dispatch",
+          effect: "clear",
+          reason: "Proof requirements do not block dispatch assignment.",
+        },
+        {
+          stage: "completion",
+          effect: missingItems.length === 0 ? "clear" : "blocked",
+          reason:
+            missingItems.length === 0
+              ? "Completion may proceed because proof requirements are satisfied."
+              : "Trip completion stays blocked until the required proof bundle is submitted.",
+        },
+        {
+          stage: "settlement",
+          effect: missingItems.length === 0 ? "clear" : "review_required",
+          reason:
+            missingItems.length === 0
+              ? "Proof evidence is ready for downstream settlement and audit."
+              : "Settlement review requires proof completion or manual finance follow-up.",
+        },
+      ],
+    };
+  }
+
+  private buildEligibilityGate(
+    order: OwnedOrderRecord,
+  ): ComplianceGateRecord | null {
+    const verification = this.resolveEligibilityVerification(order);
+    if (!order.partnerEntrySlug && !verification) {
+      return null;
+    }
+
+    const required =
+      Boolean(order.partnerEntrySlug) &&
+      this.resolvePartnerEligibilityRequired(order.partnerEntrySlug ?? "");
+    const hasVerification = Boolean(order.eligibilityVerificationId);
+    const verificationExpired = Boolean(
+      verification?.expiresAt &&
+      Number.isFinite(Date.parse(verification.expiresAt)) &&
+      Date.parse(verification.expiresAt) < Date.now(),
+    );
+    const isEligible =
+      verification?.verificationStatus === "eligible" && !verificationExpired;
+    const isManualReview = verification?.verificationStatus === "manual_review";
+
+    const state: ComplianceGateState = !required
+      ? "clear"
+      : isEligible
+        ? "clear"
+        : isManualReview
+          ? "review_required"
+          : "blocked";
+
+    return {
+      gateType: "eligibility",
+      title: "Partner eligibility verification",
+      state,
+      required,
+      blocking: state === "blocked",
+      evidenceState: !required
+        ? "not_required"
+        : hasVerification
+          ? isEligible
+            ? "verified"
+            : "submitted"
+          : "missing",
+      evidenceRefs: order.eligibilityVerificationId
+        ? [order.eligibilityVerificationId]
+        : [],
+      missingItems:
+        !required || hasVerification ? [] : ["eligibility_verification"],
+      nextAction: !required
+        ? "This channel does not require partner eligibility verification."
+        : isEligible
+          ? "Eligibility verification is approved and within TTL."
+          : isManualReview
+            ? "Ops must complete the manual eligibility fallback review before release."
+            : hasVerification
+              ? verificationExpired
+                ? "Re-run partner eligibility because the current verification expired."
+                : "Resolve the partner eligibility failure before dispatch or settlement."
+              : "Run partner eligibility verification before the booking can proceed.",
+      reviewerLabel: "partner ops reviewer",
+      overrideAllowed: true,
+      overrideActors: ["ops_user", "platform_admin"],
+      impacts: [
+        {
+          stage: "dispatch",
+          effect:
+            !required || isEligible
+              ? "clear"
+              : isManualReview
+                ? "review_required"
+                : "blocked",
+          reason:
+            !required || isEligible
+              ? "Dispatch eligibility is satisfied for this booking channel."
+              : "Dispatch remains gated on partner eligibility approval or manual review.",
+        },
+        {
+          stage: "completion",
+          effect: "clear",
+          reason:
+            "Eligibility is decided before dispatch and does not change driver completion steps.",
+        },
+        {
+          stage: "settlement",
+          effect:
+            !required || isEligible
+              ? "clear"
+              : isManualReview
+                ? "review_required"
+                : "blocked",
+          reason:
+            !required || isEligible
+              ? "Eligibility evidence is present for benefit reconciliation."
+              : "Benefit settlement cannot close until eligibility review is resolved.",
+        },
+      ],
+    };
+  }
+
+  private resolvePartnerEligibilityRequired(partnerEntrySlug: string) {
+    if (!this.tenantPartnerService) {
+      return true;
+    }
+
+    try {
+      return (
+        this.tenantPartnerService.getPartnerEntry(partnerEntrySlug)
+          .eligibilityMode !== "none"
+      );
+    } catch {
+      return true;
+    }
+  }
+
+  private resolveEligibilityVerification(order: OwnedOrderRecord) {
+    if (!this.tenantPartnerService || !order.eligibilityVerificationId) {
+      return null;
+    }
+
+    try {
+      return this.tenantPartnerService.getPartnerEligibilityVerification(
+        order.eligibilityVerificationId,
+      );
+    } catch {
+      return null;
+    }
+  }
+
   private normalizeNullableText(value: string | null | undefined) {
     const normalized = value?.trim();
     return normalized ? normalized : null;
+  }
+
+  private resolveTenantPassengerProfile(
+    tenantId: string,
+    passengerId: string | null,
+    fallback: PassengerProfile,
+  ): PassengerProfile {
+    const normalizedPassengerId = this.normalizeNullableText(passengerId);
+    if (!normalizedPassengerId) {
+      this.assertNonBlank(fallback.name, "passenger.name");
+      this.assertNonBlank(fallback.phone, "passenger.phone");
+      return {
+        ...fallback,
+        passengerId: null,
+      };
+    }
+
+    if (!this.tenantPartnerService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "TENANT_MASTER_DATA_UNAVAILABLE",
+        "Tenant passenger master data is unavailable for this booking flow.",
+        {
+          tenantId,
+          passengerId: normalizedPassengerId,
+        },
+      );
+    }
+
+    const masterPassenger = this.tenantPartnerService.getPassengerMasterRecord(
+      tenantId,
+      normalizedPassengerId,
+    );
+    const phone =
+      this.normalizeNullableText(masterPassenger.mobile) ??
+      this.normalizeNullableText(fallback.phone);
+    if (!phone) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PASSENGER_CONTACT_REQUIRED",
+        "Passenger master data must include a phone number or the booking payload must provide one.",
+        {
+          tenantId,
+          passengerId: normalizedPassengerId,
+        },
+      );
+    }
+
+    return {
+      passengerId: masterPassenger.passengerId,
+      name: masterPassenger.fullName,
+      phone,
+      roles: [...(masterPassenger.roles ?? [])],
+    };
+  }
+
+  private resolveTenantAddressPayload(
+    tenantId: string,
+    addressId: string | null,
+    fallback: AddressPayload,
+    fieldName: "pickup" | "dropoff",
+  ): AddressPayload {
+    const normalizedAddressId = this.normalizeNullableText(addressId);
+    if (!normalizedAddressId) {
+      this.assertAddress(fallback.address, `${fieldName}.address`);
+      return { ...fallback, addressId: null };
+    }
+
+    if (!this.tenantPartnerService) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "TENANT_MASTER_DATA_UNAVAILABLE",
+        "Tenant address master data is unavailable for this booking flow.",
+        {
+          tenantId,
+          addressId: normalizedAddressId,
+          fieldName,
+        },
+      );
+    }
+
+    const masterAddress = this.tenantPartnerService.getAddressMasterRecord(
+      tenantId,
+      normalizedAddressId,
+    );
+    this.assertAddress(masterAddress.addressText, `${fieldName}.address`);
+    return {
+      addressId: masterAddress.addressId,
+      addressName: masterAddress.addressName,
+      address: masterAddress.addressText,
+      normalizedAddress: masterAddress.normalizedAddressText ?? null,
+      maskedAddress: masterAddress.maskedAddressText ?? null,
+      sensitive: masterAddress.sensitiveFlag ?? false,
+      lat: masterAddress.lat,
+      lng: masterAddress.lng,
+    };
   }
 
   private resolvePartnerBookingContext(
@@ -2746,6 +3599,7 @@ export class OwnedMobilityService implements OnModuleInit {
       partnerId: entry.partnerId,
       partnerProgramId: entry.programId,
       partnerEntrySlug: entry.entrySlug,
+      eligibilityMode: entry.eligibilityMode,
       eligibilityVerificationId:
         verification?.eligibilityVerificationId ?? null,
       issuerAuthorizationRef: verification?.issuerAuthorizationRef ?? null,
@@ -2754,6 +3608,7 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {
+    const complianceGates = this.listComplianceGatesForOrder(order);
     return {
       ...order,
       pickup: { ...order.pickup },
@@ -2763,12 +3618,21 @@ export class OwnedMobilityService implements OnModuleInit {
       onsiteContact: order.onsiteContact ? { ...order.onsiteContact } : null,
       etaSnapshot: order.etaSnapshot ? { ...order.etaSnapshot } : null,
       quotedFare: order.quotedFare ? { ...order.quotedFare } : null,
+      quotedFareSource: order.quotedFareSource,
+      quotedFareRuleVersion: order.quotedFareRuleVersion,
+      manualFareOverride: order.manualFareOverride
+        ? { ...order.manualFareOverride }
+        : null,
       proofRequirements: { ...order.proofRequirements },
+      complianceGates,
       complianceFlags: [...order.complianceFlags],
     };
   }
 
   private cloneTask(task: DriverTaskRecord): DriverTaskRecord {
+    const order = this.orders.find(
+      (candidateOrder) => candidateOrder.orderId === task.orderId,
+    );
     return {
       ...task,
       fare: task.fare ? { ...task.fare } : null,
@@ -2779,6 +3643,9 @@ export class OwnedMobilityService implements OnModuleInit {
             expenseItems: [...(task.proof.expenseItems ?? [])],
           }
         : null,
+      complianceGates: order
+        ? this.listComplianceGatesForOrder(order, task)
+        : [],
     };
   }
 }

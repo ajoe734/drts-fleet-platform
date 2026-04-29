@@ -106,6 +106,19 @@ function getErrorMessage(error: unknown): string {
   return "Unknown error";
 }
 
+function getComplianceTone(state: string) {
+  switch (state) {
+    case "clear":
+      return { bg: "#ecfdf5", border: "#86efac", text: "#166534" };
+    case "blocked":
+      return { bg: "#fff1f2", border: "#fda4af", text: "#9f1239" };
+    case "review_required":
+      return { bg: "#fffbeb", border: "#fcd34d", text: "#92400e" };
+    default:
+      return { bg: "#f8fafc", border: "#cbd5e1", text: "#334155" };
+  }
+}
+
 type LocationTrackingState =
   | "idle"
   | "requesting_permission"
@@ -168,6 +181,7 @@ export default function TripScreen() {
   const showTripMetrics = shouldShowTripMetrics(taskDetail);
   const completionBlockedByTracking =
     isTripInProgress && locationTrackingState !== "active";
+  const complianceGates = orderDetail?.complianceGates ?? [];
 
   function clearDurationTicker() {
     if (durationIntervalRef.current) {
@@ -598,6 +612,45 @@ export default function TripScreen() {
                 )}
             </View>
           )}
+          {complianceGates.length > 0 && (
+            <View style={styles.complianceCard}>
+              <Text style={styles.complianceTitle}>Compliance Gates</Text>
+              {complianceGates.map((gate) => {
+                const tone = getComplianceTone(gate.state);
+                return (
+                  <View
+                    key={gate.gateType}
+                    style={[
+                      styles.complianceGate,
+                      {
+                        backgroundColor: tone.bg,
+                        borderColor: tone.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.complianceGateTitle, { color: tone.text }]}
+                    >
+                      {gate.title}
+                    </Text>
+                    <Text
+                      style={[styles.complianceGateState, { color: tone.text }]}
+                    >
+                      {gate.state}
+                    </Text>
+                    <Text style={styles.complianceGateAction}>
+                      {gate.nextAction}
+                    </Text>
+                    {gate.missingItems.length > 0 && (
+                      <Text style={styles.complianceGateMeta}>
+                        Missing: {gate.missingItems.join(", ")}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          )}
           {isForwardedTask(taskDetail) && (
             <Text style={styles.forwardedNote}>
               Dispatched by {taskDetail.sourcePlatform}. Dispatch rules are
@@ -829,6 +882,30 @@ const styles = StyleSheet.create({
   metricValue: { fontSize: 20, fontWeight: "700", color: "#0f3554" },
   metricHint: { fontSize: 12, color: "#0f6cbd" },
   metricWarning: { fontSize: 12, color: "#b42318" },
+  complianceCard: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#d9e7f5",
+    gap: 10,
+  },
+  complianceTitle: { fontSize: 16, fontWeight: "600", color: "#0f3554" },
+  complianceGate: {
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    gap: 4,
+  },
+  complianceGateTitle: { fontSize: 14, fontWeight: "600" },
+  complianceGateState: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  complianceGateAction: { fontSize: 12, color: "#334155" },
+  complianceGateMeta: { fontSize: 12, color: "#64748b" },
   proofCard: {
     backgroundColor: "#faf7ef",
     borderRadius: 8,

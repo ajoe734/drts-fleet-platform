@@ -14,6 +14,8 @@ import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 
+const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
+
 function createOwnedMobilityService(options?: {
   candidates?: Array<{
     driverId: string;
@@ -356,6 +358,105 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
+  it("rejects manual fare override after a fixed-price order is completed", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+    service.completeDriverTask(assignment.taskId, {
+      completedAt: "2026-04-29T12:45:00.000Z",
+      actualDistanceKm: 14.2,
+      actualDurationSec: 1200,
+      proof: {
+        photos: [SAMPLE_PROOF_PHOTO],
+      },
+    });
+
+    expect(() =>
+      service.applyManualFareOverride(
+        booking.orderId,
+        {
+          fare: {
+            currency: "NTD",
+            amountMinor: 188000,
+          },
+          reason: "Late override after close",
+          traceId: "trace-fare-override-closed-001",
+        },
+        {
+          actorType: "ops_user",
+          actorId: "ops-007",
+        } as never,
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.applyManualFareOverride(
+        booking.orderId,
+        {
+          fare: {
+            currency: "NTD",
+            amountMinor: 188000,
+          },
+          reason: "Late override after close",
+          traceId: "trace-fare-override-closed-001",
+        },
+        {
+          actorType: "ops_user",
+          actorId: "ops-007",
+        } as never,
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "MANUAL_FARE_OVERRIDE_CLOSED_ORDER",
+        },
+      });
+    }
+  });
+
   it("keeps reservation orders in redispatch queue before the confirmation window", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
@@ -446,6 +547,52 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
+  it("escalates redispatch queue with confirmation_window_expired once the window opens", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T13:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T14:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    const firstAttempt = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    expect(firstAttempt.status).toBe("queued");
+
+    vi.setSystemTime(new Date("2026-04-29T12:35:00.000Z"));
+    const secondAttempt = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const order = service.getOrder(booking.orderId);
+    const trace = service.listDispatchTrace(booking.orderId);
+
+    expect(secondAttempt.status).toBe("failed");
+    expect(order.status).toBe("exception_hold");
+    expect(order.reservationHoldStatus).toBe("exception_hold");
+    expect(trace).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "order.exception_hold",
+          details: expect.objectContaining({
+            reasonCode: "confirmation_window_expired",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("resolves exception hold by releasing order to dispatch", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
@@ -476,7 +623,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
 
     expect(resolvedOrder.status).toBe("ready_for_dispatch");
-    expect(resolvedOrder.reservationHoldStatus).toBe("released");
+    expect(resolvedOrder.reservationHoldStatus).toBe("requested");
 
     const trace = service.listDispatchTrace(booking.orderId);
     expect(trace).toEqual(
@@ -490,6 +637,96 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         }),
       ]),
     );
+  });
+
+  it("re-enters requested hold before redispatch after exception hold release", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T12:20:00.000Z",
+        reservationWindowEnd: "2026-04-29T13:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+    service.resolveExceptionHold(booking.orderId, {
+      resolution: "release_to_dispatch",
+      operatorId: "ops-user-001",
+      reason: "Retry dispatch",
+    });
+
+    const redispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const order = service.getOrder(booking.orderId);
+
+    expect(redispatchResult.status).toBe("failed");
+    expect(order.status).toBe("exception_hold");
+    expect(order.reservationHoldStatus).toBe("exception_hold");
+  });
+
+  it("allows dispatch assignment after release_to_dispatch without invalid hold transitions", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const candidates = [
+      {
+        driverId: "driver-009",
+        vehicleId: "vehicle-009",
+        etaMinutes: 4,
+        operatingArea: "north",
+        serviceBuckets: ["business_dispatch"],
+      },
+    ];
+    const { service, regulatoryRegistryService } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T12:20:00.000Z",
+        reservationWindowEnd: "2026-04-29T13:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+    service.resolveExceptionHold(booking.orderId, {
+      resolution: "release_to_dispatch",
+      operatorId: "ops-user-001",
+      reason: "Retry dispatch after manual confirmation",
+    });
+
+    regulatoryRegistryService.getEligibleCandidates.mockReturnValue(candidates);
+
+    const redispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    expect(redispatchResult.status).toBe("reserved");
+
+    const assignment = service.assignDispatch({
+      dispatchJobId: redispatchResult.dispatchJobId,
+      vehicleId: "vehicle-009",
+      driverId: "driver-009",
+    });
+    const order = service.getOrder(booking.orderId);
+
+    expect(assignment.status).toBe("assigned");
+    expect(order.status).toBe("assigned");
+    expect(order.reservationHoldStatus).toBe("released");
   });
 
   it("resolves exception hold by cancelling the order", () => {
@@ -603,6 +840,46 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
           eventType: "reservation.hold.released",
           details: expect.objectContaining({
             reason: "assignment_confirmed",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("releases reservation hold when cancelling from redispatch queue", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+    const cancelledOrder = service.cancelOwnedOrder(booking.orderId, {
+      reason: "Rider cancelled",
+    });
+
+    expect(cancelledOrder.status).toBe("cancelled");
+    expect(cancelledOrder.reservationHoldStatus).toBe("released");
+
+    const trace = service.listDispatchTrace(booking.orderId);
+    expect(trace).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "reservation.hold.released",
+          details: expect.objectContaining({
+            reason: "order_cancelled",
           }),
         }),
       ]),

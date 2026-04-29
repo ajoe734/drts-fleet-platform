@@ -78,6 +78,21 @@ function formatEta(
   };
 }
 
+function getComplianceTone(state: string): string {
+  switch (state) {
+    case "clear":
+      return "bg-green-100 text-green-800";
+    case "pending":
+      return "bg-slate-100 text-slate-700";
+    case "review_required":
+      return "bg-amber-100 text-amber-800";
+    case "blocked":
+      return "bg-rose-100 text-rose-800";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
 export function DispatchWorkflow({
   orders,
   dispatchJobs,
@@ -152,7 +167,8 @@ export function DispatchWorkflow({
 
         startTransition(() => {
           switch (envelope.eventType) {
-            case "order_created": {
+            case "order_created":
+            case "order_updated": {
               if (!("order" in envelope.data)) {
                 return;
               }
@@ -183,6 +199,10 @@ export function DispatchWorkflow({
               scheduleDispatchReload();
               return;
             }
+            case "supply_lifecycle_updated": {
+              scheduleDispatchReload();
+              return;
+            }
           }
         });
       } catch (parseError) {
@@ -206,11 +226,19 @@ export function DispatchWorkflow({
       handleEnvelope as EventListener,
     );
     eventSource.addEventListener(
+      "order_updated",
+      handleEnvelope as EventListener,
+    );
+    eventSource.addEventListener(
       "dispatch_job_updated",
       handleEnvelope as EventListener,
     );
     eventSource.addEventListener(
       "driver_location_updated",
+      handleEnvelope as EventListener,
+    );
+    eventSource.addEventListener(
+      "supply_lifecycle_updated",
       handleEnvelope as EventListener,
     );
 
@@ -404,6 +432,7 @@ export function DispatchWorkflow({
               <th>{t("dispatch.workflow.col.product")}</th>
               <th>{t("dispatch.workflow.col.queue")}</th>
               <th>{t("dispatch.workflow.col.dispatch")}</th>
+              <th>{t("dispatch.workflow.col.compliance")}</th>
               <th>{t("dispatch.workflow.col.revenue")}</th>
               <th>{t("dispatch.workflow.col.eta")}</th>
               <th>{t("dispatch.workflow.col.candidates")}</th>
@@ -425,6 +454,13 @@ export function DispatchWorkflow({
                   ? formatEta(locale, job.latestEtaMinutes, job.updatedAt)
                   : { display: "-", tooltip: t("dispatch.workflow.noJobEta") };
                 const isFocused = focusOrderId === order.orderId;
+                const complianceGates = order.complianceGates ?? [];
+                const activeGates = complianceGates.filter(
+                  (gate) => gate.state !== "clear",
+                );
+                const complianceFocus =
+                  activeGates[0] ??
+                  complianceGates.find((gate) => gate.required);
 
                 return (
                   <tr
@@ -493,6 +529,35 @@ export function DispatchWorkflow({
                       ) : (
                         <span className="cell-subcopy">
                           {t("dispatch.workflow.noJob")}
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      {complianceFocus ? (
+                        <div className="dispatch-block">
+                          <div className="badge-stack">
+                            {complianceGates.map((gate) => (
+                              <span
+                                key={gate.gateType}
+                                className={`queue-badge ${getComplianceTone(gate.state)}`}
+                                title={gate.nextAction}
+                              >
+                                {t(`dispatch.workflow.gate.${gate.gateType}`)}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="cell-title">
+                            {t(
+                              `dispatch.workflow.gateState.${complianceFocus.state}`,
+                            )}
+                          </div>
+                          <div className="cell-subcopy">
+                            {complianceFocus.nextAction}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="cell-subcopy">
+                          {t("dispatch.workflow.noComplianceGate")}
                         </span>
                       )}
                     </td>
@@ -610,7 +675,7 @@ export function DispatchWorkflow({
               })
             ) : (
               <tr>
-                <td colSpan={8}>{t("dispatch.workflow.noOrders")}</td>
+                <td colSpan={9}>{t("dispatch.workflow.noOrders")}</td>
               </tr>
             )}
           </tbody>
@@ -702,6 +767,11 @@ export function DispatchWorkflow({
         .candidate-panel,
         .actions {
           display: grid;
+          gap: 0.35rem;
+        }
+        .badge-stack {
+          display: flex;
+          flex-wrap: wrap;
           gap: 0.35rem;
         }
         .candidate-select {

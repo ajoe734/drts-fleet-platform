@@ -37,7 +37,7 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
-import { CurrentIdentity, OpenRoute } from "../../common/auth";
+import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { TenantPartnerService } from "./tenant-partner.service";
 
@@ -177,6 +177,7 @@ export class TenantPartnerController {
   }
 
   @Get("partner/eligibility/:eligibilityVerificationId")
+  @RequireRealms("partner", "tenant", "platform", "ops")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   getPartnerEligibilityVerification(
     @Param("eligibilityVerificationId") eligibilityVerificationId: string,
@@ -186,6 +187,7 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.getPartnerEligibilityVerification(
         eligibilityVerificationId,
+        requestId,
         identity,
       ),
       requestId,
@@ -548,25 +550,33 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/webhooks/deliveries")
+  @RequireRealms("tenant", "platform", "ops")
   listWebhookDeliveries(
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const items = this.tenantPartnerService.listWebhookDeliveries(
       this.requireTenantId(tenantId),
+      requestId,
+      identity,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/webhooks/:webhookId/deliveries")
+  @RequireRealms("tenant", "platform", "ops")
   listWebhookDeliveriesByEndpoint(
     @Param("webhookId") webhookId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const items = this.tenantPartnerService.listWebhookDeliveriesByWebhook(
       this.requireTenantId(tenantId),
       webhookId,
+      requestId,
+      identity,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
@@ -599,12 +609,16 @@ export class TenantPartnerController {
   }
 
   @Get("tenant/audit")
+  @RequireRealms("tenant", "platform", "ops")
   listTenantAudit(
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     const items = this.tenantPartnerService.listTenantAudit(
       this.requireTenantId(tenantId),
+      requestId,
+      identity,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }

@@ -154,6 +154,12 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  publishOrderUpdated(order: OwnedOrderRecord, requestId?: string) {
+    this.publish("order_updated", order.orderId, requestId, {
+      order: this.cloneOrder(order),
+    });
+  }
+
   publishDispatchJobUpdated(
     orderId: string,
     dispatchJob: DispatchJobRecord,

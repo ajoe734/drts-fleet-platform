@@ -1,23 +1,34 @@
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import { firstValueFrom, take, timeout, toArray } from "rxjs";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveRouteAuthPolicy } from "../../src/common/auth";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 
-function createOwnedMobilityService() {
+function createOwnedMobilityService(options?: {
+  candidates?: Array<{
+    driverId: string;
+    vehicleId: string;
+    etaMinutes: number;
+    operatingArea: string;
+    serviceBuckets: string[];
+  }>;
+}) {
   const regulatoryRegistryService = {
-    getEligibleCandidates: vi.fn(() => [
-      {
-        driverId: "driver-001",
-        vehicleId: "vehicle-001",
-        etaMinutes: 4,
-        operatingArea: "taipei",
-        serviceBuckets: ["standard_taxi"],
-      },
-    ]),
+    getEligibleCandidates: vi.fn(
+      () =>
+        options?.candidates ?? [
+          {
+            driverId: "driver-001",
+            vehicleId: "vehicle-001",
+            etaMinutes: 4,
+            operatingArea: "taipei",
+            serviceBuckets: ["standard_taxi"],
+          },
+        ],
+    ),
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),
   };
@@ -53,6 +64,10 @@ function createOwnedMobilityService() {
 }
 
 describe("owned mobility task events", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("protects driver task event streams with the driver auth policy", () => {
     expect(resolveRouteAuthPolicy("GET", "/api/driver/task-events")).toEqual({
       routeKey: "driver:tasks:GET",
@@ -150,6 +165,110 @@ describe("owned mobility task events", () => {
           dispatchJob: {
             orderId: order.orderId,
             status: "matching",
+          },
+        },
+      },
+    });
+  });
+
+  it("emits order_updated when manual fare override changes a fixed-price order", async () => {
+    const { service } = createOwnedMobilityService();
+    const streamPromise = firstValueFrom(
+      service
+        .streamOpsDispatchEvents()
+        .pipe(take(2), toArray(), timeout(1_000)),
+    );
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.applyManualFareOverride(
+      booking.orderId,
+      {
+        fare: {
+          currency: "NTD",
+          amountMinor: 188000,
+        },
+        reason: "Airport surge approval",
+        traceId: "trace-fare-override-001",
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-007",
+      } as never,
+    );
+
+    const events = await streamPromise;
+
+    expect(events[1]).toMatchObject({
+      type: "order_updated",
+      data: {
+        eventType: "order_updated",
+        data: {
+          order: {
+            orderId: booking.orderId,
+            quotedFareSource: "ops_manual_override",
+            quotedFare: {
+              currency: "NTD",
+              amountMinor: 188000,
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("emits order_updated when exception hold is released to dispatch", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+    const streamPromise = firstValueFrom(
+      service
+        .streamOpsDispatchEvents()
+        .pipe(take(3), toArray(), timeout(1_000)),
+    );
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T12:20:00.000Z",
+        reservationWindowEnd: "2026-04-29T13:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+    service.resolveExceptionHold(booking.orderId, {
+      resolution: "release_to_dispatch",
+      operatorId: "ops-user-001",
+      reason: "Supply confirmed manually",
+    });
+
+    const events = await streamPromise;
+
+    expect(events[2]).toMatchObject({
+      type: "order_updated",
+      data: {
+        eventType: "order_updated",
+        data: {
+          order: {
+            orderId: booking.orderId,
+            status: "ready_for_dispatch",
+            reservationHoldStatus: "requested",
           },
         },
       },

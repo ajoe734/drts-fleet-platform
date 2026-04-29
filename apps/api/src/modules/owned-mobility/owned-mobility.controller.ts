@@ -14,6 +14,7 @@ import type { MessageEvent } from "@nestjs/common";
 import type { Observable } from "rxjs";
 
 import type {
+  ApplyManualFareOverrideCommand,
   AssignDispatchCommand,
   CancelOwnedOrderCommand,
   CreateCallCenterOrderCommand,
@@ -29,6 +30,7 @@ import type {
   QueueCheckInCommand,
   QueueCheckOutCommand,
   RedispatchOrderCommand,
+  ResolveExceptionHoldCommand,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
 
@@ -177,6 +179,7 @@ export class OwnedMobilityController {
   @Post("tenant/bookings")
   createTenantBooking(
     @Body() command: CreateTenantBookingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -184,6 +187,7 @@ export class OwnedMobilityController {
       this.ownedMobilityService.createTenantBooking(
         command,
         this.requireTenantId(tenantId),
+        identity,
         requestId,
       ),
       requestId,
@@ -225,6 +229,7 @@ export class OwnedMobilityController {
   updateTenantBooking(
     @Param("bookingId") bookingId: string,
     @Body() command: UpdateTenantBookingCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
@@ -233,6 +238,25 @@ export class OwnedMobilityController {
         this.requireTenantId(tenantId),
         bookingId,
         command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("orders/:orderId/manual-fare-override")
+  applyManualFareOverride(
+    @Param("orderId") orderId: string,
+    @Body() command: ApplyManualFareOverrideCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.applyManualFareOverride(
+        orderId,
+        command,
+        identity,
         requestId,
       ),
       requestId,
@@ -289,6 +313,22 @@ export class OwnedMobilityController {
   ) {
     return toApiSuccessEnvelope(
       this.ownedMobilityService.redispatchOrder(orderId, command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("orders/:orderId/resolve-exception-hold")
+  resolveExceptionHold(
+    @Param("orderId") orderId: string,
+    @Body() command: ResolveExceptionHoldCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.resolveExceptionHold(
+        orderId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }

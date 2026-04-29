@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import {
   PartnerEligibilityAdapterError,
@@ -479,5 +480,114 @@ describe("TenantPartnerService sensitive-data governance", () => {
         disableReason: null,
       }),
     });
+  });
+
+  it("audits webhook-delivery and eligibility evidence reads with tenant and partner scope checks", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const webhookDispatchService = new WebhookDispatchService(
+      vi.fn(async () => ({ ok: true, status: 202 })) as never,
+    );
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      webhookDispatchService,
+      [],
+    );
+
+    const webhook = service.createWebhookEndpoint(
+      "tenant-demo-001",
+      {
+        url: "https://tenant.example/webhooks/evidence",
+        secret: "whsec_test_evidence",
+        events: ["tenant.webhook.test"],
+      },
+      "req-webhook-create-003",
+    );
+    await service.sendTestWebhook(
+      "tenant-demo-001",
+      {
+        webhookId: webhook.webhookId,
+      },
+      "req-webhook-test-010",
+    );
+
+    const tenantIdentity = {
+      actorType: "tenant_admin" as const,
+      actorId: "tenant-admin-001",
+      realm: "tenant" as const,
+      scopes: ["tenant:webhooks:read", "tenant:read"],
+      tenantId: "tenant-demo-001",
+    };
+    const deliveries = service.listWebhookDeliveries(
+      "tenant-demo-001",
+      "req-webhook-read-010",
+      tenantIdentity,
+    );
+    expect(deliveries.length).toBeGreaterThan(0);
+
+    expect(() =>
+      service.listWebhookDeliveries("tenant-demo-001", "req-webhook-read-011", {
+        ...tenantIdentity,
+        tenantId: "tenant-other-001",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    const verification = await service.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-beta-airport",
+        referenceToken: "raw-secret-token-eligibility-010",
+      },
+      "req-eligibility-reference-010",
+    );
+    const partnerIdentity = {
+      actorType: "partner_api_key" as const,
+      actorId: "partner-key-beta-demo",
+      realm: "partner" as const,
+      scopes: [],
+      tenantId: verification.tenantId,
+      partnerId: verification.partnerId,
+      partnerProgramId: verification.partnerProgramId,
+      partnerEntrySlug: verification.partnerEntrySlug,
+      requestId: "req-eligibility-read-010",
+    };
+
+    const detail = service.getPartnerEligibilityVerification(
+      verification.eligibilityVerificationId,
+      "req-eligibility-read-010",
+      partnerIdentity,
+    );
+    expect(detail.eligibilityVerificationId).toBe(
+      verification.eligibilityVerificationId,
+    );
+
+    expect(() =>
+      service.getPartnerEligibilityVerification(
+        verification.eligibilityVerificationId,
+        "req-eligibility-read-011",
+        {
+          ...partnerIdentity,
+          partnerEntrySlug: "bank-demo-alpha-airport",
+        },
+      ),
+    ).toThrowError(ApiRequestError);
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "view_webhook_delivery_evidence",
+          actorType: "tenant_admin",
+          newValuesSummary: expect.objectContaining({
+            evidenceFamily: "webhook_delivery",
+          }),
+        }),
+        expect.objectContaining({
+          actionName: "view_partner_eligibility_evidence",
+          actorType: "partner_api_key",
+          newValuesSummary: expect.objectContaining({
+            evidenceFamily: "eligibility_verification",
+          }),
+        }),
+      ]),
+    );
   });
 });
