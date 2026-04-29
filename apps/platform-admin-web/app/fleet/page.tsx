@@ -18,6 +18,19 @@ import type {
   VehicleContractRecord,
 } from "@drts/contracts";
 
+function badgeClassForLifecycle(status: string) {
+  if (status === "active") return "admin-badge--success";
+  if (
+    status === "expired" ||
+    status === "terminated" ||
+    status === "revoked" ||
+    status === "rejected"
+  ) {
+    return "admin-badge--warning";
+  }
+  return "admin-badge--neutral";
+}
+
 export default function FleetPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -117,6 +130,11 @@ export default function FleetPage() {
                   <th>{t("fleet.col.plate")}</th>
                   <th>{t("fleet.col.dispatchable")}</th>
                   <th>{t("fleet.col.area")}</th>
+                  <th>{t("fleet.col.contract")}</th>
+                  <th>{t("fleet.col.insurance")}</th>
+                  <th>{t("fleet.col.exclusivity")}</th>
+                  <th>{t("fleet.col.blockedBy")}</th>
+                  <th>{t("fleet.col.lastChange")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -140,6 +158,70 @@ export default function FleetPage() {
                       </span>
                     </td>
                     <td>{v.operatingArea || "—"}</td>
+                    <td>
+                      <span
+                        className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.contract.lifecycleStatus)}`}
+                      >
+                        {formatPlatformCodeLabel(
+                          locale,
+                          v.supplyLifecycle.contract.lifecycleStatus,
+                        )}
+                      </span>
+                    </td>
+                    <td>
+                      <span
+                        className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.insurance.lifecycleStatus)}`}
+                      >
+                        {formatPlatformCodeLabel(
+                          locale,
+                          v.supplyLifecycle.insurance.lifecycleStatus,
+                        )}
+                      </span>
+                    </td>
+                    <td>
+                      <span
+                        className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.exclusivity.lifecycleStatus)}`}
+                      >
+                        {formatPlatformCodeLabel(
+                          locale,
+                          v.supplyLifecycle.exclusivity.lifecycleStatus,
+                        )}
+                      </span>
+                    </td>
+                    <td style={{ minWidth: 220 }}>
+                      {v.supplyLifecycle.dispatch.blockedReasons.length > 0 ? (
+                        v.supplyLifecycle.dispatch.blockedReasons.map(
+                          (reason) => (
+                            <div key={reason}>
+                              {formatPlatformCodeLabel(locale, reason)}
+                            </div>
+                          ),
+                        )
+                      ) : (
+                        <span className="admin-badge admin-badge--success">
+                          {t("fleet.noneBlocked")}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ minWidth: 220 }}>
+                      {v.supplyLifecycle.lastTrace ? (
+                        <div>
+                          <div>{v.supplyLifecycle.lastTrace.message}</div>
+                          <div
+                            style={{
+                              color: "var(--admin-text-muted)",
+                              fontSize: 12,
+                            }}
+                          >
+                            {formatDateTime(
+                              v.supplyLifecycle.lastTrace.occurredAt,
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        t("fleet.lastChangeNone")
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -228,12 +310,12 @@ export default function FleetPage() {
                     <td>
                       <span
                         className={`admin-badge ${
-                          c.status === "active"
+                          c.lifecycleStatus === "active"
                             ? "admin-badge--success"
-                            : "admin-badge--neutral"
+                            : "admin-badge--warning"
                         }`}
                       >
-                        {formatPlatformCodeLabel(locale, c.status)}
+                        {formatPlatformCodeLabel(locale, c.lifecycleStatus)}
                       </span>
                     </td>
                     <td>{formatDateTime(c.startAt || "")}</td>

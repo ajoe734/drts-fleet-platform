@@ -199,7 +199,7 @@ export class RegulatoryRegistryRepository {
             vehicle.operatingArea,
             vehicle.dispatchableFlag,
             vehicle.insuranceStatus,
-            new Date().toISOString(),
+            vehicle.updatedAt,
             JSON.stringify(vehicle),
           ],
         ),

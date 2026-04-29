@@ -109,8 +109,14 @@ const en = {
   "vehicles.col.vehicleId": "Vehicle ID",
   "vehicles.col.plate": "Plate",
   "vehicles.col.operatingArea": "Operating Area",
+  "vehicles.col.contract": "Contract",
   "vehicles.col.insurance": "Insurance",
+  "vehicles.col.exclusivity": "Exclusivity",
   "vehicles.col.dispatchable": "Dispatchable",
+  "vehicles.col.blockedBy": "Blocked By",
+  "vehicles.col.lastChange": "Last Change",
+  "vehicles.noneBlocked": "Ready",
+  "vehicles.lastChangeNone": "No lifecycle change recorded",
   "vehicles.empty": "No vehicles registered.",
 
   // ── Drivers ──
@@ -918,8 +924,14 @@ const zh: Record<keyof typeof en, string> = {
   "vehicles.col.vehicleId": "車輛編號",
   "vehicles.col.plate": "車牌",
   "vehicles.col.operatingArea": "營運區域",
+  "vehicles.col.contract": "合約",
   "vehicles.col.insurance": "保險",
+  "vehicles.col.exclusivity": "排他委託",
   "vehicles.col.dispatchable": "可派遣",
+  "vehicles.col.blockedBy": "阻塞原因",
+  "vehicles.col.lastChange": "最近變更",
+  "vehicles.noneBlocked": "可派",
+  "vehicles.lastChangeNone": "尚無 lifecycle 變更紀錄",
   "vehicles.empty": "尚未登記車輛。",
 
   // ── Drivers ──

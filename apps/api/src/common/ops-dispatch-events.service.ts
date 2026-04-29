@@ -8,6 +8,7 @@ import type {
   OpsDispatchStreamEventEnvelope,
   OpsDispatchStreamEventType,
   OwnedOrderRecord,
+  VehicleRegistryRecord,
 } from "@drts/contracts";
 import { fromEvent, map, type Observable } from "rxjs";
 
@@ -72,6 +73,24 @@ export class OpsDispatchEventsService {
     );
   }
 
+  publishSupplyLifecycleUpdated(
+    vehicle: VehicleRegistryRecord,
+    requestId?: string,
+  ) {
+    this.publish(
+      "supply_lifecycle_updated",
+      vehicle.vehicleId,
+      requestId,
+      {
+        vehicleId: vehicle.vehicleId,
+        dispatchableFlag: vehicle.dispatchableFlag,
+        blockedReasons: [...vehicle.supplyLifecycle.dispatch.blockedReasons],
+        lifecycle: this.cloneVehicle(vehicle).supplyLifecycle,
+      },
+      null,
+    );
+  }
+
   private publish(
     eventType: OpsDispatchStreamEventType,
     subjectId: string,
@@ -107,6 +126,25 @@ export class OpsDispatchEventsService {
       quotedFare: order.quotedFare ? { ...order.quotedFare } : null,
       proofRequirements: { ...order.proofRequirements },
       complianceFlags: [...order.complianceFlags],
+    };
+  }
+
+  private cloneVehicle(vehicle: VehicleRegistryRecord): VehicleRegistryRecord {
+    return {
+      ...vehicle,
+      supportedServiceBuckets: [...vehicle.supportedServiceBuckets],
+      supplyLifecycle: {
+        contract: { ...vehicle.supplyLifecycle.contract },
+        insurance: { ...vehicle.supplyLifecycle.insurance },
+        exclusivity: { ...vehicle.supplyLifecycle.exclusivity },
+        dispatch: {
+          ...vehicle.supplyLifecycle.dispatch,
+          blockedReasons: [...vehicle.supplyLifecycle.dispatch.blockedReasons],
+        },
+        lastTrace: vehicle.supplyLifecycle.lastTrace
+          ? { ...vehicle.supplyLifecycle.lastTrace }
+          : null,
+      },
     };
   }
 }

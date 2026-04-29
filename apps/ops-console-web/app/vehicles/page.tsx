@@ -1,11 +1,25 @@
 import type { VehicleRegistryRecord } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
+import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import { PageHeader } from "@drts/ui-web";
 import { Card } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
 import { Badge } from "@drts/ui-web";
+
+function lifecycleBadgeVariant(status: string) {
+  if (status === "active") return "green" as const;
+  if (
+    status === "expired" ||
+    status === "terminated" ||
+    status === "revoked" ||
+    status === "rejected"
+  ) {
+    return "red" as const;
+  }
+  return "yellow" as const;
+}
 
 export default async function VehiclesPage() {
   const [client, locale] = await Promise.all([
@@ -50,8 +64,12 @@ export default async function VehiclesPage() {
             { label: t("vehicles.col.vehicleId", locale) },
             { label: t("vehicles.col.plate", locale) },
             { label: t("vehicles.col.operatingArea", locale) },
+            { label: t("vehicles.col.contract", locale) },
             { label: t("vehicles.col.insurance", locale) },
+            { label: t("vehicles.col.exclusivity", locale) },
             { label: t("vehicles.col.dispatchable", locale) },
+            { label: t("vehicles.col.blockedBy", locale) },
+            { label: t("vehicles.col.lastChange", locale) },
           ]}
           empty={t("vehicles.empty", locale)}
         >
@@ -62,11 +80,38 @@ export default async function VehiclesPage() {
               <Td>{v.operatingArea}</Td>
               <Td>
                 <Badge
-                  variant={v.insuranceStatus === "valid" ? "green" : "red"}
+                  variant={lifecycleBadgeVariant(
+                    v.supplyLifecycle.contract.lifecycleStatus,
+                  )}
                 >
-                  {v.insuranceStatus === "valid"
-                    ? t("common.valid", locale)
-                    : t("common.invalid", locale)}
+                  {formatOpsCodeLabel(
+                    locale,
+                    v.supplyLifecycle.contract.lifecycleStatus,
+                  )}
+                </Badge>
+              </Td>
+              <Td>
+                <Badge
+                  variant={lifecycleBadgeVariant(
+                    v.supplyLifecycle.insurance.lifecycleStatus,
+                  )}
+                >
+                  {formatOpsCodeLabel(
+                    locale,
+                    v.supplyLifecycle.insurance.lifecycleStatus,
+                  )}
+                </Badge>
+              </Td>
+              <Td>
+                <Badge
+                  variant={lifecycleBadgeVariant(
+                    v.supplyLifecycle.exclusivity.lifecycleStatus,
+                  )}
+                >
+                  {formatOpsCodeLabel(
+                    locale,
+                    v.supplyLifecycle.exclusivity.lifecycleStatus,
+                  )}
                 </Badge>
               </Td>
               <Td>
@@ -75,6 +120,20 @@ export default async function VehiclesPage() {
                     ? t("common.yes", locale)
                     : t("common.no", locale)}
                 </Badge>
+              </Td>
+              <Td>
+                {v.supplyLifecycle.dispatch.blockedReasons.length > 0
+                  ? v.supplyLifecycle.dispatch.blockedReasons
+                      .map((reason) => formatOpsCodeLabel(locale, reason))
+                      .join(" / ")
+                  : t("vehicles.noneBlocked", locale)}
+              </Td>
+              <Td>
+                {v.supplyLifecycle.lastTrace
+                  ? `${v.supplyLifecycle.lastTrace.message} (${new Date(
+                      v.supplyLifecycle.lastTrace.occurredAt,
+                    ).toLocaleString()})`
+                  : t("vehicles.lastChangeNone", locale)}
               </Td>
             </Tr>
           ))}

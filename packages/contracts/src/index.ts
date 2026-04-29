@@ -1041,7 +1041,8 @@ export interface DriverTaskStreamEventEnvelope extends DomainEventEnvelope<Drive
 export type OpsDispatchStreamEventType =
   | "order_created"
   | "dispatch_job_updated"
-  | "driver_location_updated";
+  | "driver_location_updated"
+  | "supply_lifecycle_updated";
 
 export interface OpsDispatchOrderCreatedEventData {
   order: OwnedOrderRecord;
@@ -1059,10 +1060,18 @@ export interface OpsDispatchDriverLocationUpdatedEventData {
   recordedAt: string;
 }
 
+export interface OpsDispatchSupplyLifecycleUpdatedEventData {
+  vehicleId: string;
+  dispatchableFlag: boolean;
+  blockedReasons: SupplyDispatchBlockReason[];
+  lifecycle: VehicleSupplyLifecycleRecord;
+}
+
 export type OpsDispatchStreamEventData =
   | OpsDispatchOrderCreatedEventData
   | OpsDispatchJobUpdatedEventData
-  | OpsDispatchDriverLocationUpdatedEventData;
+  | OpsDispatchDriverLocationUpdatedEventData
+  | OpsDispatchSupplyLifecycleUpdatedEventData;
 
 export interface OpsDispatchStreamEventEnvelope extends DomainEventEnvelope<OpsDispatchStreamEventData> {
   eventType: OpsDispatchStreamEventType;
@@ -1087,6 +1096,87 @@ export interface QueueEntryRecord {
   checkedOutAt: string | null;
 }
 
+export type VehicleContractLifecycleStatus =
+  | "missing"
+  | "draft"
+  | "active"
+  | "expired"
+  | "terminated";
+
+export type InsurancePolicyLifecycleStatus =
+  | "missing"
+  | "pending"
+  | "active"
+  | "expired"
+  | "cancelled";
+
+export type DispatchExclusivityLifecycleStatus =
+  | "missing"
+  | "pending_review"
+  | "active"
+  | "expired"
+  | "revoked"
+  | "rejected";
+
+export type SupplyDispatchBlockReason =
+  | "manual_hold"
+  | "contract_missing"
+  | "contract_draft"
+  | "contract_expired"
+  | "contract_terminated"
+  | "insurance_missing"
+  | "insurance_pending"
+  | "insurance_expired"
+  | "insurance_cancelled"
+  | "exclusivity_missing"
+  | "exclusivity_pending_review"
+  | "exclusivity_expired"
+  | "exclusivity_revoked"
+  | "exclusivity_rejected";
+
+export interface SupplyLifecycleTraceRecord {
+  entityType: "vehicle" | "contract" | "insurance_policy" | "exclusivity";
+  status: string;
+  reasonCode: SupplyDispatchBlockReason | null;
+  message: string;
+  occurredAt: string;
+  relatedEntityId: string | null;
+}
+
+export interface VehicleSupplyLifecycleRecord {
+  contract: {
+    contractId: string | null;
+    lifecycleStatus: VehicleContractLifecycleStatus;
+    startAt: string | null;
+    endAt: string | null;
+    updatedAt: string | null;
+  };
+  insurance: {
+    policyId: string | null;
+    lifecycleStatus: InsurancePolicyLifecycleStatus;
+    startAt: string | null;
+    endAt: string | null;
+    updatedAt: string | null;
+  };
+  exclusivity: {
+    lifecycleStatus: DispatchExclusivityLifecycleStatus;
+    declarationStatus: "missing" | "submitted";
+    declarationFileId: string | null;
+    reviewStatus: "draft" | "pending" | "approved" | "rejected";
+    providerName: string | null;
+    effectiveStart: string | null;
+    effectiveEnd: string | null;
+    reviewedAt: string | null;
+    updatedAt: string | null;
+  };
+  dispatch: {
+    eligible: boolean;
+    blockedReasons: SupplyDispatchBlockReason[];
+    evaluatedAt: string;
+  };
+  lastTrace: SupplyLifecycleTraceRecord | null;
+}
+
 export interface VehicleRegistryRecord {
   vehicleId: string;
   plateNo: string;
@@ -1095,6 +1185,8 @@ export interface VehicleRegistryRecord {
   dispatchableFlag: boolean;
   exclusivityApproved: boolean;
   insuranceStatus: "valid" | "expired";
+  updatedAt: string;
+  supplyLifecycle: VehicleSupplyLifecycleRecord;
 }
 
 export interface DriverRegistryRecord {
@@ -1126,6 +1218,7 @@ export interface VehicleContractRecord {
   startAt: string;
   endAt: string;
   status: "draft" | "active" | "terminated";
+  lifecycleStatus: VehicleContractLifecycleStatus;
   approvedBy: string | null;
   approvedAt: string | null;
   createdAt: string;
@@ -1158,6 +1251,7 @@ export interface InsurancePolicyRecord {
   startAt: string;
   endAt: string;
   status: "pending" | "active" | "expired" | "cancelled";
+  lifecycleStatus: InsurancePolicyLifecycleStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -1181,6 +1275,7 @@ export interface DispatchExclusivityRecord {
   declarationStatus: "missing" | "submitted";
   declarationFileId: string | null;
   reviewStatus: "draft" | "pending" | "approved" | "rejected";
+  lifecycleStatus: DispatchExclusivityLifecycleStatus;
   reviewerId: string | null;
   reviewedAt: string | null;
   exclusiveProviderName: string | null;
