@@ -66,7 +66,7 @@ function createMemoryTenantPartnerRepository(): TenantPartnerRepository {
     apiKeys: [],
   };
 
-  const mergeUniqueByKey = <T extends Record<string, unknown>>(
+  const mergeUniqueByKey = <T extends object>(
     items: readonly T[],
     key: keyof T,
     existing: T[],

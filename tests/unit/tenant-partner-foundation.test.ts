@@ -5,6 +5,7 @@ import type {
   PartnerEligibilityVerificationRecord,
 } from "@drts/contracts";
 
+import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import {
   type PersistTenantPartnerChanges,
@@ -38,7 +39,7 @@ function createEmptyPartnerState(): TenantPartnerState {
   };
 }
 
-function mergeUniqueByKey<T extends Record<string, unknown>>(
+function mergeUniqueByKey<T extends object>(
   items: readonly T[],
   key: keyof T,
   existing: T[],
@@ -233,6 +234,72 @@ describe("tenant partner foundation service", () => {
       issuerAuthorizationRef: "issuer-ref-BETA0001",
     });
     expect(acceptedByReference.referenceTokenHash).toMatch(/^sha256:/);
+  });
+
+  it("issues partner ingress identity only for the matching api key", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    const session = tenantPartnerService.authenticatePartnerBootstrap(
+      {
+        entrySlug: "bank-demo-alpha-airport",
+        apiKey: "pk_demo_alpha_airport_20260428",
+      },
+      "partner-bootstrap-request",
+    );
+
+    expect(session.identity).toMatchObject({
+      actorType: "partner_api_key",
+      actorId: "partner-key-alpha-demo",
+      realm: "partner",
+      tenantId: TENANT_ID,
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+    });
+    expect(auditService.listAuditLogs()[0]).toMatchObject({
+      actionName: "partner_ingress_authenticated",
+      tenantId: TENANT_ID,
+    });
+  });
+
+  it("rejects partner ingress when the api key is invalid", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+
+    expect(() =>
+      tenantPartnerService.authenticatePartnerBootstrap(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          apiKey: "wrong-demo-key",
+        },
+        "partner-bootstrap-invalid-request",
+      ),
+    ).toThrowError(ApiRequestError);
+    expect(auditService.listAuditLogs()[0]).toMatchObject({
+      actionName: "partner_ingress_rejected",
+      tenantId: TENANT_ID,
+    });
+  });
+
+  it("rejects eligibility verification when partner identity targets another entry", () => {
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(auditService);
+    const alphaIdentity = tenantPartnerService.authenticatePartnerBootstrap({
+      entrySlug: "bank-demo-alpha-airport",
+      apiKey: "pk_demo_alpha_airport_20260428",
+    }).identity;
+
+    expect(() =>
+      tenantPartnerService.verifyPartnerEligibility(
+        {
+          entrySlug: "bank-demo-beta-airport",
+          referenceToken: "BETA0001",
+        },
+        "cross-partner-verify-request",
+        alphaIdentity,
+      ),
+    ).toThrowError(ApiRequestError);
   });
 
   it("persists partner entries across repository reloads", async () => {
@@ -745,6 +812,144 @@ describe("tenant partner foundation service", () => {
     expect(
       tenantPartnerService.listWebhookDeliveries(OTHER_TENANT_ID),
     ).toHaveLength(1);
+  });
+
+  it("rejects partner verification lookup across tenant scope", async () => {
+    const otherTenantEntry: PartnerChannelEntryRecord = {
+      partnerId: "partner-bank-other-001",
+      partnerCode: "bank_demo_other",
+      partnerType: "bank_partner",
+      programId: "program-other-tenant",
+      programCode: "OTHER_TENANT",
+      tenantId: OTHER_TENANT_ID,
+      bankCode: "BANK_OTHER",
+      entrySlug: "bank-demo-other-airport",
+      displayName: "Other Tenant Airport Transfer",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+      authMode: "partner_api_key",
+      eligibilityMode: "reference_required",
+      entryHost: null,
+      entryPath: "/partner/bank-demo-other-airport",
+      themeAccent: "#1c7ed6",
+      brandingMetadata: {
+        displayName: "Other Tenant Airport Transfer",
+        themeAccent: "#1c7ed6",
+        supportEmail: "other@bank-demo.example",
+        supportPhone: "0800-000-333",
+      },
+      status: "active",
+      activeFlag: true,
+      createdAt: "2026-04-28T00:00:00.000Z",
+      updatedAt: "2026-04-28T00:00:00.000Z",
+      auditMetadata: {
+        source: "test",
+        requestId: null,
+        createdBy: "test",
+        updatedBy: "test",
+      },
+    };
+    const auditService = new AuditNotificationService();
+    const tenantPartnerService = new TenantPartnerService(
+      auditService,
+      undefined,
+      new WebhookDispatchService(),
+      [
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          keyId: "partner-key-alpha-demo",
+          plaintextApiKey: "pk_demo_alpha_airport_20260428",
+        },
+        {
+          entrySlug: "bank-demo-beta-airport",
+          keyId: "partner-key-beta-demo",
+          plaintextApiKey: "pk_demo_beta_airport_20260428",
+        },
+        {
+          entrySlug: "bank-demo-other-airport",
+          keyId: "partner-key-other-demo",
+          plaintextApiKey: "pk_demo_other_airport_20260428",
+        },
+      ],
+    );
+    (
+      tenantPartnerService as unknown as {
+        partnerEntries: PartnerChannelEntryRecord[];
+      }
+    ).partnerEntries.push(otherTenantEntry);
+
+    const alphaIdentity = tenantPartnerService.authenticatePartnerBootstrap({
+      entrySlug: "bank-demo-alpha-airport",
+      apiKey: "pk_demo_alpha_airport_20260428",
+    }).identity;
+    const otherVerification = tenantPartnerService.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-other-airport",
+        referenceToken: "OTHER0001",
+      },
+      "other-tenant-verify-request",
+    );
+
+    expect(() =>
+      tenantPartnerService.getPartnerEligibilityVerification(
+        otherVerification.eligibilityVerificationId,
+        alphaIdentity,
+      ),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("rejects partner bootstrap for inactive entries", async () => {
+    const inactiveEntry: PartnerChannelEntryRecord = {
+      partnerId: "partner-bank-inactive-001",
+      partnerCode: "bank_demo_inactive",
+      partnerType: "bank_partner",
+      programId: "program-inactive",
+      programCode: "INACTIVE",
+      tenantId: TENANT_ID,
+      bankCode: "BANK_INACTIVE",
+      entrySlug: "bank-demo-inactive-airport",
+      displayName: "Inactive Airport Transfer",
+      businessDispatchSubtype: "credit_card_airport_transfer",
+      authMode: "partner_api_key",
+      eligibilityMode: "none",
+      entryHost: null,
+      entryPath: "/partner/bank-demo-inactive-airport",
+      themeAccent: "#868e96",
+      brandingMetadata: null,
+      status: "inactive",
+      activeFlag: false,
+      createdAt: "2026-04-28T00:00:00.000Z",
+      updatedAt: "2026-04-28T00:00:00.000Z",
+      auditMetadata: {
+        source: "test",
+        requestId: null,
+        createdBy: "test",
+        updatedBy: "test",
+      },
+    };
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+      undefined,
+      new WebhookDispatchService(),
+      [
+        {
+          entrySlug: "bank-demo-inactive-airport",
+          keyId: "partner-key-inactive-demo",
+          plaintextApiKey: "pk_demo_inactive_airport_20260428",
+        },
+      ],
+    );
+    (
+      tenantPartnerService as unknown as {
+        partnerEntries: PartnerChannelEntryRecord[];
+      }
+    ).partnerEntries.push(inactiveEntry);
+
+    expect(() =>
+      tenantPartnerService.authenticatePartnerBootstrap({
+        entrySlug: "bank-demo-inactive-airport",
+        apiKey: "pk_demo_inactive_airport_20260428",
+      }),
+    ).toThrowError(ApiRequestError);
   });
 
   it("rejects cross-tenant passenger and address upserts when ids belong to another tenant", () => {

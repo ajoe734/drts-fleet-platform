@@ -69,6 +69,35 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
+  it("parses partner bootstrap identity extensions from headers", () => {
+    const identity = extractBootstrapRequestIdentity(
+      {
+        "x-actor-type": "partner_api_key",
+        "x-actor-id": "partner-key-alpha-demo",
+        "x-realm": "partner",
+        "x-tenant-id": "tenant-demo-001",
+        "x-partner-id": "partner-bank-demo-001",
+        "x-partner-program-id": "program-airport-alpha",
+        "x-partner-entry-slug": "bank-demo-alpha-airport",
+      },
+      { allowAnonymous: false },
+    );
+
+    expect(identity).toMatchObject({
+      actorType: "partner_api_key",
+      realm: "partner",
+      tenantId: "tenant-demo-001",
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      roleFamilies: ["partner"],
+      scopes: expect.arrayContaining([
+        "partner:eligibility:read",
+        "partner:eligibility:write",
+      ]),
+    });
+  });
+
   it("resolves a meaningful policy for protected route groups", () => {
     const policy = resolveRouteAuthPolicy("POST", "/api/tenant/webhooks");
 
@@ -91,6 +120,20 @@ describe("bootstrap auth extraction", () => {
       requiredScopes: ["foundation:write"],
       allowedRealms: ["system", "platform"],
       description: "Platform admin master-data management",
+    });
+  });
+
+  it("resolves partner eligibility routes to partner-scoped access", () => {
+    const policy = resolveRouteAuthPolicy(
+      "POST",
+      "/api/partner/eligibility/verify",
+    );
+
+    expect(policy).toEqual({
+      routeKey: "partner:eligibility:verify",
+      requiredScopes: ["partner:eligibility:write"],
+      allowedRealms: ["system", "partner"],
+      description: "Partner eligibility verification",
     });
   });
 
@@ -613,6 +656,19 @@ describe("internal key middleware", () => {
     ).not.toThrow();
   });
 
+  it("allows partner bootstrap-session issuance without the internal key", () => {
+    expect(() =>
+      validateInternalKey(
+        {
+          headers: {},
+          method: "POST",
+          originalUrl: "/api/auth/partner/bootstrap-session",
+        },
+        "staging-secret",
+      ),
+    ).not.toThrow();
+  });
+
   it("allows bearer-authenticated tenant routes without the internal key", () => {
     expect(() =>
       validateInternalKey(
@@ -899,6 +955,87 @@ describe("tenant bootstrap-session auth controller", () => {
         },
       });
     }
+
+    delete process.env.JWT_SECRET;
+  });
+});
+
+describe("partner bootstrap-session auth controller", () => {
+  it("issues a bearer session envelope for partner ingress", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const jwtAuthService = new JwtAuthService();
+    const controller = new AuthController(
+      jwtAuthService,
+      new TenantPartnerService(new AuditNotificationService()),
+    );
+
+    const response = controller.issuePartnerBootstrapSession(
+      {
+        entrySlug: "bank-demo-alpha-airport",
+        apiKey: "pk_demo_alpha_airport_20260428",
+      },
+      "req-partner-bootstrap-001",
+    );
+
+    expect(response.data).toMatchObject({
+      tokenType: "Bearer",
+      expiresIn: "1h",
+      partnerEntry: {
+        entrySlug: "bank-demo-alpha-airport",
+        partnerId: "partner-bank-demo-001",
+        authMode: "partner_api_key",
+      },
+      identity: {
+        actorType: "partner_api_key",
+        actorId: "partner-key-alpha-demo",
+        authMode: "jwt_bearer",
+        realm: "partner",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner-bank-demo-001",
+        partnerProgramId: "program-airport-alpha",
+        partnerEntrySlug: "bank-demo-alpha-airport",
+        scopes: expect.arrayContaining([
+          "partner:eligibility:read",
+          "partner:eligibility:write",
+        ]),
+      },
+    });
+    const verifiedPayload = jwtAuthService.verify(response.data.accessToken);
+    expect(verifiedPayload).toMatchObject({
+      sub: "partner-key-alpha-demo",
+      actorType: "partner_api_key",
+      realm: "partner",
+      tenantId: "tenant-demo-001",
+      partnerId: "partner-bank-demo-001",
+      partnerProgramId: "program-airport-alpha",
+      partnerEntrySlug: "bank-demo-alpha-airport",
+    });
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+  });
+
+  it("rejects partner bootstrap-session issuance for an invalid api key", () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const controller = new AuthController(
+      new JwtAuthService(),
+      new TenantPartnerService(new AuditNotificationService()),
+    );
+
+    expect(() =>
+      controller.issuePartnerBootstrapSession(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          apiKey: "wrong-demo-key",
+        },
+        "req-partner-bootstrap-002",
+      ),
+    ).toThrowError(ApiRequestError);
 
     delete process.env.JWT_SECRET;
   });

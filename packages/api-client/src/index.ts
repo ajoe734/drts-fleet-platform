@@ -22,6 +22,7 @@ import type {
   ComplaintExportViewRecord,
   ComplaintTimelineEntry,
   CompleteCallbackTaskCommand,
+  CreatePartnerBootstrapSessionCommand,
   CreateTenantBootstrapSessionCommand,
   CreateDriverProfileCommand,
   CreateOwnedOrderCommand,
@@ -73,6 +74,7 @@ import type {
   OpenCallSessionCommand,
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
+  PartnerBootstrapSession,
   PartnerEligibilityVerificationRecord,
   PlacardVersionRecord,
   PlatformAdminTenantRecord,
@@ -326,6 +328,17 @@ export class ApiClient {
   ): Promise<TenantBootstrapSession> {
     return this.post<TenantBootstrapSession>(
       "/api/auth/tenant/bootstrap-session",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async createPartnerBootstrapSession(
+    command: CreatePartnerBootstrapSessionCommand,
+  ): Promise<PartnerBootstrapSession> {
+    return this.post<PartnerBootstrapSession>(
+      "/api/auth/partner/bootstrap-session",
       {
         body: command,
       },

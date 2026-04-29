@@ -1,4 +1,9 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 
 import {
   HttpStatus,
@@ -10,7 +15,9 @@ import {
 
 import type {
   AuditLogRecord,
+  CreatePartnerBootstrapSessionCommand,
   CreateTenantUserCommand,
+  IdentityContext,
   CreateTenantWebhookEndpointCommand,
   IssueTenantApiKeyCommand,
   PartnerChannelEntryRecord,
@@ -97,6 +104,30 @@ type RotateWebhookSecretCommand = {
   webhookId: string;
   secret: string;
   rotationReason?: string;
+};
+
+type PartnerIngressCredentialSeed = {
+  entrySlug: string;
+  keyId: string;
+  plaintextApiKey: string;
+};
+
+type PartnerIngressResolution = {
+  partnerEntry: PartnerChannelEntryRecord;
+  identity: IdentityContext;
+};
+
+type PartnerEligibilityIdentity = Pick<
+  IdentityContext,
+  | "actorType"
+  | "actorId"
+  | "realm"
+  | "tenantId"
+  | "partnerId"
+  | "partnerProgramId"
+  | "partnerEntrySlug"
+> & {
+  requestId?: string | null;
 };
 
 const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
@@ -258,7 +289,7 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     entrySlug: "bank-demo-alpha-airport",
     displayName: "Bank Demo Alpha Airport Transfer",
     businessDispatchSubtype: "credit_card_airport_transfer",
-    authMode: "tenant_portal_bearer",
+    authMode: "partner_api_key",
     eligibilityMode: "bank_card_inline",
     entryHost: null,
     entryPath: "/partner/bank-demo-alpha-airport",
@@ -291,7 +322,7 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     entrySlug: "bank-demo-beta-airport",
     displayName: "Bank Demo Beta Airport Transfer",
     businessDispatchSubtype: "credit_card_airport_transfer",
-    authMode: "tenant_portal_bearer",
+    authMode: "partner_api_key",
     eligibilityMode: "reference_required",
     entryHost: null,
     entryPath: "/partner/bank-demo-beta-airport",
@@ -314,6 +345,20 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     },
   },
 ];
+
+const PARTNER_INGRESS_CREDENTIAL_SEED: readonly PartnerIngressCredentialSeed[] =
+  [
+    {
+      entrySlug: "bank-demo-alpha-airport",
+      keyId: "partner-key-alpha-demo",
+      plaintextApiKey: "pk_demo_alpha_airport_20260428",
+    },
+    {
+      entrySlug: "bank-demo-beta-airport",
+      keyId: "partner-key-beta-demo",
+      plaintextApiKey: "pk_demo_beta_airport_20260428",
+    },
+  ];
 
 @Injectable()
 export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
@@ -366,6 +411,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     private readonly tenantPartnerRepository?: TenantPartnerRepository,
     @Optional()
     private readonly webhookDispatchService: WebhookDispatchService = new WebhookDispatchService(),
+    private readonly partnerIngressCredentials: readonly PartnerIngressCredentialSeed[] = PARTNER_INGRESS_CREDENTIAL_SEED,
   ) {}
 
   async onModuleInit() {
@@ -446,6 +492,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         partnerEntries.length > 0
           ? partnerEntries.map((entry) => this.clonePartnerEntry(entry))
           : PARTNER_ENTRY_SEED.map((entry) => this.clonePartnerEntry(entry));
+      this.normalizePartnerEntryAuthModes();
       this.partnerEligibilityVerifications = new Map(
         partnerEligibilityVerifications.map((verification) => [
           verification.eligibilityVerificationId,
@@ -797,11 +844,97 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePartnerEntry(this.requirePartnerEntry(entrySlug));
   }
 
+  authenticatePartnerBootstrap(
+    command: CreatePartnerBootstrapSessionCommand,
+    requestId?: string,
+  ): PartnerIngressResolution {
+    const entry = this.requirePartnerEntry(command.entrySlug);
+    const apiKey = command.apiKey?.trim();
+    if (!apiKey) {
+      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+        reason: "api_key_missing",
+      });
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "PARTNER_API_KEY_REQUIRED",
+        "apiKey is required for partner bootstrap authentication.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+
+    const credential = this.resolvePartnerIngressCredential(entry.entrySlug);
+    if (!credential) {
+      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+        reason: "credential_not_configured",
+      });
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_AUTH_NOT_CONFIGURED",
+        "Partner ingress authentication is not configured for this entry.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+
+    const providedHash = this.hashPartnerApiKey(apiKey);
+    const expectedHash = this.hashPartnerApiKey(credential.plaintextApiKey);
+    if (!this.hashesMatch(providedHash, expectedHash)) {
+      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+        reason: "api_key_invalid",
+        keyId: credential.keyId,
+      });
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "PARTNER_API_KEY_INVALID",
+        "Partner API key is invalid for this entry.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+
+    const identity: IdentityContext = {
+      actorType: "partner_api_key",
+      actorId: credential.keyId,
+      realm: "partner",
+      authMode: "bootstrap_headers",
+      roleFamilies: ["partner"],
+      roles: ["partner_ingress"],
+      scopes: [
+        "partner:entries:read",
+        "partner:eligibility:read",
+        "partner:eligibility:write",
+      ],
+      tenantId: entry.tenantId,
+      partnerId: entry.partnerId,
+      partnerProgramId: entry.programId,
+      partnerEntrySlug: entry.entrySlug,
+      supportedExecutionModes: [
+        "discussion_planning",
+        "supervisor_managed_execution",
+      ],
+    };
+
+    this.recordPartnerIngressAttempt(entry, requestId, "accepted", {
+      keyId: credential.keyId,
+    });
+
+    return {
+      partnerEntry: this.clonePartnerEntry(entry),
+      identity,
+    };
+  }
+
   verifyPartnerEligibility(
     command: VerifyPartnerEligibilityCommand,
     requestId?: string,
+    identity?: PartnerEligibilityIdentity | null,
   ) {
     const entry = this.requirePartnerEntry(command.entrySlug);
+    this.assertPartnerEligibilityIdentity(identity, entry, requestId);
     const verifiedAt = new Date().toISOString();
     const expiresAt = new Date(
       Date.parse(verifiedAt) + 30 * 60 * 1000,
@@ -915,8 +1048,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     this.recordTenantAudit(
       {
-        actorId: null,
-        actorType: "system",
+        actorId: identity?.actorId ?? null,
+        actorType:
+          identity?.actorType === "partner_api_key"
+            ? "partner_api_key"
+            : "system",
         tenantId: entry.tenantId,
         moduleName: "tenant-partner",
         actionName: "verify_partner_eligibility",
@@ -936,7 +1072,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.clonePartnerEligibilityVerification(verification);
   }
 
-  getPartnerEligibilityVerification(eligibilityVerificationId: string) {
+  getPartnerEligibilityVerification(
+    eligibilityVerificationId: string,
+    identity?: PartnerEligibilityIdentity | null,
+  ) {
     const verification = this.partnerEligibilityVerifications.get(
       eligibilityVerificationId,
     );
@@ -950,6 +1089,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         },
       );
     }
+
+    this.assertPartnerEligibilityVerificationIdentity(
+      identity,
+      verification,
+      eligibilityVerificationId,
+    );
 
     return this.clonePartnerEligibilityVerification(verification);
   }
@@ -2187,6 +2332,141 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return entry;
   }
 
+  private normalizePartnerEntryAuthModes() {
+    const changedEntries = this.partnerEntries
+      .filter((entry) => entry.authMode !== "partner_api_key")
+      .map((entry) => {
+        entry.authMode = "partner_api_key";
+        entry.updatedAt = new Date().toISOString();
+        entry.auditMetadata = {
+          ...entry.auditMetadata,
+          source: entry.auditMetadata.source ?? "partner_auth_upgrade",
+          updatedBy: "system:partner-auth-upgrade",
+        };
+        return this.clonePartnerEntry(entry);
+      });
+
+    if (changedEntries.length > 0) {
+      this.persistChanges(
+        {
+          partnerEntries: changedEntries,
+        },
+        "normalize_partner_entry_auth_modes",
+      );
+    }
+  }
+
+  private resolvePartnerIngressCredential(entrySlug: string) {
+    return this.partnerIngressCredentials.find(
+      (credential) => credential.entrySlug === entrySlug,
+    );
+  }
+
+  private hashPartnerApiKey(apiKey: string) {
+    return createHash("sha256").update(apiKey).digest("hex");
+  }
+
+  private hashesMatch(left: string, right: string) {
+    const leftBuffer = Buffer.from(left, "utf8");
+    const rightBuffer = Buffer.from(right, "utf8");
+    return (
+      leftBuffer.length === rightBuffer.length &&
+      timingSafeEqual(leftBuffer, rightBuffer)
+    );
+  }
+
+  private assertPartnerEligibilityIdentity(
+    identity: PartnerEligibilityIdentity | null | undefined,
+    entry: PartnerChannelEntryRecord,
+    requestId?: string,
+  ) {
+    if (!identity || identity.realm === "system") {
+      return;
+    }
+
+    const partnerMismatch =
+      identity.actorType !== "partner_api_key" ||
+      identity.realm !== "partner" ||
+      identity.tenantId !== entry.tenantId ||
+      identity.partnerId !== entry.partnerId ||
+      identity.partnerProgramId !== entry.programId ||
+      identity.partnerEntrySlug !== entry.entrySlug;
+
+    if (!partnerMismatch) {
+      return;
+    }
+
+    this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+      reason: "identity_scope_mismatch",
+      actorId: identity.actorId,
+      identityTenantId: identity.tenantId,
+      identityPartnerId: identity.partnerId,
+      identityPartnerProgramId: identity.partnerProgramId,
+      identityPartnerEntrySlug: identity.partnerEntrySlug,
+    });
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "PARTNER_SCOPE_MISMATCH",
+      "Authenticated partner identity cannot access another partner or tenant entry.",
+      {
+        entrySlug: entry.entrySlug,
+        tenantId: entry.tenantId,
+      },
+    );
+  }
+
+  private assertPartnerEligibilityVerificationIdentity(
+    identity: PartnerEligibilityIdentity | null | undefined,
+    verification: PartnerEligibilityVerificationRecord,
+    eligibilityVerificationId: string,
+  ) {
+    if (!identity || identity.realm === "system") {
+      return;
+    }
+
+    const partnerMismatch =
+      identity.actorType !== "partner_api_key" ||
+      identity.realm !== "partner" ||
+      identity.tenantId !== verification.tenantId ||
+      identity.partnerId !== verification.partnerId ||
+      identity.partnerProgramId !== verification.partnerProgramId ||
+      identity.partnerEntrySlug !== verification.partnerEntrySlug;
+
+    if (!partnerMismatch) {
+      return;
+    }
+
+    this.recordPartnerIngressAttempt(
+      this.findPartnerEntryBySlug(verification.partnerEntrySlug),
+      identity.requestId ?? undefined,
+      "rejected",
+      {
+        reason: "verification_scope_mismatch",
+        actorId: identity.actorId,
+        eligibilityVerificationId,
+        identityTenantId: identity.tenantId,
+        identityPartnerId: identity.partnerId,
+        identityPartnerProgramId: identity.partnerProgramId,
+        identityPartnerEntrySlug: identity.partnerEntrySlug,
+      },
+    );
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "PARTNER_SCOPE_MISMATCH",
+      "Authenticated partner identity cannot access another partner or tenant verification.",
+      {
+        eligibilityVerificationId,
+        tenantId: verification.tenantId,
+      },
+    );
+  }
+
+  private findPartnerEntryBySlug(entrySlug: string) {
+    return (
+      this.partnerEntries.find((entry) => entry.entrySlug === entrySlug) ?? null
+    );
+  }
+
   private requireApiKey(tenantId: string, apiKeyId: string) {
     const apiKey = this.apiKeys.find(
       (candidate) =>
@@ -2239,6 +2519,39 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       auditLogInput.requestId = requestId;
     }
     this.auditNotificationService.recordAuditLog(auditLogInput);
+  }
+
+  private recordPartnerIngressAttempt(
+    entry: PartnerChannelEntryRecord | null,
+    requestId: string | undefined,
+    outcome: "accepted" | "rejected",
+    details: Record<string, unknown>,
+  ) {
+    this.recordTenantAudit(
+      {
+        actorId:
+          typeof details.actorId === "string"
+            ? (details.actorId as string)
+            : null,
+        actorType: "partner_api_key",
+        tenantId: entry?.tenantId ?? null,
+        moduleName: "tenant-partner",
+        actionName:
+          outcome === "accepted"
+            ? "partner_ingress_authenticated"
+            : "partner_ingress_rejected",
+        resourceType: "partner_entry",
+        resourceId: entry?.entrySlug ?? null,
+        newValuesSummary: {
+          partnerId: entry?.partnerId ?? null,
+          partnerProgramId: entry?.programId ?? null,
+          partnerEntrySlug: entry?.entrySlug ?? null,
+          outcome,
+          ...details,
+        },
+      },
+      requestId,
+    );
   }
 
   private hashSecret(secret: string) {

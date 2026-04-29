@@ -28,6 +28,7 @@ export const AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE: Record<
   tenant_admin: ["tenant"],
   ops_user: ["ops"],
   driver_user: ["driver"],
+  partner_api_key: ["partner"],
 };
 
 export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
@@ -139,6 +140,11 @@ export const AUTH_SCOPE_PRESETS: Record<AuthActorType, readonly string[]> = {
     "forwarder:write",
   ],
   driver_user: ["owned:read", "driver:read", "driver:write", "dispatch:read"],
+  partner_api_key: [
+    "partner:entries:read",
+    "partner:eligibility:read",
+    "partner:eligibility:write",
+  ],
 };
 
 export const AUTH_TENANT_ROLE_SCOPE_PRESETS: Record<string, readonly string[]> =

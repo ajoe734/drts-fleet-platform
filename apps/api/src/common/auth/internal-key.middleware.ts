@@ -20,12 +20,14 @@ const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "GET identity/context",
   "GET tenant/roles",
   "POST auth/tenant/bootstrap-session",
+  "POST auth/partner/bootstrap-session",
 ]);
 const PUBLIC_BOOTSTRAP_REALMS = new Set([
   "platform",
   "tenant",
   "ops",
   "driver",
+  "partner",
 ]);
 
 function normalizeHeaderValue(value: HeaderValue): string {

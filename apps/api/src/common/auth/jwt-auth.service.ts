@@ -1,3 +1,4 @@
+import type { IdentityContext } from "@drts/contracts";
 import { Injectable, Logger } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 
@@ -13,12 +14,33 @@ export interface JwtIdentityPayload {
   actorType: AuthActorType;
   realm: AuthRealm;
   tenantId: string | null;
+  partnerId?: string | null;
+  partnerProgramId?: string | null;
+  partnerEntrySlug?: string | null;
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];
 }
 
 type JwtExpiresIn = Extract<NonNullable<jwt.SignOptions["expiresIn"]>, string>;
+
+type JwtSignIdentity =
+  | Pick<
+      BootstrapRequestIdentity,
+      | "authMode"
+      | "actorType"
+      | "actorId"
+      | "realm"
+      | "tenantId"
+      | "partnerId"
+      | "partnerProgramId"
+      | "partnerEntrySlug"
+      | "roleFamilies"
+      | "roles"
+      | "scopes"
+      | "requestId"
+    >
+  | IdentityContext;
 
 const DEFAULT_EXPIRES_IN: JwtExpiresIn = "8h";
 const SERVICE_EXPIRES_IN: JwtExpiresIn = "1h";
@@ -76,15 +98,15 @@ export class JwtAuthService {
     return options;
   }
 
-  sign(
-    identity: BootstrapRequestIdentity,
-    opts?: { expiresIn?: JwtExpiresIn },
-  ): string {
+  sign(identity: JwtSignIdentity, opts?: { expiresIn?: JwtExpiresIn }): string {
     const payload: JwtIdentityPayload = {
       sub: identity.actorId,
       actorType: identity.actorType,
       realm: identity.realm,
       tenantId: identity.tenantId,
+      partnerId: identity.partnerId ?? null,
+      partnerProgramId: identity.partnerProgramId ?? null,
+      partnerEntrySlug: identity.partnerEntrySlug ?? null,
       roleFamilies: identity.roleFamilies,
       roles: identity.roles,
       scopes: identity.scopes,
@@ -118,6 +140,9 @@ export class JwtAuthService {
       actorId: payload.sub,
       realm: payload.realm,
       tenantId: payload.tenantId,
+      partnerId: payload.partnerId ?? null,
+      partnerProgramId: payload.partnerProgramId ?? null,
+      partnerEntrySlug: payload.partnerEntrySlug ?? null,
       roleFamilies: payload.roleFamilies,
       roles: payload.roles,
       scopes: payload.scopes,

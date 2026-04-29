@@ -10,6 +10,7 @@ import {
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  IdentityContext,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
   IssueTenantApiKeyCommand,
@@ -32,7 +33,7 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
-import { OpenRoute } from "../../common/auth";
+import { CurrentIdentity, OpenRoute } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
 import { TenantPartnerService } from "./tenant-partner.service";
 
@@ -91,26 +92,31 @@ export class TenantPartnerController {
   }
 
   @Post("partner/eligibility/verify")
-  @OpenRoute()
   verifyPartnerEligibility(
     @Body() command: VerifyPartnerEligibilityCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     const verification: PartnerEligibilityVerificationRecord =
-      this.tenantPartnerService.verifyPartnerEligibility(command, requestId);
+      this.tenantPartnerService.verifyPartnerEligibility(
+        command,
+        requestId,
+        identity,
+      );
     return toApiSuccessEnvelope(verification, requestId);
   }
 
   @Get("partner/eligibility/:eligibilityVerificationId")
-  @OpenRoute()
   @Throttle(READ_HEAVY_RATE_LIMIT)
   getPartnerEligibilityVerification(
     @Param("eligibilityVerificationId") eligibilityVerificationId: string,
+    @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.getPartnerEligibilityVerification(
         eligibilityVerificationId,
+        identity,
       ),
       requestId,
     );

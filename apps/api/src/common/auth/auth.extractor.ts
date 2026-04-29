@@ -27,6 +27,9 @@ function hasAuthSignal(headers: AuthBootstrapHeaders): boolean {
     "x-scopes",
     "x-auth-mode",
     "x-tenant-id",
+    "x-partner-id",
+    "x-partner-program-id",
+    "x-partner-entry-slug",
   ].some((key) => Boolean(headers[key]));
 }
 
@@ -65,7 +68,8 @@ function normalizeRealm(actorType: AuthActorType, rawRealm: string): AuthRealm {
     rawRealm === "platform" ||
     rawRealm === "tenant" ||
     rawRealm === "ops" ||
-    rawRealm === "driver"
+    rawRealm === "driver" ||
+    rawRealm === "partner"
   ) {
     return rawRealm;
   }
@@ -79,6 +83,8 @@ function normalizeRealm(actorType: AuthActorType, rawRealm: string): AuthRealm {
       return "ops";
     case "driver_user":
       return "driver";
+    case "partner_api_key":
+      return "partner";
     default:
       return "system";
   }
@@ -93,7 +99,8 @@ function normalizeRoleFamilies(
       family === "platform" ||
       family === "tenant" ||
       family === "ops" ||
-      family === "driver",
+      family === "driver" ||
+      family === "partner",
   );
 
   const fromActorType = AUTH_ROLE_FAMILY_FROM_ACTOR_TYPE[actorType];
@@ -132,6 +139,9 @@ export function extractBootstrapRequestIdentity(
       roles: [],
       scopes: [],
       requestId: normalizeHeaderValue(headers["x-request-id"]) || null,
+      partnerId: null,
+      partnerProgramId: null,
+      partnerEntrySlug: null,
     };
   }
 
@@ -160,6 +170,11 @@ export function extractBootstrapRequestIdentity(
     actorId: normalizeHeaderValue(headers["x-actor-id"]) || null,
     realm,
     tenantId: normalizeHeaderValue(headers["x-tenant-id"]) || null,
+    partnerId: normalizeHeaderValue(headers["x-partner-id"]) || null,
+    partnerProgramId:
+      normalizeHeaderValue(headers["x-partner-program-id"]) || null,
+    partnerEntrySlug:
+      normalizeHeaderValue(headers["x-partner-entry-slug"]) || null,
     roleFamilies: normalizeRoleFamilies(explicitRoleFamilies, actorType),
     roles,
     scopes,

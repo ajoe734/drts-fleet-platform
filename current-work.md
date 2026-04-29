@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-04-24T14:16:32Z
+Last updated: 2026-04-29T00:43:25Z
 
 ## Objective
 
@@ -47,58 +47,73 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ### Primary Project Work
 
-| ID | Phase | Task | Owner | Status | Depends On | 中文說明 |
-|---|---|---|---|---|---|---|
-| _(none)_ | - | - | - | - | - | - |
+| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
+| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
+| _(none)_ | -     | -    | -     | -      | -          | -        |
 
 ### External / Upstream Integration Work
 
-| ID | Phase | Task | Owner | Status | Depends On | 中文說明 |
-|---|---|---|---|---|---|---|
-| _(none)_ | - | - | - | - | - | - |
+| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
+| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
+| _(none)_ | -     | -    | -     | -      | -          | -        |
 
 ## Task Board (active only)
 
-| ID | Phase | Task | Owner | Status | Depends On |
-|---|---|---|---|---|---|
+| ID  | Phase | Task | Owner | Status | Depends On |
+| --- | ----- | ---- | ----- | ------ | ---------- |
 
 ## Handoff Queue
 
-| Task | From | To | Message | Status | Created At |
-|---|---|---|---|---|---|
-| _(none)_ | - | - | - | - | - |
+| Task     | From | To  | Message | Status | Created At |
+| -------- | ---- | --- | ------- | ------ | ---------- |
+| _(none)_ | -    | -   | -       | -      | -          |
 
 ## Blockers
 
-| Task | Owner | Waiting For | Message | Status |
-|---|---|---|---|---|
-| _(none)_ | - | - | - | - |
+| Task     | Owner | Waiting For | Message | Status |
+| -------- | ----- | ----------- | ------- | ------ |
+| _(none)_ | -     | -           | -       | -      |
 
 ## Review Notes (active tasks)
 
-| Task | Reviewer | 修正重點 | Review File |
-|---|---|---|---|
-| _(none)_ | - | - | - |
+| Task     | Reviewer | 修正重點 | Review File |
+| -------- | -------- | -------- | ----------- |
+| _(none)_ | -        | -        | -           |
 
 ## Completion Evidence (last 10)
 
-| Task | Commit | Subject | LLM Agent | Reviewer | Recorded At |
-|---|---|---|---|---|---|
-| `EMC-H1-002` | d4ff866 | fix(EMC-H1-002): remove driver-profile seeded fallback | Codex | Claude | 2026-04-22T05:39:53Z |
-| `EMC-H1-003` | 4c27586 | fix(EMC-H1-003): harden platform earnings db aggregation | Codex2 | Claude | 2026-04-22T05:47:44Z |
-| `EMC-H1-004` | f6ef9e5845a054949d6bd8b160ca90fc8cd98179 | fix(EMC-H1-004): harden billing settlement truth sources | Codex | Claude | 2026-04-22T05:56:13Z |
-| `EMC-H2-001` | 284e0cd | chore(EMC-H2-001): finalize closeout metadata | Codex | Claude | 2026-04-22T06:14:47Z |
-| `EMC-W1-001` | 8cbdda5 | feat(EMC-W1-001): add ops-console earnings drilldown parity | Codex2 | Codex | 2026-04-22T06:03:07Z |
-| `EMC-W1-002` | 8c4a254 | feat(EMC-W1-002): replace onboarding placeholder with degraded-state recovery UX | Claude | Codex2 | 2026-04-22T06:01:34Z |
-| `EMC-W1-003` | 739ea323c3f894bb45433e7dc033c9adc5ed65da | feat(platform-admin): bind public-info publish actor to verified identity | Codex2 | Claude | 2026-04-22T06:09:01Z |
-| `EMC-I1-001` | 4be98cb | fix(EMC-I1-001): restore camel/snake fallback in E2E-002 §3.5 dispatch check | Claude | Codex | 2026-04-22T06:38:59Z |
-| `EMC-I1-002` | 73323dd | test(EMC-I1-002): add phone booking compliance export flow | Codex2 | Codex | 2026-04-22T06:21:17Z |
-| `EMC-I1-001-SIDECAR-ACCEPTANCE` | - | no-commit closeout | Codex2 | Claude | 2026-04-22T06:30:23Z |
+| Task                              | Commit                                   | Subject                                                                                   | LLM Agent | Reviewer | Recorded At          |
+| --------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------- | --------- | -------- | -------------------- |
+| `P1PX-BE-001`                     | db06e6f                                  | feat(p1px-be-001): persist partner registry and eligibility                               | Codex2    | Claude   | 2026-04-28T14:54:35Z |
+| `P1PX-BE-002`                     | 4e5c22e                                  | feat(P1PX-BE-002): fix partner bootstrap session JWT identity construction                | Claude    | Codex2   | 2026-04-28T15:22:27Z |
+| `P1PX-FE-001`                     | 29f27526c20103af5ddd61152d4961d04b314724 | feat(p1px-fe-001): finalize partner booking entry shell                                   | Codex2    | Claude   | 2026-04-28T14:48:16Z |
+| `P1PX-BE-003`                     | 0519485762fc8f83e60e7715594c2f525aa34fae | feat(P1PX-BE-003): carry partner truth into finance reporting                             | Codex     | Claude   | 2026-04-28T15:26:23Z |
+| `P1PX-DRV-001`                    | 83a3e4c                                  | feat(P1PX-DRV-001): harden driver app identity and device provisioning                    | Claude    | Codex    | 2026-04-28T15:01:35Z |
+| `P1PX-DRV-002`                    | 4a99bdd                                  | feat(P1PX-DRV-002): document EAS internal build baseline and external credential blockers | Claude    | Codex    | 2026-04-28T15:21:25Z |
+| `P1PX-DOC-001`                    | 7958a40                                  | fix(P1PX-DOC-001): correct stale baseline refs and EMC-X1-\* materialization wording      | Claude    | Codex    | 2026-04-28T15:37:41Z |
+| `P1PX-BE-001-SIDECAR-ACCEPTANCE`  | -                                        | no-commit closeout                                                                        | Codex2    | Codex    | 2026-04-28T15:00:12Z |
+| `P1PX-DRV-001-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                                        | Codex     | Codex2   | 2026-04-28T14:55:24Z |
+| `P1PX-DOC-001-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                                        | Codex2    | Claude   | 2026-04-28T15:41:44Z |
 
 ## Latest Checkpoints
 
-- 2026-04-24T14:15:51Z Codex: `GAP-P2S3-001` Assigned GAP-P2S3-001 to Gemini with reviewer Codex
-- 2026-04-24T14:15:52Z Gemini: `GAP-P2S3-001` Manual GCP prerequisites, protected control-plane proxy migration, and staging verification are complete; moving GAP-P2S3-001 into final canonical closeout review.
-- 2026-04-24T14:15:53Z Gemini: `GAP-P2S3-001` Handoff to Codex: Protected staging auth cutover is merged and verified on remote main; review canonical task-state closeout against the synced runbooks and staging evidence.
-- 2026-04-24T14:15:54Z Codex: `GAP-P2S3-001` Review approved: protected control-plane auth cutover is merged, staging-verified, and ready for final done closure in machine truth.
-- 2026-04-24T14:15:55Z Gemini: `GAP-P2S3-001` Owner finalized GAP-P2S3-001: Cloud IAP / OIDC staged control-plane cutover is closed on protected staging, staging deploy run #24891433989 passed post-merge verification, and the remaining visible delta is limited to documented local/direct-path fallback policy rather than an active repo blocker.
+- 2026-04-28T19:51:49Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T20:06:49Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T20:21:50Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T20:36:51Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T20:51:53Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T21:06:54Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T21:21:55Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T21:36:56Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T21:51:57Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T22:06:58Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T22:21:59Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T22:37:00Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T22:52:01Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T23:07:02Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T23:22:03Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T23:37:03Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-28T23:52:05Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-29T00:07:05Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-29T00:22:07Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-04-29T00:37:09Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback

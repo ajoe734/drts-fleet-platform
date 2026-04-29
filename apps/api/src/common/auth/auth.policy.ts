@@ -67,6 +67,24 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "partner/eligibility/verify") {
+    return {
+      routeKey: "partner:eligibility:verify",
+      requiredScopes: ["partner:eligibility:write"],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Partner eligibility verification",
+    };
+  }
+
+  if (routePath.startsWith("partner/eligibility/")) {
+    return {
+      routeKey: "partner:eligibility:get",
+      requiredScopes: ["partner:eligibility:read"],
+      allowedRealms: baseAllowedRealms("partner"),
+      description: "Partner eligibility verification lookup",
+    };
+  }
+
   if (routePath.startsWith("platform-admin/")) {
     return {
       routeKey: `platform-admin:${upperMethod}`,

@@ -4,6 +4,7 @@ export const AUTH_ACTOR_TYPES = [
   "tenant_admin",
   "ops_user",
   "driver_user",
+  "partner_api_key",
 ] as const;
 
 export type AuthActorType = (typeof AUTH_ACTOR_TYPES)[number];
@@ -14,6 +15,7 @@ export const AUTH_REALMS = [
   "tenant",
   "ops",
   "driver",
+  "partner",
 ] as const;
 
 export type AuthRealm = (typeof AUTH_REALMS)[number];
@@ -23,6 +25,7 @@ export const AUTH_ROLE_FAMILIES = [
   "tenant",
   "ops",
   "driver",
+  "partner",
 ] as const;
 
 export type AuthRoleFamily = (typeof AUTH_ROLE_FAMILIES)[number];
@@ -39,6 +42,9 @@ export interface BootstrapRequestIdentity {
   actorId: string | null;
   realm: AuthRealm;
   tenantId: string | null;
+  partnerId?: string | null;
+  partnerProgramId?: string | null;
+  partnerEntrySlug?: string | null;
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];
@@ -52,6 +58,9 @@ export interface AuthBootstrapHeaders {
   "x-actor-id"?: string;
   "x-realm"?: string;
   "x-tenant-id"?: string;
+  "x-partner-id"?: string;
+  "x-partner-program-id"?: string;
+  "x-partner-entry-slug"?: string;
   "x-roles"?: string;
   "x-role-families"?: string;
   "x-scopes"?: string;
