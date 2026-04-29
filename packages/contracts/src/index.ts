@@ -294,6 +294,45 @@ export interface PartnerChannelEntryRecord {
   auditMetadata: PartnerRecordAuditMetadata;
 }
 
+export interface CreatePartnerChannelEntryCommand {
+  tenantId: string;
+  partnerCode: string;
+  partnerType: string;
+  programId: string;
+  programCode?: string | null;
+  bankCode?: string | null;
+  entrySlug: string;
+  displayName: string;
+  businessDispatchSubtype: BusinessDispatchSubtype;
+  authMode: PartnerEntryAuthMode;
+  eligibilityMode: PartnerEligibilityMode;
+  entryHost?: string | null;
+  entryPath?: string | null;
+  themeAccent?: string | null;
+  brandingMetadata?: Partial<PartnerEntryBrandingMetadata> | null;
+  status?: "active" | "inactive";
+  activeFlag?: boolean;
+}
+
+export interface UpdatePartnerChannelEntryCommand {
+  tenantId?: string;
+  partnerCode?: string;
+  partnerType?: string;
+  programId?: string;
+  programCode?: string | null;
+  bankCode?: string | null;
+  displayName?: string;
+  businessDispatchSubtype?: BusinessDispatchSubtype;
+  authMode?: PartnerEntryAuthMode;
+  eligibilityMode?: PartnerEligibilityMode;
+  entryHost?: string | null;
+  entryPath?: string | null;
+  themeAccent?: string | null;
+  brandingMetadata?: Partial<PartnerEntryBrandingMetadata> | null;
+  status?: "active" | "inactive";
+  activeFlag?: boolean;
+}
+
 export interface VerifyPartnerEligibilityCommand {
   entrySlug: string;
   referenceToken?: string;

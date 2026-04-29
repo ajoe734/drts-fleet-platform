@@ -10,6 +10,7 @@ import {
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  CreatePartnerChannelEntryCommand,
   IdentityContext,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
@@ -19,6 +20,7 @@ import type {
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
   TenantPartnerSummary,
+  UpdatePartnerChannelEntryCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
@@ -87,6 +89,72 @@ export class TenantPartnerController {
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.getPartnerEntry(entrySlug),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/partner-entries")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listPlatformPartnerEntries(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      toApiListData(this.tenantPartnerService.listPlatformPartnerEntries()),
+      requestId,
+    );
+  }
+
+  @Post("platform-admin/partner-entries")
+  createPlatformPartnerEntry(
+    @Body() command: CreatePartnerChannelEntryCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.createPlatformPartnerEntry(command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("platform-admin/partner-entries/:entrySlug")
+  updatePlatformPartnerEntry(
+    @Param("entrySlug") entrySlug: string,
+    @Body() command: UpdatePartnerChannelEntryCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.updatePlatformPartnerEntry(
+        entrySlug,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("platform-admin/partner-entries/:entrySlug/activate")
+  activatePlatformPartnerEntry(
+    @Param("entrySlug") entrySlug: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.setPlatformPartnerEntryStatus(
+        entrySlug,
+        "active",
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("platform-admin/partner-entries/:entrySlug/deactivate")
+  deactivatePlatformPartnerEntry(
+    @Param("entrySlug") entrySlug: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.setPlatformPartnerEntryStatus(
+        entrySlug,
+        "inactive",
+        requestId,
+      ),
       requestId,
     );
   }

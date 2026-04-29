@@ -14,6 +14,11 @@ export default function HomePage() {
       descKey: "home.tenants.desc",
     },
     {
+      href: "/partners",
+      titleKey: "home.partners.title",
+      descKey: "home.partners.desc",
+    },
+    {
       href: "/users",
       titleKey: "home.users.title",
       descKey: "home.users.desc",

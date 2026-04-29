@@ -102,4 +102,108 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(delivery).not.toHaveProperty("rawBody");
     expect(delivery).not.toHaveProperty("retryPolicySnapshot");
   });
+
+  it("creates and updates partner entries through the platform-admin lifecycle with audit metadata", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
+
+    const created = service.createPlatformPartnerEntry(
+      {
+        tenantId: "tenant-demo-001",
+        partnerCode: "bank_growth_plus",
+        partnerType: "bank_partner",
+        programId: "program-growth-plus-airport",
+        programCode: "GROWTH_PLUS",
+        bankCode: "BANK_GROWTH_PLUS",
+        entrySlug: "bank-growth-plus-airport",
+        displayName: "Bank Growth Plus Airport",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        authMode: "partner_api_key",
+        eligibilityMode: "reference_required",
+        entryHost: "partner.bank-growth.example",
+        entryPath: "/airport-transfer",
+        themeAccent: "#1254c7",
+        brandingMetadata: {
+          supportEmail: "growth-plus@bank.example",
+          supportPhone: "0800-123-456",
+        },
+      },
+      "req-partner-create-001",
+    );
+
+    expect(created).toMatchObject({
+      partnerCode: "bank_growth_plus",
+      programId: "program-growth-plus-airport",
+      entrySlug: "bank-growth-plus-airport",
+      authMode: "partner_api_key",
+      eligibilityMode: "reference_required",
+      status: "active",
+      activeFlag: true,
+      brandingMetadata: {
+        supportEmail: "growth-plus@bank.example",
+        supportPhone: "0800-123-456",
+      },
+      auditMetadata: {
+        source: "platform_admin_console",
+        requestId: "req-partner-create-001",
+        createdBy: "platform_admin",
+        updatedBy: "platform_admin",
+      },
+    });
+
+    const updated = service.updatePlatformPartnerEntry(
+      created.entrySlug,
+      {
+        displayName: "Bank Growth Plus Premium Airport",
+        eligibilityMode: "bank_card_inline",
+        entryPath: "/airport-transfer/premium",
+        status: "inactive",
+        brandingMetadata: {
+          supportEmail: "premium@bank.example",
+        },
+      },
+      "req-partner-update-001",
+    );
+
+    expect(updated).toMatchObject({
+      displayName: "Bank Growth Plus Premium Airport",
+      eligibilityMode: "bank_card_inline",
+      entryPath: "/airport-transfer/premium",
+      status: "inactive",
+      activeFlag: false,
+      brandingMetadata: {
+        supportEmail: "premium@bank.example",
+        supportPhone: "0800-123-456",
+      },
+      auditMetadata: {
+        source: "platform_admin_console",
+        requestId: "req-partner-update-001",
+        updatedBy: "platform_admin",
+      },
+    });
+
+    expect(service.listPlatformPartnerEntries()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entrySlug: "bank-growth-plus-airport",
+          status: "inactive",
+        }),
+      ]),
+    );
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "create_partner_entry",
+          resourceType: "partner_entry",
+          resourceId: "bank-growth-plus-airport",
+        }),
+        expect.objectContaining({
+          actionName: "update_partner_entry",
+          resourceType: "partner_entry",
+          resourceId: "bank-growth-plus-airport",
+        }),
+      ]),
+    );
+  });
 });

@@ -8,6 +8,7 @@ import {
   Shield,
   Users,
   Truck,
+  Handshake,
   Radio,
   DollarSign,
   CreditCard,
@@ -27,6 +28,11 @@ export function AdminNav() {
   const NAV_ITEMS = [
     { href: "/", label: t("nav.home"), icon: <LayoutDashboard size={16} /> },
     { href: "/tenants", label: t("nav.tenants"), icon: <Shield size={16} /> },
+    {
+      href: "/partners",
+      label: t("nav.partners"),
+      icon: <Handshake size={16} />,
+    },
     { href: "/users", label: t("nav.users"), icon: <Users size={16} /> },
     { href: "/fleet", label: t("nav.fleet"), icon: <Truck size={16} /> },
     {

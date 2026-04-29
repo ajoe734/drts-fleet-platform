@@ -23,6 +23,7 @@ import type {
   ComplaintTimelineEntry,
   CompleteCallbackTaskCommand,
   CreateDriverMasterCommand,
+  CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
   CreateTenantBootstrapSessionCommand,
   CreateDriverProfileCommand,
@@ -124,6 +125,7 @@ import type {
   UpdateMaintenanceRecordCommand,
   UpdatePlatformAdminUserRoleCommand,
   UpdatePlatformTenantOnboardingCommand,
+  UpdatePartnerChannelEntryCommand,
   UpdatePlatformTenantSettingsCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
@@ -1054,6 +1056,53 @@ export class ApiClient {
   async listPlatformTenants(): Promise<PlatformAdminTenantRecord[]> {
     return this.getList<PlatformAdminTenantRecord>(
       "/api/platform-admin/tenants",
+    );
+  }
+
+  async listPlatformPartnerEntries(): Promise<PartnerChannelEntryRecord[]> {
+    return this.getList<PartnerChannelEntryRecord>(
+      "/api/platform-admin/partner-entries",
+    );
+  }
+
+  async createPlatformPartnerEntry(
+    command: CreatePartnerChannelEntryCommand,
+  ): Promise<PartnerChannelEntryRecord> {
+    return this.post<PartnerChannelEntryRecord>(
+      "/api/platform-admin/partner-entries",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async updatePlatformPartnerEntry(
+    entrySlug: string,
+    command: UpdatePartnerChannelEntryCommand,
+  ): Promise<PartnerChannelEntryRecord> {
+    return this.post<PartnerChannelEntryRecord>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async activatePlatformPartnerEntry(
+    entrySlug: string,
+  ): Promise<PartnerChannelEntryRecord> {
+    return this.post<PartnerChannelEntryRecord>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/activate`,
+      {},
+    );
+  }
+
+  async deactivatePlatformPartnerEntry(
+    entrySlug: string,
+  ): Promise<PartnerChannelEntryRecord> {
+    return this.post<PartnerChannelEntryRecord>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/deactivate`,
+      {},
     );
   }
 
