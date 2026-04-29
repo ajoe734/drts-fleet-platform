@@ -109,6 +109,7 @@ import type {
   SetPlatformTenantRolloutStageCommand,
   SetPlatformOfflineCommand,
   SetPlatformOnlineCommand,
+  SettlementMatrixRecord,
   ShiftRecord,
   TenantAddressRecord,
   TenantApiKeyRecord,
@@ -141,6 +142,7 @@ import type {
   AssignDispatchCommand,
   DriverCompleteTaskCommand,
   UpdateTenantBookingCommand,
+  ForwardedOrderRecord,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -986,8 +988,8 @@ export class ApiClient {
 
   // ── Forwarder ──
 
-  async listForwarderOrders() {
-    return this.getList("/api/forwarder/orders");
+  async listForwarderOrders(): Promise<ForwardedOrderRecord[]> {
+    return this.getList<ForwardedOrderRecord>("/api/forwarder/orders");
   }
 
   async getForwarderAdaptersHealth() {
@@ -1233,7 +1235,11 @@ export class ApiClient {
   }
 
   async listPlatformInvoices(): Promise<TenantInvoiceRecord[]> {
-    return this.getList<TenantInvoiceRecord>("/api/platform-admin/invoices");
+    return this.getList<TenantInvoiceRecord>("/api/settlement/invoices");
+  }
+
+  async listSettlementMatrix(): Promise<SettlementMatrixRecord[]> {
+    return this.getList<SettlementMatrixRecord>("/api/settlement/matrix");
   }
 
   async suspendTenant(tenantId: string): Promise<unknown> {

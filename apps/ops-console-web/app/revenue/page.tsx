@@ -2,7 +2,9 @@ import Link from "next/link";
 import type {
   DriverStatementRecord,
   DriverTaskRecord,
+  ForwardedOrderRecord,
   OwnedOrderRecord,
+  SettlementMatrixRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
@@ -25,6 +27,13 @@ import { Badge } from "@drts/ui-web";
 type RevenuePageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
+
+const MATRIX_CHANNEL_ORDER = [
+  "tenant_enterprise",
+  "partner_airport",
+  "phone_dispatch",
+  "forwarded_shadow",
+];
 
 async function resolveOrFallback<T>(
   loader: () => Promise<T>,
@@ -78,6 +87,17 @@ function buildHref(
   return query ? `/revenue?${query}` : "/revenue";
 }
 
+function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
+  const priority = new Map(
+    MATRIX_CHANNEL_ORDER.map((channelKey, index) => [channelKey, index]),
+  );
+  return [...rows].sort(
+    (left, right) =>
+      (priority.get(left.channelKey) ?? Number.MAX_SAFE_INTEGER) -
+      (priority.get(right.channelKey) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
 function ChipLink({
   href,
   active,
@@ -112,7 +132,15 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const resolvedSearchParams = await (searchParams ??
     Promise.resolve({} as Record<string, string | string[] | undefined>));
   const filters = resolveFilters(resolvedSearchParams);
-  const [orders, tasks, statements, vehicles, locale] = await Promise.all([
+  const [
+    orders,
+    tasks,
+    statements,
+    vehicles,
+    forwardedOrders,
+    settlementMatrix,
+    locale,
+  ] = await Promise.all([
     resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
     resolveOrFallback(() => client.listDriverTasks(), [] as DriverTaskRecord[]),
     resolveOrFallback(
@@ -122,6 +150,14 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     resolveOrFallback(
       () => client.listVehicles(),
       [] as VehicleRegistryRecord[],
+    ),
+    resolveOrFallback(
+      () => client.listForwarderOrders(),
+      [] as ForwardedOrderRecord[],
+    ),
+    resolveOrFallback(
+      () => client.listSettlementMatrix(),
+      [] as SettlementMatrixRecord[],
     ),
     getServerLocale(),
   ]);
@@ -157,6 +193,107 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       }
       return true;
     });
+  const enterpriseOrders = orders.filter(
+    (order) =>
+      order.serviceBucket === "business_dispatch" &&
+      order.businessDispatchSubtype === "enterprise_dispatch",
+  );
+  const phoneOrders = orders.filter((order) => order.orderSource === "phone");
+  const forwardedSyncFailedCount = forwardedOrders.filter(
+    (order) => order.status === "sync_failed",
+  ).length;
+
+  const describeMatrixChannel = (channelKey: string) => {
+    switch (channelKey) {
+      case "tenant_enterprise":
+        return t("revenue.matrix.channel.tenant_enterprise", locale);
+      case "partner_airport":
+        return t("revenue.matrix.channel.partner_airport", locale);
+      case "phone_dispatch":
+        return t("revenue.matrix.channel.phone_dispatch", locale);
+      case "forwarded_shadow":
+        return t("revenue.matrix.channel.forwarded_shadow", locale);
+      default:
+        return channelKey;
+    }
+  };
+
+  const describeMatrixPayer = (channelKey: string) => {
+    switch (channelKey) {
+      case "tenant_enterprise":
+        return t("revenue.matrix.payer.tenant_enterprise", locale);
+      case "partner_airport":
+        return t("revenue.matrix.payer.partner_airport", locale);
+      case "phone_dispatch":
+        return t("revenue.matrix.payer.phone_dispatch", locale);
+      case "forwarded_shadow":
+        return t("revenue.matrix.payer.forwarded_shadow", locale);
+      default:
+        return channelKey;
+    }
+  };
+
+  const describeMatrixReceipt = (channelKey: string) => {
+    switch (channelKey) {
+      case "tenant_enterprise":
+        return t("revenue.matrix.receipt.tenant_enterprise", locale);
+      case "partner_airport":
+        return t("revenue.matrix.receipt.partner_airport", locale);
+      case "phone_dispatch":
+        return t("revenue.matrix.receipt.phone_dispatch", locale);
+      case "forwarded_shadow":
+        return t("revenue.matrix.receipt.forwarded_shadow", locale);
+      default:
+        return channelKey;
+    }
+  };
+
+  const describeMatrixReconciliation = (channelKey: string) => {
+    switch (channelKey) {
+      case "tenant_enterprise":
+        return t("revenue.matrix.reconciliation.tenant_enterprise", locale);
+      case "partner_airport":
+        return t("revenue.matrix.reconciliation.partner_airport", locale);
+      case "phone_dispatch":
+        return t("revenue.matrix.reconciliation.phone_dispatch", locale);
+      case "forwarded_shadow":
+        return t("revenue.matrix.reconciliation.forwarded_shadow", locale);
+      default:
+        return channelKey;
+    }
+  };
+
+  const describeLedgerMode = (
+    mode: SettlementMatrixRecord["localLedgerMode"],
+  ) =>
+    mode === "shadow_only"
+      ? t("revenue.matrix.ledger.shadow_only", locale)
+      : t("revenue.matrix.ledger.full_service", locale);
+
+  const describeEvidence = (channelKey: string) => {
+    switch (channelKey) {
+      case "tenant_enterprise":
+        return t("revenue.matrix.evidence.tenant_enterprise", locale, {
+          orders: String(enterpriseOrders.length),
+          statements: String(statements.length),
+        });
+      case "partner_airport":
+        return t("revenue.matrix.evidence.partner_airport", locale, {
+          trips: String(partnerBenefitRows.length),
+        });
+      case "phone_dispatch":
+        return t("revenue.matrix.evidence.phone_dispatch", locale, {
+          orders: String(phoneOrders.length),
+        });
+      case "forwarded_shadow":
+        return t("revenue.matrix.evidence.forwarded_shadow", locale, {
+          mirrors: String(forwardedOrders.length),
+          syncFailed: String(forwardedSyncFailedCount),
+        });
+      default:
+        return t("common.noData", locale);
+    }
+  };
 
   return (
     <>
@@ -447,6 +584,60 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                 </div>
               </Td>
               <Td>{formatMinorCurrency(order.quotedFare?.amountMinor ?? 0)}</Td>
+            </Tr>
+          ))}
+        </DataTable>
+      </Card>
+
+      <Card style={{ marginBottom: "20px" }}>
+        <CardHeader>
+          <div
+            style={{
+              fontSize: "11px",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "#64748b",
+              marginBottom: "2px",
+            }}
+          >
+            {t("revenue.matrix.title", locale)}
+          </div>
+          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
+            {t("revenue.matrix.subtitle", locale)}
+          </div>
+        </CardHeader>
+        <DataTable
+          columns={[
+            { label: t("revenue.matrix.col.channel", locale) },
+            { label: t("revenue.matrix.col.payer", locale) },
+            { label: t("revenue.matrix.col.receipt", locale) },
+            { label: t("revenue.matrix.col.reconciliation", locale) },
+            { label: t("revenue.matrix.col.evidence", locale) },
+            { label: t("revenue.matrix.col.ledger", locale) },
+          ]}
+          empty={t("revenue.matrix.empty", locale)}
+        >
+          {sortSettlementMatrix(settlementMatrix).map((row) => (
+            <Tr key={row.channelKey}>
+              <Td>
+                <div>{describeMatrixChannel(row.channelKey)}</div>
+                <div style={{ color: "#64748b", fontSize: "12px" }}>
+                  {row.orderDomain} · {row.orderSources.join(" / ")}
+                </div>
+              </Td>
+              <Td>{describeMatrixPayer(row.channelKey)}</Td>
+              <Td>{describeMatrixReceipt(row.channelKey)}</Td>
+              <Td>{describeMatrixReconciliation(row.channelKey)}</Td>
+              <Td muted>{describeEvidence(row.channelKey)}</Td>
+              <Td>
+                <Badge
+                  variant={
+                    row.localLedgerMode === "shadow_only" ? "yellow" : "green"
+                  }
+                >
+                  {describeLedgerMode(row.localLedgerMode)}
+                </Badge>
+              </Td>
             </Tr>
           ))}
         </DataTable>

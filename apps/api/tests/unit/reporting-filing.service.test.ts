@@ -63,6 +63,18 @@ describe("ReportingFilingService sensitive-data governance", () => {
       recordingId: "recordin...4321",
       missingRecording: false,
     });
+    expect(detail.settlementMatrix).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          channelKey: "phone_dispatch",
+          localLedgerMode: "full_service",
+        }),
+        expect.objectContaining({
+          channelKey: "forwarded_shadow",
+          localLedgerMode: "shadow_only",
+        }),
+      ]),
+    );
 
     const accessAudit = auditNotificationService
       .listAuditLogs()
@@ -99,6 +111,13 @@ describe("ReportingFilingService sensitive-data governance", () => {
       issuerAuthorizationRef: "issuer-a...0321",
       benefitReference: "benefit-...0321",
     });
+    expect(reportDetail.settlementMatrix).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          channelKey: "partner_airport",
+        }),
+      ]),
+    );
 
     const packageAccepted = service.generateFilingPackage(
       {

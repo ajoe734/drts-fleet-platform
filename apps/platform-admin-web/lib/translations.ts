@@ -350,6 +350,50 @@ const en = {
   // ── Payments ──
   "payments.title": "Finance Console",
   "payments.subtitle": "Invoice, statement, and reimbursement management",
+  "payments.matrix.title": "Settlement matrix",
+  "payments.matrix.subtitle":
+    "Canonical payer, receipt, invoice, and reconciliation responsibilities by channel.",
+  "payments.matrix.empty": "No settlement matrix rows available.",
+  "payments.matrix.col.channel": "Channel",
+  "payments.matrix.col.payer": "Payer",
+  "payments.matrix.col.invoice": "Invoice path",
+  "payments.matrix.col.receipt": "Receipt owner",
+  "payments.matrix.col.reconciliation": "Reconciliation",
+  "payments.matrix.col.ledger": "Ledger mode",
+  "payments.matrix.channel.tenant_enterprise": "Tenant enterprise dispatch",
+  "payments.matrix.channel.partner_airport":
+    "Partner / card-benefit airport transfer",
+  "payments.matrix.channel.phone_dispatch": "Phone dispatch",
+  "payments.matrix.channel.forwarded_shadow":
+    "Forwarded external-platform mirror",
+  "payments.matrix.payer.tenant_enterprise": "Tenant contract / tenant AP",
+  "payments.matrix.payer.partner_airport":
+    "Partner program / card-benefit sponsor",
+  "payments.matrix.payer.phone_dispatch": "Passenger or backoffice collection",
+  "payments.matrix.payer.forwarded_shadow": "External platform",
+  "payments.matrix.invoice.tenant_enterprise":
+    "Tenant invoice + cost-center export",
+  "payments.matrix.invoice.partner_airport":
+    "Partner statement + tenant invoice cross-check",
+  "payments.matrix.invoice.phone_dispatch":
+    "Operator lookup / admin download only",
+  "payments.matrix.invoice.forwarded_shadow":
+    "External-platform settlement file / API",
+  "payments.matrix.receipt.tenant_enterprise": "Tenant / partner channel",
+  "payments.matrix.receipt.partner_airport":
+    "Credit-card / service platform / partner channel",
+  "payments.matrix.receipt.phone_dispatch": "Backoffice / tenant portal",
+  "payments.matrix.receipt.forwarded_shadow": "External platform",
+  "payments.matrix.reconciliation.tenant_enterprise":
+    "Tenant invoice review + monthly trip report",
+  "payments.matrix.reconciliation.partner_airport":
+    "Partner revenue summary + benefit reference audit",
+  "payments.matrix.reconciliation.phone_dispatch":
+    "Dispatch recording index + ops trace review",
+  "payments.matrix.reconciliation.forwarded_shadow":
+    "Forwarder reconciliation job + shadow-ledger exception handling",
+  "payments.matrix.ledger.full_service": "Full service",
+  "payments.matrix.ledger.shadow_only": "Shadow only",
   "payments.loading": "Loading payment data...",
   "payments.tab.invoices": "Invoices",
   "payments.tab.statements": "Driver Statements",
@@ -369,6 +413,7 @@ const en = {
   "payments.awaitingRemittance": "Awaiting remittance",
   "payments.col.invoice": "Invoice",
   "payments.col.tenant": "Tenant",
+  "payments.col.channelMix": "Channel mix",
   "payments.col.period": "Period",
   "payments.col.amount": "Amount",
   "payments.col.status": "Status",
@@ -892,6 +937,41 @@ const zh: typeof en = {
   // ── Payments ──
   "payments.title": "財務控制台",
   "payments.subtitle": "發票、結算單與報銷管理",
+  "payments.matrix.title": "結算矩陣",
+  "payments.matrix.subtitle": "依渠道對齊付款方、收據責任、開票與對帳路徑。",
+  "payments.matrix.empty": "目前沒有可用的結算矩陣資料。",
+  "payments.matrix.col.channel": "渠道",
+  "payments.matrix.col.payer": "付款方",
+  "payments.matrix.col.invoice": "開票路徑",
+  "payments.matrix.col.receipt": "收據責任方",
+  "payments.matrix.col.reconciliation": "對帳方式",
+  "payments.matrix.col.ledger": "帳務模式",
+  "payments.matrix.channel.tenant_enterprise": "企業租戶派車",
+  "payments.matrix.channel.partner_airport": "合作方／信用卡機場接送",
+  "payments.matrix.channel.phone_dispatch": "電話叫車",
+  "payments.matrix.channel.forwarded_shadow": "第三方平台轉送鏡像",
+  "payments.matrix.payer.tenant_enterprise": "租戶合約／租戶應付",
+  "payments.matrix.payer.partner_airport": "合作方案／信用卡補貼方",
+  "payments.matrix.payer.phone_dispatch": "乘客或後台收款",
+  "payments.matrix.payer.forwarded_shadow": "外部平台",
+  "payments.matrix.invoice.tenant_enterprise": "租戶發票＋成本中心匯出",
+  "payments.matrix.invoice.partner_airport": "合作方結算單＋租戶發票交叉複核",
+  "payments.matrix.invoice.phone_dispatch": "僅供後台查詢／管理端下載",
+  "payments.matrix.invoice.forwarded_shadow": "外部平台結算檔／API",
+  "payments.matrix.receipt.tenant_enterprise": "租戶／合作渠道",
+  "payments.matrix.receipt.partner_airport": "信用卡／服務平台／合作渠道",
+  "payments.matrix.receipt.phone_dispatch": "後台／租戶入口",
+  "payments.matrix.receipt.forwarded_shadow": "外部平台",
+  "payments.matrix.reconciliation.tenant_enterprise":
+    "租戶發票審核＋月度行程報表",
+  "payments.matrix.reconciliation.partner_airport":
+    "合作收益總表＋福利／資格 trace",
+  "payments.matrix.reconciliation.phone_dispatch":
+    "派遣錄音索引＋營運 trace 複核",
+  "payments.matrix.reconciliation.forwarded_shadow":
+    "轉送對帳工單＋shadow ledger 例外處理",
+  "payments.matrix.ledger.full_service": "完整入帳",
+  "payments.matrix.ledger.shadow_only": "僅鏡像",
   "payments.loading": "載入付款資料中...",
   "payments.tab.invoices": "發票",
   "payments.tab.statements": "司機結算單",
@@ -911,6 +991,7 @@ const zh: typeof en = {
   "payments.awaitingRemittance": "等待匯款",
   "payments.col.invoice": "發票",
   "payments.col.tenant": "租戶",
+  "payments.col.channelMix": "渠道組成",
   "payments.col.period": "期間",
   "payments.col.amount": "金額",
   "payments.col.status": "狀態",

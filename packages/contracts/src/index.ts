@@ -2060,6 +2060,8 @@ export interface InvoiceLineRecord {
   amount: MoneyAmount;
   serviceBucket?: Phase1ServiceBucket;
   businessDispatchSubtype?: BusinessDispatchSubtype | null;
+  channelKey?: string;
+  orderSource?: OwnedOrderSource;
   partnerId?: string | null;
   partnerProgramId?: string | null;
   partnerEntrySlug?: string | null;
@@ -2130,6 +2132,8 @@ export interface DriverStatementLineRecord {
   subsidy: MoneyAmount;
   netAmount: MoneyAmount;
   reimbursementRequired: boolean;
+  channelKey?: string;
+  orderSource?: OwnedOrderSource;
 }
 
 export interface DriverStatementRecord {
@@ -2153,6 +2157,7 @@ export interface ReimbursementItemRecord {
   orderId: string;
   amount: MoneyAmount;
   reason: string;
+  channelKey?: string;
 }
 
 export interface ReimbursementBatchRecord {
@@ -2220,6 +2225,20 @@ export interface CreateReportJobCommand {
   format: ReportOutputFormat;
   filters?: Record<string, unknown>;
   recipients?: string[];
+}
+
+export interface SettlementMatrixRecord {
+  channelKey: string;
+  channelLabel: string;
+  orderDomain: "owned" | "forwarded";
+  orderSources: string[];
+  payerType: string;
+  invoicePath: string;
+  receiptOwner: string;
+  reconciliationPath: string;
+  reportingArtifacts: string[];
+  localLedgerMode: "full_service" | "shadow_only";
+  notes: string;
 }
 
 export interface ReportArtifactRecord {
@@ -2291,6 +2310,7 @@ export interface ReportJobDetailRecord extends ReportJobRecord {
     | null;
   rows?: DispatchRecordingIndexRowRecord[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
+  settlementMatrix?: SettlementMatrixRecord[];
 }
 
 export const FILING_PACKAGE_TYPES = [

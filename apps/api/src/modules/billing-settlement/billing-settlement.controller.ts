@@ -114,6 +114,18 @@ export class BillingSettlementController {
     );
   }
 
+  @Get("settlement/invoices")
+  listPlatformInvoices(@Headers("x-request-id") requestId?: string) {
+    const items = this.billingSettlementService.listPlatformInvoices();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("settlement/matrix")
+  listSettlementMatrix(@Headers("x-request-id") requestId?: string) {
+    const items = this.billingSettlementService.listSettlementMatrix();
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
   @Get("driver-fee-plans")
   listDriverFeePlans(@Headers("x-request-id") requestId?: string) {
     const items = this.billingSettlementService.listDriverFeePlans();

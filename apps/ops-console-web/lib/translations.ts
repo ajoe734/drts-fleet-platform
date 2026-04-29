@@ -746,6 +746,48 @@ const en = {
   "revenue.partnerBenefitTitle": "Partner benefit review",
   "revenue.partnerBenefitSub":
     "Airport-transfer benefit trips with partner eligibility trace.",
+  "revenue.matrix.title": "Settlement matrix",
+  "revenue.matrix.subtitle":
+    "Channel-by-channel payer, receipt, and reconciliation responsibilities.",
+  "revenue.matrix.col.channel": "Channel",
+  "revenue.matrix.col.payer": "Payer",
+  "revenue.matrix.col.receipt": "Receipt owner",
+  "revenue.matrix.col.reconciliation": "Reconciliation",
+  "revenue.matrix.col.evidence": "Evidence",
+  "revenue.matrix.col.ledger": "Ledger mode",
+  "revenue.matrix.channel.tenant_enterprise": "Tenant enterprise dispatch",
+  "revenue.matrix.channel.partner_airport":
+    "Partner / card-benefit airport transfer",
+  "revenue.matrix.channel.phone_dispatch": "Phone dispatch",
+  "revenue.matrix.channel.forwarded_shadow":
+    "Forwarded external-platform mirror",
+  "revenue.matrix.payer.tenant_enterprise": "Tenant contract / tenant AP",
+  "revenue.matrix.payer.partner_airport":
+    "Partner program / card-benefit sponsor",
+  "revenue.matrix.payer.phone_dispatch": "Passenger or backoffice collection",
+  "revenue.matrix.payer.forwarded_shadow": "External platform",
+  "revenue.matrix.receipt.tenant_enterprise": "Tenant / partner channel",
+  "revenue.matrix.receipt.partner_airport":
+    "Credit-card / service platform / partner channel",
+  "revenue.matrix.receipt.phone_dispatch": "Backoffice / tenant portal",
+  "revenue.matrix.receipt.forwarded_shadow": "External platform",
+  "revenue.matrix.reconciliation.tenant_enterprise":
+    "Tenant invoice review + monthly trip report",
+  "revenue.matrix.reconciliation.partner_airport":
+    "Partner revenue summary + benefit reference audit",
+  "revenue.matrix.reconciliation.phone_dispatch":
+    "Dispatch recording index + ops trace review",
+  "revenue.matrix.reconciliation.forwarded_shadow":
+    "Forwarder reconciliation job + shadow-ledger exception handling",
+  "revenue.matrix.evidence.tenant_enterprise":
+    "{orders} enterprise orders · {statements} statements",
+  "revenue.matrix.evidence.partner_airport": "{trips} partner-benefit trips",
+  "revenue.matrix.evidence.phone_dispatch": "{orders} phone-origin orders",
+  "revenue.matrix.evidence.forwarded_shadow":
+    "{mirrors} mirrored orders · {syncFailed} sync_failed",
+  "revenue.matrix.ledger.full_service": "Full service",
+  "revenue.matrix.ledger.shadow_only": "Shadow only",
+  "revenue.matrix.empty": "No settlement matrix rows available.",
   "revenue.settlementTitle": "Settlement",
   "revenue.settlementSub": "Driver statement pulse",
   "revenue.statementNet": "Net: {value}",
@@ -1530,6 +1572,43 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.partnerBenefitTitle": "合作福利複核",
   "revenue.partnerBenefitSub":
     "檢視銀行機場接送福利單的 partner 與 eligibility trace。",
+  "revenue.matrix.title": "結算矩陣",
+  "revenue.matrix.subtitle": "逐渠道對齊付款方、收據責任與對帳責任。",
+  "revenue.matrix.col.channel": "渠道",
+  "revenue.matrix.col.payer": "付款方",
+  "revenue.matrix.col.receipt": "收據責任方",
+  "revenue.matrix.col.reconciliation": "對帳方式",
+  "revenue.matrix.col.evidence": "現況證據",
+  "revenue.matrix.col.ledger": "帳務模式",
+  "revenue.matrix.channel.tenant_enterprise": "企業租戶派車",
+  "revenue.matrix.channel.partner_airport": "合作方／信用卡機場接送",
+  "revenue.matrix.channel.phone_dispatch": "電話叫車",
+  "revenue.matrix.channel.forwarded_shadow": "第三方平台轉送鏡像",
+  "revenue.matrix.payer.tenant_enterprise": "租戶合約／租戶應付",
+  "revenue.matrix.payer.partner_airport": "合作方案／信用卡補貼方",
+  "revenue.matrix.payer.phone_dispatch": "乘客或後台收款",
+  "revenue.matrix.payer.forwarded_shadow": "外部平台",
+  "revenue.matrix.receipt.tenant_enterprise": "租戶／合作渠道",
+  "revenue.matrix.receipt.partner_airport": "信用卡／服務平台／合作渠道",
+  "revenue.matrix.receipt.phone_dispatch": "後台／租戶入口",
+  "revenue.matrix.receipt.forwarded_shadow": "外部平台",
+  "revenue.matrix.reconciliation.tenant_enterprise":
+    "租戶發票審核＋月度行程報表",
+  "revenue.matrix.reconciliation.partner_airport":
+    "合作收益總表＋福利／資格 trace",
+  "revenue.matrix.reconciliation.phone_dispatch":
+    "派遣錄音索引＋營運 trace 複核",
+  "revenue.matrix.reconciliation.forwarded_shadow":
+    "轉送對帳工單＋shadow ledger 例外處理",
+  "revenue.matrix.evidence.tenant_enterprise":
+    "{orders} 筆企業訂單 · {statements} 份帳單",
+  "revenue.matrix.evidence.partner_airport": "{trips} 筆合作福利行程",
+  "revenue.matrix.evidence.phone_dispatch": "{orders} 筆電話來源訂單",
+  "revenue.matrix.evidence.forwarded_shadow":
+    "{mirrors} 筆鏡像訂單 · {syncFailed} 筆 sync_failed",
+  "revenue.matrix.ledger.full_service": "完整入帳",
+  "revenue.matrix.ledger.shadow_only": "僅鏡像",
+  "revenue.matrix.empty": "目前沒有可用的結算矩陣資料。",
   "revenue.settlementTitle": "結算",
   "revenue.settlementSub": "司機帳單狀況",
   "revenue.statementNet": "淨額：{value}",

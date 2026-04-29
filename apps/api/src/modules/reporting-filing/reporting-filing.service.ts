@@ -15,6 +15,7 @@ import type {
   ReportArtifactRecord,
   ReportJobAccepted,
   ReportJobRecord,
+  SettlementMatrixRecord,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -33,6 +34,7 @@ import {
   createControlledDownloadMetadata,
   type ControlledDownloadMetadata,
 } from "./download-signing.util";
+import { buildSettlementMatrix } from "../billing-settlement/settlement-matrix";
 
 type DispatchRecordingIndexRow = {
   orderId: string;
@@ -47,6 +49,7 @@ type ReportJobView = ReportJobRecord & {
   artifact: ReportArtifactView | null;
   rows?: DispatchRecordingIndexRow[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
+  settlementMatrix?: SettlementMatrixRecord[];
 };
 
 type ReportArtifactView = ReportArtifactRecord & {
@@ -84,6 +87,7 @@ type StoredReportJob = ReportJobRecord & {
   artifact: ReportArtifactView | null;
   rows: DispatchRecordingIndexRow[];
   partnerRevenueRows: PartnerRevenueSummaryRowRecord[];
+  settlementMatrix: SettlementMatrixRecord[];
 };
 
 type StoredFilingPackage = FilingPackageRecord & {
@@ -134,6 +138,7 @@ export class ReportingFilingService implements OnModuleInit {
         this.cloneStoredReportJob({
           ...job,
           partnerRevenueRows: job.partnerRevenueRows ?? [],
+          settlementMatrix: job.settlementMatrix ?? [],
         }),
       );
       this.filingPackages = persistedState.filingPackages.map((filingPackage) =>
@@ -180,6 +185,7 @@ export class ReportingFilingService implements OnModuleInit {
       artifact: null,
       rows: [],
       partnerRevenueRows: [],
+      settlementMatrix: [],
       createdAt,
       updatedAt: createdAt,
     };
@@ -426,7 +432,9 @@ export class ReportingFilingService implements OnModuleInit {
       filters: job.filters,
       rows: job.rows,
       partnerRevenueRows: job.partnerRevenueRows,
+      settlementMatrix: buildSettlementMatrix(),
     };
+    job.settlementMatrix = buildSettlementMatrix();
     job.artifact = this.createArtifact("report", job.jobId, artifactPayload);
     job.status = "completed";
     job.updatedAt = new Date().toISOString();
@@ -764,6 +772,11 @@ export class ReportingFilingService implements OnModuleInit {
         ...row,
         amount: { ...row.amount },
       })),
+      settlementMatrix: (job.settlementMatrix ?? []).map((row) => ({
+        ...row,
+        orderSources: [...row.orderSources],
+        reportingArtifacts: [...row.reportingArtifacts],
+      })),
     };
   }
 
@@ -781,6 +794,11 @@ export class ReportingFilingService implements OnModuleInit {
       partnerRevenueRows: (job.partnerRevenueRows ?? []).map((row) => ({
         ...row,
         amount: { ...row.amount },
+      })),
+      settlementMatrix: (job.settlementMatrix ?? []).map((row) => ({
+        ...row,
+        orderSources: [...row.orderSources],
+        reportingArtifacts: [...row.reportingArtifacts],
       })),
     };
   }

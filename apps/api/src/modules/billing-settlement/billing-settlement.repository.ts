@@ -33,6 +33,7 @@ export type LiveSettlementTripRecord = {
   orderId: string;
   completedAt: string;
   grossEarning: MoneyAmount;
+  orderSource: OwnedOrderRecord["orderSource"];
   serviceBucket: OwnedOrderRecord["serviceBucket"];
   businessDispatchSubtype: OwnedOrderRecord["businessDispatchSubtype"];
   partnerId: string | null;
@@ -212,6 +213,7 @@ export class BillingSettlementRepository {
         orderId: order.orderId,
         completedAt: task.completedAt ?? order.updatedAt,
         grossEarning: { ...grossEarning },
+        orderSource: order.orderSource,
         serviceBucket: order.serviceBucket,
         businessDispatchSubtype: order.businessDispatchSubtype,
         partnerId: order.partnerId,
@@ -490,6 +492,7 @@ export class BillingSettlementRepository {
         orderId: order.orderId,
         completedAt: task.completedAt ?? order.updatedAt,
         grossEarning: { ...grossEarning },
+        orderSource: order.orderSource,
         serviceBucket: order.serviceBucket,
         businessDispatchSubtype: order.businessDispatchSubtype,
         partnerId: order.partnerId,

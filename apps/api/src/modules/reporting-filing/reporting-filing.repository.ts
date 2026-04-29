@@ -5,6 +5,7 @@ import type {
   FilingPackageRecord,
   ReportArtifactRecord,
   ReportJobRecord,
+  SettlementMatrixRecord,
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
@@ -52,6 +53,7 @@ export type StoredReportJobRecord = ReportJobRecord & {
   artifact: ReportArtifactView | null;
   rows: DispatchRecordingIndexRow[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
+  settlementMatrix?: SettlementMatrixRecord[];
 };
 
 export type StoredFilingPackageRecord = FilingPackageRecord & {

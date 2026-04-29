@@ -15,10 +15,17 @@ import {
 import type {
   DriverStatementRecord,
   ReimbursementBatchRecord,
+  SettlementMatrixRecord,
   TenantInvoiceRecord,
 } from "@drts/contracts";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
+const MATRIX_CHANNEL_ORDER = [
+  "tenant_enterprise",
+  "partner_airport",
+  "phone_dispatch",
+  "forwarded_shadow",
+];
 
 function toDateInputValue(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -67,6 +74,41 @@ function reimbursementWorkflow(
   return awaitingApproval;
 }
 
+function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
+  const priority = new Map(
+    MATRIX_CHANNEL_ORDER.map((channelKey, index) => [channelKey, index]),
+  );
+  return [...rows].sort(
+    (left, right) =>
+      (priority.get(left.channelKey) ?? Number.MAX_SAFE_INTEGER) -
+      (priority.get(right.channelKey) ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
+function summarizeChannelMix(
+  keys: readonly (string | null | undefined)[],
+  labelForChannel: (channelKey: string) => string,
+) {
+  const counts = new Map<string, number>();
+  for (const key of keys) {
+    if (!key) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  if (counts.size === 0) {
+    return "—";
+  }
+
+  return [...counts.entries()]
+    .sort(
+      ([left], [right]) =>
+        MATRIX_CHANNEL_ORDER.indexOf(left) -
+        MATRIX_CHANNEL_ORDER.indexOf(right),
+    )
+    .map(([channelKey, count]) => `${labelForChannel(channelKey)} × ${count}`)
+    .join(", ");
+}
+
 export default function PaymentsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -75,6 +117,9 @@ export default function PaymentsPage() {
   const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
   const [reimbursements, setReimbursements] = useState<
     ReimbursementBatchRecord[]
+  >([]);
+  const [settlementMatrix, setSettlementMatrix] = useState<
+    SettlementMatrixRecord[]
   >([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -100,15 +145,21 @@ export default function PaymentsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [invoiceRecords, statementRecords, reimbursementRecords] =
-        await Promise.all([
-          client.listPlatformInvoices(),
-          client.listDriverStatements(),
-          client.listReimbursementBatches(),
-        ]);
+      const [
+        invoiceRecords,
+        statementRecords,
+        reimbursementRecords,
+        settlementMatrixRecords,
+      ] = await Promise.all([
+        client.listPlatformInvoices(),
+        client.listDriverStatements(),
+        client.listReimbursementBatches(),
+        client.listSettlementMatrix(),
+      ]);
       setInvoices(invoiceRecords ?? []);
       setStatements(statementRecords ?? []);
       setReimbursements(reimbursementRecords ?? []);
+      setSettlementMatrix(settlementMatrixRecords ?? []);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -216,6 +267,100 @@ export default function PaymentsPage() {
   const paidReimbursementMinor = reimbursements
     .filter((batch) => batch.status === "paid")
     .reduce((sum, batch) => sum + batch.totalAmount.amountMinor, 0);
+
+  const describeMatrixChannel = (channelKey: string) => {
+    switch (channelKey) {
+      case "tenant_enterprise":
+        return t("payments.matrix.channel.tenant_enterprise");
+      case "partner_airport":
+        return t("payments.matrix.channel.partner_airport");
+      case "phone_dispatch":
+        return t("payments.matrix.channel.phone_dispatch");
+      case "forwarded_shadow":
+        return t("payments.matrix.channel.forwarded_shadow");
+      default:
+        return channelKey;
+    }
+  };
+
+  const describeMatrixPayer = (channelKey: string) => {
+    switch (channelKey) {
+      case "tenant_enterprise":
+        return t("payments.matrix.payer.tenant_enterprise");
+      case "partner_airport":
+        return t("payments.matrix.payer.partner_airport");
+      case "phone_dispatch":
+        return t("payments.matrix.payer.phone_dispatch");
+      case "forwarded_shadow":
+        return t("payments.matrix.payer.forwarded_shadow");
+      default:
+        return channelKey;
+    }
+  };
+
+  const describeMatrixInvoicePath = (channelKey: string) => {
+    switch (channelKey) {
+      case "tenant_enterprise":
+        return t("payments.matrix.invoice.tenant_enterprise");
+      case "partner_airport":
+        return t("payments.matrix.invoice.partner_airport");
+      case "phone_dispatch":
+        return t("payments.matrix.invoice.phone_dispatch");
+      case "forwarded_shadow":
+        return t("payments.matrix.invoice.forwarded_shadow");
+      default:
+        return channelKey;
+    }
+  };
+
+  const describeMatrixReceiptOwner = (channelKey: string) => {
+    switch (channelKey) {
+      case "tenant_enterprise":
+        return t("payments.matrix.receipt.tenant_enterprise");
+      case "partner_airport":
+        return t("payments.matrix.receipt.partner_airport");
+      case "phone_dispatch":
+        return t("payments.matrix.receipt.phone_dispatch");
+      case "forwarded_shadow":
+        return t("payments.matrix.receipt.forwarded_shadow");
+      default:
+        return channelKey;
+    }
+  };
+
+  const describeMatrixReconciliation = (channelKey: string) => {
+    switch (channelKey) {
+      case "tenant_enterprise":
+        return t("payments.matrix.reconciliation.tenant_enterprise");
+      case "partner_airport":
+        return t("payments.matrix.reconciliation.partner_airport");
+      case "phone_dispatch":
+        return t("payments.matrix.reconciliation.phone_dispatch");
+      case "forwarded_shadow":
+        return t("payments.matrix.reconciliation.forwarded_shadow");
+      default:
+        return channelKey;
+    }
+  };
+
+  const describeLedgerMode = (
+    mode: SettlementMatrixRecord["localLedgerMode"],
+  ) =>
+    mode === "shadow_only"
+      ? t("payments.matrix.ledger.shadow_only")
+      : t("payments.matrix.ledger.full_service");
+
+  const describeInvoiceChannelMix = (invoice: TenantInvoiceRecord) =>
+    summarizeChannelMix(
+      invoice.lines.map((line) => line.channelKey),
+      describeMatrixChannel,
+    );
+
+  const describeStatementChannelMix = (statement: DriverStatementRecord) =>
+    summarizeChannelMix(
+      statement.lines.map((line) => line.channelKey),
+      describeMatrixChannel,
+    );
 
   if (loading) {
     return <div className="admin-empty">{t("payments.loading")}</div>;
@@ -371,6 +516,63 @@ export default function PaymentsPage() {
         </div>
       </div>
 
+      <div
+        className="admin-card"
+        style={{ overflowX: "auto", marginBottom: 16 }}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: "0 0 4px" }}>{t("payments.matrix.title")}</h3>
+          <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
+            {t("payments.matrix.subtitle")}
+          </p>
+        </div>
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>{t("payments.matrix.col.channel")}</th>
+              <th>{t("payments.matrix.col.payer")}</th>
+              <th>{t("payments.matrix.col.invoice")}</th>
+              <th>{t("payments.matrix.col.receipt")}</th>
+              <th>{t("payments.matrix.col.reconciliation")}</th>
+              <th>{t("payments.matrix.col.ledger")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {settlementMatrix.length > 0 ? (
+              sortSettlementMatrix(settlementMatrix).map((row) => (
+                <tr key={row.channelKey}>
+                  <td>
+                    <div>{describeMatrixChannel(row.channelKey)}</div>
+                    <div style={{ color: "#6b7280", fontSize: 12 }}>
+                      {row.orderDomain} · {row.orderSources.join(" / ")}
+                    </div>
+                  </td>
+                  <td>{describeMatrixPayer(row.channelKey)}</td>
+                  <td>{describeMatrixInvoicePath(row.channelKey)}</td>
+                  <td>{describeMatrixReceiptOwner(row.channelKey)}</td>
+                  <td>{describeMatrixReconciliation(row.channelKey)}</td>
+                  <td>
+                    <span
+                      className={`admin-badge ${
+                        row.localLedgerMode === "shadow_only"
+                          ? "admin-badge--neutral"
+                          : "admin-badge--success"
+                      }`}
+                    >
+                      {describeLedgerMode(row.localLedgerMode)}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={6}>{t("payments.matrix.empty")}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
       <div className="admin-toolbar">
         <div className="admin-toggle-group">
           {(["all", "paid", "issued", "draft"] as const).map((value) => (
@@ -415,6 +617,7 @@ export default function PaymentsPage() {
             <tr>
               <th>{t("payments.col.invoice")}</th>
               <th>{t("payments.col.tenant")}</th>
+              <th>{t("payments.col.channelMix")}</th>
               <th>{t("payments.col.amount")}</th>
               <th>{t("payments.col.status")}</th>
               <th>{getPlatformLabel(locale, "pricingSnapshot")}</th>
@@ -434,6 +637,9 @@ export default function PaymentsPage() {
                   </td>
                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>
                     {invoice.tenantId}
+                  </td>
+                  <td style={{ fontSize: 12 }}>
+                    {describeInvoiceChannelMix(invoice)}
                   </td>
                   <td>{formatMoney(invoice.amount)}</td>
                   <td>
@@ -473,7 +679,7 @@ export default function PaymentsPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={7}>{t("payments.noInvoices")}</td>
+                <td colSpan={8}>{t("payments.noInvoices")}</td>
               </tr>
             )}
           </tbody>
@@ -502,6 +708,7 @@ export default function PaymentsPage() {
             <tr>
               <th>{t("payments.col.statement")}</th>
               <th>{t("payments.col.driver")}</th>
+              <th>{t("payments.col.channelMix")}</th>
               <th>{t("payments.col.period")}</th>
               <th>{getPlatformLabel(locale, "feePlan")}</th>
               <th>{getPlatformLabel(locale, "gross")}</th>
@@ -522,6 +729,9 @@ export default function PaymentsPage() {
                     </div>
                   </td>
                   <td>{statement.driverId}</td>
+                  <td style={{ fontSize: 12 }}>
+                    {describeStatementChannelMix(statement)}
+                  </td>
                   <td>{statement.periodMonth}</td>
                   <td>
                     <code>{statement.feePlanVersion}</code>
@@ -545,7 +755,7 @@ export default function PaymentsPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={9}>{t("payments.noStatements")}</td>
+                <td colSpan={10}>{t("payments.noStatements")}</td>
               </tr>
             )}
           </tbody>

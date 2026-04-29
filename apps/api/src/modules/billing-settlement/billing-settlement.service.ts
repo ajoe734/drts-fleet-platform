@@ -16,6 +16,7 @@ import type {
   PublishDriverFeePlanCommand,
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
+  SettlementMatrixRecord,
   TenantBillingProfile,
   TenantInvoiceRecord,
   UpdateTenantBillingProfileCommand,
@@ -37,6 +38,10 @@ import {
   createControlledDownloadMetadata,
   type ControlledDownloadMetadata,
 } from "../reporting-filing/download-signing.util";
+import {
+  buildSettlementMatrix,
+  settlementChannelKeyForTrip,
+} from "./settlement-matrix";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_CURRENCY = "NTD";
@@ -48,6 +53,7 @@ type SettlementTripSnapshot = {
   driverId: string;
   orderId: string;
   completedAt: string;
+  orderSource: NonNullable<InvoiceLineRecord["orderSource"]>;
   grossEarning: MoneyAmount;
   subsidy: MoneyAmount;
   platformFundedDiscount: MoneyAmount;
@@ -84,6 +90,7 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     driverId: "drv-demo-001",
     orderId: "order-demo-031",
     completedAt: "2026-03-05T09:40:00Z",
+    orderSource: "portal",
     grossEarning: {
       currency: DEFAULT_CURRENCY,
       amountMinor: 120000,
@@ -114,6 +121,7 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     driverId: "drv-demo-001",
     orderId: "order-demo-032",
     completedAt: "2026-03-18T18:20:00Z",
+    orderSource: "api",
     grossEarning: {
       currency: DEFAULT_CURRENCY,
       amountMinor: 80000,
@@ -144,6 +152,7 @@ const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
     driverId: "drv-demo-002",
     orderId: "order-demo-033",
     completedAt: "2026-03-22T12:00:00Z",
+    orderSource: "portal",
     grossEarning: {
       currency: DEFAULT_CURRENCY,
       amountMinor: 150000,
@@ -352,6 +361,8 @@ export class BillingSettlementService implements OnModuleInit {
       orderId: trip.orderId,
       description: this.buildInvoiceLineDescription(trip),
       amount: { ...trip.grossEarning },
+      channelKey: this.getSettlementChannelKey(trip),
+      orderSource: trip.orderSource,
       serviceBucket: trip.serviceBucket,
       businessDispatchSubtype: trip.businessDispatchSubtype,
       partnerId: trip.partnerId,
@@ -434,7 +445,7 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneInvoice(invoice);
   }
 
-  private buildInvoiceLineDescription(trip: LiveSettlementTripRecord) {
+  private buildInvoiceLineDescription(trip: SettlementTripSnapshot) {
     if (
       trip.businessDispatchSubtype === "credit_card_airport_transfer" &&
       trip.partnerEntrySlug
@@ -449,6 +460,14 @@ export class BillingSettlementService implements OnModuleInit {
     return this.tenantInvoices
       .filter((invoice) => invoice.tenantId === tenantId)
       .map((invoice) => this.cloneInvoice(invoice));
+  }
+
+  listPlatformInvoices() {
+    return this.tenantInvoices.map((invoice) => this.cloneInvoice(invoice));
+  }
+
+  listSettlementMatrix(): SettlementMatrixRecord[] {
+    return buildSettlementMatrix();
   }
 
   getTenantInvoice(tenantId: string, invoiceId: string) {
@@ -963,6 +982,8 @@ export class BillingSettlementService implements OnModuleInit {
       subsidy: { ...trip.subsidy },
       netAmount: this.money(netAmountMinor),
       reimbursementRequired: trip.platformFundedDiscount.amountMinor > 0,
+      channelKey: this.getSettlementChannelKey(trip),
+      orderSource: trip.orderSource,
     };
   }
 
@@ -982,6 +1003,7 @@ export class BillingSettlementService implements OnModuleInit {
           orderId: trip.orderId,
           amount: { ...trip.platformFundedDiscount },
           reason: "platform_funded_discount",
+          channelKey: this.getSettlementChannelKey(trip),
         }),
       );
   }
@@ -1127,6 +1149,7 @@ export class BillingSettlementService implements OnModuleInit {
       driverId: trip.driverId,
       orderId: trip.orderId,
       completedAt: trip.completedAt,
+      orderSource: trip.orderSource,
       grossEarning: { ...trip.grossEarning },
       subsidy: this.money(0),
       platformFundedDiscount: this.money(0),
@@ -1272,6 +1295,15 @@ export class BillingSettlementService implements OnModuleInit {
         commandTenantId,
       },
     );
+  }
+
+  private getSettlementChannelKey(
+    trip: Pick<
+      SettlementTripSnapshot,
+      "businessDispatchSubtype" | "orderSource" | "partnerId"
+    >,
+  ) {
+    return settlementChannelKeyForTrip(trip);
   }
 
   private sumMoney(amounts: MoneyAmount[]) {
