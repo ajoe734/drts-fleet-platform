@@ -285,6 +285,7 @@ describe("regulatory registry service", () => {
         lat: 25.033964,
         lng: 121.564468,
         accuracyM: 6,
+        recordedAt: "2026-04-29T16:00:00.000Z",
       }),
     ).resolves.toEqual({ success: true });
 
@@ -293,7 +294,26 @@ describe("regulatory registry service", () => {
       lat: 25.033964,
       lng: 121.564468,
       accuracyM: 6,
+      recordedAt: "2026-04-29T16:00:00.000Z",
     });
+  });
+
+  it("rejects invalid heartbeat timestamps before persistence", async () => {
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      upsertDriverLocation: vi.fn(async () => undefined),
+    } as unknown as RegulatoryRegistryRepository;
+    const regulatoryRegistryService =
+      createRegulatoryRegistryService(repository);
+
+    await expect(
+      regulatoryRegistryService.recordDriverLocation({
+        driverId: "drv-demo-001",
+        lat: 25.033964,
+        lng: 121.564468,
+        recordedAt: "not-a-date",
+      }),
+    ).rejects.toThrowError(ApiRequestError);
   });
 
   it("rejects invalid heartbeat coordinates before persistence", async () => {

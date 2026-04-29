@@ -22,7 +22,8 @@ import { Observable, filter, fromEvent, map } from "rxjs";
 import { DatabaseService } from "../../common/db";
 
 const DRIVER_TASK_EVENT_CHANNEL = "owned-mobility.driver-task";
-const DRIVER_TASK_EVENT_NOTIFICATION_CHANNEL = "owned_mobility_driver_task_events";
+const DRIVER_TASK_EVENT_NOTIFICATION_CHANNEL =
+  "owned_mobility_driver_task_events";
 const DRIVER_TASK_EVENT_RETRY_MS = 10_000;
 const DRIVER_TASK_EVENT_RECONNECT_MS = 5_000;
 const DRIVER_TASK_EVENT_PAYLOAD_PREFIX = "gzip:";
@@ -98,7 +99,10 @@ export class OwnedMobilityTaskEventsService
   }
 
   private handleExternalNotification(msg: Notification) {
-    if (msg.channel !== DRIVER_TASK_EVENT_NOTIFICATION_CHANNEL || !msg.payload) {
+    if (
+      msg.channel !== DRIVER_TASK_EVENT_NOTIFICATION_CHANNEL ||
+      !msg.payload
+    ) {
       return;
     }
 
@@ -112,7 +116,9 @@ export class OwnedMobilityTaskEventsService
         rawPayload = gunzipSync(compressed).toString("utf-8");
       }
 
-      const envelope = JSON.parse(rawPayload) as DriverTaskStreamEventEnvelope & {
+      const envelope = JSON.parse(
+        rawPayload,
+      ) as DriverTaskStreamEventEnvelope & {
         publishedAt?: string;
       };
 
@@ -216,11 +222,14 @@ export class OwnedMobilityTaskEventsService
       } else {
         void this.databaseService
           .query(
-            `NOTIFY ${DRIVER_TASK_EVENT_NOTIFICATION_CHANNEL}, $1`,
+            `SELECT pg_notify('${DRIVER_TASK_EVENT_NOTIFICATION_CHANNEL}', $1)`,
             [payload],
           )
           .catch((err) => {
-            this.logger.error(`Postgres NOTIFY failed for ${envelope.eventId}`, err);
+            this.logger.error(
+              `Postgres NOTIFY failed for ${envelope.eventId}`,
+              err,
+            );
             // Fallback to local
             this.eventEmitter.emit(DRIVER_TASK_EVENT_CHANNEL, envelope);
           });

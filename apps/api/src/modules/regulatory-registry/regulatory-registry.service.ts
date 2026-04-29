@@ -367,38 +367,42 @@ export class RegulatoryRegistryService implements OnModuleInit {
   async recordDriverLocation(
     command: DriverLocationHeartbeatCommand,
   ): Promise<{ success: true }> {
-    this.assertNonBlank(command.driverId, "driverId");
+    const driverId = command.driverId.trim();
+    this.assertNonBlank(driverId, "driverId");
     this.assertCoordinate(command.lat, "lat", -90, 90);
     this.assertCoordinate(command.lng, "lng", -180, 180);
     this.assertOptionalNonNegativeNumber(command.accuracyM, "accuracyM");
-    this.requireDriver(command.driverId);
+    const recordedAt = this.normalizeHeartbeatRecordedAt(command.recordedAt);
+
+    this.requireDriver(driverId);
 
     await this.requireLocationRepository().upsertDriverLocation({
-      driverId: command.driverId.trim(),
+      driverId,
       lat: command.lat,
       lng: command.lng,
+      recordedAt,
       ...(command.accuracyM === undefined
         ? {}
         : { accuracyM: command.accuracyM }),
     });
 
-    const recordedAt = new Date().toISOString();
+    const updatedAt = new Date().toISOString();
     this.setLatestDriverLocation({
-      driverId: command.driverId.trim(),
+      driverId,
       lat: command.lat,
       lng: command.lng,
       accuracyM: command.accuracyM ?? null,
       recordedAt,
-      updatedAt: recordedAt,
+      updatedAt,
     });
     this.opsDispatchEventsService.publishDriverLocationUpdated(
       {
-        driverId: command.driverId.trim(),
+        driverId,
         lat: command.lat,
         lng: command.lng,
         accuracyM: command.accuracyM ?? null,
         recordedAt,
-        updatedAt: recordedAt,
+        updatedAt,
       },
       undefined,
     );
@@ -1473,6 +1477,38 @@ export class RegulatoryRegistryService implements OnModuleInit {
   private normalizeNullableText(value: string | null | undefined) {
     const normalized = value?.trim();
     return normalized ? normalized : null;
+  }
+
+  private normalizeHeartbeatRecordedAt(recordedAt: string | undefined): string {
+    if (!recordedAt) {
+      return new Date().toISOString();
+    }
+
+    const normalized = recordedAt.trim();
+    if (!normalized) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_REQUIRED",
+        "recordedAt is required.",
+        {
+          field: "recordedAt",
+        },
+      );
+    }
+
+    const parsed = Date.parse(normalized);
+    if (Number.isNaN(parsed)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_INVALID",
+        "recordedAt must be a valid ISO-8601 timestamp.",
+        {
+          field: "recordedAt",
+        },
+      );
+    }
+
+    return new Date(parsed).toISOString();
   }
 
   private assertNonBlank(value: string, fieldName: string) {

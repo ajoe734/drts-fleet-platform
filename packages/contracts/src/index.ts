@@ -666,6 +666,7 @@ export interface DriverLocationHeartbeatCommand {
   lat: number;
   lng: number;
   accuracyM?: number;
+  recordedAt?: string;
 }
 
 export interface DriverLocationSnapshot {

@@ -158,6 +158,7 @@ describe("driver location heartbeat transport", () => {
       lat: 25.033,
       lng: 121.5654,
       accuracyM: 8,
+      recordedAt: new Date(16_000).toISOString(),
     });
   });
 
@@ -193,12 +194,14 @@ describe("driver location heartbeat transport", () => {
       lat: 25.033,
       lng: 121.5654,
       accuracyM: 8,
+      recordedAt: new Date(1_000).toISOString(),
     });
     expect(recordDriverLocation).toHaveBeenNthCalledWith(2, {
       driverId: "driver-001",
       lat: 25.035,
       lng: 121.5656,
       accuracyM: 8,
+      recordedAt: new Date(16_500).toISOString(),
     });
   });
 });

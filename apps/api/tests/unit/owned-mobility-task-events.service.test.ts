@@ -43,7 +43,8 @@ describe("OwnedMobilityTaskEventsService", () => {
       waypoints: Array(100).fill({
         lat: 0,
         lng: 0,
-        address: "A very long address that will make the payload exceed the threshold",
+        address:
+          "A very long address that will make the payload exceed the threshold",
       }),
     } as any;
     const order = { orderId: "order-1", tenantId: "tenant-1" } as any;
@@ -52,7 +53,7 @@ describe("OwnedMobilityTaskEventsService", () => {
     service.publishTaskAssigned(largeTask, order);
 
     const notifyCall = databaseService.query.mock.calls.find(
-      ([statement]: [string]) => statement.includes("NOTIFY"),
+      ([statement]: [string]) => statement.includes("pg_notify"),
     );
     const payload = notifyCall?.[1]?.[0];
 

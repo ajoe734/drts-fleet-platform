@@ -89,6 +89,7 @@ function queueHeartbeat(
         lat: update.latitude,
         lng: update.longitude,
         accuracyM: update.accuracyM ?? undefined,
+        recordedAt: update.recordedAt,
       });
     })
     .catch((error: unknown) => {

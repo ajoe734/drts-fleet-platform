@@ -383,16 +383,22 @@ export class RegulatoryRegistryRepository {
           recorded_at,
           updated_at
         ) VALUES (
-          $1, $2, $3, $4, now(), now()
+          $1, $2, $3, $4, $5, now()
         )
         ON CONFLICT (driver_id) DO UPDATE SET
           lat = EXCLUDED.lat,
           lng = EXCLUDED.lng,
           accuracy_m = EXCLUDED.accuracy_m,
-          recorded_at = now(),
+          recorded_at = EXCLUDED.recorded_at,
           updated_at = now()
       `,
-      [command.driverId, command.lat, command.lng, command.accuracyM ?? null],
+      [
+        command.driverId,
+        command.lat,
+        command.lng,
+        command.accuracyM ?? null,
+        command.recordedAt ?? new Date().toISOString(),
+      ],
     );
   }
 
