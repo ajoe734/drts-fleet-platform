@@ -208,8 +208,9 @@ export default function JobsScreen() {
                 )}
                 {forwarded && (
                   <Text style={styles.forwardedNote}>
-                    Dispatched by {item.sourcePlatform}. Rules cannot be
-                    overridden locally.
+                    Routed by {item.sourcePlatform}. Dispatch, route, fare, and
+                    completion status stay under platform authority. If sync
+                    stalls, contact dispatch for manual fallback.
                   </Text>
                 )}
               </View>

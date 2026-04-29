@@ -1931,16 +1931,68 @@ export interface SyncForwardedOrderStatusCommand {
   payload?: Record<string, unknown>;
 }
 
+export interface ReportForwarderSyncFailureCommand {
+  errorCode: string;
+  errorMessage: string;
+  retryable: boolean;
+  nativeStatus?: string | null;
+  manualFallbackReason?: string | null;
+  payload?: Record<string, unknown>;
+}
+
+export interface EngageForwarderManualFallbackCommand {
+  reason: string;
+  requestedBy?: string | null;
+  notes?: string | null;
+}
+
+export interface CompleteForwarderReconciliationCommand {
+  nativeStatus: string;
+  mismatchCount: number;
+  notes?: string | null;
+  payload?: Record<string, unknown>;
+}
+
+export interface ForwardedOrderFinanceContext {
+  fareAuthority: "external_platform";
+  settlementAuthority: "external_platform";
+  driverPayoutAuthority: "external_platform";
+  localLedgerMode: "shadow_only";
+}
+
+export interface ForwarderSyncErrorRecord {
+  code: string;
+  message: string;
+  retryable: boolean;
+  failedAt: string;
+  nativeStatus: string | null;
+  payload: Record<string, unknown>;
+}
+
+export interface ForwardedOrderManualFallbackRecord {
+  required: boolean;
+  reason: string | null;
+  requestedAt: string | null;
+  requestedBy: string | null;
+  notes: string | null;
+}
+
 export interface ForwardedOrderRecord {
   mirrorOrderId: string;
   platformCode: PlatformCode;
   externalOrderId: string;
+  orderDomain: "forwarded";
+  dispatchSemantics: "forwarder_broadcast";
   status: ForwardedOrderStatus;
   candidateDriverIds: string[];
   acceptedDriverId: string | null;
   lastNativeStatus: string | null;
   payload: Record<string, unknown>;
   authoritativeSnapshot: Record<string, unknown>;
+  financeContext: ForwardedOrderFinanceContext;
+  lastSyncError: ForwarderSyncErrorRecord | null;
+  manualFallback: ForwardedOrderManualFallbackRecord;
+  reconciliationJob: ReconciliationJobRecord | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1954,9 +2006,13 @@ export interface AdapterHealthRecord {
 
 export interface ReconciliationJobRecord {
   reconciliationJobId: string;
+  mirrorOrderId: string;
   platformCode: PlatformCode;
+  externalOrderId: string;
+  reason: "sync_failed" | "manual_fallback";
   status: "queued" | "completed";
   mismatchCount: number;
+  notes: string | null;
   createdAt: string;
   completedAt: string | null;
 }

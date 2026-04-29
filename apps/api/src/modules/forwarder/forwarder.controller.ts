@@ -2,7 +2,10 @@ import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import type {
   BroadcastForwardedOrderCommand,
+  CompleteForwarderReconciliationCommand,
+  EngageForwarderManualFallbackCommand,
   IngestExternalOrderCommand,
+  ReportForwarderSyncFailureCommand,
   RelayDriverAcceptCommand,
   SyncForwardedOrderStatusCommand,
 } from "@drts/contracts";
@@ -59,13 +62,49 @@ export class ForwarderController {
   }
 
   @Post("forwarder/orders/:orderId/accept")
-  relayDriverAccept(
+  async relayDriverAccept(
     @Param("orderId") orderId: string,
     @Body() command: RelayDriverAcceptCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.forwarderService.relayDriverAccept(orderId, command, requestId),
+      await this.forwarderService.relayDriverAccept(orderId, command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("forwarder/orders/:orderId/sync-failed")
+  reportSyncFailure(
+    @Param("orderId") orderId: string,
+    @Body() command: ReportForwarderSyncFailureCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.forwarderService.reportSyncFailure(orderId, command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("forwarder/orders/:orderId/manual-fallback")
+  engageManualFallback(
+    @Param("orderId") orderId: string,
+    @Body() command: EngageForwarderManualFallbackCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.forwarderService.engageManualFallback(orderId, command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("forwarder/orders/:orderId/reconciliation/complete")
+  completeReconciliation(
+    @Param("orderId") orderId: string,
+    @Body() command: CompleteForwarderReconciliationCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.forwarderService.completeReconciliation(orderId, command, requestId),
       requestId,
     );
   }
@@ -87,6 +126,26 @@ export class ForwarderController {
     return toApiSuccessEnvelope(
       {
         items: this.forwarderService.listAdapterHealth(),
+      },
+      requestId,
+    );
+  }
+
+  @Get("forwarder/orders/sync-errors")
+  listSyncErrors(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      {
+        items: this.forwarderService.listSyncErrors(),
+      },
+      requestId,
+    );
+  }
+
+  @Get("forwarder/reconciliation-jobs")
+  listReconciliationJobs(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      {
+        items: this.forwarderService.listReconciliationJobs(),
       },
       requestId,
     );
