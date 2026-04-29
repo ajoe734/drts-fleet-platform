@@ -104,6 +104,7 @@ import type {
   RevokeDriverDeviceBindingCommand,
   RotateTenantApiKeyCommand,
   SetPlatformMaintenanceModeCommand,
+  SetPlatformTenantRolloutStageCommand,
   SetPlatformOfflineCommand,
   SetPlatformOnlineCommand,
   ShiftRecord,
@@ -120,6 +121,7 @@ import type {
   UpdateIncidentCommand,
   UpdateMaintenanceRecordCommand,
   UpdatePlatformAdminUserRoleCommand,
+  UpdatePlatformTenantOnboardingCommand,
   UpdatePlatformTenantSettingsCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
@@ -1067,6 +1069,34 @@ export class ApiClient {
   ): Promise<PlatformAdminTenantRecord> {
     return this.post<PlatformAdminTenantRecord>(
       `/api/platform-admin/tenants/${tenantId}/settings`,
+      { body: command },
+    );
+  }
+
+  async getPlatformTenant(
+    tenantId: string,
+  ): Promise<PlatformAdminTenantRecord> {
+    return this.get<PlatformAdminTenantRecord>(
+      `/api/platform-admin/tenants/${encodeURIComponent(tenantId)}`,
+    );
+  }
+
+  async updatePlatformTenantOnboarding(
+    tenantId: string,
+    command: UpdatePlatformTenantOnboardingCommand,
+  ): Promise<PlatformAdminTenantRecord> {
+    return this.post<PlatformAdminTenantRecord>(
+      `/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/onboarding`,
+      { body: command },
+    );
+  }
+
+  async setPlatformTenantRolloutStage(
+    tenantId: string,
+    command: SetPlatformTenantRolloutStageCommand,
+  ): Promise<PlatformAdminTenantRecord> {
+    return this.post<PlatformAdminTenantRecord>(
+      `/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/rollout`,
       { body: command },
     );
   }

@@ -2,6 +2,8 @@ import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import type {
   CreatePlatformTenantCommand,
+  SetPlatformTenantRolloutStageCommand,
+  UpdatePlatformTenantOnboardingCommand,
   UpdatePlatformTenantSettingsCommand,
 } from "@drts/contracts";
 
@@ -35,6 +37,34 @@ export class TenantsController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const updated = this.tenants.updateSettings(tenantId, body, requestId);
+    return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Get("tenants/:tenantId")
+  getTenant(
+    @Param("tenantId") tenantId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(this.tenants.get(tenantId), requestId);
+  }
+
+  @Post("tenants/:tenantId/onboarding")
+  updateOnboarding(
+    @Param("tenantId") tenantId: string,
+    @Body() body: UpdatePlatformTenantOnboardingCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const updated = this.tenants.updateOnboarding(tenantId, body, requestId);
+    return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Post("tenants/:tenantId/rollout")
+  setRolloutStage(
+    @Param("tenantId") tenantId: string,
+    @Body() body: SetPlatformTenantRolloutStageCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const updated = this.tenants.setRolloutStage(tenantId, body, requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 

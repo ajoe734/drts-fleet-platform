@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
+  PlatformAdminTenantRecord,
   PlacardVersionRecord,
   PublicInfoVersionRecord,
 } from "@drts/contracts";
@@ -12,11 +13,13 @@ type JsonRecordRow = {
 };
 
 export type PlatformAdminState = {
+  platformTenants: PlatformAdminTenantRecord[];
   publicInfoVersions: PublicInfoVersionRecord[];
   placardVersions: PlacardVersionRecord[];
 };
 
 export type PersistPlatformAdminChanges = {
+  platformTenants?: readonly PlatformAdminTenantRecord[];
   publicInfoVersions?: readonly PublicInfoVersionRecord[];
   placardVersions?: readonly PlacardVersionRecord[];
   deletedPublicInfoVersionIds?: readonly string[];
@@ -35,12 +38,20 @@ export class PlatformAdminRepository {
   async loadState(): Promise<PlatformAdminState> {
     if (!this.isEnabled()) {
       return {
+        platformTenants: [],
         publicInfoVersions: [],
         placardVersions: [],
       };
     }
 
-    const [publicInfoResult, placardResult] = await Promise.all([
+    const [tenantResult, publicInfoResult, placardResult] = await Promise.all([
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM admin.phase1_platform_tenants
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
       this.databaseService!.query<JsonRecordRow>(
         `
           SELECT record
@@ -58,6 +69,12 @@ export class PlatformAdminRepository {
     ]);
 
     return {
+      platformTenants: tenantResult.rows.map((row) =>
+        this.parseRecord<PlatformAdminTenantRecord>(
+          row.record,
+          "admin.phase1_platform_tenants",
+        ),
+      ),
       publicInfoVersions: publicInfoResult.rows.map((row) =>
         this.parseRecord<PublicInfoVersionRecord>(
           row.record,
@@ -79,6 +96,39 @@ export class PlatformAdminRepository {
     }
 
     const writes: Promise<unknown>[] = [];
+
+    for (const tenant of changes.platformTenants ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO admin.phase1_platform_tenants (
+              tenant_id,
+              tenant_code,
+              tenant_status,
+              created_at,
+              updated_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb
+            )
+            ON CONFLICT (tenant_id) DO UPDATE SET
+              tenant_code = EXCLUDED.tenant_code,
+              tenant_status = EXCLUDED.tenant_status,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
+          `,
+          [
+            tenant.id,
+            tenant.code,
+            tenant.status,
+            tenant.createdAt,
+            tenant.updatedAt,
+            JSON.stringify(tenant),
+          ],
+        ),
+      );
+    }
 
     for (const version of changes.publicInfoVersions ?? []) {
       writes.push(

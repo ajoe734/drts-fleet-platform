@@ -1,19 +1,41 @@
-import { randomUUID } from "node:crypto";
-
-import { HttpStatus, Injectable, Logger } from "@nestjs/common";
+import {
+  HttpStatus,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  Optional,
+} from "@nestjs/common";
 
 import type {
   AuditLogRecord,
   CreatePlatformTenantCommand,
   PlatformAdminTenantRecord,
+  PlatformTenantBootstrapDefaults,
+  PlatformTenantBootstrapRoleDefault,
+  PlatformTenantGateStatus,
+  PlatformTenantIntegrationMode,
+  PlatformTenantIntegrationPackage,
   PlatformTenantModule,
   PlatformTenantQuotaSummary,
+  PlatformTenantRolloutStage,
+  PlatformTenantRolloutState,
+  SetPlatformTenantRolloutStageCommand,
+  TenantNotificationSubscription,
+  UpdatePlatformTenantOnboardingCommand,
   UpdatePlatformTenantSettingsCommand,
 } from "@drts/contracts";
-import { PLATFORM_TENANT_MODULES } from "@drts/contracts";
+import {
+  PLATFORM_TENANT_GATE_STATUSES,
+  PLATFORM_TENANT_MODULES,
+  PLATFORM_TENANT_ROLLOUT_STAGES,
+} from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import {
+  PlatformAdminRepository,
+  type PersistPlatformAdminChanges,
+} from "./platform-admin.repository";
 
 export type TenantSummary = PlatformAdminTenantRecord;
 
@@ -23,36 +45,108 @@ const DEFAULT_QUOTAS: PlatformTenantQuotaSummary = {
   monthlyApiCalls: 10000,
 };
 
+const DEFAULT_ROLE_DEFAULTS: PlatformTenantBootstrapRoleDefault[] = [
+  {
+    roleCode: "tenant_admin",
+    displayName: "Tenant Admin",
+    required: true,
+  },
+  {
+    roleCode: "tenant_ops_admin",
+    displayName: "Tenant Ops Admin",
+    required: true,
+  },
+  {
+    roleCode: "tenant_finance_admin",
+    displayName: "Tenant Finance Admin",
+    required: false,
+  },
+  {
+    roleCode: "tenant_viewer",
+    displayName: "Tenant Viewer",
+    required: false,
+  },
+];
+
+const DEFAULT_NOTIFICATION_SUBSCRIPTIONS: TenantNotificationSubscription[] = [
+  {
+    eventType: "reservation.failed",
+    channel: "ops_console",
+    enabled: true,
+  },
+  {
+    eventType: "tenant.sla.threshold_breached",
+    channel: "webhook",
+    enabled: true,
+  },
+];
+
+const DEFAULT_WEBHOOK_EVENTS = [
+  "booking.created",
+  "booking.updated",
+  "dispatch.assigned",
+  "invoice.issued",
+];
+
+const DEFAULT_API_KEY_SCOPES = [
+  "tenant:bookings:write",
+  "tenant:reports:read",
+  "tenant:webhooks:write",
+];
+
+const DEMO_CREATED_AT = "2026-04-01T00:00:00.000Z";
+
 @Injectable()
-export class TenantsService {
+export class TenantsService implements OnModuleInit {
   private readonly logger = new Logger(TenantsService.name);
   private readonly tenants: Map<string, PlatformAdminTenantRecord> = new Map();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
+    @Optional()
+    private readonly platformAdminRepository?: PlatformAdminRepository,
   ) {
-    const now = "2026-04-01T00:00:00.000Z";
-    const seed: PlatformAdminTenantRecord = {
-      id: "t_demo",
-      code: "demo",
-      name: "Demo Tenant",
-      status: "active",
-      enabledModules: ["enterprise_dispatch", "billing", "reporting"],
-      quotas: {
-        activeDrivers: 50,
-        monthlyBookings: 1200,
-        monthlyApiCalls: 80000,
-      },
-      createdAt: now,
-      updatedAt: now,
-    };
+    const seed = this.createSeedTenant();
     this.tenants.set(seed.id, seed);
+  }
+
+  async onModuleInit() {
+    if (!this.platformAdminRepository) {
+      return;
+    }
+
+    try {
+      const persistedState = await this.platformAdminRepository.loadState();
+      if (persistedState.platformTenants.length === 0) {
+        this.persistChanges(
+          {
+            platformTenants: this.list(),
+          },
+          "module init bootstrap",
+        );
+        return;
+      }
+
+      this.tenants.clear();
+      for (const tenant of persistedState.platformTenants) {
+        this.tenants.set(tenant.id, this.cloneTenant(tenant));
+      }
+    } catch (error) {
+      this.platformAdminRepository.reportPersistenceFailure(
+        error,
+        "tenant module init",
+      );
+    }
   }
 
   list(): TenantSummary[] {
     return Array.from(this.tenants.values()).map((tenant) =>
       this.cloneTenant(tenant),
     );
+  }
+
+  get(tenantId: string): TenantSummary {
+    return this.cloneTenant(this.requireTenant(tenantId));
   }
 
   create(
@@ -64,19 +158,36 @@ export class TenantsService {
     this.assertCodeAvailable(code);
 
     const now = new Date().toISOString();
+    const tenantId = this.buildTenantId(code);
     const created: PlatformAdminTenantRecord = {
-      id: `t_${randomUUID().slice(0, 8)}`,
+      id: tenantId,
       code,
       name,
       status: input.status === "inactive" ? "paused" : "active",
       enabledModules: this.normalizeModules(input.enabledModules),
       quotas: this.mergeQuotas(DEFAULT_QUOTAS, input.quotas),
+      bootstrapDefaults: this.createBootstrapDefaults(
+        name,
+        code,
+        input.bootstrapAdminEmail,
+      ),
+      integrationPackage: this.createIntegrationPackage(
+        input.integrationMode,
+        input.sandboxBaseUrl,
+      ),
+      rollout: this.createRolloutState(),
       createdAt: now,
       updatedAt: now,
     };
 
-    this.tenants.set(created.id, created);
+    this.tenants.set(created.id, this.cloneTenant(created));
     this.logger.log(`Created tenant ${created.id} (${created.code})`);
+    this.persistChanges(
+      {
+        platformTenants: [this.cloneTenant(created)],
+      },
+      "create tenant",
+    );
     this.recordAudit(
       {
         actorId: null,
@@ -91,6 +202,8 @@ export class TenantsService {
           status: created.status,
           enabledModules: [...created.enabledModules],
           quotas: { ...created.quotas },
+          integrationMode: created.integrationPackage.mode,
+          rolloutStage: created.rollout.stage,
         },
       },
       requestId,
@@ -117,6 +230,12 @@ export class TenantsService {
     }
     tenant.updatedAt = new Date().toISOString();
 
+    this.persistChanges(
+      {
+        platformTenants: [this.cloneTenant(tenant)],
+      },
+      "update tenant settings",
+    );
     this.recordAudit(
       {
         actorId: null,
@@ -143,6 +262,209 @@ export class TenantsService {
     return this.cloneTenant(tenant);
   }
 
+  updateOnboarding(
+    tenantId: string,
+    command: UpdatePlatformTenantOnboardingCommand,
+    requestId?: string,
+  ): TenantSummary {
+    const tenant = this.requireTenant(tenantId);
+    const before = this.cloneTenant(tenant);
+
+    if (command.billingBaseline) {
+      tenant.bootstrapDefaults.billingBaseline = {
+        invoiceTitle:
+          typeof command.billingBaseline.invoiceTitle === "string"
+            ? this.requireNonBlank(
+                command.billingBaseline.invoiceTitle,
+                "billingBaseline.invoiceTitle",
+              )
+            : tenant.bootstrapDefaults.billingBaseline.invoiceTitle,
+        contactName:
+          typeof command.billingBaseline.contactName === "string"
+            ? this.requireNonBlank(
+                command.billingBaseline.contactName,
+                "billingBaseline.contactName",
+              )
+            : tenant.bootstrapDefaults.billingBaseline.contactName,
+        email:
+          typeof command.billingBaseline.email === "string"
+            ? this.normalizeEmail(command.billingBaseline.email)
+            : tenant.bootstrapDefaults.billingBaseline.email,
+      };
+    }
+
+    if (command.roleDefaults) {
+      tenant.bootstrapDefaults.roleDefaults = this.normalizeRoleDefaults(
+        command.roleDefaults,
+      );
+    }
+
+    if (command.notificationSubscriptions) {
+      tenant.bootstrapDefaults.notificationSubscriptions =
+        this.normalizeNotificationSubscriptions(
+          command.notificationSubscriptions,
+        );
+    }
+
+    if (command.webhookEvents) {
+      tenant.bootstrapDefaults.webhookEvents = this.normalizeStringList(
+        command.webhookEvents,
+        "webhookEvents",
+        true,
+      );
+    }
+
+    if (command.integrationPackage) {
+      tenant.integrationPackage = {
+        mode: command.integrationPackage.mode ?? tenant.integrationPackage.mode,
+        apiKeyScopes:
+          command.integrationPackage.apiKeyScopes !== undefined
+            ? this.normalizeStringList(
+                command.integrationPackage.apiKeyScopes,
+                "apiKeyScopes",
+                true,
+              )
+            : [...tenant.integrationPackage.apiKeyScopes],
+        sandboxBaseUrl:
+          command.integrationPackage.sandboxBaseUrl !== undefined
+            ? this.normalizeNullableText(
+                command.integrationPackage.sandboxBaseUrl,
+              )
+            : tenant.integrationPackage.sandboxBaseUrl,
+        productionBaseUrl:
+          command.integrationPackage.productionBaseUrl !== undefined
+            ? this.normalizeNullableText(
+                command.integrationPackage.productionBaseUrl,
+              )
+            : tenant.integrationPackage.productionBaseUrl,
+      };
+    }
+
+    if (command.rollout) {
+      tenant.rollout = {
+        ...tenant.rollout,
+        sandboxStatus:
+          command.rollout.sandboxStatus !== undefined
+            ? this.normalizeGateStatus(command.rollout.sandboxStatus)
+            : tenant.rollout.sandboxStatus,
+        pilotStatus:
+          command.rollout.pilotStatus !== undefined
+            ? this.normalizeGateStatus(command.rollout.pilotStatus)
+            : tenant.rollout.pilotStatus,
+        productionStatus:
+          command.rollout.productionStatus !== undefined
+            ? this.normalizeGateStatus(command.rollout.productionStatus)
+            : tenant.rollout.productionStatus,
+        cutoverOwner:
+          command.rollout.cutoverOwner !== undefined
+            ? this.normalizeNullableText(command.rollout.cutoverOwner)
+            : tenant.rollout.cutoverOwner,
+        rollbackOwner:
+          command.rollout.rollbackOwner !== undefined
+            ? this.normalizeNullableText(command.rollout.rollbackOwner)
+            : tenant.rollout.rollbackOwner,
+        rollbackPrepared:
+          command.rollout.rollbackPrepared !== undefined
+            ? command.rollout.rollbackPrepared
+            : tenant.rollout.rollbackPrepared,
+        lastPromotedAt:
+          command.rollout.lastPromotedAt !== undefined
+            ? this.normalizeNullableText(command.rollout.lastPromotedAt)
+            : tenant.rollout.lastPromotedAt,
+        notes:
+          command.rollout.notes !== undefined
+            ? this.normalizeNullableText(command.rollout.notes)
+            : tenant.rollout.notes,
+      };
+    }
+
+    tenant.updatedAt = new Date().toISOString();
+    this.persistChanges(
+      {
+        platformTenants: [this.cloneTenant(tenant)],
+      },
+      "update tenant onboarding",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "update_platform_tenant_onboarding",
+        resourceType: "platform_tenant",
+        resourceId: tenant.id,
+        oldValuesSummary: {
+          bootstrapDefaults: before.bootstrapDefaults,
+          integrationPackage: before.integrationPackage,
+          rollout: before.rollout,
+        },
+        newValuesSummary: {
+          bootstrapDefaults: tenant.bootstrapDefaults,
+          integrationPackage: tenant.integrationPackage,
+          rollout: tenant.rollout,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneTenant(tenant);
+  }
+
+  setRolloutStage(
+    tenantId: string,
+    command: SetPlatformTenantRolloutStageCommand,
+    requestId?: string,
+  ): TenantSummary {
+    const tenant = this.requireTenant(tenantId);
+    const oldRollout = { ...tenant.rollout };
+    const nextStage = this.normalizeRolloutStage(command.stage);
+
+    tenant.rollout.stage = nextStage;
+    tenant.rollout.lastPromotedAt = new Date().toISOString();
+    tenant.rollout.notes = this.coalesceNullableText(
+      command.notes,
+      tenant.rollout.notes,
+    );
+
+    if (nextStage === "sandbox") {
+      tenant.rollout.sandboxStatus = "approved";
+    }
+    if (nextStage === "pilot") {
+      tenant.rollout.sandboxStatus = "approved";
+      tenant.rollout.pilotStatus = "approved";
+    }
+    if (nextStage === "production") {
+      tenant.rollout.sandboxStatus = "approved";
+      tenant.rollout.pilotStatus = "approved";
+      tenant.rollout.productionStatus = "approved";
+    }
+
+    tenant.updatedAt = new Date().toISOString();
+    this.persistChanges(
+      {
+        platformTenants: [this.cloneTenant(tenant)],
+      },
+      "set tenant rollout stage",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "update_platform_tenant_rollout",
+        resourceType: "platform_tenant",
+        resourceId: tenant.id,
+        oldValuesSummary: { ...oldRollout },
+        newValuesSummary: { ...tenant.rollout },
+      },
+      requestId,
+    );
+
+    return this.cloneTenant(tenant);
+  }
+
   setStatus(
     tenantId: string,
     newStatus: "active" | "paused",
@@ -153,6 +475,12 @@ export class TenantsService {
     tenant.status = newStatus;
     tenant.updatedAt = new Date().toISOString();
     this.logger.log(`Tenant ${tenantId} status set to ${newStatus}`);
+    this.persistChanges(
+      {
+        platformTenants: [this.cloneTenant(tenant)],
+      },
+      "set tenant status",
+    );
     this.recordAudit(
       {
         actorId: null,
@@ -181,6 +509,103 @@ export class TenantsService {
       );
     }
     return tenant;
+  }
+
+  private createSeedTenant() {
+    return {
+      id: "tenant-demo-001",
+      code: "demo",
+      name: "Demo Tenant",
+      status: "active",
+      enabledModules: ["enterprise_dispatch", "billing", "reporting"],
+      quotas: {
+        activeDrivers: 50,
+        monthlyBookings: 1200,
+        monthlyApiCalls: 80000,
+      },
+      bootstrapDefaults: this.createBootstrapDefaults(
+        "Demo Tenant",
+        "demo",
+        "admin@demo.example",
+      ),
+      integrationPackage: {
+        mode: "api_key_and_webhook",
+        apiKeyScopes: [...DEFAULT_API_KEY_SCOPES],
+        sandboxBaseUrl: "https://sandbox.demo.drts.example",
+        productionBaseUrl: "https://api.demo.drts.example",
+      },
+      rollout: {
+        stage: "production",
+        sandboxStatus: "approved",
+        pilotStatus: "approved",
+        productionStatus: "approved",
+        cutoverOwner: "Platform Launch Lead",
+        rollbackOwner: "Platform Operations",
+        rollbackPrepared: true,
+        lastPromotedAt: DEMO_CREATED_AT,
+        notes:
+          "Demo tenant already completed sandbox, pilot, and production promotion.",
+      },
+      createdAt: DEMO_CREATED_AT,
+      updatedAt: DEMO_CREATED_AT,
+    } satisfies PlatformAdminTenantRecord;
+  }
+
+  private buildTenantId(code: string) {
+    return `tenant-${code.replace(/_/g, "-")}`;
+  }
+
+  private createBootstrapDefaults(
+    tenantName: string,
+    tenantCode: string,
+    bootstrapAdminEmail?: string,
+  ): PlatformTenantBootstrapDefaults {
+    const normalizedCode = this.normalizeCode(tenantCode);
+    const emailLocalPart = normalizedCode
+      .replace(/_/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return {
+      roleDefaults: DEFAULT_ROLE_DEFAULTS.map((role) => ({ ...role })),
+      billingBaseline: {
+        invoiceTitle: tenantName,
+        contactName: `${tenantName} Billing Owner`,
+        email: this.normalizeEmail(
+          bootstrapAdminEmail ?? `billing@${emailLocalPart}.example.com`,
+        ),
+      },
+      notificationSubscriptions: DEFAULT_NOTIFICATION_SUBSCRIPTIONS.map(
+        (subscription) => ({ ...subscription }),
+      ),
+      webhookEvents: [...DEFAULT_WEBHOOK_EVENTS],
+    };
+  }
+
+  private createIntegrationPackage(
+    mode?: PlatformTenantIntegrationMode,
+    sandboxBaseUrl?: string | null,
+  ): PlatformTenantIntegrationPackage {
+    const resolvedMode = mode ?? "none";
+    return {
+      mode: resolvedMode,
+      apiKeyScopes: resolvedMode === "none" ? [] : [...DEFAULT_API_KEY_SCOPES],
+      sandboxBaseUrl: this.normalizeNullableText(sandboxBaseUrl),
+      productionBaseUrl: null,
+    };
+  }
+
+  private createRolloutState(): PlatformTenantRolloutState {
+    return {
+      stage: "sandbox",
+      sandboxStatus: "ready",
+      pilotStatus: "pending",
+      productionStatus: "pending",
+      cutoverOwner: null,
+      rollbackOwner: null,
+      rollbackPrepared: false,
+      lastPromotedAt: null,
+      notes:
+        "Start in sandbox. Promote only after bootstrap defaults, billing baseline, notifications, and integration package are verified.",
+    };
   }
 
   private assertCodeAvailable(code: string) {
@@ -266,6 +691,111 @@ export class TenantsService {
     return Math.floor(value);
   }
 
+  private normalizeRoleDefaults(
+    roles: readonly PlatformTenantBootstrapRoleDefault[],
+  ) {
+    if (roles.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_ROLE_DEFAULTS_REQUIRED",
+        "At least one role default is required.",
+      );
+    }
+
+    return roles.map((role) => ({
+      roleCode: this.requireNonBlank(role.roleCode, "roleDefaults.roleCode"),
+      displayName: this.requireNonBlank(
+        role.displayName,
+        "roleDefaults.displayName",
+      ),
+      required: Boolean(role.required),
+    }));
+  }
+
+  private normalizeNotificationSubscriptions(
+    subscriptions: readonly TenantNotificationSubscription[],
+  ) {
+    return subscriptions.map((subscription) => ({
+      eventType: this.requireNonBlank(
+        subscription.eventType,
+        "notificationSubscriptions.eventType",
+      ),
+      channel: subscription.channel,
+      enabled: Boolean(subscription.enabled),
+    }));
+  }
+
+  private normalizeStringList(
+    values: readonly string[],
+    field: string,
+    allowEmpty = false,
+  ) {
+    const normalized = Array.from(
+      new Set(values.map((value) => this.requireNonBlank(value, field))),
+    );
+    if (normalized.length === 0 && !allowEmpty) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "FIELD_REQUIRED",
+        `${field} must contain at least one value.`,
+        { field },
+      );
+    }
+    return normalized;
+  }
+
+  private normalizeRolloutStage(stage: PlatformTenantRolloutStage) {
+    if (!PLATFORM_TENANT_ROLLOUT_STAGES.includes(stage)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_ROLLOUT_STAGE_INVALID",
+        "Unknown rollout stage.",
+        { stage },
+      );
+    }
+    return stage;
+  }
+
+  private normalizeGateStatus(status: PlatformTenantGateStatus) {
+    if (!PLATFORM_TENANT_GATE_STATUSES.includes(status)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_GATE_STATUS_INVALID",
+        "Unknown rollout gate status.",
+        { status },
+      );
+    }
+    return status;
+  }
+
+  private normalizeEmail(value: string) {
+    const normalized = this.requireNonBlank(value, "email").toLowerCase();
+    if (!normalized.includes("@")) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_EMAIL_INVALID",
+        "A valid email is required.",
+        { email: value },
+      );
+    }
+    return normalized;
+  }
+
+  private normalizeNullableText(value: string | null | undefined) {
+    const normalized = value?.trim();
+    return normalized ? normalized : null;
+  }
+
+  private coalesceNullableText(
+    value: string | null | undefined,
+    fallback: string | null,
+  ) {
+    if (value === undefined) {
+      return fallback;
+    }
+    return this.normalizeNullableText(value);
+  }
+
   private requireNonBlank(value: string, field: string): string {
     const normalized = value.trim();
     if (!normalized) {
@@ -286,7 +816,38 @@ export class TenantsService {
       ...tenant,
       enabledModules: [...tenant.enabledModules],
       quotas: { ...tenant.quotas },
+      bootstrapDefaults: {
+        roleDefaults: tenant.bootstrapDefaults.roleDefaults.map((role) => ({
+          ...role,
+        })),
+        billingBaseline: { ...tenant.bootstrapDefaults.billingBaseline },
+        notificationSubscriptions:
+          tenant.bootstrapDefaults.notificationSubscriptions.map(
+            (subscription) => ({ ...subscription }),
+          ),
+        webhookEvents: [...tenant.bootstrapDefaults.webhookEvents],
+      },
+      integrationPackage: {
+        ...tenant.integrationPackage,
+        apiKeyScopes: [...tenant.integrationPackage.apiKeyScopes],
+      },
+      rollout: { ...tenant.rollout },
     };
+  }
+
+  private persistChanges(
+    changes: PersistPlatformAdminChanges,
+    context: string,
+  ) {
+    if (!this.platformAdminRepository) {
+      return;
+    }
+
+    void this.platformAdminRepository
+      .persistChanges(changes)
+      .catch((error) =>
+        this.platformAdminRepository?.reportPersistenceFailure(error, context),
+      );
   }
 
   private recordAudit(

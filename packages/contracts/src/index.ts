@@ -2326,6 +2326,70 @@ export interface PlatformTenantQuotaSummary {
   monthlyApiCalls: number;
 }
 
+export const PLATFORM_TENANT_ROLLOUT_STAGES = [
+  "sandbox",
+  "pilot",
+  "production",
+] as const;
+export type PlatformTenantRolloutStage =
+  (typeof PLATFORM_TENANT_ROLLOUT_STAGES)[number];
+
+export const PLATFORM_TENANT_GATE_STATUSES = [
+  "pending",
+  "ready",
+  "approved",
+  "blocked",
+] as const;
+export type PlatformTenantGateStatus =
+  (typeof PLATFORM_TENANT_GATE_STATUSES)[number];
+
+export const PLATFORM_TENANT_INTEGRATION_MODES = [
+  "none",
+  "api_key",
+  "api_key_and_webhook",
+  "partner_managed",
+] as const;
+export type PlatformTenantIntegrationMode =
+  (typeof PLATFORM_TENANT_INTEGRATION_MODES)[number];
+
+export interface PlatformTenantBootstrapRoleDefault {
+  roleCode: string;
+  displayName: string;
+  required: boolean;
+}
+
+export interface PlatformTenantBillingBaseline {
+  invoiceTitle: string;
+  contactName: string;
+  email: string;
+}
+
+export interface PlatformTenantBootstrapDefaults {
+  roleDefaults: PlatformTenantBootstrapRoleDefault[];
+  billingBaseline: PlatformTenantBillingBaseline;
+  notificationSubscriptions: TenantNotificationSubscription[];
+  webhookEvents: string[];
+}
+
+export interface PlatformTenantIntegrationPackage {
+  mode: PlatformTenantIntegrationMode;
+  apiKeyScopes: string[];
+  sandboxBaseUrl: string | null;
+  productionBaseUrl: string | null;
+}
+
+export interface PlatformTenantRolloutState {
+  stage: PlatformTenantRolloutStage;
+  sandboxStatus: PlatformTenantGateStatus;
+  pilotStatus: PlatformTenantGateStatus;
+  productionStatus: PlatformTenantGateStatus;
+  cutoverOwner: string | null;
+  rollbackOwner: string | null;
+  rollbackPrepared: boolean;
+  lastPromotedAt: string | null;
+  notes: string | null;
+}
+
 export interface PlatformAdminTenantRecord {
   id: string;
   code: string;
@@ -2333,6 +2397,9 @@ export interface PlatformAdminTenantRecord {
   status: "draft" | "active" | "paused";
   enabledModules: PlatformTenantModule[];
   quotas: PlatformTenantQuotaSummary;
+  bootstrapDefaults: PlatformTenantBootstrapDefaults;
+  integrationPackage: PlatformTenantIntegrationPackage;
+  rollout: PlatformTenantRolloutState;
   createdAt: string;
   updatedAt: string;
 }
@@ -2343,6 +2410,23 @@ export interface CreatePlatformTenantCommand {
   status?: "active" | "inactive";
   enabledModules?: PlatformTenantModule[];
   quotas?: Partial<PlatformTenantQuotaSummary>;
+  integrationMode?: PlatformTenantIntegrationMode;
+  bootstrapAdminEmail?: string;
+  sandboxBaseUrl?: string | null;
+}
+
+export interface UpdatePlatformTenantOnboardingCommand {
+  billingBaseline?: Partial<PlatformTenantBillingBaseline>;
+  roleDefaults?: PlatformTenantBootstrapRoleDefault[];
+  notificationSubscriptions?: TenantNotificationSubscription[];
+  webhookEvents?: string[];
+  integrationPackage?: Partial<PlatformTenantIntegrationPackage>;
+  rollout?: Partial<Omit<PlatformTenantRolloutState, "stage">>;
+}
+
+export interface SetPlatformTenantRolloutStageCommand {
+  stage: PlatformTenantRolloutStage;
+  notes?: string | null;
 }
 
 export interface UpdatePlatformTenantSettingsCommand {
