@@ -12,6 +12,7 @@ Primary citations:
 - `docs/02-architecture/authority/rgp-002-authority-map.md` §§2, 4, 5
 - `docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md`
 - `docs/02-architecture/tenant-commute-hub-boundary.md` §§1–5
+- `docs/02-architecture/authority/rgp-003-contract-sync-lifecycle.md`
 - `docs/02-architecture/authority/fbp-005-tenant-bff-parity-matrix.md` §§2, 5, 6
 - `phase1_service_contracts_v1.md` §3.2
 - `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/03_api_examples_and_error_contracts.md` §§3.2, 3.18, 3.19
@@ -71,6 +72,13 @@ Additional addendum on `2026-04-25`:
 - this closes the most visible remaining package-portability maintenance debt
   without reopening tenant authority ownership: repo B still consumes the core
   contract surface, and the fallback is refreshed from that source of truth
+
+Operational addendum on `2026-04-29`:
+
+- `OPX-GV-001` adds a formal contract-sync lifecycle, a compatibility-note
+  requirement for breaking consumer changes, and a core-owned smoke command
+  (`scripts/tenant-hub-contract-sync-smoke.sh`) so the fallback snapshot stays
+  governed instead of becoming an unmanaged second truth
 
 ## 2. Core-Repo Gate Closed Before External Cutover
 
@@ -139,6 +147,9 @@ These are the non-negotiable runtime rules during and after cutover:
 - All POST command calls carry `Idempotency-Key`.
 - Signed downloads are consumed as returned; repo B must not cache or regenerate them.
 - Repo B must treat `drts-fleet-platform` error codes as authoritative instead of replacing them with local business outcomes.
+- Snapshot fallback files under `src/lib/drts-shim/generated/` are managed
+  outputs only; breaking changes follow `RGP-003` and require a compatibility
+  note before merge.
 
 ## 6. Verification Gate For `FBP-006`
 

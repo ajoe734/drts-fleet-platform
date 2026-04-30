@@ -14,6 +14,7 @@ Primary citations:
 - phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/03_api_examples_and_error_contracts.md (Sections 3.2, 3.3, 3.18, 3.19)
 - docs/02-architecture/consensus/sessions/20260413T025550Z-repo-gap-reassessment-v3/consensus-packet.md (Bucket A decisions; C4 boundary notes)
 - docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md
+- docs/02-architecture/authority/rgp-003-contract-sync-lifecycle.md
 
 ---
 
@@ -80,6 +81,7 @@ Explicit rules to prevent cross-repo authority drift:
 - UI must not evaluate business rules or derive authoritative states locally (e.g., computing dispatchability, editing order status, or mutating billing/statement fields). Ref: service contracts §§3.3, 3.5–3.6, 3.11.
 - Canonical enums are serialized in snake_case and must not be reinterpreted as display strings for submission. Ref: dev-pack §3.18.
 - Error/Success envelopes and list pagination must conform exactly (data/meta, items/page_info). UI cannot special-case or silently unwrap to different shapes. Ref: dev-pack §§3.2.3–3.2.5.
+- Standalone fallback contracts must be regenerated from the core repo snapshot flow; consumer repos must not hand-edit or fork `@drts/contracts` truth. Ref: `RGP-003`.
 - Idempotency and headers must be honored for command endpoints; UI must not retry in ways that violate server idempotency semantics. Ref: dev-pack §3.2.2, §3.2.6.
 - Webhook signing/verification and signed downloads are server-owned; UI must not proxy or store secrets. Ref: dev-pack §§3.13–3.15; service contracts §3.13.
 - Forwarded orders remain authoritative at the external platform; UI must not coerce forwarded states into owned states. Ref: service contracts §3.7.
@@ -109,6 +111,7 @@ Minimum client-side obligations for `tenant-commute-hub`:
 - Ownership for this map: Codex (contracts/schema lane). Reviewer: Claude.
 - Update triggers: creating a new API surface or DTO family; moving a surface between repos; introducing a new read model that crosses repo boundaries; adding a new external provider class.
 - Process: propose diffs in this file; cite L1/L2 documents or a new consensus packet. If semantics change, route through discussion → consensus packet → supervisor-managed execution before updating this map.
+- Contract portability and snapshot refresh follow `RGP-003`; breaking consumer impact requires a compatibility note before merge.
 
 ---
 
