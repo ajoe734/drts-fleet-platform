@@ -5,10 +5,12 @@ import {
   startTransition,
   useDeferredValue,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import type {
+  AddressPayload,
   ComplianceGateRecord,
   DispatchCandidate,
   DispatchJobRecord,
@@ -40,6 +42,30 @@ type ActionMode =
   | "redispatch_with_reason"
   | "resolve_no_supply";
 
+type SpatialPointKind = "pickup" | "dropoff" | "candidate";
+
+interface SpatialPoint {
+  key: string;
+  kind: SpatialPointKind;
+  label: string;
+  lat: number;
+  lng: number;
+  tone: QueueState;
+  orderId?: string;
+  jobId?: string;
+  etaMinutes?: number | null;
+  subtitle?: string;
+  freshness?: "live" | "stale";
+}
+
+type DispatchCandidateWithLocation = DispatchCandidate & {
+  currentLocation?: {
+    lat: number;
+    lng: number;
+    recordedAt?: string | null;
+  } | null;
+};
+
 interface ActionDraft {
   mode: ActionMode;
   reason: string;
@@ -50,6 +76,9 @@ interface ActionDraft {
   escalationTarget: string;
   noSupplyResolution: "retry_dispatch" | "cancel_with_notification";
 }
+
+const LOCATION_STALE_MS = 10 * 60 * 1000;
+const AUTO_LOAD_CANDIDATE_LIMIT = 6;
 
 function getQueueState(
   order: OwnedOrderRecord,
@@ -162,6 +191,73 @@ function listDownstreamReviewDuties(gates: ComplianceGateRecord[]) {
   );
 }
 
+function hasCoordinates(
+  address?: AddressPayload | null,
+): address is AddressPayload & { lat: number; lng: number } {
+  return Boolean(
+    address && Number.isFinite(address.lat) && Number.isFinite(address.lng),
+  );
+}
+
+function getPointStyle(kind: SpatialPointKind): {
+  className: string;
+  shortLabel: string;
+} {
+  switch (kind) {
+    case "pickup":
+      return { className: "spatial-point-pickup", shortLabel: "P" };
+    case "dropoff":
+      return { className: "spatial-point-dropoff", shortLabel: "D" };
+    case "candidate":
+      return { className: "spatial-point-candidate", shortLabel: "C" };
+  }
+}
+
+function normalizeSpatialBounds(points: SpatialPoint[]) {
+  const latitudes = points.map((point) => point.lat);
+  const longitudes = points.map((point) => point.lng);
+  const minLat = Math.min(...latitudes);
+  const maxLat = Math.max(...latitudes);
+  const minLng = Math.min(...longitudes);
+  const maxLng = Math.max(...longitudes);
+  const latSpan = Math.max(maxLat - minLat, 0.01);
+  const lngSpan = Math.max(maxLng - minLng, 0.01);
+
+  return { minLat, maxLat, minLng, maxLng, latSpan, lngSpan };
+}
+
+function projectSpatialPoint(
+  point: SpatialPoint,
+  bounds: ReturnType<typeof normalizeSpatialBounds>,
+) {
+  const horizontalPadding = 8;
+  const verticalPadding = 10;
+  const width = 100 - horizontalPadding * 2;
+  const height = 100 - verticalPadding * 2;
+  const x =
+    horizontalPadding + ((point.lng - bounds.minLng) / bounds.lngSpan) * width;
+  const y =
+    100 -
+    verticalPadding -
+    ((point.lat - bounds.minLat) / bounds.latSpan) * height;
+
+  return {
+    left: `${Math.min(96, Math.max(4, x))}%`,
+    top: `${Math.min(94, Math.max(6, y))}%`,
+  };
+}
+
+function isFreshLocation(recordedAt?: string | null) {
+  if (!recordedAt) {
+    return false;
+  }
+  const recordedMs = new Date(recordedAt).getTime();
+  if (Number.isNaN(recordedMs)) {
+    return false;
+  }
+  return Date.now() - recordedMs <= LOCATION_STALE_MS;
+}
+
 export function DispatchWorkflow({
   orders,
   dispatchJobs,
@@ -191,6 +287,7 @@ export function DispatchWorkflow({
     Record<string, ActionDraft | undefined>
   >({});
   const reloadTimerRef = useRef<number | null>(null);
+  const autoLoadedCandidateJobsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setLiveOrders(orders);
@@ -199,6 +296,43 @@ export function DispatchWorkflow({
   useEffect(() => {
     setLiveDispatchJobs(dispatchJobs);
   }, [dispatchJobs]);
+
+  const orderJobMap = useMemo(
+    () =>
+      liveDispatchJobs.reduce(
+        (acc, job) => {
+          acc[job.orderId] = job;
+          return acc;
+        },
+        {} as Record<string, DispatchJobRecord>,
+      ),
+    [liveDispatchJobs],
+  );
+
+  useEffect(() => {
+    const visibleJobIds = liveOrders
+      .map((order) => orderJobMap[order.orderId]?.dispatchJobId ?? null)
+      .filter((jobId): jobId is string => Boolean(jobId));
+    const missingJobIds = visibleJobIds.filter(
+      (jobId) =>
+        !candidates[jobId] && !autoLoadedCandidateJobsRef.current.has(jobId),
+    );
+    if (missingJobIds.length === 0) {
+      return;
+    }
+
+    missingJobIds.slice(0, AUTO_LOAD_CANDIDATE_LIMIT).forEach((jobId) => {
+      autoLoadedCandidateJobsRef.current.add(jobId);
+      void client
+        .listDispatchCandidates(jobId)
+        .then((items) => {
+          setCandidates((current) => ({ ...current, [jobId]: items }));
+        })
+        .catch(() => {
+          autoLoadedCandidateJobsRef.current.delete(jobId);
+        });
+    });
+  }, [candidates, client, liveOrders, orderJobMap]);
 
   const reloadDispatchState = async () => {
     const [nextOrders, nextDispatchJobs] = await Promise.all([
@@ -322,14 +456,6 @@ export function DispatchWorkflow({
       eventSource.close();
     };
   }, []);
-
-  const orderJobMap = liveDispatchJobs.reduce(
-    (acc, job) => {
-      acc[job.orderId] = job;
-      return acc;
-    },
-    {} as Record<string, DispatchJobRecord>,
-  );
 
   const filteredOrders = liveOrders.filter((order) => {
     const job = orderJobMap[order.orderId];
@@ -581,6 +707,87 @@ export function DispatchWorkflow({
     } as Record<QueueState, number>,
   );
 
+  const visibleOrdersForMap = filteredOrders.slice(0, 10);
+  const spatialPoints: SpatialPoint[] = [];
+  const ordersWithCoordinates = filteredOrders.filter((order) =>
+    hasCoordinates(order.pickup),
+  ).length;
+  let candidateSupplyPoints = 0;
+  let staleCandidatePoints = 0;
+
+  visibleOrdersForMap.forEach((order) => {
+    const job = orderJobMap[order.orderId];
+    const tone = getQueueState(order, job);
+
+    if (hasCoordinates(order.pickup)) {
+      spatialPoints.push({
+        key: `${order.orderId}:pickup`,
+        kind: "pickup",
+        label: order.orderNo,
+        lat: order.pickup.lat,
+        lng: order.pickup.lng,
+        tone,
+        orderId: order.orderId,
+        subtitle: order.pickup.addressName ?? order.pickup.address,
+        ...(job
+          ? { jobId: job.dispatchJobId, etaMinutes: job.latestEtaMinutes }
+          : {}),
+      });
+    }
+
+    if (hasCoordinates(order.dropoff)) {
+      spatialPoints.push({
+        key: `${order.orderId}:dropoff`,
+        kind: "dropoff",
+        label: order.orderNo,
+        lat: order.dropoff.lat,
+        lng: order.dropoff.lng,
+        tone,
+        orderId: order.orderId,
+        subtitle: order.dropoff.addressName ?? order.dropoff.address,
+        ...(job
+          ? { jobId: job.dispatchJobId, etaMinutes: job.latestEtaMinutes }
+          : {}),
+      });
+    }
+
+    if (!job) {
+      return;
+    }
+
+    for (const candidate of (candidates[job.dispatchJobId] ??
+      []) as DispatchCandidateWithLocation[]) {
+      if (!candidate.currentLocation) {
+        continue;
+      }
+      candidateSupplyPoints += 1;
+      const freshness = isFreshLocation(candidate.currentLocation.recordedAt)
+        ? "live"
+        : "stale";
+      if (freshness === "stale") {
+        staleCandidatePoints += 1;
+      }
+      spatialPoints.push({
+        key: `${job.dispatchJobId}:${candidate.vehicleId}:${candidate.driverId}`,
+        kind: "candidate",
+        label: candidate.vehicleId,
+        lat: candidate.currentLocation.lat,
+        lng: candidate.currentLocation.lng,
+        tone,
+        orderId: order.orderId,
+        jobId: job.dispatchJobId,
+        etaMinutes: candidate.etaMinutes,
+        subtitle: `${candidate.driverId} · ${candidate.operatingArea}`,
+        freshness,
+      });
+    }
+  });
+
+  const spatialBounds =
+    spatialPoints.length > 0 ? normalizeSpatialBounds(spatialPoints) : null;
+  const ordersWithoutCoordinates =
+    filteredOrders.length - ordersWithCoordinates;
+
   return (
     <div className="dispatch-workflow">
       {error && (
@@ -641,6 +848,172 @@ export function DispatchWorkflow({
           </div>
         ))}
       </div>
+
+      <section className="spatial-board">
+        <div className="spatial-board-header">
+          <div>
+            <div className="spatial-board-title">
+              {t("dispatch.workflow.map.title")}
+            </div>
+            <div className="cell-subcopy">
+              {t("dispatch.workflow.map.subtitle")}
+            </div>
+          </div>
+          <div className="spatial-board-stats">
+            <div className="spatial-stat-card">
+              <strong>{ordersWithCoordinates}</strong>
+              <span>{t("dispatch.workflow.map.ordersWithCoords")}</span>
+            </div>
+            <div className="spatial-stat-card">
+              <strong>{candidateSupplyPoints}</strong>
+              <span>{t("dispatch.workflow.map.supplyPoints")}</span>
+            </div>
+            <div className="spatial-stat-card">
+              <strong>{staleCandidatePoints}</strong>
+              <span>{t("dispatch.workflow.map.staleSupply")}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="spatial-board-note">
+          {t("dispatch.workflow.map.projectionNote")}
+        </div>
+
+        {spatialBounds ? (
+          <div className="spatial-map-shell">
+            <div className="spatial-map">
+              <div className="spatial-grid" />
+              {visibleOrdersForMap.map((order) => {
+                const pickupPoint = spatialPoints.find(
+                  (point) =>
+                    point.orderId === order.orderId && point.kind === "pickup",
+                );
+                const dropoffPoint = spatialPoints.find(
+                  (point) =>
+                    point.orderId === order.orderId && point.kind === "dropoff",
+                );
+                if (!pickupPoint || !dropoffPoint || !spatialBounds) {
+                  return null;
+                }
+                const pickup = projectSpatialPoint(pickupPoint, spatialBounds);
+                const dropoff = projectSpatialPoint(
+                  dropoffPoint,
+                  spatialBounds,
+                );
+
+                return (
+                  <svg
+                    key={`${order.orderId}:route`}
+                    className="spatial-route"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                  >
+                    <line
+                      x1={pickup.left.replace("%", "")}
+                      y1={pickup.top.replace("%", "")}
+                      x2={dropoff.left.replace("%", "")}
+                      y2={dropoff.top.replace("%", "")}
+                    />
+                  </svg>
+                );
+              })}
+              {spatialPoints.map((point) => {
+                const coords = projectSpatialPoint(point, spatialBounds);
+                const pointStyle = getPointStyle(point.kind);
+                return (
+                  <button
+                    key={point.key}
+                    className={`spatial-point ${pointStyle.className} ${
+                      point.freshness === "stale" ? "spatial-point-stale" : ""
+                    }`}
+                    style={coords}
+                    title={`${point.label} · ${point.subtitle ?? ""}`}
+                    type="button"
+                    onClick={() => {
+                      if (point.orderId) {
+                        setSearchValue(point.label);
+                        setFilterMode("all");
+                      }
+                    }}
+                  >
+                    <span>{pointStyle.shortLabel}</span>
+                  </button>
+                );
+              })}
+              <div className="spatial-axis spatial-axis-top">
+                {t("dispatch.workflow.map.northWest", {
+                  lat: spatialBounds.maxLat.toFixed(3),
+                  lng: spatialBounds.minLng.toFixed(3),
+                })}
+              </div>
+              <div className="spatial-axis spatial-axis-bottom">
+                {t("dispatch.workflow.map.southEast", {
+                  lat: spatialBounds.minLat.toFixed(3),
+                  lng: spatialBounds.maxLng.toFixed(3),
+                })}
+              </div>
+            </div>
+
+            <div className="spatial-legend">
+              <div className="spatial-legend-title">
+                {t("dispatch.workflow.map.legend")}
+              </div>
+              <div className="spatial-legend-list">
+                {(["pickup", "dropoff", "candidate"] as SpatialPointKind[]).map(
+                  (kind) => {
+                    const pointStyle = getPointStyle(kind);
+                    return (
+                      <div key={kind} className="spatial-legend-item">
+                        <span
+                          className={`spatial-legend-dot ${pointStyle.className}`}
+                        />
+                        <span>{t(`dispatch.workflow.map.legend.${kind}`)}</span>
+                      </div>
+                    );
+                  },
+                )}
+                <div className="spatial-legend-item">
+                  <span className="spatial-legend-dot spatial-point-candidate spatial-point-stale" />
+                  <span>{t("dispatch.workflow.map.legend.stale")}</span>
+                </div>
+              </div>
+
+              <div className="spatial-order-list">
+                {visibleOrdersForMap.slice(0, 6).map((order) => {
+                  const job = orderJobMap[order.orderId];
+                  return (
+                    <div key={order.orderId} className="spatial-order-card">
+                      <div className="cell-title">{order.orderNo}</div>
+                      <div className="cell-subcopy">
+                        {t(getQueueStateKey(getQueueState(order, job)))}
+                      </div>
+                      <div className="cell-subcopy">
+                        {hasCoordinates(order.pickup)
+                          ? `${order.pickup.lat.toFixed(3)}, ${order.pickup.lng.toFixed(3)}`
+                          : t("dispatch.workflow.map.missingPickupCoords")}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="spatial-empty">
+            <strong>{t("dispatch.workflow.map.emptyTitle")}</strong>
+            <span>{t("dispatch.workflow.map.emptyBody")}</span>
+          </div>
+        )}
+
+        <div className="spatial-board-footer">
+          <span>
+            {t("dispatch.workflow.map.missingCoords", {
+              count: ordersWithoutCoordinates,
+            })}
+          </span>
+          <span>{t("dispatch.workflow.map.autoLoadHint")}</span>
+        </div>
+      </section>
 
       <div className="results-note">
         {t("dispatch.workflow.showing", {
@@ -1267,6 +1640,8 @@ export function DispatchWorkflow({
         .toolbar,
         .filter-chip-group,
         .queue-summary,
+        .spatial-board-stats,
+        .spatial-order-list,
         .actions,
         .detail-list,
         .action-sheet {
@@ -1308,6 +1683,175 @@ export function DispatchWorkflow({
         }
         .queue-summary {
           grid-template-columns: repeat(5, minmax(0, 1fr));
+          margin-bottom: 0.75rem;
+        }
+        .spatial-board {
+          margin-bottom: 1rem;
+          padding: 1rem;
+          border: 1px solid #dbeafe;
+          border-radius: 1rem;
+          background:
+            radial-gradient(
+              circle at top left,
+              rgba(56, 189, 248, 0.14),
+              transparent 30%
+            ),
+            linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%);
+        }
+        .spatial-board-header,
+        .spatial-board-footer,
+        .spatial-map-shell,
+        .spatial-legend-list {
+          display: grid;
+          gap: 0.75rem;
+        }
+        .spatial-board-header {
+          margin-bottom: 0.75rem;
+        }
+        .spatial-board-title,
+        .spatial-legend-title {
+          font-size: 1rem;
+          font-weight: 700;
+          color: #0f172a;
+        }
+        .spatial-board-stats {
+          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        }
+        .spatial-stat-card {
+          padding: 0.75rem;
+          border-radius: 0.9rem;
+          background: rgba(255, 255, 255, 0.78);
+          border: 1px solid rgba(148, 163, 184, 0.25);
+          display: grid;
+          gap: 0.2rem;
+        }
+        .spatial-stat-card strong {
+          font-size: 1.25rem;
+          color: #0f172a;
+        }
+        .spatial-board-note,
+        .spatial-board-footer {
+          color: #475569;
+          font-size: 0.85rem;
+        }
+        .spatial-map-shell {
+          align-items: start;
+          margin-bottom: 0.75rem;
+        }
+        .spatial-map {
+          position: relative;
+          min-height: 360px;
+          border-radius: 1rem;
+          overflow: hidden;
+          border: 1px solid rgba(56, 189, 248, 0.25);
+          background:
+            linear-gradient(
+              180deg,
+              rgba(14, 116, 144, 0.1),
+              rgba(12, 74, 110, 0.02)
+            ),
+            linear-gradient(135deg, #dbeafe 0%, #eff6ff 48%, #f8fafc 100%);
+        }
+        .spatial-grid,
+        .spatial-route {
+          position: absolute;
+          inset: 0;
+        }
+        .spatial-grid {
+          background-image:
+            linear-gradient(rgba(15, 23, 42, 0.08) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(15, 23, 42, 0.08) 1px, transparent 1px);
+          background-size: 20% 20%;
+        }
+        .spatial-route {
+          width: 100%;
+          height: 100%;
+          pointer-events: none;
+        }
+        .spatial-route line {
+          stroke: rgba(14, 116, 144, 0.55);
+          stroke-width: 0.6;
+          stroke-dasharray: 1.4 1.6;
+        }
+        .spatial-point {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          width: 2rem;
+          height: 2rem;
+          border-radius: 999px;
+          border: 2px solid rgba(255, 255, 255, 0.95);
+          color: white;
+          font-size: 0.75rem;
+          font-weight: 700;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          box-shadow: 0 10px 25px rgba(15, 23, 42, 0.18);
+          cursor: pointer;
+        }
+        .spatial-point-pickup {
+          background: #1d4ed8;
+        }
+        .spatial-point-dropoff {
+          background: #0f766e;
+        }
+        .spatial-point-candidate {
+          background: #f97316;
+        }
+        .spatial-point-stale {
+          opacity: 0.7;
+          filter: grayscale(0.15);
+        }
+        .spatial-axis {
+          position: absolute;
+          left: 0.75rem;
+          padding: 0.35rem 0.55rem;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.86);
+          color: #334155;
+          font-size: 0.72rem;
+          border: 1px solid rgba(148, 163, 184, 0.28);
+        }
+        .spatial-axis-top {
+          top: 0.75rem;
+        }
+        .spatial-axis-bottom {
+          bottom: 0.75rem;
+        }
+        .spatial-legend {
+          padding: 0.9rem;
+          border-radius: 1rem;
+          background: rgba(255, 255, 255, 0.82);
+          border: 1px solid rgba(148, 163, 184, 0.22);
+        }
+        .spatial-legend-item {
+          display: flex;
+          align-items: center;
+          gap: 0.55rem;
+          color: #334155;
+          font-size: 0.85rem;
+        }
+        .spatial-legend-dot {
+          width: 0.9rem;
+          height: 0.9rem;
+          border-radius: 999px;
+          border: 2px solid rgba(255, 255, 255, 0.95);
+          display: inline-block;
+        }
+        .spatial-order-card {
+          padding: 0.75rem;
+          border-radius: 0.9rem;
+          background: #f8fafc;
+          border: 1px solid #e2e8f0;
+        }
+        .spatial-empty {
+          padding: 1rem;
+          border-radius: 0.9rem;
+          background: rgba(255, 255, 255, 0.82);
+          border: 1px dashed #93c5fd;
+          display: grid;
+          gap: 0.35rem;
+          color: #334155;
           margin-bottom: 0.75rem;
         }
         .queue-card {
@@ -1431,6 +1975,42 @@ export function DispatchWorkflow({
         }
         .row-warning {
           background: #fffbeb;
+        }
+        @media (min-width: 960px) {
+          .spatial-board-header,
+          .spatial-board-footer,
+          .spatial-map-shell {
+            grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+          }
+          .spatial-board-header > :first-child,
+          .spatial-board-footer > :first-child,
+          .spatial-map {
+            grid-column: 1;
+          }
+          .spatial-board-header > :last-child,
+          .spatial-board-footer > :last-child,
+          .spatial-legend {
+            grid-column: 2;
+          }
+        }
+        @media (max-width: 900px) {
+          .queue-summary {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+        @media (max-width: 640px) {
+          .queue-summary {
+            grid-template-columns: 1fr;
+          }
+          .spatial-map {
+            min-height: 280px;
+          }
+          .data-table {
+            overflow-x: auto;
+          }
+          .data-table table {
+            min-width: 980px;
+          }
         }
       `}</style>
     </div>

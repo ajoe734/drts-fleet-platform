@@ -304,6 +304,30 @@ const en = {
   "dispatch.workflow.escalateOps": "Ops Supervisor",
   "dispatch.workflow.escalateManager": "Dispatch Manager",
   "dispatch.workflow.noSupplyResolution": "Resolution",
+  "dispatch.workflow.map.title": "Spatial dispatch board",
+  "dispatch.workflow.map.subtitle":
+    "Pickup, dropoff, and candidate supply projected from governed coordinates.",
+  "dispatch.workflow.map.ordersWithCoords": "orders with pickup coordinates",
+  "dispatch.workflow.map.supplyPoints": "candidate supply points",
+  "dispatch.workflow.map.staleSupply": "stale supply points",
+  "dispatch.workflow.map.projectionNote":
+    "This board is a projection over backend order and location truth. It does not create a second dispatch authority.",
+  "dispatch.workflow.map.northWest": "NW · {lat}, {lng}",
+  "dispatch.workflow.map.southEast": "SE · {lat}, {lng}",
+  "dispatch.workflow.map.legend": "Legend",
+  "dispatch.workflow.map.legend.pickup": "Pickup",
+  "dispatch.workflow.map.legend.dropoff": "Dropoff",
+  "dispatch.workflow.map.legend.candidate": "Candidate supply",
+  "dispatch.workflow.map.legend.stale":
+    "Candidate location is older than 10 min",
+  "dispatch.workflow.map.missingPickupCoords": "Pickup coordinates unavailable",
+  "dispatch.workflow.map.emptyTitle": "No spatial projection available yet",
+  "dispatch.workflow.map.emptyBody":
+    "Orders or candidate supply need governed coordinates before the map board can project them.",
+  "dispatch.workflow.map.missingCoords":
+    "{count} visible order(s) are still missing pickup coordinates.",
+  "dispatch.workflow.map.autoLoadHint":
+    "Candidate supply locations are auto-loaded for visible dispatch jobs when available.",
   "dispatch.workflow.loadCandidatesFailed": "Failed to fetch candidates",
   "dispatch.workflow.refreshFailed": "Failed to refresh dispatch board",
   "dispatch.workflow.actionFailed": "Dispatch action failed",
@@ -1283,6 +1307,28 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.escalateOps": "營運主管",
   "dispatch.workflow.escalateManager": "派車經理",
   "dispatch.workflow.noSupplyResolution": "處理方式",
+  "dispatch.workflow.map.title": "空間派車看板",
+  "dispatch.workflow.map.subtitle":
+    "以治理過的座標投影接送點、下車點與候選供給位置。",
+  "dispatch.workflow.map.ordersWithCoords": "有上車座標的訂單",
+  "dispatch.workflow.map.supplyPoints": "候選供給點",
+  "dispatch.workflow.map.staleSupply": "過舊供給點",
+  "dispatch.workflow.map.projectionNote":
+    "此看板只投影後端訂單與位置真相，不形成第二套派車權威。",
+  "dispatch.workflow.map.northWest": "西北 · {lat}, {lng}",
+  "dispatch.workflow.map.southEast": "東南 · {lat}, {lng}",
+  "dispatch.workflow.map.legend": "圖例",
+  "dispatch.workflow.map.legend.pickup": "上車點",
+  "dispatch.workflow.map.legend.dropoff": "下車點",
+  "dispatch.workflow.map.legend.candidate": "候選供給",
+  "dispatch.workflow.map.legend.stale": "候選位置已超過 10 分鐘",
+  "dispatch.workflow.map.missingPickupCoords": "尚無上車座標",
+  "dispatch.workflow.map.emptyTitle": "目前沒有可投影的空間資料",
+  "dispatch.workflow.map.emptyBody":
+    "訂單或候選供給需要有治理過的座標後，空間看板才能投影顯示。",
+  "dispatch.workflow.map.missingCoords": "{count} 筆可見訂單仍缺少上車座標。",
+  "dispatch.workflow.map.autoLoadHint":
+    "可見派車任務若提供候選供給位置，系統會自動載入。",
   "dispatch.workflow.loadCandidatesFailed": "載入候選人失敗",
   "dispatch.workflow.refreshFailed": "重新整理派車看板失敗",
   "dispatch.workflow.actionFailed": "派車操作失敗",
