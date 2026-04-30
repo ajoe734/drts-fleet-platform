@@ -1,7 +1,7 @@
 # Tenant Onboarding, Bootstrap Defaults, And Rollout Gates
 
-Last updated: 2026-04-29
-Task ref: `OPX-MD-003`
+Last updated: 2026-04-30
+Task ref: `OPX-MD-003`, `ORX-MD-003`
 
 This runbook defines the standard path for opening a new tenant from initial
 provisioning through sandbox, pilot, and production.
@@ -60,6 +60,39 @@ Each stage also carries independent gate statuses:
 
 Allowed values: `pending`, `ready`, `approved`, `blocked`
 
+## Role Invitation And Acknowledgment
+
+Each tenant has bootstrap role defaults. Required roles must be invited and
+acknowledged before production promotion is permitted.
+
+### Invitation flow
+
+1. Platform admin selects a role in the tenant detail view and clicks **Invite**.
+2. The API records `invitedAt` on the role default record.
+3. An optional `inviteeEmail` may be provided for reference and future
+   notification integration.
+
+### Acknowledgment flow
+
+1. After the invited user confirms ownership, platform admin clicks
+   **Acknowledge** on the role.
+2. The API records `acknowledgedAt` on the role default record.
+3. Acknowledgment is only allowed after invitation (`TENANT_ROLE_NOT_INVITED`
+   is returned otherwise).
+
+### Promotion gate enforcement
+
+The API enforces these checks automatically on `setRolloutStage`:
+
+- **pilot**: `sandboxStatus` must be `approved`.
+- **production**: `pilotStatus` must be `approved`, `cutoverOwner` and
+  `rollbackOwner` must be set, `rollbackPrepared` must be `true`, and all
+  required roles must have `acknowledgedAt` set.
+- **rollback_hold**: any promotion is blocked until the hold is resolved.
+
+If any gate is not met, the API returns `TENANT_PROMOTION_GATE_BLOCKED` with
+the list of missing prerequisites.
+
 ## Cutover Checklist
 
 Before promoting a tenant into `production`, confirm:
@@ -72,11 +105,32 @@ Before promoting a tenant into `production`, confirm:
 5. Cutover owner and rollback owner are named in the tenant rollout record.
 6. Rollback plan is marked prepared in the platform-admin tenant record.
 
+## Rollback Hold
+
+A tenant can be placed into `rollback_hold` status when a critical issue is
+discovered during or after production cutover.
+
+### Entering rollback hold
+
+1. Platform admin clicks **Rollback Hold** on the tenant row in the tenant
+   console, or calls `POST /platform-admin/tenants/:tenantId/rollback-hold`.
+2. The API sets `status` to `rollback_hold` and `productionStatus` to `blocked`.
+3. All further rollout stage promotions are blocked until the hold is resolved.
+
+### Resolving rollback hold
+
+1. Investigate and resolve the underlying issue.
+2. Record the resolution in `rollout.notes`.
+3. Reactivate the tenant by clicking **Activate** or calling the activate
+   endpoint, which sets `status` back to `active`.
+4. Update `productionStatus` through the onboarding endpoint if production
+   readiness has been re-confirmed.
+
 ## Rollback Procedure
 
 If production cutover fails:
 
-1. Pause the tenant in `platform-admin`.
+1. Place the tenant in `rollback_hold` via the platform-admin console.
 2. Revert partner or tenant integration endpoints back to sandbox or prior
    production credentials.
 3. Disable production webhook delivery targets if they were part of the failed
@@ -85,6 +139,8 @@ If production cutover fails:
    at `blocked`.
 5. Resume only after the rollback owner confirms the previous working state is
    restored.
+6. Reactivate the tenant and, if appropriate, re-promote through the rollout
+   stages.
 
 ## Source Of Truth
 

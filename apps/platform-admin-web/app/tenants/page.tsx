@@ -126,7 +126,11 @@ function badgeTone(status: string): string {
   if (status === "active" || status === "production" || status === "approved") {
     return "admin-badge--success";
   }
-  if (status === "paused" || status === "blocked") {
+  if (
+    status === "paused" ||
+    status === "blocked" ||
+    status === "rollback_hold"
+  ) {
     return "admin-badge--danger";
   }
   if (status === "pilot" || status === "ready") {
@@ -305,14 +309,45 @@ export default function TenantsPage() {
   };
 
   const runTenantAction = useCallback(
-    async (tenantId: string, action: "activate" | "suspend") => {
+    async (
+      tenantId: string,
+      action: "activate" | "suspend" | "rollback_hold",
+    ) => {
       try {
         setError(null);
         if (action === "activate") {
           await client.activateTenant(tenantId);
+        } else if (action === "rollback_hold") {
+          await client.rollbackHoldTenant(tenantId);
         } else {
           await client.suspendTenant(tenantId);
         }
+        await loadTenants();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      }
+    },
+    [client, loadTenants],
+  );
+
+  const inviteRole = useCallback(
+    async (tenantId: string, roleCode: string) => {
+      try {
+        setError(null);
+        await client.inviteTenantRole(tenantId, { roleCode });
+        await loadTenants();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      }
+    },
+    [client, loadTenants],
+  );
+
+  const acknowledgeRole = useCallback(
+    async (tenantId: string, roleCode: string) => {
+      try {
+        setError(null);
+        await client.acknowledgeTenantRole(tenantId, { roleCode });
         await loadTenants();
       } catch (e: any) {
         setError(e?.message || String(e));
@@ -756,17 +791,64 @@ export default function TenantsPage() {
               <h5 style={{ margin: "0 0 8px", fontSize: 13 }}>
                 {t("tenants.defaultRoles")}
               </h5>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <div style={{ display: "grid", gap: 8 }}>
                 {selectedTenant.bootstrapDefaults.roleDefaults.map((role) => (
-                  <StatusBadge
+                  <div
                     key={role.roleCode}
-                    label={`${role.displayName}${role.required ? " • required" : ""}`}
-                    tone={
-                      role.required
-                        ? "admin-badge--info"
-                        : "admin-badge--neutral"
-                    }
-                  />
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 10px",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 8,
+                      fontSize: 13,
+                    }}
+                  >
+                    <span style={{ flex: 1 }}>
+                      {role.displayName}
+                      {role.required ? (
+                        <span style={{ color: "#dc2626", marginLeft: 4 }}>
+                          *
+                        </span>
+                      ) : null}
+                    </span>
+                    {role.acknowledgedAt ? (
+                      <StatusBadge
+                        label={t("tenants.role.acknowledged")}
+                        tone="admin-badge--success"
+                      />
+                    ) : role.invitedAt ? (
+                      <>
+                        <StatusBadge
+                          label={t("tenants.role.invited")}
+                          tone="admin-badge--info"
+                        />
+                        <button
+                          className="admin-btn admin-btn--secondary admin-btn--sm"
+                          type="button"
+                          onClick={() =>
+                            void acknowledgeRole(
+                              selectedTenant.id,
+                              role.roleCode,
+                            )
+                          }
+                        >
+                          {t("tenants.role.acknowledge")}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="admin-btn admin-btn--secondary admin-btn--sm"
+                        type="button"
+                        onClick={() =>
+                          void inviteRole(selectedTenant.id, role.roleCode)
+                        }
+                      >
+                        {t("tenants.role.invite")}
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
@@ -897,15 +979,27 @@ export default function TenantsPage() {
                         </button>
                       )}
                       {tenant.status === "active" && (
-                        <button
-                          className="admin-btn admin-btn--secondary admin-btn--sm"
-                          onClick={() =>
-                            void runTenantAction(tenant.id, "suspend")
-                          }
-                          type="button"
-                        >
-                          {t("tenants.suspend")}
-                        </button>
+                        <>
+                          <button
+                            className="admin-btn admin-btn--secondary admin-btn--sm"
+                            onClick={() =>
+                              void runTenantAction(tenant.id, "suspend")
+                            }
+                            type="button"
+                          >
+                            {t("tenants.suspend")}
+                          </button>
+                          <button
+                            className="admin-btn admin-btn--secondary admin-btn--sm"
+                            onClick={() =>
+                              void runTenantAction(tenant.id, "rollback_hold")
+                            }
+                            type="button"
+                            style={{ color: "#dc2626" }}
+                          >
+                            {t("tenants.rollbackHold")}
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>

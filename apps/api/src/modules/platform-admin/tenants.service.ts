@@ -7,8 +7,10 @@ import {
 } from "@nestjs/common";
 
 import type {
+  AcknowledgeTenantRoleCommand,
   AuditLogRecord,
   CreatePlatformTenantCommand,
+  InviteTenantRoleCommand,
   PlatformAdminTenantRecord,
   PlatformTenantBootstrapDefaults,
   PlatformTenantBootstrapRoleDefault,
@@ -50,21 +52,29 @@ const DEFAULT_ROLE_DEFAULTS: PlatformTenantBootstrapRoleDefault[] = [
     roleCode: "tenant_admin",
     displayName: "Tenant Admin",
     required: true,
+    invitedAt: null,
+    acknowledgedAt: null,
   },
   {
     roleCode: "tenant_ops_admin",
     displayName: "Tenant Ops Admin",
     required: true,
+    invitedAt: null,
+    acknowledgedAt: null,
   },
   {
     roleCode: "tenant_finance_admin",
     displayName: "Tenant Finance Admin",
     required: false,
+    invitedAt: null,
+    acknowledgedAt: null,
   },
   {
     roleCode: "tenant_viewer",
     displayName: "Tenant Viewer",
     required: false,
+    invitedAt: null,
+    acknowledgedAt: null,
   },
 ];
 
@@ -411,6 +421,141 @@ export class TenantsService implements OnModuleInit {
     return this.cloneTenant(tenant);
   }
 
+  inviteRole(
+    tenantId: string,
+    command: InviteTenantRoleCommand,
+    requestId?: string,
+  ): TenantSummary {
+    const tenant = this.requireTenant(tenantId);
+    const roleCode = this.requireNonBlank(command.roleCode, "roleCode");
+    const role = tenant.bootstrapDefaults.roleDefaults.find(
+      (r) => r.roleCode === roleCode,
+    );
+    if (!role) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "TENANT_ROLE_NOT_FOUND",
+        "Role not found in tenant bootstrap defaults.",
+        { tenantId, roleCode },
+      );
+    }
+
+    const now = new Date().toISOString();
+    role.invitedAt = now;
+    tenant.updatedAt = now;
+
+    this.persistChanges(
+      { platformTenants: [this.cloneTenant(tenant)] },
+      "invite tenant role",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "invite_tenant_role",
+        resourceType: "platform_tenant",
+        resourceId: tenant.id,
+        newValuesSummary: {
+          roleCode,
+          invitedAt: now,
+          inviteeEmail: command.inviteeEmail ?? null,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneTenant(tenant);
+  }
+
+  acknowledgeRole(
+    tenantId: string,
+    command: AcknowledgeTenantRoleCommand,
+    requestId?: string,
+  ): TenantSummary {
+    const tenant = this.requireTenant(tenantId);
+    const roleCode = this.requireNonBlank(command.roleCode, "roleCode");
+    const role = tenant.bootstrapDefaults.roleDefaults.find(
+      (r) => r.roleCode === roleCode,
+    );
+    if (!role) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "TENANT_ROLE_NOT_FOUND",
+        "Role not found in tenant bootstrap defaults.",
+        { tenantId, roleCode },
+      );
+    }
+    if (!role.invitedAt) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_ROLE_NOT_INVITED",
+        "Role must be invited before it can be acknowledged.",
+        { tenantId, roleCode },
+      );
+    }
+
+    const now = new Date().toISOString();
+    role.acknowledgedAt = now;
+    tenant.updatedAt = now;
+
+    this.persistChanges(
+      { platformTenants: [this.cloneTenant(tenant)] },
+      "acknowledge tenant role",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "acknowledge_tenant_role",
+        resourceType: "platform_tenant",
+        resourceId: tenant.id,
+        newValuesSummary: { roleCode, acknowledgedAt: now },
+      },
+      requestId,
+    );
+
+    return this.cloneTenant(tenant);
+  }
+
+  setRollbackHold(tenantId: string, requestId?: string): TenantSummary {
+    const tenant = this.requireTenant(tenantId);
+    const oldStatus = tenant.status;
+    const now = new Date().toISOString();
+
+    tenant.status = "rollback_hold";
+    tenant.rollout.productionStatus = "blocked";
+    tenant.updatedAt = now;
+
+    this.logger.log(`Tenant ${tenantId} placed in rollback_hold`);
+    this.persistChanges(
+      { platformTenants: [this.cloneTenant(tenant)] },
+      "set tenant rollback hold",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "set_tenant_rollback_hold",
+        resourceType: "platform_tenant",
+        resourceId: tenant.id,
+        oldValuesSummary: { status: oldStatus },
+        newValuesSummary: {
+          status: "rollback_hold",
+          productionStatus: "blocked",
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneTenant(tenant);
+  }
+
   setRolloutStage(
     tenantId: string,
     command: SetPlatformTenantRolloutStageCommand,
@@ -419,6 +564,8 @@ export class TenantsService implements OnModuleInit {
     const tenant = this.requireTenant(tenantId);
     const oldRollout = { ...tenant.rollout };
     const nextStage = this.normalizeRolloutStage(command.stage);
+
+    this.enforcePromotionGates(tenant, nextStage);
 
     tenant.rollout.stage = nextStage;
     tenant.rollout.lastPromotedAt = new Date().toISOString();
@@ -467,7 +614,7 @@ export class TenantsService implements OnModuleInit {
 
   setStatus(
     tenantId: string,
-    newStatus: "active" | "paused",
+    newStatus: "active" | "paused" | "rollback_hold",
     requestId?: string,
   ): TenantSummary {
     const tenant = this.requireTenant(tenantId);
@@ -496,6 +643,61 @@ export class TenantsService implements OnModuleInit {
       requestId,
     );
     return this.cloneTenant(tenant);
+  }
+
+  private enforcePromotionGates(
+    tenant: PlatformAdminTenantRecord,
+    nextStage: PlatformTenantRolloutStage,
+  ) {
+    if (tenant.status === "rollback_hold") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_IN_ROLLBACK_HOLD",
+        "Tenant is in rollback hold. Resolve the hold before promoting.",
+        { tenantId: tenant.id, status: tenant.status },
+      );
+    }
+
+    const missing: string[] = [];
+
+    if (nextStage === "pilot") {
+      if (tenant.rollout.sandboxStatus !== "approved") {
+        missing.push("sandboxStatus must be approved");
+      }
+    }
+
+    if (nextStage === "production") {
+      if (tenant.rollout.pilotStatus !== "approved") {
+        missing.push("pilotStatus must be approved");
+      }
+      if (!tenant.rollout.cutoverOwner) {
+        missing.push("cutoverOwner is required");
+      }
+      if (!tenant.rollout.rollbackOwner) {
+        missing.push("rollbackOwner is required");
+      }
+      if (!tenant.rollout.rollbackPrepared) {
+        missing.push("rollbackPrepared must be true");
+      }
+
+      const unacknowledgedRequired = tenant.bootstrapDefaults.roleDefaults
+        .filter((r) => r.required && !r.acknowledgedAt)
+        .map((r) => r.roleCode);
+      if (unacknowledgedRequired.length > 0) {
+        missing.push(
+          `required roles not acknowledged: ${unacknowledgedRequired.join(", ")}`,
+        );
+      }
+    }
+
+    if (missing.length > 0) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_PROMOTION_GATE_BLOCKED",
+        `Cannot promote to ${nextStage}: ${missing.join("; ")}.`,
+        { tenantId: tenant.id, nextStage, missing },
+      );
+    }
   }
 
   private requireTenant(tenantId: string): PlatformAdminTenantRecord {
@@ -709,6 +911,8 @@ export class TenantsService implements OnModuleInit {
         "roleDefaults.displayName",
       ),
       required: Boolean(role.required),
+      invitedAt: role.invitedAt ?? null,
+      acknowledgedAt: role.acknowledgedAt ?? null,
     }));
   }
 

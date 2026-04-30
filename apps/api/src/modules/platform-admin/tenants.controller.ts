@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import type {
+  AcknowledgeTenantRoleCommand,
   CreatePlatformTenantCommand,
+  InviteTenantRoleCommand,
   SetPlatformTenantRolloutStageCommand,
   UpdatePlatformTenantOnboardingCommand,
   UpdatePlatformTenantSettingsCommand,
@@ -65,6 +67,35 @@ export class TenantsController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const updated = this.tenants.setRolloutStage(tenantId, body, requestId);
+    return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Post("tenants/:tenantId/roles/invite")
+  inviteRole(
+    @Param("tenantId") tenantId: string,
+    @Body() body: InviteTenantRoleCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const updated = this.tenants.inviteRole(tenantId, body, requestId);
+    return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Post("tenants/:tenantId/roles/acknowledge")
+  acknowledgeRole(
+    @Param("tenantId") tenantId: string,
+    @Body() body: AcknowledgeTenantRoleCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const updated = this.tenants.acknowledgeRole(tenantId, body, requestId);
+    return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  @Post("tenants/:tenantId/rollback-hold")
+  rollbackHold(
+    @Param("tenantId") tenantId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const updated = this.tenants.setRollbackHold(tenantId, requestId);
     return toApiSuccessEnvelope(updated, requestId);
   }
 
