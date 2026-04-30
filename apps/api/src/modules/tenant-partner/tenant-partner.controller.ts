@@ -19,6 +19,7 @@ import type {
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
   PartnerChannelEntryRecord,
+  PartnerEligibilityReviewQueueItem,
   PartnerEligibilityVerificationRecord,
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
@@ -259,7 +260,7 @@ export class TenantPartnerController {
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const items: PartnerEligibilityVerificationRecord[] =
+    const items: PartnerEligibilityReviewQueueItem[] =
       this.tenantPartnerService.listPartnerEligibilityReviewQueue(
         requestId,
         identity,

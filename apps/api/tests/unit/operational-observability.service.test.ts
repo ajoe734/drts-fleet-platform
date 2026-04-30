@@ -7,7 +7,7 @@ import type {
   DriverLocationSnapshot,
   DriverRegistryRecord,
   OwnedOrderRecord,
-  PartnerEligibilityVerificationRecord,
+  PartnerEligibilityReviewQueueItem,
   ReportJobRecord,
 } from "@drts/contracts";
 
@@ -462,24 +462,16 @@ function createServiceFixture() {
     },
   ];
 
-  const eligibilityQueue: PartnerEligibilityVerificationRecord[] = [
+  const eligibilityQueue: PartnerEligibilityReviewQueueItem[] = [
     {
       eligibilityVerificationId: "elig-001",
-      tenantId: "tenant-demo-001",
-      partnerId: "partner-001",
-      partnerProgramId: "program-001",
-      partnerProgramCode: null,
       partnerEntrySlug: "bank-alpha",
-      bankCode: null,
-      cardProgramCode: null,
-      businessDispatchSubtype: "credit_card_airport_transfer",
       verificationStatus: "manual_review",
       decisionSource: "manual_fallback",
       verificationReasonCode: "ISSUER_TIMEOUT",
-      adapterCode: "issuer-adapter",
-      adapterVersion: "1",
-      contractSnapshot: null,
-      attempts: [],
+      attemptCount: 0,
+      latestAttemptStatus: null,
+      latestAttemptReasonCode: null,
       manualFallback: {
         required: true,
         reasonCode: "ISSUER_TIMEOUT",
@@ -487,41 +479,23 @@ function createServiceFixture() {
         requestedBy: "system:auto_fallback",
         notes: null,
       },
-      referenceTokenHash: null,
-      benefitReference: null,
-      issuerAuthorizationRef: null,
-      requestMetadata: {
+      requestHints: {
         cardLast4: "1234",
-        cardholderName: null,
         flightNo: null,
-        requestId: "req-001",
       },
       verifiedAt: "2026-04-30T10:00:00.000Z",
-      expiresAt: null,
       createdAt: "2026-04-30T10:00:00.000Z",
       updatedAt: "2026-04-30T10:00:00.000Z",
-      auditMetadata: {
-        source: "ops_console",
-        requestId: "req-001",
-      },
     },
     {
       eligibilityVerificationId: "elig-002",
-      tenantId: "tenant-demo-001",
-      partnerId: "partner-001",
-      partnerProgramId: "program-001",
-      partnerProgramCode: null,
       partnerEntrySlug: "bank-beta",
-      bankCode: null,
-      cardProgramCode: null,
-      businessDispatchSubtype: "credit_card_airport_transfer",
       verificationStatus: "ineligible",
       decisionSource: "issuer_realtime",
       verificationReasonCode: "CARD_NOT_ELIGIBLE",
-      adapterCode: "issuer-adapter",
-      adapterVersion: "1",
-      contractSnapshot: null,
-      attempts: [],
+      attemptCount: 0,
+      latestAttemptStatus: null,
+      latestAttemptReasonCode: null,
       manualFallback: {
         required: false,
         reasonCode: null,
@@ -529,23 +503,13 @@ function createServiceFixture() {
         requestedBy: null,
         notes: null,
       },
-      referenceTokenHash: null,
-      benefitReference: null,
-      issuerAuthorizationRef: null,
-      requestMetadata: {
+      requestHints: {
         cardLast4: "5678",
-        cardholderName: null,
         flightNo: null,
-        requestId: "req-002",
       },
       verifiedAt: "2026-04-30T06:00:00.000Z",
-      expiresAt: null,
       createdAt: "2026-04-30T06:00:00.000Z",
       updatedAt: "2026-04-30T06:00:00.000Z",
-      auditMetadata: {
-        source: "partner_api",
-        requestId: "req-002",
-      },
     },
   ];
 

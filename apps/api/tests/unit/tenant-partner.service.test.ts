@@ -882,14 +882,12 @@ describe("TenantPartnerService sensitive-data governance", () => {
         required: true,
         reasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
       }),
-      requestMetadata: expect.objectContaining({
+      requestHints: expect.objectContaining({
         flightNo: "BR102",
       }),
-    });
-    expect(queue[0].attempts).toHaveLength(3);
-    expect(queue[0].attempts.at(-1)).toMatchObject({
-      status: "error",
-      reasonCode: "ISSUER_UNAVAILABLE",
+      attemptCount: 3,
+      latestAttemptStatus: "error",
+      latestAttemptReasonCode: "ISSUER_UNAVAILABLE",
     });
     expect(queue[1]).toMatchObject({
       partnerEntrySlug: "bank-demo-alpha-airport",
@@ -898,15 +896,13 @@ describe("TenantPartnerService sensitive-data governance", () => {
       manualFallback: expect.objectContaining({
         required: false,
       }),
-      requestMetadata: expect.objectContaining({
+      requestHints: expect.objectContaining({
         cardLast4: "1357",
         flightNo: "CI220",
       }),
-    });
-    expect(queue[1].attempts).toHaveLength(1);
-    expect(queue[1].attempts[0]).toMatchObject({
-      status: "ineligible",
-      reasonCode: "CARD_PROGRAM_NOT_ELIGIBLE",
+      attemptCount: 1,
+      latestAttemptStatus: "ineligible",
+      latestAttemptReasonCode: "CARD_PROGRAM_NOT_ELIGIBLE",
     });
 
     expect(auditNotificationService.listAuditLogs()).toEqual(
@@ -922,6 +918,92 @@ describe("TenantPartnerService sensitive-data governance", () => {
         }),
       ]),
     );
+  });
+
+  it("review queue omits evidence-grade fields while evidence endpoint returns them", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const retryingAdapter: PartnerEligibilityAdapterInterface = {
+      adapterCode: "issuer_reference_lookup_v1",
+      adapterVersion: "v1",
+      supports: (contract) =>
+        contract.adapterCode === "issuer_reference_lookup_v1",
+      async verify() {
+        throw new PartnerEligibilityAdapterError(
+          "ISSUER_UNAVAILABLE",
+          "Sandbox issuer adapter unavailable.",
+          {
+            retryable: true,
+            upstreamHttpStatus: 503,
+            manualFallbackReasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+          },
+        );
+      },
+    };
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      undefined,
+      undefined,
+      [new BankCardInlineEligibilityAdapter(), retryingAdapter],
+    );
+
+    const verification = await service.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-beta-airport",
+        referenceToken: "secret-token-redaction-test",
+        cardholderName: "Redacted Traveler",
+        flightNo: "BR999",
+      },
+      "req-eligibility-redaction-001",
+    );
+
+    const queue = service.listPartnerEligibilityReviewQueue(
+      "req-eligibility-redaction-queue",
+      {
+        actorType: "ops_user",
+        actorId: "ops-reviewer-002",
+        realm: "ops",
+        scopes: ["ops:dispatch:read"],
+        requestId: "req-eligibility-redaction-queue",
+      },
+    );
+
+    expect(queue).toHaveLength(1);
+    const queueItem = queue[0];
+
+    // Queue item must NOT contain evidence-grade fields
+    expect(queueItem).not.toHaveProperty("referenceTokenHash");
+    expect(queueItem).not.toHaveProperty("benefitReference");
+    expect(queueItem).not.toHaveProperty("issuerAuthorizationRef");
+    expect(queueItem).not.toHaveProperty("requestMetadata");
+    expect(queueItem).not.toHaveProperty("contractSnapshot");
+    expect(queueItem).not.toHaveProperty("attempts");
+    expect(queueItem).not.toHaveProperty("adapterCode");
+    expect(queueItem).not.toHaveProperty("adapterVersion");
+    expect(queueItem).not.toHaveProperty("auditMetadata");
+
+    // Queue item must contain triage-safe fields
+    expect(queueItem).toMatchObject({
+      eligibilityVerificationId: verification.eligibilityVerificationId,
+      partnerEntrySlug: "bank-demo-beta-airport",
+      verificationStatus: "manual_review",
+      attemptCount: 3,
+      requestHints: { cardLast4: null, flightNo: "BR999" },
+    });
+
+    // Evidence endpoint must still return all fields including secrets
+    const detail = service.getPartnerEligibilityVerification(
+      verification.eligibilityVerificationId,
+      "req-eligibility-redaction-evidence",
+    );
+    expect(detail).toHaveProperty("referenceTokenHash");
+    expect(detail).toHaveProperty("benefitReference");
+    expect(detail).toHaveProperty("issuerAuthorizationRef");
+    expect(detail.requestMetadata).toHaveProperty("cardholderName");
+    expect(detail).toHaveProperty("contractSnapshot");
+    expect(detail).toHaveProperty("attempts");
+    expect(detail.attempts).toHaveLength(3);
+    expect(detail).toHaveProperty("auditMetadata");
   });
 
   it("disables failing webhook endpoints and returns them to test_pending on secret rotation", async () => {

@@ -86,6 +86,7 @@ import type {
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
   PartnerBootstrapSession,
+  PartnerEligibilityReviewQueueItem,
   PartnerEligibilityVerificationRecord,
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
@@ -413,9 +414,9 @@ export class ApiClient {
   }
 
   async listPartnerEligibilityReviewQueue(): Promise<
-    PartnerEligibilityVerificationRecord[]
+    PartnerEligibilityReviewQueueItem[]
   > {
-    return this.getList<PartnerEligibilityVerificationRecord>(
+    return this.getList<PartnerEligibilityReviewQueueItem>(
       "/api/ops/partner/eligibility/reviews",
     );
   }

@@ -492,6 +492,45 @@ export interface PartnerEligibilityVerificationRecord {
   auditMetadata: PartnerRecordAuditMetadata;
 }
 
+export interface PartnerEligibilityReviewQueueItem {
+  eligibilityVerificationId: string;
+  partnerEntrySlug: string;
+  verificationStatus: PartnerEligibilityStatus;
+  verificationReasonCode: string;
+  decisionSource: PartnerEligibilityDecisionSource;
+  attemptCount: number;
+  latestAttemptStatus: string | null;
+  latestAttemptReasonCode: string | null;
+  manualFallback: PartnerEligibilityManualFallbackRecord;
+  requestHints: {
+    cardLast4: string | null;
+    flightNo: string | null;
+  };
+  verifiedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PartnerEligibilityReviewDecision = "approve" | "deny";
+
+export interface ResolvePartnerEligibilityReviewCommand {
+  eligibilityVerificationId: string;
+  decision: PartnerEligibilityReviewDecision;
+  reasonCode: string;
+  notes: string | null;
+}
+
+export interface PartnerEligibilityReviewResolution {
+  eligibilityVerificationId: string;
+  previousStatus: PartnerEligibilityStatus;
+  resolvedStatus: PartnerEligibilityStatus;
+  decision: PartnerEligibilityReviewDecision;
+  reasonCode: string;
+  notes: string | null;
+  resolvedAt: string;
+  resolvedBy: string;
+}
+
 export interface RegulatoryRegistrySummary {
   entities: Array<
     | "vehicle"
@@ -1600,6 +1639,7 @@ export interface DispatchCandidate {
   operatingArea: string;
   serviceBuckets: Phase1ServiceBucket[];
   etaMinutes: number;
+  currentLocation?: DriverLocationSnapshot | null;
 }
 
 export interface DispatchJobRecord {

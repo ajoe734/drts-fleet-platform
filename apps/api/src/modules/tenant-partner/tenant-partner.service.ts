@@ -35,7 +35,11 @@ import type {
   PartnerEligibilityManualFallbackRecord,
   PartnerEligibilityRetryPolicyRecord,
   PartnerEligibilitySensitiveDataPolicy,
+  PartnerEligibilityReviewDecision,
+  PartnerEligibilityReviewQueueItem,
+  PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
+  ResolvePartnerEligibilityReviewCommand,
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
@@ -1208,11 +1212,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   listPartnerEligibilityReviewQueue(
     requestId?: string,
     identity?: IdentityContext | null,
-  ) {
-    const items = [...this.partnerEligibilityVerifications.values()]
-      .map((verification) =>
-        this.clonePartnerEligibilityVerification(verification),
-      )
+  ): PartnerEligibilityReviewQueueItem[] {
+    const records = [...this.partnerEligibilityVerifications.values()]
       .filter((verification) => verification.verificationStatus !== "eligible")
       .sort((left, right) => {
         if (left.verificationStatus !== right.verificationStatus) {
@@ -1233,11 +1234,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         resourceType: "partner_eligibility",
         resourceId: null,
         newValuesSummary: {
-          queueSize: items.length,
-          manualReviewCount: items.filter(
+          queueSize: records.length,
+          manualReviewCount: records.filter(
             (item) => item.verificationStatus === "manual_review",
           ).length,
-          deniedCount: items.filter(
+          deniedCount: records.filter(
             (item) => item.verificationStatus === "ineligible",
           ).length,
         },
@@ -1245,7 +1246,35 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       requestId,
     );
 
-    return items;
+    return records.map((record) => this.toReviewQueueItem(record));
+  }
+
+  private toReviewQueueItem(
+    record: PartnerEligibilityVerificationRecord,
+  ): PartnerEligibilityReviewQueueItem {
+    const lastAttempt =
+      record.attempts.length > 0
+        ? record.attempts[record.attempts.length - 1]
+        : null;
+
+    return {
+      eligibilityVerificationId: record.eligibilityVerificationId,
+      partnerEntrySlug: record.partnerEntrySlug,
+      verificationStatus: record.verificationStatus,
+      verificationReasonCode: record.verificationReasonCode,
+      decisionSource: record.decisionSource,
+      attemptCount: record.attempts.length,
+      latestAttemptStatus: lastAttempt?.status ?? null,
+      latestAttemptReasonCode: lastAttempt?.reasonCode ?? null,
+      manualFallback: { ...record.manualFallback },
+      requestHints: {
+        cardLast4: record.requestMetadata.cardLast4,
+        flightNo: record.requestMetadata.flightNo,
+      },
+      verifiedAt: record.verifiedAt,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
   }
 
   getPartnerEntry(entrySlug: string) {
@@ -2008,6 +2037,106 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
 
     return this.clonePartnerEligibilityVerification(verification);
+  }
+
+  resolvePartnerEligibilityReview(
+    command: ResolvePartnerEligibilityReviewCommand,
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ): PartnerEligibilityReviewResolution {
+    const verification = this.partnerEligibilityVerifications.get(
+      command.eligibilityVerificationId,
+    );
+    if (!verification) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PARTNER_ELIGIBILITY_NOT_FOUND",
+        "The partner eligibility verification record could not be found.",
+        {
+          eligibilityVerificationId: command.eligibilityVerificationId,
+        },
+      );
+    }
+
+    if (
+      verification.verificationStatus !== "manual_review" &&
+      verification.verificationStatus !== "ineligible"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ELIGIBILITY_ALREADY_RESOLVED",
+        "This eligibility verification has already been resolved.",
+        {
+          eligibilityVerificationId: command.eligibilityVerificationId,
+          currentStatus: verification.verificationStatus,
+        },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const previousStatus = verification.verificationStatus;
+    const resolvedStatus: PartnerEligibilityVerificationRecord["verificationStatus"] =
+      command.decision === "approve" ? "eligible" : "ineligible";
+    const resolvedBy = identity?.actorId ?? "ops_reviewer";
+
+    verification.verificationStatus = resolvedStatus;
+    verification.verificationReasonCode = command.reasonCode;
+    verification.decisionSource = "ops_manual_review";
+    verification.updatedAt = now;
+    verification.manualFallback = {
+      ...verification.manualFallback,
+      notes: command.notes,
+    };
+    verification.auditMetadata = {
+      ...verification.auditMetadata,
+      updatedBy: resolvedBy,
+    };
+
+    this.partnerEligibilityVerifications.set(
+      command.eligibilityVerificationId,
+      this.clonePartnerEligibilityVerification(verification),
+    );
+    this.persistChanges(
+      {
+        partnerEligibilityVerifications: [
+          this.clonePartnerEligibilityVerification(verification),
+        ],
+      },
+      "resolve_partner_eligibility_review",
+    );
+
+    this.recordTenantAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "ops_user",
+        tenantId: verification.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "resolve_partner_eligibility_review",
+        resourceType: "partner_eligibility",
+        resourceId: command.eligibilityVerificationId,
+        newValuesSummary: {
+          previousStatus,
+          resolvedStatus,
+          decision: command.decision,
+          reasonCode: command.reasonCode,
+          partnerEntrySlug: verification.partnerEntrySlug,
+        },
+      },
+      requestId,
+    );
+
+    return {
+      eligibilityVerificationId: command.eligibilityVerificationId,
+      previousStatus,
+      resolvedStatus,
+      decision: command.decision,
+      reasonCode: command.reasonCode,
+      notes: command.notes,
+      resolvedAt: now,
+      resolvedBy,
+    };
   }
 
   private assertPartnerEligibilityCommand(

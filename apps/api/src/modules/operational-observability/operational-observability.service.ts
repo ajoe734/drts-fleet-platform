@@ -13,7 +13,7 @@ import type {
   OperationalAlertThresholds,
   OperationalObservabilitySnapshot,
   OwnedOrderRecord,
-  PartnerEligibilityVerificationRecord,
+  PartnerEligibilityReviewQueueItem,
   ReportJobRecord,
 } from "@drts/contracts";
 
@@ -348,7 +348,7 @@ export class OperationalObservabilityService {
   }
 
   private buildEligibilityMetrics(
-    queue: PartnerEligibilityVerificationRecord[],
+    queue: PartnerEligibilityReviewQueueItem[],
     referenceDate: Date,
   ) {
     const thresholdTimestamp = referenceDate.getTime() - 24 * 60 * 60 * 1000;

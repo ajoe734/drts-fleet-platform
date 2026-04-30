@@ -510,6 +510,7 @@
 - throughput assumption by channel
 - retention by data family
 - degraded mode policy
+- 實作基線見 `phase1-operational-workload-sla-degradation-baseline-20260430.md`
 
 ### 4.22 資安 / sensitive data / masking / secret policy
 

@@ -13,6 +13,9 @@ This runbook defines the minimum operational visibility bar for Phase 1 workflow
 
 The current thresholds are operational defaults for Phase 1. They are intentionally conservative and can be tightened later by `OPX-GV-004` when formal SLO / paging policy work is ready.
 
+The formal workload, SLA, and degradation baseline now lives in
+`docs/02-architecture/phase1-operational-workload-sla-degradation-baseline-20260430.md`.
+
 ## Alert Taxonomy
 
 | Alert key                    | Primary route | Secondary route | Measured value                                                | Warning | Critical |
@@ -174,5 +177,5 @@ Likely actions:
 ## Notes
 
 - This runbook documents the workflow-health contract added by `OPX-GV-003`.
-- It does not define final paging policy, escalation schedule, or tenancy-specific SLOs.
-- Threshold ownership and formal incident routing should be hardened in `OPX-GV-004`.
+- It does not define tenancy-specific paging calendars or on-call rotations.
+- Use the `OPX-GV-004` baseline for workflow SLO intent, degraded-mode policy, and fault-domain routing.
