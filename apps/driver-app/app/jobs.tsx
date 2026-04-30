@@ -10,6 +10,10 @@ import {
 import { useRouter } from "expo-router";
 import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
 import { getDriverClient } from "@/lib/api-client";
+import {
+  formatDriverTaskStatusLabel,
+  formatDriverTaskTypeLabel,
+} from "@/lib/operational-labels";
 import { PlatformTaskBadge } from "@/components/platform-task-badge";
 
 function RouteLockedIcon() {
@@ -19,7 +23,7 @@ function RouteLockedIcon() {
 function FixedPriceBadge() {
   return (
     <View style={[styles.badge, { backgroundColor: "#e3f2fd" }]}>
-      <Text style={[styles.badgeText, { color: "#0d47a1" }]}>fixed price</Text>
+      <Text style={[styles.badgeText, { color: "#0d47a1" }]}>固定車資</Text>
     </View>
   );
 }
@@ -33,24 +37,40 @@ function TaskTypeBadge({
   businessDispatchSubtype: string | null;
   dispatchSemantics: string | null;
 }) {
-  let label = "platform_dispatch";
+  let label = "平台派單";
   let bgColor = "#f3e5f5";
   let textColor = "#4a148c";
 
   if (businessDispatchSubtype === "enterprise_dispatch") {
-    label = "enterprise_shuttle";
+    label = formatDriverTaskTypeLabel({
+      serviceBucket,
+      businessDispatchSubtype,
+      dispatchSemantics,
+    });
     bgColor = "#e8eaf6";
     textColor = "#1a237e";
   } else if (businessDispatchSubtype === "credit_card_airport_transfer") {
-    label = "airport_pickup";
+    label = formatDriverTaskTypeLabel({
+      serviceBucket,
+      businessDispatchSubtype,
+      dispatchSemantics,
+    });
     bgColor = "#e0f2f1";
     textColor = "#004d40";
   } else if (dispatchSemantics === "forwarder_broadcast") {
-    label = "auto_assigned";
+    label = formatDriverTaskTypeLabel({
+      serviceBucket,
+      businessDispatchSubtype,
+      dispatchSemantics,
+    });
     bgColor = "#fff3e0";
     textColor = "#e65100";
   } else if (serviceBucket === "standard_taxi") {
-    label = "platform_dispatch";
+    label = formatDriverTaskTypeLabel({
+      serviceBucket,
+      businessDispatchSubtype,
+      dispatchSemantics,
+    });
     bgColor = "#f3e5f5";
     textColor = "#4a148c";
   }
@@ -73,9 +93,7 @@ function isForwarderTerminalTask(task: DriverTaskRecord): boolean {
 function ForwarderTerminalBadge() {
   return (
     <View style={[styles.badge, { backgroundColor: "#fef2f2" }]}>
-      <Text style={[styles.badgeText, { color: "#991b1b" }]}>
-        platform closed
-      </Text>
+      <Text style={[styles.badgeText, { color: "#991b1b" }]}>平台已結案</Text>
     </View>
   );
 }
@@ -161,7 +179,7 @@ export default function JobsScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" />
-        <Text style={styles.label}>Loading tasks...</Text>
+        <Text style={styles.label}>載入任務中…</Text>
       </View>
     );
   }
@@ -169,23 +187,21 @@ export default function JobsScreen() {
   if (!tasksEnabled) {
     return (
       <View style={styles.center}>
-        <Text style={styles.title}>Tasks Unavailable</Text>
-        <Text style={styles.empty}>
-          The task lifecycle feature is currently disabled.
-        </Text>
+        <Text style={styles.title}>任務清單暫停提供</Text>
+        <Text style={styles.empty}>此功能目前未啟用。</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Jobs Inbox</Text>
-      <Text style={styles.subtitle}>{tasks.length} task(s) assigned</Text>
+      <Text style={styles.title}>任務收件匣</Text>
+      <Text style={styles.subtitle}>已指派 {tasks.length} 筆任務</Text>
 
-      {error && <Text style={styles.error}>Error: {error}</Text>}
+      {error && <Text style={styles.error}>錯誤：{error}</Text>}
 
       {tasks.length === 0 ? (
-        <Text style={styles.empty}>No tasks available.</Text>
+        <Text style={styles.empty}>目前沒有可執行的任務。</Text>
       ) : (
         <FlatList
           data={tasks}
@@ -222,23 +238,21 @@ export default function JobsScreen() {
                   </View>
                 </View>
                 <Text style={styles.taskStatus}>
-                  {item.status ?? "unknown"}
+                  {formatDriverTaskStatusLabel(item.status)}
                 </Text>
                 {item.orderId && (
-                  <Text style={styles.taskOrder}>Order: {item.orderId}</Text>
+                  <Text style={styles.taskOrder}>訂單：{item.orderId}</Text>
                 )}
                 {forwarderTerminal && (
                   <Text style={styles.forwarderTerminalNote}>
-                    This task was closed by the external platform (lost race or
-                    cancelled). No further action is required. If you believe
-                    this is incorrect, contact dispatch.
+                    此任務已由外部平台結案（可能為搶單失敗或已取消）。
+                    目前不需要進一步處理；若判定有誤，請聯繫派車台。
                   </Text>
                 )}
                 {forwarded && !forwarderTerminal && (
                   <Text style={styles.forwardedNote}>
-                    Routed by {item.sourcePlatform}. Dispatch, route, fare, and
-                    completion status stay under platform authority. If sync
-                    stalls, contact dispatch for manual fallback.
+                    此任務由 {item.sourcePlatform}{" "}
+                    路由。派遣、路線、車資與完單狀態仍由來源平台管理；若同步停滯，請聯繫派車台人工處理。
                   </Text>
                 )}
               </View>
@@ -252,7 +266,7 @@ export default function JobsScreen() {
 
       <View style={styles.footer}>
         <Text style={styles.link} onPress={() => router.push("/trip")}>
-          Open Trip →
+          開啟行程 →
         </Text>
       </View>
     </View>

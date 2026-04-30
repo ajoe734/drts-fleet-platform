@@ -15,6 +15,7 @@ import type {
 import { getDriverClient } from "@/lib/api-client";
 import { EarningsByPlatform } from "@/components/earnings-by-platform";
 import { formatMoney } from "@/lib/money";
+import { formatDriverPayoutStatusLabel } from "@/lib/operational-labels";
 
 type PeriodKey = "today" | "week" | "month";
 
@@ -26,9 +27,9 @@ function PeriodToggle({
   onChange: (p: PeriodKey) => void;
 }) {
   const tabs: { key: PeriodKey; label: string }[] = [
-    { key: "today", label: "Today" },
-    { key: "week", label: "This Week" },
-    { key: "month", label: "This Month" },
+    { key: "today", label: "今日" },
+    { key: "week", label: "本週" },
+    { key: "month", label: "本月" },
   ];
   return (
     <View style={styles.tabBar}>
@@ -124,7 +125,7 @@ export default function EarningsScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" />
-        <Text style={styles.label}>Loading earnings...</Text>
+        <Text style={styles.label}>載入收入資料中…</Text>
       </View>
     );
   }
@@ -132,22 +133,20 @@ export default function EarningsScreen() {
   if (!earningsEnabled) {
     return (
       <View style={styles.center}>
-        <Text style={styles.title}>Earnings Unavailable</Text>
-        <Text style={styles.empty}>
-          The earnings read model is currently disabled.
-        </Text>
+        <Text style={styles.title}>收入檢視暫停提供</Text>
+        <Text style={styles.empty}>此功能目前未啟用。</Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Earnings</Text>
+      <Text style={styles.title}>收入總覽</Text>
       <Text style={styles.subtitle}>
-        {statements.length} statement(s) | {platformEarnings.length} platform(s)
+        {statements.length} 份對帳單 | {platformEarnings.length} 個平台
       </Text>
 
-      {error && <Text style={styles.error}>Error: {error}</Text>}
+      {error && <Text style={styles.error}>錯誤：{error}</Text>}
 
       <FlatList
         data={[{ key: "platforms" }, { key: "statements" }]}
@@ -156,7 +155,7 @@ export default function EarningsScreen() {
           if (item.key === "platforms") {
             return (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Per-Platform Earnings</Text>
+                <Text style={styles.sectionTitle}>各平台收入</Text>
                 <PeriodToggle value={period} onChange={setPeriod} />
                 <EarningsByPlatform items={platformEarnings} />
               </View>
@@ -164,25 +163,23 @@ export default function EarningsScreen() {
           }
           // statements section
           if (statements.length === 0) {
-            return (
-              <Text style={styles.empty}>No earnings data available yet.</Text>
-            );
+            return <Text style={styles.empty}>目前尚無收入資料。</Text>;
           }
           return (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Statements</Text>
+              <Text style={styles.sectionTitle}>對帳單</Text>
               {statements.map((s) => (
                 <View key={s.statementId} style={styles.stmtCard}>
                   <Text style={styles.stmtId}>{s.statementId}</Text>
                   <Text style={styles.stmtAmount}>
-                    Net: {formatMoney(s.netAmount)}
+                    實拿：{formatMoney(s.netAmount)}
                   </Text>
                   <Text style={styles.stmtMeta}>
-                    Gross: {formatMoney(s.grossEarning)}
+                    總收入：{formatMoney(s.grossEarning)}
                   </Text>
-                  <Text style={styles.stmtMeta}>Period: {s.periodMonth}</Text>
+                  <Text style={styles.stmtMeta}>期間：{s.periodMonth}</Text>
                   <Text style={styles.stmtPeriod}>
-                    Payout status: {s.payoutStatus}
+                    撥款狀態：{formatDriverPayoutStatusLabel(s.payoutStatus)}
                   </Text>
                 </View>
               ))}
@@ -196,7 +193,7 @@ export default function EarningsScreen() {
 
       <View style={styles.footer}>
         <Text style={styles.link} onPress={() => router.push("/settings")}>
-          Open Settings →
+          開啟設定 →
         </Text>
       </View>
     </View>

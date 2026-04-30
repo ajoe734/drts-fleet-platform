@@ -42,9 +42,10 @@ import {
   subscribeToDriverLocationUpdates,
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
+import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
 
 function PlatformBadge({ platform }: { platform: string | null }) {
-  const label = platform ?? "direct";
+  const label = platform ?? "自營派單";
   const bgColor = platform ? "#e0f7fa" : "#e8f5e9";
   const textColor = platform ? "#006064" : "#1b5e20";
   return (
@@ -57,7 +58,7 @@ function PlatformBadge({ platform }: { platform: string | null }) {
 function RouteLockedBadge() {
   return (
     <View style={[styles.badge, { backgroundColor: "#fff3e0" }]}>
-      <Text style={[styles.badgeText, { color: "#e65100" }]}>route-locked</Text>
+      <Text style={[styles.badgeText, { color: "#e65100" }]}>路線鎖定</Text>
     </View>
   );
 }
@@ -425,10 +426,10 @@ export default function TripScreen() {
     }
 
     Alert.alert(
-      "Permission required",
+      "需要權限",
       source === "camera"
-        ? "Camera access is required to capture trip proof photos."
-        : "Photo library access is required to attach trip proof photos.",
+        ? "需要相機權限才能拍攝行程佐證照片。"
+        : "需要相簿權限才能附加行程佐證照片。",
     );
     return false;
   }
@@ -436,8 +437,8 @@ export default function TripScreen() {
   async function pickProofPhotos(source: "camera" | "library") {
     if (remainingSlots <= 0) {
       Alert.alert(
-        "Photo limit reached",
-        `You can attach up to ${MAX_COMPLETION_PROOF_PHOTOS} proof photos.`,
+        "已達照片上限",
+        `最多只能附加 ${MAX_COMPLETION_PROOF_PHOTOS} 張佐證照片。`,
       );
       return;
     }
@@ -470,7 +471,7 @@ export default function TripScreen() {
     setProofPhotos(photos);
 
     if (rejected.length > 0) {
-      Alert.alert("Some photos were skipped", rejected.join("\n"));
+      Alert.alert("部分照片已略過", rejected.join("\n"));
     }
   }
 
@@ -507,27 +508,27 @@ export default function TripScreen() {
         case "complete":
           if (completionSubmitBlocker === "proof_requirements_unavailable") {
             Alert.alert(
-              "Trip details unavailable",
-              "Trip proof requirements could not be loaded. Refresh the trip before completing it.",
+              "行程資料暫時無法使用",
+              "目前無法載入行程佐證需求，請先重新整理行程，再完成任務。",
             );
             return;
           }
 
           if (completionSubmitBlocker === "expense_amount_invalid") {
             Alert.alert(
-              "Expense amount invalid",
-              "Enter a valid positive expense amount before completing this trip.",
+              "費用金額無效",
+              "請先輸入有效的正數費用金額，再完成此行程。",
             );
             return;
           }
 
           if (completionSubmitBlocker === "tracking_unavailable") {
             Alert.alert(
-              "Trip metrics unavailable",
+              "行程度量暫時無法使用",
               locationTrackingMessage ??
                 (locationTrackingState === "requesting_permission"
-                  ? "Location tracking is still starting. Wait a moment, then try again."
-                  : "Enable location tracking before completing the trip so distance and duration can be recorded."),
+                  ? "定位追蹤仍在啟動中，請稍候再試。"
+                  : "請先啟用定位追蹤，再完成行程，才能記錄距離與時長。"),
             );
             return;
           }
@@ -565,7 +566,7 @@ export default function TripScreen() {
         lastTrackedCoordinateRef.current = null;
       }
 
-      Alert.alert("Success", `Task ${action} successful`);
+      Alert.alert("成功", `已完成任務操作：${action}`);
       await loadTrip(false);
     } catch (actionError) {
       const actionErrorMessage = getErrorMessage(actionError);
@@ -581,7 +582,7 @@ export default function TripScreen() {
         }
       }
 
-      Alert.alert("Error", actionErrorMessage);
+      Alert.alert("錯誤", actionErrorMessage);
     } finally {
       setSubmittingAction(null);
     }
@@ -591,56 +592,54 @@ export default function TripScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" />
-        <Text style={styles.label}>Loading trip...</Text>
+        <Text style={styles.label}>載入行程中…</Text>
       </View>
     );
   }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>Trip Detail</Text>
+      <Text style={styles.title}>行程詳情</Text>
 
-      {error && <Text style={styles.error}>Error: {error}</Text>}
+      {error && <Text style={styles.error}>錯誤：{error}</Text>}
 
       {taskDetail ? (
         <View style={styles.card}>
           <View style={styles.cardHeader}>
-            <Text style={styles.taskId}>Task: {taskDetail.taskId}</Text>
+            <Text style={styles.taskId}>任務：{taskDetail.taskId}</Text>
             <View style={styles.badgeRow}>
               {isForwardedTask(taskDetail) && <RouteLockedBadge />}
               <PlatformBadge platform={taskDetail.sourcePlatform} />
             </View>
           </View>
           <Text style={styles.taskStatus}>
-            Status: {taskDetail.status ?? "unknown"}
+            狀態：{formatDriverTaskStatusLabel(taskDetail.status)}
           </Text>
           <Text style={styles.taskInfo}>
             {taskDetail.orderId
-              ? `Order: ${taskDetail.orderId}`
-              : "No order linked"}
+              ? `訂單：${taskDetail.orderId}`
+              : "尚未關聯訂單"}
           </Text>
           <RouteDisplay task={taskDetail} order={orderDetail} />
           {showTripMetrics && (
             <View style={styles.metricsCard}>
               <View style={styles.metricsHeader}>
-                <Text style={styles.metricsTitle}>Trip Metrics</Text>
+                <Text style={styles.metricsTitle}>行程度量</Text>
                 {isTripInProgress && (
                   <Text style={styles.metricsStatusPill}>
-                    {locationTrackingState === "active"
-                      ? "live"
-                      : "needs attention"}
+                    {locationTrackingState === "active" ? "追蹤中" : "需處理"}
                   </Text>
                 )}
               </View>
               <View style={styles.metricsGrid}>
                 <View style={styles.metricTile}>
-                  <Text style={styles.metricLabel}>Distance</Text>
+                  <Text style={styles.metricLabel}>距離</Text>
                   <Text style={styles.metricValue}>
                     {formatTripDistance(liveDistanceKm)}
                   </Text>
                 </View>
                 <View style={styles.metricTile}>
-                  <Text style={styles.metricLabel}>Duration</Text>
+                  <Text style={styles.metricLabel}>時長</Text>
                   <Text style={styles.metricValue}>
                     {formatTripDuration(liveDurationSec)}
                   </Text>
@@ -648,14 +647,13 @@ export default function TripScreen() {
               </View>
               {isTripInProgress && locationTrackingState === "active" && (
                 <Text style={styles.metricHint}>
-                  {locationTrackingMessage ??
-                    "Live location tracking is active for this trip."}
+                  {locationTrackingMessage ?? "此行程已啟用即時定位追蹤。"}
                 </Text>
               )}
               {isTripInProgress &&
                 locationTrackingState === "requesting_permission" && (
                   <Text style={styles.metricWarning}>
-                    Allow location access to start live trip tracking.
+                    請允許定位權限以啟動即時行程追蹤。
                   </Text>
                 )}
               {isTripInProgress &&
@@ -664,10 +662,10 @@ export default function TripScreen() {
                   <>
                     <Text style={styles.metricWarning}>
                       {locationTrackingMessage ??
-                        "Trip metrics could not start. Retry location tracking. You can still complete the trip once foreground tracking is available."}
+                        "行程度量無法啟動。請重試定位追蹤；待前景追蹤可用後，仍可完成行程。"}
                     </Text>
                     <ActionButton
-                      label="Retry Tracking"
+                      label="重試追蹤"
                       onPress={() =>
                         setTrackingRetryKey((current) => current + 1)
                       }
@@ -680,7 +678,7 @@ export default function TripScreen() {
           )}
           {complianceGates.length > 0 && (
             <View style={styles.complianceCard}>
-              <Text style={styles.complianceTitle}>Compliance Gates</Text>
+              <Text style={styles.complianceTitle}>合規檢查</Text>
               {complianceGates.map((gate) => {
                 const tone = getComplianceTone(gate.state);
                 return (
@@ -709,7 +707,7 @@ export default function TripScreen() {
                     </Text>
                     {gate.missingItems.length > 0 && (
                       <Text style={styles.complianceGateMeta}>
-                        Missing: {gate.missingItems.join(", ")}
+                        缺少項目：{gate.missingItems.join(", ")}
                       </Text>
                     )}
                   </View>
@@ -719,69 +717,64 @@ export default function TripScreen() {
           )}
           {isForwardedTask(taskDetail) && (
             <Text style={styles.forwardedNote}>
-              Dispatched by {taskDetail.sourcePlatform}. Dispatch rules are
-              managed by the source platform.
+              此任務由 {taskDetail.sourcePlatform}{" "}
+              派發，派遣規則由來源平台管理。
             </Text>
           )}
         </View>
       ) : (
-        <Text style={styles.empty}>No active trip.</Text>
+        <Text style={styles.empty}>目前沒有進行中的行程。</Text>
       )}
 
       {!isForwardedTask(taskDetail) && taskDetail && (
         <>
           <View style={styles.proofCard}>
             <View style={styles.proofHeader}>
-              <Text style={styles.proofTitle}>Completion Proof</Text>
+              <Text style={styles.proofTitle}>完單佐證</Text>
               <Text style={styles.proofCounter}>
-                {proofPhotos.length}/{MAX_COMPLETION_PROOF_PHOTOS} attached
+                已附加 {proofPhotos.length}/{MAX_COMPLETION_PROOF_PHOTOS}
               </Text>
             </View>
 
             <Text style={styles.proofHint}>
-              Attach up to 5 photos. Each proof photo must stay below 600KB
-              after compression.
+              最多可附加 5 張照片。每張佐證照片壓縮後需低於 600KB。
             </Text>
 
             {proofRequirementsUnavailable && (
               <Text style={styles.unsupportedNote}>
-                Trip proof requirements are unavailable until order details
-                load. Refresh the trip before completing it.
+                需待訂單詳情載入後才能確認佐證需求；請先重新整理行程，再完成任務。
               </Text>
             )}
 
             {proofRequirements.minPhotoCount > 0 && (
               <Text style={styles.requirementNote}>
-                This trip requires at least {proofRequirements.minPhotoCount}{" "}
-                proof photo
-                {proofRequirements.minPhotoCount === 1 ? "" : "s"}.
+                此行程至少需要 {proofRequirements.minPhotoCount} 張佐證照片。
                 {missingRequiredPhotos > 0
-                  ? ` Add ${missingRequiredPhotos} more before completion.`
-                  : " Photo requirement met."}
+                  ? ` 完成前還需補上 ${missingRequiredPhotos} 張。`
+                  : " 已達照片需求。"}
               </Text>
             )}
 
             {proofRequirements.signoffRequired && (
               <View style={styles.requirementCard}>
                 <Text style={styles.requirementCardTitle}>
-                  Signoff proof required
+                  必須提供簽收佐證
                 </Text>
                 <Text style={styles.requirementCardHint}>
-                  Capture the passenger or onsite signoff reference before trip
-                  completion.
+                  完成行程前，請填寫乘客或現場簽收識別資料。
                 </Text>
                 <TextInput
                   style={styles.proofInput}
                   value={signoffReference}
                   onChangeText={setSignoffReference}
                   editable={submittingAction === null}
-                  placeholder="Passenger signoff or receipt reference"
+                  placeholder="乘客簽收或簽收單號"
                   autoCapitalize="characters"
                 />
                 <Text style={styles.requirementStatus}>
                   {signoffRequirementMissing
-                    ? "Missing signoff reference."
-                    : "Signoff requirement ready."}
+                    ? "尚未填寫簽收識別資料。"
+                    : "簽收需求已完成。"}
                 </Text>
               </View>
             )}
@@ -789,18 +782,17 @@ export default function TripScreen() {
             {proofRequirements.expenseProofRequired && (
               <View style={styles.requirementCard}>
                 <Text style={styles.requirementCardTitle}>
-                  Expense proof required
+                  必須提供費用佐證
                 </Text>
                 <Text style={styles.requirementCardHint}>
-                  Add one reimbursable expense with a type, amount, and receipt
-                  reference for finance review.
+                  請填寫一筆可報銷費用，包含類型、金額與單據識別，供財務覆核。
                 </Text>
                 <TextInput
                   style={styles.proofInput}
                   value={expenseType}
                   onChangeText={setExpenseType}
                   editable={submittingAction === null}
-                  placeholder="Expense type, for example toll or parking"
+                  placeholder="費用類型，例如過路費或停車費"
                   autoCapitalize="none"
                 />
                 <TextInput
@@ -808,7 +800,7 @@ export default function TripScreen() {
                   value={expenseAmount}
                   onChangeText={setExpenseAmount}
                   editable={submittingAction === null}
-                  placeholder="Amount, for example 40 or 40.50"
+                  placeholder="金額，例如 40 或 40.50"
                   keyboardType="decimal-pad"
                 />
                 <TextInput
@@ -816,22 +808,24 @@ export default function TripScreen() {
                   value={expenseAttachmentRef}
                   onChangeText={setExpenseAttachmentRef}
                   editable={submittingAction === null}
-                  placeholder="Receipt or attachment reference"
+                  placeholder="單據或附件識別"
                   autoCapitalize="characters"
                 />
                 <Text style={styles.requirementStatus}>
                   {expenseAmountInvalid
-                    ? "Enter a valid positive amount."
+                    ? "請輸入有效的正數金額。"
                     : expenseRequirementMissing
-                      ? "Missing expense proof details."
-                      : `Expense proof ready${expenseAttachmentId ? `: ${expenseAttachmentId}` : ""}.`}
+                      ? "費用佐證資料尚未填完整。"
+                      : expenseAttachmentId
+                        ? `費用佐證已完成：${expenseAttachmentId}`
+                        : "費用佐證已完成。"}
                 </Text>
               </View>
             )}
 
             <View style={styles.proofActions}>
               <ActionButton
-                label="Use Camera"
+                label="拍照上傳"
                 onPress={() => void pickProofPhotos("camera")}
                 disabled={
                   submittingAction !== null ||
@@ -841,7 +835,7 @@ export default function TripScreen() {
                 variant="secondary"
               />
               <ActionButton
-                label="From Library"
+                label="從相簿選取"
                 onPress={() => void pickProofPhotos("library")}
                 disabled={
                   submittingAction !== null ||
@@ -864,7 +858,7 @@ export default function TripScreen() {
                       {Math.round(photo.estimatedBytes / 1024)} KB
                     </Text>
                     <ActionButton
-                      label="Remove"
+                      label="移除"
                       onPress={() => removeProofPhoto(index)}
                       disabled={submittingAction !== null}
                       variant="secondary"
@@ -873,37 +867,33 @@ export default function TripScreen() {
                 ))}
               </View>
             ) : (
-              <Text style={styles.emptyProofState}>
-                No proof photos selected yet.
-              </Text>
+              <Text style={styles.emptyProofState}>尚未選取佐證照片。</Text>
             )}
           </View>
 
           <View style={styles.actions}>
             <ActionButton
-              label="Accept"
+              label="接受任務"
               onPress={() => void handleAction("accept")}
               disabled={submittingAction !== null}
             />
             <ActionButton
-              label="Depart"
+              label="前往接送點"
               onPress={() => void handleAction("depart")}
               disabled={submittingAction !== null}
             />
             <ActionButton
-              label="Arrived"
+              label="抵達上車點"
               onPress={() => void handleAction("arrived")}
               disabled={submittingAction !== null}
             />
             <ActionButton
-              label="Start Trip"
+              label="開始行程"
               onPress={() => void handleAction("start")}
               disabled={submittingAction !== null}
             />
             <ActionButton
-              label={
-                submittingAction === "complete" ? "Completing..." : "Complete"
-              }
+              label={submittingAction === "complete" ? "完成中…" : "完成行程"}
               onPress={() => void handleAction("complete")}
               disabled={shouldDisableCompleteTripAction({
                 submittingAction,
@@ -922,14 +912,14 @@ export default function TripScreen() {
       {taskDetail && isForwardedTask(taskDetail) && (
         <View style={styles.actions}>
           <Text style={styles.forwardedActionNote}>
-            Actions are managed by {taskDetail.sourcePlatform}.
+            任務操作由 {taskDetail.sourcePlatform} 管理。
           </Text>
         </View>
       )}
 
       <View style={styles.footer}>
         <Text style={styles.link} onPress={() => router.push("/incident")}>
-          SOS Emergency →
+          SOS 緊急通報 →
         </Text>
       </View>
     </ScrollView>

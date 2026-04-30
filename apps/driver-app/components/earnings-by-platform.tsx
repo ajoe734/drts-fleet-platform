@@ -45,19 +45,16 @@ function PlatformCard({ item }: { item: PlatformEarningsItem }) {
       <View style={styles.cardHeader}>
         <Text style={styles.platformCode}>{item.platformCode}</Text>
         <Text style={styles.netSummary}>
-          Net: {formatMoney(item.netAmount)}
+          實拿：{formatMoney(item.netAmount)}
         </Text>
         <Text style={styles.chevron}>{expanded ? "▲" : "▼"}</Text>
       </View>
       {expanded && (
         <View style={styles.detail}>
-          <EarningRow label="Gross" value={formatMoney(item.grossEarning)} />
-          <EarningRow
-            label="Service Fee"
-            value={formatMoney(item.serviceFee)}
-          />
-          <EarningRow label="Subsidy" value={formatMoney(item.subsidy)} />
-          <EarningRow label="Net" value={formatMoney(item.netAmount)} net />
+          <EarningRow label="總收入" value={formatMoney(item.grossEarning)} />
+          <EarningRow label="平台服務費" value={formatMoney(item.serviceFee)} />
+          <EarningRow label="補貼" value={formatMoney(item.subsidy)} />
+          <EarningRow label="實拿" value={formatMoney(item.netAmount)} net />
         </View>
       )}
     </TouchableOpacity>
@@ -70,7 +67,7 @@ export function EarningsByPlatform({
   items: PlatformEarningsItem[];
 }) {
   if (items.length === 0) {
-    return <Text style={styles.empty}>No earnings data for this period.</Text>;
+    return <Text style={styles.empty}>此期間尚無收入資料。</Text>;
   }
   return (
     <View>

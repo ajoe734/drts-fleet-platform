@@ -720,9 +720,9 @@ This scenario inventory feeds the workflow-family release matrix at
 
 ---
 
-### 2.4 Health & Quotas
+### 2.4 Health & Alerts
 
-#### PA-008 — Health dashboard shows service statuses
+#### PA-008 — Health dashboard shows workflow alerts and adapter status
 
 **Steps**
 
@@ -730,8 +730,8 @@ This scenario inventory feeds the workflow-family release matrix at
 
 **Expected**
 
-- Service health indicators visible
-- Quotas summary shown (note: may be simulated data if dedicated endpoint not yet available)
+- Workflow alert indicators visible
+- Forwarder adapter status visible
 
 ---
 

@@ -36,21 +36,17 @@ export default function IncidentScreen() {
     const client = getDriverClient();
     try {
       await client.createIncident({
-        title: "Driver SOS emergency",
-        description:
-          details.trim() || "SOS alert triggered from the driver app.",
+        title: "司機 SOS 緊急通報",
+        description: details.trim() || "已由司機 App 送出 SOS 緊急通報。",
         category: "safety",
         severity: "critical",
         reportedBy: "driver",
       });
-      Alert.alert(
-        "SOS sent",
-        "Operations has received your critical safety alert.",
-      );
+      Alert.alert("已送出 SOS", "營運已收到你的重大安全警示。");
       setDetails("");
       router.replace("/trip");
     } catch (e: any) {
-      Alert.alert("Error", e.message);
+      Alert.alert("錯誤", e.message);
     } finally {
       setSubmitting(false);
     }
@@ -60,7 +56,7 @@ export default function IncidentScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" />
-        <Text style={styles.loadingLabel}>Loading...</Text>
+        <Text style={styles.loadingLabel}>載入中…</Text>
       </View>
     );
   }
@@ -68,8 +64,8 @@ export default function IncidentScreen() {
   if (!incidentsEnabled) {
     return (
       <View style={styles.center}>
-        <Text style={styles.disabledTitle}>Incident Reporting Unavailable</Text>
-        <Text style={styles.empty}>This feature is currently disabled.</Text>
+        <Text style={styles.disabledTitle}>事件回報暫停提供</Text>
+        <Text style={styles.empty}>此功能目前未啟用。</Text>
       </View>
     );
   }
@@ -77,25 +73,22 @@ export default function IncidentScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.heroCard}>
-        <Text style={styles.eyebrow}>Driver Safety</Text>
-        <Text style={styles.title}>SOS Emergency</Text>
-        <Text style={styles.subtitle}>
-          One tap sends a critical safety incident to operations immediately.
-        </Text>
+        <Text style={styles.eyebrow}>司機安全</Text>
+        <Text style={styles.title}>SOS 緊急通報</Text>
+        <Text style={styles.subtitle}>一鍵立即把重大安全事件通報給營運。</Text>
       </View>
 
       <View style={styles.noticeCard}>
-        <Text style={styles.noticeTitle}>Dispatch behavior</Text>
+        <Text style={styles.noticeTitle}>派遣處理說明</Text>
         <Text style={styles.noticeBody}>
-          This screen always creates an incident with category safety and
-          severity critical.
+          此畫面送出的事件會固定標記為安全類別與重大等級。
         </Text>
       </View>
 
-      <Text style={styles.fieldLabel}>Additional details (optional)</Text>
+      <Text style={styles.fieldLabel}>補充說明（選填）</Text>
       <TextInput
         style={styles.input}
-        placeholder="Share location, passenger status, or immediate risk..."
+        placeholder="可補充目前位置、乘客狀況或即時風險…"
         multiline
         numberOfLines={4}
         value={details}
@@ -107,12 +100,12 @@ export default function IncidentScreen() {
         style={[styles.sosButton, submitting && styles.submitBtnDisabled]}
         onPress={submitting ? undefined : handleSubmit}
       >
-        {submitting ? "Sending SOS..." : "Send SOS Alert"}
+        {submitting ? "送出中…" : "送出 SOS 警示"}
       </Text>
 
       <View style={styles.footer}>
         <Text style={styles.link} onPress={() => router.replace("/trip")}>
-          Back to Trip
+          返回行程
         </Text>
       </View>
     </View>
