@@ -26,9 +26,19 @@ interface DispatchWorkflowProps {
   focusOrderId?: string;
 }
 
-type QueueState = "pending" | "reserved" | "exception";
+type QueueState =
+  | "pending"
+  | "reserved"
+  | "exception"
+  | "timeout"
+  | "no_supply";
 type FilterMode = "all" | "attention" | "queued";
-type ActionMode = "release" | "cancel" | "fare_override";
+type ActionMode =
+  | "release"
+  | "cancel"
+  | "fare_override"
+  | "redispatch_with_reason"
+  | "resolve_no_supply";
 
 interface ActionDraft {
   mode: ActionMode;
@@ -36,6 +46,9 @@ interface ActionDraft {
   traceId: string;
   fareAmount: string;
   fareCurrency: string;
+  reasonNote: string;
+  escalationTarget: string;
+  noSupplyResolution: "retry_dispatch" | "cancel_with_notification";
 }
 
 function getQueueState(
@@ -43,6 +56,9 @@ function getQueueState(
   job?: DispatchJobRecord,
 ): QueueState {
   if (order.status === "exception_hold") return "exception";
+  if (order.status === "dispatch_timeout") return "timeout";
+  if (order.status === "no_supply" || order.status === "delayed_queue")
+    return "no_supply";
   if (job?.status === "reserved") return "reserved";
   return "pending";
 }
@@ -55,6 +71,10 @@ function getQueueStateKey(state: QueueState): string {
       return "dispatch.workflow.queue.reserved";
     case "exception":
       return "dispatch.workflow.queue.exception";
+    case "timeout":
+      return "dispatch.workflow.queue.timeout";
+    case "no_supply":
+      return "dispatch.workflow.queue.noSupply";
   }
 }
 
@@ -66,6 +86,10 @@ function getQueueStateColor(state: QueueState): string {
       return "bg-blue-100 text-blue-800";
     case "exception":
       return "bg-amber-100 text-amber-800";
+    case "timeout":
+      return "bg-rose-100 text-rose-800";
+    case "no_supply":
+      return "bg-orange-100 text-orange-800";
   }
 }
 
@@ -117,6 +141,9 @@ function buildActionDraft(
         ? (order.quotedFare.amountMinor / 100).toFixed(2)
         : "0.00",
     fareCurrency: order.quotedFare?.currency ?? "TWD",
+    reasonNote: "",
+    escalationTarget: "",
+    noSupplyResolution: "retry_dispatch",
   };
 }
 
@@ -310,7 +337,12 @@ export function DispatchWorkflow({
       const needsAttention =
         order.status === "redispatch_required" ||
         order.status === "exception_hold" ||
+        order.status === "dispatch_timeout" ||
+        order.status === "no_supply" ||
+        order.status === "delayed_queue" ||
         job?.status === "failed" ||
+        job?.status === "timed_out" ||
+        job?.status === "no_supply" ||
         job?.status === "redispatch_required";
       if (!needsAttention) return false;
     }
@@ -407,7 +439,16 @@ export function DispatchWorkflow({
 
   const handleRedispatch = async (orderId: string) => {
     await runAction(orderId, async () => {
-      await client.redispatchOrder(orderId);
+      await client.redispatchOrder(orderId, "operator_redispatch");
+    });
+  };
+
+  const handleResolveNoSupply = async (
+    orderId: string,
+    resolution: "retry_dispatch" | "cancel_with_notification",
+  ) => {
+    await runAction(orderId, async () => {
+      await client.resolveNoSupply(orderId, resolution);
     });
   };
 
@@ -445,6 +486,46 @@ export function DispatchWorkflow({
     order: OwnedOrderRecord,
     draft: ActionDraft,
   ) => {
+    if (draft.mode === "resolve_no_supply") {
+      const success = await runAction(order.orderId, async () => {
+        await client.resolveNoSupply(order.orderId, draft.noSupplyResolution);
+      });
+      if (success) {
+        closeActionDraft(order.orderId);
+      }
+      return;
+    }
+
+    if (draft.mode === "redispatch_with_reason") {
+      const reason = draft.reason.trim();
+      if (!reason) {
+        throw new Error(t("dispatch.workflow.actionFieldsRequired"));
+      }
+      const success = await runAction(order.orderId, async () => {
+        const options: {
+          reasonNote?: string;
+          escalationTarget?: "ops_supervisor" | "dispatch_manager" | null;
+        } = {};
+        const reasonNote = draft.reasonNote.trim();
+        const escalationTarget = draft.escalationTarget.trim();
+
+        if (reasonNote) {
+          options.reasonNote = reasonNote;
+        }
+        if (escalationTarget) {
+          options.escalationTarget = escalationTarget as
+            | "ops_supervisor"
+            | "dispatch_manager";
+        }
+
+        await client.redispatchOrder(order.orderId, reason, options);
+      });
+      if (success) {
+        closeActionDraft(order.orderId);
+      }
+      return;
+    }
+
     const reason = draft.reason.trim();
     const traceId = draft.traceId.trim();
     if (!reason || !traceId) {
@@ -491,7 +572,13 @@ export function DispatchWorkflow({
       acc[state] += 1;
       return acc;
     },
-    { pending: 0, reserved: 0, exception: 0 } as Record<QueueState, number>,
+    {
+      pending: 0,
+      reserved: 0,
+      exception: 0,
+      timeout: 0,
+      no_supply: 0,
+    } as Record<QueueState, number>,
   );
 
   return (
@@ -536,7 +623,15 @@ export function DispatchWorkflow({
       </div>
 
       <div className="queue-summary">
-        {(["pending", "reserved", "exception"] as QueueState[]).map((state) => (
+        {(
+          [
+            "pending",
+            "reserved",
+            "exception",
+            "timeout",
+            "no_supply",
+          ] as QueueState[]
+        ).map((state) => (
           <div
             key={state}
             className={`queue-card ${getQueueStateColor(state)}`}
@@ -580,6 +675,10 @@ export function DispatchWorkflow({
                 const isRedispatchRequired =
                   order.status === "redispatch_required";
                 const isExceptionHold = order.status === "exception_hold";
+                const isDispatchTimeout = order.status === "dispatch_timeout";
+                const isNoSupply =
+                  order.status === "no_supply" ||
+                  order.status === "delayed_queue";
                 const etaInfo = job
                   ? formatEta(locale, job.latestEtaMinutes, job.updatedAt)
                   : { display: "-", tooltip: t("dispatch.workflow.noJobEta") };
@@ -611,9 +710,9 @@ export function DispatchWorkflow({
                     className={
                       isFocused
                         ? "row-focused"
-                        : isRedispatchRequired
+                        : isRedispatchRequired || isDispatchTimeout
                           ? "row-alert"
-                          : isExceptionHold
+                          : isExceptionHold || isNoSupply
                             ? "row-warning"
                             : ""
                     }
@@ -661,6 +760,23 @@ export function DispatchWorkflow({
                           {formatOpsCodeLabel(locale, queueEntryReason)}
                         </div>
                       )}
+                      {order.dispatchAttemptCount > 0 && (
+                        <div className="cell-subcopy">
+                          {t("dispatch.workflow.attemptCount", {
+                            count: order.dispatchAttemptCount,
+                          })}
+                        </div>
+                      )}
+                      {order.lastDispatchFailureReason && (
+                        <div className="cell-subcopy">
+                          {t("dispatch.workflow.lastFailure", {
+                            reason: formatOpsCodeLabel(
+                              locale,
+                              order.lastDispatchFailureReason,
+                            ),
+                          })}
+                        </div>
+                      )}
                       {isExceptionHold && exceptionHold && (
                         <>
                           <div className="cell-title exception-copy">
@@ -681,6 +797,26 @@ export function DispatchWorkflow({
                             })}
                           </div>
                         </>
+                      )}
+                      {isDispatchTimeout && order.dispatchTimeout && (
+                        <div className="cell-title exception-copy">
+                          {t("dispatch.workflow.timeoutReason", {
+                            reason: formatOpsCodeLabel(
+                              locale,
+                              order.dispatchTimeout.timeoutReasonCode,
+                            ),
+                          })}
+                        </div>
+                      )}
+                      {isNoSupply && order.noSupplyEscalation && (
+                        <div className="cell-title exception-copy">
+                          {t("dispatch.workflow.noSupplyAction", {
+                            action: formatOpsCodeLabel(
+                              locale,
+                              order.noSupplyEscalation.escalationAction,
+                            ),
+                          })}
+                        </div>
                       )}
                     </td>
                     <td>
@@ -868,7 +1004,9 @@ export function DispatchWorkflow({
                             {t("dispatch.workflow.reassign")}
                           </button>
                         )}
-                        {(isRedispatchRequired || isExceptionHold) && (
+                        {(isRedispatchRequired ||
+                          isExceptionHold ||
+                          isDispatchTimeout) && (
                           <button
                             className="btn btn-warning"
                             disabled={loading === order.orderId}
@@ -876,6 +1014,45 @@ export function DispatchWorkflow({
                             onClick={() => handleRedispatch(order.orderId)}
                           >
                             {t("dispatch.workflow.redispatch")}
+                          </button>
+                        )}
+                        {(isRedispatchRequired || isDispatchTimeout) && (
+                          <button
+                            className="btn"
+                            disabled={loading === order.orderId}
+                            type="button"
+                            onClick={() =>
+                              openActionDraft(order, "redispatch_with_reason")
+                            }
+                          >
+                            {t("dispatch.workflow.redispatchWithReason")}
+                          </button>
+                        )}
+                        {isNoSupply && (
+                          <button
+                            className="btn btn-primary"
+                            disabled={loading === order.orderId}
+                            type="button"
+                            onClick={() =>
+                              handleResolveNoSupply(
+                                order.orderId,
+                                "retry_dispatch",
+                              )
+                            }
+                          >
+                            {t("dispatch.workflow.retryDispatch")}
+                          </button>
+                        )}
+                        {isNoSupply && (
+                          <button
+                            className="btn"
+                            disabled={loading === order.orderId}
+                            type="button"
+                            onClick={() =>
+                              openActionDraft(order, "resolve_no_supply")
+                            }
+                          >
+                            {t("dispatch.workflow.resolveNoSupply")}
                           </button>
                         )}
                         {isExceptionHold && (
@@ -989,6 +1166,70 @@ export function DispatchWorkflow({
                                 </label>
                               </div>
                             )}
+                            {actionDraft.mode === "redispatch_with_reason" && (
+                              <>
+                                <label className="field-label">
+                                  {t("dispatch.workflow.reasonNote")}
+                                  <textarea
+                                    className="action-input"
+                                    value={actionDraft.reasonNote}
+                                    onChange={(event) =>
+                                      updateActionDraft(order.orderId, {
+                                        reasonNote: event.target.value,
+                                      })
+                                    }
+                                    rows={2}
+                                  />
+                                </label>
+                                <label className="field-label">
+                                  {t("dispatch.workflow.escalationTarget")}
+                                  <select
+                                    className="action-input"
+                                    value={actionDraft.escalationTarget}
+                                    onChange={(event) =>
+                                      updateActionDraft(order.orderId, {
+                                        escalationTarget: event.target.value,
+                                      })
+                                    }
+                                  >
+                                    <option value="">
+                                      {t("dispatch.workflow.noEscalation")}
+                                    </option>
+                                    <option value="ops_supervisor">
+                                      {t("dispatch.workflow.escalateOps")}
+                                    </option>
+                                    <option value="dispatch_manager">
+                                      {t("dispatch.workflow.escalateManager")}
+                                    </option>
+                                  </select>
+                                </label>
+                              </>
+                            )}
+                            {actionDraft.mode === "resolve_no_supply" && (
+                              <label className="field-label">
+                                {t("dispatch.workflow.noSupplyResolution")}
+                                <select
+                                  className="action-input"
+                                  value={actionDraft.noSupplyResolution}
+                                  onChange={(event) =>
+                                    updateActionDraft(order.orderId, {
+                                      noSupplyResolution: event.target.value as
+                                        | "retry_dispatch"
+                                        | "cancel_with_notification",
+                                    })
+                                  }
+                                >
+                                  <option value="retry_dispatch">
+                                    {t("dispatch.workflow.retryDispatch")}
+                                  </option>
+                                  <option value="cancel_with_notification">
+                                    {t(
+                                      "dispatch.workflow.cancelWithNotification",
+                                    )}
+                                  </option>
+                                </select>
+                              </label>
+                            )}
                             <div className="action-row">
                               <button
                                 className="btn btn-primary"
@@ -1068,7 +1309,7 @@ export function DispatchWorkflow({
           border-color: #0f172a;
         }
         .queue-summary {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(5, minmax(0, 1fr));
           margin-bottom: 0.75rem;
         }
         .queue-card {

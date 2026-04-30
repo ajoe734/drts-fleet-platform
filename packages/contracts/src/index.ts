@@ -978,6 +978,9 @@ export const OWNED_ORDER_STATUSES = [
   "cancelled",
   "redispatch_required",
   "dispatch_failed",
+  "dispatch_timeout",
+  "no_supply",
+  "delayed_queue",
   "exception_hold",
 ] as const;
 export type OwnedOrderStatus = (typeof OWNED_ORDER_STATUSES)[number];
@@ -988,6 +991,8 @@ export const DISPATCH_JOB_STATUSES = [
   "queued",
   "assigned",
   "failed",
+  "timed_out",
+  "no_supply",
   "redispatch_required",
   "closed",
 ] as const;
@@ -1038,6 +1043,7 @@ export const DISPATCH_QUEUE_FAMILIES = [
   "realtime_ready_queue",
   "reservation_confirmation_queue",
   "redispatch_priority_queue",
+  "delayed_retry_queue",
   "exception_hold_queue",
   "recording_gate_queue",
   "manual_review_queue",
@@ -1050,6 +1056,9 @@ export const DISPATCH_QUEUE_ENTRY_REASONS = [
   "redispatch_retry_required",
   "recording_missing_for_dispatch",
   "dispatch_manual_review_required",
+  "dispatch_timeout_retry",
+  "no_supply_delayed_retry",
+  "no_supply_escalated_to_ops",
   "exception_hold_no_eligible_supply",
   "exception_hold_confirmation_window_expired",
   "exception_hold_driver_rejected_in_window",
@@ -1414,6 +1423,9 @@ export interface ReassignDispatchCommand {
 
 export interface RedispatchOrderCommand {
   reasonCode: string;
+  reasonNote?: string;
+  operatorId?: string;
+  escalationTarget?: "ops_supervisor" | "dispatch_manager" | null;
 }
 
 export interface CancelOwnedOrderCommand {
@@ -1527,6 +1539,10 @@ export interface OwnedOrderRecord {
   reservationHoldExpiresAt: string | null;
   queueFamily?: DispatchQueueFamily | null;
   queueEntryReason?: DispatchQueueEntryReason | null;
+  dispatchAttemptCount: number;
+  lastDispatchFailureReason: string | null;
+  noSupplyEscalation: NoSupplyEscalationRecord | null;
+  dispatchTimeout: DispatchTimeoutRecord | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1606,9 +1622,66 @@ export interface DispatchAttemptRecord {
     | "assigned"
     | "reassigned"
     | "rejected"
+    | "timed_out"
+    | "no_supply"
     | "failed";
   reasonCode: string | null;
   createdAt: string;
+}
+
+// --- Redispatch / Reassign Reason Codes ---
+
+export const REDISPATCH_REASON_CODES = [
+  "operator_redispatch",
+  "driver_rejected",
+  "dispatch_timeout",
+  "no_supply_available",
+  "vehicle_became_unavailable",
+  "customer_request",
+  "system_redispatch",
+] as const;
+export type RedispatchReasonCode = (typeof REDISPATCH_REASON_CODES)[number];
+
+export const REASSIGN_REASON_CODES = [
+  "operator_reassign",
+  "driver_unavailable",
+  "vehicle_swap",
+  "customer_request",
+  "load_balancing",
+] as const;
+export type ReassignReasonCode = (typeof REASSIGN_REASON_CODES)[number];
+
+// --- No-Supply Escalation ---
+
+export const NO_SUPPLY_ESCALATION_ACTIONS = [
+  "retry_dispatch",
+  "expand_search_radius",
+  "escalate_to_ops",
+  "move_to_delayed_queue",
+  "cancel_with_notification",
+] as const;
+export type NoSupplyEscalationAction =
+  (typeof NO_SUPPLY_ESCALATION_ACTIONS)[number];
+
+export interface NoSupplyEscalationRecord {
+  orderId: string;
+  dispatchJobId: string;
+  attemptCount: number;
+  lastAttemptAt: string;
+  escalationAction: NoSupplyEscalationAction;
+  escalatedAt: string;
+  resolvedAt: string | null;
+}
+
+// --- Dispatch Timeout ---
+
+export interface DispatchTimeoutRecord {
+  orderId: string;
+  dispatchJobId: string;
+  timeoutAt: string;
+  timeoutReasonCode: "acceptance_timeout" | "matching_timeout";
+  previousAssignmentId: string | null;
+  escalationAction: NoSupplyEscalationAction;
 }
 
 export interface DispatchAssignmentRecord {

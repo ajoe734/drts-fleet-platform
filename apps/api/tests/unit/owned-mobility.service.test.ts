@@ -642,12 +642,19 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       "exception_hold_no_eligible_supply",
     );
 
-    const resolvedOrder = service.resolveExceptionHold(booking.orderId, {
-      resolution: "release_to_dispatch",
-      operatorId: "ops-user-001",
-      reason: "Supply confirmed manually",
-      traceId: "trace-exception-release-001",
-    });
+    const resolvedOrder = service.resolveExceptionHold(
+      booking.orderId,
+      {
+        resolution: "release_to_dispatch",
+        operatorId: "ops-user-001",
+        reason: "Supply confirmed manually",
+        traceId: "trace-exception-release-001",
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-user-001",
+      } as never,
+    );
 
     expect(resolvedOrder.status).toBe("ready_for_dispatch");
     expect(resolvedOrder.reservationHoldStatus).toBe("requested");
@@ -696,12 +703,19 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
 
     service.dispatchOrder(booking.orderId, { mode: "auto" });
-    service.resolveExceptionHold(booking.orderId, {
-      resolution: "release_to_dispatch",
-      operatorId: "ops-user-001",
-      reason: "Retry dispatch",
-      traceId: "trace-exception-release-002",
-    });
+    service.resolveExceptionHold(
+      booking.orderId,
+      {
+        resolution: "release_to_dispatch",
+        operatorId: "ops-user-001",
+        reason: "Retry dispatch",
+        traceId: "trace-exception-release-002",
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-user-001",
+      } as never,
+    );
 
     const redispatchResult = service.dispatchOrder(booking.orderId, {
       mode: "auto",
@@ -742,12 +756,19 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
 
     service.dispatchOrder(booking.orderId, { mode: "auto" });
-    service.resolveExceptionHold(booking.orderId, {
-      resolution: "release_to_dispatch",
-      operatorId: "ops-user-001",
-      reason: "Retry dispatch after manual confirmation",
-      traceId: "trace-exception-release-003",
-    });
+    service.resolveExceptionHold(
+      booking.orderId,
+      {
+        resolution: "release_to_dispatch",
+        operatorId: "ops-user-001",
+        reason: "Retry dispatch after manual confirmation",
+        traceId: "trace-exception-release-003",
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-user-001",
+      } as never,
+    );
 
     regulatoryRegistryService.getEligibleCandidates.mockReturnValue(candidates);
 
@@ -789,12 +810,19 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
 
     service.dispatchOrder(booking.orderId, { mode: "auto" });
 
-    const cancelledOrder = service.resolveExceptionHold(booking.orderId, {
-      resolution: "cancel_order",
-      operatorId: "ops-user-002",
-      reason: "No supply available, rider notified",
-      traceId: "trace-exception-cancel-001",
-    });
+    const cancelledOrder = service.resolveExceptionHold(
+      booking.orderId,
+      {
+        resolution: "cancel_order",
+        operatorId: "ops-user-002",
+        reason: "No supply available, rider notified",
+        traceId: "trace-exception-cancel-001",
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-user-002",
+      } as never,
+    );
 
     expect(cancelledOrder.status).toBe("cancelled");
     expect(cancelledOrder.reservationHoldStatus).toBe("released");
@@ -907,25 +935,85 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
 
     expect(() =>
-      service.resolveExceptionHold(order.orderId, {
-        resolution: "release_to_dispatch",
-        operatorId: "ops-001",
-        reason: "test",
-        traceId: "trace-exception-invalid-001",
-      }),
+      service.resolveExceptionHold(
+        order.orderId,
+        {
+          resolution: "release_to_dispatch",
+          operatorId: "ops-001",
+          reason: "test",
+          traceId: "trace-exception-invalid-001",
+        },
+        {
+          actorType: "ops_user",
+          actorId: "ops-001",
+        } as never,
+      ),
     ).toThrowError(ApiRequestError);
 
     try {
-      service.resolveExceptionHold(order.orderId, {
-        resolution: "release_to_dispatch",
-        operatorId: "ops-001",
-        reason: "test",
-        traceId: "trace-exception-invalid-001",
-      });
+      service.resolveExceptionHold(
+        order.orderId,
+        {
+          resolution: "release_to_dispatch",
+          operatorId: "ops-001",
+          reason: "test",
+          traceId: "trace-exception-invalid-001",
+        },
+        {
+          actorType: "ops_user",
+          actorId: "ops-001",
+        } as never,
+      );
     } catch (error) {
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
           code: "ORDER_NOT_IN_EXCEPTION_HOLD",
+        },
+      });
+    }
+  });
+
+  it("rejects resolveExceptionHold without authenticated identity even when operatorId is provided", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T12:20:00.000Z",
+        reservationWindowEnd: "2026-04-29T13:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+
+    expect(() =>
+      service.resolveExceptionHold(booking.orderId, {
+        resolution: "release_to_dispatch",
+        operatorId: "ops-user-001",
+        reason: "Attempt without identity",
+        traceId: "trace-exception-forbidden-001",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.resolveExceptionHold(booking.orderId, {
+        resolution: "release_to_dispatch",
+        operatorId: "ops-user-001",
+        reason: "Attempt without identity",
+        traceId: "trace-exception-forbidden-001",
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "EXCEPTION_HOLD_OVERRIDE_FORBIDDEN",
         },
       });
     }
@@ -1394,5 +1482,260 @@ describe("Queue-entry policy and dispatch semantics contracts", () => {
     );
     expect(EXCEPTION_HOLD_REASON_CODES).toContain("driver_rejected_in_window");
     expect(EXCEPTION_HOLD_REASON_CODES).toContain("manual_escalation");
+  });
+});
+
+describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("moves realtime order to delayed_queue on first no-supply dispatch failure", () => {
+    const { service } = createOwnedMobilityService({ candidates: [] });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Test", phone: "0912345678" },
+    });
+
+    const dispatchResult = service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+
+    const updatedOrder = service.getOrder(order.orderId);
+    expect(updatedOrder.status).toBe("delayed_queue");
+    expect(updatedOrder.queueFamily).toBe("delayed_retry_queue");
+    expect(updatedOrder.queueEntryReason).toBe("no_supply_delayed_retry");
+    expect(updatedOrder.dispatchAttemptCount).toBe(1);
+    expect(updatedOrder.lastDispatchFailureReason).toBe("no_eligible_supply");
+    expect(updatedOrder.noSupplyEscalation).not.toBeNull();
+    expect(updatedOrder.noSupplyEscalation!.escalationAction).toBe(
+      "move_to_delayed_queue",
+    );
+    expect(dispatchResult.status).toBe("no_supply");
+  });
+
+  it("escalates to ops on second no-supply dispatch failure", () => {
+    const { service } = createOwnedMobilityService({ candidates: [] });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Test", phone: "0912345678" },
+    });
+
+    // First dispatch → delayed_queue
+    service.dispatchOrder(order.orderId, { mode: "auto" });
+    let updatedOrder = service.getOrder(order.orderId);
+    expect(updatedOrder.status).toBe("delayed_queue");
+
+    // Resolve and retry
+    service.resolveNoSupplyOrder(order.orderId, "retry_dispatch");
+    updatedOrder = service.getOrder(order.orderId);
+    // Second dispatch → no_supply with escalation to ops
+    expect(updatedOrder.status).toBe("no_supply");
+    expect(updatedOrder.queueFamily).toBe("manual_review_queue");
+    expect(updatedOrder.queueEntryReason).toBe("no_supply_escalated_to_ops");
+    expect(updatedOrder.noSupplyEscalation!.escalationAction).toBe(
+      "escalate_to_ops",
+    );
+  });
+
+  it("resolves no-supply order by cancelling with notification", () => {
+    const { service } = createOwnedMobilityService({ candidates: [] });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Test", phone: "0912345678" },
+    });
+
+    service.dispatchOrder(order.orderId, { mode: "auto" });
+    service.resolveNoSupplyOrder(
+      order.orderId,
+      "cancel_with_notification",
+      "operator-1",
+    );
+
+    const updatedOrder = service.getOrder(order.orderId);
+    expect(updatedOrder.status).toBe("cancelled");
+    expect(updatedOrder.cancelReason).toBe("no_supply_cancelled");
+    expect(updatedOrder.noSupplyEscalation!.resolvedAt).not.toBeNull();
+  });
+
+  it("handles dispatch timeout and places order in redispatch priority queue", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-1",
+          vehicleId: "vehicle-1",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Test", phone: "0912345678" },
+    });
+
+    service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    const timeoutResult = service.handleDispatchTimeout(
+      order.orderId,
+      "acceptance_timeout",
+    );
+
+    expect(timeoutResult.status).toBe("dispatch_timeout");
+    expect(timeoutResult.timeoutReasonCode).toBe("acceptance_timeout");
+
+    const updatedOrder = service.getOrder(order.orderId);
+    expect(updatedOrder.status).toBe("dispatch_timeout");
+    expect(updatedOrder.queueFamily).toBe("redispatch_priority_queue");
+    expect(updatedOrder.queueEntryReason).toBe("dispatch_timeout_retry");
+    expect(updatedOrder.dispatchTimeout).not.toBeNull();
+    expect(updatedOrder.dispatchTimeout!.timeoutReasonCode).toBe(
+      "acceptance_timeout",
+    );
+    expect(updatedOrder.dispatchAttemptCount).toBe(1);
+  });
+
+  it("preserves reason code and note through redispatch with operator context", () => {
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-1",
+          vehicleId: "vehicle-1",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Test", phone: "0912345678" },
+    });
+
+    service.dispatchOrder(order.orderId, { mode: "auto" });
+
+    service.redispatchOrder(order.orderId, {
+      reasonCode: "customer_request",
+      reasonNote: "Customer changed pickup location",
+      operatorId: "ops-user-42",
+      escalationTarget: "ops_supervisor",
+    });
+
+    const updatedOrder = service.getOrder(order.orderId);
+    expect(updatedOrder.lastDispatchFailureReason).toBe("customer_request");
+    expect(updatedOrder.dispatchAttemptCount).toBe(1);
+
+    const traceItems = service.listDispatchTrace(order.orderId);
+    const redispatchTrace = traceItems.find(
+      (item) => item.eventType === "dispatch.redispatch_required",
+    );
+    expect(redispatchTrace).toBeDefined();
+    expect(redispatchTrace!.details).toMatchObject({
+      reasonCode: "customer_request",
+      reasonNote: "Customer changed pickup location",
+      operatorId: "ops-user-42",
+      escalationTarget: "ops_supervisor",
+    });
+
+    const auditCalls = auditNotificationService.recordAuditLog.mock.calls;
+    const redispatchAudit = auditCalls.find(
+      ([log]) => log.actionName === "redispatch_order",
+    );
+    expect(redispatchAudit).toBeDefined();
+    expect(redispatchAudit![0].actorId).toBe("ops-user-42");
+    expect(redispatchAudit![0].actorType).toBe("ops_user");
+    expect(redispatchAudit![0].newValuesSummary).toMatchObject({
+      reasonCode: "customer_request",
+      reasonNote: "Customer changed pickup location",
+      escalationTarget: "ops_supervisor",
+    });
+  });
+
+  it("rejects resolveNoSupplyOrder when order is not in no_supply or delayed_queue state", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-1",
+          vehicleId: "vehicle-1",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Test", phone: "0912345678" },
+    });
+
+    expect(() =>
+      service.resolveNoSupplyOrder(order.orderId, "retry_dispatch"),
+    ).toThrowError(ApiRequestError);
+  });
+
+  it("tracks dispatch attempt count through multiple reject-redispatch cycles", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-1",
+          vehicleId: "vehicle-1",
+          etaMinutes: 5,
+          operatingArea: "taipei",
+          serviceBuckets: ["standard_taxi"],
+        },
+      ],
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Taipei 101" },
+      passenger: { name: "Test", phone: "0912345678" },
+    });
+
+    const dispatchResult = service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const jobs = service.listDispatchJobs();
+    const job = jobs.find(
+      (j) => j.dispatchJobId === dispatchResult.dispatchJobId,
+    );
+    expect(job).toBeDefined();
+
+    // Assign and then reject
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-1",
+      driverId: "driver-1",
+    });
+    const task = service.getDriverTask(assignment.taskId);
+    service.rejectDriverTask(task.taskId, {
+      reasonCode: "driver_rejected",
+      reasonNote: "Too far",
+    });
+
+    let updatedOrder = service.getOrder(order.orderId);
+    expect(updatedOrder.status).toBe("redispatch_required");
+
+    // Redispatch
+    service.redispatchOrder(order.orderId, {
+      reasonCode: "driver_rejected",
+    });
+
+    updatedOrder = service.getOrder(order.orderId);
+    expect(updatedOrder.dispatchAttemptCount).toBe(1);
+    expect(updatedOrder.lastDispatchFailureReason).toBe("driver_rejected");
   });
 });

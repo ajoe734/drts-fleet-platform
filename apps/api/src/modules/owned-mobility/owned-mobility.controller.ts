@@ -336,6 +336,45 @@ export class OwnedMobilityController {
     );
   }
 
+  @Post("orders/:orderId/dispatch-timeout")
+  handleDispatchTimeout(
+    @Param("orderId") orderId: string,
+    @Body()
+    command: { timeoutReasonCode: "acceptance_timeout" | "matching_timeout" },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.handleDispatchTimeout(
+        orderId,
+        command.timeoutReasonCode,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("orders/:orderId/resolve-no-supply")
+  resolveNoSupply(
+    @Param("orderId") orderId: string,
+    @Body()
+    command: {
+      resolution: "retry_dispatch" | "cancel_with_notification";
+      operatorId?: string;
+    },
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.resolveNoSupplyOrder(
+        orderId,
+        command.resolution,
+        command.operatorId ?? identity?.actorId ?? undefined,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Get("dispatch/tasks")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listDispatchJobs(@Headers("x-request-id") requestId?: string) {

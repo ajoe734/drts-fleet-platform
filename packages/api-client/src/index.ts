@@ -27,6 +27,7 @@ import type {
   CreateDriverMasterCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
+  IssuePartnerIngressCredentialCommand,
   CreateTenantBootstrapSessionCommand,
   CreateDriverProfileCommand,
   CreateOwnedOrderCommand,
@@ -41,7 +42,9 @@ import type {
   CreateCallbackTaskCommand,
   CreateComplaintCaseCommand,
   CreateIncidentCommand,
+  CompleteVehicleDebrandingCommand,
   CreateMaintenanceRecordCommand,
+  DispatchExclusivityRecord,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
   DispatchCandidate,
@@ -71,6 +74,8 @@ import type {
   GenerateTenantInvoiceCommand,
   IncidentRecord,
   IncidentTimelineEntry,
+  InitiateVehicleOffboardingCommand,
+  InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
   LinkCallOrderCommand,
   MaintenanceRecord,
@@ -82,6 +87,8 @@ import type {
   PartnerChannelEntryRecord,
   PartnerBootstrapSession,
   PartnerEligibilityVerificationRecord,
+  PartnerIngressCredentialIssued,
+  PartnerIngressCredentialRecord,
   PlacardVersionRecord,
   PlatformAdminTenantRecord,
   PlatformAdminUserRecord,
@@ -100,7 +107,9 @@ import type {
   PublicInfoVersionRecord,
   QuoteCallEtaCommand,
   RefreshDriverDeviceSessionCommand,
+  RejectExclusivityCommand,
   ReimbursementBatchRecord,
+  RevokePartnerIngressCredentialCommand,
   RegisterDriverDeviceCommand,
   ReopenComplaintCaseCommand,
   ReportJobAccepted,
@@ -127,6 +136,11 @@ import type {
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
   TransferCallToComplaintCommand,
+  TransferCallToIncidentCommand,
+  EscalateComplaintToIncidentCommand,
+  LinkComplaintToIncidentCommand,
+  SubmitExclusivityReviewCommand,
+  ApproveExclusivityCommand,
   UpdateDriverMasterLifecycleCommand,
   UpdateDriverProfileCommand,
   UpdateIncidentCommand,
@@ -139,6 +153,7 @@ import type {
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
   UpdateTenantWebhookEndpointCommand,
+  UpdateVehicleComplianceCommand,
   UpsertTenantAddressCommand,
   UpsertTenantPassengerCommand,
   VehicleContractRecord,
@@ -152,6 +167,8 @@ import type {
   UpdateTenantBookingCommand,
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
+  InviteTenantRoleCommand,
+  AcknowledgeTenantRoleCommand,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -395,6 +412,14 @@ export class ApiClient {
     );
   }
 
+  async listPartnerEligibilityReviewQueue(): Promise<
+    PartnerEligibilityVerificationRecord[]
+  > {
+    return this.getList<PartnerEligibilityVerificationRecord>(
+      "/api/ops/partner/eligibility/reviews",
+    );
+  }
+
   // ── Owned Mobility: Orders ──
 
   async createOrder(command: CreateOwnedOrderCommand) {
@@ -490,11 +515,41 @@ export class ApiClient {
     return this.post(`/api/orders/${orderId}/dispatch`);
   }
 
-  async redispatchOrder(orderId: string, reasonCode = "operator_redispatch") {
+  async redispatchOrder(
+    orderId: string,
+    reasonCode = "operator_redispatch",
+    options?: {
+      reasonNote?: string;
+      operatorId?: string;
+      escalationTarget?: "ops_supervisor" | "dispatch_manager" | null;
+    },
+  ) {
     return this.post(`/api/orders/${orderId}/redispatch`, {
       body: {
         reasonCode,
+        reasonNote: options?.reasonNote,
+        operatorId: options?.operatorId,
+        escalationTarget: options?.escalationTarget,
       },
+    });
+  }
+
+  async handleDispatchTimeout(
+    orderId: string,
+    timeoutReasonCode: "acceptance_timeout" | "matching_timeout",
+  ) {
+    return this.post(`/api/orders/${orderId}/dispatch-timeout`, {
+      body: { timeoutReasonCode },
+    });
+  }
+
+  async resolveNoSupply(
+    orderId: string,
+    resolution: "retry_dispatch" | "cancel_with_notification",
+    operatorId?: string,
+  ) {
+    return this.post(`/api/orders/${orderId}/resolve-no-supply`, {
+      body: { resolution, operatorId },
     });
   }
 
@@ -669,6 +724,19 @@ export class ApiClient {
     );
   }
 
+  async transferCallToIncident(
+    callId: string,
+    command: TransferCallToIncidentCommand,
+  ) {
+    return this.post<{
+      session: CallSessionRecord;
+      incident: IncidentRecord;
+    }>(
+      `/api/callcenter/sessions/${encodeURIComponent(callId)}/transfer-to-incident`,
+      { body: command },
+    );
+  }
+
   // ── Complaint ──
 
   async listComplaints(): Promise<ComplaintCaseRecord[]> {
@@ -739,6 +807,28 @@ export class ApiClient {
   async markComplaintSlaBreach(caseNo: string) {
     return this.post<ComplaintCaseRecord>(
       `/api/complaints/${encodeURIComponent(caseNo)}/sla-breach`,
+    );
+  }
+
+  async escalateComplaintToIncident(
+    caseNo: string,
+    command: EscalateComplaintToIncidentCommand,
+  ) {
+    return this.post<{
+      complaintCase: ComplaintCaseRecord;
+      incident: IncidentRecord;
+    }>(`/api/complaints/${encodeURIComponent(caseNo)}/escalate-to-incident`, {
+      body: command,
+    });
+  }
+
+  async linkComplaintToIncident(
+    caseNo: string,
+    command: LinkComplaintToIncidentCommand,
+  ) {
+    return this.post<ComplaintCaseRecord>(
+      `/api/complaints/${encodeURIComponent(caseNo)}/link-incident`,
+      { body: command },
     );
   }
 
@@ -1181,6 +1271,48 @@ export class ApiClient {
     );
   }
 
+  async revokePlatformPartnerEntry(
+    entrySlug: string,
+  ): Promise<PartnerChannelEntryRecord> {
+    return this.post<PartnerChannelEntryRecord>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/revoke`,
+      {},
+    );
+  }
+
+  async listPlatformPartnerIngressCredentials(
+    entrySlug: string,
+  ): Promise<PartnerIngressCredentialRecord[]> {
+    return this.getList<PartnerIngressCredentialRecord>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/credentials`,
+    );
+  }
+
+  async issuePlatformPartnerIngressCredential(
+    entrySlug: string,
+    command: IssuePartnerIngressCredentialCommand = {},
+  ): Promise<PartnerIngressCredentialIssued> {
+    return this.post<PartnerIngressCredentialIssued>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/credentials/issue`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async revokePlatformPartnerIngressCredential(
+    entrySlug: string,
+    keyId: string,
+    command: RevokePartnerIngressCredentialCommand = {},
+  ): Promise<PartnerIngressCredentialRecord> {
+    return this.post<PartnerIngressCredentialRecord>(
+      `/api/platform-admin/partner-entries/${encodeURIComponent(entrySlug)}/credentials/${encodeURIComponent(keyId)}/revoke`,
+      {
+        body: command,
+      },
+    );
+  }
+
   async createPlatformTenant(
     command: CreatePlatformTenantCommand,
   ): Promise<PlatformAdminTenantRecord> {
@@ -1327,6 +1459,34 @@ export class ApiClient {
     return this.post(`/api/platform-admin/tenants/${tenantId}/activate`);
   }
 
+  async inviteTenantRole(
+    tenantId: string,
+    command: InviteTenantRoleCommand,
+  ): Promise<PlatformAdminTenantRecord> {
+    return this.post<PlatformAdminTenantRecord>(
+      `/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/roles/invite`,
+      { body: command },
+    );
+  }
+
+  async acknowledgeTenantRole(
+    tenantId: string,
+    command: AcknowledgeTenantRoleCommand,
+  ): Promise<PlatformAdminTenantRecord> {
+    return this.post<PlatformAdminTenantRecord>(
+      `/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/roles/acknowledge`,
+      { body: command },
+    );
+  }
+
+  async rollbackHoldTenant(
+    tenantId: string,
+  ): Promise<PlatformAdminTenantRecord> {
+    return this.post<PlatformAdminTenantRecord>(
+      `/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/rollback-hold`,
+    );
+  }
+
   // ── Regulatory Registry ──
 
   async listVehicles(): Promise<VehicleRegistryRecord[]> {
@@ -1390,6 +1550,90 @@ export class ApiClient {
     );
   }
 
+  async listPolicies(): Promise<InsurancePolicyRecord[]> {
+    return this.getList<InsurancePolicyRecord>(
+      "/api/regulatory-registry/policies",
+    );
+  }
+
+  async listExclusivities(): Promise<DispatchExclusivityRecord[]> {
+    return this.getList<DispatchExclusivityRecord>(
+      "/api/regulatory-registry/exclusivities",
+    );
+  }
+
+  async updateVehicleCompliance(
+    vehicleId: string,
+    command: UpdateVehicleComplianceCommand,
+  ): Promise<VehicleRegistryRecord> {
+    return this.post<VehicleRegistryRecord>(
+      `/api/regulatory-registry/vehicles/${vehicleId}/compliance`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async submitExclusivityReview(
+    vehicleId: string,
+    command: SubmitExclusivityReviewCommand,
+  ): Promise<DispatchExclusivityRecord> {
+    return this.post<DispatchExclusivityRecord>(
+      `/api/regulatory-registry/exclusivities/${vehicleId}/submit-review`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async approveExclusivity(
+    vehicleId: string,
+    command: ApproveExclusivityCommand,
+  ): Promise<DispatchExclusivityRecord> {
+    return this.post<DispatchExclusivityRecord>(
+      `/api/regulatory-registry/exclusivities/${vehicleId}/approve`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async rejectExclusivity(
+    vehicleId: string,
+    command: RejectExclusivityCommand,
+  ): Promise<DispatchExclusivityRecord> {
+    return this.post<DispatchExclusivityRecord>(
+      `/api/regulatory-registry/exclusivities/${vehicleId}/reject`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async initiateVehicleOffboarding(
+    vehicleId: string,
+    command: InitiateVehicleOffboardingCommand,
+  ): Promise<VehicleRegistryRecord> {
+    return this.post<VehicleRegistryRecord>(
+      `/api/regulatory-registry/vehicles/${vehicleId}/offboarding`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async completeVehicleDebranding(
+    vehicleId: string,
+    command: CompleteVehicleDebrandingCommand,
+  ): Promise<VehicleRegistryRecord> {
+    return this.post<VehicleRegistryRecord>(
+      `/api/regulatory-registry/vehicles/${vehicleId}/offboarding/complete-debranding`,
+      {
+        body: command,
+      },
+    );
+  }
+
   // ── W8-001E: Ops & Driver Domain ──
 
   async listIncidents(): Promise<IncidentRecord[]> {
@@ -1414,6 +1658,13 @@ export class ApiClient {
 
   async updateIncident(incidentId: string, command: UpdateIncidentCommand) {
     return this.patch(`/api/incidents/${incidentId}`, { body: command });
+  }
+
+  async linkIncidentToComplaint(incidentId: string, complaintCaseNo: string) {
+    return this.post<IncidentRecord>(
+      `/api/incidents/${encodeURIComponent(incidentId)}/link-complaint`,
+      { body: { complaintCaseNo } },
+    );
   }
 
   async listMaintenance(vehicleId?: string): Promise<MaintenanceRecord[]> {

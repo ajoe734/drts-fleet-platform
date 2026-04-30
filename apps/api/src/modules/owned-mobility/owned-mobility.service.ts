@@ -35,6 +35,7 @@ import type {
   ExceptionHoldRecord,
   ExceptionHoldReasonCode,
   MoneyAmount,
+  NoSupplyEscalationAction,
   OwnedOrderRecord,
   PassengerProfile,
   QueueCheckInCommand,
@@ -279,6 +280,10 @@ export class OwnedMobilityService implements OnModuleInit {
       reservationHoldStatus: "none",
       reservationHoldId: null,
       reservationHoldExpiresAt: null,
+      dispatchAttemptCount: 0,
+      lastDispatchFailureReason: null,
+      noSupplyEscalation: null,
+      dispatchTimeout: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -405,6 +410,10 @@ export class OwnedMobilityService implements OnModuleInit {
       reservationHoldStatus: "none",
       reservationHoldId: null,
       reservationHoldExpiresAt: null,
+      dispatchAttemptCount: 0,
+      lastDispatchFailureReason: null,
+      noSupplyEscalation: null,
+      dispatchTimeout: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -580,6 +589,10 @@ export class OwnedMobilityService implements OnModuleInit {
       reservationHoldStatus: "requested",
       reservationHoldId,
       reservationHoldExpiresAt: command.reservationWindowStart,
+      dispatchAttemptCount: 0,
+      lastDispatchFailureReason: null,
+      noSupplyEscalation: null,
+      dispatchTimeout: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -1174,13 +1187,62 @@ export class OwnedMobilityService implements OnModuleInit {
           }),
         );
       } else {
-        order.status = "dispatch_failed";
-        traceLogs.push(
-          this.appendTrace(orderId, "dispatch.failed", {
+        const escalationAction = this.resolveNoSupplyEscalation(order);
+        if (escalationAction === "move_to_delayed_queue") {
+          order.status = "delayed_queue";
+          order.queueFamily = "delayed_retry_queue";
+          order.queueEntryReason = "no_supply_delayed_retry";
+          dispatchJob.status = "no_supply";
+          order.noSupplyEscalation = {
+            orderId,
             dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: exceptionHoldEval.reasonCode,
-          }),
-        );
+            attemptCount: order.dispatchAttemptCount + 1,
+            lastAttemptAt: now,
+            escalationAction,
+            escalatedAt: now,
+            resolvedAt: null,
+          };
+          traceLogs.push(
+            this.appendTrace(orderId, "dispatch.no_supply_delayed", {
+              dispatchJobId: dispatchJob.dispatchJobId,
+              reasonCode: exceptionHoldEval.reasonCode,
+              escalationAction,
+              attemptCount: order.dispatchAttemptCount + 1,
+            }),
+          );
+        } else if (escalationAction === "escalate_to_ops") {
+          order.status = "no_supply";
+          order.queueFamily = "manual_review_queue";
+          order.queueEntryReason = "no_supply_escalated_to_ops";
+          dispatchJob.status = "no_supply";
+          order.noSupplyEscalation = {
+            orderId,
+            dispatchJobId: dispatchJob.dispatchJobId,
+            attemptCount: order.dispatchAttemptCount + 1,
+            lastAttemptAt: now,
+            escalationAction,
+            escalatedAt: now,
+            resolvedAt: null,
+          };
+          traceLogs.push(
+            this.appendTrace(orderId, "dispatch.no_supply_escalated", {
+              dispatchJobId: dispatchJob.dispatchJobId,
+              reasonCode: exceptionHoldEval.reasonCode,
+              escalationAction,
+              attemptCount: order.dispatchAttemptCount + 1,
+            }),
+          );
+        } else {
+          order.status = "dispatch_failed";
+          traceLogs.push(
+            this.appendTrace(orderId, "dispatch.failed", {
+              dispatchJobId: dispatchJob.dispatchJobId,
+              reasonCode: exceptionHoldEval.reasonCode,
+            }),
+          );
+        }
+        order.dispatchAttemptCount += 1;
+        order.lastDispatchFailureReason = exceptionHoldEval.reasonCode;
       }
 
       if (isReservation) {
@@ -1261,8 +1323,11 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
     const order = this.requireOrder(orderId);
+    const now = new Date().toISOString();
     order.status = "redispatch_required";
-    order.updatedAt = new Date().toISOString();
+    order.dispatchAttemptCount += 1;
+    order.lastDispatchFailureReason = command.reasonCode;
+    order.updatedAt = now;
 
     const latestAssignment = this.dispatchAssignments.find(
       (assignment) =>
@@ -1278,15 +1343,19 @@ export class OwnedMobilityService implements OnModuleInit {
       : null;
     if (latestAssignment) {
       latestAssignment.status = "cancelled";
-      latestAssignment.updatedAt = new Date().toISOString();
+      latestAssignment.updatedAt = now;
     }
     if (latestTask) {
       latestTask.status = "cancelled";
-      latestTask.completedAt = new Date().toISOString();
+      latestTask.completedAt = now;
     }
 
     const traceLog = this.appendTrace(orderId, "dispatch.redispatch_required", {
       reasonCode: command.reasonCode,
+      reasonNote: command.reasonNote ?? null,
+      operatorId: command.operatorId ?? null,
+      escalationTarget: command.escalationTarget ?? null,
+      attemptCount: order.dispatchAttemptCount,
     });
     this.persistChanges(
       {
@@ -1301,16 +1370,19 @@ export class OwnedMobilityService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
+        actorId: command.operatorId ?? null,
+        actorType: command.operatorId ? "ops_user" : "system",
+        tenantId: order.tenantId,
         moduleName: "dispatch",
         actionName: "redispatch_order",
         resourceType: "order",
         resourceId: orderId,
         newValuesSummary: {
           reasonCode: command.reasonCode,
+          reasonNote: command.reasonNote ?? null,
+          escalationTarget: command.escalationTarget ?? null,
           status: order.status,
+          attemptCount: order.dispatchAttemptCount,
         },
       },
       requestId,
@@ -2872,13 +2944,6 @@ export class OwnedMobilityService implements OnModuleInit {
       } as const;
     }
 
-    if (operatorId?.trim()) {
-      return {
-        actorId: operatorId.trim(),
-        actorType: "ops_user",
-      } as const;
-    }
-
     throw new ApiRequestError(
       HttpStatus.FORBIDDEN,
       "EXCEPTION_HOLD_OVERRIDE_FORBIDDEN",
@@ -3036,6 +3101,9 @@ export class OwnedMobilityService implements OnModuleInit {
         "assigned",
         "driver_accepted",
         "dispatch_failed",
+        "dispatch_timeout",
+        "no_supply",
+        "delayed_queue",
         "redispatch_required",
       ].includes(order.status)
     ) {
@@ -3087,6 +3155,231 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
     order.reservationHoldStatus = targetStatus;
+  }
+
+  private resolveNoSupplyEscalation(
+    order: OwnedOrderRecord,
+  ): NoSupplyEscalationAction {
+    // First attempt: move to delayed retry queue for automatic retry
+    if (order.dispatchAttemptCount < 1) {
+      return "move_to_delayed_queue";
+    }
+    // After first retry failure: escalate to ops for manual intervention
+    return "escalate_to_ops";
+  }
+
+  handleDispatchTimeout(
+    orderId: string,
+    timeoutReasonCode: "acceptance_timeout" | "matching_timeout",
+    requestId?: string,
+  ) {
+    const order = this.requireOrder(orderId);
+    const now = new Date().toISOString();
+
+    const activeJob = this.dispatchJobs.find(
+      (job) =>
+        job.orderId === orderId &&
+        ["matching", "assigned"].includes(job.status),
+    );
+
+    const latestAssignment = activeJob
+      ? this.dispatchAssignments.find(
+          (assignment) =>
+            assignment.dispatchJobId === activeJob.dispatchJobId &&
+            ["assigned", "accepted"].includes(assignment.status),
+        )
+      : null;
+    const latestTask = latestAssignment
+      ? this.driverTasks.find(
+          (task) =>
+            task.assignmentId === latestAssignment.assignmentId &&
+            !["completed", "cancelled", "rejected"].includes(task.status),
+        )
+      : null;
+
+    if (latestAssignment) {
+      latestAssignment.status = "cancelled";
+      latestAssignment.updatedAt = now;
+    }
+    if (latestTask) {
+      latestTask.status = "cancelled";
+      latestTask.completedAt = now;
+    }
+    if (activeJob) {
+      activeJob.status = "timed_out";
+      activeJob.updatedAt = now;
+    }
+
+    order.status = "dispatch_timeout";
+    order.dispatchAttemptCount += 1;
+    order.lastDispatchFailureReason = timeoutReasonCode;
+    order.queueFamily = "redispatch_priority_queue";
+    order.queueEntryReason = "dispatch_timeout_retry";
+    order.dispatchTimeout = {
+      orderId,
+      dispatchJobId: activeJob?.dispatchJobId ?? "",
+      timeoutAt: now,
+      timeoutReasonCode,
+      previousAssignmentId: latestAssignment?.assignmentId ?? null,
+      escalationAction: "retry_dispatch",
+    };
+    order.updatedAt = now;
+
+    const dispatchAttempt: DispatchAttemptRecord = {
+      attemptId: randomUUID(),
+      dispatchJobId: activeJob?.dispatchJobId ?? "",
+      orderId,
+      sequence: this.nextAttemptSequence(activeJob?.dispatchJobId ?? ""),
+      outcome: "timed_out",
+      reasonCode: timeoutReasonCode,
+      createdAt: now,
+    };
+    this.dispatchAttempts = [dispatchAttempt, ...this.dispatchAttempts];
+
+    const traceLog = this.appendTrace(orderId, "dispatch.timeout", {
+      dispatchJobId: activeJob?.dispatchJobId ?? null,
+      timeoutReasonCode,
+      previousAssignmentId: latestAssignment?.assignmentId ?? null,
+      attemptCount: order.dispatchAttemptCount,
+    });
+
+    this.persistChanges(
+      {
+        orders: [order],
+        ...(activeJob ? { dispatchJobs: [activeJob] } : {}),
+        ...(latestAssignment
+          ? { dispatchAssignments: [latestAssignment] }
+          : {}),
+        ...(latestTask ? { driverTasks: [latestTask] } : {}),
+        dispatchAttempts: [dispatchAttempt],
+        dispatchTraceLogs: [traceLog],
+      },
+      "dispatch_timeout",
+    );
+
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: order.tenantId,
+        moduleName: "dispatch",
+        actionName: "dispatch_timeout",
+        resourceType: "order",
+        resourceId: orderId,
+        newValuesSummary: {
+          timeoutReasonCode,
+          status: order.status,
+          attemptCount: order.dispatchAttemptCount,
+        },
+      },
+      requestId,
+    );
+
+    if (latestTask) {
+      this.ownedMobilityTaskEventsService.publishTaskCancelled(
+        latestTask,
+        order,
+        requestId,
+      );
+    }
+
+    this.opsDispatchEventsService?.publishOrderUpdated(order, requestId);
+
+    return {
+      orderId,
+      status: order.status,
+      timeoutReasonCode,
+      escalationAction: "retry_dispatch" as NoSupplyEscalationAction,
+    };
+  }
+
+  resolveNoSupplyOrder(
+    orderId: string,
+    resolution: "retry_dispatch" | "cancel_with_notification",
+    operatorId?: string,
+    requestId?: string,
+  ) {
+    const order = this.requireOrder(orderId);
+    const now = new Date().toISOString();
+
+    if (order.status !== "no_supply" && order.status !== "delayed_queue") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ORDER_NOT_IN_NO_SUPPLY",
+        "Order is not in a no-supply or delayed queue state.",
+        { orderId, status: order.status },
+      );
+    }
+
+    if (resolution === "cancel_with_notification") {
+      order.status = "cancelled";
+      order.cancelledAt = now;
+      order.cancelReason = "no_supply_cancelled";
+      order.updatedAt = now;
+      if (order.noSupplyEscalation) {
+        order.noSupplyEscalation.resolvedAt = now;
+      }
+      order.queueFamily = null;
+      order.queueEntryReason = null;
+
+      const traceLog = this.appendTrace(orderId, "order.cancelled", {
+        reason: "no_supply_cancelled",
+        operatorId: operatorId ?? null,
+      });
+
+      this.persistChanges(
+        { orders: [order], dispatchTraceLogs: [traceLog] },
+        "cancel_no_supply",
+      );
+      this.recordAudit(
+        {
+          actorId: operatorId ?? null,
+          actorType: operatorId ? "ops_user" : "system",
+          tenantId: order.tenantId,
+          moduleName: "dispatch",
+          actionName: "cancel_no_supply",
+          resourceType: "order",
+          resourceId: orderId,
+          newValuesSummary: { status: order.status },
+        },
+        requestId,
+      );
+      this.opsDispatchEventsService?.publishOrderUpdated(order, requestId);
+      return { orderId, status: order.status };
+    }
+
+    // retry_dispatch
+    order.status = "ready_for_dispatch";
+    order.updatedAt = now;
+    if (order.noSupplyEscalation) {
+      order.noSupplyEscalation.resolvedAt = now;
+    }
+    order.queueFamily = null;
+    order.queueEntryReason = null;
+
+    const traceLog = this.appendTrace(orderId, "dispatch.no_supply_resolved", {
+      resolution: "retry_dispatch",
+      operatorId: operatorId ?? null,
+    });
+    this.persistChanges(
+      { orders: [order], dispatchTraceLogs: [traceLog] },
+      "resolve_no_supply",
+    );
+    this.recordAudit(
+      {
+        actorId: operatorId ?? null,
+        actorType: operatorId ? "ops_user" : "system",
+        tenantId: order.tenantId,
+        moduleName: "dispatch",
+        actionName: "resolve_no_supply",
+        resourceType: "order",
+        resourceId: orderId,
+        newValuesSummary: { status: order.status },
+      },
+      requestId,
+    );
+    this.opsDispatchEventsService?.publishOrderUpdated(order, requestId);
+    return this.dispatchOrder(orderId, { mode: "auto" }, requestId);
   }
 
   private evaluateExceptionHoldCriteria(
@@ -4147,6 +4440,12 @@ export class OwnedMobilityService implements OnModuleInit {
       complianceFlags: [...order.complianceFlags],
       queueFamily: queueState.queueFamily,
       queueEntryReason: queueState.queueEntryReason,
+      noSupplyEscalation: order.noSupplyEscalation
+        ? { ...order.noSupplyEscalation }
+        : null,
+      dispatchTimeout: order.dispatchTimeout
+        ? { ...order.dispatchTimeout }
+        : null,
     };
   }
 
@@ -4196,6 +4495,27 @@ export class OwnedMobilityService implements OnModuleInit {
       return {
         queueFamily: "recording_gate_queue",
         queueEntryReason: "recording_missing_for_dispatch",
+      };
+    }
+
+    if (order.status === "dispatch_timeout") {
+      return {
+        queueFamily: "redispatch_priority_queue",
+        queueEntryReason: "dispatch_timeout_retry",
+      };
+    }
+
+    if (order.status === "delayed_queue") {
+      return {
+        queueFamily: "delayed_retry_queue",
+        queueEntryReason: "no_supply_delayed_retry",
+      };
+    }
+
+    if (order.status === "no_supply") {
+      return {
+        queueFamily: "manual_review_queue",
+        queueEntryReason: "no_supply_escalated_to_ops",
       };
     }
 

@@ -185,10 +185,16 @@ export function buildDispatchInsights(
     ).length,
     queueDepth: queueJobs.length,
     redispatchOrders: orders.filter(
-      (order) => order.status === "redispatch_required",
+      (order) =>
+        order.status === "redispatch_required" ||
+        order.status === "dispatch_timeout",
     ).length,
-    exceptionOrders: orders.filter((order) => order.status === "exception_hold")
-      .length,
+    exceptionOrders: orders.filter(
+      (order) =>
+        order.status === "exception_hold" ||
+        order.status === "no_supply" ||
+        order.status === "delayed_queue",
+    ).length,
     averageEtaMinutes:
       etaValues.length > 0
         ? Math.round(
