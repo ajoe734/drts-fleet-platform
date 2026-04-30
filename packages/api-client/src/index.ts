@@ -18,6 +18,7 @@ import type {
   CallSessionRecord,
   ClockInCommand,
   ClockOutCommand,
+  CloseCallSessionCommand,
   ComplaintCaseRecord,
   ComplaintExportViewRecord,
   ComplaintTimelineEntry,
@@ -591,9 +592,10 @@ export class ApiClient {
     );
   }
 
-  async closeCallSession(id: string) {
+  async closeCallSession(id: string, command: CloseCallSessionCommand = {}) {
     return this.post<CallSessionRecord>(
       `/api/callcenter/sessions/${encodeURIComponent(id)}/close`,
+      { body: command },
     );
   }
 

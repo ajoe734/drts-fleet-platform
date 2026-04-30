@@ -232,6 +232,13 @@
 - call-taker form 與 dispatch queue 要能協同
 - screen-pop 與 recording status 要在同一工作流可見
 
+#### Phase 1 CTI / screen-pop 假設
+
+- CTI provider 仍屬外部 gated source；core 只接收 `callId`、來電 metadata、錄音 callback 與 provider reference
+- screen-pop 只負責帶入受理上下文，不取代 operator 對乘客、上下車點、與 phone order 欄位的確認
+- 錄音 callback 可晚於建單抵達；在 `recording binding` 到位前，phone order 維持 `recording_pending`，但 callback 與 complaint handoff 仍在同一工作台處理
+- 錄音檔 binary 本體不落在 ops console 內；工作台只追蹤 `recordingId`、provider reference、與受控的錄音 URL
+
 ### 4.6 待派清單與 dispatch / redispatch 規則
 
 #### 目標狀態

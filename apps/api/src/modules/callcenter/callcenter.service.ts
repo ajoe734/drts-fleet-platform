@@ -234,7 +234,7 @@ export class CallcenterService implements OnModuleInit {
 
   closeCallSession(
     callId: string,
-    command: CloseCallSessionCommand,
+    command: CloseCallSessionCommand = {},
     requestId?: string,
   ) {
     const session = this.requireSession(callId);

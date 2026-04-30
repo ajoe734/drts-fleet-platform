@@ -76,7 +76,7 @@ export class CallcenterController {
   @Post("sessions/:callId/close")
   closeCallSession(
     @Param("callId") callId: string,
-    @Body() command: CloseCallSessionCommand,
+    @Body() command: CloseCallSessionCommand = {},
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(

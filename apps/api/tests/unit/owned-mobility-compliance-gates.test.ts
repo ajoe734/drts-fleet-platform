@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 
 function createService(options?: {
@@ -75,6 +76,54 @@ describe("OwnedMobilityService compliance gates", () => {
     );
   });
 
+  it("releases phone orders once recording callback binding arrives", () => {
+    const regulatoryRegistryService = {
+      getEligibleCandidates: vi.fn(() => []),
+      getVehicleDispatchability: vi.fn(() => true),
+      getDriverAvailability: vi.fn(() => true),
+    };
+    const auditNotificationService = new AuditNotificationService();
+    const callcenterService = new CallcenterService(auditNotificationService);
+    const taskEventsService = {
+      publishTaskAssigned: vi.fn(),
+      publishTaskUpdated: vi.fn(),
+      publishTaskCancelled: vi.fn(),
+    };
+    const service = new OwnedMobilityService(
+      regulatoryRegistryService as never,
+      auditNotificationService,
+      callcenterService,
+      taskEventsService as never,
+    );
+
+    const order = service.createCallCenterOrder({
+      callId: "call-ops-001",
+      agentId: "ops-agent-001",
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Songshan Airport" },
+      passenger: { name: "Rider", phone: "0912000000" },
+    });
+
+    expect(service.getOrder(order.orderId)).toMatchObject({
+      status: "recording_pending",
+      recordingId: null,
+      complianceFlags: expect.arrayContaining(["recording_pending"]),
+    });
+
+    callcenterService.attachRecordingCallback("call-ops-001", {
+      recordingId: "recording-demo-002",
+      providerRecordingRef: "cti-ref-002",
+      recordingUrl: "https://cti.example/recordings/recording-demo-002",
+      agentId: "ops-agent-001",
+    });
+
+    expect(service.getOrder(order.orderId)).toMatchObject({
+      status: "ready_for_dispatch",
+      recordingId: "recording-demo-002",
+      complianceFlags: expect.arrayContaining(["recording_bound"]),
+    });
+  });
+
   it("surfaces approved partner eligibility as a clear gate", () => {
     const tenantPartnerService = {
       getPartnerEntry: vi.fn(() => ({
@@ -118,10 +167,10 @@ describe("OwnedMobilityService compliance gates", () => {
           flightNo: null,
           requestId: null,
         },
-        verifiedAt: "2026-04-29T00:00:00.000Z",
-        expiresAt: "2026-04-30T00:00:00.000Z",
-        createdAt: "2026-04-29T00:00:00.000Z",
-        updatedAt: "2026-04-29T00:00:00.000Z",
+        verifiedAt: "2026-05-29T00:00:00.000Z",
+        expiresAt: "2026-05-30T00:00:00.000Z",
+        createdAt: "2026-05-29T00:00:00.000Z",
+        updatedAt: "2026-05-29T00:00:00.000Z",
         auditMetadata: {
           source: "test",
           requestId: null,

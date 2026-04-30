@@ -505,6 +505,13 @@ const en = {
   "callcenter.newIntake": "New call intake",
   "callcenter.intakeNote":
     "Hotline stays inside the existing callcenter + complaint flow.",
+  "callcenter.integrationAssumptionsTitle": "CTI + screen-pop assumptions",
+  "callcenter.integrationAssumption.screenPop":
+    "Screen-pop only seeds call ID, caller phone, and any provider reference. Agents still confirm passenger and address details before creating a phone order.",
+  "callcenter.integrationAssumption.recording":
+    "Recording callback is asynchronous. Orders remain in recording_pending until recording linkage arrives, while callback and complaint actions stay available in the same workspace.",
+  "callcenter.integrationAssumption.storage":
+    "Recording binaries remain outside this console. The workspace only tracks recording ID, provider reference, and the signed link surfaced by the CTI callback.",
   "callcenter.form.opening": "Opening...",
   "callcenter.sessions": "Sessions",
   "callcenter.results": "{count} result(s)",
@@ -1377,6 +1384,13 @@ const zh: Record<keyof typeof en, string> = {
   "callcenter.openIntake": "開啟新受理",
   "callcenter.newIntake": "新通話受理",
   "callcenter.intakeNote": "熱線請保留在現有客服中心 + 投訴流程中。",
+  "callcenter.integrationAssumptionsTitle": "CTI 與 screen-pop 假設",
+  "callcenter.integrationAssumption.screenPop":
+    "screen-pop 只提供 call ID、來電號碼與供應商參考。客服人員在建立電話訂單前仍需確認乘客與地址資料。",
+  "callcenter.integrationAssumption.recording":
+    "錄音回調屬於非同步流程。錄音關聯尚未到位前，電話訂單會維持 recording_pending，但同一工作台仍可處理回電與投訴轉交。",
+  "callcenter.integrationAssumption.storage":
+    "錄音檔本體不在此後台保存。工作台只追蹤錄音編號、供應商參考，以及 CTI 回調帶回的簽名連結。",
   "callcenter.form.opening": "開啟中...",
   "callcenter.sessions": "通話記錄",
   "callcenter.results": "{count} 筆結果",

@@ -282,6 +282,15 @@ export default function CallcenterPage() {
           </button>
         </div>
 
+        <section className="assumption-panel">
+          <strong>{t("callcenter.integrationAssumptionsTitle")}</strong>
+          <ul className="assumption-list">
+            <li>{t("callcenter.integrationAssumption.screenPop")}</li>
+            <li>{t("callcenter.integrationAssumption.recording")}</li>
+            <li>{t("callcenter.integrationAssumption.storage")}</li>
+          </ul>
+        </section>
+
         {showIntake && (
           <section className="panel">
             <div className="panel-head">
@@ -1110,6 +1119,20 @@ export default function CallcenterPage() {
           }
           .toolbar {
             margin-bottom: 1rem;
+          }
+          .assumption-panel {
+            border: 1px solid #cbd5e1;
+            border-radius: 1rem;
+            background: #f8fafc;
+            padding: 0.95rem 1rem;
+            margin-bottom: 1rem;
+          }
+          .assumption-list {
+            margin: 0.55rem 0 0;
+            padding-left: 1.15rem;
+            color: #334155;
+            display: grid;
+            gap: 0.4rem;
           }
           .search-input,
           input,

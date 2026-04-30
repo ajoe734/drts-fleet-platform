@@ -70,4 +70,24 @@ describe("CallcenterService evidence access", () => {
       hasRecordingUrl: true,
     });
   });
+
+  it("closes sessions even when the caller sends no explicit close payload", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new CallcenterService(auditNotificationService);
+
+    const session = service.openCallSession(
+      {
+        callType: "callback",
+        callerPhone: "0922333444",
+        agentId: "ops-002",
+      },
+      "req-call-open-002",
+    );
+
+    const closed = service.closeCallSession(session.callId);
+
+    expect(closed.status).toBe("closed");
+    expect(closed.endedAt).not.toBeNull();
+    expect(closed.flags).toContain("closed");
+  });
 });

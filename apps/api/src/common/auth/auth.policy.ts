@@ -171,11 +171,20 @@ export function resolveRouteAuthPolicy(
     };
   }
 
-  if (
-    routePath.startsWith("orders") ||
-    routePath.startsWith("call-center/orders") ||
-    routePath.startsWith("dispatch/")
-  ) {
+  if (routePath.startsWith("call-center/orders")) {
+    return {
+      routeKey: `callcenter:orders:${upperMethod}`,
+      requiredScopes: methodScope(
+        "callcenter:read",
+        "callcenter:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Callcenter phone-order management",
+    };
+  }
+
+  if (routePath.startsWith("orders") || routePath.startsWith("dispatch/")) {
     const readRoute = isReadMethod(upperMethod);
     const scope = routePath.startsWith("dispatch/")
       ? methodScope("dispatch:read", "dispatch:write", upperMethod)
