@@ -343,9 +343,18 @@ export function DispatchWorkflow({
   const handleReassign = async (jobId: string) => {
     const job = liveDispatchJobs.find((item) => item.dispatchJobId === jobId);
     if (!job) return;
+    const candidateKey = selectedCandidate[jobId];
+    if (!candidateKey) return;
+    const [vehicleId, driverId] = candidateKey.split("|");
+    if (!vehicleId || !driverId) return;
 
     await runAction(jobId, async () => {
-      await client.redispatchOrder(job.orderId);
+      await client.reassignDispatch({
+        dispatchJobId: jobId,
+        vehicleId,
+        driverId,
+        reasonCode: "operator_reassign",
+      });
     });
   };
 
@@ -651,7 +660,10 @@ export function DispatchWorkflow({
                         {job && job.status === "assigned" && (
                           <button
                             className="btn"
-                            disabled={loading === job.dispatchJobId}
+                            disabled={
+                              !selectedCandidate[job.dispatchJobId] ||
+                              loading === job.dispatchJobId
+                            }
                             type="button"
                             onClick={() => handleReassign(job.dispatchJobId)}
                           >

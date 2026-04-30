@@ -846,6 +846,143 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     );
   });
 
+  it("keeps reassign distinct from redispatch by rotating assignment inside the same dispatch job", () => {
+    const candidates = [
+      {
+        driverId: "driver-001",
+        vehicleId: "vehicle-001",
+        etaMinutes: 5,
+        operatingArea: "north",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ];
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates,
+    });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "A" },
+      dropoff: { address: "B" },
+      passenger: { name: "Test", phone: "0911111111" },
+    });
+    const dispatchResult = service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const firstAssignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    const reassignResult = service.reassignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-002",
+      driverId: "driver-002",
+      reasonCode: "operator_reassign",
+      reasonNote: "Closer vehicle picked by ops",
+    });
+
+    expect(reassignResult.assignmentId).not.toBe(firstAssignment.assignmentId);
+    const trace = service.listDispatchTrace(order.orderId);
+    expect(trace).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "dispatch.reassigned",
+          details: expect.objectContaining({
+            dispatchJobId: dispatchResult.dispatchJobId,
+            previousAssignmentId: firstAssignment.assignmentId,
+            nextVehicleId: "vehicle-002",
+            nextDriverId: "driver-002",
+            reasonCode: "operator_reassign",
+          }),
+        }),
+      ]),
+    );
+    const tasks = service
+      .listDriverTasks()
+      .filter((task) => task.orderId === order.orderId);
+    expect(tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskId: firstAssignment.taskId,
+          status: "cancelled",
+        }),
+        expect.objectContaining({
+          taskId: reassignResult.taskId,
+          status: "pending_acceptance",
+          dispatchJobId: dispatchResult.dispatchJobId,
+          driverId: "driver-002",
+          vehicleId: "vehicle-002",
+        }),
+      ]),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "reassign_dispatch",
+      }),
+    );
+  });
+
+  it("keeps redispatch distinct from reassign by opening a new dispatch job", () => {
+    const candidates = [
+      {
+        driverId: "driver-001",
+        vehicleId: "vehicle-001",
+        etaMinutes: 5,
+        operatingArea: "north",
+        serviceBuckets: ["standard_taxi"],
+      },
+    ];
+    const { service } = createOwnedMobilityService({ candidates });
+
+    const order = service.createPassengerOrder({
+      pickup: { address: "A" },
+      dropoff: { address: "B" },
+      passenger: { name: "Test", phone: "0911111111" },
+    });
+    const firstDispatch = service.dispatchOrder(order.orderId, {
+      mode: "auto",
+    });
+    const firstAssignment = service.assignDispatch({
+      dispatchJobId: firstDispatch.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    const secondDispatch = service.redispatchOrder(order.orderId, {
+      reasonCode: "operator_redispatch",
+    });
+
+    expect(secondDispatch.dispatchJobId).not.toBe(firstDispatch.dispatchJobId);
+    const jobs = service
+      .listDispatchJobs()
+      .filter((job) => job.orderId === order.orderId);
+    expect(jobs).toHaveLength(2);
+    const tasks = service
+      .listDriverTasks()
+      .filter((task) => task.orderId === order.orderId);
+    expect(tasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskId: firstAssignment.taskId,
+          status: "cancelled",
+          dispatchJobId: firstDispatch.dispatchJobId,
+        }),
+      ]),
+    );
+    const trace = service.listDispatchTrace(order.orderId);
+    expect(trace).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "dispatch.redispatch_required",
+          details: expect.objectContaining({
+            reasonCode: "operator_redispatch",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("releases reservation hold when cancelling from redispatch queue", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));

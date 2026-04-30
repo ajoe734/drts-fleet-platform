@@ -29,6 +29,7 @@ import type {
   DriverStartTaskCommand,
   QueueCheckInCommand,
   QueueCheckOutCommand,
+  ReassignDispatchCommand,
   RedispatchOrderCommand,
   ResolveExceptionHoldCommand,
   UpdateTenantBookingCommand,
@@ -365,6 +366,17 @@ export class OwnedMobilityController {
   ) {
     return toApiSuccessEnvelope(
       this.ownedMobilityService.assignDispatch(command, requestId),
+      requestId,
+    );
+  }
+
+  @Post("dispatch/reassign")
+  reassignDispatch(
+    @Body() command: ReassignDispatchCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.reassignDispatch(command, requestId),
       requestId,
     );
   }

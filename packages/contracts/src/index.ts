@@ -1319,6 +1319,14 @@ export interface AssignDispatchCommand {
   driverId: string;
 }
 
+export interface ReassignDispatchCommand {
+  dispatchJobId: string;
+  vehicleId: string;
+  driverId: string;
+  reasonCode: string;
+  reasonNote?: string;
+}
+
 export interface RedispatchOrderCommand {
   reasonCode: string;
 }
@@ -1505,7 +1513,12 @@ export interface DispatchAttemptRecord {
   dispatchJobId: string;
   orderId: string;
   sequence: number;
-  outcome: "candidate_found" | "assigned" | "rejected" | "failed";
+  outcome:
+    | "candidate_found"
+    | "assigned"
+    | "reassigned"
+    | "rejected"
+    | "failed";
   reasonCode: string | null;
   createdAt: string;
 }

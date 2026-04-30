@@ -144,6 +144,7 @@ import type {
   WebhookDeliveryRecord,
   CancelOwnedOrderCommand,
   AssignDispatchCommand,
+  ReassignDispatchCommand,
   DriverCompleteTaskCommand,
   UpdateTenantBookingCommand,
   ForwardedOrderRecord,
@@ -474,8 +475,12 @@ export class ApiClient {
     return this.post(`/api/orders/${orderId}/dispatch`);
   }
 
-  async redispatchOrder(orderId: string) {
-    return this.post(`/api/orders/${orderId}/redispatch`);
+  async redispatchOrder(orderId: string, reasonCode = "operator_redispatch") {
+    return this.post(`/api/orders/${orderId}/redispatch`, {
+      body: {
+        reasonCode,
+      },
+    });
   }
 
   async listDispatchJobs(): Promise<DispatchJobRecord[]> {
@@ -496,6 +501,10 @@ export class ApiClient {
 
   async assignDispatch(command: AssignDispatchCommand) {
     return this.post("/api/dispatch/assign", { body: command });
+  }
+
+  async reassignDispatch(command: ReassignDispatchCommand) {
+    return this.post("/api/dispatch/reassign", { body: command });
   }
 
   async queueCheckIn(command: { vehicleId: string; siteId: string }) {
