@@ -13,6 +13,7 @@ import type {
   AddressPayload,
   ComplianceGateRecord,
   DispatchCandidate,
+  DispatchCandidateLocationState,
   DispatchJobRecord,
   OpsDispatchStreamEventEnvelope,
   OwnedOrderRecord,
@@ -21,6 +22,10 @@ import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import {
+  getCandidateLocationState,
+  getCandidateLocationTone,
+} from "./location-state";
 
 interface DispatchWorkflowProps {
   orders: OwnedOrderRecord[];
@@ -55,16 +60,8 @@ interface SpatialPoint {
   jobId?: string;
   etaMinutes?: number | null;
   subtitle?: string;
-  freshness?: "live" | "stale";
+  freshness?: DispatchCandidateLocationState;
 }
-
-type DispatchCandidateWithLocation = DispatchCandidate & {
-  currentLocation?: {
-    lat: number;
-    lng: number;
-    recordedAt?: string | null;
-  } | null;
-};
 
 interface ActionDraft {
   mode: ActionMode;
@@ -77,7 +74,6 @@ interface ActionDraft {
   noSupplyResolution: "retry_dispatch" | "cancel_with_notification";
 }
 
-const LOCATION_STALE_MS = 10 * 60 * 1000;
 const AUTO_LOAD_CANDIDATE_LIMIT = 6;
 
 function getQueueState(
@@ -245,17 +241,6 @@ function projectSpatialPoint(
     left: `${Math.min(96, Math.max(4, x))}%`,
     top: `${Math.min(94, Math.max(6, y))}%`,
   };
-}
-
-function isFreshLocation(recordedAt?: string | null) {
-  if (!recordedAt) {
-    return false;
-  }
-  const recordedMs = new Date(recordedAt).getTime();
-  if (Number.isNaN(recordedMs)) {
-    return false;
-  }
-  return Date.now() - recordedMs <= LOCATION_STALE_MS;
 }
 
 export function DispatchWorkflow({
@@ -714,6 +699,7 @@ export function DispatchWorkflow({
   ).length;
   let candidateSupplyPoints = 0;
   let staleCandidatePoints = 0;
+  let noLocationCandidateCount = 0;
 
   visibleOrdersForMap.forEach((order) => {
     const job = orderJobMap[order.orderId];
@@ -755,15 +741,13 @@ export function DispatchWorkflow({
       return;
     }
 
-    for (const candidate of (candidates[job.dispatchJobId] ??
-      []) as DispatchCandidateWithLocation[]) {
-      if (!candidate.currentLocation) {
+    for (const candidate of candidates[job.dispatchJobId] ?? []) {
+      const freshness = getCandidateLocationState(candidate);
+      if (freshness === "no_location" || !candidate.currentLocation) {
+        noLocationCandidateCount += 1;
         continue;
       }
       candidateSupplyPoints += 1;
-      const freshness = isFreshLocation(candidate.currentLocation.recordedAt)
-        ? "live"
-        : "stale";
       if (freshness === "stale") {
         staleCandidatePoints += 1;
       }
@@ -872,6 +856,10 @@ export function DispatchWorkflow({
               <strong>{staleCandidatePoints}</strong>
               <span>{t("dispatch.workflow.map.staleSupply")}</span>
             </div>
+            <div className="spatial-stat-card">
+              <strong>{noLocationCandidateCount}</strong>
+              <span>{t("dispatch.workflow.map.noLocationSupply")}</span>
+            </div>
           </div>
         </div>
 
@@ -975,6 +963,10 @@ export function DispatchWorkflow({
                 <div className="spatial-legend-item">
                   <span className="spatial-legend-dot spatial-point-candidate spatial-point-stale" />
                   <span>{t("dispatch.workflow.map.legend.stale")}</span>
+                </div>
+                <div className="spatial-legend-item">
+                  <span className="spatial-legend-dot spatial-point-no-location" />
+                  <span>{t("dispatch.workflow.map.legend.noLocation")}</span>
                 </div>
               </div>
 
@@ -1320,7 +1312,10 @@ export function DispatchWorkflow({
                                     value={`${candidate.vehicleId}|${candidate.driverId}`}
                                   >
                                     {candidate.vehicleId} / {candidate.driverId}{" "}
-                                    · {candidate.etaMinutes}m
+                                    · {candidate.etaMinutes}m ·{" "}
+                                    {t(
+                                      `dispatch.workflow.candidateLocation.${getCandidateLocationState(candidate)}`,
+                                    )}
                                   </option>
                                 ))}
                               </select>
@@ -1329,6 +1324,39 @@ export function DispatchWorkflow({
                                   count: jobCandidates.length,
                                 })}
                               </div>
+                              {(
+                                [
+                                  "stale",
+                                  "no_location",
+                                ] as DispatchCandidateLocationState[]
+                              ).map((locationState) => {
+                                const count = jobCandidates.filter(
+                                  (candidate) =>
+                                    getCandidateLocationState(candidate) ===
+                                    locationState,
+                                ).length;
+                                if (count === 0) {
+                                  return null;
+                                }
+                                return (
+                                  <div
+                                    key={locationState}
+                                    className={`candidate-location-note ${getCandidateLocationTone(
+                                      locationState,
+                                    )}`}
+                                  >
+                                    {t(
+                                      "dispatch.workflow.candidateLocationSummary",
+                                      {
+                                        count,
+                                        state: t(
+                                          `dispatch.workflow.candidateLocation.${locationState}`,
+                                        ).toLowerCase(),
+                                      },
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </>
                           ) : (
                             <button
@@ -1802,6 +1830,14 @@ export function DispatchWorkflow({
           opacity: 0.7;
           filter: grayscale(0.15);
         }
+        .spatial-point-no-location {
+          background: linear-gradient(
+            135deg,
+            rgba(248, 250, 252, 0.95),
+            #cbd5e1
+          );
+          border-color: rgba(148, 163, 184, 0.45);
+        }
         .spatial-axis {
           position: absolute;
           left: 0.75rem;
@@ -1909,6 +1945,23 @@ export function DispatchWorkflow({
           padding: 0.45rem;
           border-radius: 0.6rem;
           border: 1px solid #cbd5e1;
+        }
+        .candidate-location-note {
+          padding: 0.45rem 0.55rem;
+          border-radius: 0.7rem;
+          font-size: 0.8rem;
+        }
+        .candidate-location-live {
+          background: #dcfce7;
+          color: #166534;
+        }
+        .candidate-location-stale {
+          background: #ffedd5;
+          color: #9a3412;
+        }
+        .candidate-location-no-location {
+          background: #e2e8f0;
+          color: #334155;
         }
         .queue-badge {
           display: inline-block;

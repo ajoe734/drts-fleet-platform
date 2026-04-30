@@ -1639,8 +1639,17 @@ export interface DispatchCandidate {
   operatingArea: string;
   serviceBuckets: Phase1ServiceBucket[];
   etaMinutes: number;
+  locationState?: DispatchCandidateLocationState;
   currentLocation?: DriverLocationSnapshot | null;
 }
+
+export const DISPATCH_CANDIDATE_LOCATION_STATES = [
+  "live",
+  "stale",
+  "no_location",
+] as const;
+export type DispatchCandidateLocationState =
+  (typeof DISPATCH_CANDIDATE_LOCATION_STATES)[number];
 
 export interface DispatchJobRecord {
   dispatchJobId: string;
