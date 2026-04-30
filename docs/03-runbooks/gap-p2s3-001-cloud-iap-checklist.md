@@ -14,6 +14,7 @@ control-plane auth migration and the remaining fallback-policy decisions.
 Execution anchor:
 
 - `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
+- `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`
 
 ## Current Block
 
@@ -247,7 +248,9 @@ verified by staging deploy run `#24891433989`.
 ## Repo Anchors
 
 - `.github/workflows/deploy-staging.yml`
+- `docs/03-runbooks/auth-plane-separation-matrix.md`
 - `apps/api/src/common/auth/bootstrap-auth.guard.ts`
+- `apps/api/src/common/auth/auth.matrix.ts`
 - `apps/api/src/common/auth/internal-key.middleware.ts`
 - `apps/api/src/common/auth/auth.types.ts`
 - `apps/api/src/app.module.ts`

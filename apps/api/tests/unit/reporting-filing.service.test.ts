@@ -205,4 +205,104 @@ describe("ReportingFilingService sensitive-data governance", () => {
       accessAction: "download",
     });
   });
+
+  it("surfaces legal holds and deletion exceptions on report and filing evidence detail views", async () => {
+    process.env.CONTROLLED_DOWNLOAD_SIGNING_SECRET =
+      "reporting-download-test-secret";
+
+    const auditNotificationService = new AuditNotificationService();
+    const service = new ReportingFilingService(auditNotificationService);
+    service.registerOrderFeedProvider(() => [createOrder()] as never[]);
+
+    const reportAccepted = service.createReportJob(
+      {
+        jobType: "revenue_summary",
+        format: "csv",
+      },
+      "req-report-create-governance-001",
+      "tenant-demo-001",
+    );
+    const packageAccepted = service.generateFilingPackage(
+      {
+        packageType: "audit_request",
+      },
+      "req-filing-create-governance-001",
+    );
+    await flushBackgroundWork();
+
+    const reportDetail = service.getReportJob(
+      reportAccepted.jobId,
+      "req-report-open-governance-001",
+      undefined,
+      "tenant-demo-001",
+    );
+    const filingDetail = service.getFilingPackage(
+      packageAccepted.packageId,
+      "req-filing-open-governance-001",
+    );
+
+    auditNotificationService.placeEvidenceLegalHold(
+      {
+        family: "report_artifact",
+        subjectId: reportDetail.artifact!.artifactId,
+        caseNumber: "CASE-REPORT-001",
+        reasonCode: "settlement_dispute",
+        tenantId: "tenant-demo-001",
+        manifestHash: reportDetail.artifact!.manifestHash,
+      },
+      {
+        actorId: "ops-user-001",
+        actorType: "ops_user",
+        realm: "ops",
+        scopes: ["audit:read"],
+        tenantId: null,
+      },
+    );
+    auditNotificationService.registerEvidenceDeletionException(
+      {
+        family: "filing_package",
+        subjectId: filingDetail.packageId,
+        sourceResourceType: "regulator_packet",
+        sourceResourceId: "reg-001",
+        reviewerActorId: "platform-admin-001",
+        reviewerActorType: "platform_admin",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        reasonCode: "regulatory_request",
+        manifestHash: filingDetail.manifestHash,
+      },
+      {
+        actorId: "ops-user-001",
+        actorType: "ops_user",
+        realm: "ops",
+        scopes: ["audit:read"],
+        tenantId: null,
+      },
+    );
+
+    const governedReportDetail = service.getReportJob(
+      reportAccepted.jobId,
+      "req-report-open-governance-002",
+      undefined,
+      "tenant-demo-001",
+    );
+    const governedFilingDetail = service.getFilingPackage(
+      packageAccepted.packageId,
+      "req-filing-open-governance-002",
+    );
+
+    expect(governedReportDetail.evidenceGovernance).toMatchObject({
+      subjectId: reportDetail.artifact!.artifactId,
+      deletionSuppressed: true,
+    });
+    expect(
+      governedReportDetail.evidenceGovernance?.activeLegalHolds,
+    ).toHaveLength(1);
+    expect(governedFilingDetail.evidenceGovernance).toMatchObject({
+      subjectId: filingDetail.packageId,
+      deletionSuppressed: true,
+    });
+    expect(
+      governedFilingDetail.evidenceGovernance?.activeDeletionExceptions,
+    ).toHaveLength(1);
+  });
 });

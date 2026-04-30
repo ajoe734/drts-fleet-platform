@@ -2,7 +2,9 @@ import { HttpStatus } from "@nestjs/common";
 
 import type {
   EvidenceAccessAction,
+  EvidenceDownloadControlRecord,
   EvidenceLegalHoldPolicyRecord,
+  EvidenceMaskingRuleRecord,
   EvidenceGovernanceCatalog,
   EvidenceRetentionFamily,
   EvidenceRetentionPolicyRecord,
@@ -34,6 +36,22 @@ const DEFAULT_LEGAL_HOLD_POLICY: EvidenceLegalHoldPolicyRecord = {
   notes: DEFAULT_LEGAL_HOLD_NOTES,
 };
 
+const CONTROLLED_DOWNLOAD_15_MINUTES: EvidenceDownloadControlRecord = {
+  mode: "signed_url",
+  ttlMinutes: 15,
+  reissueRequired: true,
+  requiresAuditOnIssue: true,
+  notes: [
+    "Signed artifact URLs expire after 15 minutes and must be re-issued through an authorized API call.",
+  ],
+};
+
+const NO_DOWNLOAD_CONTROL: EvidenceDownloadControlRecord | null = null;
+
+function cloneMaskingRules(rules: EvidenceMaskingRuleRecord[]) {
+  return rules.map((rule) => ({ ...rule }));
+}
+
 const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
   {
     family: "call_recording",
@@ -64,6 +82,21 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
         tenantScoped: false,
       },
     ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Secondary evidence views expose callId and recordingId as masked prefix...suffix previews.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Audit entries record evidence actions and status metadata, not raw provider recording references.",
+      },
+      {
+        surface: "storage",
+        rule: "Binary call media remains in CTI/provider storage; the repo-local authority keeps only metadata and masked references.",
+      },
+    ],
+    downloadControl: NO_DOWNLOAD_CONTROL,
     legalHold: DEFAULT_LEGAL_HOLD_POLICY,
     deletionException:
       "Call-recording evidence stays in archive while the linked complaint, legal hold, or regulator request remains open.",
@@ -108,6 +141,21 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
         tenantScoped: true,
       },
     ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Dispatch recording index responses mask callId and recordingId previews before they leave reporting-filing.",
+      },
+      {
+        surface: "download",
+        rule: "Revenue-summary evidence exposes issuerAuthorizationRef and benefitReference only as masked prefix...suffix previews.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Artifact issuance audits log manifest hash, expiry, and actor context without raw partner references or contact PII.",
+      },
+    ],
+    downloadControl: CONTROLLED_DOWNLOAD_15_MINUTES,
     legalHold: DEFAULT_LEGAL_HOLD_POLICY,
     deletionException:
       "Generated report artifacts remain recoverable from archive while any dependent filing, dispute, or legal hold references the same manifest hash.",
@@ -145,6 +193,17 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
         tenantScoped: false,
       },
     ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Filing package views expose manifest hash and signed-download metadata only; package items inherit masked report-artifact previews.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Download issuance audits record packageId, manifest hash, and expiry metadata without raw package contents.",
+      },
+    ],
+    downloadControl: CONTROLLED_DOWNLOAD_15_MINUTES,
     legalHold: DEFAULT_LEGAL_HOLD_POLICY,
     deletionException:
       "Filing packages skip deletion whenever they are referenced by an audit request, regulator handoff, or active legal hold.",
@@ -188,6 +247,17 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
         tenantScoped: true,
       },
     ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Audit feeds expose masked old/new summaries rather than raw secrets, raw partner references, or plaintext key material.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Evidence-access audit entries carry policy metadata and subject identifiers while preserving OPX-ID-003 masking rules.",
+      },
+    ],
+    downloadControl: NO_DOWNLOAD_CONTROL,
     legalHold: DEFAULT_LEGAL_HOLD_POLICY,
     deletionException:
       "Audit evidence is never hard-deleted while linked incident, complaint, or regulator references remain unresolved.",
@@ -231,6 +301,17 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
         tenantScoped: true,
       },
     ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Webhook delivery views expose signature preview and secret version metadata only; raw secret and raw body stay internal.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Delivery-history audits capture retry/status metadata without raw payload bodies or webhook secrets.",
+      },
+    ],
+    downloadControl: NO_DOWNLOAD_CONTROL,
     legalHold: DEFAULT_LEGAL_HOLD_POLICY,
     deletionException:
       "Webhook delivery evidence is retained whenever a disable event, customer dispute, or legal hold references the affected endpoint.",
@@ -280,6 +361,17 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
         tenantScoped: true,
       },
     ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Eligibility evidence surfaces expose masked issuerAuthorizationRef and benefitReference previews plus hash-only referenceToken material.",
+      },
+      {
+        surface: "storage",
+        rule: "Raw referenceToken material is not persisted once hash-based evidence fields are materialized.",
+      },
+    ],
+    downloadControl: NO_DOWNLOAD_CONTROL,
     legalHold: DEFAULT_LEGAL_HOLD_POLICY,
     deletionException:
       "Eligibility evidence stays preserved while refunds, fare disputes, or regulatory inspections depend on the original decision trace.",
@@ -323,6 +415,17 @@ const EVIDENCE_POLICIES: readonly EvidenceRetentionPolicyRecord[] = [
         tenantScoped: true,
       },
     ],
+    maskingRules: [
+      {
+        surface: "api_view",
+        rule: "Proof retrieval surfaces expose metadata and signoff references only; raw contact PII and unsecured attachments remain out of secondary evidence views.",
+      },
+      {
+        surface: "audit_log",
+        rule: "Proof evidence audits record subject identifiers and access context without reopening proof-capture payload semantics.",
+      },
+    ],
+    downloadControl: NO_DOWNLOAD_CONTROL,
     legalHold: DEFAULT_LEGAL_HOLD_POLICY,
     deletionException:
       "Proof bundles remain undeletable while settlement review, complaint handling, or legal hold references the completed trip.",
@@ -360,6 +463,13 @@ function clonePolicy(
   return {
     ...policy,
     accessRules: cloneAccessRules(policy.accessRules),
+    maskingRules: cloneMaskingRules(policy.maskingRules),
+    downloadControl: policy.downloadControl
+      ? {
+          ...policy.downloadControl,
+          notes: [...policy.downloadControl.notes],
+        }
+      : null,
     legalHold: {
       ...policy.legalHold,
       placementActors: [...policy.legalHold.placementActors],

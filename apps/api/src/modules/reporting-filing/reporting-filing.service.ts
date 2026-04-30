@@ -5,6 +5,7 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import type {
   AuditLogRecord,
   CreateReportJobCommand,
+  EvidenceSubjectGovernanceRecord,
   FilingPackageAccepted,
   FilingPackageRecord,
   FilingPackageType,
@@ -55,6 +56,7 @@ type ReportJobView = ReportJobRecord & {
   rows?: DispatchRecordingIndexRow[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
+  evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
 };
 
 type ReportArtifactView = ReportArtifactRecord & {
@@ -81,6 +83,7 @@ type FilingPackageView = FilingPackageRecord & {
   immutable: true;
   manifest: FilingPackageManifest | null;
   downloadMetadata: FilingPackageDownloadMetadata | null;
+  evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
 };
 
 type FilingPackageDownloadMetadata = {
@@ -303,6 +306,19 @@ export class ReportingFilingService implements OnModuleInit {
       tenantId: normalizedTenantScopeId,
     });
     const reportJob = this.cloneReportJob(job);
+    if (reportJob.artifact) {
+      reportJob.evidenceGovernance =
+        this.auditNotificationService.getEvidenceSubjectGovernance(
+          "report_artifact",
+          reportJob.artifact.artifactId,
+          {
+            tenantId: normalizedTenantScopeId,
+            manifestHash: reportJob.artifact.manifestHash,
+          },
+        );
+    } else {
+      reportJob.evidenceGovernance = null;
+    }
     this.recordArtifactAccessAudit(
       {
         actionName: "issue_report_artifact_download",
@@ -396,6 +412,14 @@ export class ReportingFilingService implements OnModuleInit {
       identity,
     });
     const packageView = this.cloneFilingPackage(filingPackage);
+    packageView.evidenceGovernance =
+      this.auditNotificationService.getEvidenceSubjectGovernance(
+        "filing_package",
+        packageView.packageId,
+        {
+          manifestHash: packageView.manifestHash,
+        },
+      );
     this.recordArtifactAccessAudit(
       {
         actionName: "issue_filing_package_download",

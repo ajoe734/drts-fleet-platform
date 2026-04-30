@@ -70,6 +70,37 @@ export class AuditLogRepository {
     return result.rows.map((row) => this.mapRow(row));
   }
 
+  async loadEvidenceGovernanceTrail() {
+    if (!this.isEnabled()) {
+      return [this.getBootstrapSeed()];
+    }
+
+    await this.ensureBootstrapSeed();
+
+    const result = await this.databaseService!.query<AuditLogRow>(
+      `
+        SELECT
+          audit_id,
+          actor_id,
+          actor_type,
+          tenant_id,
+          module_name,
+          action_name,
+          resource_type,
+          resource_id,
+          old_value,
+          new_value,
+          request_id,
+          created_at
+        FROM admin.audit_logs
+        WHERE resource_type IN ('evidence_legal_hold', 'evidence_deletion_exception')
+        ORDER BY created_at ASC
+      `,
+    );
+
+    return result.rows.map((row) => this.mapRow(row));
+  }
+
   async append(record: AuditLogRecord) {
     if (!this.isEnabled()) {
       return;
