@@ -12,13 +12,17 @@ import type {
   CreatePartnerChannelEntryCommand,
   PartnerChannelEntryRecord,
   PartnerEntryAuthMode,
+  PartnerEntryStatus,
   PartnerEligibilityMode,
+  PartnerIngressCredentialIssued,
+  PartnerIngressCredentialRecord,
   UpdatePartnerChannelEntryCommand,
 } from "@drts/contracts";
 import {
   BUSINESS_DISPATCH_SUBTYPES,
   PARTNER_ENTRY_AUTH_MODES,
   PARTNER_ELIGIBILITY_MODES,
+  PARTNER_ENTRY_STATUSES,
 } from "@drts/contracts";
 
 type TFn = (key: string, params?: Record<string, string | number>) => string;
@@ -40,7 +44,7 @@ type EntryFormState = {
   themeAccent: string;
   supportEmail: string;
   supportPhone: string;
-  status: "active" | "inactive";
+  status: PartnerEntryStatus;
 };
 
 const EMPTY_FORM: EntryFormState = {
@@ -199,6 +203,7 @@ function badgeTone(status: string) {
   }
   if (
     status === "inactive" ||
+    status === "revoked" ||
     status === "ineligible" ||
     status === "missing"
   ) {
@@ -222,6 +227,16 @@ export default function PartnersPage() {
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [changingStatus, setChangingStatus] = useState<string | null>(null);
+  const [credentials, setCredentials] = useState<
+    PartnerIngressCredentialRecord[]
+  >([]);
+  const [credentialsLoading, setCredentialsLoading] = useState(false);
+  const [issuingCredential, setIssuingCredential] = useState(false);
+  const [revokingCredentialId, setRevokingCredentialId] = useState<
+    string | null
+  >(null);
+  const [issuedCredential, setIssuedCredential] =
+    useState<PartnerIngressCredentialIssued | null>(null);
 
   const selectedEntry = useMemo(
     () =>
@@ -248,10 +263,35 @@ export default function PartnersPage() {
 
   useEffect(() => {
     if (!selectedEntry) {
+      setCredentials([]);
+      setIssuedCredential(null);
       return;
     }
     setEditForm(toFormState(selectedEntry));
   }, [selectedEntry]);
+
+  const loadCredentials = useCallback(
+    async (entrySlug: string) => {
+      setCredentialsLoading(true);
+      try {
+        const result =
+          await client.listPlatformPartnerIngressCredentials(entrySlug);
+        setCredentials(result ?? []);
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setCredentialsLoading(false);
+      }
+    },
+    [client],
+  );
+
+  useEffect(() => {
+    if (!selectedEntrySlug) {
+      return;
+    }
+    void loadCredentials(selectedEntrySlug);
+  }, [loadCredentials, selectedEntrySlug]);
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -288,23 +328,70 @@ export default function PartnersPage() {
   };
 
   const setEntryStatus = useCallback(
-    async (entrySlug: string, nextStatus: "active" | "inactive") => {
+    async (
+      entrySlug: string,
+      nextStatus: "active" | "inactive" | "revoked",
+    ) => {
       setChangingStatus(entrySlug);
       setError(null);
       try {
         if (nextStatus === "active") {
           await client.activatePlatformPartnerEntry(entrySlug);
-        } else {
+        } else if (nextStatus === "inactive") {
           await client.deactivatePlatformPartnerEntry(entrySlug);
+        } else {
+          await client.revokePlatformPartnerEntry(entrySlug);
         }
         await loadEntries();
+        if (selectedEntrySlug === entrySlug) {
+          await loadCredentials(entrySlug);
+        }
       } catch (e: any) {
         setError(e?.message || String(e));
       } finally {
         setChangingStatus(null);
       }
     },
-    [client, loadEntries],
+    [client, loadCredentials, loadEntries, selectedEntrySlug],
+  );
+
+  const issueCredential = useCallback(async () => {
+    if (!selectedEntry) return;
+    setIssuingCredential(true);
+    setError(null);
+    try {
+      const issued = await client.issuePlatformPartnerIngressCredential(
+        selectedEntry.entrySlug,
+        {},
+      );
+      setIssuedCredential(issued);
+      await loadCredentials(selectedEntry.entrySlug);
+    } catch (e: any) {
+      setError(e?.message || String(e));
+    } finally {
+      setIssuingCredential(false);
+    }
+  }, [client, loadCredentials, selectedEntry]);
+
+  const revokeCredential = useCallback(
+    async (keyId: string) => {
+      if (!selectedEntry) return;
+      setRevokingCredentialId(keyId);
+      setError(null);
+      try {
+        await client.revokePlatformPartnerIngressCredential(
+          selectedEntry.entrySlug,
+          keyId,
+          {},
+        );
+        await loadCredentials(selectedEntry.entrySlug);
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setRevokingCredentialId(null);
+      }
+    },
+    [client, loadCredentials, selectedEntry],
   );
 
   if (loading) {
@@ -467,7 +554,7 @@ export default function PartnersPage() {
                     >
                       {t("partners.deactivate")}
                     </button>
-                  ) : (
+                  ) : selectedEntry.status === "inactive" ? (
                     <button
                       className="admin-btn admin-btn--secondary admin-btn--sm"
                       type="button"
@@ -478,6 +565,24 @@ export default function PartnersPage() {
                     >
                       {t("partners.activate")}
                     </button>
+                  ) : null}
+                  {selectedEntry.status !== "revoked" ? (
+                    <button
+                      className="admin-btn admin-btn--secondary admin-btn--sm"
+                      type="button"
+                      disabled={changingStatus === selectedEntry.entrySlug}
+                      onClick={() =>
+                        void setEntryStatus(selectedEntry.entrySlug, "revoked")
+                      }
+                    >
+                      {t("partners.revoke")}
+                    </button>
+                  ) : (
+                    <span style={smallMutedStyle}>
+                      {selectedEntry.revokedAt
+                        ? `${t("partners.revokedAt")} ${formatDateTime(selectedEntry.revokedAt)}`
+                        : t("partners.status.revoked")}
+                    </span>
                   )}
                 </div>
               </div>
@@ -517,6 +622,141 @@ export default function PartnersPage() {
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div className="admin-card" style={nestedCardStyle}>
+                <h4 style={sectionTitleStyle}>
+                  {t("partners.section.credentials")}
+                </h4>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    marginBottom: 12,
+                  }}
+                >
+                  <button
+                    className="admin-btn admin-btn--secondary admin-btn--sm"
+                    type="button"
+                    disabled={
+                      issuingCredential || selectedEntry.status === "revoked"
+                    }
+                    onClick={() => void issueCredential()}
+                  >
+                    {issuingCredential
+                      ? t("partners.rotatingCredential")
+                      : t("partners.rotateCredential")}
+                  </button>
+                </div>
+                {issuedCredential && (
+                  <div
+                    style={{
+                      background: "#f8fafc",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: 12,
+                      padding: 12,
+                      marginBottom: 12,
+                      fontSize: 12,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                      {t("partners.plaintextCredential")}
+                    </div>
+                    <code style={{ wordBreak: "break-all" }}>
+                      {issuedCredential.plaintextKey}
+                    </code>
+                  </div>
+                )}
+                {credentialsLoading ? (
+                  <p style={smallMutedStyle}>
+                    {t("partners.loadingCredentials")}
+                  </p>
+                ) : credentials.length === 0 ? (
+                  <p style={smallMutedStyle}>
+                    {t("partners.emptyCredentials")}
+                  </p>
+                ) : (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {credentials.map((credential) => (
+                      <div
+                        key={credential.keyId}
+                        style={{
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 12,
+                          padding: 12,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 12,
+                            alignItems: "center",
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 600 }}>
+                              <code>
+                                {credential.keyPrefix}
+                                {credential.maskedSuffix}
+                              </code>
+                            </div>
+                            <div style={smallMutedStyle}>
+                              {credential.keyId}
+                            </div>
+                          </div>
+                          <span
+                            className={`admin-badge ${badgeTone(
+                              credential.revokedAt ? "revoked" : "active",
+                            )}`}
+                          >
+                            {credential.revokedAt
+                              ? t("partners.credentialStatus.revoked")
+                              : t("partners.credentialStatus.active")}
+                          </span>
+                        </div>
+                        <div style={{ ...smallMutedStyle, marginTop: 8 }}>
+                          {t("partners.credentialMeta.createdAt")}:{" "}
+                          {formatDateTime(credential.createdAt)}
+                        </div>
+                        <div style={smallMutedStyle}>
+                          {t("partners.credentialMeta.lastUsedAt")}:{" "}
+                          {credential.lastUsedAt
+                            ? formatDateTime(credential.lastUsedAt)
+                            : "—"}
+                        </div>
+                        <div style={smallMutedStyle}>
+                          {t("partners.credentialMeta.source")}:{" "}
+                          {credential.source}
+                        </div>
+                        {credential.revokedAt ? (
+                          <div style={smallMutedStyle}>
+                            {t("partners.revokedAt")}{" "}
+                            {formatDateTime(credential.revokedAt)}
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 10 }}>
+                            <button
+                              className="admin-btn admin-btn--secondary admin-btn--sm"
+                              type="button"
+                              disabled={
+                                revokingCredentialId === credential.keyId
+                              }
+                              onClick={() =>
+                                void revokeCredential(credential.keyId)
+                              }
+                            >
+                              {revokingCredentialId === credential.keyId
+                                ? t("partners.revokingCredential")
+                                : t("partners.revokeCredential")}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="admin-card" style={nestedCardStyle}>
@@ -618,7 +858,7 @@ export default function PartnersPage() {
                         >
                           {t("partners.deactivate")}
                         </button>
-                      ) : (
+                      ) : entry.status === "inactive" ? (
                         <button
                           className="admin-btn admin-btn--secondary admin-btn--sm"
                           onClick={() =>
@@ -629,7 +869,19 @@ export default function PartnersPage() {
                         >
                           {t("partners.activate")}
                         </button>
-                      )}
+                      ) : null}
+                      {entry.status !== "revoked" ? (
+                        <button
+                          className="admin-btn admin-btn--secondary admin-btn--sm"
+                          onClick={() =>
+                            void setEntryStatus(entry.entrySlug, "revoked")
+                          }
+                          type="button"
+                          disabled={changingStatus === entry.entrySlug}
+                        >
+                          {t("partners.revoke")}
+                        </button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>
@@ -749,11 +1001,13 @@ function EntryForm({
         <SelectField
           label={t("partners.form.status")}
           value={form.status}
-          options={["active", "inactive"]}
+          options={PARTNER_ENTRY_STATUSES.filter(
+            (status) => status !== "revoked",
+          )}
           onChange={(value) =>
             setForm((current) => ({
               ...current,
-              status: value as "active" | "inactive",
+              status: value as PartnerEntryStatus,
             }))
           }
         />

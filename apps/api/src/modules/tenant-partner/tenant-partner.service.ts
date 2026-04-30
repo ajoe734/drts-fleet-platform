@@ -23,15 +23,20 @@ import type {
   IdentityContext,
   CreateTenantWebhookEndpointCommand,
   IssueTenantApiKeyCommand,
+  IssuePartnerIngressCredentialCommand,
   PartnerEligibilityAdapterAttemptRecord,
   PartnerChannelEntryRecord,
+  PartnerEntryStatus,
   PartnerEligibilityDecisionSource,
   PartnerEligibilityIntegrationContractRecord,
+  PartnerIngressCredentialIssued,
+  PartnerIngressCredentialRecord,
   PartnerEligibilityManualFallbackPolicy,
   PartnerEligibilityManualFallbackRecord,
   PartnerEligibilityRetryPolicyRecord,
   PartnerEligibilitySensitiveDataPolicy,
   PartnerEligibilityVerificationRecord,
+  RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
   TenantAddressExportViewRecord,
@@ -98,6 +103,7 @@ import {
 import {
   TenantPartnerRepository,
   type PersistTenantPartnerChanges,
+  type StoredPartnerIngressCredentialRecord,
   type StoredTenantApiKeyRecord,
   type StoredWebhookDeliveryRecord,
   type StoredWebhookEndpointRecord,
@@ -432,6 +438,9 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     eligibilityContract: null,
     status: "active",
     activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
     createdAt: "2026-04-10T00:00:00.000Z",
     updatedAt: "2026-04-10T00:00:00.000Z",
     auditMetadata: {
@@ -466,6 +475,9 @@ const PARTNER_ENTRY_SEED: PartnerChannelEntryRecord[] = [
     eligibilityContract: null,
     status: "active",
     activeFlag: true,
+    revokedAt: null,
+    revokedBy: null,
+    revokeReason: null,
     createdAt: "2026-04-10T00:10:00.000Z",
     updatedAt: "2026-04-10T00:10:00.000Z",
     auditMetadata: {
@@ -512,6 +524,26 @@ function resolvePartnerIngressCredentialsFromEnv(): readonly PartnerIngressCrede
   });
 }
 
+function createBootstrapPartnerIngressCredential(
+  seed: PartnerIngressCredentialSeed,
+): StoredPartnerIngressCredentialRecord {
+  return {
+    keyId: seed.keyId,
+    entrySlug: seed.entrySlug,
+    keyPrefix: "env_bootstrap",
+    maskedSuffix: "configured",
+    source: "env_bootstrap",
+    createdAt: "2026-04-10T00:00:00.000Z",
+    lastUsedAt: null,
+    revokedAt: null,
+    issuedBy: "system:env_bootstrap",
+    revokedBy: null,
+    rotationReason: null,
+    revokeReason: null,
+    keyHash: seed.apiKeyHash,
+  };
+}
+
 @Injectable()
 export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private notificationPreferences = new Map<
@@ -547,6 +579,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.clonePartnerEntry(entry),
   );
 
+  private partnerIngressCredentials: StoredPartnerIngressCredentialRecord[] =
+    [];
+
   private partnerEligibilityVerifications = new Map<
     string,
     PartnerEligibilityVerificationRecord
@@ -563,14 +598,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     private readonly tenantPartnerRepository?: TenantPartnerRepository,
     @Optional()
     private readonly webhookDispatchService: WebhookDispatchService = new WebhookDispatchService(),
-    private readonly partnerIngressCredentials: readonly PartnerIngressCredentialSeed[] = resolvePartnerIngressCredentialsFromEnv(),
+    private readonly partnerIngressCredentialSeeds: readonly PartnerIngressCredentialSeed[] = resolvePartnerIngressCredentialsFromEnv(),
     @Optional()
     @Inject(PARTNER_ELIGIBILITY_ADAPTERS)
     private readonly eligibilityAdapters: readonly PartnerEligibilityAdapterInterface[] = [
       new BankCardInlineEligibilityAdapter(),
       new ReferenceTokenEligibilityAdapter(),
     ],
-  ) {}
+  ) {
+    this.partnerIngressCredentials = this.partnerIngressCredentialSeeds.map(
+      (seed) => createBootstrapPartnerIngressCredential(seed),
+    );
+  }
 
   async onModuleInit() {
     if (!this.tenantPartnerRepository) {
@@ -585,6 +624,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       const webhookEndpoints = persistedState.webhookEndpoints ?? [];
       const webhookDeliveries = persistedState.webhookDeliveries ?? [];
       const partnerEntries = persistedState.partnerEntries ?? [];
+      const partnerIngressCredentials =
+        persistedState.partnerIngressCredentials ?? [];
       const partnerEligibilityVerifications =
         persistedState.partnerEligibilityVerifications ?? [];
       const passengers = persistedState.passengers ?? [];
@@ -597,6 +638,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         webhookEndpoints.length > 0 ||
         webhookDeliveries.length > 0 ||
         partnerEntries.length > 0 ||
+        partnerIngressCredentials.length > 0 ||
         partnerEligibilityVerifications.length > 0 ||
         passengers.length > 0 ||
         addresses.length > 0 ||
@@ -615,6 +657,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             ),
             partnerEntries: this.partnerEntries.map((entry) =>
               this.clonePartnerEntry(entry),
+            ),
+            partnerIngressCredentials: this.partnerIngressCredentials.map(
+              (credential) =>
+                this.cloneStoredPartnerIngressCredential(credential),
             ),
             passengers: this.passengers.map((passenger) =>
               this.clonePassenger(passenger),
@@ -650,6 +696,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         partnerEntries.length > 0
           ? partnerEntries.map((entry) => this.clonePartnerEntry(entry))
           : PARTNER_ENTRY_SEED.map((entry) => this.clonePartnerEntry(entry));
+      this.partnerIngressCredentials =
+        partnerIngressCredentials.length > 0
+          ? partnerIngressCredentials.map((credential) =>
+              this.cloneStoredPartnerIngressCredential(credential),
+            )
+          : this.partnerIngressCredentialSeeds.map((seed) =>
+              createBootstrapPartnerIngressCredential(seed),
+            );
       this.normalizePartnerEntryAuthModes();
       this.partnerEligibilityVerifications = new Map(
         partnerEligibilityVerifications.map((verification) => [
@@ -679,6 +733,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             ),
           },
           "module init partner entry bootstrap",
+        );
+      }
+      if (partnerIngressCredentials.length === 0) {
+        this.persistChanges(
+          {
+            partnerIngressCredentials: this.partnerIngressCredentials.map(
+              (credential) =>
+                this.cloneStoredPartnerIngressCredential(credential),
+            ),
+          },
+          "module init partner ingress credential bootstrap",
         );
       }
       this.schedulePersistedWebhookRetries();
@@ -1124,8 +1189,67 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.partnerEntries.map((entry) => this.clonePartnerEntry(entry));
   }
 
+  listPlatformPartnerIngressCredentials(entrySlug: string) {
+    this.requirePlatformPartnerEntry(entrySlug);
+    return this.partnerIngressCredentials
+      .filter((credential) => credential.entrySlug === entrySlug)
+      .sort((left, right) => {
+        if (left.revokedAt && !right.revokedAt) {
+          return 1;
+        }
+        if (!left.revokedAt && right.revokedAt) {
+          return -1;
+        }
+        return right.createdAt.localeCompare(left.createdAt);
+      })
+      .map((credential) => this.toPartnerIngressCredentialResponse(credential));
+  }
+
+  listPartnerEligibilityReviewQueue(
+    requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    const items = [...this.partnerEligibilityVerifications.values()]
+      .map((verification) =>
+        this.clonePartnerEligibilityVerification(verification),
+      )
+      .filter((verification) => verification.verificationStatus !== "eligible")
+      .sort((left, right) => {
+        if (left.verificationStatus !== right.verificationStatus) {
+          return left.verificationStatus === "manual_review" ? -1 : 1;
+        }
+        return right.updatedAt.localeCompare(left.updatedAt);
+      });
+
+    this.recordTenantAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "ops_user",
+        tenantId: null,
+        moduleName: "tenant-partner",
+        actionName: "list_partner_eligibility_review_queue",
+        resourceType: "partner_eligibility",
+        resourceId: null,
+        newValuesSummary: {
+          queueSize: items.length,
+          manualReviewCount: items.filter(
+            (item) => item.verificationStatus === "manual_review",
+          ).length,
+          deniedCount: items.filter(
+            (item) => item.verificationStatus === "ineligible",
+          ).length,
+        },
+      },
+      requestId,
+    );
+
+    return items;
+  }
+
   getPartnerEntry(entrySlug: string) {
-    return this.clonePartnerEntry(this.requirePartnerEntry(entrySlug));
+    return this.clonePartnerEntry(this.requirePublicPartnerEntry(entrySlug));
   }
 
   createPlatformPartnerEntry(
@@ -1174,6 +1298,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       status: command.status ?? "active",
       activeFlag:
         command.activeFlag ?? (command.status ?? "active") === "active",
+      revokedAt: null,
+      revokedBy: null,
+      revokeReason: null,
       createdAt: now,
       updatedAt: now,
       auditMetadata: {
@@ -1221,6 +1348,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   ) {
     const entry = this.requirePlatformPartnerEntry(entrySlug);
     const before = this.clonePartnerEntry(entry);
+    const lifecycleStatus = this.resolveLifecycleStatus(command.status);
+    const lifecycleActiveFlag =
+      command.activeFlag !== undefined ? command.activeFlag : undefined;
+
+    if (
+      entry.status === "revoked" &&
+      ((lifecycleStatus && lifecycleStatus !== "revoked") ||
+        lifecycleActiveFlag === true)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PARTNER_ENTRY_REVOKED",
+        "Revoked partner entries cannot be reactivated or re-opened.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
 
     if (typeof command.tenantId === "string") {
       entry.tenantId = this.requireNonBlank(command.tenantId, "tenantId");
@@ -1267,13 +1412,23 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     if (command.themeAccent !== undefined) {
       entry.themeAccent = this.normalizeNullableText(command.themeAccent);
     }
-    if (command.status) {
-      entry.status = command.status;
-      entry.activeFlag = command.status === "active";
+    if (lifecycleStatus) {
+      entry.status = lifecycleStatus;
+      entry.activeFlag = lifecycleStatus === "active";
+      if (lifecycleStatus !== "revoked") {
+        entry.revokedAt = null;
+        entry.revokedBy = null;
+        entry.revokeReason = null;
+      }
     }
-    if (command.activeFlag !== undefined) {
-      entry.activeFlag = command.activeFlag;
-      entry.status = command.activeFlag ? "active" : "inactive";
+    if (lifecycleActiveFlag !== undefined) {
+      entry.activeFlag = lifecycleActiveFlag;
+      entry.status = lifecycleActiveFlag ? "active" : "inactive";
+      if (lifecycleActiveFlag) {
+        entry.revokedAt = null;
+        entry.revokedBy = null;
+        entry.revokeReason = null;
+      }
     }
 
     entry.brandingMetadata = this.buildBrandingMetadata(
@@ -1331,6 +1486,212 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  revokePlatformPartnerEntry(entrySlug: string, requestId?: string) {
+    const entry = this.requirePlatformPartnerEntry(entrySlug);
+    const before = this.clonePartnerEntry(entry);
+    const revokedAt = new Date().toISOString();
+
+    entry.status = "revoked";
+    entry.activeFlag = false;
+    entry.revokedAt = revokedAt;
+    entry.revokedBy = "platform_admin";
+    entry.revokeReason = "partner_entry_revoked";
+    entry.updatedAt = revokedAt;
+    entry.auditMetadata = {
+      ...entry.auditMetadata,
+      source: "platform_admin_console",
+      requestId: this.normalizeNullableText(requestId),
+      updatedBy: "platform_admin",
+    };
+
+    let revokedCredentialCount = 0;
+    this.partnerIngressCredentials = this.partnerIngressCredentials.map(
+      (credential) => {
+        if (
+          credential.entrySlug !== entry.entrySlug ||
+          credential.revokedAt !== null
+        ) {
+          return credential;
+        }
+        revokedCredentialCount += 1;
+        return {
+          ...credential,
+          revokedAt,
+          revokedBy: "platform_admin",
+          revokeReason: "partner_entry_revoked",
+        };
+      },
+    );
+
+    this.persistChanges(
+      {
+        partnerEntries: [this.clonePartnerEntry(entry)],
+        partnerIngressCredentials: this.partnerIngressCredentials
+          .filter((credential) => credential.entrySlug === entry.entrySlug)
+          .map((credential) =>
+            this.cloneStoredPartnerIngressCredential(credential),
+          ),
+      },
+      "revoke_platform_partner_entry",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: entry.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "revoke_partner_entry",
+        resourceType: "partner_entry",
+        resourceId: entry.entrySlug,
+        oldValuesSummary: before as unknown as Record<string, unknown>,
+        newValuesSummary: {
+          ...(this.clonePartnerEntry(entry) as unknown as Record<
+            string,
+            unknown
+          >),
+          revokedCredentialCount,
+        },
+      },
+      requestId,
+    );
+
+    return this.clonePartnerEntry(entry);
+  }
+
+  issuePlatformPartnerIngressCredential(
+    entrySlug: string,
+    command: IssuePartnerIngressCredentialCommand,
+    requestId?: string,
+  ): PartnerIngressCredentialIssued {
+    const entry = this.requirePlatformPartnerEntry(entrySlug);
+    if (entry.status === "revoked") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PARTNER_ENTRY_REVOKED",
+        "Revoked partner entries cannot receive new credentials.",
+        {
+          entrySlug: entry.entrySlug,
+        },
+      );
+    }
+
+    const issued = this.buildIssuedPartnerIngressCredential(
+      entry.entrySlug,
+      command.rotationReason ?? null,
+    );
+    let revokedCredentialId: string | null = null;
+    this.partnerIngressCredentials = this.partnerIngressCredentials.map(
+      (credential) => {
+        if (
+          credential.entrySlug !== entry.entrySlug ||
+          credential.revokedAt !== null
+        ) {
+          return credential;
+        }
+        revokedCredentialId = credential.keyId;
+        return {
+          ...credential,
+          revokedAt: issued.credential.createdAt,
+          revokedBy: "platform_admin",
+          revokeReason: command.rotationReason ?? "credential_rotated",
+        };
+      },
+    );
+    this.partnerIngressCredentials = [
+      issued.storedCredential,
+      ...this.partnerIngressCredentials,
+    ];
+    const persistedCredentials = this.partnerIngressCredentials.filter(
+      (credential) =>
+        credential.entrySlug === entry.entrySlug &&
+        (credential.keyId === issued.storedCredential.keyId ||
+          credential.keyId === revokedCredentialId),
+    );
+
+    this.persistChanges(
+      {
+        partnerIngressCredentials: persistedCredentials.map((credential) =>
+          this.cloneStoredPartnerIngressCredential(credential),
+        ),
+      },
+      "issue_platform_partner_ingress_credential",
+    );
+
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: entry.tenantId,
+        moduleName: "tenant-partner",
+        actionName: revokedCredentialId
+          ? "rotate_partner_ingress_credential"
+          : "issue_partner_ingress_credential",
+        resourceType: "partner_ingress_credential",
+        resourceId: issued.credential.keyId,
+        newValuesSummary: {
+          ...issued.credential,
+          revokedCredentialId,
+        },
+      },
+      requestId,
+    );
+
+    return {
+      credential: issued.credential,
+      plaintextKey: issued.plaintextKey,
+      revokedCredentialId,
+    };
+  }
+
+  revokePlatformPartnerIngressCredential(
+    entrySlug: string,
+    keyId: string,
+    command: RevokePartnerIngressCredentialCommand,
+    requestId?: string,
+  ) {
+    const entry = this.requirePlatformPartnerEntry(entrySlug);
+    const credential = this.requirePartnerIngressCredential(
+      entry.entrySlug,
+      keyId,
+    );
+    if (credential.revokedAt) {
+      return this.toPartnerIngressCredentialResponse(credential);
+    }
+
+    const revokedAt = new Date().toISOString();
+    credential.revokedAt = revokedAt;
+    credential.revokedBy = "platform_admin";
+    credential.revokeReason =
+      this.normalizeNullableText(command.revokeReason) ?? "manual_revoke";
+
+    this.persistChanges(
+      {
+        partnerIngressCredentials: [
+          this.cloneStoredPartnerIngressCredential(credential),
+        ],
+      },
+      "revoke_platform_partner_ingress_credential",
+    );
+
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "platform_admin",
+        tenantId: entry.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "revoke_partner_ingress_credential",
+        resourceType: "partner_ingress_credential",
+        resourceId: credential.keyId,
+        newValuesSummary: this.toPartnerIngressCredentialResponse(
+          credential,
+        ) as unknown as Record<string, unknown>,
+      },
+      requestId,
+    );
+
+    return this.toPartnerIngressCredentialResponse(credential);
+  }
+
   authenticatePartnerBootstrap(
     command: CreatePartnerBootstrapSessionCommand,
     requestId?: string,
@@ -1345,39 +1706,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const entry = this.findPartnerEntryBySlug(normalizedEntrySlug);
-    if (!entry) {
-      this.recordPartnerIngressAttempt(null, requestId, "rejected", {
-        reason: "entry_not_found",
-        entrySlug: normalizedEntrySlug,
-      });
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "PARTNER_ENTRY_NOT_FOUND",
-        "The partner entry could not be found.",
-        {
-          entrySlug: normalizedEntrySlug,
-        },
-      );
-    }
-
-    if (!entry.activeFlag || entry.status !== "active") {
-      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
-        reason: "entry_inactive",
-        entrySlug: entry.entrySlug,
-        status: entry.status,
-        activeFlag: entry.activeFlag,
-      });
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "PARTNER_ENTRY_INACTIVE",
-        "The partner entry is inactive and cannot authenticate.",
-        {
-          entrySlug: entry.entrySlug,
-          status: entry.status,
-        },
-      );
-    }
+    const entry = this.requireAccessiblePartnerEntry(
+      normalizedEntrySlug,
+      requestId,
+      "authenticate",
+    );
 
     const apiKey = command.apiKey?.trim();
     if (!apiKey) {
@@ -1410,7 +1743,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const providedHash = this.hashPartnerApiKey(apiKey);
-    const expectedHash = credential.apiKeyHash;
+    const expectedHash = credential.keyHash;
     if (!this.hashesMatch(providedHash, expectedHash)) {
       this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
         reason: "api_key_invalid",
@@ -1451,6 +1784,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.recordPartnerIngressAttempt(entry, requestId, "accepted", {
       keyId: credential.keyId,
     });
+    credential.lastUsedAt = new Date().toISOString();
 
     return {
       partnerEntry: this.clonePartnerEntry(entry),
@@ -1463,7 +1797,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: PartnerEligibilityIdentity | null,
   ) {
-    const entry = this.requirePartnerEntry(command.entrySlug);
+    const entry = this.requireAccessiblePartnerEntry(
+      command.entrySlug,
+      requestId,
+      "eligibility",
+    );
     this.assertPartnerEligibilityIdentity(identity, entry, requestId);
     const verifiedAt = new Date().toISOString();
     const normalizedBenefitReference = this.normalizeNullableText(
@@ -2218,6 +2556,44 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.webhookEndpoints
       .filter((endpoint) => endpoint.tenantId === tenantId)
       .map((endpoint) => this.toWebhookResponse(endpoint));
+  }
+
+  summarizeWebhookDeliveryHealth(referenceDate = new Date()) {
+    const referenceTimestamp = referenceDate.getTime();
+    const oneHourAgoTimestamp = referenceTimestamp - 60 * 60 * 1000;
+    const queuedDeliveryLagMinutes = this.webhookDeliveries
+      .filter((delivery) => delivery.status === "queued")
+      .map((delivery) =>
+        Math.max(
+          0,
+          Math.round(
+            (referenceTimestamp - new Date(delivery.createdAt).getTime()) /
+              60_000,
+          ),
+        ),
+      );
+
+    return {
+      totalEndpoints: this.webhookEndpoints.length,
+      activeEndpoints: this.webhookEndpoints.filter(
+        (endpoint) => endpoint.status === "active",
+      ).length,
+      disabledEndpoints: this.webhookEndpoints.filter(
+        (endpoint) => endpoint.status === "disabled",
+      ).length,
+      queuedDeliveries: this.webhookDeliveries.filter(
+        (delivery) => delivery.status === "queued",
+      ).length,
+      failedDeliveriesLastHour: this.webhookDeliveries.filter(
+        (delivery) =>
+          delivery.status === "delivery_failed" &&
+          new Date(delivery.createdAt).getTime() >= oneHourAgoTimestamp,
+      ).length,
+      oldestQueuedDeliveryLagMinutes:
+        queuedDeliveryLagMinutes.length > 0
+          ? Math.max(...queuedDeliveryLagMinutes)
+          : null,
+    };
   }
 
   deleteWebhookEndpoint(
@@ -3464,6 +3840,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private cloneStoredPartnerIngressCredential(
+    credential: StoredPartnerIngressCredentialRecord,
+  ): StoredPartnerIngressCredentialRecord {
+    return {
+      ...credential,
+    };
+  }
+
+  private toPartnerIngressCredentialResponse(
+    credential: StoredPartnerIngressCredentialRecord,
+  ): PartnerIngressCredentialRecord {
+    const response = { ...credential };
+    delete response.keyHash;
+    return response;
+  }
+
   private clonePartnerEligibilityVerification(
     verification: PartnerEligibilityVerificationRecord,
   ): PartnerEligibilityVerificationRecord {
@@ -3662,6 +4054,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return userRole;
   }
 
+  private requirePublicPartnerEntry(entrySlug: string) {
+    return this.requireAccessiblePartnerEntry(entrySlug, undefined, "public");
+  }
+
   private requirePartnerEntry(entrySlug: string) {
     const normalizedSlug = entrySlug?.trim();
     if (!normalizedSlug) {
@@ -3686,6 +4082,75 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         "The partner entry could not be found.",
         {
           entrySlug: normalizedSlug,
+        },
+      );
+    }
+
+    return entry;
+  }
+
+  private requireAccessiblePartnerEntry(
+    entrySlug: string,
+    requestId: string | undefined,
+    mode: "authenticate" | "eligibility" | "public",
+  ) {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_REQUIRED",
+        "entrySlug is required.",
+        {},
+      );
+    }
+
+    const entry = this.findPartnerEntryBySlug(normalizedSlug);
+    if (!entry) {
+      this.recordPartnerIngressAttempt(null, requestId, "rejected", {
+        reason: "entry_not_found",
+        entrySlug: normalizedSlug,
+      });
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PARTNER_ENTRY_NOT_FOUND",
+        "The partner entry could not be found.",
+        {
+          entrySlug: normalizedSlug,
+        },
+      );
+    }
+
+    if (entry.status === "revoked") {
+      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+        reason: "entry_revoked",
+        entrySlug: entry.entrySlug,
+        status: entry.status,
+      });
+      throw new ApiRequestError(
+        mode === "public" ? HttpStatus.NOT_FOUND : HttpStatus.FORBIDDEN,
+        "PARTNER_ENTRY_REVOKED",
+        "The partner entry has been revoked.",
+        {
+          entrySlug: entry.entrySlug,
+          status: entry.status,
+        },
+      );
+    }
+
+    if (!entry.activeFlag || entry.status !== "active") {
+      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+        reason: "entry_inactive",
+        entrySlug: entry.entrySlug,
+        status: entry.status,
+        activeFlag: entry.activeFlag,
+      });
+      throw new ApiRequestError(
+        mode === "public" ? HttpStatus.NOT_FOUND : HttpStatus.FORBIDDEN,
+        "PARTNER_ENTRY_INACTIVE",
+        "The partner entry is inactive and cannot be used.",
+        {
+          entrySlug: entry.entrySlug,
+          status: entry.status,
         },
       );
     }
@@ -3747,8 +4212,28 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private resolvePartnerIngressCredential(entrySlug: string) {
     return this.partnerIngressCredentials.find(
-      (credential) => credential.entrySlug === entrySlug,
+      (credential) =>
+        credential.entrySlug === entrySlug && credential.revokedAt === null,
     );
+  }
+
+  private requirePartnerIngressCredential(entrySlug: string, keyId: string) {
+    const credential = this.partnerIngressCredentials.find(
+      (candidate) =>
+        candidate.entrySlug === entrySlug && candidate.keyId === keyId,
+    );
+    if (!credential) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PARTNER_INGRESS_CREDENTIAL_NOT_FOUND",
+        "The partner ingress credential could not be found.",
+        {
+          entrySlug,
+          keyId,
+        },
+      );
+    }
+    return credential;
   }
 
   private hashPartnerApiKey(apiKey: string) {
@@ -3854,6 +4339,41 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return (
       this.partnerEntries.find((entry) => entry.entrySlug === entrySlug) ?? null
     );
+  }
+
+  private buildIssuedPartnerIngressCredential(
+    entrySlug: string,
+    rotationReason: string | null,
+  ) {
+    const now = new Date().toISOString();
+    const plaintextKey = `pk_${randomBytes(18).toString("hex")}`;
+    const storedCredential: StoredPartnerIngressCredentialRecord = {
+      keyId: `partner_key_${randomUUID()}`,
+      entrySlug,
+      keyPrefix: plaintextKey.slice(0, 12),
+      maskedSuffix: this.maskedSuffix(plaintextKey),
+      source: "platform_admin",
+      createdAt: now,
+      lastUsedAt: null,
+      revokedAt: null,
+      issuedBy: "platform_admin",
+      revokedBy: null,
+      rotationReason,
+      revokeReason: null,
+      keyHash: this.hashPartnerApiKey(plaintextKey),
+    };
+
+    return {
+      storedCredential,
+      credential: this.toPartnerIngressCredentialResponse(storedCredential),
+      plaintextKey,
+    };
+  }
+
+  private resolveLifecycleStatus(
+    status: PartnerEntryStatus | undefined,
+  ): PartnerEntryStatus | undefined {
+    return status;
   }
 
   private requireApiKey(tenantId: string, apiKeyId: string) {

@@ -2,12 +2,121 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { BankCardInlineEligibilityAdapter } from "../../src/modules/tenant-partner/bank-card-inline-eligibility.adapter";
 import {
   PartnerEligibilityAdapterError,
   type PartnerEligibilityAdapterInterface,
 } from "../../src/modules/tenant-partner/partner-eligibility-adapter.interface";
+import type {
+  PersistTenantPartnerChanges,
+  StoredPartnerIngressCredentialRecord,
+  TenantPartnerState,
+} from "../../src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../src/modules/tenant-partner/webhook-dispatch.service";
+
+function cloneState(state: TenantPartnerState): TenantPartnerState {
+  return JSON.parse(JSON.stringify(state)) as TenantPartnerState;
+}
+
+function createEmptyRepositoryState(): TenantPartnerState {
+  return {
+    notificationPreferences: [],
+    webhookEndpoints: [],
+    webhookDeliveries: [],
+    slaProfiles: [],
+    partnerEntries: [],
+    partnerIngressCredentials: [],
+    partnerEligibilityVerifications: [],
+    passengers: [],
+    addresses: [],
+    userRoles: [],
+    apiKeys: [],
+  };
+}
+
+function mergeByKey<T>(
+  current: readonly T[],
+  incoming: readonly T[] | undefined,
+  keyOf: (value: T) => string,
+) {
+  const merged = new Map(current.map((value) => [keyOf(value), value]));
+  for (const value of incoming ?? []) {
+    merged.set(keyOf(value), value);
+  }
+  return [...merged.values()];
+}
+
+function createInMemoryTenantPartnerRepository(
+  initialState: TenantPartnerState = createEmptyRepositoryState(),
+) {
+  let state = cloneState(initialState);
+
+  return {
+    loadState: vi.fn(async () => cloneState(state)),
+    persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
+      state = {
+        notificationPreferences: mergeByKey(
+          state.notificationPreferences,
+          changes.notificationPreferences,
+          (value) => value.tenantId,
+        ),
+        webhookEndpoints: mergeByKey(
+          state.webhookEndpoints,
+          changes.webhookEndpoints,
+          (value) => value.webhookId,
+        ),
+        webhookDeliveries: mergeByKey(
+          state.webhookDeliveries,
+          changes.webhookDeliveries,
+          (value) => value.deliveryId,
+        ),
+        slaProfiles: mergeByKey(
+          state.slaProfiles,
+          changes.slaProfiles,
+          (value) => value.tenantId,
+        ),
+        partnerEntries: mergeByKey(
+          state.partnerEntries,
+          changes.partnerEntries,
+          (value) => value.entrySlug,
+        ),
+        partnerIngressCredentials: mergeByKey(
+          state.partnerIngressCredentials,
+          changes.partnerIngressCredentials,
+          (value) => value.keyId,
+        ),
+        partnerEligibilityVerifications: mergeByKey(
+          state.partnerEligibilityVerifications,
+          changes.partnerEligibilityVerifications,
+          (value) => value.eligibilityVerificationId,
+        ),
+        passengers: mergeByKey(
+          state.passengers,
+          changes.passengers,
+          (value) => value.passengerId,
+        ),
+        addresses: mergeByKey(
+          state.addresses,
+          changes.addresses,
+          (value) => value.addressId,
+        ),
+        userRoles: mergeByKey(
+          state.userRoles,
+          changes.userRoles,
+          (value) => value.userId,
+        ),
+        apiKeys: mergeByKey(
+          state.apiKeys,
+          changes.apiKeys,
+          (value) => value.apiKeyId,
+        ),
+      };
+    }),
+    reportPersistenceFailure: vi.fn(),
+    getState: () => cloneState(state),
+  };
+}
 
 describe("TenantPartnerService sensitive-data governance", () => {
   afterEach(() => {
@@ -261,6 +370,256 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
+  it("revokes partner entries and blocks public lookup plus bootstrap auth", () => {
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_test_alpha_ingress_secret";
+
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
+
+    const revoked = service.revokePlatformPartnerEntry(
+      "bank-demo-alpha-airport",
+      "req-partner-revoke-001",
+    );
+
+    expect(revoked).toMatchObject({
+      status: "revoked",
+      activeFlag: false,
+      revokedBy: "platform_admin",
+      revokeReason: "partner_entry_revoked",
+    });
+
+    expect(() =>
+      service.getPartnerEntry("bank-demo-alpha-airport"),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "PARTNER_ENTRY_REVOKED",
+          }),
+        }),
+      }),
+    );
+
+    expect(() =>
+      service.authenticatePartnerBootstrap(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          apiKey: "pk_test_alpha_ingress_secret",
+        },
+        "req-partner-bootstrap-revoked-001",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "PARTNER_ENTRY_REVOKED",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("rotates and revokes partner ingress credentials with audit evidence", () => {
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_test_alpha_ingress_secret";
+
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
+
+    const issued = service.issuePlatformPartnerIngressCredential(
+      "bank-demo-alpha-airport",
+      {
+        rotationReason: "scheduled_rotation",
+      },
+      "req-partner-credential-issue-001",
+    );
+
+    expect(issued.revokedCredentialId).toBe("partner-key-alpha-demo");
+    expect(issued.credential).toMatchObject({
+      entrySlug: "bank-demo-alpha-airport",
+      source: "platform_admin",
+      revokedAt: null,
+      rotationReason: "scheduled_rotation",
+    });
+
+    const credentialsAfterRotate =
+      service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport");
+    expect(credentialsAfterRotate[0]).toMatchObject({
+      keyId: issued.credential.keyId,
+      revokedAt: null,
+    });
+    expect(credentialsAfterRotate[1]).toMatchObject({
+      keyId: "partner-key-alpha-demo",
+      revokedAt: expect.any(String),
+    });
+
+    const resolution = service.authenticatePartnerBootstrap(
+      {
+        entrySlug: "bank-demo-alpha-airport",
+        apiKey: issued.plaintextKey,
+      },
+      "req-partner-credential-auth-001",
+    );
+    expect(resolution.identity.actorId).toBe(issued.credential.keyId);
+
+    const revoked = service.revokePlatformPartnerIngressCredential(
+      "bank-demo-alpha-airport",
+      issued.credential.keyId,
+      {
+        revokeReason: "compromised",
+      },
+      "req-partner-credential-revoke-001",
+    );
+    expect(revoked).toMatchObject({
+      keyId: issued.credential.keyId,
+      revokeReason: "compromised",
+      revokedAt: expect.any(String),
+    });
+
+    expect(() =>
+      service.authenticatePartnerBootstrap(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          apiKey: issued.plaintextKey,
+        },
+        "req-partner-credential-auth-002",
+      ),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "PARTNER_AUTH_NOT_CONFIGURED",
+          }),
+        }),
+      }),
+    );
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "rotate_partner_ingress_credential",
+          resourceType: "partner_ingress_credential",
+          resourceId: issued.credential.keyId,
+        }),
+        expect.objectContaining({
+          actionName: "revoke_partner_ingress_credential",
+          resourceType: "partner_ingress_credential",
+          resourceId: issued.credential.keyId,
+        }),
+      ]),
+    );
+  });
+
+  it("persists partner ingress credential lifecycle changes and reloads them", async () => {
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_test_alpha_ingress_secret";
+
+    const repository = createInMemoryTenantPartnerRepository();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    await service.onModuleInit();
+
+    const issued = service.issuePlatformPartnerIngressCredential(
+      "bank-demo-alpha-airport",
+      {
+        rotationReason: "scheduled_rotation",
+      },
+      "req-partner-credential-persist-001",
+    );
+    service.revokePlatformPartnerIngressCredential(
+      "bank-demo-alpha-airport",
+      issued.credential.keyId,
+      {
+        revokeReason: "compromised",
+      },
+      "req-partner-credential-persist-002",
+    );
+
+    const persistedState = repository.getState();
+    expect(persistedState.partnerIngressCredentials).toEqual(
+      expect.arrayContaining<Partial<StoredPartnerIngressCredentialRecord>>([
+        expect.objectContaining({
+          keyId: "partner-key-alpha-demo",
+          entrySlug: "bank-demo-alpha-airport",
+          revokedAt: expect.any(String),
+          revokeReason: "scheduled_rotation",
+        }),
+        expect.objectContaining({
+          keyId: issued.credential.keyId,
+          entrySlug: "bank-demo-alpha-airport",
+          revokedAt: expect.any(String),
+          revokeReason: "compromised",
+          keyHash: expect.any(String),
+        }),
+      ]),
+    );
+
+    const reloaded = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+      undefined,
+      [],
+    );
+    await reloaded.onModuleInit();
+
+    expect(
+      reloaded.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          keyId: issued.credential.keyId,
+          revokedAt: expect.any(String),
+          revokeReason: "compromised",
+        }),
+        expect.objectContaining({
+          keyId: "partner-key-alpha-demo",
+          revokedAt: expect.any(String),
+          revokeReason: "scheduled_rotation",
+        }),
+      ]),
+    );
+  });
+
+  it("persists entry revoke metadata together with credential revocation", async () => {
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_test_alpha_ingress_secret";
+
+    const repository = createInMemoryTenantPartnerRepository();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    await service.onModuleInit();
+
+    service.revokePlatformPartnerEntry(
+      "bank-demo-alpha-airport",
+      "req-partner-entry-persist-001",
+    );
+
+    const persistedState = repository.getState();
+    const persistedEntry = persistedState.partnerEntries.find(
+      (entry) => entry.entrySlug === "bank-demo-alpha-airport",
+    );
+    const persistedCredential = persistedState.partnerIngressCredentials.find(
+      (credential) => credential.keyId === "partner-key-alpha-demo",
+    );
+
+    expect(persistedEntry).toMatchObject({
+      status: "revoked",
+      revokedBy: "platform_admin",
+      revokeReason: "partner_entry_revoked",
+    });
+    expect(persistedCredential).toMatchObject({
+      entrySlug: "bank-demo-alpha-airport",
+      revokedBy: "platform_admin",
+      revokeReason: "partner_entry_revoked",
+      revokedAt: expect.any(String),
+    });
+  });
+
   it("publishes the formal eligibility contract and hashes reference tokens instead of persisting raw values", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
@@ -457,6 +816,112 @@ describe("TenantPartnerService sensitive-data governance", () => {
           attempt.retryable === true,
       ),
     ).toBe(true);
+  });
+
+  it("lists manual-review and denial cases for ops review with manual-review first", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const retryingAdapter: PartnerEligibilityAdapterInterface = {
+      adapterCode: "issuer_reference_lookup_v1",
+      adapterVersion: "v1",
+      supports: (contract) =>
+        contract.adapterCode === "issuer_reference_lookup_v1",
+      async verify() {
+        throw new PartnerEligibilityAdapterError(
+          "ISSUER_UNAVAILABLE",
+          "Sandbox issuer adapter unavailable.",
+          {
+            retryable: true,
+            upstreamHttpStatus: 503,
+            manualFallbackReasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+          },
+        );
+      },
+    };
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      undefined,
+      undefined,
+      [new BankCardInlineEligibilityAdapter(), retryingAdapter],
+    );
+
+    await service.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "1357",
+        cardholderName: "Traveler Denied",
+        flightNo: "CI220",
+      },
+      "req-eligibility-denied-001",
+    );
+    await service.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-beta-airport",
+        referenceToken: "manual-review-token",
+        flightNo: "BR102",
+      },
+      "req-eligibility-review-002",
+    );
+
+    const queue = service.listPartnerEligibilityReviewQueue(
+      "req-eligibility-queue-001",
+      {
+        actorType: "ops_user",
+        actorId: "ops-reviewer-001",
+        realm: "ops",
+        scopes: ["ops:dispatch:read"],
+        requestId: "req-eligibility-queue-001",
+      },
+    );
+
+    expect(queue).toHaveLength(2);
+    expect(queue[0]).toMatchObject({
+      partnerEntrySlug: "bank-demo-beta-airport",
+      verificationStatus: "manual_review",
+      manualFallback: expect.objectContaining({
+        required: true,
+        reasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+      }),
+      requestMetadata: expect.objectContaining({
+        flightNo: "BR102",
+      }),
+    });
+    expect(queue[0].attempts).toHaveLength(3);
+    expect(queue[0].attempts.at(-1)).toMatchObject({
+      status: "error",
+      reasonCode: "ISSUER_UNAVAILABLE",
+    });
+    expect(queue[1]).toMatchObject({
+      partnerEntrySlug: "bank-demo-alpha-airport",
+      verificationStatus: "ineligible",
+      verificationReasonCode: "CARD_PROGRAM_NOT_ELIGIBLE",
+      manualFallback: expect.objectContaining({
+        required: false,
+      }),
+      requestMetadata: expect.objectContaining({
+        cardLast4: "1357",
+        flightNo: "CI220",
+      }),
+    });
+    expect(queue[1].attempts).toHaveLength(1);
+    expect(queue[1].attempts[0]).toMatchObject({
+      status: "ineligible",
+      reasonCode: "CARD_PROGRAM_NOT_ELIGIBLE",
+    });
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "list_partner_eligibility_review_queue",
+          actorType: "ops_user",
+          newValuesSummary: expect.objectContaining({
+            queueSize: 2,
+            manualReviewCount: 1,
+            deniedCount: 1,
+          }),
+        }),
+      ]),
+    );
   });
 
   it("disables failing webhook endpoints and returns them to test_pending on secret rotation", async () => {

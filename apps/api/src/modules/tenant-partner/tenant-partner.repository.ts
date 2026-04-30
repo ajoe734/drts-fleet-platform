@@ -3,6 +3,7 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 import type {
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
+  PartnerIngressCredentialRecord,
   TenantAddressRecord,
   TenantApiKeyRecord,
   TenantNotificationPreferences,
@@ -74,12 +75,18 @@ export type StoredTenantApiKeyRecord = TenantApiKeyRecord & {
   keyHash: string;
 };
 
+export type StoredPartnerIngressCredentialRecord =
+  PartnerIngressCredentialRecord & {
+    keyHash: string;
+  };
+
 export type TenantPartnerState = {
   notificationPreferences: TenantNotificationPreferences[];
   webhookEndpoints: StoredWebhookEndpointRecord[];
   webhookDeliveries: StoredWebhookDeliveryRecord[];
   slaProfiles: TenantSlaProfile[];
   partnerEntries: PartnerChannelEntryRecord[];
+  partnerIngressCredentials: StoredPartnerIngressCredentialRecord[];
   partnerEligibilityVerifications: PartnerEligibilityVerificationRecord[];
   passengers: TenantPassengerRecord[];
   addresses: TenantAddressRecord[];
@@ -93,6 +100,7 @@ export type PersistTenantPartnerChanges = {
   webhookDeliveries?: readonly StoredWebhookDeliveryRecord[];
   slaProfiles?: readonly TenantSlaProfile[];
   partnerEntries?: readonly PartnerChannelEntryRecord[];
+  partnerIngressCredentials?: readonly StoredPartnerIngressCredentialRecord[];
   partnerEligibilityVerifications?: readonly PartnerEligibilityVerificationRecord[];
   passengers?: readonly TenantPassengerRecord[];
   addresses?: readonly TenantAddressRecord[];
@@ -118,6 +126,7 @@ export class TenantPartnerRepository {
         webhookDeliveries: [],
         slaProfiles: [],
         partnerEntries: [],
+        partnerIngressCredentials: [],
         partnerEligibilityVerifications: [],
         passengers: [],
         addresses: [],
@@ -132,6 +141,7 @@ export class TenantPartnerRepository {
       webhookDeliveriesResult,
       slaProfileResult,
       partnerEntriesResult,
+      partnerIngressCredentialsResult,
       partnerEligibilityVerificationsResult,
       passengersResult,
       addressesResult,
@@ -171,6 +181,13 @@ export class TenantPartnerRepository {
           SELECT record
           FROM admin.phase1_partner_channel_entries
           ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM admin.phase1_partner_ingress_credentials
+          ORDER BY created_at DESC
         `,
       ),
       this.databaseService!.query<JsonRecordRow>(
@@ -240,6 +257,13 @@ export class TenantPartnerRepository {
           row.record,
           "admin.phase1_partner_channel_entries",
         ),
+      ),
+      partnerIngressCredentials: partnerIngressCredentialsResult.rows.map(
+        (row) =>
+          this.parseRecord<StoredPartnerIngressCredentialRecord>(
+            row.record,
+            "admin.phase1_partner_ingress_credentials",
+          ),
       ),
       partnerEligibilityVerifications:
         partnerEligibilityVerificationsResult.rows.map((row) =>
@@ -367,6 +391,36 @@ export class TenantPartnerRepository {
             entry.createdAt,
             entry.updatedAt,
             JSON.stringify(entry),
+          ],
+        ),
+      );
+    }
+
+    for (const credential of changes.partnerIngressCredentials ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO admin.phase1_partner_ingress_credentials (
+              key_id,
+              entry_slug,
+              revoked_at,
+              created_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5::jsonb
+            )
+            ON CONFLICT (key_id) DO UPDATE SET
+              entry_slug = EXCLUDED.entry_slug,
+              revoked_at = EXCLUDED.revoked_at,
+              created_at = EXCLUDED.created_at,
+              record = EXCLUDED.record
+          `,
+          [
+            credential.keyId,
+            credential.entrySlug,
+            credential.revokedAt,
+            credential.createdAt,
+            JSON.stringify(credential),
           ],
         ),
       );

@@ -12,11 +12,15 @@ import { Throttle } from "@nestjs/throttler";
 import type {
   CreatePartnerChannelEntryCommand,
   IdentityContext,
+  IssuePartnerIngressCredentialCommand,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
   IssueTenantApiKeyCommand,
+  PartnerIngressCredentialIssued,
+  PartnerIngressCredentialRecord,
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
+  RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
   TenantAddressExportViewRecord,
@@ -161,6 +165,60 @@ export class TenantPartnerController {
     );
   }
 
+  @Post("platform-admin/partner-entries/:entrySlug/revoke")
+  revokePlatformPartnerEntry(
+    @Param("entrySlug") entrySlug: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.revokePlatformPartnerEntry(entrySlug, requestId),
+      requestId,
+    );
+  }
+
+  @Get("platform-admin/partner-entries/:entrySlug/credentials")
+  listPlatformPartnerIngressCredentials(
+    @Param("entrySlug") entrySlug: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: PartnerIngressCredentialRecord[] =
+      this.tenantPartnerService.listPlatformPartnerIngressCredentials(entrySlug);
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Post("platform-admin/partner-entries/:entrySlug/credentials/issue")
+  issuePlatformPartnerIngressCredential(
+    @Param("entrySlug") entrySlug: string,
+    @Body() command: IssuePartnerIngressCredentialCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const issued: PartnerIngressCredentialIssued =
+      this.tenantPartnerService.issuePlatformPartnerIngressCredential(
+        entrySlug,
+        command,
+        requestId,
+      );
+    return toApiSuccessEnvelope(issued, requestId);
+  }
+
+  @Post("platform-admin/partner-entries/:entrySlug/credentials/:keyId/revoke")
+  revokePlatformPartnerIngressCredential(
+    @Param("entrySlug") entrySlug: string,
+    @Param("keyId") keyId: string,
+    @Body() command: RevokePartnerIngressCredentialCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.revokePlatformPartnerIngressCredential(
+        entrySlug,
+        keyId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Post("partner/eligibility/verify")
   async verifyPartnerEligibility(
     @Body() command: VerifyPartnerEligibilityCommand,
@@ -192,6 +250,21 @@ export class TenantPartnerController {
       ),
       requestId,
     );
+  }
+
+  @Get("ops/partner/eligibility/reviews")
+  @RequireRealms("platform", "ops")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listPartnerEligibilityReviewQueue(
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: PartnerEligibilityVerificationRecord[] =
+      this.tenantPartnerService.listPartnerEligibilityReviewQueue(
+        requestId,
+        identity,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Get("tenant/passengers")
