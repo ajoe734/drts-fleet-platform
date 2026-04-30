@@ -7,6 +7,7 @@ import type {
   ActivateVehicleContractCommand,
   ApproveExclusivityCommand,
   AuditLogRecord,
+  CompleteVehicleDebrandingCommand,
   CreateDriverMasterCommand,
   CreateInsurancePolicyCommand,
   CreateDriverProfileCommand,
@@ -19,9 +20,11 @@ import type {
   DriverLocationSnapshot,
   DriverMasterLifecycleStatus,
   DriverRegistryRecord,
+  InitiateVehicleOffboardingCommand,
   InsurancePolicyLifecycleStatus,
   InsurancePolicyRecord,
   Phase1ServiceBucket,
+  RejectExclusivityCommand,
   SupplyDispatchBlockReason,
   SupplyLifecycleTraceRecord,
   SubmitExclusivityReviewCommand,
@@ -126,6 +129,20 @@ function createEmptySupplyLifecycle(
       eligible: false,
       blockedReasons: ["manual_hold"],
       evaluatedAt,
+    },
+    offboarding: {
+      status: "none",
+      reason: null,
+      requestedAt: null,
+      effectiveAt: null,
+      completedAt: null,
+      requestedBy: null,
+      debrandingRequired: false,
+      debrandingStatus: "not_required",
+      debrandingDueAt: null,
+      debrandingCompletedAt: null,
+      debrandingTicketId: null,
+      notes: null,
     },
     lastTrace: null,
   };
@@ -978,6 +995,186 @@ export class RegulatoryRegistryService implements OnModuleInit {
     return this.cloneExclusivity(exclusivity);
   }
 
+  rejectExclusivity(vehicleId: string, command: RejectExclusivityCommand) {
+    this.requireVehicle(vehicleId);
+    const reviewedAt = command.reviewedAt ?? new Date().toISOString();
+    const exclusivity = this.exclusivities.find(
+      (candidate) => candidate.vehicleId === vehicleId,
+    ) ?? {
+      vehicleId,
+      declarationStatus: "submitted",
+      declarationFileId: null,
+      reviewStatus: "draft" as const,
+      lifecycleStatus: "missing" as const,
+      reviewerId: null,
+      reviewedAt: null,
+      exclusiveProviderName: null,
+      effectiveStart: null,
+      effectiveEnd: null,
+      terminationReason: null,
+      updatedAt: reviewedAt,
+    };
+
+    exclusivity.declarationStatus = "submitted";
+    exclusivity.reviewStatus = "rejected";
+    exclusivity.reviewerId = this.normalizeNullableText(command.reviewerId);
+    exclusivity.reviewedAt = reviewedAt;
+    exclusivity.terminationReason = this.normalizeNullableText(command.reason);
+    exclusivity.updatedAt = reviewedAt;
+    this.applyExclusivityLifecycle(exclusivity, reviewedAt);
+
+    this.exclusivities = [
+      this.cloneExclusivity(exclusivity),
+      ...this.exclusivities.filter(
+        (candidate) => candidate.vehicleId !== vehicleId,
+      ),
+    ];
+    const vehicle = this.reconcileVehicleLifecycle(vehicleId, {
+      entityType: "exclusivity",
+      message: "Exclusivity was rejected and supply remains blocked.",
+      occurredAt: reviewedAt,
+      relatedEntityId: vehicleId,
+      persistContext: null,
+      touchUpdatedAt: true,
+    });
+    this.persistChanges(
+      {
+        exclusivities: [this.cloneExclusivity(exclusivity)],
+        vehicles: [this.cloneVehicle(vehicle)],
+      },
+      "reject_exclusivity",
+    );
+
+    return this.cloneExclusivity(exclusivity);
+  }
+
+  initiateVehicleOffboarding(
+    vehicleId: string,
+    command: InitiateVehicleOffboardingCommand,
+  ) {
+    this.assertNonBlank(command.reason, "reason");
+    const vehicle = this.requireVehicle(vehicleId);
+    const occurredAt = new Date().toISOString();
+    const effectiveAt = this.normalizeNullableText(command.effectiveAt);
+    if (effectiveAt && Number.isNaN(new Date(effectiveAt).getTime())) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_TIME_RANGE",
+        "effectiveAt must be a valid ISO timestamp.",
+        { field: "effectiveAt" },
+      );
+    }
+
+    const debrandingDueAt = this.normalizeNullableText(command.debrandingDueAt);
+    if (debrandingDueAt && Number.isNaN(new Date(debrandingDueAt).getTime())) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_TIME_RANGE",
+        "debrandingDueAt must be a valid ISO timestamp.",
+        { field: "debrandingDueAt" },
+      );
+    }
+
+    const debrandingRequired = command.debrandingRequired ?? true;
+    vehicle.dispatchableFlag = false;
+    vehicle.supplyLifecycle = {
+      ...this.cloneSupplyLifecycle(vehicle.supplyLifecycle),
+      offboarding: {
+        status: debrandingRequired ? "debranding_required" : "completed",
+        reason: command.reason.trim(),
+        requestedAt: occurredAt,
+        effectiveAt,
+        completedAt: debrandingRequired ? null : occurredAt,
+        requestedBy: this.normalizeNullableText(command.requestedBy),
+        debrandingRequired,
+        debrandingStatus: debrandingRequired ? "pending" : "completed",
+        debrandingDueAt,
+        debrandingCompletedAt: debrandingRequired ? null : occurredAt,
+        debrandingTicketId: this.normalizeNullableText(
+          command.debrandingTicketId,
+        ),
+        notes: this.normalizeNullableText(command.notes),
+      },
+    };
+    const updated = this.reconcileVehicleLifecycle(vehicleId, {
+      entityType: "offboarding",
+      message: debrandingRequired
+        ? "Vehicle offboarding started and debranding work is now tracked."
+        : "Vehicle offboarding completed without debranding work.",
+      occurredAt,
+      relatedEntityId: vehicleId,
+      persistContext: null,
+      touchUpdatedAt: true,
+    });
+    this.persistChanges(
+      {
+        vehicles: [this.cloneVehicle(updated)],
+      },
+      "initiate_vehicle_offboarding",
+    );
+
+    return this.cloneVehicle(updated);
+  }
+
+  completeVehicleDebranding(
+    vehicleId: string,
+    command: CompleteVehicleDebrandingCommand,
+  ) {
+    const vehicle = this.requireVehicle(vehicleId);
+    const current = this.normalizeOffboarding(
+      vehicle.supplyLifecycle.offboarding,
+    );
+    if (!current.debrandingRequired || current.debrandingStatus !== "pending") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "DEBRANDING_NOT_REQUIRED",
+        "There is no pending debranding work for this vehicle.",
+        { vehicleId },
+      );
+    }
+
+    const completedAt = command.completedAt ?? new Date().toISOString();
+    if (Number.isNaN(new Date(completedAt).getTime())) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_TIME_RANGE",
+        "completedAt must be a valid ISO timestamp.",
+        { field: "completedAt" },
+      );
+    }
+
+    vehicle.supplyLifecycle = {
+      ...this.cloneSupplyLifecycle(vehicle.supplyLifecycle),
+      offboarding: {
+        ...current,
+        status: "completed",
+        completedAt,
+        debrandingStatus: "completed",
+        debrandingCompletedAt: completedAt,
+        debrandingTicketId:
+          this.normalizeNullableText(command.debrandingTicketId) ??
+          current.debrandingTicketId,
+        notes: this.normalizeNullableText(command.notes) ?? current.notes,
+      },
+    };
+    const updated = this.reconcileVehicleLifecycle(vehicleId, {
+      entityType: "offboarding",
+      message: "Vehicle debranding work completed and offboarding is closed.",
+      occurredAt: completedAt,
+      relatedEntityId: vehicleId,
+      persistContext: null,
+      touchUpdatedAt: true,
+    });
+    this.persistChanges(
+      {
+        vehicles: [this.cloneVehicle(updated)],
+      },
+      "complete_vehicle_debranding",
+    );
+
+    return this.cloneVehicle(updated);
+  }
+
   updateVehicleCompliance(
     vehicleId: string,
     command: UpdateVehicleComplianceCommand,
@@ -1288,6 +1485,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
       vehicle.vehicleId,
       evaluatedAt,
     );
+    const offboarding = this.normalizeOffboarding(
+      vehicle.supplyLifecycle?.offboarding,
+    );
 
     const blockedReasons: SupplyDispatchBlockReason[] = [];
     if (!contract || contract.lifecycleStatus === "missing") {
@@ -1320,6 +1520,10 @@ export class RegulatoryRegistryService implements OnModuleInit {
       blockedReasons.push("exclusivity_revoked");
     } else if (exclusivity.lifecycleStatus === "rejected") {
       blockedReasons.push("exclusivity_rejected");
+    }
+
+    if (offboarding.status !== "none" && offboarding.status !== "completed") {
+      blockedReasons.push("offboarding_pending_debranding");
     }
 
     if (blockedReasons.length === 0 && !dispatchableFlag) {
@@ -1357,6 +1561,7 @@ export class RegulatoryRegistryService implements OnModuleInit {
         blockedReasons,
         evaluatedAt,
       },
+      offboarding,
       lastTrace: vehicle.supplyLifecycle?.lastTrace
         ? this.cloneTrace(vehicle.supplyLifecycle.lastTrace)
         : null,
@@ -1375,6 +1580,9 @@ export class RegulatoryRegistryService implements OnModuleInit {
       previous.exclusivity.lifecycleStatus !==
         next.exclusivity.lifecycleStatus ||
       previous.exclusivity.reviewStatus !== next.exclusivity.reviewStatus ||
+      previous.offboarding.status !== next.offboarding.status ||
+      previous.offboarding.debrandingStatus !==
+        next.offboarding.debrandingStatus ||
       previous.dispatch.eligible !== next.dispatch.eligible ||
       previous.dispatch.blockedReasons.join("|") !==
         next.dispatch.blockedReasons.join("|")
@@ -1559,13 +1767,17 @@ export class RegulatoryRegistryService implements OnModuleInit {
     vehicle: VehicleRegistryRecord,
   ): VehicleRegistryRecord {
     const updatedAt = vehicle.updatedAt ?? SEED_TIMESTAMP;
+    const lifecycle = vehicle.supplyLifecycle
+      ? this.cloneSupplyLifecycle(vehicle.supplyLifecycle)
+      : createEmptySupplyLifecycle(updatedAt);
     return {
       ...vehicle,
       supportedServiceBuckets: [...vehicle.supportedServiceBuckets],
       updatedAt,
-      supplyLifecycle: vehicle.supplyLifecycle
-        ? this.cloneSupplyLifecycle(vehicle.supplyLifecycle)
-        : createEmptySupplyLifecycle(updatedAt),
+      supplyLifecycle: {
+        ...lifecycle,
+        offboarding: this.normalizeOffboarding(lifecycle.offboarding),
+      },
     };
   }
 
@@ -1690,9 +1902,29 @@ export class RegulatoryRegistryService implements OnModuleInit {
         ...lifecycle.dispatch,
         blockedReasons: [...lifecycle.dispatch.blockedReasons],
       },
+      offboarding: this.normalizeOffboarding(lifecycle.offboarding),
       lastTrace: lifecycle.lastTrace
         ? this.cloneTrace(lifecycle.lastTrace)
         : null,
+    };
+  }
+
+  private normalizeOffboarding(
+    offboarding: VehicleSupplyLifecycleRecord["offboarding"] | undefined,
+  ): VehicleSupplyLifecycleRecord["offboarding"] {
+    return {
+      status: offboarding?.status ?? "none",
+      reason: offboarding?.reason ?? null,
+      requestedAt: offboarding?.requestedAt ?? null,
+      effectiveAt: offboarding?.effectiveAt ?? null,
+      completedAt: offboarding?.completedAt ?? null,
+      requestedBy: offboarding?.requestedBy ?? null,
+      debrandingRequired: offboarding?.debrandingRequired ?? false,
+      debrandingStatus: offboarding?.debrandingStatus ?? "not_required",
+      debrandingDueAt: offboarding?.debrandingDueAt ?? null,
+      debrandingCompletedAt: offboarding?.debrandingCompletedAt ?? null,
+      debrandingTicketId: offboarding?.debrandingTicketId ?? null,
+      notes: offboarding?.notes ?? null,
     };
   }
 

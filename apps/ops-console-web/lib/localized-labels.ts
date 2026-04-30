@@ -179,6 +179,12 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   exclusivity_expired: { en: "Exclusivity Expired", zh: "排他已過期" },
   exclusivity_revoked: { en: "Exclusivity Revoked", zh: "排他已撤銷" },
   exclusivity_rejected: { en: "Exclusivity Rejected", zh: "排他遭退回" },
+  offboarding_pending_debranding: {
+    en: "Debranding Required",
+    zh: "待完成除標識",
+  },
+  debranding_required: { en: "Debranding Required", zh: "待完成除標識" },
+  not_required: { en: "Not Required", zh: "不需要" },
 };
 
 function formatTemplate(

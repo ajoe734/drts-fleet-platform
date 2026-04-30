@@ -16,6 +16,8 @@ import type {
   CreateDriverMasterCommand,
   DriverDeviceBindingSummary,
   DriverRegistryRecord,
+  InitiateVehicleOffboardingCommand,
+  SubmitExclusivityReviewCommand,
   VehicleContractRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
@@ -45,6 +47,26 @@ function createInitialDriverForm(): CreateDriverMasterCommand {
   };
 }
 
+function createInitialExclusivityForm(): SubmitExclusivityReviewCommand {
+  return {
+    declarationFileId: "",
+    exclusiveProviderName: "",
+    effectiveStart: "",
+    effectiveEnd: "",
+  };
+}
+
+function createInitialOffboardingForm(): InitiateVehicleOffboardingCommand {
+  return {
+    reason: "",
+    requestedBy: "",
+    debrandingRequired: true,
+    debrandingDueAt: "",
+    debrandingTicketId: "",
+    notes: "",
+  };
+}
+
 export default function FleetPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -62,6 +84,14 @@ export default function FleetPage() {
   const [creatingDriver, setCreatingDriver] = useState(false);
   const [driverActionId, setDriverActionId] = useState<string | null>(null);
   const [bindingActionId, setBindingActionId] = useState<string | null>(null);
+  const [vehicleActionId, setVehicleActionId] = useState<string | null>(null);
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(
+    null,
+  );
+  const [exclusivityForm, setExclusivityForm] =
+    useState<SubmitExclusivityReviewCommand>(createInitialExclusivityForm());
+  const [offboardingForm, setOffboardingForm] =
+    useState<InitiateVehicleOffboardingCommand>(createInitialOffboardingForm());
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -75,6 +105,15 @@ export default function FleetPage() {
       setVehicles(v || []);
       setDrivers(d || []);
       setContracts(c || []);
+      setSelectedVehicleId((current) => {
+        if (
+          current &&
+          (v || []).some((vehicle) => vehicle.vehicleId === current)
+        ) {
+          return current;
+        }
+        return v?.[0]?.vehicleId ?? null;
+      });
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -85,6 +124,41 @@ export default function FleetPage() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const selectedVehicle =
+    vehicles.find((vehicle) => vehicle.vehicleId === selectedVehicleId) ??
+    vehicles[0] ??
+    null;
+
+  useEffect(() => {
+    if (!selectedVehicle) {
+      return;
+    }
+    setExclusivityForm({
+      declarationFileId:
+        selectedVehicle.supplyLifecycle.exclusivity.declarationFileId ?? "",
+      exclusiveProviderName:
+        selectedVehicle.supplyLifecycle.exclusivity.providerName ?? "",
+      effectiveStart:
+        selectedVehicle.supplyLifecycle.exclusivity.effectiveStart ?? "",
+      effectiveEnd:
+        selectedVehicle.supplyLifecycle.exclusivity.effectiveEnd ?? "",
+    });
+    setOffboardingForm({
+      reason: selectedVehicle.supplyLifecycle.offboarding.reason ?? "",
+      requestedBy:
+        selectedVehicle.supplyLifecycle.offboarding.requestedBy ?? "",
+      effectiveAt:
+        selectedVehicle.supplyLifecycle.offboarding.effectiveAt ?? "",
+      debrandingRequired:
+        selectedVehicle.supplyLifecycle.offboarding.debrandingRequired,
+      debrandingDueAt:
+        selectedVehicle.supplyLifecycle.offboarding.debrandingDueAt ?? "",
+      debrandingTicketId:
+        selectedVehicle.supplyLifecycle.offboarding.debrandingTicketId ?? "",
+      notes: selectedVehicle.supplyLifecycle.offboarding.notes ?? "",
+    });
+  }, [selectedVehicle]);
 
   const submitDriver = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -147,6 +221,126 @@ export default function FleetPage() {
       }
     },
     [client, loadData],
+  );
+
+  const setVehicleDispatchable = useCallback(
+    async (vehicleId: string, dispatchableFlag: boolean) => {
+      setVehicleActionId(`${vehicleId}:dispatch:${dispatchableFlag}`);
+      setError(null);
+      try {
+        await client.updateVehicleCompliance(vehicleId, { dispatchableFlag });
+        await loadData();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setVehicleActionId(null);
+      }
+    },
+    [client, loadData],
+  );
+
+  const submitVehicleExclusivity = useCallback(
+    async (vehicleId: string) => {
+      setVehicleActionId(`${vehicleId}:exclusivity:submit`);
+      setError(null);
+      try {
+        await client.submitExclusivityReview(vehicleId, {
+          declarationFileId: exclusivityForm.declarationFileId?.trim() || null,
+          exclusiveProviderName:
+            exclusivityForm.exclusiveProviderName?.trim() || null,
+          effectiveStart: exclusivityForm.effectiveStart?.trim() || null,
+          effectiveEnd: exclusivityForm.effectiveEnd?.trim() || null,
+        });
+        await loadData();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setVehicleActionId(null);
+      }
+    },
+    [client, exclusivityForm, loadData],
+  );
+
+  const approveVehicleExclusivity = useCallback(
+    async (vehicleId: string) => {
+      setVehicleActionId(`${vehicleId}:exclusivity:approve`);
+      setError(null);
+      try {
+        await client.approveExclusivity(vehicleId, {
+          reviewerId: "platform-admin-web",
+        });
+        await loadData();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setVehicleActionId(null);
+      }
+    },
+    [client, loadData],
+  );
+
+  const rejectVehicleExclusivity = useCallback(
+    async (vehicleId: string) => {
+      setVehicleActionId(`${vehicleId}:exclusivity:reject`);
+      setError(null);
+      try {
+        await client.rejectExclusivity(vehicleId, {
+          reviewerId: "platform-admin-web",
+          reason: "Rejected from fleet admin review console.",
+        });
+        await loadData();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setVehicleActionId(null);
+      }
+    },
+    [client, loadData],
+  );
+
+  const startVehicleOffboarding = useCallback(
+    async (vehicleId: string) => {
+      setVehicleActionId(`${vehicleId}:offboarding:start`);
+      setError(null);
+      try {
+        await client.initiateVehicleOffboarding(vehicleId, {
+          reason: offboardingForm.reason.trim(),
+          requestedBy: offboardingForm.requestedBy?.trim() || null,
+          effectiveAt: offboardingForm.effectiveAt?.trim() || null,
+          debrandingRequired: offboardingForm.debrandingRequired ?? true,
+          debrandingDueAt: offboardingForm.debrandingDueAt?.trim() || null,
+          debrandingTicketId:
+            offboardingForm.debrandingTicketId?.trim() || null,
+          notes: offboardingForm.notes?.trim() || null,
+        });
+        await loadData();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setVehicleActionId(null);
+      }
+    },
+    [client, loadData, offboardingForm],
+  );
+
+  const completeVehicleDebranding = useCallback(
+    async (vehicleId: string) => {
+      setVehicleActionId(`${vehicleId}:offboarding:complete`);
+      setError(null);
+      try {
+        await client.completeVehicleDebranding(vehicleId, {
+          debrandingTicketId:
+            offboardingForm.debrandingTicketId?.trim() || null,
+          notes: offboardingForm.notes?.trim() || null,
+        });
+        await loadData();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setVehicleActionId(null);
+      }
+    },
+    [client, loadData, offboardingForm],
   );
 
   if (loading) return <div className="admin-empty">{t("fleet.loading")}</div>;
@@ -290,109 +484,558 @@ export default function FleetPage() {
           (vehicles.length === 0 ? (
             <p className="admin-empty">{t("fleet.noVehicles")}</p>
           ) : (
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>{t("fleet.col.vehicleId")}</th>
-                  <th>{t("fleet.col.plate")}</th>
-                  <th>{t("fleet.col.dispatchable")}</th>
-                  <th>{t("fleet.col.area")}</th>
-                  <th>{t("fleet.col.contract")}</th>
-                  <th>{t("fleet.col.insurance")}</th>
-                  <th>{t("fleet.col.exclusivity")}</th>
-                  <th>{t("fleet.col.blockedBy")}</th>
-                  <th>{t("fleet.col.lastChange")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vehicles.map((v) => (
-                  <tr key={v.vehicleId}>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      {v.vehicleId}
-                    </td>
-                    <td>{v.plateNo || "—"}</td>
-                    <td>
-                      <span
-                        className={`admin-badge ${
-                          v.dispatchableFlag
-                            ? "admin-badge--success"
-                            : "admin-badge--neutral"
-                        }`}
-                      >
-                        {v.dispatchableFlag
-                          ? t("fleet.dispatchable")
-                          : t("fleet.notDispatchable")}
-                      </span>
-                    </td>
-                    <td>{v.operatingArea || "—"}</td>
-                    <td>
-                      <span
-                        className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.contract.lifecycleStatus)}`}
-                      >
-                        {formatPlatformCodeLabel(
-                          locale,
-                          v.supplyLifecycle.contract.lifecycleStatus,
+            <>
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>{t("fleet.col.vehicleId")}</th>
+                    <th>{t("fleet.col.plate")}</th>
+                    <th>{t("fleet.col.dispatchable")}</th>
+                    <th>{t("fleet.col.area")}</th>
+                    <th>{t("fleet.col.contract")}</th>
+                    <th>{t("fleet.col.insurance")}</th>
+                    <th>{t("fleet.col.exclusivity")}</th>
+                    <th>{t("fleet.col.offboarding")}</th>
+                    <th>{t("fleet.col.blockedBy")}</th>
+                    <th>{t("fleet.col.lastChange")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vehicles.map((v) => (
+                    <tr
+                      key={v.vehicleId}
+                      onClick={() => setSelectedVehicleId(v.vehicleId)}
+                      style={{
+                        cursor: "pointer",
+                        background:
+                          selectedVehicle?.vehicleId === v.vehicleId
+                            ? "rgba(15, 23, 42, 0.04)"
+                            : undefined,
+                      }}
+                    >
+                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>
+                        {v.vehicleId}
+                      </td>
+                      <td>{v.plateNo || "—"}</td>
+                      <td>
+                        <span
+                          className={`admin-badge ${
+                            v.dispatchableFlag
+                              ? "admin-badge--success"
+                              : "admin-badge--neutral"
+                          }`}
+                        >
+                          {v.dispatchableFlag
+                            ? t("fleet.dispatchable")
+                            : t("fleet.notDispatchable")}
+                        </span>
+                      </td>
+                      <td>{v.operatingArea || "—"}</td>
+                      <td>
+                        <span
+                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.contract.lifecycleStatus)}`}
+                        >
+                          {formatPlatformCodeLabel(
+                            locale,
+                            v.supplyLifecycle.contract.lifecycleStatus,
+                          )}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.insurance.lifecycleStatus)}`}
+                        >
+                          {formatPlatformCodeLabel(
+                            locale,
+                            v.supplyLifecycle.insurance.lifecycleStatus,
+                          )}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.exclusivity.lifecycleStatus)}`}
+                        >
+                          {formatPlatformCodeLabel(
+                            locale,
+                            v.supplyLifecycle.exclusivity.lifecycleStatus,
+                          )}
+                        </span>
+                      </td>
+                      <td>
+                        <span
+                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.offboarding.status)}`}
+                        >
+                          {formatPlatformCodeLabel(
+                            locale,
+                            v.supplyLifecycle.offboarding.status,
+                          )}
+                        </span>
+                      </td>
+                      <td style={{ minWidth: 220 }}>
+                        {v.supplyLifecycle.dispatch.blockedReasons.length >
+                        0 ? (
+                          v.supplyLifecycle.dispatch.blockedReasons.map(
+                            (reason) => (
+                              <div key={reason}>
+                                {formatPlatformCodeLabel(locale, reason)}
+                              </div>
+                            ),
+                          )
+                        ) : (
+                          <span className="admin-badge admin-badge--success">
+                            {t("fleet.noneBlocked")}
+                          </span>
                         )}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.insurance.lifecycleStatus)}`}
-                      >
-                        {formatPlatformCodeLabel(
-                          locale,
-                          v.supplyLifecycle.insurance.lifecycleStatus,
-                        )}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.exclusivity.lifecycleStatus)}`}
-                      >
-                        {formatPlatformCodeLabel(
-                          locale,
-                          v.supplyLifecycle.exclusivity.lifecycleStatus,
-                        )}
-                      </span>
-                    </td>
-                    <td style={{ minWidth: 220 }}>
-                      {v.supplyLifecycle.dispatch.blockedReasons.length > 0 ? (
-                        v.supplyLifecycle.dispatch.blockedReasons.map(
-                          (reason) => (
-                            <div key={reason}>
-                              {formatPlatformCodeLabel(locale, reason)}
+                      </td>
+                      <td style={{ minWidth: 220 }}>
+                        {v.supplyLifecycle.lastTrace ? (
+                          <div>
+                            <div>{v.supplyLifecycle.lastTrace.message}</div>
+                            <div
+                              style={{
+                                color: "var(--admin-text-muted)",
+                                fontSize: 12,
+                              }}
+                            >
+                              {formatDateTime(
+                                v.supplyLifecycle.lastTrace.occurredAt,
+                              )}
                             </div>
-                          ),
-                        )
-                      ) : (
+                          </div>
+                        ) : (
+                          t("fleet.lastChangeNone")
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {selectedVehicle && (
+                <div
+                  style={{
+                    marginTop: 20,
+                    display: "grid",
+                    gap: 16,
+                    gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+                  }}
+                >
+                  <div className="admin-card">
+                    <h3 style={{ marginTop: 0 }}>
+                      {t("fleet.detail.dispatch")}
+                    </h3>
+                    <p style={{ marginTop: 0 }}>
+                      <strong>{selectedVehicle.vehicleId}</strong> ·{" "}
+                      {selectedVehicle.plateNo || "—"}
+                    </p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {selectedVehicle.supplyLifecycle.dispatch.blockedReasons.map(
+                        (reason) => (
+                          <span
+                            key={reason}
+                            className="admin-badge admin-badge--warning"
+                          >
+                            {formatPlatformCodeLabel(locale, reason)}
+                          </span>
+                        ),
+                      )}
+                      {selectedVehicle.supplyLifecycle.dispatch.blockedReasons
+                        .length === 0 && (
                         <span className="admin-badge admin-badge--success">
                           {t("fleet.noneBlocked")}
                         </span>
                       )}
-                    </td>
-                    <td style={{ minWidth: 220 }}>
-                      {v.supplyLifecycle.lastTrace ? (
-                        <div>
-                          <div>{v.supplyLifecycle.lastTrace.message}</div>
-                          <div
-                            style={{
-                              color: "var(--admin-text-muted)",
-                              fontSize: 12,
-                            }}
-                          >
-                            {formatDateTime(
-                              v.supplyLifecycle.lastTrace.occurredAt,
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        t("fleet.lastChangeNone")
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        marginTop: 12,
+                      }}
+                    >
+                      <button
+                        className="admin-btn admin-btn--secondary"
+                        type="button"
+                        disabled={
+                          vehicleActionId ===
+                            `${selectedVehicle.vehicleId}:dispatch:true` ||
+                          selectedVehicle.dispatchableFlag
+                        }
+                        onClick={() =>
+                          setVehicleDispatchable(
+                            selectedVehicle.vehicleId,
+                            true,
+                          )
+                        }
+                      >
+                        {vehicleActionId ===
+                        `${selectedVehicle.vehicleId}:dispatch:true`
+                          ? t("fleet.updatingVehicle")
+                          : t("fleet.markDispatchable")}
+                      </button>
+                      <button
+                        className="admin-btn admin-btn--secondary"
+                        type="button"
+                        disabled={
+                          vehicleActionId ===
+                            `${selectedVehicle.vehicleId}:dispatch:false` ||
+                          !selectedVehicle.dispatchableFlag
+                        }
+                        onClick={() =>
+                          setVehicleDispatchable(
+                            selectedVehicle.vehicleId,
+                            false,
+                          )
+                        }
+                      >
+                        {vehicleActionId ===
+                        `${selectedVehicle.vehicleId}:dispatch:false`
+                          ? t("fleet.updatingVehicle")
+                          : t("fleet.placeDispatchHold")}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="admin-card">
+                    <h3 style={{ marginTop: 0 }}>
+                      {t("fleet.detail.insurance")}
+                    </h3>
+                    <p style={{ margin: "0 0 6px" }}>
+                      {t("fleet.detail.policyId")}:{" "}
+                      {selectedVehicle.supplyLifecycle.insurance.policyId ??
+                        "—"}
+                    </p>
+                    <p style={{ margin: "0 0 6px" }}>
+                      {t("fleet.detail.window")}:{" "}
+                      {selectedVehicle.supplyLifecycle.insurance.startAt
+                        ? `${formatDateTime(selectedVehicle.supplyLifecycle.insurance.startAt)} - ${formatDateTime(selectedVehicle.supplyLifecycle.insurance.endAt || "")}`
+                        : "—"}
+                    </p>
+                    <span
+                      className={`admin-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.insurance.lifecycleStatus)}`}
+                    >
+                      {formatPlatformCodeLabel(
+                        locale,
+                        selectedVehicle.supplyLifecycle.insurance
+                          .lifecycleStatus,
                       )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </span>
+                  </div>
+
+                  <div className="admin-card">
+                    <h3 style={{ marginTop: 0 }}>
+                      {t("fleet.detail.exclusivity")}
+                    </h3>
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: 10,
+                        gridTemplateColumns: "1fr 1fr",
+                      }}
+                    >
+                      <label>
+                        <div className="admin-field-label">
+                          {t("fleet.form.provider")}
+                        </div>
+                        <input
+                          className="admin-input"
+                          value={exclusivityForm.exclusiveProviderName ?? ""}
+                          onChange={(event) =>
+                            setExclusivityForm((current) => ({
+                              ...current,
+                              exclusiveProviderName: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <div className="admin-field-label">
+                          {t("fleet.form.declarationFile")}
+                        </div>
+                        <input
+                          className="admin-input"
+                          value={exclusivityForm.declarationFileId ?? ""}
+                          onChange={(event) =>
+                            setExclusivityForm((current) => ({
+                              ...current,
+                              declarationFileId: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <div className="admin-field-label">
+                          {t("fleet.form.effectiveStart")}
+                        </div>
+                        <input
+                          className="admin-input"
+                          placeholder="2026-12-31T00:00:00.000Z"
+                          value={exclusivityForm.effectiveStart ?? ""}
+                          onChange={(event) =>
+                            setExclusivityForm((current) => ({
+                              ...current,
+                              effectiveStart: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <div className="admin-field-label">
+                          {t("fleet.form.effectiveEnd")}
+                        </div>
+                        <input
+                          className="admin-input"
+                          placeholder="2026-12-31T23:59:59.000Z"
+                          value={exclusivityForm.effectiveEnd ?? ""}
+                          onChange={(event) =>
+                            setExclusivityForm((current) => ({
+                              ...current,
+                              effectiveEnd: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                    </div>
+                    <div style={{ marginTop: 12, marginBottom: 12 }}>
+                      <span
+                        className={`admin-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.exclusivity.lifecycleStatus)}`}
+                      >
+                        {formatPlatformCodeLabel(
+                          locale,
+                          selectedVehicle.supplyLifecycle.exclusivity
+                            .lifecycleStatus,
+                        )}
+                      </span>{" "}
+                      <span
+                        style={{
+                          color: "var(--admin-text-muted)",
+                          fontSize: 12,
+                        }}
+                      >
+                        {formatPlatformCodeLabel(
+                          locale,
+                          selectedVehicle.supplyLifecycle.exclusivity
+                            .reviewStatus,
+                        )}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        className="admin-btn admin-btn--secondary"
+                        type="button"
+                        disabled={
+                          vehicleActionId ===
+                          `${selectedVehicle.vehicleId}:exclusivity:submit`
+                        }
+                        onClick={() =>
+                          submitVehicleExclusivity(selectedVehicle.vehicleId)
+                        }
+                      >
+                        {vehicleActionId ===
+                        `${selectedVehicle.vehicleId}:exclusivity:submit`
+                          ? t("fleet.updatingVehicle")
+                          : t("fleet.submitExclusivity")}
+                      </button>
+                      <button
+                        className="admin-btn admin-btn--secondary"
+                        type="button"
+                        disabled={
+                          vehicleActionId ===
+                          `${selectedVehicle.vehicleId}:exclusivity:approve`
+                        }
+                        onClick={() =>
+                          approveVehicleExclusivity(selectedVehicle.vehicleId)
+                        }
+                      >
+                        {vehicleActionId ===
+                        `${selectedVehicle.vehicleId}:exclusivity:approve`
+                          ? t("fleet.updatingVehicle")
+                          : t("fleet.approveExclusivity")}
+                      </button>
+                      <button
+                        className="admin-btn admin-btn--secondary"
+                        type="button"
+                        disabled={
+                          vehicleActionId ===
+                          `${selectedVehicle.vehicleId}:exclusivity:reject`
+                        }
+                        onClick={() =>
+                          rejectVehicleExclusivity(selectedVehicle.vehicleId)
+                        }
+                      >
+                        {vehicleActionId ===
+                        `${selectedVehicle.vehicleId}:exclusivity:reject`
+                          ? t("fleet.updatingVehicle")
+                          : t("fleet.rejectExclusivity")}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="admin-card">
+                    <h3 style={{ marginTop: 0 }}>
+                      {t("fleet.detail.offboarding")}
+                    </h3>
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: 10,
+                        gridTemplateColumns: "1fr 1fr",
+                      }}
+                    >
+                      <label style={{ gridColumn: "1 / -1" }}>
+                        <div className="admin-field-label">
+                          {t("fleet.form.offboardingReason")}
+                        </div>
+                        <input
+                          className="admin-input"
+                          value={offboardingForm.reason}
+                          onChange={(event) =>
+                            setOffboardingForm((current) => ({
+                              ...current,
+                              reason: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <div className="admin-field-label">
+                          {t("fleet.form.requestedBy")}
+                        </div>
+                        <input
+                          className="admin-input"
+                          value={offboardingForm.requestedBy ?? ""}
+                          onChange={(event) =>
+                            setOffboardingForm((current) => ({
+                              ...current,
+                              requestedBy: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <div className="admin-field-label">
+                          {t("fleet.form.debrandingTicket")}
+                        </div>
+                        <input
+                          className="admin-input"
+                          value={offboardingForm.debrandingTicketId ?? ""}
+                          onChange={(event) =>
+                            setOffboardingForm((current) => ({
+                              ...current,
+                              debrandingTicketId: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <div className="admin-field-label">
+                          {t("fleet.form.effectiveStart")}
+                        </div>
+                        <input
+                          className="admin-input"
+                          placeholder="2026-12-31T00:00:00.000Z"
+                          value={offboardingForm.effectiveAt ?? ""}
+                          onChange={(event) =>
+                            setOffboardingForm((current) => ({
+                              ...current,
+                              effectiveAt: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <div className="admin-field-label">
+                          {t("fleet.form.debrandingDueAt")}
+                        </div>
+                        <input
+                          className="admin-input"
+                          placeholder="2026-12-31T23:59:59.000Z"
+                          value={offboardingForm.debrandingDueAt ?? ""}
+                          onChange={(event) =>
+                            setOffboardingForm((current) => ({
+                              ...current,
+                              debrandingDueAt: event.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          gridColumn: "1 / -1",
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={offboardingForm.debrandingRequired ?? true}
+                          onChange={(event) =>
+                            setOffboardingForm((current) => ({
+                              ...current,
+                              debrandingRequired: event.target.checked,
+                            }))
+                          }
+                        />
+                        <span>{t("fleet.form.debrandingRequired")}</span>
+                      </label>
+                    </div>
+                    <p
+                      style={{
+                        marginTop: 12,
+                        marginBottom: 12,
+                        color: "var(--admin-text-muted)",
+                        fontSize: 12,
+                      }}
+                    >
+                      {t("fleet.detail.debrandingStatus")}:{" "}
+                      {formatPlatformCodeLabel(
+                        locale,
+                        selectedVehicle.supplyLifecycle.offboarding
+                          .debrandingStatus,
+                      )}
+                    </p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        className="admin-btn admin-btn--secondary"
+                        type="button"
+                        disabled={
+                          vehicleActionId ===
+                          `${selectedVehicle.vehicleId}:offboarding:start`
+                        }
+                        onClick={() =>
+                          startVehicleOffboarding(selectedVehicle.vehicleId)
+                        }
+                      >
+                        {vehicleActionId ===
+                        `${selectedVehicle.vehicleId}:offboarding:start`
+                          ? t("fleet.updatingVehicle")
+                          : t("fleet.startOffboarding")}
+                      </button>
+                      <button
+                        className="admin-btn admin-btn--secondary"
+                        type="button"
+                        disabled={
+                          vehicleActionId ===
+                            `${selectedVehicle.vehicleId}:offboarding:complete` ||
+                          selectedVehicle.supplyLifecycle.offboarding
+                            .debrandingStatus !== "pending"
+                        }
+                        onClick={() =>
+                          completeVehicleDebranding(selectedVehicle.vehicleId)
+                        }
+                      >
+                        {vehicleActionId ===
+                        `${selectedVehicle.vehicleId}:offboarding:complete`
+                          ? t("fleet.updatingVehicle")
+                          : t("fleet.completeDebranding")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           ))}
 
         {activeTab === "drivers" &&

@@ -1685,10 +1685,24 @@ export type SupplyDispatchBlockReason =
   | "exclusivity_pending_review"
   | "exclusivity_expired"
   | "exclusivity_revoked"
-  | "exclusivity_rejected";
+  | "exclusivity_rejected"
+  | "offboarding_pending_debranding";
+
+export type VehicleOffboardingStatus =
+  | "none"
+  | "scheduled"
+  | "debranding_required"
+  | "completed";
+
+export type VehicleDebrandingStatus = "not_required" | "pending" | "completed";
 
 export interface SupplyLifecycleTraceRecord {
-  entityType: "vehicle" | "contract" | "insurance_policy" | "exclusivity";
+  entityType:
+    | "vehicle"
+    | "contract"
+    | "insurance_policy"
+    | "exclusivity"
+    | "offboarding";
   status: string;
   reasonCode: SupplyDispatchBlockReason | null;
   message: string;
@@ -1726,6 +1740,20 @@ export interface VehicleSupplyLifecycleRecord {
     eligible: boolean;
     blockedReasons: SupplyDispatchBlockReason[];
     evaluatedAt: string;
+  };
+  offboarding: {
+    status: VehicleOffboardingStatus;
+    reason: string | null;
+    requestedAt: string | null;
+    effectiveAt: string | null;
+    completedAt: string | null;
+    requestedBy: string | null;
+    debrandingRequired: boolean;
+    debrandingStatus: VehicleDebrandingStatus;
+    debrandingDueAt: string | null;
+    debrandingCompletedAt: string | null;
+    debrandingTicketId: string | null;
+    notes: string | null;
   };
   lastTrace: SupplyLifecycleTraceRecord | null;
 }
@@ -1902,6 +1930,28 @@ export interface SubmitExclusivityReviewCommand {
 export interface ApproveExclusivityCommand {
   reviewerId?: string | null;
   reviewedAt?: string;
+}
+
+export interface RejectExclusivityCommand {
+  reviewerId?: string | null;
+  reviewedAt?: string;
+  reason?: string | null;
+}
+
+export interface InitiateVehicleOffboardingCommand {
+  reason: string;
+  effectiveAt?: string | null;
+  requestedBy?: string | null;
+  debrandingRequired?: boolean;
+  debrandingDueAt?: string | null;
+  debrandingTicketId?: string | null;
+  notes?: string | null;
+}
+
+export interface CompleteVehicleDebrandingCommand {
+  completedAt?: string;
+  debrandingTicketId?: string | null;
+  notes?: string | null;
 }
 
 export type PublicInfoVersionStatus = "draft" | "published" | "retired";
@@ -2128,11 +2178,32 @@ export interface ResolveComplaintCaseCommand {
   closingNote: string;
 }
 
+export interface EscalateComplaintToIncidentCommand {
+  title: string;
+  severity: "low" | "medium" | "high" | "critical";
+  reason: string;
+}
+
+export interface TransferCallToIncidentCommand {
+  title: string;
+  description: string;
+  category: IncidentCategory;
+  severity: IncidentSeverity;
+  relatedOrderId?: string | null;
+  relatedVehicleId?: string | null;
+  relatedDriverId?: string | null;
+}
+
+export interface LinkComplaintToIncidentCommand {
+  incidentId: string;
+}
+
 export interface ComplaintCaseRecord {
   caseNo: string;
   caseSource: "phone" | "web" | "app" | "ops";
   relatedOrderId: string | null;
   relatedCallId: string | null;
+  relatedIncidentId: string | null;
   category: ComplaintCategory;
   severity: "normal" | "high";
   description: string;
@@ -2156,7 +2227,9 @@ export interface ComplaintTimelineEntry {
     | "case_reopened"
     | "sla_breached"
     | "case_resolved"
-    | "case_closed";
+    | "case_closed"
+    | "escalated_to_incident"
+    | "incident_linked";
   note: string;
   createdAt: string;
 }
@@ -3054,6 +3127,8 @@ export interface PlatformTenantBootstrapRoleDefault {
   roleCode: string;
   displayName: string;
   required: boolean;
+  invitedAt: string | null;
+  acknowledgedAt: string | null;
 }
 
 export interface PlatformTenantBillingBaseline {
@@ -3092,7 +3167,7 @@ export interface PlatformAdminTenantRecord {
   id: string;
   code: string;
   name: string;
-  status: "draft" | "active" | "paused";
+  status: "draft" | "active" | "paused" | "rollback_hold";
   enabledModules: PlatformTenantModule[];
   quotas: PlatformTenantQuotaSummary;
   bootstrapDefaults: PlatformTenantBootstrapDefaults;
@@ -3125,6 +3200,15 @@ export interface UpdatePlatformTenantOnboardingCommand {
 export interface SetPlatformTenantRolloutStageCommand {
   stage: PlatformTenantRolloutStage;
   notes?: string | null;
+}
+
+export interface InviteTenantRoleCommand {
+  roleCode: string;
+  inviteeEmail?: string;
+}
+
+export interface AcknowledgeTenantRoleCommand {
+  roleCode: string;
 }
 
 export interface UpdatePlatformTenantSettingsCommand {

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { AppState } from "react-native";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 
@@ -8,7 +8,14 @@ import {
   initializeDriverLocationHeartbeat,
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
-import { getDriverClient, initializeDriverIdentity } from "@/lib/api-client";
+import { syncDriverIdentityBootstrap } from "@/lib/driver-identity-bootstrap";
+import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
+import {
+  getDriverClient,
+  getDriverIdentityIssue,
+  initializeDriverIdentity,
+  isDriverIdentityProvisioned,
+} from "@/lib/api-client";
 
 const DRIVER_SESSION_REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -17,33 +24,27 @@ export const unstable_settings = {
 };
 
 function DriverHeartbeatBootstrap() {
+  const router = useRouter();
+
   useEffect(() => {
     initializeDriverLocationHeartbeat();
 
     let cancelled = false;
 
     const syncWithActiveTrip = async () => {
-      try {
-        await initializeDriverIdentity();
-        const tasks = await getDriverClient().listDriverTasks();
-        const activeTask =
-          tasks.find((task) => task.status === "on_trip") ?? null;
-
-        if (cancelled) {
-          return;
-        }
-
-        await syncDriverLocationHeartbeat(
-          activeTask
-            ? {
-                taskId: activeTask.taskId,
-                driverId: activeTask.driverId,
-              }
-            : null,
-        );
-      } catch (error) {
-        console.warn("Driver heartbeat bootstrap sync failed", error);
-      }
+      await syncDriverIdentityBootstrap({
+        cancelled: () => cancelled,
+        getDriverIdentityIssue,
+        initializeDriverIdentity,
+        isDriverIdentityProvisioned,
+        listDriverTasks: () => getDriverClient().listDriverTasks(),
+        onWarning: (error) => {
+          console.warn("Driver heartbeat bootstrap sync failed", error);
+        },
+        resetDriverAppToOnboarding,
+        router,
+        syncDriverLocationHeartbeat,
+      });
     };
 
     void syncWithActiveTrip();
@@ -62,7 +63,7 @@ function DriverHeartbeatBootstrap() {
       subscription.remove();
       clearInterval(refreshInterval);
     };
-  }, []);
+  }, [router]);
 
   return null;
 }

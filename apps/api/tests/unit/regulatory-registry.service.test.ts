@@ -348,4 +348,73 @@ describe("RegulatoryRegistryService", () => {
       eligibilityBlockedReasons: ["lifecycle_draft", "work_state_offline"],
     });
   });
+
+  it("tracks debranding work during vehicle offboarding", () => {
+    const { service } = createService();
+
+    const offboarded = service.initiateVehicleOffboarding("veh-demo-001", {
+      reason: "Partner exit",
+      requestedBy: "ops-lead",
+      debrandingRequired: true,
+      debrandingDueAt: "2026-05-02T00:00:00.000Z",
+      debrandingTicketId: "DEBRAND-001",
+    });
+
+    expect(offboarded).toMatchObject({
+      dispatchableFlag: false,
+      supplyLifecycle: {
+        dispatch: {
+          eligible: false,
+          blockedReasons: expect.arrayContaining([
+            "offboarding_pending_debranding",
+          ]),
+        },
+        offboarding: {
+          status: "debranding_required",
+          debrandingStatus: "pending",
+          debrandingTicketId: "DEBRAND-001",
+        },
+      },
+    });
+
+    const completed = service.completeVehicleDebranding("veh-demo-001", {
+      debrandingTicketId: "DEBRAND-001",
+      notes: "Branding removed at depot",
+    });
+
+    expect(completed.supplyLifecycle.offboarding).toMatchObject({
+      status: "completed",
+      debrandingStatus: "completed",
+      debrandingTicketId: "DEBRAND-001",
+    });
+    expect(completed.supplyLifecycle.dispatch.blockedReasons).not.toContain(
+      "offboarding_pending_debranding",
+    );
+  });
+
+  it("surfaces rejected exclusivity in vehicle lifecycle", () => {
+    const { service } = createService();
+
+    const rejected = service.rejectExclusivity("veh-demo-002", {
+      reviewerId: "platform-admin-demo-002",
+      reason: "Missing declaration evidence",
+      reviewedAt: "2026-04-30T00:00:00.000Z",
+    });
+
+    expect(rejected.lifecycleStatus).toBe("rejected");
+    expect(
+      service
+        .listVehicles()
+        .find((vehicle) => vehicle.vehicleId === "veh-demo-002"),
+    ).toMatchObject({
+      supplyLifecycle: {
+        exclusivity: {
+          lifecycleStatus: "rejected",
+        },
+        dispatch: {
+          blockedReasons: expect.arrayContaining(["exclusivity_rejected"]),
+        },
+      },
+    });
+  });
 });

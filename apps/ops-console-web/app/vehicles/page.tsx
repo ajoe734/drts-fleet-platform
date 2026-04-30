@@ -14,7 +14,8 @@ function lifecycleBadgeVariant(status: string) {
     status === "expired" ||
     status === "terminated" ||
     status === "revoked" ||
-    status === "rejected"
+    status === "rejected" ||
+    status === "completed"
   ) {
     return "red" as const;
   }
@@ -34,6 +35,10 @@ export default async function VehiclesPage() {
   } catch (e) {
     error = e instanceof Error ? e.message : t("common.unknown", locale);
   }
+
+  const warningVehicles = vehicles.filter(
+    (vehicle) => vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
+  );
 
   return (
     <>
@@ -58,6 +63,22 @@ export default async function VehiclesPage() {
         </div>
       )}
 
+      {warningVehicles.length > 0 && (
+        <Card style={{ marginBottom: "20px" }}>
+          <div style={{ display: "grid", gap: "10px" }}>
+            <strong>{t("vehicles.warningTitle", locale)}</strong>
+            {warningVehicles.map((vehicle) => (
+              <div key={vehicle.vehicleId} style={{ fontSize: "13.5px" }}>
+                <strong>{vehicle.vehicleId}</strong>:{" "}
+                {vehicle.supplyLifecycle.dispatch.blockedReasons
+                  .map((reason) => formatOpsCodeLabel(locale, reason))
+                  .join(" / ")}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card>
         <DataTable
           columns={[
@@ -67,6 +88,7 @@ export default async function VehiclesPage() {
             { label: t("vehicles.col.contract", locale) },
             { label: t("vehicles.col.insurance", locale) },
             { label: t("vehicles.col.exclusivity", locale) },
+            { label: t("vehicles.col.offboarding", locale) },
             { label: t("vehicles.col.dispatchable", locale) },
             { label: t("vehicles.col.blockedBy", locale) },
             { label: t("vehicles.col.lastChange", locale) },
@@ -115,6 +137,18 @@ export default async function VehiclesPage() {
                 </Badge>
               </Td>
               <Td>
+                <Badge
+                  variant={lifecycleBadgeVariant(
+                    v.supplyLifecycle.offboarding.status,
+                  )}
+                >
+                  {formatOpsCodeLabel(
+                    locale,
+                    v.supplyLifecycle.offboarding.status,
+                  )}
+                </Badge>
+              </Td>
+              <Td>
                 <Badge variant={v.dispatchableFlag ? "green" : "gray"}>
                   {v.dispatchableFlag
                     ? t("common.yes", locale)
@@ -134,6 +168,9 @@ export default async function VehiclesPage() {
                       v.supplyLifecycle.lastTrace.occurredAt,
                     ).toLocaleString()})`
                   : t("vehicles.lastChangeNone", locale)}
+                {v.supplyLifecycle.offboarding.debrandingStatus === "pending"
+                  ? ` · ${t("vehicles.debrandingPending", locale)}`
+                  : ""}
               </Td>
             </Tr>
           ))}

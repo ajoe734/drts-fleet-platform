@@ -13,10 +13,13 @@ import type {
   ActivateInsurancePolicyCommand,
   ActivateVehicleContractCommand,
   ApproveExclusivityCommand,
+  CompleteVehicleDebrandingCommand,
   CreateDriverMasterCommand,
   CreateInsurancePolicyCommand,
   CreateVehicleContractCommand,
   DriverLocationHeartbeatCommand,
+  InitiateVehicleOffboardingCommand,
+  RejectExclusivityCommand,
   RegulatoryRegistrySummary,
   SubmitExclusivityReviewCommand,
   UpdateDriverMasterLifecycleCommand,
@@ -77,6 +80,36 @@ export class RegulatoryRegistryController {
   ) {
     return toApiSuccessEnvelope(
       this.regulatoryRegistryService.updateVehicleCompliance(
+        vehicleId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("vehicles/:vehicleId/offboarding")
+  initiateVehicleOffboarding(
+    @Param("vehicleId") vehicleId: string,
+    @Body() command: InitiateVehicleOffboardingCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryRegistryService.initiateVehicleOffboarding(
+        vehicleId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("vehicles/:vehicleId/offboarding/complete-debranding")
+  completeVehicleDebranding(
+    @Param("vehicleId") vehicleId: string,
+    @Body() command: CompleteVehicleDebrandingCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryRegistryService.completeVehicleDebranding(
         vehicleId,
         command,
       ),
@@ -270,6 +303,18 @@ export class RegulatoryRegistryController {
   ) {
     return toApiSuccessEnvelope(
       this.regulatoryRegistryService.approveExclusivity(vehicleId, command),
+      requestId,
+    );
+  }
+
+  @Post("exclusivities/:vehicleId/reject")
+  rejectExclusivity(
+    @Param("vehicleId") vehicleId: string,
+    @Body() command: RejectExclusivityCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.regulatoryRegistryService.rejectExclusivity(vehicleId, command),
       requestId,
     );
   }
