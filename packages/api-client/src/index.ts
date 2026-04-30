@@ -7,6 +7,7 @@
 
 import type {
   AddComplaintCaseNoteCommand,
+  ApplyManualFareOverrideCommand,
   AnnounceCallAgentIdentityCommand,
   ApproveReimbursementBatchCommand,
   AssignComplaintCaseCommand,
@@ -105,6 +106,7 @@ import type {
   ReportJobDetailRecord,
   ReportJobRecord,
   ResolveComplaintCaseCommand,
+  ResolveExceptionHoldCommand,
   RevokeDriverDeviceBindingCommand,
   RotateTenantApiKeyCommand,
   SetPlatformMaintenanceModeCommand,
@@ -422,6 +424,18 @@ export class ApiClient {
     return this.patch(`/api/orders/${id}`, { body: command });
   }
 
+  async applyManualFareOverride(
+    orderId: string,
+    command: ApplyManualFareOverrideCommand,
+  ) {
+    return this.post<OwnedOrderRecord>(
+      `/api/orders/${encodeURIComponent(orderId)}/manual-fare-override`,
+      {
+        body: command,
+      },
+    );
+  }
+
   // ── Owned Mobility: Call Center ──
 
   async createCallCenterOrder(command: CreateCallCenterOrderCommand) {
@@ -481,6 +495,18 @@ export class ApiClient {
         reasonCode,
       },
     });
+  }
+
+  async resolveExceptionHold(
+    orderId: string,
+    command: ResolveExceptionHoldCommand,
+  ) {
+    return this.post<OwnedOrderRecord>(
+      `/api/orders/${encodeURIComponent(orderId)}/resolve-exception-hold`,
+      {
+        body: command,
+      },
+    );
   }
 
   async listDispatchJobs(): Promise<DispatchJobRecord[]> {

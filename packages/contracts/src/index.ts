@@ -995,6 +995,30 @@ export const RESERVATION_HOLD_STATUSES = [
 ] as const;
 export type ReservationHoldStatus = (typeof RESERVATION_HOLD_STATUSES)[number];
 
+export const DISPATCH_QUEUE_FAMILIES = [
+  "realtime_ready_queue",
+  "reservation_confirmation_queue",
+  "redispatch_priority_queue",
+  "exception_hold_queue",
+  "recording_gate_queue",
+  "manual_review_queue",
+] as const;
+export type DispatchQueueFamily = (typeof DISPATCH_QUEUE_FAMILIES)[number];
+
+export const DISPATCH_QUEUE_ENTRY_REASONS = [
+  "realtime_ready_for_dispatch",
+  "reservation_confirmation_window_open",
+  "redispatch_retry_required",
+  "recording_missing_for_dispatch",
+  "dispatch_manual_review_required",
+  "exception_hold_no_eligible_supply",
+  "exception_hold_confirmation_window_expired",
+  "exception_hold_driver_rejected_in_window",
+  "exception_hold_manual_escalation",
+] as const;
+export type DispatchQueueEntryReason =
+  (typeof DISPATCH_QUEUE_ENTRY_REASONS)[number];
+
 // --- Queue-Entry Policy ---
 
 export const QUEUE_ENTRY_POLICY_MAP: Record<
@@ -1072,8 +1096,9 @@ export interface ExceptionHoldCriteria {
 
 export interface ResolveExceptionHoldCommand {
   resolution: "release_to_dispatch" | "cancel_order";
-  operatorId: string;
+  operatorId?: string;
   reason: string;
+  traceId: string;
 }
 
 export interface AddressPayload {
@@ -1302,6 +1327,27 @@ export interface ManualFareOverrideRecord {
   overriddenAt: string;
 }
 
+export interface ExceptionHoldResolutionRecord {
+  resolution: ResolveExceptionHoldCommand["resolution"];
+  actorType: "platform_admin" | "ops_user";
+  actorId: string;
+  reason: string;
+  traceId: string;
+  resolvedAt: string;
+  downstreamReviewerLabels: string[];
+  downstreamStages: ComplianceImpactStage[];
+}
+
+export interface ExceptionHoldRecord {
+  reasonCode: ExceptionHoldReasonCode;
+  dispatchJobId: string | null;
+  raisedAt: string;
+  criteria: ExceptionHoldCriteria;
+  overrideAllowed: boolean;
+  overrideActors: ("platform_admin" | "ops_user")[];
+  resolution: ExceptionHoldResolutionRecord | null;
+}
+
 export interface ApplyManualFareOverrideCommand {
   fare: MoneyAmount;
   reason: string;
@@ -1427,6 +1473,7 @@ export interface OwnedOrderRecord {
   quotedFareSource: QuotedFareSource | null;
   quotedFareRuleVersion: string | null;
   manualFareOverride: ManualFareOverrideRecord | null;
+  exceptionHold: ExceptionHoldRecord | null;
   proofRequirements: {
     minPhotoCount: number;
     signoffRequired: boolean;
@@ -1439,6 +1486,8 @@ export interface OwnedOrderRecord {
   reservationHoldStatus: ReservationHoldStatus;
   reservationHoldId: string | null;
   reservationHoldExpiresAt: string | null;
+  queueFamily?: DispatchQueueFamily | null;
+  queueEntryReason?: DispatchQueueEntryReason | null;
   createdAt: string;
   updatedAt: string;
 }

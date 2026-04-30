@@ -256,6 +256,7 @@ describe("owned mobility task events", () => {
       resolution: "release_to_dispatch",
       operatorId: "ops-user-001",
       reason: "Supply confirmed manually",
+      traceId: "trace-exception-release-stream-001",
     });
 
     const events = await streamPromise;

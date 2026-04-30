@@ -40,6 +40,23 @@ function createOwnedMobilityService(options?: {
   };
   const callcenterService = {
     registerRecordingAttachmentListener: vi.fn(),
+    linkOrderToCallSession: vi.fn(
+      ({
+        callId,
+        callType,
+        callerPhone,
+        agentId,
+        linkedOrderId,
+        recordingId,
+      }) => ({
+        callId,
+        callType,
+        callerPhone,
+        agentId,
+        linkedOrderId,
+        recordingId: recordingId ?? null,
+      }),
+    ),
   };
   const taskEventsService = new OwnedMobilityTaskEventsService(
     new EventEmitter2(),
@@ -615,15 +632,34 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     service.dispatchOrder(booking.orderId, { mode: "auto" });
     const heldOrder = service.getOrder(booking.orderId);
     expect(heldOrder.status).toBe("exception_hold");
+    expect(heldOrder.exceptionHold).toMatchObject({
+      reasonCode: "no_eligible_supply",
+      overrideAllowed: true,
+      overrideActors: ["ops_user", "platform_admin"],
+    });
+    expect(heldOrder.queueFamily).toBe("exception_hold_queue");
+    expect(heldOrder.queueEntryReason).toBe(
+      "exception_hold_no_eligible_supply",
+    );
 
     const resolvedOrder = service.resolveExceptionHold(booking.orderId, {
       resolution: "release_to_dispatch",
       operatorId: "ops-user-001",
       reason: "Supply confirmed manually",
+      traceId: "trace-exception-release-001",
     });
 
     expect(resolvedOrder.status).toBe("ready_for_dispatch");
     expect(resolvedOrder.reservationHoldStatus).toBe("requested");
+    expect(resolvedOrder.exceptionHold?.resolution).toMatchObject({
+      resolution: "release_to_dispatch",
+      actorId: "ops-user-001",
+      traceId: "trace-exception-release-001",
+    });
+    expect(resolvedOrder.queueFamily).toBe("reservation_confirmation_queue");
+    expect(resolvedOrder.queueEntryReason).toBe(
+      "reservation_confirmation_window_open",
+    );
 
     const trace = service.listDispatchTrace(booking.orderId);
     expect(trace).toEqual(
@@ -633,6 +669,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
           details: expect.objectContaining({
             operatorId: "ops-user-001",
             resolution: "release_to_dispatch",
+            traceId: "trace-exception-release-001",
           }),
         }),
       ]),
@@ -663,6 +700,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       resolution: "release_to_dispatch",
       operatorId: "ops-user-001",
       reason: "Retry dispatch",
+      traceId: "trace-exception-release-002",
     });
 
     const redispatchResult = service.dispatchOrder(booking.orderId, {
@@ -708,6 +746,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       resolution: "release_to_dispatch",
       operatorId: "ops-user-001",
       reason: "Retry dispatch after manual confirmation",
+      traceId: "trace-exception-release-003",
     });
 
     regulatoryRegistryService.getEligibleCandidates.mockReturnValue(candidates);
@@ -754,10 +793,108 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       resolution: "cancel_order",
       operatorId: "ops-user-002",
       reason: "No supply available, rider notified",
+      traceId: "trace-exception-cancel-001",
     });
 
     expect(cancelledOrder.status).toBe("cancelled");
     expect(cancelledOrder.reservationHoldStatus).toBe("released");
+    expect(cancelledOrder.exceptionHold?.resolution).toMatchObject({
+      resolution: "cancel_order",
+      actorId: "ops-user-002",
+      traceId: "trace-exception-cancel-001",
+    });
+    expect(cancelledOrder.queueFamily).toBeNull();
+    expect(cancelledOrder.queueEntryReason).toBeNull();
+  });
+
+  it("surfaces queue family and entry reason for realtime, recording, redispatch, and manual-review queues", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+
+    const { service } = createOwnedMobilityService();
+
+    const realtimeOrder = service.createPassengerOrder({
+      pickup: { address: "Realtime A" },
+      dropoff: { address: "Realtime B" },
+      passenger: { name: "Realtime Rider", phone: "0911111111" },
+    });
+    expect(realtimeOrder.queueFamily).toBe("realtime_ready_queue");
+    expect(realtimeOrder.queueEntryReason).toBe("realtime_ready_for_dispatch");
+
+    const recordingOrder = service.createCallCenterOrder({
+      callId: "call-queue-001",
+      agentId: "agent-001",
+      pickup: { address: "Phone A" },
+      dropoff: { address: "Phone B" },
+      passenger: { name: "Phone Rider", phone: "0922000000" },
+    });
+    expect(recordingOrder.queueFamily).toBe("recording_gate_queue");
+    expect(recordingOrder.queueEntryReason).toBe(
+      "recording_missing_for_dispatch",
+    );
+
+    const reservationBooking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Reservation A" },
+        dropoff: { address: "Reservation B" },
+        passenger: { name: "Reservation Rider", phone: "0933000000" },
+      },
+      "tenant-demo-001",
+    );
+    service.dispatchOrder(reservationBooking.orderId, { mode: "auto" });
+    const redispatchOrder = service.getOrder(reservationBooking.orderId);
+    expect(redispatchOrder.queueFamily).toBe("redispatch_priority_queue");
+    expect(redispatchOrder.queueEntryReason).toBe("redispatch_retry_required");
+
+    const tenantPartnerService = {
+      getPartnerEntry: vi.fn(() => ({
+        partnerId: "partner-demo-001",
+        programId: "program-demo-001",
+        entrySlug: "partner-entry-manual-review",
+        tenantId: "tenant-demo-001",
+        businessDispatchSubtype: "enterprise_dispatch",
+        eligibilityMode: "bank_card_inline",
+      })),
+      getPartnerEligibilityVerification: vi.fn(() => ({
+        eligibilityVerificationId: "elig-review-001",
+        tenantId: "tenant-demo-001",
+        partnerId: "partner-demo-001",
+        partnerProgramId: "program-demo-001",
+        partnerEntrySlug: "partner-entry-manual-review",
+        verificationStatus: "manual_review",
+        expiresAt: null,
+      })),
+    } as unknown as TenantPartnerService;
+    const { service: manualReviewService } = createOwnedMobilityService({
+      tenantPartnerService,
+    });
+    const manualReviewOrder = manualReviewService.createPassengerOrder({
+      pickup: { address: "Manual Review A" },
+      dropoff: { address: "Manual Review B" },
+      passenger: { name: "Manual Review Rider", phone: "0944000000" },
+    });
+    const rawManualReviewOrder = (
+      manualReviewService as unknown as {
+        orders: Array<Record<string, unknown>>;
+      }
+    ).orders[0];
+    rawManualReviewOrder.serviceBucket = "business_dispatch";
+    rawManualReviewOrder.tenantId = "tenant-demo-001";
+    rawManualReviewOrder.partnerEntrySlug = "partner-entry-manual-review";
+    rawManualReviewOrder.eligibilityVerificationId = "elig-review-001";
+
+    const queueTaggedManualReviewOrder = manualReviewService.getOrder(
+      manualReviewOrder.orderId,
+    );
+    expect(queueTaggedManualReviewOrder.queueFamily).toBe(
+      "manual_review_queue",
+    );
+    expect(queueTaggedManualReviewOrder.queueEntryReason).toBe(
+      "dispatch_manual_review_required",
+    );
   });
 
   it("rejects resolveExceptionHold on orders not in exception hold", () => {
@@ -774,6 +911,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         resolution: "release_to_dispatch",
         operatorId: "ops-001",
         reason: "test",
+        traceId: "trace-exception-invalid-001",
       }),
     ).toThrowError(ApiRequestError);
 
@@ -782,6 +920,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         resolution: "release_to_dispatch",
         operatorId: "ops-001",
         reason: "test",
+        traceId: "trace-exception-invalid-001",
       });
     } catch (error) {
       expect((error as ApiRequestError).getResponse()).toMatchObject({

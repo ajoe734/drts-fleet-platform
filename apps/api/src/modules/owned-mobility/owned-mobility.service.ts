@@ -17,6 +17,8 @@ import type {
   DispatchAssignmentRecord,
   DispatchAttemptRecord,
   DispatchCandidate,
+  DispatchQueueEntryReason,
+  DispatchQueueFamily,
   DispatchJobRecord,
   DispatchOrderCommand,
   DispatchSemantics,
@@ -29,6 +31,7 @@ import type {
   DriverStartTaskCommand,
   DriverTaskRecord,
   EtaSnapshot,
+  ExceptionHoldRecord,
   ExceptionHoldReasonCode,
   MoneyAmount,
   OwnedOrderRecord,
@@ -263,6 +266,7 @@ export class OwnedMobilityService implements OnModuleInit {
       quotedFareSource: null,
       quotedFareRuleVersion: null,
       manualFareOverride: null,
+      exceptionHold: null,
       proofRequirements: {
         minPhotoCount: 0,
         signoffRequired: false,
@@ -310,7 +314,10 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.opsDispatchEventsService?.publishOrderCreated(order, requestId);
+    this.opsDispatchEventsService?.publishOrderCreated(
+      this.cloneOrder(order),
+      requestId,
+    );
 
     return this.cloneOrder(order);
   }
@@ -383,6 +390,7 @@ export class OwnedMobilityService implements OnModuleInit {
       quotedFareSource: null,
       quotedFareRuleVersion: null,
       manualFareOverride: null,
+      exceptionHold: null,
       proofRequirements: {
         minPhotoCount: 0,
         signoffRequired: false,
@@ -453,7 +461,10 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
-    this.opsDispatchEventsService?.publishOrderCreated(order, requestId);
+    this.opsDispatchEventsService?.publishOrderCreated(
+      this.cloneOrder(order),
+      requestId,
+    );
 
     return this.cloneOrder(order);
   }
@@ -553,6 +564,7 @@ export class OwnedMobilityService implements OnModuleInit {
       quotedFareSource: "platform_pricing_rule",
       quotedFareRuleVersion: DEFAULT_PLATFORM_PRICING_RULE_VERSION,
       manualFareOverride: null,
+      exceptionHold: null,
       proofRequirements: {
         // Enterprise dispatch keeps a photo proof requirement by default; unlike
         // the standard createOrder path, omitting minPhotoCount here must still
@@ -622,7 +634,10 @@ export class OwnedMobilityService implements OnModuleInit {
       requestId,
     );
     this.publishTenantOrderWebhook(order, "order.created", order.createdAt);
-    this.opsDispatchEventsService?.publishOrderCreated(order, requestId);
+    this.opsDispatchEventsService?.publishOrderCreated(
+      this.cloneOrder(order),
+      requestId,
+    );
 
     return {
       orderId,
@@ -1129,6 +1144,17 @@ export class OwnedMobilityService implements OnModuleInit {
       } else if (isReservation) {
         order.status = "exception_hold";
         this.transitionReservationHold(order, "exception_hold");
+        order.exceptionHold = this.createExceptionHoldRecord(
+          exceptionHoldEval.reasonCode,
+          dispatchJob.dispatchJobId,
+          now,
+          {
+            isReservation: true,
+            isWithinConfirmationWindow: true,
+            hasEligibleSupply: false,
+            reasonCode: exceptionHoldEval.reasonCode,
+          },
+        );
         traceLogs.push(
           this.appendTrace(orderId, "dispatch.failed", {
             dispatchJobId: dispatchJob.dispatchJobId,
@@ -1302,9 +1328,13 @@ export class OwnedMobilityService implements OnModuleInit {
   resolveExceptionHold(
     orderId: string,
     command: ResolveExceptionHoldCommand,
+    identity?: BootstrapRequestIdentity | null,
     requestId?: string,
   ) {
     const order = this.requireOrder(orderId);
+    const actor = this.requireExceptionHoldActor(identity, command.operatorId);
+    const reason = this.requireNonBlankText(command.reason, "reason");
+    const traceId = this.requireNonBlankText(command.traceId, "traceId");
 
     if (order.status !== "exception_hold") {
       throw new ApiRequestError(
@@ -1331,20 +1361,50 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
+    const downstreamReview = this.listDownstreamReviewDuties(order);
+    const exceptionHoldRecord =
+      order.exceptionHold ??
+      this.createExceptionHoldRecord(
+        "manual_escalation",
+        this.findLatestOpenDispatchJob(orderId)?.dispatchJobId ?? null,
+        now,
+        {
+          isReservation: true,
+          isWithinConfirmationWindow: true,
+          hasEligibleSupply: false,
+          reasonCode: "manual_escalation",
+        },
+      );
 
     if (command.resolution === "cancel_order") {
       this.transitionReservationHold(order, "released");
       order.reservationHoldExpiresAt = now;
+      exceptionHoldRecord.resolution = {
+        resolution: "cancel_order",
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        reason,
+        traceId,
+        resolvedAt: now,
+        downstreamReviewerLabels: downstreamReview.labels,
+        downstreamStages: downstreamReview.stages,
+      };
+      order.exceptionHold = exceptionHoldRecord;
       const traceLog = this.appendTrace(
         orderId,
         "exception_hold.resolved.cancel",
         {
-          operatorId: command.operatorId,
-          reason: command.reason,
+          operatorId: actor.actorId,
+          actorId: actor.actorId,
+          actorType: actor.actorType,
+          reason,
           resolution: "cancel_order",
+          traceId,
+          downstreamReviewerLabels: downstreamReview.labels,
+          downstreamStages: downstreamReview.stages,
         },
       );
-      const cancelReason = `Exception hold resolved: ${command.reason}`;
+      const cancelReason = `Exception hold resolved: ${reason}`;
       order.status = "cancelled";
       order.cancelledAt = now;
       order.cancelReason = cancelReason;
@@ -1369,8 +1429,8 @@ export class OwnedMobilityService implements OnModuleInit {
       );
       this.recordAudit(
         {
-          actorId: command.operatorId,
-          actorType: "ops_user",
+          actorId: actor.actorId,
+          actorType: actor.actorType,
           tenantId: order.tenantId,
           moduleName: "dispatch",
           actionName: "resolve_exception_hold",
@@ -1378,8 +1438,11 @@ export class OwnedMobilityService implements OnModuleInit {
           resourceId: orderId,
           newValuesSummary: {
             resolution: "cancel_order",
-            reason: command.reason,
+            reason,
             status: order.status,
+            traceId,
+            downstreamReviewerLabels: downstreamReview.labels,
+            downstreamStages: downstreamReview.stages,
           },
         },
         requestId,
@@ -1398,14 +1461,30 @@ export class OwnedMobilityService implements OnModuleInit {
     order.status = "ready_for_dispatch";
     order.reservationHoldExpiresAt = now;
     order.updatedAt = now;
+    exceptionHoldRecord.resolution = {
+      resolution: "release_to_dispatch",
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      reason,
+      traceId,
+      resolvedAt: now,
+      downstreamReviewerLabels: downstreamReview.labels,
+      downstreamStages: downstreamReview.stages,
+    };
+    order.exceptionHold = exceptionHoldRecord;
 
     const traceLog = this.appendTrace(
       orderId,
       "exception_hold.resolved.release",
       {
-        operatorId: command.operatorId,
-        reason: command.reason,
+        operatorId: actor.actorId,
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        reason,
         resolution: "release_to_dispatch",
+        traceId,
+        downstreamReviewerLabels: downstreamReview.labels,
+        downstreamStages: downstreamReview.stages,
       },
     );
     this.persistChanges(
@@ -1417,8 +1496,8 @@ export class OwnedMobilityService implements OnModuleInit {
     );
     this.recordAudit(
       {
-        actorId: command.operatorId,
-        actorType: "ops_user",
+        actorId: actor.actorId,
+        actorType: actor.actorType,
         tenantId: order.tenantId,
         moduleName: "dispatch",
         actionName: "resolve_exception_hold",
@@ -1426,8 +1505,11 @@ export class OwnedMobilityService implements OnModuleInit {
         resourceId: orderId,
         newValuesSummary: {
           resolution: "release_to_dispatch",
-          reason: command.reason,
+          reason,
           status: order.status,
+          traceId,
+          downstreamReviewerLabels: downstreamReview.labels,
+          downstreamStages: downstreamReview.stages,
         },
       },
       requestId,
@@ -2160,7 +2242,10 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   private publishOrderUpdate(order: OwnedOrderRecord, requestId?: string) {
-    this.opsDispatchEventsService?.publishOrderUpdated(order, requestId);
+    this.opsDispatchEventsService?.publishOrderUpdated(
+      this.cloneOrder(order),
+      requestId,
+    );
   }
 
   private publishLatestDispatchJobUpdate(orderId: string, requestId?: string) {
@@ -2734,6 +2819,47 @@ export class OwnedMobilityService implements OnModuleInit {
       HttpStatus.FORBIDDEN,
       "MANUAL_FARE_OVERRIDE_FORBIDDEN",
       "Manual fare override requires a platform_admin or ops_user identity.",
+    );
+  }
+
+  private requireExceptionHoldActor(
+    identity?: BootstrapRequestIdentity | null,
+    operatorId?: string | null,
+  ) {
+    if (
+      identity?.actorId &&
+      (identity.actorType === "platform_admin" ||
+        identity.actorType === "ops_user")
+    ) {
+      if (operatorId?.trim() && operatorId.trim() !== identity.actorId.trim()) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "EXCEPTION_HOLD_OPERATOR_MISMATCH",
+          "operatorId must match the authenticated actor.",
+          {
+            operatorId,
+            actorId: identity.actorId,
+          },
+        );
+      }
+
+      return {
+        actorId: identity.actorId,
+        actorType: identity.actorType,
+      } as const;
+    }
+
+    if (operatorId?.trim()) {
+      return {
+        actorId: operatorId.trim(),
+        actorType: "ops_user",
+      } as const;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "EXCEPTION_HOLD_OVERRIDE_FORBIDDEN",
+      "Exception hold release requires an ops_user or platform_admin identity.",
     );
   }
 
@@ -3910,6 +4036,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {
     const complianceGates = this.listComplianceGatesForOrder(order);
+    const queueState = this.resolveDispatchQueueState(order, complianceGates);
     return {
       ...order,
       pickup: { ...order.pickup },
@@ -3924,9 +4051,98 @@ export class OwnedMobilityService implements OnModuleInit {
       manualFareOverride: order.manualFareOverride
         ? { ...order.manualFareOverride }
         : null,
+      exceptionHold: order.exceptionHold
+        ? this.cloneExceptionHoldRecord(order.exceptionHold)
+        : null,
       proofRequirements: { ...order.proofRequirements },
       complianceGates,
       complianceFlags: [...order.complianceFlags],
+      queueFamily: queueState.queueFamily,
+      queueEntryReason: queueState.queueEntryReason,
+    };
+  }
+
+  private resolveDispatchQueueState(
+    order: OwnedOrderRecord,
+    complianceGates = this.listComplianceGatesForOrder(order),
+  ): {
+    queueFamily: DispatchQueueFamily | null;
+    queueEntryReason: DispatchQueueEntryReason | null;
+  } {
+    const now = new Date().toISOString();
+    const dispatchReviewRequired = complianceGates.some((gate) =>
+      gate.impacts.some(
+        (impact) =>
+          impact.stage === "dispatch" && impact.effect === "review_required",
+      ),
+    );
+
+    if (
+      order.status === "exception_hold" ||
+      order.reservationHoldStatus === "exception_hold"
+    ) {
+      return {
+        queueFamily: "exception_hold_queue",
+        queueEntryReason:
+          order.exceptionHold?.reasonCode === "confirmation_window_expired"
+            ? "exception_hold_confirmation_window_expired"
+            : order.exceptionHold?.reasonCode === "driver_rejected_in_window"
+              ? "exception_hold_driver_rejected_in_window"
+              : order.exceptionHold?.reasonCode === "manual_escalation"
+                ? "exception_hold_manual_escalation"
+                : "exception_hold_no_eligible_supply",
+      };
+    }
+
+    if (dispatchReviewRequired) {
+      return {
+        queueFamily: "manual_review_queue",
+        queueEntryReason: "dispatch_manual_review_required",
+      };
+    }
+
+    if (
+      order.status === "recording_pending" ||
+      order.complianceFlags.includes("recording_pending")
+    ) {
+      return {
+        queueFamily: "recording_gate_queue",
+        queueEntryReason: "recording_missing_for_dispatch",
+      };
+    }
+
+    if (
+      order.status === "redispatch_required" ||
+      order.reservationHoldStatus === "redispatch_queue"
+    ) {
+      return {
+        queueFamily: "redispatch_priority_queue",
+        queueEntryReason: "redispatch_retry_required",
+      };
+    }
+
+    if (
+      order.dispatchSemantics === "reservation" &&
+      order.status === "ready_for_dispatch" &&
+      order.reservationHoldStatus === "requested" &&
+      this.isWithinConfirmationWindow(order, now)
+    ) {
+      return {
+        queueFamily: "reservation_confirmation_queue",
+        queueEntryReason: "reservation_confirmation_window_open",
+      };
+    }
+
+    if (order.status === "ready_for_dispatch") {
+      return {
+        queueFamily: "realtime_ready_queue",
+        queueEntryReason: "realtime_ready_for_dispatch",
+      };
+    }
+
+    return {
+      queueFamily: null,
+      queueEntryReason: null,
     };
   }
 
@@ -3947,6 +4163,71 @@ export class OwnedMobilityService implements OnModuleInit {
       complianceGates: order
         ? this.listComplianceGatesForOrder(order, task)
         : [],
+    };
+  }
+
+  private createExceptionHoldRecord(
+    reasonCode: ExceptionHoldReasonCode,
+    dispatchJobId: string | null,
+    raisedAt: string,
+    criteria: {
+      isReservation: boolean;
+      isWithinConfirmationWindow: boolean;
+      hasEligibleSupply: boolean;
+      reasonCode: ExceptionHoldReasonCode;
+    },
+  ): ExceptionHoldRecord {
+    return {
+      reasonCode,
+      dispatchJobId,
+      raisedAt,
+      criteria: { ...criteria },
+      overrideAllowed: true,
+      overrideActors: ["ops_user", "platform_admin"],
+      resolution: null,
+    };
+  }
+
+  private cloneExceptionHoldRecord(
+    record: ExceptionHoldRecord,
+  ): ExceptionHoldRecord {
+    return {
+      ...record,
+      criteria: { ...record.criteria },
+      overrideActors: [...record.overrideActors],
+      resolution: record.resolution
+        ? {
+            ...record.resolution,
+            downstreamReviewerLabels: [
+              ...record.resolution.downstreamReviewerLabels,
+            ],
+            downstreamStages: [...record.resolution.downstreamStages],
+          }
+        : null,
+    };
+  }
+
+  private listDownstreamReviewDuties(order: OwnedOrderRecord) {
+    const labels = new Set<string>();
+    const stages = new Set<"dispatch" | "completion" | "settlement">();
+
+    this.listComplianceGatesForOrder(order).forEach((gate) => {
+      if (gate.state === "clear") {
+        return;
+      }
+      if (gate.reviewerLabel) {
+        labels.add(gate.reviewerLabel);
+      }
+      gate.impacts.forEach((impact) => {
+        if (impact.effect !== "clear") {
+          stages.add(impact.stage);
+        }
+      });
+    });
+
+    return {
+      labels: [...labels],
+      stages: [...stages],
     };
   }
 }

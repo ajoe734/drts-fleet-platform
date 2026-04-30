@@ -322,12 +322,14 @@ export class OwnedMobilityController {
   resolveExceptionHold(
     @Param("orderId") orderId: string,
     @Body() command: ResolveExceptionHoldCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       this.ownedMobilityService.resolveExceptionHold(
         orderId,
         command,
+        identity,
         requestId,
       ),
       requestId,

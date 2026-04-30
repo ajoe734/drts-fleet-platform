@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   startTransition,
   useDeferredValue,
@@ -8,6 +9,7 @@ import {
   useState,
 } from "react";
 import type {
+  ComplianceGateRecord,
   DispatchCandidate,
   DispatchJobRecord,
   OpsDispatchStreamEventEnvelope,
@@ -26,6 +28,15 @@ interface DispatchWorkflowProps {
 
 type QueueState = "pending" | "reserved" | "exception";
 type FilterMode = "all" | "attention" | "queued";
+type ActionMode = "release" | "cancel" | "fare_override";
+
+interface ActionDraft {
+  mode: ActionMode;
+  reason: string;
+  traceId: string;
+  fareAmount: string;
+  fareCurrency: string;
+}
 
 function getQueueState(
   order: OwnedOrderRecord,
@@ -93,6 +104,37 @@ function getComplianceTone(state: string): string {
   }
 }
 
+function buildActionDraft(
+  order: OwnedOrderRecord,
+  mode: ActionMode,
+): ActionDraft {
+  return {
+    mode,
+    reason: "",
+    traceId: "",
+    fareAmount:
+      order.quotedFare && Number.isFinite(order.quotedFare.amountMinor)
+        ? (order.quotedFare.amountMinor / 100).toFixed(2)
+        : "0.00",
+    fareCurrency: order.quotedFare?.currency ?? "TWD",
+  };
+}
+
+function listDownstreamReviewDuties(gates: ComplianceGateRecord[]) {
+  return gates.flatMap((gate) =>
+    gate.impacts
+      .filter((impact) => impact.effect !== "clear")
+      .map((impact) => ({
+        key: `${gate.gateType}:${impact.stage}:${impact.effect}`,
+        gateType: gate.gateType,
+        stage: impact.stage,
+        effect: impact.effect,
+        reviewerLabel: gate.reviewerLabel,
+        reason: impact.reason,
+      })),
+  );
+}
+
 export function DispatchWorkflow({
   orders,
   dispatchJobs,
@@ -117,6 +159,9 @@ export function DispatchWorkflow({
   >({});
   const [selectedCandidate, setSelectedCandidate] = useState<
     Record<string, string>
+  >({});
+  const [actionDrafts, setActionDrafts] = useState<
+    Record<string, ActionDraft | undefined>
   >({});
   const reloadTimerRef = useRef<number | null>(null);
 
@@ -315,10 +360,12 @@ export function DispatchWorkflow({
       setError(null);
       await action();
       await reloadDispatchState();
+      return true;
     } catch (e) {
       setError(
         e instanceof Error ? e.message : t("dispatch.workflow.actionFailed"),
       );
+      return false;
     } finally {
       setLoading(null);
     }
@@ -362,6 +409,80 @@ export function DispatchWorkflow({
     await runAction(orderId, async () => {
       await client.redispatchOrder(orderId);
     });
+  };
+
+  const openActionDraft = (order: OwnedOrderRecord, mode: ActionMode) => {
+    setActionDrafts((current) => ({
+      ...current,
+      [order.orderId]: buildActionDraft(order, mode),
+    }));
+  };
+
+  const closeActionDraft = (orderId: string) => {
+    setActionDrafts((current) => ({
+      ...current,
+      [orderId]: undefined,
+    }));
+  };
+
+  const updateActionDraft = (orderId: string, patch: Partial<ActionDraft>) => {
+    setActionDrafts((current) => {
+      const existing = current[orderId];
+      if (!existing) {
+        return current;
+      }
+      return {
+        ...current,
+        [orderId]: {
+          ...existing,
+          ...patch,
+        },
+      };
+    });
+  };
+
+  const submitActionDraft = async (
+    order: OwnedOrderRecord,
+    draft: ActionDraft,
+  ) => {
+    const reason = draft.reason.trim();
+    const traceId = draft.traceId.trim();
+    if (!reason || !traceId) {
+      throw new Error(t("dispatch.workflow.actionFieldsRequired"));
+    }
+
+    if (draft.mode === "fare_override") {
+      const amount = Number.parseFloat(draft.fareAmount);
+      if (!Number.isFinite(amount)) {
+        throw new Error(t("dispatch.workflow.invalidFare"));
+      }
+      const success = await runAction(order.orderId, async () => {
+        await client.applyManualFareOverride(order.orderId, {
+          fare: {
+            currency: draft.fareCurrency.trim() || "TWD",
+            amountMinor: Math.round(amount * 100),
+          },
+          reason,
+          traceId,
+        });
+      });
+      if (success) {
+        closeActionDraft(order.orderId);
+      }
+      return;
+    }
+
+    const success = await runAction(order.orderId, async () => {
+      await client.resolveExceptionHold(order.orderId, {
+        resolution:
+          draft.mode === "release" ? "release_to_dispatch" : "cancel_order",
+        reason,
+        traceId,
+      });
+    });
+    if (success) {
+      closeActionDraft(order.orderId);
+    }
   };
 
   const queueCounts = filteredOrders.reduce(
@@ -467,9 +588,22 @@ export function DispatchWorkflow({
                 const activeGates = complianceGates.filter(
                   (gate) => gate.state !== "clear",
                 );
+                const downstreamReviewDuties =
+                  listDownstreamReviewDuties(activeGates);
                 const complianceFocus =
                   activeGates[0] ??
                   complianceGates.find((gate) => gate.required);
+                const actionDraft = actionDrafts[order.orderId];
+                const exceptionHold = order.exceptionHold;
+                const queueFamily = order.queueFamily;
+                const queueEntryReason = order.queueEntryReason;
+                const incidentHref = `/incidents?create=1&relatedOrderId=${encodeURIComponent(order.orderId)}&title=${encodeURIComponent(
+                  `${order.orderNo} exception hold escalation`,
+                )}&description=${encodeURIComponent(
+                  exceptionHold
+                    ? `Order ${order.orderNo} entered exception hold for ${exceptionHold.reasonCode}. Review dispatch trace, rider communication, and downstream compliance duties before release.`
+                    : `Review dispatch exception handling for order ${order.orderNo}.`,
+                )}&category=operational&severity=high`;
 
                 return (
                   <tr
@@ -514,9 +648,40 @@ export function DispatchWorkflow({
                       >
                         {t(getQueueStateKey(queueState))}
                       </span>
+                      {queueFamily && (
+                        <div className="cell-title queue-family-copy">
+                          {formatOpsCodeLabel(locale, queueFamily)}
+                        </div>
+                      )}
                       <div className="cell-subcopy">
                         {formatOpsCodeLabel(locale, order.status)}
                       </div>
+                      {queueEntryReason && (
+                        <div className="cell-subcopy">
+                          {formatOpsCodeLabel(locale, queueEntryReason)}
+                        </div>
+                      )}
+                      {isExceptionHold && exceptionHold && (
+                        <>
+                          <div className="cell-title exception-copy">
+                            {t("dispatch.workflow.blockedReason", {
+                              reason: formatOpsCodeLabel(
+                                locale,
+                                exceptionHold.reasonCode,
+                              ),
+                            })}
+                          </div>
+                          <div className="cell-subcopy">
+                            {t("dispatch.workflow.overrideActors", {
+                              value: exceptionHold.overrideActors
+                                .map((actor) =>
+                                  formatOpsCodeLabel(locale, actor),
+                                )
+                                .join(", "),
+                            })}
+                          </div>
+                        </>
+                      )}
                     </td>
                     <td>
                       {job ? (
@@ -563,6 +728,25 @@ export function DispatchWorkflow({
                           <div className="cell-subcopy">
                             {complianceFocus.nextAction}
                           </div>
+                          {downstreamReviewDuties.length > 0 && (
+                            <div className="detail-list">
+                              <div className="cell-subcopy detail-heading">
+                                {t("dispatch.workflow.downstreamReview")}
+                              </div>
+                              {downstreamReviewDuties.map((duty) => (
+                                <div
+                                  key={duty.key}
+                                  className="cell-subcopy detail-line"
+                                  title={duty.reason}
+                                >
+                                  {formatOpsCodeLabel(locale, duty.stage)}
+                                  {duty.reviewerLabel
+                                    ? ` · ${duty.reviewerLabel}`
+                                    : ""}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <span className="cell-subcopy">
@@ -581,6 +765,20 @@ export function DispatchWorkflow({
                           ? t("dispatch.workflow.fixedPrice")
                           : t("dispatch.workflow.metered")}
                       </div>
+                      {order.manualFareOverride && (
+                        <div className="cell-subcopy">
+                          {t("dispatch.workflow.overrideRecorded", {
+                            actor: order.manualFareOverride.actorId,
+                          })}
+                        </div>
+                      )}
+                      {exceptionHold?.resolution && (
+                        <div className="cell-subcopy">
+                          {t("dispatch.workflow.lastResolution", {
+                            actor: exceptionHold.resolution.actorId,
+                          })}
+                        </div>
+                      )}
                     </td>
                     <td>
                       <span className="cell-title" title={etaInfo.tooltip}>
@@ -680,6 +878,135 @@ export function DispatchWorkflow({
                             {t("dispatch.workflow.redispatch")}
                           </button>
                         )}
+                        {isExceptionHold && (
+                          <button
+                            className="btn"
+                            disabled={loading === order.orderId}
+                            type="button"
+                            onClick={() => openActionDraft(order, "release")}
+                          >
+                            {t("dispatch.workflow.release")}
+                          </button>
+                        )}
+                        {isExceptionHold && (
+                          <button
+                            className="btn"
+                            disabled={loading === order.orderId}
+                            type="button"
+                            onClick={() => openActionDraft(order, "cancel")}
+                          >
+                            {t("dispatch.workflow.cancelOrder")}
+                          </button>
+                        )}
+                        {order.fixedPrice && (
+                          <button
+                            className="btn"
+                            disabled={loading === order.orderId}
+                            type="button"
+                            onClick={() =>
+                              openActionDraft(order, "fare_override")
+                            }
+                          >
+                            {t("dispatch.workflow.overrideFare")}
+                          </button>
+                        )}
+                        {isExceptionHold && (
+                          <Link className="btn" href={incidentHref}>
+                            {t("dispatch.workflow.escalateIncident")}
+                          </Link>
+                        )}
+                        {actionDraft && (
+                          <form
+                            className="action-sheet"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void submitActionDraft(order, actionDraft).catch(
+                                (submitError) => {
+                                  setError(
+                                    submitError instanceof Error
+                                      ? submitError.message
+                                      : t("dispatch.workflow.actionFailed"),
+                                  );
+                                },
+                              );
+                            }}
+                          >
+                            <label className="field-label">
+                              {t("dispatch.workflow.actionReason")}
+                              <textarea
+                                className="action-input"
+                                value={actionDraft.reason}
+                                onChange={(event) =>
+                                  updateActionDraft(order.orderId, {
+                                    reason: event.target.value,
+                                  })
+                                }
+                                rows={3}
+                              />
+                            </label>
+                            <label className="field-label">
+                              {t("dispatch.workflow.actionTraceId")}
+                              <input
+                                className="action-input"
+                                type="text"
+                                value={actionDraft.traceId}
+                                onChange={(event) =>
+                                  updateActionDraft(order.orderId, {
+                                    traceId: event.target.value,
+                                  })
+                                }
+                              />
+                            </label>
+                            {actionDraft.mode === "fare_override" && (
+                              <div className="field-grid">
+                                <label className="field-label">
+                                  {t("dispatch.workflow.actionFare")}
+                                  <input
+                                    className="action-input"
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={actionDraft.fareAmount}
+                                    onChange={(event) =>
+                                      updateActionDraft(order.orderId, {
+                                        fareAmount: event.target.value,
+                                      })
+                                    }
+                                  />
+                                </label>
+                                <label className="field-label">
+                                  {t("dispatch.workflow.actionCurrency")}
+                                  <input
+                                    className="action-input"
+                                    type="text"
+                                    value={actionDraft.fareCurrency}
+                                    onChange={(event) =>
+                                      updateActionDraft(order.orderId, {
+                                        fareCurrency: event.target.value,
+                                      })
+                                    }
+                                  />
+                                </label>
+                              </div>
+                            )}
+                            <div className="action-row">
+                              <button
+                                className="btn btn-primary"
+                                disabled={loading === order.orderId}
+                                type="submit"
+                              >
+                                {t("dispatch.workflow.actionSubmit")}
+                              </button>
+                              <button
+                                className="btn"
+                                type="button"
+                                onClick={() => closeActionDraft(order.orderId)}
+                              >
+                                {t("dispatch.workflow.actionDismiss")}
+                              </button>
+                            </div>
+                          </form>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -701,7 +1028,9 @@ export function DispatchWorkflow({
         .toolbar,
         .filter-chip-group,
         .queue-summary,
-        .actions {
+        .actions,
+        .detail-list,
+        .action-sheet {
           display: grid;
           gap: 0.75rem;
         }
@@ -777,9 +1106,15 @@ export function DispatchWorkflow({
         }
         .dispatch-block,
         .candidate-panel,
-        .actions {
+        .actions,
+        .action-row,
+        .field-grid {
           display: grid;
           gap: 0.35rem;
+        }
+        .action-row,
+        .field-grid {
+          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
         }
         .badge-stack {
           display: flex;
@@ -815,6 +1150,39 @@ export function DispatchWorkflow({
           background: #fef3c7;
           border-color: #f59e0b;
           color: #92400e;
+        }
+        .action-sheet {
+          padding: 0.85rem;
+          border-radius: 0.85rem;
+          border: 1px solid #dbeafe;
+          background: #f8fbff;
+        }
+        .field-label {
+          display: grid;
+          gap: 0.35rem;
+          font-size: 0.82rem;
+          color: #334155;
+        }
+        .action-input {
+          width: 100%;
+          padding: 0.65rem 0.7rem;
+          border-radius: 0.75rem;
+          border: 1px solid #cbd5e1;
+          background: white;
+        }
+        .detail-heading {
+          font-weight: 600;
+          color: #334155;
+        }
+        .detail-line {
+          line-height: 1.4;
+        }
+        .queue-family-copy {
+          margin-top: 0.4rem;
+        }
+        .exception-copy {
+          margin-top: 0.4rem;
+          font-size: 0.85rem;
         }
         .row-focused {
           background: #eff6ff;
