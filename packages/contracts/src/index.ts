@@ -290,6 +290,7 @@ export const PARTNER_ELIGIBILITY_DECISION_SOURCES = [
   "issuer_realtime",
   "issuer_reference_lookup",
   "manual_fallback",
+  "ops_manual_review",
 ] as const;
 export type PartnerEligibilityDecisionSource =
   (typeof PARTNER_ELIGIBILITY_DECISION_SOURCES)[number];

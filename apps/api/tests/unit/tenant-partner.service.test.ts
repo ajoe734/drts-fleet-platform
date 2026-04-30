@@ -1006,6 +1006,204 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(detail).toHaveProperty("auditMetadata");
   });
 
+  it("resolves manual-review and denial cases through the ops review lane", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const retryingAdapter: PartnerEligibilityAdapterInterface = {
+      adapterCode: "issuer_reference_lookup_v1",
+      adapterVersion: "v1",
+      supports: (contract) =>
+        contract.adapterCode === "issuer_reference_lookup_v1",
+      async verify() {
+        throw new PartnerEligibilityAdapterError(
+          "ISSUER_UNAVAILABLE",
+          "Sandbox issuer adapter unavailable.",
+          {
+            retryable: true,
+            upstreamHttpStatus: 503,
+            manualFallbackReasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+          },
+        );
+      },
+    };
+    const service = new TenantPartnerService(
+      auditNotificationService,
+      undefined,
+      undefined,
+      undefined,
+      [new BankCardInlineEligibilityAdapter(), retryingAdapter],
+    );
+
+    const denied = await service.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-alpha-airport",
+        cardLast4: "1357",
+        cardholderName: "Traveler Denied",
+      },
+      "req-eligibility-denied-resolve-001",
+    );
+    const manualReview = await service.verifyPartnerEligibility(
+      {
+        entrySlug: "bank-demo-beta-airport",
+        referenceToken: "manual-review-token",
+      },
+      "req-eligibility-manual-resolve-001",
+    );
+
+    const approveResolution = service.resolvePartnerEligibilityReview(
+      {
+        eligibilityVerificationId: manualReview.eligibilityVerificationId,
+        decision: "approve",
+        reasonCode: "OFFLINE_ISSUER_CONFIRMATION_RECEIVED",
+        notes: "Issuer helpdesk confirmed eligibility offline.",
+      },
+      "req-eligibility-resolve-approve-001",
+      {
+        actorType: "ops_user",
+        actorId: "ops-reviewer-approve-001",
+        realm: "ops",
+        scopes: ["ops:dispatch:write"],
+      },
+    );
+    expect(approveResolution).toMatchObject({
+      eligibilityVerificationId: manualReview.eligibilityVerificationId,
+      previousStatus: "manual_review",
+      resolvedStatus: "eligible",
+      decision: "approve",
+      reasonCode: "OFFLINE_ISSUER_CONFIRMATION_RECEIVED",
+      resolvedBy: "ops-reviewer-approve-001",
+    });
+
+    const denyResolution = service.resolvePartnerEligibilityReview(
+      {
+        eligibilityVerificationId: denied.eligibilityVerificationId,
+        decision: "deny",
+        reasonCode: "DENIAL_CONFIRMED_BY_REVIEW",
+        notes: "Ops verified the issuer denial should stand.",
+      },
+      "req-eligibility-resolve-deny-001",
+      {
+        actorType: "ops_user",
+        actorId: "ops-reviewer-deny-001",
+        realm: "ops",
+        scopes: ["ops:dispatch:write"],
+      },
+    );
+    expect(denyResolution).toMatchObject({
+      eligibilityVerificationId: denied.eligibilityVerificationId,
+      previousStatus: "ineligible",
+      resolvedStatus: "ineligible",
+      decision: "deny",
+      reasonCode: "DENIAL_CONFIRMED_BY_REVIEW",
+      resolvedBy: "ops-reviewer-deny-001",
+    });
+
+    try {
+      service.resolvePartnerEligibilityReview(
+        {
+          eligibilityVerificationId: denied.eligibilityVerificationId,
+          decision: "approve",
+          reasonCode: "OVERRIDE_REQUESTED_WITHOUT_APPROVAL",
+          notes: "Attempted to release an explicit issuer denial.",
+        },
+        "req-eligibility-resolve-invalid-approve-001",
+        {
+          actorType: "ops_user",
+          actorId: "ops-reviewer-invalid-approve-001",
+          realm: "ops",
+          scopes: ["ops:dispatch:write"],
+        },
+      );
+      expect.unreachable(
+        "approve on ineligible should require a separate override workflow",
+      );
+    } catch (error) {
+      expect(error).toMatchObject({
+        status: 409,
+        response: {
+          error: {
+            code: "ELIGIBILITY_OVERRIDE_REQUIRED",
+            details: expect.objectContaining({
+              eligibilityVerificationId: denied.eligibilityVerificationId,
+              currentStatus: "ineligible",
+            }),
+          },
+        },
+      });
+    }
+
+    const queueAfterResolution = service.listPartnerEligibilityReviewQueue(
+      "req-eligibility-queue-post-resolve-001",
+      {
+        actorType: "ops_user",
+        actorId: "ops-reviewer-queue-001",
+        realm: "ops",
+        scopes: ["ops:dispatch:read"],
+      },
+    );
+    expect(queueAfterResolution).toHaveLength(1);
+    expect(queueAfterResolution[0]).toMatchObject({
+      eligibilityVerificationId: denied.eligibilityVerificationId,
+      verificationStatus: "ineligible",
+      decisionSource: "ops_manual_review",
+      verificationReasonCode: "DENIAL_CONFIRMED_BY_REVIEW",
+    });
+
+    const resolvedDeniedReview = service.getPartnerEligibilityVerification(
+      denied.eligibilityVerificationId,
+      "req-eligibility-denied-detail-001",
+    );
+    expect(resolvedDeniedReview).toMatchObject({
+      verificationStatus: "ineligible",
+      decisionSource: "ops_manual_review",
+      verificationReasonCode: "DENIAL_CONFIRMED_BY_REVIEW",
+      manualFallback: expect.objectContaining({
+        notes: "Ops verified the issuer denial should stand.",
+      }),
+      auditMetadata: expect.objectContaining({
+        updatedBy: "ops-reviewer-deny-001",
+      }),
+    });
+
+    const resolvedManualReview = service.getPartnerEligibilityVerification(
+      manualReview.eligibilityVerificationId,
+      "req-eligibility-manual-detail-001",
+    );
+    expect(resolvedManualReview).toMatchObject({
+      verificationStatus: "eligible",
+      decisionSource: "ops_manual_review",
+      verificationReasonCode: "OFFLINE_ISSUER_CONFIRMATION_RECEIVED",
+      manualFallback: expect.objectContaining({
+        notes: "Issuer helpdesk confirmed eligibility offline.",
+      }),
+      auditMetadata: expect.objectContaining({
+        updatedBy: "ops-reviewer-approve-001",
+      }),
+    });
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "resolve_partner_eligibility_review",
+          actorType: "ops_user",
+          newValuesSummary: expect.objectContaining({
+            previousStatus: "manual_review",
+            resolvedStatus: "eligible",
+            decision: "approve",
+          }),
+        }),
+        expect.objectContaining({
+          actionName: "resolve_partner_eligibility_review",
+          actorType: "ops_user",
+          newValuesSummary: expect.objectContaining({
+            previousStatus: "ineligible",
+            resolvedStatus: "ineligible",
+            decision: "deny",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("disables failing webhook endpoints and returns them to test_pending on secret rotation", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(

@@ -87,6 +87,7 @@ import type {
   PartnerChannelEntryRecord,
   PartnerBootstrapSession,
   PartnerEligibilityReviewQueueItem,
+  PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
@@ -118,6 +119,7 @@ import type {
   ReportJobRecord,
   ResolveComplaintCaseCommand,
   ResolveExceptionHoldCommand,
+  ResolvePartnerEligibilityReviewCommand,
   RevokeDriverDeviceBindingCommand,
   RotateTenantApiKeyCommand,
   SetPlatformMaintenanceModeCommand,
@@ -418,6 +420,17 @@ export class ApiClient {
   > {
     return this.getList<PartnerEligibilityReviewQueueItem>(
       "/api/ops/partner/eligibility/reviews",
+    );
+  }
+
+  async resolvePartnerEligibilityReview(
+    command: ResolvePartnerEligibilityReviewCommand,
+  ): Promise<PartnerEligibilityReviewResolution> {
+    return this.post<PartnerEligibilityReviewResolution>(
+      "/api/ops/partner/eligibility/reviews/resolve",
+      {
+        body: command,
+      },
     );
   }
 

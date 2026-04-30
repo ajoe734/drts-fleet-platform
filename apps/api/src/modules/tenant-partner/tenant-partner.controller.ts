@@ -20,7 +20,9 @@ import type {
   PartnerIngressCredentialRecord,
   PartnerChannelEntryRecord,
   PartnerEligibilityReviewQueueItem,
+  PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
+  ResolvePartnerEligibilityReviewCommand,
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
@@ -172,7 +174,10 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.revokePlatformPartnerEntry(entrySlug, requestId),
+      this.tenantPartnerService.revokePlatformPartnerEntry(
+        entrySlug,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -183,7 +188,9 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const items: PartnerIngressCredentialRecord[] =
-      this.tenantPartnerService.listPlatformPartnerIngressCredentials(entrySlug);
+      this.tenantPartnerService.listPlatformPartnerIngressCredentials(
+        entrySlug,
+      );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
@@ -266,6 +273,22 @@ export class TenantPartnerController {
         identity,
       );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Post("ops/partner/eligibility/reviews/resolve")
+  @RequireRealms("platform", "ops")
+  resolvePartnerEligibilityReview(
+    @Body() command: ResolvePartnerEligibilityReviewCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolution: PartnerEligibilityReviewResolution =
+      this.tenantPartnerService.resolvePartnerEligibilityReview(
+        command,
+        requestId,
+        identity,
+      );
+    return toApiSuccessEnvelope(resolution, requestId);
   }
 
   @Get("tenant/passengers")

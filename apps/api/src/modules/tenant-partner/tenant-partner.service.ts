@@ -35,7 +35,6 @@ import type {
   PartnerEligibilityManualFallbackRecord,
   PartnerEligibilityRetryPolicyRecord,
   PartnerEligibilitySensitiveDataPolicy,
-  PartnerEligibilityReviewDecision,
   PartnerEligibilityReviewQueueItem,
   PartnerEligibilityReviewResolution,
   PartnerEligibilityVerificationRecord,
@@ -2075,6 +2074,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     const now = new Date().toISOString();
     const previousStatus = verification.verificationStatus;
+    if (previousStatus === "ineligible" && command.decision === "approve") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ELIGIBILITY_OVERRIDE_REQUIRED",
+        "Ineligible verifications require a separate approved override workflow.",
+        {
+          eligibilityVerificationId: command.eligibilityVerificationId,
+          currentStatus: previousStatus,
+        },
+      );
+    }
     const resolvedStatus: PartnerEligibilityVerificationRecord["verificationStatus"] =
       command.decision === "approve" ? "eligible" : "ineligible";
     const resolvedBy = identity?.actorId ?? "ops_reviewer";
