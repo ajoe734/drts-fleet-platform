@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ForwarderService } from "../../src/modules/forwarder/forwarder.service";
-import {
-  GRAB_TAIWAN_PLATFORM_CODE,
-} from "../../src/modules/forwarder/grab-taiwan.adapter";
+import { GRAB_TAIWAN_PLATFORM_CODE } from "../../src/modules/forwarder/grab-taiwan.adapter";
 import type { ForwarderAdapterInterface } from "../../src/modules/forwarder/forwarder-adapter.interface";
 
 function createAdapter(
@@ -44,9 +42,17 @@ function createAdapter(
   };
 }
 
+function createOwnedMobilityServiceMock() {
+  return {
+    cancelForwarderTasks: vi.fn(() => []),
+    registerForwarderSource: vi.fn(),
+  };
+}
+
 function createService(options?: {
   adapter?: ForwarderAdapterInterface;
   eligibleDriverIds?: string[];
+  ownedMobilityService?: ReturnType<typeof createOwnedMobilityServiceMock>;
 }) {
   const eligibleDriverIds = options?.eligibleDriverIds ?? [];
   const regulatoryRegistryService = {
@@ -58,18 +64,21 @@ function createService(options?: {
     recordAuditLog: vi.fn(),
   };
   const adapter = options?.adapter ?? createAdapter();
+  const ownedMobilityService = options?.ownedMobilityService;
 
   const service = new ForwarderService(
     regulatoryRegistryService as never,
     auditNotificationService as never,
     [adapter],
     undefined,
+    ownedMobilityService as never,
   );
 
   return {
     service,
     adapter,
     auditNotificationService,
+    ownedMobilityService,
   };
 }
 
@@ -329,5 +338,227 @@ describe("ForwarderService", () => {
         status: "queued",
       },
     });
+  });
+
+  it("registers forwarder source on owned-mobility when ingesting an external order", () => {
+    const ownedMobilityService = createOwnedMobilityServiceMock();
+    const { service } = createService({ ownedMobilityService });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-register-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+
+    expect(ownedMobilityService.registerForwarderSource).toHaveBeenCalledWith(
+      order.mirrorOrderId,
+      GRAB_TAIWAN_PLATFORM_CODE,
+    );
+  });
+
+  it("closes mirrored driver tasks when native status sync resolves to lost_race", () => {
+    const ownedMobilityService = createOwnedMobilityServiceMock();
+    const { service } = createService({
+      eligibleDriverIds: ["driver-terminal-001"],
+      ownedMobilityService,
+    });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-lost-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+    service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: ["driver-terminal-001"],
+    });
+
+    service.syncNativeStatus(order.mirrorOrderId, {
+      nativeStatus: "lost_race",
+    });
+
+    expect(ownedMobilityService.cancelForwarderTasks).toHaveBeenCalledWith(
+      order.mirrorOrderId,
+      "lost_race",
+      undefined,
+    );
+    expect(service.listOrders()[0]).toMatchObject({
+      status: "lost_race",
+    });
+  });
+
+  it("closes mirrored driver tasks when native status sync resolves to cancelled_by_platform", () => {
+    const ownedMobilityService = createOwnedMobilityServiceMock();
+    const { service } = createService({
+      eligibleDriverIds: ["driver-terminal-002"],
+      ownedMobilityService,
+    });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-cancelled-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+    service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: ["driver-terminal-002"],
+    });
+
+    service.syncNativeStatus(order.mirrorOrderId, {
+      nativeStatus: "cancelled_by_platform",
+    });
+
+    expect(ownedMobilityService.cancelForwarderTasks).toHaveBeenCalledWith(
+      order.mirrorOrderId,
+      "cancelled_by_platform",
+      undefined,
+    );
+  });
+
+  it("does not close driver tasks when native status sync resolves to confirmed_by_platform", () => {
+    const ownedMobilityService = createOwnedMobilityServiceMock();
+    const { service } = createService({
+      eligibleDriverIds: ["driver-terminal-003"],
+      ownedMobilityService,
+    });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-confirmed-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+    service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: ["driver-terminal-003"],
+    });
+
+    service.syncNativeStatus(order.mirrorOrderId, {
+      nativeStatus: "confirmed_by_platform",
+    });
+
+    expect(ownedMobilityService.cancelForwarderTasks).not.toHaveBeenCalled();
+  });
+
+  it("closes mirrored driver tasks when reconciliation completes with a terminal status", async () => {
+    const ownedMobilityService = createOwnedMobilityServiceMock();
+    const adapter = createAdapter({
+      accept: vi.fn(async () => {
+        throw new Error("sync timeout");
+      }),
+    });
+    const { service } = createService({
+      adapter,
+      eligibleDriverIds: ["driver-recon-001"],
+      ownedMobilityService,
+    });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-recon-terminal-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+    service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: ["driver-recon-001"],
+    });
+    // Accept fails → sync_failed with reconciliation queued
+    await expect(
+      service.relayDriverAccept(order.mirrorOrderId, {
+        driverId: "driver-recon-001",
+      }),
+    ).rejects.toBeTruthy();
+
+    service.completeReconciliation(order.mirrorOrderId, {
+      nativeStatus: "lost_race",
+      mismatchCount: 1,
+      notes: "Platform awarded to another driver.",
+    });
+
+    expect(ownedMobilityService.cancelForwarderTasks).toHaveBeenCalledWith(
+      order.mirrorOrderId,
+      "lost_race",
+      undefined,
+    );
+  });
+
+  it("returns queued reconciliation issues with full order and finance context", async () => {
+    const adapter = createAdapter({
+      accept: vi.fn(async () => {
+        throw new Error("upstream failure");
+      }),
+    });
+    const { service } = createService({
+      adapter,
+      eligibleDriverIds: ["driver-issue-001"],
+    });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-issue-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+    service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: ["driver-issue-001"],
+    });
+    await expect(
+      service.relayDriverAccept(order.mirrorOrderId, {
+        driverId: "driver-issue-001",
+      }),
+    ).rejects.toBeTruthy();
+
+    const issues = service.listReconciliationIssues();
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      mirrorOrderId: order.mirrorOrderId,
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-issue-001",
+      status: "sync_failed",
+      acceptedDriverId: "driver-issue-001",
+      reconciliationJob: expect.objectContaining({
+        mirrorOrderId: order.mirrorOrderId,
+        status: "queued",
+        reason: "sync_failed",
+      }),
+      lastSyncError: expect.objectContaining({
+        code: "FORWARDER_ACCEPT_RELAY_FAILED",
+      }),
+      financeContext: expect.objectContaining({
+        fareAuthority: "external_platform",
+        settlementAuthority: "external_platform",
+      }),
+      manualFallback: expect.objectContaining({
+        required: true,
+      }),
+    });
+  });
+
+  it("excludes completed reconciliation jobs from listReconciliationIssues", async () => {
+    const adapter = createAdapter({
+      accept: vi.fn(async () => {
+        throw new Error("transient error");
+      }),
+    });
+    const { service } = createService({
+      adapter,
+      eligibleDriverIds: ["driver-issue-002"],
+    });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-issue-002",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+    service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: ["driver-issue-002"],
+    });
+    await expect(
+      service.relayDriverAccept(order.mirrorOrderId, {
+        driverId: "driver-issue-002",
+      }),
+    ).rejects.toBeTruthy();
+
+    // Resolve via native status sync — reconciliation auto-completes
+    service.syncNativeStatus(order.mirrorOrderId, {
+      nativeStatus: "confirmed_by_platform",
+    });
+
+    expect(service.listReconciliationIssues()).toHaveLength(0);
   });
 });

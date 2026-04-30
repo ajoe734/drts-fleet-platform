@@ -142,6 +142,9 @@ export class OwnedMobilityService implements OnModuleInit {
 
   private queueEntries: QueueEntryRecord[] = [];
 
+  /** Maps forwarded mirror order IDs to their source platform codes. */
+  private forwarderSourceMap = new Map<string, string>();
+
   constructor(
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     private readonly auditNotificationService: AuditNotificationService,
@@ -1509,7 +1512,7 @@ export class OwnedMobilityService implements OnModuleInit {
       assignmentId: assignment.assignmentId,
       driverId: command.driverId,
       vehicleId: command.vehicleId,
-      sourcePlatform: null,
+      sourcePlatform: this.forwarderSourceMap.get(order.orderId) ?? null,
       routeProvided: false,
       waypoints: [],
       status: "pending_acceptance",
@@ -1707,6 +1710,15 @@ export class OwnedMobilityService implements OnModuleInit {
     this.publishLatestDispatchJobUpdate(order.orderId, requestId);
 
     return this.cloneOrder(order);
+  }
+
+  /**
+   * Register a forwarded mirror order so that driver tasks created for this
+   * order will carry the correct sourcePlatform value.  Called by
+   * ForwarderService when an external order is ingested.
+   */
+  registerForwarderSource(orderId: string, platformCode: string) {
+    this.forwarderSourceMap.set(orderId, platformCode);
   }
 
   /**
@@ -1938,7 +1950,14 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   listDriverTasks() {
-    return this.driverTasks.map((task) => this.cloneTask(task));
+    return this.driverTasks.map((task) => {
+      const clone = this.cloneTask(task);
+      if (!clone.sourcePlatform) {
+        clone.sourcePlatform =
+          this.forwarderSourceMap.get(task.orderId) ?? null;
+      }
+      return clone;
+    });
   }
 
   streamDriverTaskEvents(driverId: string): Observable<MessageEvent> {
@@ -1970,7 +1989,12 @@ export class OwnedMobilityService implements OnModuleInit {
   }
 
   getDriverTask(taskId: string) {
-    return this.cloneTask(this.requireTask(taskId));
+    const task = this.requireTask(taskId);
+    const clone = this.cloneTask(task);
+    if (!clone.sourcePlatform) {
+      clone.sourcePlatform = this.forwarderSourceMap.get(task.orderId) ?? null;
+    }
+    return clone;
   }
 
   acceptDriverTask(

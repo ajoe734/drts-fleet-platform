@@ -150,6 +150,10 @@ export class ForwarderService implements OnModuleInit {
       this.cloneOrder(forwardedOrder),
       ...this.forwardedOrders,
     ];
+    this.ownedMobilityService?.registerForwarderSource(
+      forwardedOrder.mirrorOrderId,
+      forwardedOrder.platformCode,
+    );
     const adapterHealth = this.updateAdapterHealth(
       command.platformCode,
       "healthy",
