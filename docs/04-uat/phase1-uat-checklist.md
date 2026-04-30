@@ -26,16 +26,16 @@ use `FBP-013D` for the final release / pilot / production decision read.
 This checklist is still the row-by-row inventory, but release conclusions should
 be read through `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`.
 
-| Workflow family | Checklist rows that feed it                                                       | Primary companion path                                                                           |
-| --------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `WF-RLS-001`    | `PF-1` to `PF-7`                                                                  | `docs/03-runbooks/phase1-rollout.md`, `support/sidecars/FBP-013A/`, `support/sidecars/FBP-013D/` |
-| `WF-TEN-001`    | `PA-001`, `TP-029` to `TP-032`, `E2E-004`                                         | `tests/e2e/E2E-004-tenant-attribution.sh`                                                        |
-| `WF-ORD-001`    | `TP-001` to `TP-006`, `E2E-001`, `E2E-004`                                        | `tests/smoke/02-booking-create.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`                   |
-| `WF-DSP-001`    | `OC-001` to `OC-006`, `E2E-001`                                                   | `tests/smoke/03-dispatch-assign.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`                  |
-| `WF-DRV-001`    | `DA-001` to `DA-017`, `DA-019`, `DA-021`, `DA-022`, `DA-024`, `DA-025`, `E2E-001` | `tests/smoke/04-driver-task-accept.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`               |
-| `WF-FWD-001`    | `DA-005`, `E2E-002`                                                               | `tests/e2e/E2E-002-forwarded-order.sh`                                                           |
-| `WF-COM-001`    | `OC-021` to `OC-024`, `DA-007` to `DA-009`, `E2E-003`                             | manual-only in baseline; live/negative expansion stays explicit                                  |
-| `WF-FIN-001`    | `TP-013`, `TP-014`, `TP-021` to `TP-023`, `OC-017`, `OC-025`, `E2E-001`           | `tests/smoke/05-billing-invoice.sh`, `tests/smoke/06-report-export.sh`                           |
+| Workflow family | Checklist rows that feed it                                                       | Negative-path rows (ORX-GV-001)                                        | Primary companion path                                                                           |
+| --------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `WF-RLS-001`    | `PF-1` to `PF-7`                                                                  | —                                                                      | `docs/03-runbooks/phase1-rollout.md`, `support/sidecars/FBP-013A/`, `support/sidecars/FBP-013D/` |
+| `WF-TEN-001`    | `PA-001`, `TP-029` to `TP-032`, `E2E-004`                                         | `NP-AUTH-001`, `NP-AUTH-002`, `NP-AUTH-003`                            | `tests/e2e/E2E-004-tenant-attribution.sh`                                                        |
+| `WF-ORD-001`    | `TP-001` to `TP-006`, `E2E-001`, `E2E-004`                                        | (covered by `TP-002`, `TP-004`, `TP-006`)                              | `tests/smoke/02-booking-create.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`                   |
+| `WF-DSP-001`    | `OC-001` to `OC-006`, `E2E-001`                                                   | `NP-DSP-001`, `NP-DSP-002`, `NP-DSP-003`, `NP-OVR-001` to `NP-OVR-003` | `tests/smoke/03-dispatch-assign.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`                  |
+| `WF-DRV-001`    | `DA-001` to `DA-017`, `DA-019`, `DA-021`, `DA-022`, `DA-024`, `DA-025`, `E2E-001` | (covered by `DA-003` to `DA-009`, `DA-022` to `DA-025`)                | `tests/smoke/04-driver-task-accept.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`               |
+| `WF-FWD-001`    | `DA-005`, `E2E-002`                                                               | `NP-FWD-001`, `NP-FWD-002`, `NP-FWD-003`                               | `tests/e2e/E2E-002-forwarded-order.sh`                                                           |
+| `WF-COM-001`    | `OC-021` to `OC-024`, `DA-007` to `DA-009`, `E2E-003`                             | `NP-COM-001`, `NP-COM-002`                                             | manual-only in baseline; live/negative expansion stays explicit                                  |
+| `WF-FIN-001`    | `TP-013`, `TP-014`, `TP-021` to `TP-023`, `OC-017`, `OC-025`, `E2E-001`           | `NP-FIN-001` to `NP-FIN-004`                                           | `tests/smoke/05-billing-invoice.sh`, `tests/smoke/06-report-export.sh`                           |
 
 Do not summarize this checklist as "UAT green" without naming the exact
 workflow-family gate reads from the release matrix.
@@ -225,6 +225,86 @@ Items marked ⏸ require explicit sign-off before Phase 1 is declared complete.
 | OC-024   | Filing + recording export job not activated   | Staging job run evidence     | ⬜       |
 | DA-018   | Period-end billing job not activated          | Billing job run evidence     | ⬜       |
 | E2E-003  | Depends on OC-022 + OC-024                    | Same as above                | ⬜       |
+
+---
+
+## Negative-Path and Permission/Audit Scenarios (ORX-GV-001)
+
+Added: 2026-04-30 | Owner: Claude2 | Reviewer: Claude
+
+These rows fill the gaps identified by ORX-GV-001 so that every workflow family
+has at least one positive, one negative, and one permission/audit test in the
+checklist. Rows reference the full scenario definitions in
+`docs/04-uat/phase1-uat-scenarios.md §9`.
+
+### Dispatch Negative-Path
+
+| ID         | Scenario                                              | Role             | Priority | Pass/Fail | Notes                                     |
+| ---------- | ----------------------------------------------------- | ---------------- | -------- | --------- | ----------------------------------------- |
+| NP-DSP-001 | Read-only dispatcher cannot assign                    | `ops_viewer`     | P1       | ⬜        | `403 Forbidden`; access attempt audited   |
+| NP-DSP-002 | Reassign to ineligible driver rejected                | `ops_dispatcher` | P1       | ⬜        | `DRIVER_NOT_ELIGIBLE`; original preserved |
+| NP-DSP-003 | Dispatch timeout triggers escalation, not silent fail | `ops_dispatcher` | P1       | ⬜        | Ops notification created                  |
+
+**Dispatch negative-path P1 gate:** NP-DSP-001, NP-DSP-002, NP-DSP-003
+
+### Finance Negative-Path
+
+| ID         | Scenario                                             | Role              | Priority | Pass/Fail | Notes                                      |
+| ---------- | ---------------------------------------------------- | ----------------- | -------- | --------- | ------------------------------------------ |
+| NP-FIN-001 | Invoice generation with no eligible trips            | `tenant_admin`    | P2       | ⬜        | No phantom charges                         |
+| NP-FIN-002 | Unauthorized user cannot download financial artifact | (no finance role) | P1       | ⬜        | `403 Forbidden`; audited                   |
+| NP-FIN-003 | Driver cannot view another driver's earnings         | `driver`          | P1       | ⬜        | Self-scoped only; cross-driver = forbidden |
+| NP-FIN-004 | Non-finance role cannot open reconciliation dispute  | `ops_dispatcher`  | P1       | ⬜        | `403 Forbidden`; audited                   |
+
+**Finance negative-path P1 gate:** NP-FIN-002, NP-FIN-003, NP-FIN-004
+
+### Forwarder Negative-Path
+
+| ID         | Scenario                                         | Role          | Priority | Pass/Fail | Notes                             |
+| ---------- | ------------------------------------------------ | ------------- | -------- | --------- | --------------------------------- |
+| NP-FWD-001 | Accept cancelled forwarded order rejected        | `driver`      | P1       | ⬜        | `TASK_CANCELLED_BY_PLATFORM`      |
+| NP-FWD-002 | Route override on forwarded order blocked        | `driver`      | P1       | ⬜        | `ROUTE_LOCKED_IMMUTABLE`; audited |
+| NP-FWD-003 | Forwarder sync failure surfaced in ops dashboard | `ops_manager` | P2       | ⬜        | Adapter failure state visible     |
+
+**Forwarder negative-path P1 gate:** NP-FWD-001, NP-FWD-002
+
+### Compliance and Recording Negative-Path
+
+| ID         | Scenario                                              | Role                     | Priority | Pass/Fail | Notes                               |
+| ---------- | ----------------------------------------------------- | ------------------------ | -------- | --------- | ----------------------------------- |
+| NP-COM-001 | Regulatory filing flags missing recordings            | `ops_manager`            | P1       | ⬜        | Incomplete orders listed separately |
+| NP-COM-002 | Non-compliance user cannot access recording artifacts | `tenant_booking_manager` | P1       | ⬜        | `403 Forbidden`; audited            |
+
+**Compliance negative-path P1 gate:** NP-COM-001, NP-COM-002
+
+### Identity and Auth Negative-Path
+
+| ID          | Scenario                                           | Role                 | Priority | Pass/Fail | Notes                           |
+| ----------- | -------------------------------------------------- | -------------------- | -------- | --------- | ------------------------------- |
+| NP-AUTH-001 | Revoked API key cannot authenticate                | `partner_api_client` | P1       | ⬜        | `401 Unauthorized`; audited     |
+| NP-AUTH-002 | Cross-tenant API key cannot access other resources | `tenant_admin`       | P1       | ⬜        | No cross-tenant data leakage    |
+| NP-AUTH-003 | Device rebind invalidates old session              | `driver`             | P1       | ⬜        | `DRIVER_DEVICE_SESSION_INVALID` |
+
+**Auth negative-path P1 gate:** NP-AUTH-001, NP-AUTH-002, NP-AUTH-003
+
+### Override and Exception-Hold Negative-Path
+
+| ID         | Scenario                                    | Role             | Priority | Pass/Fail | Notes                               |
+| ---------- | ------------------------------------------- | ---------------- | -------- | --------- | ----------------------------------- |
+| NP-OVR-001 | Override release without reason rejected    | `ops_dispatcher` | P1       | ⬜        | `OVERRIDE_REASON_REQUIRED`          |
+| NP-OVR-002 | Non-manager cannot approve override release | `ops_dispatcher` | P1       | ⬜        | `403 Forbidden`; audited            |
+| NP-OVR-003 | Expired override is auto-revoked            | (system)         | P1       | ⬜        | Order returns to pre-override state |
+
+**Override negative-path P1 gate:** NP-OVR-001, NP-OVR-002, NP-OVR-003
+
+### Vehicle and Master Data Negative-Path
+
+| ID         | Scenario                                   | Role          | Priority | Pass/Fail | Notes                            |
+| ---------- | ------------------------------------------ | ------------- | -------- | --------- | -------------------------------- |
+| NP-VEH-001 | Offboarding vehicle cannot be redispatched | `ops_manager` | P1       | ⬜        | Debranding task must close first |
+| NP-VEH-002 | Duplicate vehicle plate number rejected    | `ops_manager` | P2       | ⬜        | Uniqueness enforced              |
+
+**Vehicle negative-path P1 gate:** NP-VEH-001
 
 ---
 

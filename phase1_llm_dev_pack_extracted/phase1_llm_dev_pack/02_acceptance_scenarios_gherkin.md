@@ -597,7 +597,204 @@ Scenario: Sensitive artifact download is permissioned and audited
 
 ---
 
-## 2.11 最小回歸套件（MVP Regression Set）
+## 2.11 負面路徑驗收場景（ORX-GV-001 Negative-Path Expansion）
+
+Added: 2026-04-30 | Owner: Claude2 | Reviewer: Claude
+
+### SC-041 派車權限不足被拒
+
+```gherkin
+Scenario: Read-only dispatcher cannot assign a driver to an order
+  Given a user is authenticated with ops_viewer role only
+    And an order is in ready_for_dispatch state
+  When the user attempts to assign a driver via dispatch API
+  Then the system returns 403 Forbidden
+    And no dispatch_assignment is created
+    And the denied access attempt is audited
+```
+
+---
+
+### SC-042 改派至不合資格司機被拒
+
+```gherkin
+Scenario: Reassign fails when target driver is ineligible
+  Given an owned order is assigned to driver A
+    And driver B has an expired occupational license
+  When the dispatcher attempts to reassign the order to driver B
+  Then the system returns "DRIVER_NOT_ELIGIBLE"
+    And the original assignment to driver A is preserved
+    And the failed reassign attempt is logged in dispatch trace
+```
+
+---
+
+### SC-043 派車逾時自動升級處理
+
+```gherkin
+Scenario: Dispatch timeout triggers escalation instead of silent failure
+  Given an owned order is in ready_for_dispatch
+    And the configured dispatch timeout window expires with no driver acceptance
+  When the timeout handler runs
+  Then the order enters redispatch_required or exception_hold state
+    And an ops notification is created for the timeout event
+    And tenant SLA notification is sent if configured
+    And the timeout event is visible in dispatch trace log
+```
+
+---
+
+### SC-044 已撤銷 API Key 不可認證
+
+```gherkin
+Scenario: Revoked tenant API key is rejected on authentication
+  Given a tenant API key has been revoked
+  When any API call is made using the revoked key
+  Then the system returns 401 Unauthorized
+    And no tenant session is established
+    And the rejected auth attempt is audited
+```
+
+---
+
+### SC-045 跨租戶 API Key 隔離
+
+```gherkin
+Scenario: Tenant A API key cannot access tenant B resources
+  Given tenant A has a valid API key
+    And tenant B has bookings
+  When tenant A uses its API key to request tenant B booking list
+  Then the response contains only tenant A data or returns 403
+    And no cross-tenant data is exposed
+    And the access attempt is logged with tenant scope context
+```
+
+---
+
+### SC-046 裝置重綁使舊 session 失效
+
+```gherkin
+Scenario: Driver device rebind invalidates previous device session
+  Given a driver has a valid device binding on device A
+  When an admin rebinds the driver to device B
+    And device A attempts an API call with its old bearer token
+  Then the system returns "DRIVER_DEVICE_SESSION_INVALID"
+    And device A cannot access any driver APIs
+    And the session invalidation is audited
+```
+
+---
+
+### SC-047 未授權使用者不可下載財務文件
+
+```gherkin
+Scenario: User without finance role cannot download invoice artifact
+  Given a completed invoice exists
+    And the requesting user lacks finance_viewer or tenant_admin role
+  When the user requests the invoice download URL
+  Then the system returns 403 Forbidden
+    And no download URL is issued
+    And the denied access attempt is audited
+```
+
+---
+
+### SC-048 已取消轉單不可接單
+
+```gherkin
+Scenario: Driver cannot accept a forwarded order after external cancellation
+  Given a forwarded order mirror exists locally
+    And the external platform has sent a cancellation callback
+  When a driver attempts to accept the cancelled forwarded task
+  Then the system rejects with "TASK_CANCELLED_BY_PLATFORM"
+    And no local assignment is created
+    And the driver sees the cancellation state in task list
+```
+
+---
+
+### SC-049 轉單路線鎖定不可修改
+
+```gherkin
+Scenario: Forwarded order route cannot be modified by driver
+  Given a forwarded task with routeLocked=true is accepted by a driver
+  When the driver attempts to modify route waypoints via API
+  Then the system returns "ROUTE_LOCKED_IMMUTABLE"
+    And third-party waypoints remain authoritative
+    And the modification attempt is audited
+```
+
+---
+
+### SC-050 監理報表標記缺錄音
+
+```gherkin
+Scenario: Regulatory filing package flags orders with missing recordings
+  Given phone-origin orders exist in the filing period
+    And some orders have recording_id=null
+  When the regulatory filing package is generated
+  Then the package includes explicit flags for missing recordings
+    And the manifest notes incomplete compliance status
+    And missing-recording orders are listed separately for remediation
+```
+
+---
+
+### SC-051 非合規角色不可存取錄音
+
+```gherkin
+Scenario: Non-compliance user cannot download call recording artifacts
+  Given call recordings exist for phone-origin orders
+    And the user has tenant_booking_manager role without compliance access
+  When the user requests a call recording download URL
+  Then the system returns 403 Forbidden
+    And no recording URL is issued
+    And the denied access attempt is audited
+```
+
+---
+
+### SC-052 例外擱置釋放需附理由
+
+```gherkin
+Scenario: Override release without reason is rejected
+  Given an order is in exception_hold state
+  When an operator attempts to release the hold without providing a reason
+  Then the system rejects with "OVERRIDE_REASON_REQUIRED"
+    And the exception hold remains in place
+    And the attempted release is logged
+```
+
+---
+
+### SC-053 非主管不可核准覆核釋放
+
+```gherkin
+Scenario: Non-manager cannot approve override release
+  Given an override request is pending approval
+    And the user has ops_dispatcher role without ops_manager
+  When the user attempts to approve the override release
+  Then the system returns 403 Forbidden
+    And the override remains pending
+    And the unauthorized approval attempt is audited
+```
+
+---
+
+### SC-054 逾時覆核自動撤銷
+
+```gherkin
+Scenario: Expired override is automatically revoked
+  Given an override was approved with a time-limited expiry
+  When the override expiry time passes
+  Then the override is automatically revoked
+    And the order returns to its pre-override state or requires new review
+    And the expiry event is audited with timestamp
+```
+
+---
+
+## 2.12 最小回歸套件（MVP Regression Set）
 
 若開發時程有限，至少要自動化以下 12 條：
 

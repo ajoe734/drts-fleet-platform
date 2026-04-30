@@ -1734,7 +1734,7 @@ This scenario inventory feeds the workflow-family release matrix at
 
 ## 6. MVP Regression Reference
 
-Minimum set of scenarios to automate first (aligns with `02_acceptance_scenarios_gherkin.md §2.11`):
+Minimum set of scenarios to automate first (aligns with `02_acceptance_scenarios_gherkin.md §2.12`):
 
 | Scenario ID | UAT ID     | Description                                       |
 | ----------- | ---------- | ------------------------------------------------- |
@@ -1843,3 +1843,427 @@ Added: 2026-04-30 | Owner: Claude2 | Reviewer: Codex
 | 4    | Attempt to relink either to a different counterpart | Rejected with conflict error                                                                            |
 
 **Pass criteria:** Complaint-incident links are bidirectional, exclusive, and auditable.
+
+---
+
+## 9. Negative-Path UAT Scenarios (ORX-GV-001)
+
+Added: 2026-04-30 | Owner: Claude2 | Reviewer: Claude
+
+This section fills coverage gaps identified during ORX-GV-001. Each scenario family
+must have at least one positive, one negative, and one permission/audit test before
+the release gate can reference it as covered. Scenarios below are grouped by the
+workflow family they feed.
+
+### 9.1 Dispatch Negative-Path (WF-DSP-001)
+
+#### NP-DSP-001 — Dispatcher without assign permission cannot assign
+
+**Pre-conditions**
+
+- Authenticated as a user with `ops_viewer` role (read-only dispatch access)
+- An order is in `ready_for_dispatch` state
+
+**Steps**
+
+1. Attempt to call `POST /api/dispatch/assign` with a valid order and driver
+
+**Expected**
+
+- Backend returns `403 Forbidden`
+- No assignment is created
+- Audit trail records the denied access attempt
+
+**Cross-ref:** SC-005 (positive path), OC-002
+
+---
+
+#### NP-DSP-002 — Reassign to ineligible driver rejected
+
+**Pre-conditions**
+
+- An order is in `assigned` state
+- Target driver has expired license or is not clocked in
+
+**Steps**
+
+1. Select the order in dispatch queue
+2. Attempt reassign to the ineligible driver
+
+**Expected**
+
+- Backend rejects with `DRIVER_NOT_ELIGIBLE`
+- Original assignment is preserved unchanged
+- Dispatch trace log records the failed reassign attempt
+
+**Cross-ref:** SC-007, OC-003
+
+---
+
+#### NP-DSP-003 — Dispatch timeout triggers escalation, not silent failure
+
+**Pre-conditions**
+
+- An owned order is in `ready_for_dispatch` with dispatch timeout configured
+- No driver accepts within the timeout window
+
+**Steps**
+
+1. Observe the order after dispatch timeout expires
+
+**Expected**
+
+- Order enters `redispatch_required` or `exception_hold` state
+- Ops notification is created for the timeout event
+- No silent state transition occurs without operator visibility
+- Tenant SLA notification sent if configured
+
+**Cross-ref:** SC-006, SC-012
+
+---
+
+### 9.2 Finance Negative-Path (WF-FIN-001)
+
+#### NP-FIN-001 — Invoice generation with no eligible trips produces empty result
+
+**Pre-conditions**
+
+- Tenant billing period has ended but no completed trips exist for the period
+
+**Steps**
+
+1. Trigger invoice generation for the empty period
+
+**Expected**
+
+- System either produces a zero-amount invoice or returns `NO_ELIGIBLE_TRIPS`
+- No phantom charges appear
+- Audit trail records the generation attempt
+
+---
+
+#### NP-FIN-002 — Unauthorized user cannot download sensitive financial artifact
+
+**Pre-conditions**
+
+- A completed invoice exists
+- Authenticated as a user without `finance_viewer` or `tenant_admin` role
+
+**Steps**
+
+1. Attempt to call `GET /api/tenant/invoices/:id/download`
+
+**Expected**
+
+- Backend returns `403 Forbidden`
+- No download URL is issued
+- Audit trail records the denied access attempt
+
+**Cross-ref:** SC-040, OC-025
+
+---
+
+#### NP-FIN-003 — Driver cannot view another driver's earnings
+
+**Pre-conditions**
+
+- Two drivers exist (driver1, driver2)
+- Authenticated as driver1
+
+**Steps**
+
+1. Attempt to call driver earnings endpoint with driver2's ID
+
+**Expected**
+
+- Backend returns only driver1's own data or `403 Forbidden`
+- No cross-driver financial data is exposed
+- Access attempt is audited
+
+**Cross-ref:** SC-036, DA-017
+
+---
+
+#### NP-FIN-004 — Reconciliation dispute cannot be opened by non-finance role
+
+**Pre-conditions**
+
+- Reconciliation issue queue has entries
+- Authenticated as `ops_dispatcher` (no finance privileges)
+
+**Steps**
+
+1. Attempt to open a reconciliation dispute via API
+
+**Expected**
+
+- Backend returns `403 Forbidden`
+- No dispute record is created
+- Access attempt is audited
+
+---
+
+### 9.3 Forwarder Negative-Path (WF-FWD-001)
+
+#### NP-FWD-001 — Forwarded order acceptance after external cancellation
+
+**Pre-conditions**
+
+- A forwarded order mirror exists locally
+- External platform has already sent a cancellation callback
+
+**Steps**
+
+1. Driver attempts to accept the cancelled forwarded task
+
+**Expected**
+
+- Backend rejects with `TASK_CANCELLED_BY_PLATFORM` or equivalent
+- No local assignment is created
+- Driver sees cancellation state in task list
+
+**Cross-ref:** SC-017
+
+---
+
+#### NP-FWD-002 — Forwarded order route override is blocked
+
+**Pre-conditions**
+
+- A forwarded task with `routeLocked=true` is accepted by a driver
+
+**Steps**
+
+1. Driver attempts to modify route waypoints via API
+
+**Expected**
+
+- Backend rejects with `ROUTE_LOCKED_IMMUTABLE`
+- Third-party waypoints remain authoritative
+- Modification attempt is audited
+
+**Cross-ref:** DA-005, SC-015
+
+---
+
+#### NP-FWD-003 — Forwarder sync failure is surfaced, not swallowed
+
+**Pre-conditions**
+
+- Forwarder adapter is configured but external platform returns an error on sync
+
+**Steps**
+
+1. Observe forwarder sync status after a failed callback
+
+**Expected**
+
+- Sync failure is logged with error code and timestamp
+- Ops health dashboard reflects the adapter failure state
+- No stale order status is presented as current truth
+
+---
+
+### 9.4 Compliance and Recording Negative-Path (WF-COM-001)
+
+#### NP-COM-001 — Regulatory filing with missing recordings is flagged
+
+**Pre-conditions**
+
+- Phone-origin orders exist in the filing period
+- Some orders have `recording_id = null` (recording never arrived)
+
+**Steps**
+
+1. Generate regulatory filing package for the period
+
+**Expected**
+
+- Filing package is generated but includes explicit flags for missing recordings
+- Package manifest notes incomplete compliance status
+- Missing-recording orders are listed separately for remediation
+
+**Cross-ref:** SC-034
+
+---
+
+#### NP-COM-002 — Non-compliance user cannot access recording artifacts
+
+**Pre-conditions**
+
+- Call recordings exist for phone-origin orders
+- Authenticated as `tenant_booking_manager` (no compliance role)
+
+**Steps**
+
+1. Attempt to request call recording download URL
+
+**Expected**
+
+- Backend returns `403 Forbidden`
+- No recording URL is issued
+- Access attempt is audited
+
+**Cross-ref:** SC-040, OC-025
+
+---
+
+### 9.5 Identity and Auth Negative-Path (WF-TEN-001 / WF-DRV-001)
+
+#### NP-AUTH-001 — Expired API key cannot authenticate
+
+**Pre-conditions**
+
+- A tenant API key has been revoked
+
+**Steps**
+
+1. Make any API call using the revoked key in the `Authorization` header
+
+**Expected**
+
+- Backend returns `401 Unauthorized`
+- No tenant session is established
+- Rejected auth attempt is audited
+
+**Cross-ref:** TP-017
+
+---
+
+#### NP-AUTH-002 — Cross-tenant API key cannot access another tenant's resources
+
+**Pre-conditions**
+
+- Tenant A has a valid API key
+- Tenant B has bookings
+
+**Steps**
+
+1. Use Tenant A's API key to request Tenant B's booking list
+
+**Expected**
+
+- Backend returns empty list (scoped to Tenant A) or `403 Forbidden`
+- No cross-tenant data leakage
+- Access attempt is logged with tenant scope mismatch
+
+**Cross-ref:** E2E-004, TP-030
+
+---
+
+#### NP-AUTH-003 — Driver device rebind invalidates old session
+
+**Pre-conditions**
+
+- Driver has a valid device binding (device A)
+- Admin rebinds driver to a new device (device B)
+
+**Steps**
+
+1. Attempt API call from device A using old bearer token
+
+**Expected**
+
+- Backend returns `DRIVER_DEVICE_SESSION_INVALID`
+- Old device cannot access any driver APIs
+- Audit trail records the session invalidation
+
+**Cross-ref:** DA-025
+
+---
+
+### 9.6 Override and Exception-Hold Negative-Path (WF-DSP-001)
+
+#### NP-OVR-001 — Override request without reason is rejected
+
+**Pre-conditions**
+
+- An order is in `exception_hold` state
+
+**Steps**
+
+1. Attempt to release the hold without providing a reason or justification
+
+**Expected**
+
+- Backend rejects with `OVERRIDE_REASON_REQUIRED`
+- Exception hold remains in place
+- Attempted release is logged
+
+---
+
+#### NP-OVR-002 — Non-manager cannot approve override release
+
+**Pre-conditions**
+
+- An override request is pending approval
+- Authenticated as `ops_dispatcher` (not `ops_manager`)
+
+**Steps**
+
+1. Attempt to approve the override release
+
+**Expected**
+
+- Backend returns `403 Forbidden`
+- Override remains pending
+- Unauthorized approval attempt is audited
+
+---
+
+#### NP-OVR-003 — Expired override is auto-revoked
+
+**Pre-conditions**
+
+- An override was approved with a time-limited expiry
+
+**Steps**
+
+1. Observe the override after its expiry time passes
+
+**Expected**
+
+- Override is automatically revoked
+- Order returns to its pre-override state or requires new review
+- Expiry event is audited with timestamp
+
+---
+
+### 9.7 Vehicle and Master Data Negative-Path
+
+#### NP-VEH-001 — Vehicle with pending offboarding cannot be redispatched
+
+**Pre-conditions**
+
+- Vehicle offboarding has been initiated (debranding task open)
+
+**Steps**
+
+1. Attempt to set `dispatchable_flag=true` via ops console or API
+
+**Expected**
+
+- Backend rejects the action
+- Vehicle remains not dispatchable until debranding is complete
+- Attempted action is audited
+
+**Cross-ref:** OC-015, SC-026
+
+---
+
+#### NP-VEH-002 — Duplicate vehicle plate number is rejected
+
+**Pre-conditions**
+
+- A vehicle with plate `ABC-1234` already exists
+
+**Steps**
+
+1. Attempt to create a new vehicle record with the same plate number
+
+**Expected**
+
+- Backend returns `DUPLICATE_PLATE_NUMBER` or equivalent uniqueness error
+- No duplicate record is created
+
+---

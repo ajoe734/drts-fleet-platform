@@ -92,13 +92,67 @@ Bad closeout language:
 - "Forwarded orders are complete" when the live adapter path was skipped or depends on external data.
 - "Phase 1 is production-ready" without naming pilot and production gate status.
 
-## Relationship To The Remediation Wave
+## Negative-Path Release Gate Expansion (ORX-GV-001)
+
+Added: 2026-04-30 | Owner: Claude2 | Reviewer: Claude
+
+### Purpose
+
+This section expands the baseline positive-path gate matrix into explicit
+negative-path, permission, and audit evidence requirements. Each workflow family
+must name its negative-path verification before a release gate can be read as
+operationally complete. Operational sign-off no longer assumes backend-only
+guards are sufficient — UX-level guards, permission denials, and audit traces
+must be separately verified.
+
+### Negative-Path Evidence Requirements Per Family
+
+| Family ID    | Positive evidence (baseline)                     | Negative-path evidence (ORX-GV-001)                                                                                                                                                                                                                                | Permission/audit evidence (ORX-GV-001)                                         | Negative-path gate read     |
+| ------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | --------------------------- |
+| `WF-RLS-001` | CI, deploy, migration, health                    | Rollback path named; migration down tested                                                                                                                                                                                                                         | Deploy audit trail present                                                     | `PASS (repo-local)`         |
+| `WF-TEN-001` | Tenant create, bootstrap, cross-tenant isolation | Scope mismatch rejected (`TP-030`); suspended user blocked (`TP-031`); inactive partner blocked (`TP-032`); revoked key rejected (`NP-AUTH-001`); cross-tenant key isolation (`NP-AUTH-002`)                                                                       | Device rebind invalidation (`NP-AUTH-003`); bootstrap rejection audited        | `PASS (static evidence)`    |
+| `WF-ORD-001` | Booking create, read-back, dispatch surface      | Address unresolvable (`TP-002`); flight number missing (`TP-004`); modify after deadline (`TP-006`)                                                                                                                                                                | Booking creation audited; modification attempt audited                         | `PASS (static evidence)`    |
+| `WF-DSP-001` | Queue visible, assign, reassign, no-supply       | Permission-denied assign (`NP-DSP-001`); ineligible driver reassign (`NP-DSP-002`); timeout escalation (`NP-DSP-003`); override without reason (`NP-OVR-001`); expired override revoked (`NP-OVR-003`)                                                             | Non-manager override blocked (`NP-OVR-002`); dispatch trace on failed reassign | `PENDING (ORX-GV-001 rows)` |
+| `WF-DRV-001` | Task lifecycle, platform presence, auth          | Trip before pickup (`DA-004`); fixed price immutable (`DA-006`); photo required (`DA-007`); signoff required (`DA-008`); expense proof required (`DA-009`); expired license blocked (`DA-022`); registration denied (`DA-024`); revoked session blocked (`DA-025`) | Driver self-scoped earnings (`DA-017`); auth denial audited                    | `PASS (static evidence)`    |
+| `WF-FWD-001` | Route-locked visibility, no owned assignment     | Accept after cancellation blocked (`NP-FWD-001`); route override blocked (`NP-FWD-002`); sync failure surfaced (`NP-FWD-003`)                                                                                                                                      | Route override attempt audited                                                 | `PENDING (ORX-GV-001 rows)` |
+| `WF-COM-001` | Phone booking linkage, recording gates           | Missing recordings flagged in filing (`NP-COM-001`); non-compliance access denied (`NP-COM-002`)                                                                                                                                                                   | Recording download audited (`SC-040`)                                          | `PENDING (ORX-GV-001 rows)` |
+| `WF-FIN-001` | Invoice generation, report export, artifact DL   | Empty-period invoice (`NP-FIN-001`); unauthorized download blocked (`NP-FIN-002`); cross-driver earnings blocked (`NP-FIN-003`); non-finance dispute blocked (`NP-FIN-004`)                                                                                        | Download audit trail (`SC-040`); reconciliation access audited                 | `PENDING (ORX-GV-001 rows)` |
+
+### Operational Sign-Off Expansion
+
+The baseline sign-off matrix assumed backend guards were sufficient. With
+ORX-GV-001, the following additional sign-off requirements are added:
+
+1. **UX-level permission denial** — Each surface must show that a denied action
+   produces a user-visible error, not a silent failure or blank screen. The
+   `NP-DSP-001`, `NP-FIN-002`, `NP-COM-002`, and `NP-OVR-002` scenarios
+   specifically verify UX-facing denial behavior.
+
+2. **Audit trail completeness** — Every denied access attempt, override
+   request, and session invalidation must produce an audit entry. The reviewer
+   must confirm that audit is not limited to successful actions.
+
+3. **Escalation visibility** — Timeouts, override expirations, and SLA
+   breaches must produce operator-visible notifications, not just backend
+   state changes. `NP-DSP-003`, `NP-OVR-003`, and `SC-CS-005` verify this.
+
+### Coverage Summary
+
+| Category                     | Baseline count | ORX-GV-001 additions | Total   |
+| ---------------------------- | -------------- | -------------------- | ------- |
+| Positive-path UAT scenarios  | 58             | 0                    | 58      |
+| Negative-path UAT scenarios  | 22             | 20                   | 42      |
+| Permission/audit scenarios   | 12             | 8                    | 20      |
+| Complaint workflow (ORX-CS)  | 0              | 6                    | 6       |
+| **Total scenario inventory** | **92**         | **34**               | **126** |
+
+### Relationship To The Remediation Wave
 
 This `OPX-GV-002` runbook is the baseline workflow-family map.
 
-`ORX-GV-001` expands the same model into negative-path release gating. Until that
-task lands, reviewers should treat this file as the minimum positive-path plus
-explicit-non-claim matrix, not as the final negative-path decision packet.
+`ORX-GV-001` has expanded the model into negative-path release gating. Reviewers
+should now treat the negative-path evidence table above as the binding release
+gate requirement in addition to the baseline positive-path matrix.
 
 ## Reference Anchors
 
