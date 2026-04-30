@@ -6,6 +6,7 @@ import type {
   DriverTaskRecord,
   IncidentRecord,
   MaintenanceRecord,
+  OperationalObservabilitySnapshot,
   OwnedOrderRecord,
   ReportJobRecord,
   ShiftRecord,
@@ -35,6 +36,128 @@ type HealthPayload = {
   execution_mode: string;
   timestamp: string;
 };
+
+const ALERT_STATE_STYLES = {
+  healthy: {
+    background: "#f0fdf4",
+    border: "#bbf7d0",
+    color: "#166534",
+  },
+  warning: {
+    background: "#fff7ed",
+    border: "#fed7aa",
+    color: "#c2410c",
+  },
+  critical: {
+    background: "#fef2f2",
+    border: "#fecaca",
+    color: "#b91c1c",
+  },
+} as const;
+
+function createFallbackObservabilitySnapshot(
+  referenceDate = new Date(),
+): OperationalObservabilitySnapshot {
+  return {
+    generatedAt: referenceDate.toISOString(),
+    alerts: [],
+    dispatch: {
+      activeOrders: 0,
+      queueDepth: 0,
+      laggedOrders: 0,
+      redispatchOrders: 0,
+      exceptionHoldOrders: 0,
+      dispatchFailedOrders: 0,
+      oldestReadyOrderLagMinutes: null,
+    },
+    recording: {
+      phoneOrders: 0,
+      linkedOrders: 0,
+      pendingOrders: 0,
+      pendingCallSessions: 0,
+      missingRecordingLinks: 0,
+      oldestPendingLagMinutes: null,
+      linkedRatioPercent: 0,
+    },
+    driverState: {
+      totalDrivers: 0,
+      availableDrivers: 0,
+      dispatchEligibleDrivers: 0,
+      offlineDrivers: 0,
+      staleLocationDrivers: 0,
+      missingLocationDrivers: 0,
+      oldestLocationLagMinutes: null,
+    },
+    webhook: {
+      totalEndpoints: 0,
+      activeEndpoints: 0,
+      disabledEndpoints: 0,
+      queuedDeliveries: 0,
+      failedDeliveriesLastHour: 0,
+      oldestQueuedDeliveryLagMinutes: null,
+    },
+    eligibility: {
+      totalReviewQueue: 0,
+      manualReviewQueue: 0,
+      manualFallbackQueue: 0,
+      ineligibleQueue: 0,
+      recentFailureCount24h: 0,
+    },
+    reporting: {
+      queuedJobs: 0,
+      failedJobs: 0,
+      dispatchRecordingIndexQueuedJobs: 0,
+    },
+    adapters: {
+      totalAdapters: 0,
+      healthyAdapters: 0,
+      degradedAdapters: 0,
+      downAdapters: 0,
+    },
+    roleViews: [],
+  };
+}
+
+function formatAlertValue(
+  value: number,
+  unit: "count" | "minutes" | "percent",
+  locale: "en" | "zh",
+) {
+  if (unit === "minutes") {
+    return locale === "en" ? `${value} min` : `${value} 分鐘`;
+  }
+  if (unit === "percent") {
+    return `${value}%`;
+  }
+  return formatCompactNumber(value);
+}
+
+function getAlertSummary(
+  alertKey: string,
+  observability: OperationalObservabilitySnapshot,
+  locale: "en" | "zh",
+) {
+  switch (alertKey) {
+    case "dispatch_lag":
+      return t("dashboard.alert.dispatch_lag.summary", locale, {
+        count: observability.dispatch.laggedOrders,
+      });
+    case "recording_backlog":
+      return t("dashboard.alert.recording_backlog.summary", locale, {
+        count: observability.recording.pendingOrders,
+      });
+    case "driver_state_lag":
+      return t("dashboard.alert.driver_state_lag.summary", locale, {
+        count: observability.driverState.staleLocationDrivers,
+      });
+    case "eligibility_review_backlog":
+      return t("dashboard.alert.eligibility_review_backlog.summary", locale, {
+        count: observability.eligibility.totalReviewQueue,
+      });
+    default:
+      return "";
+  }
+}
 
 async function resolveOrFallback<T>(
   loader: () => Promise<T>,
@@ -76,6 +199,7 @@ export default async function DashboardPage() {
     maintenance,
     reportJobs,
     driverStatements,
+    observability,
   ] = await Promise.all([
     resolveOrFallback<IdentitySummary>(
       () => client.getIdentityContext() as Promise<IdentitySummary>,
@@ -109,6 +233,10 @@ export default async function DashboardPage() {
     resolveOrFallback(
       () => client.listDriverStatements(),
       [] as DriverStatementRecord[],
+    ),
+    resolveOrFallback(
+      () => client.getOperationalObservability(),
+      createFallbackObservabilitySnapshot(),
     ),
   ]);
 
@@ -163,6 +291,18 @@ export default async function DashboardPage() {
     ["/maintenance", t("dashboard.quicklink.maintenance", locale)],
     ["/reports", t("dashboard.quicklink.reports", locale)],
   ];
+  const opsAlertKeys = new Set(
+    observability.roleViews.find((view) => view.route === "ops")?.alertKeys ??
+      [],
+  );
+  const opsAlerts = observability.alerts
+    .filter(
+      (alert) => opsAlertKeys.has(alert.key) || alert.routes.includes("ops"),
+    )
+    .sort((left, right) => {
+      const severityRank = { critical: 0, warning: 1, healthy: 2 } as const;
+      return severityRank[left.state] - severityRank[right.state];
+    });
 
   return (
     <>
@@ -228,6 +368,123 @@ export default async function DashboardPage() {
           accent="#dc2626"
         />
       </div>
+
+      <Card>
+        <CardHeader>
+          <div
+            style={{
+              fontSize: "11px",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "#64748b",
+              marginBottom: "2px",
+            }}
+          >
+            {t("dashboard.operational.title", locale)}
+          </div>
+          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
+            {t("dashboard.operational.subtitle", locale)}
+          </div>
+        </CardHeader>
+        <CardBody>
+          {opsAlerts.length === 0 ? (
+            <p style={{ margin: 0, fontSize: "13.5px", color: "#94a3b8" }}>
+              {t("dashboard.operational.empty", locale)}
+            </p>
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "14px",
+              }}
+            >
+              {opsAlerts.map((alert) => {
+                const style = ALERT_STATE_STYLES[alert.state];
+                return (
+                  <div
+                    key={alert.key}
+                    style={{
+                      border: `1px solid ${style.border}`,
+                      background: style.background,
+                      borderRadius: "12px",
+                      padding: "14px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: "8px",
+                        marginBottom: "10px",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: "14px",
+                          fontWeight: 600,
+                          color: "#0f172a",
+                        }}
+                      >
+                        {t(`dashboard.alert.${alert.key}.title`, locale)}
+                      </div>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          letterSpacing: "0.04em",
+                          textTransform: "uppercase",
+                          color: style.color,
+                        }}
+                      >
+                        {formatOpsCodeLabel(locale, alert.state)}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "22px",
+                        fontWeight: 700,
+                        color: "#0f172a",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      {formatAlertValue(
+                        alert.measuredValue,
+                        alert.thresholds.unit,
+                        locale,
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "12px",
+                        color: "#475569",
+                        marginBottom: "8px",
+                      }}
+                    >
+                      {t("dashboard.operational.thresholds", locale, {
+                        warning: formatAlertValue(
+                          alert.thresholds.warning,
+                          alert.thresholds.unit,
+                          locale,
+                        ),
+                        critical: formatAlertValue(
+                          alert.thresholds.critical,
+                          alert.thresholds.unit,
+                          locale,
+                        ),
+                      })}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#334155" }}>
+                      {getAlertSummary(alert.key, observability, locale)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardBody>
+      </Card>
 
       <div
         style={{

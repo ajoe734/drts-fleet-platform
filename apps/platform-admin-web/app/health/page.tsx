@@ -1,11 +1,15 @@
 /**
- * Health & Quotas Page
- * System health monitoring, forwarder adapter status, and quota tracking.
+ * Operational Health Page
+ * Workflow alert monitoring plus forwarder adapter detail.
  */
 
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import type {
+  AdapterHealthRecord,
+  OperationalObservabilitySnapshot,
+} from "@drts/contracts";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -13,95 +17,224 @@ import {
   getPlatformLabel,
 } from "@/lib/localized-labels";
 
-interface AdapterHealth {
+type AdapterHealth = {
   adapterId: string;
-  status: "healthy" | "degraded" | "unhealthy" | "unknown";
+  status: "healthy" | "degraded" | "down" | "unknown";
   lastCheck: string;
-  message?: string;
+  message?: string | null;
+};
+
+const ALERT_SEVERITY_ORDER = {
+  critical: 0,
+  warning: 1,
+  healthy: 2,
+} as const;
+
+function createFallbackObservabilitySnapshot(
+  referenceDate = new Date(),
+): OperationalObservabilitySnapshot {
+  return {
+    generatedAt: referenceDate.toISOString(),
+    alerts: [],
+    dispatch: {
+      activeOrders: 0,
+      queueDepth: 0,
+      laggedOrders: 0,
+      redispatchOrders: 0,
+      exceptionHoldOrders: 0,
+      dispatchFailedOrders: 0,
+      oldestReadyOrderLagMinutes: null,
+    },
+    recording: {
+      phoneOrders: 0,
+      linkedOrders: 0,
+      pendingOrders: 0,
+      pendingCallSessions: 0,
+      missingRecordingLinks: 0,
+      oldestPendingLagMinutes: null,
+      linkedRatioPercent: 0,
+    },
+    driverState: {
+      totalDrivers: 0,
+      availableDrivers: 0,
+      dispatchEligibleDrivers: 0,
+      offlineDrivers: 0,
+      staleLocationDrivers: 0,
+      missingLocationDrivers: 0,
+      oldestLocationLagMinutes: null,
+    },
+    webhook: {
+      totalEndpoints: 0,
+      activeEndpoints: 0,
+      disabledEndpoints: 0,
+      queuedDeliveries: 0,
+      failedDeliveriesLastHour: 0,
+      oldestQueuedDeliveryLagMinutes: null,
+    },
+    eligibility: {
+      totalReviewQueue: 0,
+      manualReviewQueue: 0,
+      manualFallbackQueue: 0,
+      ineligibleQueue: 0,
+      recentFailureCount24h: 0,
+    },
+    reporting: {
+      queuedJobs: 0,
+      failedJobs: 0,
+      dispatchRecordingIndexQueuedJobs: 0,
+    },
+    adapters: {
+      totalAdapters: 0,
+      healthyAdapters: 0,
+      degradedAdapters: 0,
+      downAdapters: 0,
+    },
+    roleViews: [],
+  };
 }
 
-interface QuotaStatus {
-  resource: string;
-  used: number;
-  limit: number;
-  percentage: number;
+function formatAlertValue(
+  value: number,
+  unit: "count" | "minutes" | "percent",
+  locale: "en" | "zh",
+): string {
+  if (unit === "minutes") {
+    return locale === "en" ? `${value} min` : `${value} 分鐘`;
+  }
+  if (unit === "percent") {
+    return `${value}%`;
+  }
+  return value.toLocaleString(locale === "en" ? "en-US" : "zh-TW");
+}
+
+function getAlertBadge(status: string): string {
+  switch (status) {
+    case "healthy":
+      return "admin-badge--success";
+    case "warning":
+    case "degraded":
+      return "admin-badge--warning";
+    case "critical":
+    case "down":
+      return "admin-badge--danger";
+    default:
+      return "admin-badge--neutral";
+  }
 }
 
 export default function HealthPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [adapters, setAdapters] = useState<AdapterHealth[]>([]);
-  const [quotas, setQuotas] = useState<QuotaStatus[]>([]);
+  const [observability, setObservability] =
+    useState<OperationalObservabilitySnapshot>(
+      createFallbackObservabilitySnapshot(),
+    );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"adapters" | "quotas">("adapters");
+  const [activeTab, setActiveTab] = useState<"alerts" | "adapters">("alerts");
   const [lastRefresh, setLastRefresh] = useState<string>("");
 
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const adapterData = await client.getForwarderAdaptersHealth();
-      const adapterList: AdapterHealth[] =
-        (adapterData as any[])?.map((a: any) => ({
-          adapterId: a.adapterId || a.id || "unknown",
-          status: a.status || "unknown",
-          lastCheck: a.lastCheck || a.lastChecked || "",
-          message: a.message,
-        })) || [];
-      setAdapters(adapterList);
+      const [adapterData, operationalData] = await Promise.all([
+        client.getForwarderAdaptersHealth() as Promise<AdapterHealthRecord[]>,
+        client.getOperationalObservability(),
+      ]);
+      const adapterList: AdapterHealth[] = adapterData.map((adapter) => ({
+        adapterId: adapter.platformCode,
+        status: adapter.status ?? "unknown",
+        lastCheck: adapter.lastCheckedAt ?? "",
+        message: adapter.lastError,
+      }));
 
-      const quotaData: QuotaStatus[] = [
-        {
-          resource: t("health.resource.apiRequests"),
-          used: 1243,
-          limit: 10000,
-          percentage: 12.43,
-        },
-        {
-          resource: t("health.resource.activeDrivers"),
-          used: 87,
-          limit: 500,
-          percentage: 17.4,
-        },
-        {
-          resource: t("health.resource.concurrent"),
-          used: 23,
-          limit: 100,
-          percentage: 23,
-        },
-        {
-          resource: t("health.resource.storage"),
-          used: 45.2,
-          limit: 100,
-          percentage: 45.2,
-        },
-      ];
-      setQuotas(quotaData);
+      setAdapters(adapterList);
+      setObservability(operationalData);
       setLastRefresh(new Date().toLocaleTimeString());
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
       setLoading(false);
     }
-  }, [client, t]);
+  }, [client]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  const getAdapterBadge = (status: string): string => {
-    switch (status) {
-      case "healthy":
-        return "admin-badge--success";
-      case "degraded":
-        return "admin-badge--warning";
-      case "unhealthy":
-        return "admin-badge--danger";
-      default:
-        return "admin-badge--neutral";
-    }
-  };
+  const platformAlertKeys = new Set(
+    observability.roleViews.find((view) => view.route === "platform")
+      ?.alertKeys ?? [],
+  );
+  const platformAlerts = observability.alerts
+    .filter(
+      (alert) =>
+        platformAlertKeys.has(alert.key) || alert.routes.includes("platform"),
+    )
+    .sort(
+      (left, right) =>
+        ALERT_SEVERITY_ORDER[left.state] - ALERT_SEVERITY_ORDER[right.state],
+    );
+  const metricCards = [
+    {
+      title: t("health.metric.dispatch.title"),
+      value: formatAlertValue(
+        observability.dispatch.oldestReadyOrderLagMinutes ?? 0,
+        "minutes",
+        locale,
+      ),
+      note: t("health.metric.dispatch.note", {
+        count: observability.dispatch.laggedOrders,
+      }),
+    },
+    {
+      title: t("health.metric.webhook.title"),
+      value: formatAlertValue(
+        observability.webhook.failedDeliveriesLastHour,
+        "count",
+        locale,
+      ),
+      note: t("health.metric.webhook.note", {
+        count: observability.webhook.queuedDeliveries,
+      }),
+    },
+    {
+      title: t("health.metric.eligibility.title"),
+      value: formatAlertValue(
+        observability.eligibility.totalReviewQueue,
+        "count",
+        locale,
+      ),
+      note: t("health.metric.eligibility.note", {
+        count: observability.eligibility.manualReviewQueue,
+      }),
+    },
+    {
+      title: t("health.metric.reporting.title"),
+      value: formatAlertValue(
+        observability.reporting.failedJobs,
+        "count",
+        locale,
+      ),
+      note: t("health.metric.reporting.note", {
+        count: observability.reporting.queuedJobs,
+      }),
+    },
+    {
+      title: t("health.metric.adapters.title"),
+      value: formatAlertValue(
+        observability.adapters.degradedAdapters +
+          observability.adapters.downAdapters,
+        "count",
+        locale,
+      ),
+      note: t("health.metric.adapters.note", {
+        count: observability.adapters.totalAdapters,
+      }),
+    },
+  ];
 
   if (loading) return <div className="admin-empty">{t("health.loading")}</div>;
 
@@ -126,16 +259,16 @@ export default function HealthPage() {
       <div className="admin-toolbar">
         <div className="admin-toggle-group">
           <button
+            className={`admin-toggle-btn ${activeTab === "alerts" ? "active" : ""}`}
+            onClick={() => setActiveTab("alerts")}
+          >
+            {t("health.tab.alerts")} ({platformAlerts.length})
+          </button>
+          <button
             className={`admin-toggle-btn ${activeTab === "adapters" ? "active" : ""}`}
             onClick={() => setActiveTab("adapters")}
           >
             {t("health.tab.adapters")} ({adapters.length})
-          </button>
-          <button
-            className={`admin-toggle-btn ${activeTab === "quotas" ? "active" : ""}`}
-            onClick={() => setActiveTab("quotas")}
-          >
-            {t("health.tab.quotas")} ({quotas.length})
           </button>
         </div>
         <button className="admin-btn admin-btn--secondary" onClick={loadData}>
@@ -148,9 +281,141 @@ export default function HealthPage() {
         )}
       </div>
 
-      <div className="admin-card">
-        {activeTab === "adapters" &&
-          (adapters.length === 0 ? (
+      {activeTab === "alerts" && (
+        <>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: 16,
+              marginBottom: 16,
+            }}
+          >
+            <div className="admin-card">
+              <div className="admin-card-label">
+                {t("health.summary.critical")}
+              </div>
+              <div className="admin-card-value">
+                {
+                  platformAlerts.filter((alert) => alert.state === "critical")
+                    .length
+                }
+              </div>
+            </div>
+            <div className="admin-card">
+              <div className="admin-card-label">
+                {t("health.summary.warning")}
+              </div>
+              <div className="admin-card-value">
+                {
+                  platformAlerts.filter((alert) => alert.state === "warning")
+                    .length
+                }
+              </div>
+            </div>
+            <div className="admin-card">
+              <div className="admin-card-label">
+                {t("health.summary.webhookFailures")}
+              </div>
+              <div className="admin-card-value">
+                {observability.webhook.failedDeliveriesLastHour}
+              </div>
+            </div>
+            <div className="admin-card">
+              <div className="admin-card-label">
+                {t("health.summary.reviewQueue")}
+              </div>
+              <div className="admin-card-value">
+                {observability.eligibility.totalReviewQueue}
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-card" style={{ marginBottom: 16 }}>
+            {platformAlerts.length === 0 ? (
+              <p className="admin-empty">{t("health.noAlerts")}</p>
+            ) : (
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>{t("health.col.alert")}</th>
+                    <th>{t("health.col.status")}</th>
+                    <th>{t("health.col.measured")}</th>
+                    <th>{t("health.col.threshold")}</th>
+                    <th>{t("health.col.route")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {platformAlerts.map((alert) => (
+                    <tr key={alert.key}>
+                      <td>{t(`health.alert.${alert.key}.title`)}</td>
+                      <td>
+                        <span
+                          className={`admin-badge ${getAlertBadge(alert.state)}`}
+                        >
+                          {formatPlatformCodeLabel(locale, alert.state)}
+                        </span>
+                      </td>
+                      <td>
+                        {formatAlertValue(
+                          alert.measuredValue,
+                          alert.thresholds.unit,
+                          locale,
+                        )}
+                      </td>
+                      <td>
+                        {t("health.thresholds", {
+                          warning: formatAlertValue(
+                            alert.thresholds.warning,
+                            alert.thresholds.unit,
+                            locale,
+                          ),
+                          critical: formatAlertValue(
+                            alert.thresholds.critical,
+                            alert.thresholds.unit,
+                            locale,
+                          ),
+                        })}
+                      </td>
+                      <td>
+                        {alert.routes
+                          .map((route) =>
+                            route === "platform"
+                              ? t("health.route.platform")
+                              : t("health.route.ops"),
+                          )
+                          .join(" / ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 16,
+            }}
+          >
+            {metricCards.map((metric) => (
+              <div className="admin-card" key={metric.title}>
+                <div className="admin-card-label">{metric.title}</div>
+                <div className="admin-card-value">{metric.value}</div>
+                <div style={{ color: "#6b7280", fontSize: 13 }}>
+                  {metric.note}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {activeTab === "adapters" && (
+        <div className="admin-card">
+          {adapters.length === 0 ? (
             <p className="admin-empty">{t("health.noAdapters")}</p>
           ) : (
             <table className="admin-table">
@@ -163,88 +428,40 @@ export default function HealthPage() {
                 </tr>
               </thead>
               <tbody>
-                {adapters.map((a) => (
-                  <tr key={a.adapterId}>
+                {adapters.map((adapter) => (
+                  <tr key={adapter.adapterId}>
                     <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      {a.adapterId}
+                      {adapter.adapterId}
                     </td>
                     <td>
                       <span
-                        className={`admin-badge ${getAdapterBadge(a.status)}`}
+                        className={`admin-badge ${getAlertBadge(adapter.status)}`}
                       >
-                        {formatPlatformCodeLabel(locale, a.status)}
+                        {formatPlatformCodeLabel(locale, adapter.status)}
                       </span>
                     </td>
                     <td>
-                      {a.lastCheck
-                        ? new Date(a.lastCheck).toLocaleString()
+                      {adapter.lastCheck
+                        ? new Date(adapter.lastCheck).toLocaleString()
                         : "—"}
                     </td>
                     <td
                       style={{
-                        maxWidth: 300,
+                        maxWidth: 320,
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {a.message || "—"}
+                      {adapter.message || "—"}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          ))}
-
-        {activeTab === "quotas" &&
-          (quotas.length === 0 ? (
-            <p className="admin-empty">{t("health.noQuotas")}</p>
-          ) : (
-            <div>
-              {quotas.map((q) => (
-                <div key={q.resource} style={{ marginBottom: 20 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      marginBottom: 4,
-                    }}
-                  >
-                    <span style={{ fontWeight: 500, fontSize: 14 }}>
-                      {q.resource}
-                    </span>
-                    <span style={{ fontSize: 13, color: "#6b7280" }}>
-                      {q.used} / {q.limit} ({q.percentage.toFixed(1)}%)
-                    </span>
-                  </div>
-                  <div
-                    style={{
-                      height: 8,
-                      background: "#e5e7eb",
-                      borderRadius: 4,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        height: "100%",
-                        width: `${Math.min(q.percentage, 100)}%`,
-                        background:
-                          q.percentage >= 90
-                            ? "#ef4444"
-                            : q.percentage >= 70
-                              ? "#f59e0b"
-                              : "#10b981",
-                        borderRadius: 4,
-                        transition: "width 0.3s",
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -32,6 +32,7 @@ import { IdentityModule } from "./modules/identity/identity.module";
 import { IncidentModule } from "./modules/incident/incident.module";
 import { MaintenanceModule } from "./modules/maintenance/maintenance.module";
 import { OwnedMobilityModule } from "./modules/owned-mobility/owned-mobility.module";
+import { OperationalObservabilityModule } from "./modules/operational-observability/operational-observability.module";
 import { PlatformAdminModule } from "./modules/platform-admin/platform-admin.module";
 import { PlatformPresenceModule } from "./modules/platform-presence/platform-presence.module";
 import { PlatformEarningsModule } from "./modules/platform-earnings/platform-earnings.module";
@@ -58,6 +59,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     ComplaintModule,
     DriverProfileModule,
     OwnedMobilityModule,
+    OperationalObservabilityModule,
     PlatformAdminModule,
     BillingSettlementModule,
     ReportingFilingModule,
