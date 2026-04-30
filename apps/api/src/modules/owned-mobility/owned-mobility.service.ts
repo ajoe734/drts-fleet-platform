@@ -6,6 +6,7 @@ import type {
   AddressPayload,
   ApplyManualFareOverrideCommand,
   AuditLogRecord,
+  CallRecordingState,
   ComplianceGateRecord,
   ComplianceGateState,
   CompletionProofBundle,
@@ -97,6 +98,19 @@ type CallRecordingAttachmentEvent = {
   requestId?: string;
 };
 
+type CallRecordingStateChangeEvent = {
+  callId: string;
+  linkedOrderId: string;
+  recordingState: CallRecordingState;
+  recordingId: string | null;
+  providerRecordingRef: string | null;
+  recordingUrl: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  agentId: string | null;
+  requestId?: string;
+};
+
 const BOOKING_RULES: Record<
   NonNullable<OwnedOrderRecord["businessDispatchSubtype"]>,
   {
@@ -165,6 +179,9 @@ export class OwnedMobilityService implements OnModuleInit {
   ) {
     this.callcenterService.registerRecordingAttachmentListener((event) =>
       this.handleCallRecordingAttached(event),
+    );
+    this.callcenterService.registerRecordingStateChangeListener((event) =>
+      this.handleCallRecordingStateChanged(event),
     );
   }
 
@@ -719,6 +736,53 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       },
       event.requestId,
+    );
+  }
+
+  handleCallRecordingStateChanged(event: CallRecordingStateChangeEvent) {
+    const order = this.orders.find((candidateOrder) => {
+      return candidateOrder.orderId === event.linkedOrderId;
+    });
+    if (!order) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    order.updatedAt = now;
+
+    if (event.recordingState === "ready") {
+      return;
+    }
+
+    order.recordingId = null;
+    order.status = "recording_pending";
+    order.complianceFlags = [
+      ...order.complianceFlags.filter(
+        (flag) =>
+          flag !== "recording_bound" &&
+          flag !== "recording_pending" &&
+          flag !== "recording_missing",
+      ),
+      event.recordingState === "missing"
+        ? "recording_missing"
+        : "recording_pending",
+    ];
+
+    const traceLog = this.appendTrace(
+      order.orderId,
+      "callcenter.recording_state_changed",
+      {
+        callId: event.callId,
+        recordingState: event.recordingState,
+        linkedOrderId: event.linkedOrderId,
+      },
+    );
+    this.persistChanges(
+      {
+        orders: [order],
+        dispatchTraceLogs: [traceLog],
+      },
+      "sync_call_recording_state",
     );
   }
 
@@ -2639,6 +2703,33 @@ export class OwnedMobilityService implements OnModuleInit {
     const task = this.requireTask(taskId);
     const assignment = this.requireAssignment(task.assignmentId);
     const order = this.requireOrder(task.orderId);
+
+    if (requestId) {
+      const replayedTask = this.replayDriverCompletion(task, order, requestId);
+      if (replayedTask) {
+        return replayedTask;
+      }
+    }
+
+    if (task.status === "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TASK_ALREADY_COMPLETED",
+        "Driver task has already been completed.",
+      );
+    }
+
+    if (task.status !== "on_trip" && task.status !== "proof_pending") {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TASK_NOT_ACTIVE",
+        "Driver task cannot be completed from the current status.",
+        {
+          status: task.status,
+        },
+      );
+    }
+
     const proof = {
       photos: [...(command.proof?.photos ?? [])],
       signatureId: command.proof?.signatureId ?? null,
@@ -2736,6 +2827,7 @@ export class OwnedMobilityService implements OnModuleInit {
       taskId,
       assignmentId: assignment.assignmentId,
       completedAt: command.completedAt,
+      requestId: requestId ?? null,
     });
     this.persistChanges(
       {
@@ -3528,6 +3620,53 @@ export class OwnedMobilityService implements OnModuleInit {
     return traceLog;
   }
 
+  private replayDriverCompletion(
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord,
+    requestId: string,
+  ): DriverTaskRecord | null {
+    if (
+      task.status === "completed" &&
+      this.hasDriverTaskTraceRequestId(
+        order.orderId,
+        task.taskId,
+        "driver.completed_trip",
+        requestId,
+      )
+    ) {
+      return this.cloneTask(task);
+    }
+
+    if (
+      task.status === "proof_pending" &&
+      this.hasDriverTaskTraceRequestId(
+        order.orderId,
+        task.taskId,
+        "driver.proof_pending",
+        requestId,
+      )
+    ) {
+      return this.cloneTask(task);
+    }
+
+    return null;
+  }
+
+  private hasDriverTaskTraceRequestId(
+    orderId: string,
+    taskId: string,
+    eventType: string,
+    requestId: string,
+  ): boolean {
+    return this.dispatchTraceLogs.some(
+      (traceLog) =>
+        traceLog.orderId === orderId &&
+        traceLog.eventType === eventType &&
+        traceLog.details?.taskId === taskId &&
+        traceLog.details?.requestId === requestId,
+    );
+  }
+
   private cloneTraceLog(
     traceLog: DispatchTraceLogRecord,
   ): DispatchTraceLogRecord {
@@ -3877,6 +4016,8 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     const hasRecording = Boolean(order.recordingId);
+    const recordingMissing =
+      order.complianceFlags.includes("recording_missing");
     const state: ComplianceGateState = hasRecording ? "clear" : "blocked";
     return {
       gateType: "recording",
@@ -3889,7 +4030,9 @@ export class OwnedMobilityService implements OnModuleInit {
       missingItems: hasRecording ? [] : ["recording_id"],
       nextAction: hasRecording
         ? "Recording has been bound to the phone order."
-        : "Attach the call recording callback before dispatching this order.",
+        : recordingMissing
+          ? "Call ended without a linked recording. Investigate and attach the callback before dispatching this order."
+          : "Attach the call recording callback before dispatching this order.",
       reviewerLabel: "callcenter / ops compliance",
       overrideAllowed: false,
       overrideActors: [],
@@ -4032,6 +4175,7 @@ export class OwnedMobilityService implements OnModuleInit {
       taskId: task.taskId,
       assignmentId: assignment.assignmentId,
       missingItems: this.describeMissingCompletionProof(order, proof),
+      requestId: requestId ?? null,
     });
     this.persistChanges(
       {
@@ -4505,7 +4649,8 @@ export class OwnedMobilityService implements OnModuleInit {
 
     if (
       order.status === "recording_pending" ||
-      order.complianceFlags.includes("recording_pending")
+      order.complianceFlags.includes("recording_pending") ||
+      order.complianceFlags.includes("recording_missing")
     ) {
       return {
         queueFamily: "recording_gate_queue",

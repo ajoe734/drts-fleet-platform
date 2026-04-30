@@ -27,7 +27,13 @@ import {
   shouldReloadTripAfterFailedAction,
   type ProofPhoto,
 } from "@/lib/completion-proof";
-import { getDriverClient } from "@/lib/api-client";
+import {
+  getDriverClient,
+  getDriverIdentityIssue,
+  getPendingDriverTaskCompletion,
+  replayPendingDriverTaskCompletion,
+  submitDriverTaskCompletion,
+} from "@/lib/api-client";
 import {
   accumulateTripDistanceKm,
   calculateTripDurationSec,
@@ -42,7 +48,9 @@ import {
   subscribeToDriverLocationUpdates,
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
+import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
+import { usePendingCompletionReplay } from "@/lib/use-pending-completion-replay";
 
 function PlatformBadge({ platform }: { platform: string | null }) {
   const label = platform ?? "自營派單";
@@ -253,6 +261,23 @@ export default function TripScreen() {
     );
   }
 
+  function resetCompletionDraft() {
+    setProofPhotos([]);
+    setSignoffReference("");
+    setExpenseType("");
+    setExpenseAmount("");
+    setExpenseAttachmentRef("");
+  }
+
+  async function routeToOnboardingAfterSessionFailure() {
+    await stopDriverLocationHeartbeat();
+    clearDurationTicker();
+    setLocationTrackingState("idle");
+    setLocationTrackingMessage(null);
+    lastTrackedCoordinateRef.current = null;
+    resetDriverAppToOnboarding(router);
+  }
+
   async function loadTrip(showSpinner: boolean) {
     if (showSpinner) {
       setLoading(true);
@@ -293,11 +318,7 @@ export default function TripScreen() {
   }, []);
 
   useEffect(() => {
-    setProofPhotos([]);
-    setSignoffReference("");
-    setExpenseType("");
-    setExpenseAmount("");
-    setExpenseAttachmentRef("");
+    resetCompletionDraft();
   }, [taskDetail?.taskId]);
 
   useEffect(() => {
@@ -412,6 +433,31 @@ export default function TripScreen() {
       });
     });
   }, [isTripInProgress, taskDetail?.taskId]);
+
+  usePendingCompletionReplay({
+    activeTaskId: taskDetail?.taskId ?? null,
+    submittingAction,
+    setSubmittingAction,
+    getPendingCompletion: getPendingDriverTaskCompletion,
+    replayPendingCompletion: replayPendingDriverTaskCompletion,
+    getIdentityIssue: getDriverIdentityIssue,
+    onReplayCompleted: async (replayedTask) => {
+      if (replayedTask.status === "completed") {
+        await stopDriverLocationHeartbeat();
+        clearDurationTicker();
+        setLocationTrackingState("idle");
+        setLocationTrackingMessage(null);
+        resetCompletionDraft();
+        lastTrackedCoordinateRef.current = null;
+      }
+
+      await loadTrip(false);
+    },
+    onIdentityFailure: routeToOnboardingAfterSessionFailure,
+    onReplayError: (error) => {
+      setError(getErrorMessage(error));
+    },
+  });
 
   async function requestPhotoPermission(
     source: "camera" | "library",
@@ -533,7 +579,7 @@ export default function TripScreen() {
             return;
           }
 
-          await client.completeTask(taskDetail.taskId, {
+          await submitDriverTaskCompletion(taskDetail.taskId, {
             completedAt: now,
             actualDistanceKm: roundTripDistanceKm(liveDistanceKm),
             actualDurationSec: calculateTripDurationSec(
@@ -558,11 +604,7 @@ export default function TripScreen() {
         clearDurationTicker();
         setLocationTrackingState("idle");
         setLocationTrackingMessage(null);
-        setProofPhotos([]);
-        setSignoffReference("");
-        setExpenseType("");
-        setExpenseAmount("");
-        setExpenseAttachmentRef("");
+        resetCompletionDraft();
         lastTrackedCoordinateRef.current = null;
       }
 
@@ -570,6 +612,11 @@ export default function TripScreen() {
       await loadTrip(false);
     } catch (actionError) {
       const actionErrorMessage = getErrorMessage(actionError);
+
+      if (getDriverIdentityIssue()) {
+        await routeToOnboardingAfterSessionFailure();
+        return;
+      }
 
       if (shouldReloadTripAfterFailedAction(action)) {
         try {

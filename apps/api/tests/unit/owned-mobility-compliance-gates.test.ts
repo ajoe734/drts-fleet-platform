@@ -23,6 +23,7 @@ function createService(options?: {
   };
   const callcenterService = {
     registerRecordingAttachmentListener: vi.fn(),
+    registerRecordingStateChangeListener: vi.fn(),
     linkOrderToCallSession: vi.fn(() => ({
       recordingId: options?.callSessionRecordingId ?? null,
     })),
@@ -121,6 +122,111 @@ describe("OwnedMobilityService compliance gates", () => {
       status: "ready_for_dispatch",
       recordingId: "recording-demo-002",
       complianceFlags: expect.arrayContaining(["recording_bound"]),
+    });
+  });
+
+  it("marks closed linked phone calls as recording-missing in dispatch state", () => {
+    const regulatoryRegistryService = {
+      getEligibleCandidates: vi.fn(() => []),
+      getVehicleDispatchability: vi.fn(() => true),
+      getDriverAvailability: vi.fn(() => true),
+    };
+    const auditNotificationService = new AuditNotificationService();
+    const callcenterService = new CallcenterService(auditNotificationService);
+    const taskEventsService = {
+      publishTaskAssigned: vi.fn(),
+      publishTaskUpdated: vi.fn(),
+      publishTaskCancelled: vi.fn(),
+    };
+    const service = new OwnedMobilityService(
+      regulatoryRegistryService as never,
+      auditNotificationService,
+      callcenterService,
+      taskEventsService as never,
+    );
+
+    const session = callcenterService.openCallSession({
+      callType: "booking",
+      callerPhone: "0912333444",
+      agentId: "ops-agent-002",
+    });
+    const order = service.createCallCenterOrder({
+      callId: session.callId,
+      agentId: "ops-agent-002",
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Songshan Airport" },
+      passenger: { name: "Rider", phone: "0912000000" },
+    });
+
+    expect(service.getOrder(order.orderId)).toMatchObject({
+      status: "recording_pending",
+      complianceFlags: ["recording_pending"],
+      queueFamily: "recording_gate_queue",
+    });
+
+    callcenterService.closeCallSession(session.callId);
+
+    expect(service.getOrder(order.orderId)).toMatchObject({
+      status: "recording_pending",
+      recordingId: null,
+      complianceFlags: ["recording_missing"],
+      queueFamily: "recording_gate_queue",
+      queueEntryReason: "recording_missing_for_dispatch",
+    });
+    expect(service.getOrder(order.orderId).complianceGates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          gateType: "recording",
+          evidenceState: "missing",
+          nextAction: expect.stringContaining(
+            "Call ended without a linked recording",
+          ),
+        }),
+      ]),
+    );
+  });
+
+  it("propagates late-linked closed sessions as recording-missing orders", () => {
+    const regulatoryRegistryService = {
+      getEligibleCandidates: vi.fn(() => []),
+      getVehicleDispatchability: vi.fn(() => true),
+      getDriverAvailability: vi.fn(() => true),
+    };
+    const auditNotificationService = new AuditNotificationService();
+    const callcenterService = new CallcenterService(auditNotificationService);
+    const taskEventsService = {
+      publishTaskAssigned: vi.fn(),
+      publishTaskUpdated: vi.fn(),
+      publishTaskCancelled: vi.fn(),
+    };
+    const service = new OwnedMobilityService(
+      regulatoryRegistryService as never,
+      auditNotificationService,
+      callcenterService,
+      taskEventsService as never,
+    );
+
+    const session = callcenterService.openCallSession({
+      callType: "booking",
+      callerPhone: "0912444555",
+      agentId: "ops-agent-003",
+    });
+    callcenterService.closeCallSession(session.callId);
+
+    const order = service.createCallCenterOrder({
+      callId: session.callId,
+      agentId: "ops-agent-003",
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Songshan Airport" },
+      passenger: { name: "Late Link Rider", phone: "0912444555" },
+    });
+
+    expect(service.getOrder(order.orderId)).toMatchObject({
+      status: "recording_pending",
+      recordingId: null,
+      complianceFlags: ["recording_missing"],
+      queueFamily: "recording_gate_queue",
+      queueEntryReason: "recording_missing_for_dispatch",
     });
   });
 
@@ -250,5 +356,74 @@ describe("OwnedMobilityService compliance gates", () => {
         }),
       ]),
     );
+  });
+
+  it("shows partial proof bundles as submitted while remaining proof stays blocked", () => {
+    const service = createService();
+
+    service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        reservationWindowStart: "2026-04-29T10:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T11:00:00.000Z",
+        passenger: { name: "Rider", phone: "0912000000" },
+        minPhotoCount: 1,
+        signoffRequired: true,
+      },
+      "tenant-demo-001",
+    );
+
+    const order = service.listOrders()[0];
+    service.dispatchOrder(order.orderId, { mode: "auto" });
+    const dispatchJob = service.listDispatchJobs()[0];
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchJob.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+
+    service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T10:01:00.000Z",
+    });
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T10:05:00.000Z",
+    });
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T10:08:00.000Z",
+    });
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T10:10:00.000Z",
+    });
+
+    expect(() =>
+      service.completeDriverTask(assignment.taskId, {
+        completedAt: "2026-04-29T10:40:00.000Z",
+        actualDistanceKm: 12.3,
+        actualDurationSec: 1800,
+        proof: {
+          photos: ["cHJvb2YtcGhvdG8tMDAx"],
+        },
+      }),
+    ).toThrow();
+
+    const task = service.getDriverTask(assignment.taskId);
+    const proofGate = task.complianceGates?.find(
+      (gate) => gate.gateType === "proof",
+    );
+
+    expect(task).toMatchObject({
+      status: "proof_pending",
+      proof: {
+        photos: ["cHJvb2YtcGhvdG8tMDAx"],
+        signatureId: null,
+      },
+    });
+    expect(proofGate).toMatchObject({
+      state: "blocked",
+      evidenceState: "submitted",
+      missingItems: ["signature"],
+    });
   });
 });

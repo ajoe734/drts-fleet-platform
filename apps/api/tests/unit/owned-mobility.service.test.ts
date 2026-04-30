@@ -1411,6 +1411,290 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       },
     });
   });
+
+  it("replays duplicate completion requests idempotently when the request id matches", () => {
+    const tenantPartnerService = {
+      publishWebhookEvent: vi.fn(async () => undefined),
+    } as unknown as TenantPartnerService;
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+      tenantPartnerService,
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+
+    const command = {
+      completedAt: "2026-04-29T12:45:00.000Z",
+      actualDistanceKm: 14.2,
+      actualDurationSec: 1200,
+      proof: {
+        photos: [SAMPLE_PROOF_PHOTO],
+      },
+    };
+
+    const completed = service.completeDriverTask(
+      assignment.taskId,
+      command,
+      "req-complete-001",
+    );
+    const replayed = service.completeDriverTask(
+      assignment.taskId,
+      command,
+      "req-complete-001",
+    );
+
+    expect(replayed).toEqual(completed);
+    expect(
+      service
+        .listDispatchTrace(booking.orderId)
+        .filter((trace) => trace.eventType === "driver.completed_trip"),
+    ).toHaveLength(1);
+    expect(
+      auditNotificationService.recordAuditLog.mock.calls.filter(
+        ([input]) => input.actionName === "complete_trip",
+      ),
+    ).toHaveLength(1);
+    expect(
+      (
+        tenantPartnerService.publishWebhookEvent as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(
+        ([, payload]) => payload.eventType === "order.completed",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("rejects duplicate completion requests after the trip is already completed", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+
+    service.completeDriverTask(
+      assignment.taskId,
+      {
+        completedAt: "2026-04-29T12:45:00.000Z",
+        actualDistanceKm: 14.2,
+        actualDurationSec: 1200,
+        proof: {
+          photos: [SAMPLE_PROOF_PHOTO],
+        },
+      },
+      "req-complete-001",
+    );
+
+    expect(() =>
+      service.completeDriverTask(
+        assignment.taskId,
+        {
+          completedAt: "2026-04-29T12:46:00.000Z",
+          actualDistanceKm: 14.3,
+          actualDurationSec: 1201,
+          proof: {
+            photos: [SAMPLE_PROOF_PHOTO],
+          },
+        },
+        "req-complete-002",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.completeDriverTask(
+        assignment.taskId,
+        {
+          completedAt: "2026-04-29T12:46:00.000Z",
+          actualDistanceKm: 14.3,
+          actualDurationSec: 1201,
+          proof: {
+            photos: [SAMPLE_PROOF_PHOTO],
+          },
+        },
+        "req-complete-002",
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "TASK_ALREADY_COMPLETED",
+        },
+      });
+    }
+  });
+
+  it("replays proof-pending completion requests idempotently when the request id matches", () => {
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+        signoffRequired: true,
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+
+    try {
+      service.completeDriverTask(
+        assignment.taskId,
+        {
+          completedAt: "2026-04-29T12:45:00.000Z",
+          actualDistanceKm: 14.2,
+          actualDurationSec: 1200,
+          proof: {
+            photos: [SAMPLE_PROOF_PHOTO],
+          },
+        },
+        "req-proof-001",
+      );
+      throw new Error("Expected completion to fail");
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "PROOF_REQUIRED",
+        },
+      });
+    }
+
+    const replayed = service.completeDriverTask(
+      assignment.taskId,
+      {
+        completedAt: "2026-04-29T12:45:00.000Z",
+        actualDistanceKm: 14.2,
+        actualDurationSec: 1200,
+        proof: {
+          photos: [SAMPLE_PROOF_PHOTO],
+        },
+      },
+      "req-proof-001",
+    );
+
+    expect(replayed).toMatchObject({
+      taskId: assignment.taskId,
+      status: "proof_pending",
+    });
+    expect(
+      service
+        .listDispatchTrace(booking.orderId)
+        .filter((trace) => trace.eventType === "driver.proof_pending"),
+    ).toHaveLength(1);
+    expect(
+      auditNotificationService.recordAuditLog.mock.calls.filter(
+        ([input]) => input.actionName === "complete_trip",
+      ),
+    ).toHaveLength(0);
+  });
 });
 
 describe("Queue-entry policy and dispatch semantics contracts", () => {

@@ -230,7 +230,13 @@ After installing the build, confirm:
 9. Platform admin can revoke a driver device binding from the Fleet surface,
    after which the device may be rebound through the onboarding registration
    flow.
-10. App can reach the configured API base without using an IAP login wall.
+10. A completion attempt that is submitted during weak-network conditions is
+    cached locally, retried with the same request id, and does not create a
+    duplicate completion trace when the backend already accepted it.
+11. If a cached completion replay hits an expired or revoked driver session,
+    the app clears the stale binding and returns the driver to onboarding for
+    explicit re-auth before replay is attempted again.
+12. App can reach the configured API base without using an IAP login wall.
 
 ## Current Non-Goals
 

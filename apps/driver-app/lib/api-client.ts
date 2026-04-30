@@ -13,7 +13,11 @@ import {
   createDriverClient,
   createPublicClient,
 } from "@drts/api-client";
-import type { DriverDeviceProvisioningSession } from "@drts/contracts";
+import type {
+  DriverCompleteTaskCommand,
+  DriverDeviceProvisioningSession,
+  DriverTaskRecord,
+} from "@drts/contracts";
 
 type DriverExpoExtra = {
   apiBaseUrl?: string;
@@ -33,6 +37,7 @@ const DEV_DRIVER_ID: string | undefined =
 
 const DRIVER_DEVICE_ID_KEY = "drts.driver.deviceId";
 const DRIVER_SESSION_KEY = "drts.driver.session";
+const DRIVER_PENDING_TASK_COMPLETION_KEY = "drts.driver.pendingTaskCompletion";
 
 const publicClient = createPublicClient(API_URL);
 
@@ -41,6 +46,14 @@ let hydrated = false;
 let hydrationPromise: Promise<void> | null = null;
 let provisionedSession: DriverDeviceProvisioningSession | null = null;
 let driverIdentityIssue: string | null = null;
+
+export type PendingDriverTaskCompletion = {
+  taskId: string;
+  requestId: string;
+  command: DriverCompleteTaskCommand;
+  createdAt: string;
+  updatedAt: string;
+};
 
 function createLocalId(prefix: string): string {
   if (
@@ -146,8 +159,38 @@ function getDriverIdentityIssueMessage(error: unknown): string {
   }
 }
 
+function isTerminalDriverCompletionError(error: unknown): boolean {
+  const parsed = parseApiError(error);
+  return (
+    parsed.code === "MIN_PHOTO_COUNT_NOT_MET" ||
+    parsed.code === "PROOF_REQUIRED" ||
+    parsed.code === "EXPENSE_PROOF_REQUIRED" ||
+    parsed.code === "TASK_ALREADY_COMPLETED"
+  );
+}
+
+function getReplayHeaders(requestId: string): Record<string, string> {
+  return {
+    "X-Request-Id": requestId,
+    "Idempotency-Key": requestId,
+  };
+}
+
 export function getDriverIdentityIssue(): string | null {
   return driverIdentityIssue;
+}
+
+export async function recoverDriverSessionFromApiError(
+  error: unknown,
+): Promise<boolean> {
+  if (!isDriverSessionAuthFailure(error)) {
+    return false;
+  }
+
+  setDriverIdentityIssue(getDriverIdentityIssueMessage(error));
+  await clearStoredSession();
+  hydrated = true;
+  return true;
 }
 
 async function getOrCreateDeviceId(): Promise<string> {
@@ -165,6 +208,44 @@ async function clearStoredSession() {
   provisionedSession = null;
   await SecureStore.deleteItemAsync(DRIVER_SESSION_KEY);
   applySession(null);
+}
+
+async function persistPendingDriverTaskCompletion(
+  pending: PendingDriverTaskCompletion,
+): Promise<void> {
+  await SecureStore.setItemAsync(
+    DRIVER_PENDING_TASK_COMPLETION_KEY,
+    JSON.stringify(pending),
+  );
+}
+
+async function loadPendingDriverTaskCompletion(): Promise<PendingDriverTaskCompletion | null> {
+  const raw = await SecureStore.getItemAsync(
+    DRIVER_PENDING_TASK_COMPLETION_KEY,
+  );
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const pending = JSON.parse(raw) as PendingDriverTaskCompletion;
+    if (
+      !pending.taskId?.trim() ||
+      !pending.requestId?.trim() ||
+      !pending.command?.completedAt
+    ) {
+      throw new Error("Pending driver task completion payload is incomplete.");
+    }
+
+    return pending;
+  } catch {
+    await SecureStore.deleteItemAsync(DRIVER_PENDING_TASK_COMPLETION_KEY);
+    return null;
+  }
+}
+
+async function clearPendingDriverTaskCompletion(): Promise<void> {
+  await SecureStore.deleteItemAsync(DRIVER_PENDING_TASK_COMPLETION_KEY);
 }
 
 async function persistSession(session: DriverDeviceProvisioningSession) {
@@ -283,6 +364,62 @@ export async function revokeDriverDeviceBinding(): Promise<void> {
     await clearStoredSession();
     hydrated = true;
   }
+}
+
+export async function getPendingDriverTaskCompletion(): Promise<PendingDriverTaskCompletion | null> {
+  return loadPendingDriverTaskCompletion();
+}
+
+export async function replayPendingDriverTaskCompletion(): Promise<DriverTaskRecord | null> {
+  const pending = await loadPendingDriverTaskCompletion();
+  if (!pending) {
+    return null;
+  }
+
+  try {
+    const task = await getDriverClient().completeTask(
+      pending.taskId,
+      pending.command,
+      {
+        headers: getReplayHeaders(pending.requestId),
+      },
+    );
+    await clearPendingDriverTaskCompletion();
+    return task;
+  } catch (error) {
+    if (await recoverDriverSessionFromApiError(error)) {
+      throw error;
+    }
+
+    if (isTerminalDriverCompletionError(error)) {
+      await clearPendingDriverTaskCompletion();
+    }
+
+    throw error;
+  }
+}
+
+export async function submitDriverTaskCompletion(
+  taskId: string,
+  command: DriverCompleteTaskCommand,
+): Promise<DriverTaskRecord> {
+  const now = new Date().toISOString();
+  await persistPendingDriverTaskCompletion({
+    taskId,
+    requestId: createLocalId("driver-task-complete"),
+    command,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const task = await replayPendingDriverTaskCompletion();
+  if (!task) {
+    throw new Error(
+      "Pending driver task completion disappeared before replay.",
+    );
+  }
+
+  return task;
 }
 
 export function getDriverClient(): ApiClient {

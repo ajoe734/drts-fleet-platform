@@ -38,6 +38,7 @@ function createOwnedMobilityService(options?: {
   };
   const callcenterService = {
     registerRecordingAttachmentListener: vi.fn(),
+    registerRecordingStateChangeListener: vi.fn(),
   };
   const taskEventsService = new OwnedMobilityTaskEventsService(
     new EventEmitter2(),
@@ -252,12 +253,19 @@ describe("owned mobility task events", () => {
     );
 
     service.dispatchOrder(booking.orderId, { mode: "auto" });
-    service.resolveExceptionHold(booking.orderId, {
-      resolution: "release_to_dispatch",
-      operatorId: "ops-user-001",
-      reason: "Supply confirmed manually",
-      traceId: "trace-exception-release-stream-001",
-    });
+    service.resolveExceptionHold(
+      booking.orderId,
+      {
+        resolution: "release_to_dispatch",
+        operatorId: "ops-user-001",
+        reason: "Supply confirmed manually",
+        traceId: "trace-exception-release-stream-001",
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-user-001",
+      } as never,
+    );
 
     const events = await streamPromise;
 
@@ -296,6 +304,7 @@ describe("owned mobility task events", () => {
     };
     const callcenterService = {
       registerRecordingAttachmentListener: vi.fn(),
+      registerRecordingStateChangeListener: vi.fn(),
     };
     const taskEventsService = new OwnedMobilityTaskEventsService(
       new EventEmitter2(),
@@ -377,6 +386,7 @@ describe("owned mobility task events", () => {
     };
     const callcenterService = {
       registerRecordingAttachmentListener: vi.fn(),
+      registerRecordingStateChangeListener: vi.fn(),
     };
     const taskEventsService = new OwnedMobilityTaskEventsService(
       new EventEmitter2(),
