@@ -19,6 +19,11 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  assertEvidenceAccess,
+  buildEvidenceAccessAuditSummary,
+  type EvidenceAccessIdentity,
+} from "../../common/evidence-governance";
 import { maskOpaqueToken } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import {
@@ -172,8 +177,29 @@ export class ReportingFilingService implements OnModuleInit {
   createReportJob(
     command: CreateReportJobCommand,
     requestId?: string,
+    tenantScopeId?: string | null,
   ): ReportJobAccepted {
     this.assertNonBlank(command.jobType, "jobType");
+    const normalizedTenantScopeId = tenantScopeId?.trim() || null;
+    const normalizedFilters = { ...(command.filters ?? {}) };
+    if (normalizedTenantScopeId) {
+      const commandTenantId =
+        typeof normalizedFilters.tenantId === "string"
+          ? normalizedFilters.tenantId.trim()
+          : null;
+      if (commandTenantId && commandTenantId !== normalizedTenantScopeId) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "REPORT_TENANT_SCOPE_MISMATCH",
+          "Report job tenant scope must match x-tenant-id.",
+          {
+            tenantId: normalizedTenantScopeId,
+            filtersTenantId: commandTenantId,
+          },
+        );
+      }
+      normalizedFilters.tenantId = normalizedTenantScopeId;
+    }
 
     const createdAt = new Date().toISOString();
     const job: StoredReportJob = {
@@ -181,7 +207,7 @@ export class ReportingFilingService implements OnModuleInit {
       jobType: command.jobType,
       format: command.format,
       status: "queued",
-      filters: { ...(command.filters ?? {}) },
+      filters: normalizedFilters,
       artifact: null,
       rows: [],
       partnerRevenueRows: [],
@@ -223,12 +249,59 @@ export class ReportingFilingService implements OnModuleInit {
     };
   }
 
-  listReportJobs() {
-    return this.reportJobs.map((job) => this.cloneReportJob(job));
+  listReportJobs(
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+    tenantScopeId?: string | null,
+  ) {
+    const normalizedTenantScopeId = tenantScopeId?.trim() || null;
+    const policy = assertEvidenceAccess({
+      family: "report_artifact",
+      identity,
+      tenantId: normalizedTenantScopeId,
+    });
+    const items = this.reportJobs
+      .filter((job) =>
+        normalizedTenantScopeId
+          ? this.getReportJobTenantScopeId(job) === normalizedTenantScopeId
+          : true,
+      )
+      .map((job) => this.cloneReportJob(job));
+
+    this.recordArtifactAccessAudit(
+      {
+        actionName: "list_report_artifact_evidence",
+        resourceType: "report_job",
+        resourceId: null,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
+          itemCount: items.length,
+          tenantId: normalizedTenantScopeId,
+        }),
+      },
+      requestId,
+      identity,
+      normalizedTenantScopeId,
+    );
+
+    return items;
   }
 
-  getReportJob(jobId: string, requestId?: string): ReportJobView {
+  getReportJob(
+    jobId: string,
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+    tenantScopeId?: string | null,
+  ): ReportJobView {
     const job = this.requireReportJob(jobId);
+    const normalizedTenantScopeId = tenantScopeId?.trim() || null;
+    if (normalizedTenantScopeId) {
+      this.assertReportJobTenantScope(job, normalizedTenantScopeId);
+    }
+    const policy = assertEvidenceAccess({
+      family: "report_artifact",
+      identity,
+      tenantId: normalizedTenantScopeId,
+    });
     const reportJob = this.cloneReportJob(job);
     this.recordArtifactAccessAudit(
       {
@@ -243,14 +316,19 @@ export class ReportingFilingService implements OnModuleInit {
               manifestHash: reportJob.artifact.manifestHash,
               expiresAt: reportJob.artifact.expiresAt,
               ttlMinutes: reportJob.artifact.downloadMetadata.ttlMinutes,
+              tenantId: normalizedTenantScopeId,
             }
           : {
               jobId: reportJob.jobId,
               jobType: reportJob.jobType,
               artifactAvailable: false,
+              tenantId: normalizedTenantScopeId,
             },
       },
       requestId,
+      identity,
+      normalizedTenantScopeId,
+      policy,
     );
     return reportJob;
   }
@@ -307,8 +385,16 @@ export class ReportingFilingService implements OnModuleInit {
     };
   }
 
-  getFilingPackage(packageId: string, requestId?: string): FilingPackageView {
+  getFilingPackage(
+    packageId: string,
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+  ): FilingPackageView {
     const filingPackage = this.requireFilingPackage(packageId);
+    const policy = assertEvidenceAccess({
+      family: "filing_package",
+      identity,
+    });
     const packageView = this.cloneFilingPackage(filingPackage);
     this.recordArtifactAccessAudit(
       {
@@ -331,14 +417,39 @@ export class ReportingFilingService implements OnModuleInit {
             },
       },
       requestId,
+      identity,
+      null,
+      policy,
     );
     return packageView;
   }
 
-  listFilingPackages() {
-    return this.filingPackages.map((filingPackage) =>
+  listFilingPackages(
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "filing_package",
+      identity,
+    });
+    const items = this.filingPackages.map((filingPackage) =>
       this.cloneFilingPackage(filingPackage),
     );
+    this.recordArtifactAccessAudit(
+      {
+        actionName: "list_filing_package_evidence",
+        resourceType: "filing_package",
+        resourceId: null,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
+          itemCount: items.length,
+        }),
+      },
+      requestId,
+      identity,
+      null,
+      policy,
+    );
+    return items;
   }
 
   private scheduleReportJobCompletion(jobId: string, requestId?: string) {
@@ -884,6 +995,30 @@ export class ReportingFilingService implements OnModuleInit {
     return filingPackage;
   }
 
+  private getReportJobTenantScopeId(job: StoredReportJob) {
+    return typeof job.filters.tenantId === "string"
+      ? job.filters.tenantId
+      : null;
+  }
+
+  private assertReportJobTenantScope(
+    job: StoredReportJob,
+    tenantScopeId: string,
+  ) {
+    if (this.getReportJobTenantScopeId(job) === tenantScopeId) {
+      return;
+    }
+    throw new ApiRequestError(
+      HttpStatus.FORBIDDEN,
+      "REPORT_JOB_TENANT_SCOPE_FORBIDDEN",
+      "The requested report job is not available for this tenant scope.",
+      {
+        jobId: job.jobId,
+        tenantId: tenantScopeId,
+      },
+    );
+  }
+
   private assertNonBlank(value: string, field: string) {
     if (!value.trim()) {
       throw new ApiRequestError(
@@ -925,18 +1060,41 @@ export class ReportingFilingService implements OnModuleInit {
       "actionName" | "resourceType" | "resourceId" | "newValuesSummary"
     >,
     requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+    tenantId?: string | null,
+    policy = assertEvidenceAccess({
+      family:
+        input.resourceType === "filing_package"
+          ? "filing_package"
+          : "report_artifact",
+      identity,
+      tenantId,
+    }),
   ) {
+    const hasPolicySummary =
+      input.newValuesSummary &&
+      typeof input.newValuesSummary === "object" &&
+      "evidenceFamily" in input.newValuesSummary;
     this.recordAudit(
       {
-        actorId: null,
-        actorType: "system",
-        tenantId: null,
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: tenantId ?? identity?.tenantId ?? null,
         moduleName: "reporting-filing",
         actionName: input.actionName,
         resourceType: input.resourceType,
         resourceId: input.resourceId,
         ...(input.newValuesSummary
-          ? { newValuesSummary: input.newValuesSummary }
+          ? {
+              newValuesSummary: {
+                ...(hasPolicySummary
+                  ? {}
+                  : buildEvidenceAccessAuditSummary(policy, "download")),
+                ...input.newValuesSummary,
+              },
+            }
           : {}),
       },
       requestId,

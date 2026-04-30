@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { ReportingFilingService } from "../../src/modules/reporting-filing/reporting-filing.service";
 
@@ -139,6 +140,67 @@ describe("ReportingFilingService sensitive-data governance", () => {
     expect(filingAudit?.newValuesSummary).toMatchObject({
       packageId: packageAccepted.packageId,
       ttlMinutes: 15,
+    });
+  });
+
+  it("enforces tenant-scoped report evidence access for tenant routes", async () => {
+    process.env.CONTROLLED_DOWNLOAD_SIGNING_SECRET =
+      "reporting-download-test-secret";
+
+    const auditNotificationService = new AuditNotificationService();
+    const service = new ReportingFilingService(auditNotificationService);
+    service.registerOrderFeedProvider(() => [createOrder()] as never[]);
+
+    const accepted = service.createReportJob(
+      {
+        jobType: "revenue_summary",
+        format: "csv",
+      },
+      "req-report-create-tenant-001",
+      "tenant-demo-001",
+    );
+    await flushBackgroundWork();
+
+    const tenantIdentity = {
+      actorType: "tenant_admin" as const,
+      actorId: "tenant-admin-001",
+      realm: "tenant" as const,
+      scopes: ["reports:read"],
+      tenantId: "tenant-demo-001",
+    };
+    const otherTenantIdentity = {
+      ...tenantIdentity,
+      actorId: "tenant-admin-002",
+      tenantId: "tenant-other-001",
+    };
+
+    const detail = service.getReportJob(
+      accepted.jobId,
+      "req-report-tenant-open-001",
+      tenantIdentity,
+      "tenant-demo-001",
+    );
+    expect(detail.filters).toMatchObject({
+      tenantId: "tenant-demo-001",
+    });
+
+    expect(() =>
+      service.getReportJob(
+        accepted.jobId,
+        "req-report-tenant-open-002",
+        otherTenantIdentity,
+        "tenant-other-001",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    const tenantAudit = auditNotificationService
+      .listAuditLogs()
+      .find((entry) => entry.actionName === "issue_report_artifact_download");
+    expect(tenantAudit?.actorType).toBe("tenant_admin");
+    expect(tenantAudit?.newValuesSummary).toMatchObject({
+      evidenceFamily: "report_artifact",
+      tenantId: "tenant-demo-001",
+      accessAction: "download",
     });
   });
 });

@@ -21,6 +21,14 @@ export class ProductRuleController {
       dispatchSemantics: [...DISPATCH_SEMANTIC_VALUES],
       businessDispatchSubtypes: [...BUSINESS_DISPATCH_SUBTYPE_VALUES],
       orderDomains: [...ORDER_DOMAIN_VALUES],
+      pricingAuthority: {
+        canonicalQuotedFareSource: "platform_pricing_rule",
+        canonicalPricingRuleVersion: "enterprise_dispatch.default.v1",
+        tenantCanSetQuotedFare: false,
+        partnerCanSetQuotedFare: false,
+        manualOverrideActorTypes: ["platform_admin", "ops_user"],
+        manualOverrideRequiredFields: ["actor", "reason", "traceId"],
+      },
     };
 
     return toApiSuccessEnvelope(catalog, requestId);

@@ -15,6 +15,7 @@ import {
 import type {
   DriverFeePlanRecord,
   PlatformPricingRuleRecord,
+  ProductRuleCatalog,
 } from "@drts/contracts";
 
 type PricingFormState = {
@@ -96,6 +97,8 @@ export default function PricingPage() {
   const defaultPlanName = getPlatformLabel(locale, "defaultPlanName");
   const [rules, setRules] = useState<PlatformPricingRuleRecord[]>([]);
   const [feePlans, setFeePlans] = useState<DriverFeePlanRecord[]>([]);
+  const [productRuleCatalog, setProductRuleCatalog] =
+    useState<ProductRuleCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "active" | "draft" | "archived">(
@@ -125,12 +128,14 @@ export default function PricingPage() {
     setLoading(true);
     setError(null);
     try {
-      const [pricingRules, settlementPlans] = await Promise.all([
+      const [pricingRules, settlementPlans, productRules] = await Promise.all([
         client.listPlatformPricingRules(),
         client.listDriverFeePlans(),
+        client.getProductRuleCatalog(),
       ]);
       setRules(pricingRules ?? []);
       setFeePlans(settlementPlans ?? []);
+      setProductRuleCatalog(productRules);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -287,6 +292,35 @@ export default function PricingPage() {
         >
           <p style={{ color: "#dc2626", margin: 0 }}>
             {getPlatformLabel(locale, "error")}: {error}
+          </p>
+        </div>
+      )}
+
+      {productRuleCatalog && (
+        <div className="admin-card" style={{ marginBottom: 16 }}>
+          <h3 style={{ marginTop: 0 }}>{t("pricing.title")} Governance</h3>
+          <p style={{ margin: "0 0 8px", color: "#374151" }}>
+            Canonical quoted fare source:{" "}
+            <strong>
+              {productRuleCatalog.pricingAuthority.canonicalQuotedFareSource}
+            </strong>
+            {" · "}
+            rule version{" "}
+            <strong>
+              {productRuleCatalog.pricingAuthority.canonicalPricingRuleVersion}
+            </strong>
+          </p>
+          <p style={{ margin: "0 0 8px", color: "#6b7280" }}>
+            Tenant and partner booking channels are read-only for quoted fare.
+            Manual override is allowed only for{" "}
+            {productRuleCatalog.pricingAuthority.manualOverrideActorTypes.join(
+              " / ",
+            )}{" "}
+            and must include{" "}
+            {productRuleCatalog.pricingAuthority.manualOverrideRequiredFields.join(
+              ", ",
+            )}
+            .
           </p>
         </div>
       )}

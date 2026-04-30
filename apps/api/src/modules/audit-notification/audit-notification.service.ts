@@ -4,10 +4,18 @@ import { Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
   AuditLogRecord,
+  EvidenceRetentionFamily,
   MarkNotificationsReadCommand,
   NotificationRecord,
 } from "@drts/contracts";
 
+import {
+  assertEvidenceAccess,
+  buildEvidenceAccessAuditSummary,
+  type EvidenceAccessIdentity,
+  getEvidenceGovernanceCatalog,
+  getEvidenceRetentionPolicy,
+} from "../../common/evidence-governance";
 import {
   BOOTSTRAP_AUDIT_LOG,
   cloneAuditLog,
@@ -78,8 +86,53 @@ export class AuditNotificationService implements OnModuleInit {
     return this.notifications.map((notification) => ({ ...notification }));
   }
 
-  listAuditLogs() {
-    return this.auditLogs.map((auditLog) => cloneAuditLog(auditLog));
+  listAuditLogs(identity?: EvidenceAccessIdentity | null, requestId?: string) {
+    const policy = assertEvidenceAccess({
+      family: "audit_log",
+      identity,
+      tenantId: identity?.realm === "tenant" ? identity.tenantId : null,
+    });
+    const items =
+      identity?.realm === "tenant" && identity.tenantId
+        ? this.auditLogs.filter(
+            (auditLog) => auditLog.tenantId === identity.tenantId,
+          )
+        : this.auditLogs;
+
+    const accessAudit: Omit<
+      AuditLogRecord,
+      "auditId" | "createdAt" | "requestId"
+    > & {
+      requestId?: string;
+    } = {
+      actorId: identity?.actorId ?? null,
+      actorType:
+        (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+        "system",
+      tenantId: identity?.tenantId ?? null,
+      moduleName: "audit-notification",
+      actionName: policy.auditAction,
+      resourceType: "audit_log",
+      resourceId: null,
+      newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
+        itemCount: items.length,
+        tenantScoped: identity?.realm === "tenant",
+      }),
+    };
+    if (requestId) {
+      accessAudit.requestId = requestId;
+    }
+    this.recordAuditLog(accessAudit);
+
+    return items.map((auditLog) => cloneAuditLog(auditLog));
+  }
+
+  getEvidenceGovernanceCatalog() {
+    return getEvidenceGovernanceCatalog();
+  }
+
+  getEvidenceRetentionPolicy(family: EvidenceRetentionFamily) {
+    return getEvidenceRetentionPolicy(family);
   }
 
   recordNotification(

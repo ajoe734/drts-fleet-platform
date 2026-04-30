@@ -18,6 +18,11 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  assertEvidenceAccess,
+  buildEvidenceAccessAuditSummary,
+  type EvidenceAccessIdentity,
+} from "../../common/evidence-governance";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { CallcenterRepository } from "./callcenter.repository";
 
@@ -132,12 +137,67 @@ export class CallcenterService implements OnModuleInit {
     return this.cloneSession(session);
   }
 
-  getCallSession(callId: string) {
-    return this.cloneSession(this.requireSession(callId));
+  getCallSession(
+    callId: string,
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "call_recording",
+      identity,
+    });
+    const session = this.cloneSession(this.requireSession(callId));
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "callcenter",
+        actionName: policy.auditAction,
+        resourceType: "call_session",
+        resourceId: session.callId,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "read", {
+          linkedOrderId: session.linkedOrderId,
+          hasRecordingId: Boolean(session.recordingId),
+          hasRecordingUrl: Boolean(session.recordingUrl),
+        }),
+      },
+      requestId,
+    );
+    return session;
   }
 
-  listCallSessions() {
-    return this.callSessions.map((s) => this.cloneSession(s));
+  listCallSessions(
+    requestId?: string,
+    identity?: EvidenceAccessIdentity | null,
+  ) {
+    const policy = assertEvidenceAccess({
+      family: "call_recording",
+      identity,
+    });
+    const items = this.callSessions.map((session) =>
+      this.cloneSession(session),
+    );
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType:
+          (identity?.actorType as AuditLogRecord["actorType"] | undefined) ??
+          "system",
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "callcenter",
+        actionName: "list_call_recording_evidence",
+        resourceType: "call_session",
+        resourceId: null,
+        newValuesSummary: buildEvidenceAccessAuditSummary(policy, "list", {
+          itemCount: items.length,
+        }),
+      },
+      requestId,
+    );
+    return items;
   }
 
   announceAgentIdentity(

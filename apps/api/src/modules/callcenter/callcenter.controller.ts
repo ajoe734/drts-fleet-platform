@@ -13,6 +13,8 @@ import type {
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import { CurrentIdentity, RequireRealms } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { ComplaintService } from "../complaint/complaint.service";
 import { CallcenterService } from "./callcenter.service";
 
@@ -24,9 +26,13 @@ export class CallcenterController {
   ) {}
 
   @Get("sessions")
-  listCallSessions(@Headers("x-request-id") requestId?: string) {
+  @RequireRealms("platform", "ops")
+  listCallSessions(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
     return toApiSuccessEnvelope(
-      { items: this.callcenterService.listCallSessions() },
+      { items: this.callcenterService.listCallSessions(requestId, identity) },
       requestId,
     );
   }
@@ -43,12 +49,14 @@ export class CallcenterController {
   }
 
   @Get("sessions/:callId")
+  @RequireRealms("platform", "ops")
   getCallSession(
     @Param("callId") callId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.getCallSession(callId),
+      this.callcenterService.getCallSession(callId, requestId, identity),
       requestId,
     );
   }
