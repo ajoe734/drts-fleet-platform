@@ -9,6 +9,7 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
@@ -160,7 +161,8 @@ export class DriverDeviceSessionService {
 
   revoke(
     command: RevokeDriverDeviceBindingCommand,
-    actorId?: string | null,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
   ): {
     bindingId: string;
     deviceId: string;
@@ -177,12 +179,20 @@ export class DriverDeviceSessionService {
       );
     }
 
-    if (actorId && binding.driverId !== actorId) {
+    if (
+      identity?.realm === "driver" &&
+      identity.actorId &&
+      binding.driverId !== identity.actorId
+    ) {
       throw new ApiRequestError(
         403,
         "DRIVER_DEVICE_BINDING_FORBIDDEN",
         "The current driver identity cannot revoke another driver's device binding.",
-        { actorId, driverId: binding.driverId, bindingId: binding.bindingId },
+        {
+          actorId: identity.actorId,
+          driverId: binding.driverId,
+          bindingId: binding.bindingId,
+        },
       );
     }
 
@@ -201,6 +211,7 @@ export class DriverDeviceSessionService {
       binding.driverId,
       binding.bindingId,
       revokedAt,
+      requestId,
     );
 
     return {

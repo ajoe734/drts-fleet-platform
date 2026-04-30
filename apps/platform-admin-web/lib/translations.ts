@@ -242,6 +242,11 @@ const en = {
   "fleet.suspendDriver": "Suspend",
   "fleet.retireDriver": "Retire",
   "fleet.updatingDriver": "Updating...",
+  "fleet.revokeDevice": "Revoke Device",
+  "fleet.revokingDevice": "Revoking...",
+  "fleet.deviceRevoked": "Binding revoked",
+  "fleet.deviceRebindHint":
+    "After revoke, the device can register to a new driver.",
 
   // ── Switchboard ──
   "switchboard.title": "Switchboard",
@@ -833,6 +838,10 @@ const zh: typeof en = {
   "fleet.suspendDriver": "停權",
   "fleet.retireDriver": "退役",
   "fleet.updatingDriver": "更新中...",
+  "fleet.revokeDevice": "撤銷裝置",
+  "fleet.revokingDevice": "撤銷中...",
+  "fleet.deviceRevoked": "綁定已撤銷",
+  "fleet.deviceRebindHint": "撤銷後，該裝置可重新註冊到其他司機。",
 
   // ── Switchboard ──
   "switchboard.title": "交換台",

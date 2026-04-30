@@ -14,6 +14,7 @@ import {
 } from "@/lib/localized-labels";
 import type {
   CreateDriverMasterCommand,
+  DriverDeviceBindingSummary,
   DriverRegistryRecord,
   VehicleContractRecord,
   VehicleRegistryRecord,
@@ -60,6 +61,7 @@ export default function FleetPage() {
   );
   const [creatingDriver, setCreatingDriver] = useState(false);
   const [driverActionId, setDriverActionId] = useState<string | null>(null);
+  const [bindingActionId, setBindingActionId] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -123,6 +125,25 @@ export default function FleetPage() {
         setError(e?.message || String(e));
       } finally {
         setDriverActionId(null);
+      }
+    },
+    [client, loadData],
+  );
+
+  const revokeDriverDeviceBinding = useCallback(
+    async (driverId: string, binding: DriverDeviceBindingSummary) => {
+      setBindingActionId(binding.bindingId);
+      setError(null);
+      try {
+        await client.revokeDriverDeviceBinding({
+          bindingId: binding.bindingId,
+          deviceId: binding.deviceId,
+        });
+        await loadData();
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setBindingActionId(null);
       }
     },
     [client, loadData],
@@ -476,6 +497,40 @@ export default function FleetPage() {
                               }}
                             >
                               {binding.deviceLabel || binding.status}
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: 8,
+                                alignItems: "center",
+                                marginTop: 6,
+                              }}
+                            >
+                              <button
+                                className="admin-btn admin-btn--secondary"
+                                disabled={
+                                  binding.status === "revoked" ||
+                                  bindingActionId === binding.bindingId
+                                }
+                                onClick={() =>
+                                  revokeDriverDeviceBinding(d.driverId, binding)
+                                }
+                                type="button"
+                              >
+                                {bindingActionId === binding.bindingId
+                                  ? t("fleet.revokingDevice")
+                                  : t("fleet.revokeDevice")}
+                              </button>
+                              <span
+                                style={{
+                                  color: "var(--admin-text-muted)",
+                                  fontSize: 12,
+                                }}
+                              >
+                                {binding.status === "revoked"
+                                  ? t("fleet.deviceRevoked")
+                                  : t("fleet.deviceRebindHint")}
+                              </span>
                             </div>
                           </div>
                         ))

@@ -121,7 +121,8 @@ export class AuthController {
   ) {
     const result = this.driverDeviceSessionService.revoke(
       command,
-      identity?.actorId,
+      identity,
+      requestId,
     );
     return toApiSuccessEnvelope(result, requestId);
   }

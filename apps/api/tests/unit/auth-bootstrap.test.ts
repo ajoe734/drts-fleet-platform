@@ -201,6 +201,17 @@ describe("bootstrap auth extraction", () => {
       description: "Driver self-service profile access",
     });
   });
+
+  it("keeps call-center order creation on ops-only callcenter scopes", () => {
+    const policy = resolveRouteAuthPolicy("POST", "/api/call-center/orders");
+
+    expect(policy).toEqual({
+      routeKey: "callcenter:orders:POST",
+      requiredScopes: ["callcenter:write"],
+      allowedRealms: ["system", "ops"],
+      description: "Callcenter phone-order management",
+    });
+  });
 });
 
 describe("bootstrap auth guard", () => {
@@ -290,6 +301,38 @@ describe("bootstrap auth guard", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+  });
+
+  it("rejects tenant bootstrap identities on call-center order creation", () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        "x-actor-type": "tenant_admin",
+        "x-actor-id": "tenant-admin-001",
+        "x-realm": "tenant",
+        "x-tenant-id": "tenant-demo-001",
+        "x-roles": "tenant_admin",
+        "x-scopes": "tenant:read tenant:write owned:write",
+      },
+      method: "POST",
+      originalUrl: "/api/call-center/orders",
+    };
+
+    expect(() =>
+      guard.canActivate(createExecutionContext(request)),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      guard.canActivate(createExecutionContext(request));
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "AUTH_REALM_DENIED",
+        },
+      });
+    }
   });
 
   it("prefers x-drts-authorization for app JWTs when outer authorization is used elsewhere", () => {
@@ -1335,6 +1378,118 @@ describe("driver device-session auth controller", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+  });
+
+  it("allows platform admins to revoke a driver device binding for operational recovery", () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const { controller, driverProfileService } = createAuthFixture(
+      new JwtAuthService(),
+    );
+
+    const session = controller.issueDriverDeviceSession(
+      {
+        registrationCode: "demo-driver",
+        deviceId: "device-test-admin-revoke-001",
+        deviceLabel: "QA iPhone",
+      },
+      "req-driver-device-admin-001",
+    ).data;
+
+    const response = controller.revokeDriverDeviceSession(
+      {
+        actorType: "platform_admin",
+        actorId: "platform-admin-001",
+        authMode: "bootstrap_headers",
+        realm: "platform",
+        tenantId: null,
+        partnerId: null,
+        partnerProgramId: null,
+        partnerEntrySlug: null,
+        roleFamilies: ["platform"],
+        roles: ["platform_admin"],
+        scopes: ["foundation:write"],
+        requestId: "req-driver-device-admin-002",
+      },
+      {
+        bindingId: session.bindingId,
+        deviceId: session.deviceId,
+      },
+      "req-driver-device-admin-002",
+    );
+
+    expect(response.data).toMatchObject({
+      bindingId: session.bindingId,
+      deviceId: session.deviceId,
+      driverId: session.driverId,
+    });
+
+    expect(
+      driverProfileService.getProfileForDriver(session.driverId),
+    ).toMatchObject({
+      deviceBindings: [
+        expect.objectContaining({
+          bindingId: session.bindingId,
+          status: "revoked",
+        }),
+      ],
+    });
+
+    delete process.env.JWT_SECRET;
+  });
+
+  it("rebinds a device by revoking the prior binding before issuing the replacement session", () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const { controller, driverProfileService, auditNotificationService } =
+      createAuthFixture(new JwtAuthService());
+
+    const firstSession = controller.issueDriverDeviceSession(
+      {
+        registrationCode: "demo-driver",
+        deviceId: "device-test-rebind-001",
+        deviceLabel: "Shared Tablet",
+      },
+      "req-driver-device-rebind-001",
+    ).data;
+
+    const secondSession = controller.issueDriverDeviceSession(
+      {
+        registrationCode: "drv-demo-002",
+        deviceId: "device-test-rebind-001",
+        deviceLabel: "Shared Tablet",
+      },
+      "req-driver-device-rebind-002",
+    ).data;
+
+    expect(secondSession.bindingId).not.toBe(firstSession.bindingId);
+
+    expect(
+      driverProfileService.getProfileForDriver("drv-demo-001").deviceBindings,
+    ).toEqual([
+      expect.objectContaining({
+        bindingId: firstSession.bindingId,
+        status: "revoked",
+      }),
+    ]);
+    expect(
+      driverProfileService.getProfileForDriver("drv-demo-002").deviceBindings,
+    ).toEqual([
+      expect.objectContaining({
+        bindingId: secondSession.bindingId,
+        deviceId: "device-test-rebind-001",
+        status: "active",
+      }),
+    ]);
+
+    expect(
+      auditNotificationService
+        .listAuditLogs()
+        .filter((entry) => entry.actionName === "revoke_driver_device_binding")
+        .some((entry) => entry.resourceId === firstSession.bindingId),
+    ).toBe(true);
+
+    delete process.env.JWT_SECRET;
   });
 
   it("rejects device registration when the driver certifications are invalid", () => {

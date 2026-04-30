@@ -199,6 +199,10 @@ The current Phase 1 implementation for production-grade driver identity:
    reference, and driver routes reject revoked or stale bindings even if the
    JWT is otherwise well-formed.
 
+6. **Rebind semantics**: Registering the same physical device again revokes
+   the previous active binding first, records an audit trail, and issues a
+   replacement session for the newly provisioned driver.
+
 The driver app does **not** go through Cloud IAP. It uses direct app-auth
 against the API host.
 
@@ -217,7 +221,10 @@ After installing the build, confirm:
 6. Earnings screen loads summary data.
 7. Platform presence screen loads and shows connected platforms.
 8. Revoked bindings fail refresh and return the app to the provisioning form.
-9. App can reach the configured API base without using an IAP login wall.
+9. Platform admin can revoke a driver device binding from the Fleet surface,
+   after which the device may be rebound through the onboarding registration
+   flow.
+10. App can reach the configured API base without using an IAP login wall.
 
 ## Current Non-Goals
 
