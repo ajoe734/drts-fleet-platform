@@ -1,4 +1,4 @@
-import type { OwnedOrderRecord } from "@drts/contracts";
+import type { CompletionProofBundle, OwnedOrderRecord } from "@drts/contracts";
 
 export const MAX_COMPLETION_PROOF_PHOTOS = 5;
 export const MAX_COMPLETION_PROOF_PHOTO_BYTES = 600 * 1024;
@@ -30,6 +30,26 @@ export interface CompletionProofRequirements {
   signoffRequired: boolean;
   expenseProofRequired: boolean;
 }
+
+export interface CompletionExpenseDraftInput {
+  type: string;
+  amountText: string;
+  attachmentId: string;
+}
+
+export interface CompletionSubmitClientState {
+  proofRequirementsUnavailable: boolean;
+  missingRequiredPhotos: number;
+  signoffRequirementMissing: boolean;
+  expenseRequirementMissing: boolean;
+  expenseAmountInvalid: boolean;
+  completionBlockedByTracking: boolean;
+}
+
+export type CompletionSubmitBlocker =
+  | "proof_requirements_unavailable"
+  | "expense_amount_invalid"
+  | "tracking_unavailable";
 
 export function estimateBase64DecodedBytes(base64: string): number {
   const normalized = base64.trim();
@@ -100,23 +120,78 @@ export function getCompletionProofRequirements(
   };
 }
 
-export function getUnsupportedProofRequirementMessages(
-  order: OwnedOrderRecord | null,
-): string[] {
-  const requirements = getCompletionProofRequirements(order);
-  const messages: string[] = [];
+export function normalizeCompletionProofText(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
 
-  if (requirements.signoffRequired) {
-    messages.push(
-      "This trip also requires signoff proof, which is not supported in the driver app yet.",
-    );
+export function parseCompletionExpenseAmountMinor(
+  amountText: string,
+): number | null {
+  const normalized = amountText.trim();
+  if (!normalized) {
+    return null;
   }
 
-  if (requirements.expenseProofRequired) {
-    messages.push(
-      "This trip also requires expense proof, which is not supported in the driver app yet.",
-    );
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
   }
 
-  return messages;
+  return Math.round(amount * 100);
+}
+
+export function buildCompletionExpenseItem(input: CompletionExpenseDraftInput) {
+  const type = normalizeCompletionProofText(input.type);
+  const attachmentId = normalizeCompletionProofText(input.attachmentId);
+  const amountMinor = parseCompletionExpenseAmountMinor(input.amountText);
+
+  if (!type || !attachmentId || amountMinor == null) {
+    return null;
+  }
+
+  return {
+    type,
+    amountMinor,
+    attachmentId,
+  };
+}
+
+export function getCompletionSubmitBlocker(
+  state: CompletionSubmitClientState,
+): CompletionSubmitBlocker | null {
+  if (state.proofRequirementsUnavailable) {
+    return "proof_requirements_unavailable";
+  }
+
+  if (state.expenseAmountInvalid) {
+    return "expense_amount_invalid";
+  }
+
+  if (state.completionBlockedByTracking) {
+    return "tracking_unavailable";
+  }
+
+  return null;
+}
+
+export function shouldDisableCompleteTripAction(
+  state: CompletionSubmitClientState & { submittingAction: string | null },
+): boolean {
+  return (
+    state.submittingAction !== null ||
+    getCompletionSubmitBlocker(state) !== null
+  );
+}
+
+export function hasCompletionProofEvidence(
+  proof: CompletionProofBundle | null | undefined,
+): boolean {
+  return Boolean(
+    proof?.photos.length || proof?.signatureId || proof?.expenseItems?.length,
+  );
+}
+
+export function shouldReloadTripAfterFailedAction(action: string): boolean {
+  return action === "complete";
 }

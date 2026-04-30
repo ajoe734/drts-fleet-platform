@@ -8,6 +8,7 @@ import type {
   AuditLogRecord,
   ComplianceGateRecord,
   ComplianceGateState,
+  CompletionProofBundle,
   AssignDispatchCommand,
   BookingRecord,
   CancelOwnedOrderCommand,
@@ -2557,6 +2558,7 @@ export class OwnedMobilityService implements OnModuleInit {
       expenseItems: [...(command.proof?.expenseItems ?? [])],
     };
     this.assertCompletionProofPhotos(proof.photos);
+    const proofHasEvidence = this.hasCompletionProofEvidence(proof);
 
     if (
       order.fixedPrice &&
@@ -2575,8 +2577,15 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     if (proof.photos.length < order.proofRequirements.minPhotoCount) {
+      this.markDriverTaskProofPending(
+        task,
+        assignment,
+        order,
+        proof,
+        requestId,
+      );
       throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
+        HttpStatus.CONFLICT,
         "MIN_PHOTO_COUNT_NOT_MET",
         "Completion proof does not satisfy minimum photo count.",
         {
@@ -2586,6 +2595,13 @@ export class OwnedMobilityService implements OnModuleInit {
     }
 
     if (order.proofRequirements.signoffRequired && !proof.signatureId) {
+      this.markDriverTaskProofPending(
+        task,
+        assignment,
+        order,
+        proof,
+        requestId,
+      );
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "PROOF_REQUIRED",
@@ -2600,9 +2616,16 @@ export class OwnedMobilityService implements OnModuleInit {
       order.proofRequirements.expenseProofRequired &&
       proof.expenseItems.length === 0
     ) {
+      this.markDriverTaskProofPending(
+        task,
+        assignment,
+        order,
+        proof,
+        requestId,
+      );
       throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "PROOF_REQUIRED",
+        HttpStatus.CONFLICT,
+        "EXPENSE_PROOF_REQUIRED",
         "Expense proof is required before completion.",
         {
           requirement: "expense_items",
@@ -2616,7 +2639,7 @@ export class OwnedMobilityService implements OnModuleInit {
     task.actualDistanceKm = command.actualDistanceKm;
     task.actualDurationSec = command.actualDurationSec;
     task.fare = order.fixedPrice ? order.quotedFare : (command.fare ?? null);
-    task.proof = proof;
+    task.proof = proofHasEvidence ? proof : null;
     assignment.status = "completed";
     assignment.updatedAt = now;
     order.status = "completed";
@@ -3595,7 +3618,7 @@ export class OwnedMobilityService implements OnModuleInit {
       order.proofRequirements;
     const required =
       minPhotoCount > 0 || signoffRequired || expenseProofRequired;
-    const hasProof = Boolean(task?.proof);
+    const hasProof = this.hasCompletionProofEvidence(task?.proof);
 
     if (!required && !hasProof && order.status !== "proof_pending") {
       return null;
@@ -3672,6 +3695,71 @@ export class OwnedMobilityService implements OnModuleInit {
         },
       ],
     };
+  }
+
+  private hasCompletionProofEvidence(
+    proof: CompletionProofBundle | null | undefined,
+  ): boolean {
+    return Boolean(
+      proof?.photos.length || proof?.signatureId || proof?.expenseItems?.length,
+    );
+  }
+
+  private markDriverTaskProofPending(
+    task: DriverTaskRecord,
+    assignment: DispatchAssignmentRecord,
+    order: OwnedOrderRecord,
+    proof: CompletionProofBundle,
+    requestId?: string,
+  ): void {
+    const now = new Date().toISOString();
+
+    task.status = "proof_pending";
+    task.proof = this.hasCompletionProofEvidence(proof) ? proof : null;
+    order.status = "proof_pending";
+    order.updatedAt = now;
+    assignment.updatedAt = now;
+
+    const traceLog = this.appendTrace(order.orderId, "driver.proof_pending", {
+      taskId: task.taskId,
+      assignmentId: assignment.assignmentId,
+      missingItems: this.describeMissingCompletionProof(order, proof),
+    });
+    this.persistChanges(
+      {
+        orders: [order],
+        dispatchAssignments: [assignment],
+        driverTasks: [task],
+        dispatchTraceLogs: [traceLog],
+      },
+      "driver_task_proof_pending",
+    );
+    this.ownedMobilityTaskEventsService.publishTaskUpdated(
+      task,
+      order,
+      requestId,
+    );
+    this.publishLatestDispatchJobUpdate(order.orderId, requestId);
+  }
+
+  private describeMissingCompletionProof(
+    order: OwnedOrderRecord,
+    proof: CompletionProofBundle,
+  ): string[] {
+    const missingItems: string[] = [];
+    if (proof.photos.length < order.proofRequirements.minPhotoCount) {
+      missingItems.push(`photos>=${order.proofRequirements.minPhotoCount}`);
+    }
+    if (order.proofRequirements.signoffRequired && !proof.signatureId) {
+      missingItems.push("signature");
+    }
+    if (
+      order.proofRequirements.expenseProofRequired &&
+      (proof.expenseItems?.length ?? 0) === 0
+    ) {
+      missingItems.push("expense_items");
+    }
+    return missingItems;
   }
 
   private buildEligibilityGate(

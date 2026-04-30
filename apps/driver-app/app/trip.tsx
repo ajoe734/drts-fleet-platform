@@ -4,8 +4,10 @@ import {
   Alert,
   Image,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
@@ -15,9 +17,14 @@ import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
 import RouteDisplay from "@/components/route-display";
 import {
   appendProofPhotos,
+  buildCompletionExpenseItem,
   getCompletionProofRequirements,
-  getUnsupportedProofRequirementMessages,
+  getCompletionSubmitBlocker,
   MAX_COMPLETION_PROOF_PHOTOS,
+  normalizeCompletionProofText,
+  parseCompletionExpenseAmountMinor,
+  shouldDisableCompleteTripAction,
+  shouldReloadTripAfterFailedAction,
   type ProofPhoto,
 } from "@/lib/completion-proof";
 import { getDriverClient } from "@/lib/api-client";
@@ -100,6 +107,20 @@ function isForwardedTask(task: DriverTaskRecord | null): boolean {
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
+    const apiMatch = /^API error \d+:\s*(.*)$/s.exec(error.message);
+    if (apiMatch) {
+      try {
+        const payload = JSON.parse(apiMatch[1]) as {
+          error?: { message?: string };
+        };
+        return payload.error?.message?.trim() || error.message;
+      } catch {
+        return error.message;
+      }
+    }
+  }
+
+  if (error instanceof Error) {
     return error.message;
   }
 
@@ -148,6 +169,10 @@ export default function TripScreen() {
   const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
   const [orderDetail, setOrderDetail] = useState<OwnedOrderRecord | null>(null);
   const [proofPhotos, setProofPhotos] = useState<ProofPhoto[]>([]);
+  const [signoffReference, setSignoffReference] = useState("");
+  const [expenseType, setExpenseType] = useState("");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseAttachmentRef, setExpenseAttachmentRef] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
@@ -167,8 +192,6 @@ export default function TripScreen() {
   const router = useRouter();
 
   const proofRequirements = getCompletionProofRequirements(orderDetail);
-  const unsupportedProofMessages =
-    getUnsupportedProofRequirementMessages(orderDetail);
   const proofRequirementsUnavailable = Boolean(
     taskDetail?.orderId && !orderDetail,
   );
@@ -182,6 +205,36 @@ export default function TripScreen() {
   const completionBlockedByTracking =
     isTripInProgress && locationTrackingState !== "active";
   const complianceGates = orderDetail?.complianceGates ?? [];
+  const signoffRequirementMissing =
+    proofRequirements.signoffRequired &&
+    !normalizeCompletionProofText(signoffReference);
+  const parsedExpenseAmountMinor =
+    parseCompletionExpenseAmountMinor(expenseAmount);
+  const expenseAttachmentId =
+    normalizeCompletionProofText(expenseAttachmentRef);
+  const expenseItem = buildCompletionExpenseItem({
+    type: expenseType,
+    amountText: expenseAmount,
+    attachmentId: expenseAttachmentRef,
+  });
+  const expenseAmountInvalid =
+    proofRequirements.expenseProofRequired &&
+    expenseAmount.trim().length > 0 &&
+    parsedExpenseAmountMinor == null;
+  const expenseRequirementMissing =
+    proofRequirements.expenseProofRequired && expenseItem == null;
+  const proofBundleHasEvidence =
+    proofPhotos.length > 0 ||
+    Boolean(normalizeCompletionProofText(signoffReference)) ||
+    Boolean(expenseItem);
+  const completionSubmitBlocker = getCompletionSubmitBlocker({
+    proofRequirementsUnavailable,
+    missingRequiredPhotos,
+    signoffRequirementMissing,
+    expenseRequirementMissing,
+    expenseAmountInvalid,
+    completionBlockedByTracking,
+  });
 
   function clearDurationTicker() {
     if (durationIntervalRef.current) {
@@ -240,6 +293,10 @@ export default function TripScreen() {
 
   useEffect(() => {
     setProofPhotos([]);
+    setSignoffReference("");
+    setExpenseType("");
+    setExpenseAmount("");
+    setExpenseAttachmentRef("");
   }, [taskDetail?.taskId]);
 
   useEffect(() => {
@@ -448,7 +505,7 @@ export default function TripScreen() {
           await client.startTask(taskDetail.taskId, { startedAt: now });
           break;
         case "complete":
-          if (proofRequirementsUnavailable) {
+          if (completionSubmitBlocker === "proof_requirements_unavailable") {
             Alert.alert(
               "Trip details unavailable",
               "Trip proof requirements could not be loaded. Refresh the trip before completing it.",
@@ -456,25 +513,15 @@ export default function TripScreen() {
             return;
           }
 
-          if (unsupportedProofMessages.length > 0) {
+          if (completionSubmitBlocker === "expense_amount_invalid") {
             Alert.alert(
-              "Proof requirements unsupported",
-              unsupportedProofMessages.join("\n"),
+              "Expense amount invalid",
+              "Enter a valid positive expense amount before completing this trip.",
             );
             return;
           }
 
-          if (proofPhotos.length < proofRequirements.minPhotoCount) {
-            const photoLabel =
-              proofRequirements.minPhotoCount === 1 ? "photo" : "photos";
-            Alert.alert(
-              "Proof photos required",
-              `Add at least ${proofRequirements.minPhotoCount} ${photoLabel} before completing this trip.`,
-            );
-            return;
-          }
-
-          if (completionBlockedByTracking) {
+          if (completionSubmitBlocker === "tracking_unavailable") {
             Alert.alert(
               "Trip metrics unavailable",
               locationTrackingMessage ??
@@ -491,12 +538,14 @@ export default function TripScreen() {
             actualDurationSec: calculateTripDurationSec(
               tripStartTimeRef.current,
             ),
-            proof:
-              proofPhotos.length > 0
-                ? {
-                    photos: proofPhotos.map((photo) => photo.base64),
-                  }
-                : undefined,
+            proof: proofBundleHasEvidence
+              ? {
+                  photos: proofPhotos.map((photo) => photo.base64),
+                  signatureId:
+                    normalizeCompletionProofText(signoffReference) ?? undefined,
+                  expenseItems: expenseItem ? [expenseItem] : undefined,
+                }
+              : undefined,
           });
           break;
         default:
@@ -509,13 +558,30 @@ export default function TripScreen() {
         setLocationTrackingState("idle");
         setLocationTrackingMessage(null);
         setProofPhotos([]);
+        setSignoffReference("");
+        setExpenseType("");
+        setExpenseAmount("");
+        setExpenseAttachmentRef("");
         lastTrackedCoordinateRef.current = null;
       }
 
       Alert.alert("Success", `Task ${action} successful`);
       await loadTrip(false);
     } catch (actionError) {
-      Alert.alert("Error", getErrorMessage(actionError));
+      const actionErrorMessage = getErrorMessage(actionError);
+
+      if (shouldReloadTripAfterFailedAction(action)) {
+        try {
+          await loadTrip(false);
+        } catch (reloadError) {
+          console.warn(
+            "Failed to refresh trip after a completion error.",
+            reloadError,
+          );
+        }
+      }
+
+      Alert.alert("Error", actionErrorMessage);
     } finally {
       setSubmittingAction(null);
     }
@@ -531,7 +597,7 @@ export default function TripScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Trip Detail</Text>
 
       {error && <Text style={styles.error}>Error: {error}</Text>}
@@ -695,11 +761,73 @@ export default function TripScreen() {
               </Text>
             )}
 
-            {unsupportedProofMessages.map((message) => (
-              <Text key={message} style={styles.unsupportedNote}>
-                {message}
-              </Text>
-            ))}
+            {proofRequirements.signoffRequired && (
+              <View style={styles.requirementCard}>
+                <Text style={styles.requirementCardTitle}>
+                  Signoff proof required
+                </Text>
+                <Text style={styles.requirementCardHint}>
+                  Capture the passenger or onsite signoff reference before trip
+                  completion.
+                </Text>
+                <TextInput
+                  style={styles.proofInput}
+                  value={signoffReference}
+                  onChangeText={setSignoffReference}
+                  editable={submittingAction === null}
+                  placeholder="Passenger signoff or receipt reference"
+                  autoCapitalize="characters"
+                />
+                <Text style={styles.requirementStatus}>
+                  {signoffRequirementMissing
+                    ? "Missing signoff reference."
+                    : "Signoff requirement ready."}
+                </Text>
+              </View>
+            )}
+
+            {proofRequirements.expenseProofRequired && (
+              <View style={styles.requirementCard}>
+                <Text style={styles.requirementCardTitle}>
+                  Expense proof required
+                </Text>
+                <Text style={styles.requirementCardHint}>
+                  Add one reimbursable expense with a type, amount, and receipt
+                  reference for finance review.
+                </Text>
+                <TextInput
+                  style={styles.proofInput}
+                  value={expenseType}
+                  onChangeText={setExpenseType}
+                  editable={submittingAction === null}
+                  placeholder="Expense type, for example toll or parking"
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.proofInput}
+                  value={expenseAmount}
+                  onChangeText={setExpenseAmount}
+                  editable={submittingAction === null}
+                  placeholder="Amount, for example 40 or 40.50"
+                  keyboardType="decimal-pad"
+                />
+                <TextInput
+                  style={styles.proofInput}
+                  value={expenseAttachmentRef}
+                  onChangeText={setExpenseAttachmentRef}
+                  editable={submittingAction === null}
+                  placeholder="Receipt or attachment reference"
+                  autoCapitalize="characters"
+                />
+                <Text style={styles.requirementStatus}>
+                  {expenseAmountInvalid
+                    ? "Enter a valid positive amount."
+                    : expenseRequirementMissing
+                      ? "Missing expense proof details."
+                      : `Expense proof ready${expenseAttachmentId ? `: ${expenseAttachmentId}` : ""}.`}
+                </Text>
+              </View>
+            )}
 
             <View style={styles.proofActions}>
               <ActionButton
@@ -777,13 +905,15 @@ export default function TripScreen() {
                 submittingAction === "complete" ? "Completing..." : "Complete"
               }
               onPress={() => void handleAction("complete")}
-              disabled={
-                submittingAction !== null ||
-                proofRequirementsUnavailable ||
-                unsupportedProofMessages.length > 0 ||
-                proofPhotos.length < proofRequirements.minPhotoCount ||
-                completionBlockedByTracking
-              }
+              disabled={shouldDisableCompleteTripAction({
+                submittingAction,
+                proofRequirementsUnavailable,
+                missingRequiredPhotos,
+                signoffRequirementMissing,
+                expenseRequirementMissing,
+                expenseAmountInvalid,
+                completionBlockedByTracking,
+              })}
             />
           </View>
         </>
@@ -802,12 +932,13 @@ export default function TripScreen() {
           SOS Emergency →
         </Text>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, backgroundColor: "#fff" },
+  content: { paddingBottom: 24 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   title: { fontSize: 24, fontWeight: "bold", marginBottom: 12 },
   error: { color: "red", marginBottom: 8 },
@@ -928,6 +1059,38 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#8a5b00",
     marginBottom: 8,
+  },
+  requirementCard: {
+    backgroundColor: "#fffdf7",
+    borderWidth: 1,
+    borderColor: "#ead7b5",
+    borderRadius: 8,
+    padding: 12,
+    gap: 8,
+    marginBottom: 12,
+  },
+  requirementCardTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#5a420c",
+  },
+  requirementCardHint: {
+    fontSize: 12,
+    color: "#7d6842",
+  },
+  proofInput: {
+    borderWidth: 1,
+    borderColor: "#d8c49f",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: "#1f2937",
+  },
+  requirementStatus: {
+    fontSize: 12,
+    color: "#7d6842",
   },
   unsupportedNote: {
     fontSize: 12,

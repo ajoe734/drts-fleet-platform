@@ -1161,6 +1161,167 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       ]),
     );
   });
+
+  it("moves trips into proof_pending when signoff is missing", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+        signoffRequired: true,
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+
+    try {
+      service.completeDriverTask(assignment.taskId, {
+        completedAt: "2026-04-29T12:45:00.000Z",
+        actualDistanceKm: 14.2,
+        actualDurationSec: 1200,
+        proof: {
+          photos: [SAMPLE_PROOF_PHOTO],
+        },
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "PROOF_REQUIRED",
+          details: {
+            requirement: "signature",
+          },
+        },
+      });
+    }
+
+    expect(service.getOrder(booking.orderId)).toMatchObject({
+      status: "proof_pending",
+    });
+    expect(service.listDriverTasks()[0]).toMatchObject({
+      status: "proof_pending",
+      proof: {
+        photos: [SAMPLE_PROOF_PHOTO],
+        signatureId: null,
+        expenseItems: [],
+      },
+    });
+  });
+
+  it("returns EXPENSE_PROOF_REQUIRED and preserves partial proof evidence", () => {
+    const { service } = createOwnedMobilityService({
+      candidates: [
+        {
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          etaMinutes: 5,
+          operatingArea: "north",
+          serviceBuckets: ["business_dispatch"],
+        },
+      ],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        reservationWindowStart: "2026-04-29T14:00:00.000Z",
+        reservationWindowEnd: "2026-04-29T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+        expenseProofRequired: true,
+      },
+      "tenant-demo-001",
+    );
+
+    const dispatchResult = service.dispatchOrder(booking.orderId, {
+      mode: "auto",
+    });
+    const assignment = service.assignDispatch({
+      dispatchJobId: dispatchResult.dispatchJobId,
+      vehicleId: "vehicle-001",
+      driverId: "driver-001",
+    });
+    service.acceptDriverTask(assignment.taskId, {
+      acceptedAt: "2026-04-29T12:05:00.000Z",
+    });
+    service.departDriverTask(assignment.taskId, {
+      departedAt: "2026-04-29T12:10:00.000Z",
+    });
+    service.arrivedPickup(assignment.taskId, {
+      arrivedAt: "2026-04-29T12:20:00.000Z",
+    });
+    service.startDriverTask(assignment.taskId, {
+      startedAt: "2026-04-29T12:25:00.000Z",
+    });
+
+    try {
+      service.completeDriverTask(assignment.taskId, {
+        completedAt: "2026-04-29T12:45:00.000Z",
+        actualDistanceKm: 14.2,
+        actualDurationSec: 1200,
+        proof: {
+          photos: [SAMPLE_PROOF_PHOTO],
+        },
+      });
+      throw new Error("Expected completion to fail");
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "EXPENSE_PROOF_REQUIRED",
+          details: {
+            requirement: "expense_items",
+          },
+        },
+      });
+    }
+
+    expect(service.getOrder(booking.orderId)).toMatchObject({
+      status: "proof_pending",
+    });
+    expect(service.listDriverTasks()[0]).toMatchObject({
+      status: "proof_pending",
+      proof: {
+        photos: [SAMPLE_PROOF_PHOTO],
+        signatureId: null,
+        expenseItems: [],
+      },
+    });
+  });
 });
 
 describe("Queue-entry policy and dispatch semantics contracts", () => {
