@@ -2149,6 +2149,8 @@ export interface CallbackTaskRecord {
   updatedAt: string;
 }
 
+export type CallRecordingState = "ready" | "pending" | "missing";
+
 export interface CallSessionRecord {
   callId: string;
   callType: CallType;
@@ -2167,6 +2169,7 @@ export interface CallSessionRecord {
   lastEtaQuotedMinutes: number | null;
   lastEtaQuotedAt: string | null;
   callbackTask: CallbackTaskRecord | null;
+  recordingState: CallRecordingState;
   flags: string[];
 }
 

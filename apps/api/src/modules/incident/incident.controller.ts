@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Param,
   Post,
   Patch,
@@ -10,15 +11,23 @@ import {
 
 import type {
   CreateIncidentCommand,
+  LinkComplaintToIncidentCommand,
   UpdateIncidentCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
+import { ComplaintService } from "../complaint/complaint.service";
 import { IncidentService } from "./incident.service";
 
 @Controller("incidents")
 export class IncidentController {
-  constructor(private readonly incidentService: IncidentService) {}
+  constructor(
+    private readonly incidentService: IncidentService,
+    private readonly complaintService: ComplaintService,
+  ) {}
 
   @Post()
   createIncident(
@@ -79,13 +88,52 @@ export class IncidentController {
     @Body() body: { complaintCaseNo: string },
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      this.incidentService.linkComplaint(
-        incidentId,
-        body.complaintCaseNo,
-        requestId,
-      ),
+    const incidentRecord = this.incidentService.getIncident(incidentId);
+    const complaintCase = this.complaintService.getComplaintCase(
+      body.complaintCaseNo,
+    );
+    if (
+      incidentRecord.relatedComplaintCaseNo &&
+      incidentRecord.relatedComplaintCaseNo !== complaintCase.caseNo
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "INCIDENT_COMPLAINT_LINK_CONFLICT",
+        "This incident is already linked to a different complaint case.",
+        {
+          incidentId,
+          existingComplaintCaseNo: incidentRecord.relatedComplaintCaseNo,
+          requestedComplaintCaseNo: complaintCase.caseNo,
+        },
+      );
+    }
+    if (
+      complaintCase.relatedIncidentId &&
+      complaintCase.relatedIncidentId !== incidentRecord.incidentId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "COMPLAINT_INCIDENT_LINK_CONFLICT",
+        "This complaint case is already linked to a different incident.",
+        {
+          caseNo: complaintCase.caseNo,
+          existingIncidentId: complaintCase.relatedIncidentId,
+          requestedIncidentId: incidentRecord.incidentId,
+        },
+      );
+    }
+    const incident = this.incidentService.linkComplaint(
+      incidentId,
+      body.complaintCaseNo,
       requestId,
     );
+    this.complaintService.linkIncident(
+      body.complaintCaseNo,
+      {
+        incidentId,
+      } satisfies LinkComplaintToIncidentCommand,
+      requestId,
+    );
+    return toApiSuccessEnvelope(incident, requestId);
   }
 }

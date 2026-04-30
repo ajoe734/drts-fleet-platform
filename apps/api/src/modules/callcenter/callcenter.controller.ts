@@ -10,12 +10,14 @@ import type {
   OpenCallSessionCommand,
   QuoteCallEtaCommand,
   TransferCallToComplaintCommand,
+  TransferCallToIncidentCommand,
 } from "@drts/contracts";
 
 import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { ComplaintService } from "../complaint/complaint.service";
+import { IncidentService } from "../incident/incident.service";
 import { CallcenterService } from "./callcenter.service";
 
 @Controller("callcenter")
@@ -23,6 +25,7 @@ export class CallcenterController {
   constructor(
     private readonly callcenterService: CallcenterService,
     private readonly complaintService: ComplaintService,
+    private readonly incidentService: IncidentService,
   ) {}
 
   @Get("sessions")
@@ -195,6 +198,57 @@ export class CallcenterController {
         ),
         complaintCase,
       },
+      requestId,
+    );
+  }
+
+  @Post("sessions/:callId/transfer-to-incident")
+  transferCallToIncident(
+    @Param("callId") callId: string,
+    @Body() command: TransferCallToIncidentCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const session = this.callcenterService.getCallSession(callId);
+    const createIncidentInput: Parameters<
+      typeof this.incidentService.createIncident
+    >[0] = {
+      title: command.title,
+      description: command.description,
+      category: command.category,
+      severity: command.severity,
+      reportedBy: session.agentId ?? "callcenter",
+    };
+    const effectiveOrderId = command.relatedOrderId ?? session.linkedOrderId;
+    if (effectiveOrderId) {
+      createIncidentInput.relatedOrderId = effectiveOrderId;
+    }
+    if (command.relatedVehicleId) {
+      createIncidentInput.relatedVehicleId = command.relatedVehicleId;
+    }
+    if (command.relatedDriverId) {
+      createIncidentInput.relatedDriverId = command.relatedDriverId;
+    }
+    const createdIncident = this.incidentService.createIncident(
+      createIncidentInput,
+      requestId,
+    );
+    const incident = session.agentId
+      ? this.incidentService.updateIncident(
+          createdIncident.incidentId,
+          {
+            assignedTo: session.agentId,
+          },
+          requestId,
+        )
+      : createdIncident;
+    const updatedSession = this.callcenterService.recordIncidentTransfer(
+      callId,
+      incident.incidentId,
+      requestId,
+    );
+
+    return toApiSuccessEnvelope(
+      { session: updatedSession, incident },
       requestId,
     );
   }

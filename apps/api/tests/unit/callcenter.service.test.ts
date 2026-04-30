@@ -5,6 +5,42 @@ import { AuditNotificationService } from "../../src/modules/audit-notification/a
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 
 describe("CallcenterService evidence access", () => {
+  it("derives ready, pending, and missing recording states from the same workflow", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new CallcenterService(auditNotificationService);
+
+    const pendingSession = service.openCallSession({
+      callType: "booking",
+      callerPhone: "0911000001",
+      agentId: "ops-001",
+    });
+    expect(service.getCallSession(pendingSession.callId).recordingState).toBe(
+      "pending",
+    );
+
+    service.attachRecordingCallback(pendingSession.callId, {
+      recordingId: "recording-ready-001",
+      agentId: "ops-001",
+    });
+    expect(service.getCallSession(pendingSession.callId).recordingState).toBe(
+      "ready",
+    );
+
+    const missingSession = service.openCallSession({
+      callType: "booking",
+      callerPhone: "0911000002",
+      agentId: "ops-002",
+    });
+    service.closeCallSession(missingSession.callId);
+    service.linkOrderToExistingSession(missingSession.callId, {
+      orderId: "ORD-MISSING-001",
+    });
+
+    const missingDetail = service.getCallSession(missingSession.callId);
+    expect(missingDetail.recordingState).toBe("missing");
+    expect(missingDetail.flags).toContain("recording_missing");
+  });
+
   it("allows ops to read recording evidence and rejects tenant identities", () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new CallcenterService(auditNotificationService);
@@ -48,6 +84,7 @@ describe("CallcenterService evidence access", () => {
       "req-call-read-001",
       opsIdentity,
     );
+    expect(detail.recordingState).toBe("ready");
     expect(detail.recordingId).toBe("recording-demo-001");
     expect(detail.recordingUrl).toContain("recording-demo-001");
 
@@ -89,5 +126,40 @@ describe("CallcenterService evidence access", () => {
     expect(closed.status).toBe("closed");
     expect(closed.endedAt).not.toBeNull();
     expect(closed.flags).toContain("closed");
+  });
+
+  it("records an auditable call-to-incident transfer", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new CallcenterService(auditNotificationService);
+
+    const session = service.openCallSession(
+      {
+        callType: "booking",
+        callerPhone: "0933444555",
+        agentId: "ops-roc-001",
+      },
+      "req-call-open-003",
+    );
+    service.linkOrderToExistingSession(
+      session.callId,
+      { orderId: "ORD-ROC-001" },
+      "req-call-link-order-003",
+    );
+
+    const updated = service.recordIncidentTransfer(
+      session.callId,
+      "INC-000321",
+      "req-call-incident-transfer-001",
+    );
+
+    expect(updated.flags).toContain("incident_transferred");
+    const transferAudit = auditNotificationService
+      .listAuditLogs()
+      .find((entry) => entry.actionName === "transfer_call_to_incident");
+    expect(transferAudit?.resourceId).toBe(session.callId);
+    expect(transferAudit?.newValuesSummary).toMatchObject({
+      incidentId: "INC-000321",
+      linkedOrderId: "ORD-ROC-001",
+    });
   });
 });

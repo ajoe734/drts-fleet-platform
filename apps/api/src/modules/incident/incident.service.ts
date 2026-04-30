@@ -206,17 +206,38 @@ export class IncidentService implements OnModuleInit {
     complaintCaseNo: string,
     requestId?: string,
   ) {
+    this.assertNonBlank(complaintCaseNo, "complaintCaseNo");
+    const normalizedComplaintCaseNo = complaintCaseNo.trim();
     const incident = this.require(incidentId);
+    if (
+      incident.relatedComplaintCaseNo &&
+      incident.relatedComplaintCaseNo !== normalizedComplaintCaseNo
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "INCIDENT_COMPLAINT_LINK_CONFLICT",
+        "This incident is already linked to a different complaint case.",
+        {
+          incidentId,
+          existingComplaintCaseNo: incident.relatedComplaintCaseNo,
+          requestedComplaintCaseNo: normalizedComplaintCaseNo,
+        },
+      );
+    }
+    if (incident.relatedComplaintCaseNo === normalizedComplaintCaseNo) {
+      return this.clone(incident);
+    }
+
     const updated = {
       ...incident,
-      relatedComplaintCaseNo: complaintCaseNo,
+      relatedComplaintCaseNo: normalizedComplaintCaseNo,
       updatedAt: new Date().toISOString(),
     };
     this.replace(updated);
     this.appendTimelineEntry(
       incidentId,
       TIMELINE_ACTIONS.complaintLinked,
-      `Linked to complaint case ${complaintCaseNo}.`,
+      `Linked to complaint case ${normalizedComplaintCaseNo}.`,
       "ops_user",
     );
     this.persist({ incidents: [updated] }, "link_complaint");
@@ -229,7 +250,9 @@ export class IncidentService implements OnModuleInit {
         actionName: "link_complaint",
         resourceType: "incident",
         resourceId: incidentId,
-        newValuesSummary: { relatedComplaintCaseNo: complaintCaseNo },
+        newValuesSummary: {
+          relatedComplaintCaseNo: normalizedComplaintCaseNo,
+        },
       },
       requestId,
     );

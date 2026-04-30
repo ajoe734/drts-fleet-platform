@@ -12,6 +12,7 @@ import type {
   ComplaintExportViewRecord,
   ComplaintTimelineEntry,
   CreateComplaintCaseCommand,
+  LinkComplaintToIncidentCommand,
   ReopenComplaintCaseCommand,
   ResolveComplaintCaseCommand,
 } from "@drts/contracts";
@@ -52,6 +53,8 @@ const TIMELINE_ACTIONS = {
   slaBreached: "sla_breached",
   resolved: "case_resolved",
   closed: "case_closed",
+  escalatedToIncident: "escalated_to_incident",
+  incidentLinked: "incident_linked",
 } as const;
 
 @Injectable()
@@ -107,6 +110,7 @@ export class ComplaintService implements OnModuleInit {
       caseSource: command.caseSource,
       relatedOrderId: command.relatedOrderId ?? null,
       relatedCallId: command.relatedCallId ?? null,
+      relatedIncidentId: null,
       category: command.category,
       severity: command.severity,
       description: command.description,
@@ -502,6 +506,130 @@ export class ComplaintService implements OnModuleInit {
           status: updated.status,
           slaBreach: true,
           slaDueAt: complaintCase.slaDueAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneComplaintCase(updated);
+  }
+
+  escalateToIncident(
+    caseNo: string,
+    incidentId: string,
+    reason: string,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(reason, "reason");
+
+    const complaintCase = this.requireComplaintCase(caseNo);
+    if (complaintCase.relatedIncidentId) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "COMPLAINT_ALREADY_ESCALATED",
+        "This complaint case is already linked to an incident.",
+        {
+          caseNo,
+          existingIncidentId: complaintCase.relatedIncidentId,
+        },
+      );
+    }
+
+    const updated = {
+      ...complaintCase,
+      relatedIncidentId: incidentId,
+      updatedAt: new Date().toISOString(),
+    };
+    this.replaceComplaintCase(updated);
+    const timelineEntry = this.appendTimelineEntry(
+      caseNo,
+      TIMELINE_ACTIONS.escalatedToIncident,
+      `Escalated to incident ${incidentId}: ${reason}`,
+    );
+    this.persistChanges(
+      {
+        complaintCases: [updated],
+        complaintTimelines: [timelineEntry],
+      },
+      "escalate_to_incident",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "escalate_to_incident",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          relatedIncidentId: incidentId,
+          reason,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneComplaintCase(updated);
+  }
+
+  linkIncident(
+    caseNo: string,
+    command: LinkComplaintToIncidentCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.incidentId, "incidentId");
+    const incidentId = command.incidentId.trim();
+
+    const complaintCase = this.requireComplaintCase(caseNo);
+    if (
+      complaintCase.relatedIncidentId &&
+      complaintCase.relatedIncidentId !== incidentId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "COMPLAINT_INCIDENT_LINK_CONFLICT",
+        "This complaint case is already linked to a different incident.",
+        {
+          caseNo,
+          existingIncidentId: complaintCase.relatedIncidentId,
+          requestedIncidentId: incidentId,
+        },
+      );
+    }
+    if (complaintCase.relatedIncidentId === incidentId) {
+      return this.cloneComplaintCase(complaintCase);
+    }
+
+    const updated = {
+      ...complaintCase,
+      relatedIncidentId: incidentId,
+      updatedAt: new Date().toISOString(),
+    };
+    this.replaceComplaintCase(updated);
+    const timelineEntry = this.appendTimelineEntry(
+      caseNo,
+      TIMELINE_ACTIONS.incidentLinked,
+      `Linked to incident ${incidentId}.`,
+    );
+    this.persistChanges(
+      {
+        complaintCases: [updated],
+        complaintTimelines: [timelineEntry],
+      },
+      "link_incident",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "complaint",
+        actionName: "link_incident",
+        resourceType: "complaint_case",
+        resourceId: caseNo,
+        newValuesSummary: {
+          relatedIncidentId: incidentId,
         },
       },
       requestId,

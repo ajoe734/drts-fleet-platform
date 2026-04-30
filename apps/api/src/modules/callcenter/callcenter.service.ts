@@ -6,6 +6,7 @@ import type {
   AnnounceCallAgentIdentityCommand,
   AuditLogRecord,
   AttachCallRecordingCommand,
+  CallRecordingState,
   CallbackTaskRecord,
   CallSessionRecord,
   CallType,
@@ -111,6 +112,7 @@ export class CallcenterService implements OnModuleInit {
       lastEtaQuotedMinutes: null,
       lastEtaQuotedAt: null,
       callbackTask: null,
+      recordingState: "pending",
       flags: ["recording_pending"],
     };
 
@@ -312,6 +314,15 @@ export class CallcenterService implements OnModuleInit {
 
     const session = this.requireSession(callId);
     session.linkedOrderId = orderId;
+    if (!session.recordingId) {
+      if (session.status === "closed") {
+        this.removeFlag(session, "recording_pending");
+        this.addFlag(session, "recording_missing");
+      } else {
+        this.removeFlag(session, "recording_missing");
+        this.addFlag(session, "recording_pending");
+      }
+    }
     if (session.callbackTask) {
       session.callbackTask = {
         ...session.callbackTask,
@@ -573,6 +584,7 @@ export class CallcenterService implements OnModuleInit {
         lastEtaQuotedMinutes: null,
         lastEtaQuotedAt: null,
         callbackTask: null,
+        recordingState: recordingId ? "ready" : "pending",
         flags: recordingId ? ["recording_bound"] : ["recording_pending"],
       };
       this.callSessions = [session, ...this.callSessions];
@@ -595,7 +607,13 @@ export class CallcenterService implements OnModuleInit {
       this.addFlag(existingSession, "recording_bound");
     } else {
       this.removeFlag(existingSession, "recording_bound");
-      this.addFlag(existingSession, "recording_pending");
+      if (existingSession.status === "closed") {
+        this.removeFlag(existingSession, "recording_pending");
+        this.addFlag(existingSession, "recording_missing");
+      } else {
+        this.removeFlag(existingSession, "recording_missing");
+        this.addFlag(existingSession, "recording_pending");
+      }
     }
 
     if (existingSession.callbackTask) {
@@ -642,6 +660,36 @@ export class CallcenterService implements OnModuleInit {
         resourceType: "call_session",
         resourceId: session.callId,
         newValuesSummary: {
+          linkedCaseNo: session.linkedCaseNo,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneSession(session);
+  }
+
+  recordIncidentTransfer(
+    callId: string,
+    incidentId: string,
+    requestId?: string,
+  ) {
+    const session = this.requireSession(callId);
+    this.addFlag(session, "incident_transferred");
+    this.persistSessions([session], "record_incident_transfer");
+
+    this.recordAudit(
+      {
+        actorId: session.agentId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "callcenter",
+        actionName: "transfer_call_to_incident",
+        resourceType: "call_session",
+        resourceId: session.callId,
+        newValuesSummary: {
+          incidentId,
+          linkedOrderId: session.linkedOrderId,
           linkedCaseNo: session.linkedCaseNo,
         },
       },
@@ -768,8 +816,19 @@ export class CallcenterService implements OnModuleInit {
       callbackTask: session.callbackTask
         ? this.cloneCallbackTask(session.callbackTask)
         : null,
+      recordingState: this.deriveRecordingState(session),
       flags: [...session.flags],
     };
+  }
+
+  private deriveRecordingState(session: CallSessionRecord): CallRecordingState {
+    if (session.recordingId || session.flags.includes("recording_bound")) {
+      return "ready";
+    }
+    if (session.flags.includes("recording_missing")) {
+      return "missing";
+    }
+    return "pending";
   }
 
   private cloneCallbackTask(callbackTask: CallbackTaskRecord) {
