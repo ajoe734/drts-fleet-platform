@@ -20,6 +20,9 @@ This file defines how collaboration state, Phase 1 product truth, execution rule
 ### L1 Product Truth
 
 - `phase1_system_analysis_v1.md`
+- `docs/02-architecture/phase1-operational-sa-gap-supplement-20260429.md`
+- `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
+- `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
 - `phase1_prd_detailed_v1.md`
 - `phase1_service_contracts_v1.md`
 - `phase1_migration_plan_v1.md`
@@ -33,10 +36,15 @@ the canonical PRD / SA files in the same wave.
 - `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`
 - `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
 - `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
+- `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`
 
 Optional future addition beyond the accepted packets above:
 
 - if a dedicated system design file is introduced, add it explicitly here and update precedence notes in the same change
+
+Dedicated system design supplement introduced for operational closeout:
+
+- `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
 
 ### L2 Execution Rules
 
@@ -118,7 +126,36 @@ Important:
 - Discussion workspace:
   - `docs/02-architecture/consensus/phase1/`
 
-## 6. Working Rule
+## 6. Controlled Sync Path
+
+Use this chain whenever accepted supplements or design decisions need to turn
+into backlog and later be reflected back into durable docs:
+
+1. Product / design truth:
+   - `phase1_system_analysis_v1.md`
+   - `docs/02-architecture/phase1-operational-sa-gap-supplement-20260429.md`
+   - `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
+   - `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
+   - `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
+   - `docs/01-decisions/*`
+2. Backlog materialization packet:
+   - `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
+3. Live machine truth and human mirror:
+   - `ai-status.json`
+   - `current-work.md`
+   - `docs/03-runbooks/execution-next-wave-task-board.md`
+4. Code-backed confirmation and drift review:
+   - `docs/00-context/current-system-blueprint-alignment-audit-20260421.md`
+   - `docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md`
+
+Working rule:
+
+- accepted decision or supplement changes should name the owning backlog family
+- execution packets materialize that change into concrete task IDs and acceptance
+- `ai-status.json` is the machine truth once tasks are opened
+- code-backed audits are where implementation reality is written back for drift checks
+
+## 7. Working Rule
 
 When two documents conflict:
 

@@ -25,9 +25,19 @@ KNOWN_AGENTS = {
         "default_branch": "feat/claude-governance-review",
         "target_workload": 15,
     },
+    "Claude2": {
+        "capability_lane": ["integration", "api-implementation", "adapter-execution", "acceptance"],
+        "default_branch": "feat/claude2-integration-slices",
+        "target_workload": 20,
+    },
     "Gemini": {
         "capability_lane": ["runtime-packaging", "ci-cd", "infra", "worker-ops"],
         "default_branch": "feat/gemini-runtime-infra",
+        "target_workload": 20,
+    },
+    "Gemini2": {
+        "capability_lane": ["runtime-packaging", "ci-cd", "infra", "worker-ops"],
+        "default_branch": "feat/gemini2-runtime-infra",
         "target_workload": 20,
     },
     "Codex": {
@@ -40,11 +50,6 @@ KNOWN_AGENTS = {
         "default_branch": "feat/codex2-parallel-worker",
         "target_workload": 15,
     },
-    "Qwen": {
-        "capability_lane": ["integration", "api-implementation", "adapter-execution", "acceptance"],
-        "default_branch": "feat/qwen-integration-slices",
-        "target_workload": 20,
-    },
     "Copilot": {
         "capability_lane": ["research-ingest", "external-search", "spec-review", "critique"],
         "default_branch": "feat/copilot-spec-critique",
@@ -52,16 +57,23 @@ KNOWN_AGENTS = {
     },
 }
 
+RETIRED_AGENTS = {
+    "Qwen": {
+        "capability_lane": ["integration", "api-implementation", "adapter-execution", "acceptance"],
+        "default_branch": "feat/qwen-integration-slices",
+        "target_workload": 0,
+    },
+}
+
 AGENT_ALIASES = {
-    "qwen": "Qwen",
-    "qwen coder": "Qwen",
-    "qwen2.5-coder": "Qwen",
-    "qwen3": "Qwen",
-    "千問": "Qwen",
     "grok": "Copilot",
     "copilot": "Copilot",
     "copilot host": "Copilot",
     "copilot_host": "Copilot",
+    "claude2": "Claude2",
+    "claude 2": "Claude2",
+    "gemini2": "Gemini2",
+    "gemini 2": "Gemini2",
     "codex2": "Codex2",
     "codex 2": "Codex2",
 }
@@ -121,9 +133,17 @@ def default_canonical_document_layers() -> dict[str, list[str]]:
         ],
         "L1 Product Truth": [
             "phase1_system_analysis_v1.md",
+            "docs/02-architecture/phase1-operational-sa-gap-supplement-20260429.md",
             "phase1_prd_detailed_v1.md",
             "phase1_service_contracts_v1.md",
             "phase1_migration_plan_v1.md",
+        ],
+        "L1.5 Accepted System Design Decisions": [
+            "docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md",
+            "docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md",
+            "docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md",
+            "docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md",
+            "docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md",
         ],
         "L2 Execution Rules": [
             "phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/README.md",
@@ -157,9 +177,10 @@ def short_summary(text: Any, max_length: int = 280) -> str:
 
 
 def sync_canonical_document_metadata(state: dict[str, Any]) -> None:
+    default_layers = default_canonical_document_layers()
     layers = state.get("canonical_document_layers")
     if not isinstance(layers, dict) or not layers:
-        layers = default_canonical_document_layers()
+        layers = default_layers
     else:
         normalized_layers: dict[str, list[str]] = {}
         for key, value in layers.items():
@@ -170,8 +191,17 @@ def sync_canonical_document_metadata(state: dict[str, Any]) -> None:
                     if str(item).strip() and str(item) not in NON_CANONICAL_LAYER_FILES
                 ]
         if not normalized_layers:
-            normalized_layers = default_canonical_document_layers()
-        layers = normalized_layers
+            normalized_layers = default_layers
+        merged_layers: dict[str, list[str]] = {}
+        for key, documents in default_layers.items():
+            merged_layers[key] = list(documents)
+            for document in normalized_layers.get(key, []):
+                if document not in merged_layers[key]:
+                    merged_layers[key].append(document)
+        for key, documents in normalized_layers.items():
+            if key not in merged_layers:
+                merged_layers[key] = list(documents)
+        layers = merged_layers
     state["canonical_document_layers"] = layers
     state["canonical_files"] = flatten_canonical_document_layers(layers)
 
@@ -234,6 +264,95 @@ def build_onboarding_prompt(state: dict[str, Any]) -> str:
         parts.append("Follow the canonical lifecycle backlog/todo -> in_progress -> review -> review_approved -> done.")
         parts.append("Use scripts/ai-status.sh for every state change.")
     return " ".join(parts)
+
+
+def read_repo_text(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
+
+
+def has_required_snippets(path: str, snippets: list[str]) -> tuple[bool, list[str]]:
+    full_text = read_repo_text(path)
+    missing = [snippet for snippet in snippets if snippet not in full_text]
+    return not missing, missing
+
+
+def build_doc_sync_audit_report(state: dict[str, Any]) -> tuple[bool, list[str]]:
+    checks = [
+        (
+            "Operational execution packet cites both accepted operational supplements",
+            "docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md",
+            [
+                "docs/02-architecture/phase1-operational-sa-gap-supplement-20260429.md",
+                "docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md",
+            ],
+        ),
+        (
+            "Execution task board records the operational packet -> ai-status materialization path",
+            "docs/03-runbooks/execution-next-wave-task-board.md",
+            [
+                "docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md",
+                "materialized into `ai-status.json`",
+                "`OPX-ID-*`",
+                "`OPX-MD-*`",
+                "`OPX-IN-*`",
+                "`OPX-DP-*`",
+                "`OPX-CM-*`",
+                "`OPX-GV-*`",
+            ],
+        ),
+        (
+            "Canonical map links the controlled sync path from supplements to packet, task board, and code-backed audit",
+            "CANONICAL_DOCUMENT_MAP.md",
+            [
+                "docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md",
+                "## 6. Controlled Sync Path",
+                "docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md",
+                "docs/03-runbooks/execution-next-wave-task-board.md",
+                "docs/00-context/current-system-blueprint-alignment-audit-20260421.md",
+            ],
+        ),
+        (
+            "Docs index exposes one entry point for truth docs, packets, and audits",
+            "docs/README.md",
+            [
+                "docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md",
+                "## Decision-To-Backlog Sync Path",
+                "CANONICAL_DOCUMENT_MAP.md",
+                "docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md",
+                "docs/00-context/current-system-blueprint-alignment-audit-20260421.md",
+            ],
+        ),
+    ]
+
+    lines = ["Decision-to-backlog/code-to-doc sync audit"]
+    success = True
+    for label, path, snippets in checks:
+        ok, missing = has_required_snippets(path, snippets)
+        if ok:
+            lines.append(f"OK   {label} [{path}]")
+            continue
+        success = False
+        lines.append(f"FAIL {label} [{path}]")
+        for snippet in missing:
+            lines.append(f"  missing: {snippet}")
+
+    sync_canonical_document_metadata(state)
+    expected_canonical = {
+        "docs/02-architecture/phase1-operational-sa-gap-supplement-20260429.md",
+        "docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md",
+        "docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md",
+    }
+    canonical_files = canonical_file_set(state)
+    missing_canonical = sorted(expected_canonical - canonical_files)
+    if missing_canonical:
+        success = False
+        lines.append("FAIL Canonical document layers are missing operational supplements/decisions in ai-status metadata")
+        for path in missing_canonical:
+            lines.append(f"  missing: {path}")
+    else:
+        lines.append("OK   Canonical document layers include the operational supplements and accepted decision layer [ai-status.json]")
+
+    return success, lines
 
 
 def task_requires_commit(task: dict[str, Any]) -> bool:
@@ -302,7 +421,7 @@ def canonical_agent_name(name: str | None) -> str:
     trimmed = str(name).strip()
     if not trimmed:
         return ""
-    canonical_by_lower = {agent.lower(): agent for agent in KNOWN_AGENTS}
+    canonical_by_lower = {agent.lower(): agent for agent in {**KNOWN_AGENTS, **RETIRED_AGENTS}}
     lowered = trimmed.lower()
     if lowered in canonical_by_lower:
         return canonical_by_lower[lowered]
@@ -379,7 +498,7 @@ def default_state() -> dict[str, Any]:
             "supervisor": "Claude",
             "starter": "Codex",
             "current_owner": "Codex",
-            "review_order": ["Qwen", "Gemini", "Copilot", "Claude"],
+            "review_order": ["Claude2", "Gemini", "Gemini2", "Copilot", "Claude"],
             "loop_rule": "Only the current owner edits starter-draft.md. Reviewers write cited feedback. Supervisor advances the baton.",
             "promotion_gate": "human_accepts_consensus_packet",
         },
@@ -445,9 +564,11 @@ def append_log(entry: dict[str, Any]) -> None:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-def ensure_agent(name: str) -> dict[str, Any]:
+def ensure_agent(name: str, *, allow_retired: bool = False) -> dict[str, Any]:
     canonical = canonical_agent_name(name)
     if canonical not in KNOWN_AGENTS:
+        if allow_retired and canonical in RETIRED_AGENTS:
+            return RETIRED_AGENTS[canonical]
         raise SystemExit(f"Unknown agent: {name}")
     return KNOWN_AGENTS[canonical]
 
@@ -587,23 +708,25 @@ def validate_state(state: dict[str, Any]) -> None:
     sync_canonical_document_metadata(state)
     normalize_state_agents(state)
     for task in state["tasks"]:
-        ensure_agent(task["owner"])
+        task_done = task.get("status") == "done"
+        ensure_agent(task["owner"], allow_retired=task_done)
         reviewer = canonical_agent_name(task.get("reviewer"))
         if reviewer:
-            ensure_agent(reviewer)
+            ensure_agent(reviewer, allow_retired=task_done)
         if reviewer and task["owner"] == reviewer:
             raise SystemExit(f"Task {task['id']} has identical owner and reviewer")
         waiting_for = canonical_agent_name(task.get("waiting_for"))
         if waiting_for:
-            ensure_agent(waiting_for)
+            ensure_agent(waiting_for, allow_retired=task_done)
 
     for blocker in state.get("blockers", []):
         ensure_agent(blocker["owner"])
         ensure_agent(blocker["waiting_for"])
 
     for handoff in state.get("handoffs", []):
-        ensure_agent(handoff["from"])
-        ensure_agent(handoff["to"])
+        handoff_done = handoff.get("status") == "done"
+        ensure_agent(handoff["from"], allow_retired=handoff_done)
+        ensure_agent(handoff["to"], allow_retired=handoff_done)
 
 
 def normalize_state_agents(state: dict[str, Any]) -> None:
@@ -630,7 +753,7 @@ def recompute_agents(state: dict[str, Any]) -> None:
     seen_names: set[str] = set()
     for agent in state.get("agents", []):
         name = agent.get("name")
-        if not name or name in seen_names:
+        if not name or name not in KNOWN_AGENTS or name in seen_names:
             continue
         deduped_agents.append(agent)
         seen_names.add(name)
@@ -639,7 +762,8 @@ def recompute_agents(state: dict[str, Any]) -> None:
     by_owner: dict[str, list[dict[str, Any]]] = {name: [] for name in KNOWN_AGENTS}
     task_map = {task["id"]: task for task in state["tasks"]}
     for task in state["tasks"]:
-        by_owner.setdefault(task["owner"], []).append(task)
+        if task["owner"] in by_owner:
+            by_owner[task["owner"]].append(task)
 
     for name in KNOWN_AGENTS:
         agent = get_agent(state, name)
@@ -712,9 +836,10 @@ def default_next_for_idle_agent(state: dict[str, Any], agent_name: str) -> str:
     if execution_mode == "supervisor_managed_execution":
         execution_defaults = {
             "Claude": "Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.",
+            "Claude2": "Pick the next API or integration slice that is unblocked and ready to implement.",
             "Gemini": "Pick the next infra, rollout, or runtime slice that is ready for execution review.",
+            "Gemini2": "Pick the next infra, rollout, or runtime slice that is ready for execution review.",
             "Codex": "Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.",
-            "Qwen": "Pick the next API or integration slice that is unblocked and ready to implement.",
             "Copilot": "Critique active implementation slices for contradictions, testing gaps, and weak assumptions.",
         }
         return execution_defaults.get(agent_name, "Wait for the next execution slice.")
@@ -739,8 +864,9 @@ def planning_next_for_idle_agent(
     workspace_label = Path(workspace).name if workspace else "current planning session"
 
     review_focus = {
-        "Qwen": "implementation-boundary review",
+        "Claude2": "implementation-boundary review",
         "Gemini": "rollout, infra, and evidence review",
+        "Gemini2": "rollout, infra, and evidence review",
         "Copilot": "scope-completeness and critique review",
         "Claude": "final synthesis and architecture arbitration",
     }
@@ -806,6 +932,8 @@ def recompute_workload(state: dict[str, Any]) -> None:
 
     for task in state["tasks"]:
         owner = task["owner"]
+        if owner not in summary:
+            continue
         bucket = summary[owner]
         bucket["total"] += 1
         bucket[task["status"] if task["status"] in bucket else "todo"] += 1
@@ -1472,12 +1600,23 @@ def command_prompt(state: dict[str, Any], _args: list[str]) -> None:
     print(build_onboarding_prompt(state))
 
 
+def command_audit(state: dict[str, Any], args: list[str]) -> None:
+    audit_name = args[0].strip().lower() if args else "doc-sync"
+    if audit_name != "doc-sync":
+        raise SystemExit("Usage: audit [doc-sync]")
+    success, lines = build_doc_sync_audit_report(state)
+    print("\n".join(lines))
+    if not success:
+        raise SystemExit(1)
+
+
 def main(argv: list[str]) -> int:
     state = load_state()
     command = argv[1] if len(argv) > 1 else "sync"
     args = argv[2:]
 
     read_only_commands = {
+        "audit": command_audit,
         "prompt": command_prompt,
     }
 

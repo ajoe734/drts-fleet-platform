@@ -145,3 +145,44 @@ All P1PX implementation slices are closed. The remaining delta is:
 
 - external-gated: real bank/issuer credentials (`EMC-X1-004`), Grab Taiwan adapter (`EMC-X1-001`), mobile distribution inputs
 - intentionally deferred: first-party passenger app/web, passenger receipt UI, call point/concierge, AV/ODD, live board
+
+## 9. 2026-04-29 Operational Blueprint Execution Packet
+
+The newly accepted operational SA/SD supplements have now been materialized
+into a supervisor-ready packet at:
+
+- `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
+
+That packet has since been materialized into `ai-status.json` as the active
+`OPX-*` execution family. The operational sync path is now:
+
+1. accepted SA supplement + SD blueprint + scoped decisions
+2. `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
+3. `ai-status.json` / `current-work.md`
+4. code-backed audits and closeout docs
+
+The active families are `OPX-ID-*`, `OPX-MD-*`, `OPX-IN-*`, `OPX-DP-*`,
+`OPX-CM-*`, `OPX-GV-*`. Future operational-closure work should extend this same
+materialization chain instead of reopening detached prose-only backlog.
+
+## 10. 2026-04-30 Detailed Remediation Packet
+
+The broader `OPX-*` operational wave now has a follow-on detailed remediation
+packet at:
+
+- `docs/03-runbooks/phase1-operational-remediation-execution-packet-20260430.md`
+
+This packet does not replace `OPX-*`. It refines the newly completed role /
+scenario / negative-flow planning into execution-ready slices for:
+
+1. driver registration / rebind / revoke
+2. driver master and supply lifecycle consoles
+3. phone-order recording and partner eligibility failure paths
+4. forwarder sync-failed and reconciliation handling
+5. queue families, override workflows, and map-board MVP
+6. driver proof UX, offline replay, and finance / artifact governance
+7. negative-path UAT, role-ownership runbooks, and glossary sync
+
+If a future wave is materialized from this packet, it should open as an
+explicit `ORX-*` family linked back to the accepted remediation plan rather
+than being merged silently into historical `OPX-*` prose.

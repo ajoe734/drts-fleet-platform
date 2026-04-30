@@ -30,6 +30,10 @@ order. They live at repo root, not under `docs/`.
 
 - `phase1_prd_detailed_v1.md`
 - `phase1_system_analysis_v1.md`
+- `docs/02-architecture/phase1-operational-sa-gap-supplement-20260429.md`
+- `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
+- `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
+- `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
 - `phase1_service_contracts_v1.md`
 - `phase1_migration_plan_v1.md`
 - `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/`
@@ -51,6 +55,7 @@ L1 wording without rewriting the canonical PRD / SA in the same execution wave.
 - `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`
 - `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`
 - `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`
+- `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`
 
 ## Current System Truth
 
@@ -75,7 +80,10 @@ remains open now.
 - `docs/03-runbooks/cross-repo-gap-matrix-20260424.md`
 - `docs/03-runbooks/execution-next-wave-task-board.md`
 - `docs/03-runbooks/execution-mode-candidate-backlog.md`
+- `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
+- `docs/03-runbooks/phase1-operational-remediation-execution-packet-20260430.md`
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
+- `docs/03-runbooks/auth-plane-separation-matrix.md`
 - `docs/03-runbooks/phase1-rollout.md`
 - `docs/04-uat/phase1-uat-checklist.md`
 - `docs/04-uat/phase1-uat-scenarios.md`
@@ -115,6 +123,30 @@ Execution feedback and acceptance packets mostly live outside `docs/`.
 
 Use these when you need to understand reviewer findings, acceptance evidence,
 handoff context, or why a task was reopened or classified a certain way.
+
+## Decision-To-Backlog Sync Path
+
+Use this path when a newly accepted supplement or decision needs to become
+execution truth and later be checked back against code:
+
+1. Source truth and accepted design:
+   - `phase1_system_analysis_v1.md`
+   - `docs/02-architecture/phase1-operational-sa-gap-supplement-20260429.md`
+   - `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
+   - `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
+   - `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`
+   - `docs/01-decisions/`
+2. Backlog materialization:
+   - `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
+3. Live task truth:
+   - `ai-status.json`
+   - `current-work.md`
+   - `docs/03-runbooks/execution-next-wave-task-board.md`
+4. Code-backed drift confirmation:
+   - `docs/00-context/current-system-blueprint-alignment-audit-20260421.md`
+   - `docs/02-architecture/authority/rgx-010-tenant-commute-hub-authority-annex-audit-20260422.md`
+5. Single-entry orientation:
+   - `CANONICAL_DOCUMENT_MAP.md`
 
 ## Reading Order by Question
 

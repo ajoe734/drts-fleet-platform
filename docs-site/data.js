@@ -32,28 +32,46 @@ export const CONSENSUS_FILES = {
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
-export async function fetchJson(path) {
-  const response = await fetch(`${path}?t=${Date.now()}`, {
-    cache: "no-store",
-  });
+async function fetchResource(path, options = {}) {
+  const { timeoutMs = 0, method = "GET", headers = {} } = options;
+  const controller = timeoutMs ? new AbortController() : null;
+  const timeoutId = controller
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+
+  try {
+    return await fetch(`${path}?t=${Date.now()}`, {
+      method,
+      headers,
+      cache: "no-store",
+      signal: controller?.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`載入 ${path} 逾時`);
+    }
+    throw error;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+export async function fetchJson(path, options = {}) {
+  const response = await fetchResource(path, options);
   if (!response.ok) throw new Error(`無法載入 ${path}: ${response.status}`);
   return response.json();
 }
 
-export async function fetchText(path) {
-  const response = await fetch(`${path}?t=${Date.now()}`, {
-    cache: "no-store",
-  });
+export async function fetchText(path, options = {}) {
+  const response = await fetchResource(path, options);
   if (!response.ok) throw new Error(`無法載入 ${path}: ${response.status}`);
   return response.text();
 }
 
 // Probe a file: returns { exists, content } without throwing on 404
-export async function probeFile(path) {
+export async function probeFile(path, options = {}) {
   try {
-    const response = await fetch(`${path}?t=${Date.now()}`, {
-      cache: "no-store",
-    });
+    const response = await fetchResource(path, options);
     if (!response.ok) return { exists: false, content: "" };
     const content = await response.text();
     return { exists: true, content };
@@ -97,6 +115,24 @@ export function parseJsonLines(text) {
       }
     })
     .filter(Boolean);
+}
+
+export function parseRecentJsonLines(text, limit = 24) {
+  const parsed = [];
+  const lines = text.split("\n");
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index].trim();
+    if (!line || !line.startsWith("{")) continue;
+    try {
+      parsed.unshift(JSON.parse(line));
+      if (parsed.length >= limit) break;
+    } catch {
+      // Ignore malformed log lines in the preview path.
+    }
+  }
+
+  return parsed;
 }
 
 export function parseCurrentWork(markdown) {
