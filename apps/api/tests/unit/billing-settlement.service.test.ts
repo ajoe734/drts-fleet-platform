@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
+import { settlementChannelKeyForTrip } from "../../src/modules/billing-settlement/settlement-matrix";
 
 function createService() {
   const auditNotificationService = new AuditNotificationService();
@@ -18,22 +19,62 @@ describe("BillingSettlementService settlement matrix", () => {
           channelKey: "tenant_enterprise",
           orderDomain: "owned",
           localLedgerMode: "full_service",
+          sponsorType: expect.stringContaining("tenant"),
+          invoiceOwner: expect.stringContaining("platform finance"),
+          driverPayoutAuthority: expect.stringContaining("platform"),
         }),
         expect.objectContaining({
           channelKey: "partner_airport",
           receiptOwner: expect.stringContaining("partner"),
+          reimbursementRule: expect.stringContaining("reimbursement"),
         }),
         expect.objectContaining({
           channelKey: "phone_dispatch",
           orderSources: expect.arrayContaining(["phone"]),
+          discountFundingSource: expect.stringContaining("manual"),
         }),
         expect.objectContaining({
           channelKey: "forwarded_shadow",
           orderDomain: "forwarded",
           localLedgerMode: "shadow_only",
+          driverPayoutAuthority: expect.stringContaining("external platform"),
         }),
       ]),
     );
+  });
+
+  it("maps trip context to the correct settlement channel key", () => {
+    expect(
+      settlementChannelKeyForTrip({
+        orderSource: "portal",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerId: null,
+      }),
+    ).toBe("tenant_enterprise");
+
+    expect(
+      settlementChannelKeyForTrip({
+        orderSource: "api",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerId: "partner-bank-demo-001",
+      }),
+    ).toBe("partner_airport");
+
+    expect(
+      settlementChannelKeyForTrip({
+        orderSource: "phone",
+        businessDispatchSubtype: "enterprise_dispatch",
+        partnerId: null,
+      }),
+    ).toBe("phone_dispatch");
+
+    expect(
+      settlementChannelKeyForTrip({
+        orderSource: "external_platform",
+        businessDispatchSubtype: "credit_card_airport_transfer",
+        partnerId: "partner-bank-demo-001",
+      }),
+    ).toBe("forwarded_shadow");
   });
 
   it("carries channel context into generated invoices, statements, and reimbursements", async () => {

@@ -116,6 +116,8 @@ describe("ReportingFilingService sensitive-data governance", () => {
       expect.arrayContaining([
         expect.objectContaining({
           channelKey: "partner_airport",
+          sponsorType: expect.stringContaining("issuer"),
+          driverPayoutAuthority: expect.stringContaining("platform"),
         }),
       ]),
     );

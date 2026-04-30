@@ -904,11 +904,45 @@ const en = {
     "Partner program / card-benefit sponsor",
   "revenue.matrix.payer.phone_dispatch": "Passenger or backoffice collection",
   "revenue.matrix.payer.forwarded_shadow": "External platform",
+  "revenue.matrix.sponsor.tenant_enterprise": "Tenant contract owner",
+  "revenue.matrix.sponsor.partner_airport":
+    "Partner bank / issuer benefit program",
+  "revenue.matrix.sponsor.phone_dispatch":
+    "None by default; ops backoffice if manual takeover applies",
+  "revenue.matrix.sponsor.forwarded_shadow":
+    "External platform / forwarder contract",
+  "revenue.matrix.invoiceOwner.tenant_enterprise":
+    "Platform finance for tenant billing",
+  "revenue.matrix.invoiceOwner.partner_airport":
+    "Platform finance with partner statement owner",
+  "revenue.matrix.invoiceOwner.phone_dispatch": "Platform backoffice finance",
+  "revenue.matrix.invoiceOwner.forwarded_shadow":
+    "External platform settlement owner",
   "revenue.matrix.receipt.tenant_enterprise": "Tenant / partner channel",
   "revenue.matrix.receipt.partner_airport":
     "Credit-card / service platform / partner channel",
   "revenue.matrix.receipt.phone_dispatch": "Backoffice / tenant portal",
   "revenue.matrix.receipt.forwarded_shadow": "External platform",
+  "revenue.matrix.payout.tenant_enterprise": "Platform settlement engine",
+  "revenue.matrix.payout.partner_airport": "Platform settlement engine",
+  "revenue.matrix.payout.phone_dispatch": "Platform settlement engine",
+  "revenue.matrix.payout.forwarded_shadow": "External platform payout program",
+  "revenue.matrix.discount.tenant_enterprise":
+    "Tenant-approved contract pricing; no external sponsor subsidy",
+  "revenue.matrix.discount.partner_airport":
+    "Sponsor-funded benefit subsidy with issuer and eligibility trace",
+  "revenue.matrix.discount.phone_dispatch":
+    "Manual fare adjustments or waivers require named backoffice approval",
+  "revenue.matrix.discount.forwarded_shadow":
+    "External-platform promotions and compensation stay off-platform",
+  "revenue.matrix.reimbursement.tenant_enterprise":
+    "No reimbursement batch unless a platform-funded discount is explicitly recorded on the trip.",
+  "revenue.matrix.reimbursement.partner_airport":
+    "Platform-funded discounts create reimbursement batches so driver payout stays whole while sponsor settlement closes later.",
+  "revenue.matrix.reimbursement.phone_dispatch":
+    "Driver reimbursement only applies when finance records a platform-funded concession for the call-created order.",
+  "revenue.matrix.reimbursement.forwarded_shadow":
+    "No local reimbursement batch; the platform stores shadow payout context only for audit and dispute handling.",
   "revenue.matrix.reconciliation.tenant_enterprise":
     "Tenant invoice review + monthly trip report",
   "revenue.matrix.reconciliation.partner_airport":
@@ -1873,10 +1907,36 @@ const zh: Record<keyof typeof en, string> = {
   "revenue.matrix.payer.partner_airport": "合作方案／信用卡補貼方",
   "revenue.matrix.payer.phone_dispatch": "乘客或後台收款",
   "revenue.matrix.payer.forwarded_shadow": "外部平台",
+  "revenue.matrix.sponsor.tenant_enterprise": "租戶合約責任方",
+  "revenue.matrix.sponsor.partner_airport": "合作銀行／發卡福利方案",
+  "revenue.matrix.sponsor.phone_dispatch": "預設無；人工接管時由營運後台承接",
+  "revenue.matrix.sponsor.forwarded_shadow": "外部平台／轉單合約方",
+  "revenue.matrix.invoiceOwner.tenant_enterprise": "平台財務負責租戶開票",
+  "revenue.matrix.invoiceOwner.partner_airport": "平台財務搭配合作方帳單責任方",
+  "revenue.matrix.invoiceOwner.phone_dispatch": "平台後台財務",
+  "revenue.matrix.invoiceOwner.forwarded_shadow": "外部平台結算責任方",
   "revenue.matrix.receipt.tenant_enterprise": "租戶／合作渠道",
   "revenue.matrix.receipt.partner_airport": "信用卡／服務平台／合作渠道",
   "revenue.matrix.receipt.phone_dispatch": "後台／租戶入口",
   "revenue.matrix.receipt.forwarded_shadow": "外部平台",
+  "revenue.matrix.payout.tenant_enterprise": "平台結算引擎",
+  "revenue.matrix.payout.partner_airport": "平台結算引擎",
+  "revenue.matrix.payout.phone_dispatch": "平台結算引擎",
+  "revenue.matrix.payout.forwarded_shadow": "外部平台付款方案",
+  "revenue.matrix.discount.tenant_enterprise":
+    "租戶核准的合約定價；無外部贊助補貼",
+  "revenue.matrix.discount.partner_airport":
+    "由贊助福利補貼承擔，保留 issuer 與 eligibility trace",
+  "revenue.matrix.discount.phone_dispatch": "人工調整車資或減免需具名後台核准",
+  "revenue.matrix.discount.forwarded_shadow": "外部平台促銷與補償不在本地入帳",
+  "revenue.matrix.reimbursement.tenant_enterprise":
+    "除非行程明確記錄平台補貼折扣，否則不建立報銷批次。",
+  "revenue.matrix.reimbursement.partner_airport":
+    "平台先墊付的折扣會建立報銷批次，確保司機款項完整，後續再由 sponsor 結清。",
+  "revenue.matrix.reimbursement.phone_dispatch":
+    "僅在財務記錄電話建立訂單的平台補貼減讓時，才建立司機報銷。",
+  "revenue.matrix.reimbursement.forwarded_shadow":
+    "不建立本地報銷批次；平台僅保留 shadow payout 資訊供稽核與爭議處理。",
   "revenue.matrix.reconciliation.tenant_enterprise":
     "租戶發票審核＋月度行程報表",
   "revenue.matrix.reconciliation.partner_airport":

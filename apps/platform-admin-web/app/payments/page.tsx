@@ -85,6 +85,23 @@ function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
   );
 }
 
+function settlementMatrixKey(
+  category:
+    | "channel"
+    | "payer"
+    | "sponsor"
+    | "invoiceOwner"
+    | "invoice"
+    | "receipt"
+    | "payout"
+    | "discount"
+    | "reimbursement"
+    | "reconciliation",
+  channelKey: string,
+) {
+  return `payments.matrix.${category}.${channelKey}`;
+}
+
 function summarizeChannelMix(
   keys: readonly (string | null | undefined)[],
   labelForChannel: (channelKey: string) => string,
@@ -166,6 +183,37 @@ export default function PaymentsPage() {
       setLoading(false);
     }
   }, [client]);
+
+  const describeMatrixChannel = useCallback(
+    (channelKey: string) => {
+      const key = settlementMatrixKey("channel", channelKey);
+      const value = t(key);
+      return value === key ? channelKey : value;
+    },
+    [t],
+  );
+
+  const describeMatrixField = useCallback(
+    (
+      category:
+        | "payer"
+        | "sponsor"
+        | "invoiceOwner"
+        | "invoice"
+        | "receipt"
+        | "payout"
+        | "discount"
+        | "reimbursement"
+        | "reconciliation",
+      row: SettlementMatrixRecord,
+      fallback: string,
+    ) => {
+      const key = settlementMatrixKey(category, row.channelKey);
+      const value = t(key);
+      return value === key ? fallback : value;
+    },
+    [t],
+  );
 
   useEffect(() => {
     void loadFinance();
@@ -267,81 +315,6 @@ export default function PaymentsPage() {
   const paidReimbursementMinor = reimbursements
     .filter((batch) => batch.status === "paid")
     .reduce((sum, batch) => sum + batch.totalAmount.amountMinor, 0);
-
-  const describeMatrixChannel = (channelKey: string) => {
-    switch (channelKey) {
-      case "tenant_enterprise":
-        return t("payments.matrix.channel.tenant_enterprise");
-      case "partner_airport":
-        return t("payments.matrix.channel.partner_airport");
-      case "phone_dispatch":
-        return t("payments.matrix.channel.phone_dispatch");
-      case "forwarded_shadow":
-        return t("payments.matrix.channel.forwarded_shadow");
-      default:
-        return channelKey;
-    }
-  };
-
-  const describeMatrixPayer = (channelKey: string) => {
-    switch (channelKey) {
-      case "tenant_enterprise":
-        return t("payments.matrix.payer.tenant_enterprise");
-      case "partner_airport":
-        return t("payments.matrix.payer.partner_airport");
-      case "phone_dispatch":
-        return t("payments.matrix.payer.phone_dispatch");
-      case "forwarded_shadow":
-        return t("payments.matrix.payer.forwarded_shadow");
-      default:
-        return channelKey;
-    }
-  };
-
-  const describeMatrixInvoicePath = (channelKey: string) => {
-    switch (channelKey) {
-      case "tenant_enterprise":
-        return t("payments.matrix.invoice.tenant_enterprise");
-      case "partner_airport":
-        return t("payments.matrix.invoice.partner_airport");
-      case "phone_dispatch":
-        return t("payments.matrix.invoice.phone_dispatch");
-      case "forwarded_shadow":
-        return t("payments.matrix.invoice.forwarded_shadow");
-      default:
-        return channelKey;
-    }
-  };
-
-  const describeMatrixReceiptOwner = (channelKey: string) => {
-    switch (channelKey) {
-      case "tenant_enterprise":
-        return t("payments.matrix.receipt.tenant_enterprise");
-      case "partner_airport":
-        return t("payments.matrix.receipt.partner_airport");
-      case "phone_dispatch":
-        return t("payments.matrix.receipt.phone_dispatch");
-      case "forwarded_shadow":
-        return t("payments.matrix.receipt.forwarded_shadow");
-      default:
-        return channelKey;
-    }
-  };
-
-  const describeMatrixReconciliation = (channelKey: string) => {
-    switch (channelKey) {
-      case "tenant_enterprise":
-        return t("payments.matrix.reconciliation.tenant_enterprise");
-      case "partner_airport":
-        return t("payments.matrix.reconciliation.partner_airport");
-      case "phone_dispatch":
-        return t("payments.matrix.reconciliation.phone_dispatch");
-      case "forwarded_shadow":
-        return t("payments.matrix.reconciliation.forwarded_shadow");
-      default:
-        return channelKey;
-    }
-  };
 
   const describeLedgerMode = (
     mode: SettlementMatrixRecord["localLedgerMode"],
@@ -531,8 +504,11 @@ export default function PaymentsPage() {
             <tr>
               <th>{t("payments.matrix.col.channel")}</th>
               <th>{t("payments.matrix.col.payer")}</th>
+              <th>{t("payments.matrix.col.sponsor")}</th>
               <th>{t("payments.matrix.col.invoice")}</th>
               <th>{t("payments.matrix.col.receipt")}</th>
+              <th>{t("payments.matrix.col.payout")}</th>
+              <th>{t("payments.matrix.col.discount")}</th>
               <th>{t("payments.matrix.col.reconciliation")}</th>
               <th>{t("payments.matrix.col.ledger")}</th>
             </tr>
@@ -547,10 +523,55 @@ export default function PaymentsPage() {
                       {row.orderDomain} · {row.orderSources.join(" / ")}
                     </div>
                   </td>
-                  <td>{describeMatrixPayer(row.channelKey)}</td>
-                  <td>{describeMatrixInvoicePath(row.channelKey)}</td>
-                  <td>{describeMatrixReceiptOwner(row.channelKey)}</td>
-                  <td>{describeMatrixReconciliation(row.channelKey)}</td>
+                  <td>{describeMatrixField("payer", row, row.payerType)}</td>
+                  <td>
+                    {describeMatrixField("sponsor", row, row.sponsorType)}
+                  </td>
+                  <td>
+                    <div>
+                      {describeMatrixField(
+                        "invoiceOwner",
+                        row,
+                        row.invoiceOwner,
+                      )}
+                    </div>
+                    <div style={{ color: "#6b7280", fontSize: 12 }}>
+                      {describeMatrixField("invoice", row, row.invoicePath)}
+                    </div>
+                  </td>
+                  <td>
+                    {describeMatrixField("receipt", row, row.receiptOwner)}
+                  </td>
+                  <td>
+                    {describeMatrixField(
+                      "payout",
+                      row,
+                      row.driverPayoutAuthority,
+                    )}
+                  </td>
+                  <td>
+                    <div>
+                      {describeMatrixField(
+                        "discount",
+                        row,
+                        row.discountFundingSource,
+                      )}
+                    </div>
+                    <div style={{ color: "#6b7280", fontSize: 12 }}>
+                      {describeMatrixField(
+                        "reimbursement",
+                        row,
+                        row.reimbursementRule,
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    {describeMatrixField(
+                      "reconciliation",
+                      row,
+                      row.reconciliationPath,
+                    )}
+                  </td>
                   <td>
                     <span
                       className={`admin-badge ${
@@ -566,7 +587,7 @@ export default function PaymentsPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={6}>{t("payments.matrix.empty")}</td>
+                <td colSpan={9}>{t("payments.matrix.empty")}</td>
               </tr>
             )}
           </tbody>

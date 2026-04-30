@@ -99,6 +99,22 @@ function sortSettlementMatrix(rows: SettlementMatrixRecord[]) {
   );
 }
 
+function settlementMatrixKey(
+  category:
+    | "channel"
+    | "payer"
+    | "sponsor"
+    | "invoiceOwner"
+    | "receipt"
+    | "payout"
+    | "discount"
+    | "reimbursement"
+    | "reconciliation",
+  channelKey: string,
+) {
+  return `revenue.matrix.${category}.${channelKey}`;
+}
+
 function ChipLink({
   href,
   active,
@@ -210,63 +226,27 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   ).length;
 
   const describeMatrixChannel = (channelKey: string) => {
-    switch (channelKey) {
-      case "tenant_enterprise":
-        return t("revenue.matrix.channel.tenant_enterprise", locale);
-      case "partner_airport":
-        return t("revenue.matrix.channel.partner_airport", locale);
-      case "phone_dispatch":
-        return t("revenue.matrix.channel.phone_dispatch", locale);
-      case "forwarded_shadow":
-        return t("revenue.matrix.channel.forwarded_shadow", locale);
-      default:
-        return channelKey;
-    }
+    const key = settlementMatrixKey("channel", channelKey);
+    const value = t(key, locale);
+    return value === key ? channelKey : value;
   };
 
-  const describeMatrixPayer = (channelKey: string) => {
-    switch (channelKey) {
-      case "tenant_enterprise":
-        return t("revenue.matrix.payer.tenant_enterprise", locale);
-      case "partner_airport":
-        return t("revenue.matrix.payer.partner_airport", locale);
-      case "phone_dispatch":
-        return t("revenue.matrix.payer.phone_dispatch", locale);
-      case "forwarded_shadow":
-        return t("revenue.matrix.payer.forwarded_shadow", locale);
-      default:
-        return channelKey;
-    }
-  };
-
-  const describeMatrixReceipt = (channelKey: string) => {
-    switch (channelKey) {
-      case "tenant_enterprise":
-        return t("revenue.matrix.receipt.tenant_enterprise", locale);
-      case "partner_airport":
-        return t("revenue.matrix.receipt.partner_airport", locale);
-      case "phone_dispatch":
-        return t("revenue.matrix.receipt.phone_dispatch", locale);
-      case "forwarded_shadow":
-        return t("revenue.matrix.receipt.forwarded_shadow", locale);
-      default:
-        return channelKey;
-    }
-  };
-
-  const describeMatrixReconciliation = (channelKey: string) => {
-    switch (channelKey) {
-      case "tenant_enterprise":
-        return t("revenue.matrix.reconciliation.tenant_enterprise", locale);
-      case "partner_airport":
-        return t("revenue.matrix.reconciliation.partner_airport", locale);
-      case "phone_dispatch":
-        return t("revenue.matrix.reconciliation.phone_dispatch", locale);
-      case "forwarded_shadow":
-        return t("revenue.matrix.reconciliation.forwarded_shadow", locale);
-      default:
-        return channelKey;
-    }
+  const describeMatrixField = (
+    category:
+      | "payer"
+      | "sponsor"
+      | "invoiceOwner"
+      | "receipt"
+      | "payout"
+      | "discount"
+      | "reimbursement"
+      | "reconciliation",
+    row: SettlementMatrixRecord,
+    fallback: string,
+  ) => {
+    const key = settlementMatrixKey(category, row.channelKey);
+    const value = t(key, locale);
+    return value === key ? fallback : value;
   };
 
   const describeLedgerMode = (
@@ -616,8 +596,10 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
           columns={[
             { label: t("revenue.matrix.col.channel", locale) },
             { label: t("revenue.matrix.col.payer", locale) },
-            { label: t("revenue.matrix.col.receipt", locale) },
-            { label: t("revenue.matrix.col.reconciliation", locale) },
+            { label: t("revenue.matrix.col.sponsor", locale) },
+            { label: t("revenue.matrix.col.documents", locale) },
+            { label: t("revenue.matrix.col.payout", locale) },
+            { label: t("revenue.matrix.col.discount", locale) },
             { label: t("revenue.matrix.col.evidence", locale) },
             { label: t("revenue.matrix.col.ledger", locale) },
           ]}
@@ -631,9 +613,42 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
                   {row.orderDomain} · {row.orderSources.join(" / ")}
                 </div>
               </Td>
-              <Td>{describeMatrixPayer(row.channelKey)}</Td>
-              <Td>{describeMatrixReceipt(row.channelKey)}</Td>
-              <Td>{describeMatrixReconciliation(row.channelKey)}</Td>
+              <Td>{describeMatrixField("payer", row, row.payerType)}</Td>
+              <Td>{describeMatrixField("sponsor", row, row.sponsorType)}</Td>
+              <Td>
+                <div>
+                  {describeMatrixField("invoiceOwner", row, row.invoiceOwner)}
+                </div>
+                <div style={{ color: "#64748b", fontSize: "12px" }}>
+                  {describeMatrixField("receipt", row, row.receiptOwner)}
+                </div>
+                <div style={{ color: "#64748b", fontSize: "12px" }}>
+                  {describeMatrixField(
+                    "reconciliation",
+                    row,
+                    row.reconciliationPath,
+                  )}
+                </div>
+              </Td>
+              <Td>
+                {describeMatrixField("payout", row, row.driverPayoutAuthority)}
+              </Td>
+              <Td>
+                <div>
+                  {describeMatrixField(
+                    "discount",
+                    row,
+                    row.discountFundingSource,
+                  )}
+                </div>
+                <div style={{ color: "#64748b", fontSize: "12px" }}>
+                  {describeMatrixField(
+                    "reimbursement",
+                    row,
+                    row.reimbursementRule,
+                  )}
+                </div>
+              </Td>
               <Td muted>{describeEvidence(row.channelKey)}</Td>
               <Td>
                 <Badge
