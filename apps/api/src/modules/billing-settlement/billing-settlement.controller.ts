@@ -9,10 +9,15 @@ import {
 } from "@nestjs/common";
 
 import type {
+  AddReconciliationIssueCommentCommand,
   ApproveReimbursementBatchCommand,
+  AssignReconciliationIssueCommand,
+  CreateReconciliationIssueCommand,
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
   MarkReimbursementPaidCommand,
+  ResolveReconciliationIssueCommand,
+  ReopenReconciliationIssueCommand,
   PublishDriverFeePlanCommand,
   UpdateTenantBillingProfileCommand,
 } from "@drts/contracts";
@@ -197,6 +202,100 @@ export class BillingSettlementController {
     const items =
       this.billingSettlementService.listReimbursementBatches(filters);
     return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("settlement/reconciliation-issues")
+  listReconciliationIssues(
+    @Query("status") status?: "open" | "assigned" | "resolved" | "reopened",
+    @Query("issueType")
+    issueType?: "forwarder_status_mismatch" | "partner_sponsor_mismatch",
+    @Query("channelKey") channelKey?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items = this.billingSettlementService.listReconciliationIssues({
+      ...(status ? { status } : {}),
+      ...(issueType ? { issueType } : {}),
+      ...(channelKey ? { channelKey } : {}),
+    });
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Post("settlement/reconciliation-issues")
+  createReconciliationIssue(
+    @Body() command: CreateReconciliationIssueCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.billingSettlementService.createReconciliationIssue(
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("settlement/reconciliation-issues/:issueId/assign")
+  assignReconciliationIssue(
+    @Param("issueId") issueId: string,
+    @Body() command: AssignReconciliationIssueCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.billingSettlementService.assignReconciliationIssue(
+        issueId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("settlement/reconciliation-issues/:issueId/comment")
+  addReconciliationIssueComment(
+    @Param("issueId") issueId: string,
+    @Body() command: AddReconciliationIssueCommentCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.billingSettlementService.addReconciliationIssueComment(
+        issueId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("settlement/reconciliation-issues/:issueId/resolve")
+  resolveReconciliationIssue(
+    @Param("issueId") issueId: string,
+    @Body() command: ResolveReconciliationIssueCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.billingSettlementService.resolveReconciliationIssue(
+        issueId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("settlement/reconciliation-issues/:issueId/reopen")
+  reopenReconciliationIssue(
+    @Param("issueId") issueId: string,
+    @Body() command: ReopenReconciliationIssueCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.billingSettlementService.reopenReconciliationIssue(
+        issueId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
   }
 
   @Post("reimbursements/:batchId/approve")

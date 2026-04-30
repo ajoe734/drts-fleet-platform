@@ -3,8 +3,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 
 import type {
+  AddReconciliationIssueCommentCommand,
   ApproveReimbursementBatchCommand,
+  AssignReconciliationIssueCommand,
   AuditLogRecord,
+  CreateReconciliationIssueCommand,
   DriverFeePlanRecord,
   DriverStatementLineRecord,
   DriverStatementRecord,
@@ -14,8 +17,12 @@ import type {
   MarkReimbursementPaidCommand,
   MoneyAmount,
   PublishDriverFeePlanCommand,
+  ReconciliationIssueCommentRecord,
+  ReconciliationIssueRecord,
   ReimbursementBatchRecord,
   ReimbursementItemRecord,
+  ResolveReconciliationIssueCommand,
+  ReopenReconciliationIssueCommand,
   SettlementMatrixRecord,
   TenantBillingProfile,
   TenantInvoiceRecord,
@@ -42,6 +49,7 @@ import {
   buildSettlementMatrix,
   settlementChannelKeyForTrip,
 } from "./settlement-matrix";
+import { ForwarderService } from "../forwarder/forwarder.service";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_CURRENCY = "NTD";
@@ -82,6 +90,56 @@ type ReimbursementBatchFilters = {
   driverId?: string;
   statementId?: string;
 };
+
+type ReconciliationIssueFilters = {
+  status?: ReconciliationIssueRecord["status"];
+  issueType?: ReconciliationIssueRecord["issueType"];
+  channelKey?: string;
+};
+
+const PARTNER_SPONSOR_MISMATCH_SEED: ReconciliationIssueRecord[] = [
+  {
+    issueId: "recon-partner-sponsor-202603-001",
+    issueType: "partner_sponsor_mismatch",
+    source: "finance_manual",
+    status: "open",
+    channelKey: "partner_airport",
+    summary:
+      "Partner sponsor claim does not match issuer authorization references for March airport-transfer settlement.",
+    ownerId: "fin-partner-ops",
+    openedBy: "finance.review.bot",
+    orderId: "order-demo-032",
+    tenantId: DEMO_TENANT_ID,
+    partnerId: "partner-bank-demo-001",
+    partnerProgramId: "program-airport-alpha",
+    sponsorReference: "benefit-bank-demo-032",
+    mirrorOrderId: null,
+    externalOrderId: null,
+    linkedReconciliationJobId: null,
+    linkedInvoiceId: "invoice-demo-partner-airport-202603",
+    linkedReimbursementBatchId: "reimbursement-demo-partner-airport-202603",
+    resolutionCode: null,
+    resolutionSummary: null,
+    resolvedAt: null,
+    reopenCount: 0,
+    evidenceArtifactIds: [
+      "artifact-benefit-ledger-202603",
+      "artifact-issuer-032",
+    ],
+    comments: [
+      {
+        commentId: "recon-comment-seed-001",
+        actorId: "finance.review.bot",
+        message:
+          "Benefit reference exists, but sponsor export attributes the trip to an inactive March campaign. Finance review required before closeout.",
+        artifactIds: ["artifact-benefit-ledger-202603"],
+        createdAt: "2026-04-01T03:00:00.000Z",
+      },
+    ],
+    createdAt: "2026-04-01T03:00:00.000Z",
+    updatedAt: "2026-04-01T03:00:00.000Z",
+  },
+];
 
 const SETTLEMENT_TRIP_SEED: SettlementTripSnapshot[] = [
   {
@@ -193,6 +251,10 @@ export class BillingSettlementService implements OnModuleInit {
 
   private reimbursementBatches: ReimbursementBatchRecord[] = [];
 
+  private reconciliationIssues = PARTNER_SPONSOR_MISMATCH_SEED.map((issue) =>
+    this.cloneReconciliationIssue(issue),
+  );
+
   private readonly downloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
 
   private readonly downloadSigningKeyId = DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID;
@@ -216,6 +278,7 @@ export class BillingSettlementService implements OnModuleInit {
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
     private readonly billingSettlementRepository?: BillingSettlementRepository,
+    @Optional() private readonly forwarderService?: ForwarderService,
   ) {}
 
   async onModuleInit() {
@@ -230,12 +293,16 @@ export class BillingSettlementService implements OnModuleInit {
         persistedState.tenantInvoices.length > 0 ||
         persistedState.driverFeePlans.length > 0 ||
         persistedState.driverStatements.length > 0 ||
-        persistedState.reimbursementBatches.length > 0;
+        persistedState.reimbursementBatches.length > 0 ||
+        persistedState.reconciliationIssues.length > 0;
 
       if (!hasPersistedState) {
         this.persistChanges(
           {
             tenantBillingProfiles: this.listStoredTenantBillingProfiles(),
+            reconciliationIssues: this.reconciliationIssues.map((issue) =>
+              this.cloneReconciliationIssue(issue),
+            ),
           },
           "module init bootstrap",
         );
@@ -260,6 +327,15 @@ export class BillingSettlementService implements OnModuleInit {
       this.reimbursementBatches = persistedState.reimbursementBatches.map(
         (batch) => this.cloneReimbursementBatch(batch),
       );
+      this.reconciliationIssues =
+        persistedState.reconciliationIssues.length > 0
+          ? persistedState.reconciliationIssues.map((issue) =>
+              this.cloneReconciliationIssue(issue),
+            )
+          : PARTNER_SPONSOR_MISMATCH_SEED.map((issue) =>
+              this.cloneReconciliationIssue(issue),
+            );
+      this.syncDerivedForwarderIssues();
     } catch (error) {
       this.billingSettlementRepository.reportPersistenceFailure(
         error,
@@ -799,6 +875,331 @@ export class BillingSettlementService implements OnModuleInit {
       .map((batch) => this.cloneReimbursementBatch(batch));
   }
 
+  listReconciliationIssues(filters: ReconciliationIssueFilters = {}) {
+    this.syncDerivedForwarderIssues();
+    return this.reconciliationIssues
+      .filter((issue) => {
+        if (filters.status && issue.status !== filters.status) {
+          return false;
+        }
+        if (filters.issueType && issue.issueType !== filters.issueType) {
+          return false;
+        }
+        if (filters.channelKey && issue.channelKey !== filters.channelKey) {
+          return false;
+        }
+        return true;
+      })
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .map((issue) => this.cloneReconciliationIssue(issue));
+  }
+
+  createReconciliationIssue(
+    command: CreateReconciliationIssueCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.summary, "summary");
+    this.assertNonBlank(command.openedBy, "openedBy");
+
+    const now = new Date().toISOString();
+    const ownerId = command.assigneeId?.trim() || null;
+    const comment = command.comment?.trim();
+    const issue: ReconciliationIssueRecord = {
+      issueId: `recon-${command.issueType}-${randomUUID()}`,
+      issueType: command.issueType,
+      source: "finance_manual",
+      status: ownerId ? "assigned" : "open",
+      channelKey: this.normalizeIssueChannelKey(command),
+      summary: command.summary.trim(),
+      ownerId,
+      openedBy: command.openedBy.trim(),
+      orderId: command.orderId?.trim() || null,
+      tenantId: command.tenantId?.trim() || null,
+      partnerId: command.partnerId?.trim() || null,
+      partnerProgramId: command.partnerProgramId?.trim() || null,
+      sponsorReference: command.sponsorReference?.trim() || null,
+      mirrorOrderId: command.mirrorOrderId?.trim() || null,
+      externalOrderId: command.externalOrderId?.trim() || null,
+      linkedReconciliationJobId:
+        command.linkedReconciliationJobId?.trim() || null,
+      linkedInvoiceId: null,
+      linkedReimbursementBatchId: null,
+      resolutionCode: null,
+      resolutionSummary: null,
+      resolvedAt: null,
+      reopenCount: 0,
+      evidenceArtifactIds: this.normalizeArtifactIds(command.artifactIds),
+      comments: comment
+        ? [
+            this.createIssueComment(
+              command.openedBy.trim(),
+              comment,
+              command.artifactIds,
+              now,
+            ),
+          ]
+        : [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.reconciliationIssues = [
+      this.cloneReconciliationIssue(issue),
+      ...this.reconciliationIssues,
+    ];
+    this.persistChanges(
+      {
+        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
+      },
+      "create_reconciliation_issue",
+    );
+    this.recordAudit(
+      {
+        actorId: command.openedBy.trim(),
+        actorType: "platform_admin",
+        tenantId: issue.tenantId,
+        moduleName: "billing-settlement",
+        actionName: "create_reconciliation_issue",
+        resourceType: "reconciliation_issue",
+        resourceId: issue.issueId,
+        newValuesSummary: {
+          issueType: issue.issueType,
+          status: issue.status,
+          source: issue.source,
+          ownerId: issue.ownerId,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneReconciliationIssue(issue);
+  }
+
+  assignReconciliationIssue(
+    issueId: string,
+    command: AssignReconciliationIssueCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.assigneeId, "assigneeId");
+    this.assertNonBlank(command.actorId, "actorId");
+
+    const issue = this.requireReconciliationIssue(issueId);
+    if (issue.status === "resolved") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "RECONCILIATION_ISSUE_RESOLVED",
+        "Resolved reconciliation issues must be reopened before reassignment.",
+        { issueId },
+      );
+    }
+
+    const now = new Date().toISOString();
+    issue.ownerId = command.assigneeId.trim();
+    issue.status = "assigned";
+    issue.updatedAt = now;
+
+    const note = command.note?.trim();
+    if (note) {
+      issue.comments.push(
+        this.createIssueComment(command.actorId.trim(), note, [], now),
+      );
+    }
+
+    this.persistChanges(
+      {
+        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
+      },
+      "assign_reconciliation_issue",
+    );
+    this.recordAudit(
+      {
+        actorId: command.actorId.trim(),
+        actorType: "platform_admin",
+        tenantId: issue.tenantId,
+        moduleName: "billing-settlement",
+        actionName: "assign_reconciliation_issue",
+        resourceType: "reconciliation_issue",
+        resourceId: issue.issueId,
+        newValuesSummary: {
+          ownerId: issue.ownerId,
+          status: issue.status,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneReconciliationIssue(issue);
+  }
+
+  addReconciliationIssueComment(
+    issueId: string,
+    command: AddReconciliationIssueCommentCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.actorId, "actorId");
+    this.assertNonBlank(command.message, "message");
+
+    const issue = this.requireReconciliationIssue(issueId);
+    const now = new Date().toISOString();
+    issue.comments.push(
+      this.createIssueComment(
+        command.actorId.trim(),
+        command.message.trim(),
+        command.artifactIds,
+        now,
+      ),
+    );
+    issue.evidenceArtifactIds = this.mergeArtifactIds(
+      issue.evidenceArtifactIds,
+      command.artifactIds,
+    );
+    issue.updatedAt = now;
+
+    this.persistChanges(
+      {
+        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
+      },
+      "add_reconciliation_issue_comment",
+    );
+    this.recordAudit(
+      {
+        actorId: command.actorId.trim(),
+        actorType: "platform_admin",
+        tenantId: issue.tenantId,
+        moduleName: "billing-settlement",
+        actionName: "add_reconciliation_issue_comment",
+        resourceType: "reconciliation_issue",
+        resourceId: issue.issueId,
+        newValuesSummary: {
+          commentCount: issue.comments.length,
+          evidenceArtifactIds: issue.evidenceArtifactIds,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneReconciliationIssue(issue);
+  }
+
+  resolveReconciliationIssue(
+    issueId: string,
+    command: ResolveReconciliationIssueCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.actorId, "actorId");
+    this.assertNonBlank(command.resolutionSummary, "resolutionSummary");
+
+    const issue = this.requireReconciliationIssue(issueId);
+    const now = new Date().toISOString();
+    issue.status = "resolved";
+    issue.resolutionCode = command.resolutionCode;
+    issue.resolutionSummary = command.resolutionSummary.trim();
+    issue.resolvedAt = now;
+    issue.updatedAt = now;
+    issue.comments.push(
+      this.createIssueComment(
+        command.actorId.trim(),
+        command.resolutionSummary.trim(),
+        command.artifactIds,
+        now,
+      ),
+    );
+    issue.evidenceArtifactIds = this.mergeArtifactIds(
+      issue.evidenceArtifactIds,
+      command.artifactIds,
+    );
+
+    this.persistChanges(
+      {
+        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
+      },
+      "resolve_reconciliation_issue",
+    );
+    this.recordAudit(
+      {
+        actorId: command.actorId.trim(),
+        actorType: "platform_admin",
+        tenantId: issue.tenantId,
+        moduleName: "billing-settlement",
+        actionName: "resolve_reconciliation_issue",
+        resourceType: "reconciliation_issue",
+        resourceId: issue.issueId,
+        newValuesSummary: {
+          status: issue.status,
+          resolutionCode: issue.resolutionCode,
+          resolvedAt: issue.resolvedAt,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneReconciliationIssue(issue);
+  }
+
+  reopenReconciliationIssue(
+    issueId: string,
+    command: ReopenReconciliationIssueCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.actorId, "actorId");
+    this.assertNonBlank(command.reason, "reason");
+
+    const issue = this.requireReconciliationIssue(issueId);
+    if (issue.status !== "resolved") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "RECONCILIATION_ISSUE_NOT_RESOLVED",
+        "Only resolved reconciliation issues can be reopened.",
+        { issueId },
+      );
+    }
+
+    const now = new Date().toISOString();
+    issue.status = "reopened";
+    issue.resolutionCode = null;
+    issue.resolutionSummary = null;
+    issue.resolvedAt = null;
+    issue.reopenCount += 1;
+    issue.updatedAt = now;
+    issue.comments.push(
+      this.createIssueComment(
+        command.actorId.trim(),
+        command.reason.trim(),
+        command.artifactIds,
+        now,
+      ),
+    );
+    issue.evidenceArtifactIds = this.mergeArtifactIds(
+      issue.evidenceArtifactIds,
+      command.artifactIds,
+    );
+
+    this.persistChanges(
+      {
+        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
+      },
+      "reopen_reconciliation_issue",
+    );
+    this.recordAudit(
+      {
+        actorId: command.actorId.trim(),
+        actorType: "platform_admin",
+        tenantId: issue.tenantId,
+        moduleName: "billing-settlement",
+        actionName: "reopen_reconciliation_issue",
+        resourceType: "reconciliation_issue",
+        resourceId: issue.issueId,
+        newValuesSummary: {
+          status: issue.status,
+          reopenCount: issue.reopenCount,
+        },
+      },
+      requestId,
+    );
+
+    return this.cloneReconciliationIssue(issue);
+  }
+
   approveReimbursementBatch(
     batchId: string,
     command: ApproveReimbursementBatchCommand,
@@ -1215,6 +1616,22 @@ export class BillingSettlementService implements OnModuleInit {
     return batch;
   }
 
+  private requireReconciliationIssue(issueId: string) {
+    this.syncDerivedForwarderIssues();
+    const issue = this.reconciliationIssues.find(
+      (candidate) => candidate.issueId === issueId,
+    );
+    if (!issue) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "Reconciliation issue not found.",
+        { issueId },
+      );
+    }
+    return issue;
+  }
+
   private toPeriodMonth(dateTime: string) {
     return dateTime.slice(0, 7);
   }
@@ -1399,6 +1816,179 @@ export class BillingSettlementService implements OnModuleInit {
         ...item,
         amount: { ...item.amount },
       })),
+    };
+  }
+
+  private cloneReconciliationIssue(
+    issue: ReconciliationIssueRecord,
+  ): ReconciliationIssueRecord {
+    return {
+      ...issue,
+      evidenceArtifactIds: [...issue.evidenceArtifactIds],
+      comments: issue.comments.map((comment) => ({
+        ...comment,
+        artifactIds: [...comment.artifactIds],
+      })),
+    };
+  }
+
+  private createIssueComment(
+    actorId: string,
+    message: string,
+    artifactIds: readonly string[] | undefined,
+    createdAt: string,
+  ): ReconciliationIssueCommentRecord {
+    return {
+      commentId: `recon-comment-${randomUUID()}`,
+      actorId,
+      message,
+      artifactIds: this.normalizeArtifactIds(artifactIds),
+      createdAt,
+    };
+  }
+
+  private normalizeArtifactIds(artifactIds?: readonly string[]) {
+    return [
+      ...new Set(
+        (artifactIds ?? []).map((item) => item.trim()).filter(Boolean),
+      ),
+    ];
+  }
+
+  private mergeArtifactIds(
+    existing: readonly string[],
+    incoming?: readonly string[],
+  ) {
+    return [...new Set([...existing, ...this.normalizeArtifactIds(incoming)])];
+  }
+
+  private normalizeIssueChannelKey(command: CreateReconciliationIssueCommand) {
+    const explicitChannelKey = command.channelKey?.trim();
+    if (explicitChannelKey) {
+      return explicitChannelKey;
+    }
+
+    return command.issueType === "forwarder_status_mismatch"
+      ? "forwarded_shadow"
+      : "partner_airport";
+  }
+
+  private syncDerivedForwarderIssues() {
+    if (!this.forwarderService) {
+      return;
+    }
+
+    const forwarderIssues = this.forwarderService.listReconciliationIssues();
+    const nextIssues = [...this.reconciliationIssues];
+    let changed = false;
+
+    for (const forwarderIssue of forwarderIssues) {
+      const existingIndex = nextIssues.findIndex(
+        (issue) =>
+          issue.source === "forwarder_auto" &&
+          (issue.linkedReconciliationJobId ===
+            forwarderIssue.reconciliationJob.reconciliationJobId ||
+            issue.mirrorOrderId === forwarderIssue.mirrorOrderId),
+      );
+      const existingIssue =
+        existingIndex >= 0 ? nextIssues[existingIndex] : undefined;
+      if (existingIssue?.status === "resolved") {
+        continue;
+      }
+
+      const summary =
+        `Forwarder ${forwarderIssue.platformCode} mirror order ${forwarderIssue.mirrorOrderId} requires finance review after ${forwarderIssue.reconciliationJob.reason}.` +
+        (forwarderIssue.lastSyncError
+          ? ` Last sync error: ${forwarderIssue.lastSyncError.code}.`
+          : "");
+      const now = new Date().toISOString();
+      const baseIssue: ReconciliationIssueRecord = {
+        issueId:
+          existingIssue?.issueId ??
+          `recon-forwarder-${forwarderIssue.reconciliationJob.reconciliationJobId}`,
+        issueType: "forwarder_status_mismatch",
+        source: "forwarder_auto",
+        status: existingIssue?.ownerId
+          ? "assigned"
+          : existingIssue?.status === "reopened"
+            ? "reopened"
+            : "open",
+        channelKey: "forwarded_shadow",
+        summary,
+        ownerId: existingIssue?.ownerId ?? "fin-forwarder-ops",
+        openedBy: existingIssue?.openedBy ?? "forwarder.reconciliation.bot",
+        orderId: existingIssue?.orderId ?? null,
+        tenantId: existingIssue?.tenantId ?? null,
+        partnerId: existingIssue?.partnerId ?? null,
+        partnerProgramId: existingIssue?.partnerProgramId ?? null,
+        sponsorReference: existingIssue?.sponsorReference ?? null,
+        mirrorOrderId: forwarderIssue.mirrorOrderId,
+        externalOrderId: forwarderIssue.externalOrderId,
+        linkedReconciliationJobId:
+          forwarderIssue.reconciliationJob.reconciliationJobId,
+        linkedInvoiceId: existingIssue?.linkedInvoiceId ?? null,
+        linkedReimbursementBatchId:
+          existingIssue?.linkedReimbursementBatchId ?? null,
+        resolutionCode: null,
+        resolutionSummary: null,
+        resolvedAt: null,
+        reopenCount: existingIssue?.reopenCount ?? 0,
+        evidenceArtifactIds: this.mergeArtifactIds(
+          existingIssue?.evidenceArtifactIds ?? [],
+          [
+            forwarderIssue.mirrorOrderId,
+            forwarderIssue.reconciliationJob.reconciliationJobId,
+          ],
+        ),
+        comments:
+          existingIssue?.comments.map((comment) =>
+            this.cloneIssueComment(comment),
+          ) ?? [],
+        createdAt: existingIssue?.createdAt ?? forwarderIssue.createdAt,
+        updatedAt:
+          existingIssue &&
+          existingIssue.summary === summary &&
+          existingIssue.externalOrderId === forwarderIssue.externalOrderId
+            ? existingIssue.updatedAt
+            : now,
+      };
+
+      if (existingIndex >= 0) {
+        const current = nextIssues[existingIndex]!;
+        if (JSON.stringify(current) !== JSON.stringify(baseIssue)) {
+          nextIssues[existingIndex] = baseIssue;
+          changed = true;
+        }
+        continue;
+      }
+
+      nextIssues.unshift(baseIssue);
+      changed = true;
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    this.reconciliationIssues = nextIssues.map((issue) =>
+      this.cloneReconciliationIssue(issue),
+    );
+    this.persistChanges(
+      {
+        reconciliationIssues: nextIssues.map((issue) =>
+          this.cloneReconciliationIssue(issue),
+        ),
+      },
+      "sync_forwarder_reconciliation_issues",
+    );
+  }
+
+  private cloneIssueComment(
+    comment: ReconciliationIssueCommentRecord,
+  ): ReconciliationIssueCommentRecord {
+    return {
+      ...comment,
+      artifactIds: [...comment.artifactIds],
     };
   }
 

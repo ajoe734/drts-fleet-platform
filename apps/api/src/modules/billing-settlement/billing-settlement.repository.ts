@@ -6,6 +6,7 @@ import type {
   DriverStatementRecord,
   MoneyAmount,
   OwnedOrderRecord,
+  ReconciliationIssueRecord,
   ReimbursementBatchRecord,
   TenantBillingProfile,
   TenantInvoiceRecord,
@@ -50,6 +51,7 @@ export type BillingSettlementState = {
   driverFeePlans: DriverFeePlanRecord[];
   driverStatements: DriverStatementRecord[];
   reimbursementBatches: ReimbursementBatchRecord[];
+  reconciliationIssues: ReconciliationIssueRecord[];
 };
 
 export type PersistBillingSettlementChanges = {
@@ -58,6 +60,7 @@ export type PersistBillingSettlementChanges = {
   driverFeePlans?: readonly DriverFeePlanRecord[];
   driverStatements?: readonly DriverStatementRecord[];
   reimbursementBatches?: readonly ReimbursementBatchRecord[];
+  reconciliationIssues?: readonly ReconciliationIssueRecord[];
 };
 
 const LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL = "tasks.record->>'completedAt'";
@@ -83,6 +86,7 @@ export class BillingSettlementRepository {
         driverFeePlans: [],
         driverStatements: [],
         reimbursementBatches: [],
+        reconciliationIssues: [],
       };
     }
 
@@ -92,6 +96,7 @@ export class BillingSettlementRepository {
       feePlansResult,
       statementsResult,
       reimbursementsResult,
+      reconciliationResult,
     ] = await Promise.all([
       this.databaseService!.query<JsonRecordRow>(
         `
@@ -128,6 +133,13 @@ export class BillingSettlementRepository {
           ORDER BY updated_at DESC
         `,
       ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM billing.phase1_reconciliation_issues
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
     ]);
 
     return {
@@ -159,6 +171,12 @@ export class BillingSettlementRepository {
         this.parseRecord<ReimbursementBatchRecord>(
           row.record,
           "billing.phase1_reimbursement_batches",
+        ),
+      ),
+      reconciliationIssues: reconciliationResult.rows.map((row) =>
+        this.parseRecord<ReconciliationIssueRecord>(
+          row.record,
+          "billing.phase1_reconciliation_issues",
         ),
       ),
     };
@@ -453,6 +471,45 @@ export class BillingSettlementRepository {
             batch.status,
             batch.paidAt ?? batch.approvedAt ?? new Date().toISOString(),
             JSON.stringify(batch),
+          ],
+        ),
+      );
+    }
+
+    for (const issue of changes.reconciliationIssues ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO billing.phase1_reconciliation_issues (
+              issue_id,
+              issue_type,
+              status,
+              channel_key,
+              owner_id,
+              created_at,
+              updated_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8::jsonb
+            )
+            ON CONFLICT (issue_id) DO UPDATE SET
+              issue_type = EXCLUDED.issue_type,
+              status = EXCLUDED.status,
+              channel_key = EXCLUDED.channel_key,
+              owner_id = EXCLUDED.owner_id,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
+          `,
+          [
+            issue.issueId,
+            issue.issueType,
+            issue.status,
+            issue.channelKey,
+            issue.ownerId,
+            issue.createdAt,
+            issue.updatedAt,
+            JSON.stringify(issue),
           ],
         ),
       );

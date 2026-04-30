@@ -614,6 +614,19 @@ export interface EvidenceAccessRuleRecord {
   tenantScoped: boolean;
 }
 
+export interface EvidenceMaskingRuleRecord {
+  surface: "api_view" | "download" | "audit_log" | "storage";
+  rule: string;
+}
+
+export interface EvidenceDownloadControlRecord {
+  mode: "none" | "signed_url";
+  ttlMinutes: number | null;
+  reissueRequired: boolean;
+  requiresAuditOnIssue: boolean;
+  notes: string[];
+}
+
 export interface EvidenceLegalHoldPolicyRecord {
   supported: boolean;
   placementActors: IdentityContext["actorType"][];
@@ -631,6 +644,8 @@ export interface EvidenceRetentionPolicyRecord {
   archiveRetentionDays: number | null;
   archiveTier: EvidenceArchiveTier;
   accessRules: EvidenceAccessRuleRecord[];
+  maskingRules: EvidenceMaskingRuleRecord[];
+  downloadControl: EvidenceDownloadControlRecord | null;
   legalHold: EvidenceLegalHoldPolicyRecord;
   deletionException: string;
   auditAction: string;
@@ -642,6 +657,123 @@ export interface EvidenceGovernanceCatalog {
   generatedAt: string;
   policies: EvidenceRetentionPolicyRecord[];
   legalHoldWorkflow: string[];
+}
+
+export const EVIDENCE_LEGAL_HOLD_REASON_CODES = [
+  "complaint_escalation",
+  "regulatory_inquiry",
+  "settlement_dispute",
+  "internal_investigation",
+] as const;
+export type EvidenceLegalHoldReasonCode =
+  (typeof EVIDENCE_LEGAL_HOLD_REASON_CODES)[number];
+
+export const EVIDENCE_LEGAL_HOLD_STATUSES = ["active", "released"] as const;
+export type EvidenceLegalHoldStatus =
+  (typeof EVIDENCE_LEGAL_HOLD_STATUSES)[number];
+
+export interface CreateEvidenceLegalHoldCommand {
+  family: EvidenceRetentionFamily;
+  subjectId: string;
+  caseNumber: string;
+  reasonCode: EvidenceLegalHoldReasonCode;
+  reasonNote?: string | null;
+  tenantId?: string | null;
+  manifestHash?: string | null;
+}
+
+export interface ReleaseEvidenceLegalHoldCommand {
+  releaseReason: string;
+}
+
+export interface EvidenceLegalHoldRecord {
+  holdId: string;
+  family: EvidenceRetentionFamily;
+  subjectId: string;
+  caseNumber: string;
+  reasonCode: EvidenceLegalHoldReasonCode;
+  reasonNote: string | null;
+  tenantId: string | null;
+  manifestHash: string | null;
+  status: EvidenceLegalHoldStatus;
+  placedByActorId: string;
+  placedByActorType: IdentityContext["actorType"];
+  placedAt: string;
+  releasedByActorId: string | null;
+  releasedByActorType: IdentityContext["actorType"] | null;
+  releasedAt: string | null;
+  releaseReason: string | null;
+}
+
+export const EVIDENCE_DELETION_EXCEPTION_REASON_CODES = [
+  "filing_reference",
+  "complaint_reference",
+  "settlement_dispute",
+  "regulatory_request",
+  "webhook_disablement",
+  "eligibility_dispute",
+  "manual_preservation",
+] as const;
+export type EvidenceDeletionExceptionReasonCode =
+  (typeof EVIDENCE_DELETION_EXCEPTION_REASON_CODES)[number];
+
+export const EVIDENCE_DELETION_EXCEPTION_STATUSES = [
+  "active",
+  "resolved",
+  "expired",
+] as const;
+export type EvidenceDeletionExceptionStatus =
+  (typeof EVIDENCE_DELETION_EXCEPTION_STATUSES)[number];
+
+export interface CreateEvidenceDeletionExceptionCommand {
+  family: EvidenceRetentionFamily;
+  subjectId: string;
+  sourceResourceType: string;
+  sourceResourceId: string;
+  reviewerActorId: string;
+  reviewerActorType?: IdentityContext["actorType"] | null;
+  expiresAt: string;
+  reasonCode: EvidenceDeletionExceptionReasonCode;
+  reasonNote?: string | null;
+  tenantId?: string | null;
+  manifestHash?: string | null;
+}
+
+export interface ResolveEvidenceDeletionExceptionCommand {
+  resolutionNote: string;
+}
+
+export interface EvidenceDeletionExceptionRecord {
+  exceptionId: string;
+  family: EvidenceRetentionFamily;
+  subjectId: string;
+  sourceResourceType: string;
+  sourceResourceId: string;
+  reviewerActorId: string;
+  reviewerActorType: IdentityContext["actorType"] | null;
+  expiresAt: string;
+  reasonCode: EvidenceDeletionExceptionReasonCode;
+  reasonNote: string | null;
+  tenantId: string | null;
+  manifestHash: string | null;
+  status: EvidenceDeletionExceptionStatus;
+  requestedByActorId: string;
+  requestedByActorType: IdentityContext["actorType"];
+  requestedAt: string;
+  resolvedByActorId: string | null;
+  resolvedByActorType: IdentityContext["actorType"] | null;
+  resolvedAt: string | null;
+  resolutionNote: string | null;
+}
+
+export interface EvidenceSubjectGovernanceRecord {
+  family: EvidenceRetentionFamily;
+  subjectId: string;
+  tenantId: string | null;
+  manifestHash: string | null;
+  activeLegalHolds: EvidenceLegalHoldRecord[];
+  activeDeletionExceptions: EvidenceDeletionExceptionRecord[];
+  deletionSuppressed: boolean;
 }
 
 export interface NotificationRecord {
@@ -2720,6 +2852,114 @@ export interface MarkReimbursementPaidCommand {
   paidAt?: string;
 }
 
+export const RECONCILIATION_ISSUE_TYPES = [
+  "forwarder_status_mismatch",
+  "partner_sponsor_mismatch",
+] as const;
+export type ReconciliationIssueType =
+  (typeof RECONCILIATION_ISSUE_TYPES)[number];
+
+export const RECONCILIATION_ISSUE_STATUSES = [
+  "open",
+  "assigned",
+  "resolved",
+  "reopened",
+] as const;
+export type ReconciliationIssueStatus =
+  (typeof RECONCILIATION_ISSUE_STATUSES)[number];
+
+export const RECONCILIATION_ISSUE_RESOLUTION_CODES = [
+  "mirror_resynced",
+  "sponsor_corrected",
+  "external_owner_confirmed",
+  "writeoff_approved",
+  "duplicate_closed",
+  "no_action_required",
+  "resolved_other",
+] as const;
+export type ReconciliationIssueResolutionCode =
+  (typeof RECONCILIATION_ISSUE_RESOLUTION_CODES)[number];
+
+export interface ReconciliationIssueCommentRecord {
+  commentId: string;
+  actorId: string;
+  message: string;
+  artifactIds: string[];
+  createdAt: string;
+}
+
+export interface CreateReconciliationIssueCommand {
+  issueType: ReconciliationIssueType;
+  summary: string;
+  openedBy: string;
+  assigneeId?: string | null;
+  channelKey?: string | null;
+  orderId?: string | null;
+  tenantId?: string | null;
+  partnerId?: string | null;
+  partnerProgramId?: string | null;
+  sponsorReference?: string | null;
+  mirrorOrderId?: string | null;
+  externalOrderId?: string | null;
+  linkedReconciliationJobId?: string | null;
+  comment?: string | null;
+  artifactIds?: string[];
+}
+
+export interface AssignReconciliationIssueCommand {
+  assigneeId: string;
+  actorId: string;
+  note?: string | null;
+}
+
+export interface AddReconciliationIssueCommentCommand {
+  actorId: string;
+  message: string;
+  artifactIds?: string[];
+}
+
+export interface ResolveReconciliationIssueCommand {
+  actorId: string;
+  resolutionCode: ReconciliationIssueResolutionCode;
+  resolutionSummary: string;
+  artifactIds?: string[];
+}
+
+export interface ReopenReconciliationIssueCommand {
+  actorId: string;
+  reason: string;
+  artifactIds?: string[];
+}
+
+export interface ReconciliationIssueRecord {
+  issueId: string;
+  issueType: ReconciliationIssueType;
+  source: "finance_manual" | "forwarder_auto";
+  status: ReconciliationIssueStatus;
+  channelKey: string;
+  summary: string;
+  ownerId: string | null;
+  openedBy: string;
+  orderId: string | null;
+  tenantId: string | null;
+  partnerId: string | null;
+  partnerProgramId: string | null;
+  sponsorReference: string | null;
+  mirrorOrderId: string | null;
+  externalOrderId: string | null;
+  linkedReconciliationJobId: string | null;
+  linkedInvoiceId: string | null;
+  linkedReimbursementBatchId: string | null;
+  resolutionCode: ReconciliationIssueResolutionCode | null;
+  resolutionSummary: string | null;
+  resolvedAt: string | null;
+  reopenCount: number;
+  evidenceArtifactIds: string[];
+  comments: ReconciliationIssueCommentRecord[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const REPORT_OUTPUT_FORMATS = ["csv", "xlsx", "pdf", "zip"] as const;
 export type ReportOutputFormat = (typeof REPORT_OUTPUT_FORMATS)[number];
 
@@ -2851,6 +3091,7 @@ export interface ReportJobDetailRecord extends ReportJobRecord {
         downloadMetadata: ControlledDownloadRecord;
       })
     | null;
+  evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
   rows?: DispatchRecordingIndexRowRecord[];
   partnerRevenueRows?: PartnerRevenueSummaryRowRecord[];
   settlementMatrix?: SettlementMatrixRecord[];
@@ -2927,6 +3168,7 @@ export interface FilingPackageDetailRecord extends FilingPackageRecord {
   immutable: true;
   manifest: FilingPackageManifestRecord | null;
   downloadMetadata: FilingPackageDownloadRecord | null;
+  evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
 }
 
 export const FORWARDED_ORDER_STATUSES = [

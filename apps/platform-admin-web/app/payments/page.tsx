@@ -12,20 +12,44 @@ import {
   formatPlatformCodeLabel,
   getPlatformLabel,
 } from "@/lib/localized-labels";
+import {
+  RECONCILIATION_ISSUE_RESOLUTION_CODES,
+  RECONCILIATION_ISSUE_TYPES,
+} from "@drts/contracts";
 import type {
   DriverStatementRecord,
+  ReconciliationIssueRecord,
   ReimbursementBatchRecord,
   SettlementMatrixRecord,
   TenantInvoiceRecord,
 } from "@drts/contracts";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
+const DEFAULT_FINANCE_ACTOR_ID = "finance.console";
 const MATRIX_CHANNEL_ORDER = [
   "tenant_enterprise",
   "partner_airport",
   "phone_dispatch",
   "forwarded_shadow",
 ];
+const RECONCILIATION_CHANNEL_OPTIONS = [
+  "partner_airport",
+  "forwarded_shadow",
+  "tenant_enterprise",
+  "phone_dispatch",
+] as const;
+const RECONCILIATION_ISSUE_TYPE_OPTIONS: (typeof RECONCILIATION_ISSUE_TYPES)[number][] =
+  ["partner_sponsor_mismatch", "forwarder_status_mismatch"];
+const RECONCILIATION_RESOLUTION_OPTIONS: (typeof RECONCILIATION_ISSUE_RESOLUTION_CODES)[number][] =
+  [
+    "sponsor_corrected",
+    "mirror_resynced",
+    "external_owner_confirmed",
+    "writeoff_approved",
+    "duplicate_closed",
+    "no_action_required",
+    "resolved_other",
+  ];
 
 function toDateInputValue(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -126,14 +150,27 @@ function summarizeChannelMix(
     .join(", ");
 }
 
+function parseArtifactIds(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export default function PaymentsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const defaults = getPreviousMonthDefaults();
+  const [financeActorId, setFinanceActorId] = useState(
+    DEFAULT_FINANCE_ACTOR_ID,
+  );
   const [invoices, setInvoices] = useState<TenantInvoiceRecord[]>([]);
   const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
   const [reimbursements, setReimbursements] = useState<
     ReimbursementBatchRecord[]
+  >([]);
+  const [reconciliationIssues, setReconciliationIssues] = useState<
+    ReconciliationIssueRecord[]
   >([]);
   const [settlementMatrix, setSettlementMatrix] = useState<
     SettlementMatrixRecord[]
@@ -154,9 +191,43 @@ export default function PaymentsPage() {
   const [invoicePending, setInvoicePending] = useState(false);
   const [statementPending, setStatementPending] = useState(false);
   const [batchActionId, setBatchActionId] = useState<string | null>(null);
+  const [issueActionId, setIssueActionId] = useState<string | null>(null);
+  const [issueDraftPending, setIssueDraftPending] = useState(false);
   const [remittanceProofs, setRemittanceProofs] = useState<
     Record<string, string>
   >({});
+  const [issueAssignments, setIssueAssignments] = useState<
+    Record<string, string>
+  >({});
+  const [issueComments, setIssueComments] = useState<Record<string, string>>(
+    {},
+  );
+  const [issueResolutionSummaries, setIssueResolutionSummaries] = useState<
+    Record<string, string>
+  >({});
+  const [issueResolutionCodes, setIssueResolutionCodes] = useState<
+    Record<string, ReconciliationIssueRecord["resolutionCode"] | "">
+  >({});
+  const [issueReopenReasons, setIssueReopenReasons] = useState<
+    Record<string, string>
+  >({});
+  const [newIssue, setNewIssue] = useState({
+    issueType:
+      "partner_sponsor_mismatch" as ReconciliationIssueRecord["issueType"],
+    assigneeId: "",
+    channelKey: "partner_airport",
+    summary: "",
+    orderId: "",
+    tenantId: DEMO_TENANT_ID,
+    partnerId: "",
+    partnerProgramId: "",
+    sponsorReference: "",
+    mirrorOrderId: "",
+    externalOrderId: "",
+    linkedReconciliationJobId: "",
+    comment: "",
+    artifactIds: "",
+  });
 
   const loadFinance = useCallback(async () => {
     setLoading(true);
@@ -166,16 +237,19 @@ export default function PaymentsPage() {
         invoiceRecords,
         statementRecords,
         reimbursementRecords,
+        issueRecords,
         settlementMatrixRecords,
       ] = await Promise.all([
         client.listPlatformInvoices(),
         client.listDriverStatements(),
         client.listReimbursementBatches(),
+        client.listReconciliationIssues(),
         client.listSettlementMatrix(),
       ]);
       setInvoices(invoiceRecords ?? []);
       setStatements(statementRecords ?? []);
       setReimbursements(reimbursementRecords ?? []);
+      setReconciliationIssues(issueRecords ?? []);
       setSettlementMatrix(settlementMatrixRecords ?? []);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -259,6 +333,147 @@ export default function PaymentsPage() {
     }
   }
 
+  async function handleCreateReconciliationIssue(event: React.FormEvent) {
+    event.preventDefault();
+    setIssueDraftPending(true);
+    setError(null);
+    try {
+      await client.createReconciliationIssue({
+        issueType: newIssue.issueType,
+        summary: newIssue.summary,
+        openedBy: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
+        assigneeId: newIssue.assigneeId.trim() || null,
+        channelKey: newIssue.channelKey.trim() || null,
+        orderId: newIssue.orderId.trim() || null,
+        tenantId: newIssue.tenantId.trim() || null,
+        partnerId: newIssue.partnerId.trim() || null,
+        partnerProgramId: newIssue.partnerProgramId.trim() || null,
+        sponsorReference: newIssue.sponsorReference.trim() || null,
+        mirrorOrderId: newIssue.mirrorOrderId.trim() || null,
+        externalOrderId: newIssue.externalOrderId.trim() || null,
+        linkedReconciliationJobId:
+          newIssue.linkedReconciliationJobId.trim() || null,
+        comment: newIssue.comment.trim() || null,
+        artifactIds: parseArtifactIds(newIssue.artifactIds),
+      });
+      setNewIssue((current) => ({
+        ...current,
+        assigneeId: "",
+        summary: "",
+        orderId: "",
+        partnerId: "",
+        partnerProgramId: "",
+        sponsorReference: "",
+        mirrorOrderId: "",
+        externalOrderId: "",
+        linkedReconciliationJobId: "",
+        comment: "",
+        artifactIds: "",
+      }));
+      await loadFinance();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIssueDraftPending(false);
+    }
+  }
+
+  async function handleAssignIssue(issue: ReconciliationIssueRecord) {
+    const assigneeId =
+      issueAssignments[issue.issueId]?.trim() || issue.ownerId || "";
+    if (!assigneeId) {
+      setError(t("payments.reconciliation.assigneeRequired"));
+      return;
+    }
+
+    setIssueActionId(issue.issueId);
+    setError(null);
+    try {
+      await client.assignReconciliationIssue(issue.issueId, {
+        assigneeId,
+        actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
+        note: issueComments[issue.issueId]?.trim() || null,
+      });
+      await loadFinance();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIssueActionId(null);
+    }
+  }
+
+  async function handleCommentIssue(issue: ReconciliationIssueRecord) {
+    const message = issueComments[issue.issueId]?.trim() || "";
+    if (!message) {
+      setError(t("payments.reconciliation.commentRequired"));
+      return;
+    }
+
+    setIssueActionId(issue.issueId);
+    setError(null);
+    try {
+      await client.addReconciliationIssueComment(issue.issueId, {
+        actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
+        message,
+      });
+      setIssueComments((current) => ({ ...current, [issue.issueId]: "" }));
+      await loadFinance();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIssueActionId(null);
+    }
+  }
+
+  async function handleResolveIssue(issue: ReconciliationIssueRecord) {
+    const resolutionSummary =
+      issueResolutionSummaries[issue.issueId]?.trim() || "";
+    if (!resolutionSummary) {
+      setError(t("payments.reconciliation.resolveSummaryRequired"));
+      return;
+    }
+
+    setIssueActionId(issue.issueId);
+    setError(null);
+    try {
+      await client.resolveReconciliationIssue(issue.issueId, {
+        actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
+        resolutionCode:
+          (issueResolutionCodes[issue.issueId] as NonNullable<
+            ReconciliationIssueRecord["resolutionCode"]
+          >) || "resolved_other",
+        resolutionSummary,
+      });
+      await loadFinance();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIssueActionId(null);
+    }
+  }
+
+  async function handleReopenIssue(issue: ReconciliationIssueRecord) {
+    const reason = issueReopenReasons[issue.issueId]?.trim() || "";
+    if (!reason) {
+      setError(t("payments.reconciliation.reopenReasonRequired"));
+      return;
+    }
+
+    setIssueActionId(issue.issueId);
+    setError(null);
+    try {
+      await client.reopenReconciliationIssue(issue.issueId, {
+        actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
+        reason,
+      });
+      await loadFinance();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIssueActionId(null);
+    }
+  }
+
   async function handleApproveBatch(batch: ReimbursementBatchRecord) {
     setBatchActionId(batch.batchId);
     setError(null);
@@ -315,6 +530,9 @@ export default function PaymentsPage() {
   const paidReimbursementMinor = reimbursements
     .filter((batch) => batch.status === "paid")
     .reduce((sum, batch) => sum + batch.totalAmount.amountMinor, 0);
+  const openReconciliationCount = reconciliationIssues.filter(
+    (issue) => issue.status !== "resolved",
+  ).length;
 
   const describeLedgerMode = (
     mode: SettlementMatrixRecord["localLedgerMode"],
@@ -385,6 +603,11 @@ export default function PaymentsPage() {
             label: t("payments.paidReimbursements"),
             value: `${paidReimbursementMinor.toLocaleString()} minor`,
             note: t("payments.invoiceTotalNote"),
+          },
+          {
+            label: t("payments.reconciliation.openCount"),
+            value: String(openReconciliationCount),
+            note: `${reconciliationIssues.length} ${t("payments.reconciliation.totalIssues")}`,
           },
         ].map((card) => (
           <div key={card.label} className="admin-card">
@@ -486,6 +709,440 @@ export default function PaymentsPage() {
                 : t("payments.generateStatements")}
             </button>
           </form>
+        </div>
+      </div>
+
+      <div
+        className="admin-card"
+        style={{ overflowX: "auto", marginBottom: 16 }}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: "0 0 4px" }}>
+            {t("payments.reconciliation.title")}
+          </h3>
+          <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
+            {t("payments.reconciliation.subtitle")}
+          </p>
+        </div>
+
+        <div style={{ ...formGridStyle, marginBottom: 12 }}>
+          <label style={labelStyle}>
+            {t("payments.reconciliation.actorId")}
+            <input
+              value={financeActorId}
+              onChange={(event) => setFinanceActorId(event.target.value)}
+              style={inputStyle}
+            />
+          </label>
+        </div>
+
+        <form onSubmit={handleCreateReconciliationIssue}>
+          <div style={formGridStyle}>
+            <label style={labelStyle}>
+              {t("payments.reconciliation.issueType")}
+              <select
+                value={newIssue.issueType}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    issueType: event.target
+                      .value as ReconciliationIssueRecord["issueType"],
+                    channelKey:
+                      event.target.value === "forwarder_status_mismatch"
+                        ? "forwarded_shadow"
+                        : "partner_airport",
+                  }))
+                }
+                style={inputStyle}
+              >
+                {RECONCILIATION_ISSUE_TYPE_OPTIONS.map((issueType) => (
+                  <option key={issueType} value={issueType}>
+                    {formatPlatformCodeLabel(locale, issueType)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              {t("payments.reconciliation.channel")}
+              <select
+                value={newIssue.channelKey}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    channelKey: event.target.value,
+                  }))
+                }
+                style={inputStyle}
+              >
+                {RECONCILIATION_CHANNEL_OPTIONS.map((channelKey) => (
+                  <option key={channelKey} value={channelKey}>
+                    {describeMatrixChannel(channelKey)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              {t("payments.reconciliation.assignee")}
+              <input
+                value={newIssue.assigneeId}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    assigneeId: event.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              {t("payments.reconciliation.orderId")}
+              <input
+                value={newIssue.orderId}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    orderId: event.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              {t("payments.reconciliation.partnerId")}
+              <input
+                value={newIssue.partnerId}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    partnerId: event.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              {t("payments.reconciliation.partnerProgramId")}
+              <input
+                value={newIssue.partnerProgramId}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    partnerProgramId: event.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              {t("payments.reconciliation.sponsorReference")}
+              <input
+                value={newIssue.sponsorReference}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    sponsorReference: event.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              {t("payments.reconciliation.mirrorOrderId")}
+              <input
+                value={newIssue.mirrorOrderId}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    mirrorOrderId: event.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              {t("payments.reconciliation.externalOrderId")}
+              <input
+                value={newIssue.externalOrderId}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    externalOrderId: event.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+            </label>
+            <label style={labelStyle}>
+              {t("payments.reconciliation.linkedJobId")}
+              <input
+                value={newIssue.linkedReconciliationJobId}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    linkedReconciliationJobId: event.target.value,
+                  }))
+                }
+                style={inputStyle}
+              />
+            </label>
+            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
+              {t("payments.reconciliation.summary")}
+              <textarea
+                value={newIssue.summary}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    summary: event.target.value,
+                  }))
+                }
+                style={textAreaStyle}
+              />
+            </label>
+            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
+              {t("payments.reconciliation.comment")}
+              <textarea
+                value={newIssue.comment}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    comment: event.target.value,
+                  }))
+                }
+                style={textAreaStyle}
+              />
+            </label>
+            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
+              {t("payments.reconciliation.artifactIds")}
+              <input
+                value={newIssue.artifactIds}
+                onChange={(event) =>
+                  setNewIssue((current) => ({
+                    ...current,
+                    artifactIds: event.target.value,
+                  }))
+                }
+                placeholder={t("payments.reconciliation.artifactPlaceholder")}
+                style={inputStyle}
+              />
+            </label>
+          </div>
+          <button
+            type="submit"
+            className="admin-btn admin-btn--primary"
+            disabled={issueDraftPending}
+          >
+            {issueDraftPending
+              ? t("payments.reconciliation.opening")
+              : t("payments.reconciliation.open")}
+          </button>
+        </form>
+
+        <div style={{ marginTop: 16 }}>
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>{t("payments.reconciliation.col.issue")}</th>
+                <th>{t("payments.reconciliation.col.summary")}</th>
+                <th>{t("payments.reconciliation.col.owner")}</th>
+                <th>{t("payments.reconciliation.col.context")}</th>
+                <th>{t("payments.reconciliation.col.notes")}</th>
+                <th>{t("payments.reconciliation.col.actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reconciliationIssues.length > 0 ? (
+                reconciliationIssues.map((issue) => (
+                  <tr key={issue.issueId}>
+                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
+                      <div>{issue.issueId}</div>
+                      <div style={{ color: "#6b7280" }}>
+                        {formatPlatformCodeLabel(locale, issue.issueType)}
+                      </div>
+                      <div style={{ color: "#6b7280" }}>
+                        {formatPlatformCodeLabel(locale, issue.source)}
+                      </div>
+                      <div style={{ marginTop: 6 }}>
+                        <span
+                          className={`admin-badge ${
+                            issue.status === "resolved"
+                              ? "admin-badge--success"
+                              : issue.status === "assigned"
+                                ? "admin-badge--warning"
+                                : "admin-badge--neutral"
+                          }`}
+                        >
+                          {formatPlatformCodeLabel(locale, issue.status)}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ minWidth: 260 }}>
+                      <div>{issue.summary}</div>
+                      <div style={{ color: "#6b7280", fontSize: 12 }}>
+                        {describeMatrixChannel(issue.channelKey)}
+                      </div>
+                      <div style={{ color: "#6b7280", fontSize: 12 }}>
+                        {formatDateTime(issue.updatedAt)}
+                      </div>
+                    </td>
+                    <td style={{ minWidth: 180 }}>
+                      <div>{issue.ownerId ?? "—"}</div>
+                      <div style={{ color: "#6b7280", fontSize: 12 }}>
+                        {t("payments.reconciliation.reopenCount", {
+                          count: String(issue.reopenCount),
+                        })}
+                      </div>
+                    </td>
+                    <td style={{ fontSize: 12, minWidth: 220 }}>
+                      <div>{issue.orderId ?? issue.mirrorOrderId ?? "—"}</div>
+                      <div style={{ color: "#6b7280" }}>
+                        {issue.externalOrderId ?? issue.partnerId ?? "—"}
+                      </div>
+                      <div style={{ color: "#6b7280" }}>
+                        {issue.linkedReconciliationJobId ??
+                          issue.sponsorReference ??
+                          "—"}
+                      </div>
+                    </td>
+                    <td style={{ fontSize: 12, minWidth: 220 }}>
+                      <div>
+                        {t("payments.reconciliation.commentCount", {
+                          count: String(issue.comments.length),
+                        })}
+                      </div>
+                      <div style={{ color: "#6b7280" }}>
+                        {t("payments.reconciliation.evidenceCount", {
+                          count: String(issue.evidenceArtifactIds.length),
+                        })}
+                      </div>
+                      <div style={{ color: "#6b7280", marginTop: 6 }}>
+                        {issue.comments.at(-1)?.message ?? "—"}
+                      </div>
+                    </td>
+                    <td style={{ minWidth: 320 }}>
+                      <div style={issueActionGridStyle}>
+                        {issue.status !== "resolved" && (
+                          <>
+                            <input
+                              value={
+                                issueAssignments[issue.issueId] ??
+                                issue.ownerId ??
+                                ""
+                              }
+                              onChange={(event) =>
+                                setIssueAssignments((current) => ({
+                                  ...current,
+                                  [issue.issueId]: event.target.value,
+                                }))
+                              }
+                              placeholder={t(
+                                "payments.reconciliation.assignee",
+                              )}
+                              style={inputStyle}
+                            />
+                            <button
+                              className="admin-btn admin-btn--secondary"
+                              onClick={() => void handleAssignIssue(issue)}
+                              disabled={issueActionId === issue.issueId}
+                            >
+                              {t("payments.reconciliation.assign")}
+                            </button>
+                            <input
+                              value={issueComments[issue.issueId] ?? ""}
+                              onChange={(event) =>
+                                setIssueComments((current) => ({
+                                  ...current,
+                                  [issue.issueId]: event.target.value,
+                                }))
+                              }
+                              placeholder={t("payments.reconciliation.comment")}
+                              style={inputStyle}
+                            />
+                            <button
+                              className="admin-btn admin-btn--secondary"
+                              onClick={() => void handleCommentIssue(issue)}
+                              disabled={issueActionId === issue.issueId}
+                            >
+                              {t("payments.reconciliation.addComment")}
+                            </button>
+                            <select
+                              value={issueResolutionCodes[issue.issueId] ?? ""}
+                              onChange={(event) =>
+                                setIssueResolutionCodes((current) => ({
+                                  ...current,
+                                  [issue.issueId]: event.target
+                                    .value as ReconciliationIssueRecord["resolutionCode"],
+                                }))
+                              }
+                              style={inputStyle}
+                            >
+                              <option value="">
+                                {t("payments.reconciliation.resolveCode")}
+                              </option>
+                              {RECONCILIATION_RESOLUTION_OPTIONS.map((code) => (
+                                <option key={code} value={code}>
+                                  {formatPlatformCodeLabel(locale, code)}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              value={
+                                issueResolutionSummaries[issue.issueId] ?? ""
+                              }
+                              onChange={(event) =>
+                                setIssueResolutionSummaries((current) => ({
+                                  ...current,
+                                  [issue.issueId]: event.target.value,
+                                }))
+                              }
+                              placeholder={t(
+                                "payments.reconciliation.resolveSummary",
+                              )}
+                              style={inputStyle}
+                            />
+                            <button
+                              className="admin-btn admin-btn--primary"
+                              onClick={() => void handleResolveIssue(issue)}
+                              disabled={issueActionId === issue.issueId}
+                            >
+                              {t("payments.reconciliation.resolve")}
+                            </button>
+                          </>
+                        )}
+                        {issue.status === "resolved" && (
+                          <>
+                            <input
+                              value={issueReopenReasons[issue.issueId] ?? ""}
+                              onChange={(event) =>
+                                setIssueReopenReasons((current) => ({
+                                  ...current,
+                                  [issue.issueId]: event.target.value,
+                                }))
+                              }
+                              placeholder={t(
+                                "payments.reconciliation.reopenReason",
+                              )}
+                              style={inputStyle}
+                            />
+                            <button
+                              className="admin-btn admin-btn--secondary"
+                              onClick={() => void handleReopenIssue(issue)}
+                              disabled={issueActionId === issue.issueId}
+                            >
+                              {t("payments.reconciliation.reopen")}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6}>{t("payments.reconciliation.empty")}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -932,4 +1589,15 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid #d1d5db",
   background: "#fff",
   fontSize: 14,
+};
+
+const textAreaStyle: React.CSSProperties = {
+  ...inputStyle,
+  minHeight: 88,
+  resize: "vertical",
+};
+
+const issueActionGridStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 8,
 };

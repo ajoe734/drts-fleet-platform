@@ -5,6 +5,7 @@ import type {
   ForwardedOrderRecord,
   ForwarderReconciliationIssue,
   OwnedOrderRecord,
+  ReconciliationIssueRecord,
   SettlementMatrixRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
@@ -157,6 +158,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     forwardedOrders,
     settlementMatrix,
     reconciliationIssues,
+    settlementReconciliationIssues,
     locale,
   ] = await Promise.all([
     resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
@@ -181,8 +183,21 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
       () => client.listForwarderReconciliationIssues(),
       [] as ForwarderReconciliationIssue[],
     ),
+    resolveOrFallback(
+      () => client.listReconciliationIssues(),
+      [] as ReconciliationIssueRecord[],
+    ),
     getServerLocale(),
   ]);
+  const financeIssueByJobId = new Map(
+    settlementReconciliationIssues
+      .filter(
+        (issue) =>
+          issue.issueType === "forwarder_status_mismatch" &&
+          issue.linkedReconciliationJobId,
+      )
+      .map((issue) => [issue.linkedReconciliationJobId!, issue]),
+  );
 
   const insights = buildRevenueInsights(orders, tasks, statements, filters);
   const vehicleOptions = vehicles
@@ -707,62 +722,98 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               { label: t("revenue.reconciliation.col.status", locale) },
               { label: t("revenue.reconciliation.col.error", locale) },
               { label: t("revenue.reconciliation.col.driver", locale) },
+              { label: t("revenue.reconciliation.col.finance", locale) },
               { label: t("revenue.reconciliation.col.fareAuthority", locale) },
               { label: t("revenue.reconciliation.col.ledger", locale) },
             ]}
             empty={t("revenue.reconciliation.empty", locale)}
           >
-            {reconciliationIssues.map((issue) => (
-              <Tr key={issue.reconciliationJob.reconciliationJobId}>
-                <Td>
-                  <div>{issue.mirrorOrderId.slice(0, 12)}...</div>
-                  <div style={{ color: "#64748b", fontSize: "12px" }}>
-                    {issue.externalOrderId}
-                  </div>
-                </Td>
-                <Td>{formatOpsCodeLabel(locale, issue.platformCode)}</Td>
-                <Td>
-                  <Badge
-                    variant={issue.status === "sync_failed" ? "red" : "yellow"}
-                  >
-                    {formatOpsCodeLabel(locale, issue.status)}
-                  </Badge>
-                  <div style={{ color: "#64748b", fontSize: "12px" }}>
-                    {formatOpsCodeLabel(locale, issue.reconciliationJob.reason)}
-                  </div>
-                </Td>
-                <Td>
-                  {issue.lastSyncError ? (
-                    <div>
-                      <div style={{ fontSize: "12px", fontWeight: 600 }}>
-                        {issue.lastSyncError.code}
-                      </div>
-                      <div style={{ color: "#64748b", fontSize: "11px" }}>
-                        {issue.lastSyncError.retryable
-                          ? t("revenue.reconciliation.retryable", locale)
-                          : t("revenue.reconciliation.notRetryable", locale)}
-                      </div>
+            {reconciliationIssues.map((issue) => {
+              const financeIssue = financeIssueByJobId.get(
+                issue.reconciliationJob.reconciliationJobId,
+              );
+              return (
+                <Tr key={issue.reconciliationJob.reconciliationJobId}>
+                  <Td>
+                    <div>{issue.mirrorOrderId.slice(0, 12)}...</div>
+                    <div style={{ color: "#64748b", fontSize: "12px" }}>
+                      {issue.externalOrderId}
                     </div>
-                  ) : (
-                    <span style={{ color: "#94a3b8" }}>—</span>
-                  )}
-                </Td>
-                <Td>{issue.acceptedDriverId ?? "—"}</Td>
-                <Td>
-                  <div style={{ fontSize: "12px" }}>
-                    {t("revenue.reconciliation.fareExternal", locale)}
-                  </div>
-                  <div style={{ color: "#64748b", fontSize: "11px" }}>
-                    {t("revenue.reconciliation.settlementExternal", locale)}
-                  </div>
-                </Td>
-                <Td>
-                  <Badge variant="yellow">
-                    {t("revenue.reconciliation.shadowOnly", locale)}
-                  </Badge>
-                </Td>
-              </Tr>
-            ))}
+                  </Td>
+                  <Td>{formatOpsCodeLabel(locale, issue.platformCode)}</Td>
+                  <Td>
+                    <Badge
+                      variant={
+                        issue.status === "sync_failed" ? "red" : "yellow"
+                      }
+                    >
+                      {formatOpsCodeLabel(locale, issue.status)}
+                    </Badge>
+                    <div style={{ color: "#64748b", fontSize: "12px" }}>
+                      {formatOpsCodeLabel(
+                        locale,
+                        issue.reconciliationJob.reason,
+                      )}
+                    </div>
+                  </Td>
+                  <Td>
+                    {issue.lastSyncError ? (
+                      <div>
+                        <div style={{ fontSize: "12px", fontWeight: 600 }}>
+                          {issue.lastSyncError.code}
+                        </div>
+                        <div style={{ color: "#64748b", fontSize: "11px" }}>
+                          {issue.lastSyncError.retryable
+                            ? t("revenue.reconciliation.retryable", locale)
+                            : t("revenue.reconciliation.notRetryable", locale)}
+                        </div>
+                      </div>
+                    ) : (
+                      <span style={{ color: "#94a3b8" }}>—</span>
+                    )}
+                  </Td>
+                  <Td>{issue.acceptedDriverId ?? "—"}</Td>
+                  <Td>
+                    {financeIssue ? (
+                      <div>
+                        <Badge
+                          variant={
+                            financeIssue.status === "resolved"
+                              ? "green"
+                              : financeIssue.status === "assigned"
+                                ? "yellow"
+                                : "red"
+                          }
+                        >
+                          {formatOpsCodeLabel(locale, financeIssue.status)}
+                        </Badge>
+                        <div style={{ color: "#64748b", fontSize: "11px" }}>
+                          {financeIssue.ownerId ??
+                            t("revenue.reconciliation.unassigned", locale)}
+                        </div>
+                      </div>
+                    ) : (
+                      <span style={{ color: "#94a3b8" }}>
+                        {t("revenue.reconciliation.notCreated", locale)}
+                      </span>
+                    )}
+                  </Td>
+                  <Td>
+                    <div style={{ fontSize: "12px" }}>
+                      {t("revenue.reconciliation.fareExternal", locale)}
+                    </div>
+                    <div style={{ color: "#64748b", fontSize: "11px" }}>
+                      {t("revenue.reconciliation.settlementExternal", locale)}
+                    </div>
+                  </Td>
+                  <Td>
+                    <Badge variant="yellow">
+                      {t("revenue.reconciliation.shadowOnly", locale)}
+                    </Badge>
+                  </Td>
+                </Tr>
+              );
+            })}
           </DataTable>
         </Card>
       )}
