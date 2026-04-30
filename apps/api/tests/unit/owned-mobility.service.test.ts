@@ -40,6 +40,7 @@ function createOwnedMobilityService(options?: {
   };
   const callcenterService = {
     registerRecordingAttachmentListener: vi.fn(),
+    registerRecordingStateChangeListener: vi.fn(),
     linkOrderToCallSession: vi.fn(
       ({
         callId,
@@ -1660,6 +1661,50 @@ describe("ORX-DP-002: reassign / redispatch / timeout / no-supply workflow", () 
       reasonNote: "Customer changed pickup location",
       escalationTarget: "ops_supervisor",
     });
+  });
+
+  it("rejects redispatch while an order remains in exception hold", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T12:20:00.000Z",
+        reservationWindowEnd: "2026-04-29T13:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+
+    expect(() =>
+      service.redispatchOrder(booking.orderId, {
+        reasonCode: "operator_redispatch",
+      }),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.redispatchOrder(booking.orderId, {
+        reasonCode: "operator_redispatch",
+      });
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "EXCEPTION_HOLD_REQUIRES_RESOLUTION",
+        },
+      });
+    }
+
+    const order = service.getOrder(booking.orderId);
+    expect(order.status).toBe("exception_hold");
+    expect(order.reservationHoldStatus).toBe("exception_hold");
   });
 
   it("rejects resolveNoSupplyOrder when order is not in no_supply or delayed_queue state", () => {

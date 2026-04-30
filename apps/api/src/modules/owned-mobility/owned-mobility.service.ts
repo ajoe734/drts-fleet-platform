@@ -1323,6 +1323,21 @@ export class OwnedMobilityService implements OnModuleInit {
       );
     }
     const order = this.requireOrder(orderId);
+    if (
+      order.status === "exception_hold" ||
+      order.reservationHoldStatus === "exception_hold"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "EXCEPTION_HOLD_REQUIRES_RESOLUTION",
+        "Exception-hold orders must be released or cancelled through resolveExceptionHold before redispatch.",
+        {
+          orderId,
+          status: order.status,
+          reservationHoldStatus: order.reservationHoldStatus,
+        },
+      );
+    }
     const now = new Date().toISOString();
     order.status = "redispatch_required";
     order.dispatchAttemptCount += 1;

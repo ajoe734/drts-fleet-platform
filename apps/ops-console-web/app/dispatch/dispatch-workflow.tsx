@@ -1004,9 +1004,7 @@ export function DispatchWorkflow({
                             {t("dispatch.workflow.reassign")}
                           </button>
                         )}
-                        {(isRedispatchRequired ||
-                          isExceptionHold ||
-                          isDispatchTimeout) && (
+                        {(isRedispatchRequired || isDispatchTimeout) && (
                           <button
                             className="btn btn-warning"
                             disabled={loading === order.orderId}

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useState, useTransition } from "react";
 import { PageHeader } from "@drts/ui-web";
 import type {
@@ -25,8 +26,22 @@ const STATUSES: IncidentStatus[] = [...INCIDENT_STATUSES];
 const SEVERITIES: IncidentSeverity[] = [...INCIDENT_SEVERITIES];
 const CATEGORIES: IncidentCategory[] = [...INCIDENT_CATEGORIES];
 
+type IncidentFormInitialValues = {
+  title?: string;
+  description?: string;
+  category?: IncidentCategory;
+  severity?: IncidentSeverity;
+  relatedOrderId?: string;
+  relatedVehicleId?: string;
+  relatedDriverId?: string;
+  reportedBy?: string;
+  occurredAt?: string;
+  location?: string;
+};
+
 export default function IncidentsPage() {
   const { t, locale } = useTranslation();
+  const searchParams = useSearchParams();
   const [records, setRecords] = useState<IncidentRecord[]>([]);
   const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(
@@ -47,10 +62,38 @@ export default function IncidentsPage() {
     IncidentCategory | "all"
   >("all");
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
+  const createFromQuery = searchParams.get("create") === "1";
+  const createDefaults: IncidentFormInitialValues = {
+    title: searchParams.get("title") ?? "",
+    description: searchParams.get("description") ?? "",
+    category: CATEGORIES.includes(
+      searchParams.get("category") as IncidentCategory,
+    )
+      ? (searchParams.get("category") as IncidentCategory)
+      : "operational",
+    severity: SEVERITIES.includes(
+      searchParams.get("severity") as IncidentSeverity,
+    )
+      ? (searchParams.get("severity") as IncidentSeverity)
+      : "medium",
+    relatedOrderId: searchParams.get("relatedOrderId") ?? "",
+    relatedVehicleId: searchParams.get("relatedVehicleId") ?? "",
+    relatedDriverId: searchParams.get("relatedDriverId") ?? "",
+    reportedBy: searchParams.get("reportedBy") ?? "ops-user-001",
+    location: searchParams.get("location") ?? "",
+  };
 
   useEffect(() => {
     void loadRecords();
   }, []);
+
+  useEffect(() => {
+    if (!createFromQuery) {
+      return;
+    }
+    setShowCreate(true);
+    setEditingId(null);
+  }, [createFromQuery]);
 
   async function loadRecords() {
     setLoading(true);
@@ -302,11 +345,13 @@ export default function IncidentsPage() {
 
         {(showCreate || editingId) && (
           <IncidentForm
+            key={editingId ?? `create:${searchParams.toString()}`}
             editingRecord={
               editingId
                 ? records.find((record) => record.incidentId === editingId)
                 : undefined
             }
+            {...(!editingId ? { initialValues: createDefaults } : {})}
             onCancel={() => {
               setShowCreate(false);
               setEditingId(null);
@@ -751,10 +796,12 @@ function renderSeverityBadge(severity: IncidentSeverity, locale: "en" | "zh") {
 
 function IncidentForm({
   editingRecord,
+  initialValues,
   onCancel,
   onSubmit,
 }: {
   editingRecord: IncidentRecord | undefined;
+  initialValues?: IncidentFormInitialValues;
   onCancel: () => void;
   onSubmit: (
     command: CreateIncidentCommand | UpdateIncidentCommand,
@@ -762,34 +809,38 @@ function IncidentForm({
 }) {
   const { t, locale } = useTranslation();
   const [pending, startTransition] = useTransition();
-  const [title, setTitle] = useState(editingRecord?.title ?? "");
+  const [title, setTitle] = useState(
+    editingRecord?.title ?? initialValues?.title ?? "",
+  );
   const [description, setDescription] = useState(
-    editingRecord?.description ?? "",
+    editingRecord?.description ?? initialValues?.description ?? "",
   );
   const [category, setCategory] = useState<IncidentCategory>(
-    editingRecord?.category ?? "operational",
+    editingRecord?.category ?? initialValues?.category ?? "operational",
   );
   const [severity, setSeverity] = useState<IncidentSeverity>(
-    editingRecord?.severity ?? "medium",
+    editingRecord?.severity ?? initialValues?.severity ?? "medium",
   );
   const [relatedOrderId, setRelatedOrderId] = useState(
-    editingRecord?.relatedOrderId ?? "",
+    editingRecord?.relatedOrderId ?? initialValues?.relatedOrderId ?? "",
   );
   const [relatedVehicleId, setRelatedVehicleId] = useState(
-    editingRecord?.relatedVehicleId ?? "",
+    editingRecord?.relatedVehicleId ?? initialValues?.relatedVehicleId ?? "",
   );
   const [relatedDriverId, setRelatedDriverId] = useState(
-    editingRecord?.relatedDriverId ?? "",
+    editingRecord?.relatedDriverId ?? initialValues?.relatedDriverId ?? "",
   );
   const [reportedBy, setReportedBy] = useState(
-    editingRecord?.reportedBy ?? "ops-user-001",
+    editingRecord?.reportedBy ?? initialValues?.reportedBy ?? "ops-user-001",
   );
   const [occurredAt, setOccurredAt] = useState(
     editingRecord?.occurredAt
       ? new Date(editingRecord.occurredAt).toISOString().slice(0, 16)
-      : "",
+      : (initialValues?.occurredAt ?? ""),
   );
-  const [location, setLocation] = useState(editingRecord?.location ?? "");
+  const [location, setLocation] = useState(
+    editingRecord?.location ?? initialValues?.location ?? "",
+  );
   const [status, setStatus] = useState<IncidentStatus>(
     editingRecord?.status ?? "open",
   );
