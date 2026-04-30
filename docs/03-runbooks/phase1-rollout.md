@@ -4,6 +4,9 @@
 
 This runbook operationalizes `W8-001B` for the current repo state. It turns the adopted Phase 1 migration plan into repeatable packs for backfill, UAT, pilot, and production rollout.
 
+For workflow-family gate interpretation, read this file together with
+`docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`.
+
 ## Current Repo Truth
 
 - The adopted SQL migrations and seeds under `infra/migrations/` and `infra/seeds/` are the executable database baseline.
@@ -30,10 +33,13 @@ machine-truth task status.
 
 ### Current Gate Read
 
-- **Staging release evidence:** PASS — `FBP-013A` records green run `#24522301392` with live evidence `E-11/E-12/E-13`.
-- **Smoke evidence:** PASS as static evidence — `FBP-013B` is the reviewable smoke source of truth; it does not invent a separate live smoke workflow artifact.
-- **Pilot launch:** HOLD — named live UAT sign-off and deferred-item acceptance remain open in `FBP-013C`.
-- **Production rollout:** HOLD — pilot observation, tolerance metrics, dry runs, manual rollout matrix execution, and rollback-owner acknowledgement remain required.
+- Workflow-family release language now lives in
+  `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`. Use that
+  matrix when summarizing the exact workflow-family gate read.
+- **Staging release evidence:** `PASS (live staging evidence)` — `FBP-013A` records green run `#24522301392` with live evidence `E-11/E-12/E-13`.
+- **Smoke evidence:** `PASS (static evidence)` — `FBP-013B` is the reviewable smoke source of truth; it does not invent a separate live smoke workflow artifact.
+- **Pilot launch:** `HOLD` — named live UAT sign-off and deferred-item acceptance remain open in `FBP-013C`.
+- **Production rollout:** `HOLD` — pilot observation, tolerance metrics, dry runs, manual rollout matrix execution, and rollback-owner acknowledgement remain required.
 
 This means the evidence chain is ready for closeout review, but not yet a production go-live
 approval.

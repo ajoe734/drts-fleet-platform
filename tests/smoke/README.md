@@ -24,16 +24,23 @@ tests/smoke/
 
 ## Coverage
 
-| Test                  | Critical path                                          |
-| --------------------- | ------------------------------------------------------ |
-| 01-health             | `GET /api/health` — API reachable                      |
-| 02-booking-create     | `POST /api/tenant/bookings` + read-back                |
-| 03-dispatch-assign    | `GET /api/dispatch/tasks`, `POST /api/dispatch/assign` |
-| 04-driver-task-accept | `POST /api/driver/tasks/:id/accept` + status verify    |
-| 05-billing-invoice    | `POST /api/tenant/invoices/generate` + retrieve        |
-| 06-report-export      | `POST /api/reports/jobs` + poll to completed           |
+| Test                  | Workflow family | Critical path                                          | Release-gate role                                           |
+| --------------------- | --------------- | ------------------------------------------------------ | ----------------------------------------------------------- |
+| 01-health             | `WF-RLS-001`    | `GET /api/health` — API reachable                      | foundation signal only; not a standalone release decision   |
+| 02-booking-create     | `WF-ORD-001`    | `POST /api/tenant/bookings` + read-back                | repo/staging booking baseline                               |
+| 03-dispatch-assign    | `WF-DSP-001`    | `GET /api/dispatch/tasks`, `POST /api/dispatch/assign` | repo/staging dispatch baseline                              |
+| 04-driver-task-accept | `WF-DRV-001`    | `POST /api/driver/tasks/:id/accept` + status verify    | repo/staging owned-driver baseline                          |
+| 05-billing-invoice    | `WF-FIN-001`    | `POST /api/tenant/invoices/generate` + retrieve        | repo/staging invoice baseline                               |
+| 06-report-export      | `WF-FIN-001`    | `POST /api/reports/jobs` + poll to completed           | static report/export baseline; not month-end filing closure |
 
 Tests 03–04 are gracefully skippable when staging DB is empty (they log a warning and exit 0).
+
+Interpret smoke results through
+`docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`:
+
+- smoke helps establish repo/staging API baselines
+- smoke is not the same thing as pilot or production approval
+- smoke does not erase `HOLD` or `EXTERNAL-GATED` workflow families
 
 ## Running
 

@@ -30,6 +30,10 @@ This means:
 - **partner channel and driver app baselines are now landed; only external credentials block productization completion**
 - **the repo-local closeout bar is met, while deferred and external-gated scope remains explicit**
 
+Release wording should now cite workflow families from
+`docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` instead of
+reducing the closeout narrative to repo-local test green-ness.
+
 ## A. Gap-Fix Wave Closeout
 
 These items close the currently active implementation wave.
@@ -179,6 +183,7 @@ We can honestly say the system is operationally complete only when all of the fo
 
 ## Reference Anchors
 
+- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`
 - `docs/02-architecture/consensus/gap-phase2-planning-20260417/consensus-packet.md`
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
 - `ROADMAP.md`

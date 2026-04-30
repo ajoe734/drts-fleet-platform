@@ -21,6 +21,25 @@ use `FBP-013D` for the final release / pilot / production decision read.
 4. **All P1 items must pass before Phase 1 can ship.**
 5. Deferred items require sign-off from the supervisor that the deferral is acceptable.
 
+## Release-Gate Family Map
+
+This checklist is still the row-by-row inventory, but release conclusions should
+be read through `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`.
+
+| Workflow family | Checklist rows that feed it                                                       | Primary companion path                                                                           |
+| --------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `WF-RLS-001`    | `PF-1` to `PF-7`                                                                  | `docs/03-runbooks/phase1-rollout.md`, `support/sidecars/FBP-013A/`, `support/sidecars/FBP-013D/` |
+| `WF-TEN-001`    | `PA-001`, `TP-029` to `TP-032`, `E2E-004`                                         | `tests/e2e/E2E-004-tenant-attribution.sh`                                                        |
+| `WF-ORD-001`    | `TP-001` to `TP-006`, `E2E-001`, `E2E-004`                                        | `tests/smoke/02-booking-create.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`                   |
+| `WF-DSP-001`    | `OC-001` to `OC-006`, `E2E-001`                                                   | `tests/smoke/03-dispatch-assign.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`                  |
+| `WF-DRV-001`    | `DA-001` to `DA-017`, `DA-019`, `DA-021`, `DA-022`, `DA-024`, `DA-025`, `E2E-001` | `tests/smoke/04-driver-task-accept.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`               |
+| `WF-FWD-001`    | `DA-005`, `E2E-002`                                                               | `tests/e2e/E2E-002-forwarded-order.sh`                                                           |
+| `WF-COM-001`    | `OC-021` to `OC-024`, `DA-007` to `DA-009`, `E2E-003`                             | manual-only in baseline; live/negative expansion stays explicit                                  |
+| `WF-FIN-001`    | `TP-013`, `TP-014`, `TP-021` to `TP-023`, `OC-017`, `OC-025`, `E2E-001`           | `tests/smoke/05-billing-invoice.sh`, `tests/smoke/06-report-export.sh`                           |
+
+Do not summarize this checklist as "UAT green" without naming the exact
+workflow-family gate reads from the release matrix.
+
 ---
 
 ## Pre-flight
