@@ -29,6 +29,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import {
   FORWARDER_ADAPTERS,
@@ -76,6 +77,7 @@ export class ForwarderService implements OnModuleInit {
     @Inject(FORWARDER_ADAPTERS)
     private readonly adapters: readonly ForwarderAdapterInterface[] = [],
     @Optional() private readonly forwarderRepository?: ForwarderRepository,
+    @Optional() private readonly ownedMobilityService?: OwnedMobilityService,
   ) {}
 
   async onModuleInit() {
@@ -558,6 +560,8 @@ export class ForwarderService implements OnModuleInit {
       requestId,
     );
 
+    this.closeDriverTasksOnTerminalState(forwardedOrder, requestId);
+
     return {
       status: forwardedOrder.status,
       authoritativeSnapshot: { ...forwardedOrder.authoritativeSnapshot },
@@ -594,9 +598,7 @@ export class ForwarderService implements OnModuleInit {
     forwardedOrder.manualFallback = {
       ...forwardedOrder.manualFallback,
       required: false,
-      notes:
-        command.notes?.trim() ??
-        forwardedOrder.manualFallback.notes,
+      notes: command.notes?.trim() ?? forwardedOrder.manualFallback.notes,
     };
     forwardedOrder.reconciliationJob = {
       ...forwardedOrder.reconciliationJob,
@@ -637,6 +639,8 @@ export class ForwarderService implements OnModuleInit {
       requestId,
     );
 
+    this.closeDriverTasksOnTerminalState(forwardedOrder, requestId);
+
     return this.cloneOrder(forwardedOrder);
   }
 
@@ -654,12 +658,72 @@ export class ForwarderService implements OnModuleInit {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  /**
+   * Return open reconciliation issues with full order and finance context so
+   * ops and finance can review sync-failed mirrors and distinguish operational
+   * mirror failure from commercial settlement truth.
+   */
+  listReconciliationIssues() {
+    return this.forwardedOrders
+      .filter(
+        (order) =>
+          order.reconciliationJob != null &&
+          order.reconciliationJob.status === "queued",
+      )
+      .map((order) => ({
+        reconciliationJob: { ...order.reconciliationJob! },
+        mirrorOrderId: order.mirrorOrderId,
+        platformCode: order.platformCode,
+        externalOrderId: order.externalOrderId,
+        status: order.status,
+        acceptedDriverId: order.acceptedDriverId,
+        lastSyncError: order.lastSyncError ? { ...order.lastSyncError } : null,
+        financeContext: { ...order.financeContext },
+        manualFallback: { ...order.manualFallback },
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+      }))
+      .sort((left, right) =>
+        right.reconciliationJob.createdAt.localeCompare(
+          left.reconciliationJob.createdAt,
+        ),
+      );
+  }
+
   listAdapterHealth() {
     return this.adapterHealth.map((adapter) => ({ ...adapter }));
   }
 
   hasAdapter(platformCode: PlatformCode) {
     return Boolean(this.findAdapter(platformCode));
+  }
+
+  private closeDriverTasksOnTerminalState(
+    forwardedOrder: ForwardedOrderRecord,
+    requestId?: string,
+  ) {
+    const isTerminal =
+      forwardedOrder.status === "lost_race" ||
+      forwardedOrder.status === "cancelled_by_platform";
+
+    if (!isTerminal || !this.ownedMobilityService) {
+      return;
+    }
+
+    try {
+      this.ownedMobilityService.cancelForwarderTasks(
+        forwardedOrder.mirrorOrderId,
+        forwardedOrder.status,
+        requestId,
+      );
+      this.logger.log(
+        `Closed driver tasks for forwarder order ${forwardedOrder.mirrorOrderId} (${forwardedOrder.status})`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to close driver tasks for forwarder order ${forwardedOrder.mirrorOrderId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private resolveNextStatus(nativeStatus: string) {
@@ -790,8 +854,7 @@ export class ForwarderService implements OnModuleInit {
     forwardedOrder.lastSyncError = lastSyncError;
     forwardedOrder.manualFallback = {
       required: true,
-      reason:
-        command.manualFallbackReason?.trim() || command.errorMessage,
+      reason: command.manualFallbackReason?.trim() || command.errorMessage,
       requestedAt: failedAt,
       requestedBy: null,
       notes: null,

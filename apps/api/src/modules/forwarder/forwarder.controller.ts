@@ -68,7 +68,11 @@ export class ForwarderController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.forwarderService.relayDriverAccept(orderId, command, requestId),
+      await this.forwarderService.relayDriverAccept(
+        orderId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -146,6 +150,16 @@ export class ForwarderController {
     return toApiSuccessEnvelope(
       {
         items: this.forwarderService.listReconciliationJobs(),
+      },
+      requestId,
+    );
+  }
+
+  @Get("forwarder/reconciliation-issues")
+  listReconciliationIssues(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      {
+        items: this.forwarderService.listReconciliationIssues(),
       },
       requestId,
     );

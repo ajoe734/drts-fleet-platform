@@ -1,4 +1,8 @@
-import type { DispatchJobRecord, OwnedOrderRecord } from "@drts/contracts";
+import type {
+  DispatchJobRecord,
+  ForwardedOrderRecord,
+  OwnedOrderRecord,
+} from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
@@ -35,19 +39,28 @@ export default async function DispatchPage({
   searchParams,
 }: DispatchPageProps) {
   const client = getOpsClient();
-  const [orders, dispatchJobs, locale, resolvedSearchParams] =
-    await Promise.all([
-      resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
-      resolveOrFallback(
-        () => client.listDispatchJobs(),
-        [] as DispatchJobRecord[],
-      ),
-      getServerLocale(),
-      (searchParams ??
-        Promise.resolve(
-          {} as Record<string, string | string[] | undefined>,
-        )) as Promise<Record<string, string | string[] | undefined>>,
-    ]);
+  const [
+    orders,
+    dispatchJobs,
+    forwarderSyncErrors,
+    locale,
+    resolvedSearchParams,
+  ] = await Promise.all([
+    resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
+    resolveOrFallback(
+      () => client.listDispatchJobs(),
+      [] as DispatchJobRecord[],
+    ),
+    resolveOrFallback(
+      () => client.listForwarderSyncErrors(),
+      [] as ForwardedOrderRecord[],
+    ),
+    getServerLocale(),
+    (searchParams ??
+      Promise.resolve(
+        {} as Record<string, string | string[] | undefined>,
+      )) as Promise<Record<string, string | string[] | undefined>>,
+  ]);
   const focusOrderId = firstParam(resolvedSearchParams?.orderId) ?? "";
   const insights = buildDispatchInsights(orders, dispatchJobs);
 
@@ -98,6 +111,14 @@ export default async function DispatchPage({
           sub={t("dispatch.queuedRevenueSub", locale)}
           accent="#15803d"
         />
+        {forwarderSyncErrors.length > 0 && (
+          <StatCard
+            label={t("dispatch.forwarderSyncFailed", locale)}
+            value={formatCompactNumber(forwarderSyncErrors.length)}
+            sub={t("dispatch.forwarderSyncFailedSub", locale)}
+            accent="#ea580c"
+          />
+        )}
       </div>
 
       <Card style={{ marginBottom: "20px" }}>

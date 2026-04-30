@@ -66,6 +66,20 @@ function isForwardedTask(task: DriverTaskRecord): boolean {
   return task.sourcePlatform != null;
 }
 
+function isForwarderTerminalTask(task: DriverTaskRecord): boolean {
+  return isForwardedTask(task) && task.status === "cancelled";
+}
+
+function ForwarderTerminalBadge() {
+  return (
+    <View style={[styles.badge, { backgroundColor: "#fef2f2" }]}>
+      <Text style={[styles.badgeText, { color: "#991b1b" }]}>
+        platform closed
+      </Text>
+    </View>
+  );
+}
+
 export default function JobsScreen() {
   const [tasks, setTasks] = useState<DriverTaskRecord[]>([]);
   const [orderMap, setOrderMap] = useState<Record<string, OwnedOrderRecord>>(
@@ -178,6 +192,7 @@ export default function JobsScreen() {
           keyExtractor={(item, i) => item.taskId ?? String(i)}
           renderItem={({ item }) => {
             const forwarded = isForwardedTask(item);
+            const forwarderTerminal = isForwarderTerminalTask(item);
             const order = item.orderId ? orderMap[item.orderId] : null;
             const fixedPrice = order?.fixedPrice ?? false;
             const serviceBucket = order?.serviceBucket ?? null;
@@ -186,7 +201,12 @@ export default function JobsScreen() {
             const dispatchSemantics = order?.dispatchSemantics ?? null;
 
             return (
-              <View style={styles.taskCard}>
+              <View
+                style={[
+                  styles.taskCard,
+                  forwarderTerminal && styles.taskCardTerminal,
+                ]}
+              >
                 <View style={styles.taskHeader}>
                   <Text style={styles.taskId}>{item.taskId}</Text>
                   <View style={styles.badgeRow}>
@@ -198,6 +218,7 @@ export default function JobsScreen() {
                       dispatchSemantics={dispatchSemantics}
                     />
                     {fixedPrice && <FixedPriceBadge />}
+                    {forwarderTerminal && <ForwarderTerminalBadge />}
                   </View>
                 </View>
                 <Text style={styles.taskStatus}>
@@ -206,7 +227,14 @@ export default function JobsScreen() {
                 {item.orderId && (
                   <Text style={styles.taskOrder}>Order: {item.orderId}</Text>
                 )}
-                {forwarded && (
+                {forwarderTerminal && (
+                  <Text style={styles.forwarderTerminalNote}>
+                    This task was closed by the external platform (lost race or
+                    cancelled). No further action is required. If you believe
+                    this is incorrect, contact dispatch.
+                  </Text>
+                )}
+                {forwarded && !forwarderTerminal && (
                   <Text style={styles.forwardedNote}>
                     Routed by {item.sourcePlatform}. Dispatch, route, fare, and
                     completion status stay under platform authority. If sync
@@ -268,6 +296,17 @@ const styles = StyleSheet.create({
   forwardedNote: {
     fontSize: 11,
     color: "#666",
+    marginTop: 6,
+    fontStyle: "italic",
+  },
+  taskCardTerminal: {
+    backgroundColor: "#fef2f2",
+    borderWidth: 1,
+    borderColor: "#fecaca",
+  },
+  forwarderTerminalNote: {
+    fontSize: 11,
+    color: "#991b1b",
     marginTop: 6,
     fontStyle: "italic",
   },

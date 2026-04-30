@@ -3,6 +3,7 @@ import type {
   DriverStatementRecord,
   DriverTaskRecord,
   ForwardedOrderRecord,
+  ForwarderReconciliationIssue,
   OwnedOrderRecord,
   SettlementMatrixRecord,
   VehicleRegistryRecord,
@@ -139,6 +140,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     vehicles,
     forwardedOrders,
     settlementMatrix,
+    reconciliationIssues,
     locale,
   ] = await Promise.all([
     resolveOrFallback(() => client.listOrders(), [] as OwnedOrderRecord[]),
@@ -158,6 +160,10 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     resolveOrFallback(
       () => client.listSettlementMatrix(),
       [] as SettlementMatrixRecord[],
+    ),
+    resolveOrFallback(
+      () => client.listForwarderReconciliationIssues(),
+      [] as ForwarderReconciliationIssue[],
     ),
     getServerLocale(),
   ]);
@@ -642,6 +648,109 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
           ))}
         </DataTable>
       </Card>
+
+      {/* Reconciliation Issues */}
+      {reconciliationIssues.length > 0 && (
+        <Card style={{ marginBottom: "20px" }}>
+          <CardHeader>
+            <div
+              style={{
+                fontSize: "11px",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "#64748b",
+                marginBottom: "2px",
+              }}
+            >
+              {t("revenue.reconciliation.title", locale)}
+            </div>
+            <div
+              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
+            >
+              {t("revenue.reconciliation.subtitle", locale)}
+            </div>
+          </CardHeader>
+          <div
+            style={{
+              padding: "12px 16px",
+              background: "#fef2f2",
+              border: "1px solid #fecaca",
+              borderRadius: "8px",
+              margin: "0 16px 12px",
+              color: "#991b1b",
+              fontSize: "13px",
+            }}
+          >
+            {t("revenue.reconciliation.banner", locale, {
+              count: String(reconciliationIssues.length),
+            })}
+          </div>
+          <DataTable
+            columns={[
+              { label: t("revenue.reconciliation.col.mirror", locale) },
+              { label: t("revenue.reconciliation.col.platform", locale) },
+              { label: t("revenue.reconciliation.col.status", locale) },
+              { label: t("revenue.reconciliation.col.error", locale) },
+              { label: t("revenue.reconciliation.col.driver", locale) },
+              { label: t("revenue.reconciliation.col.fareAuthority", locale) },
+              { label: t("revenue.reconciliation.col.ledger", locale) },
+            ]}
+            empty={t("revenue.reconciliation.empty", locale)}
+          >
+            {reconciliationIssues.map((issue) => (
+              <Tr key={issue.reconciliationJob.reconciliationJobId}>
+                <Td>
+                  <div>{issue.mirrorOrderId.slice(0, 12)}...</div>
+                  <div style={{ color: "#64748b", fontSize: "12px" }}>
+                    {issue.externalOrderId}
+                  </div>
+                </Td>
+                <Td>{formatOpsCodeLabel(locale, issue.platformCode)}</Td>
+                <Td>
+                  <Badge
+                    variant={issue.status === "sync_failed" ? "red" : "yellow"}
+                  >
+                    {formatOpsCodeLabel(locale, issue.status)}
+                  </Badge>
+                  <div style={{ color: "#64748b", fontSize: "12px" }}>
+                    {formatOpsCodeLabel(locale, issue.reconciliationJob.reason)}
+                  </div>
+                </Td>
+                <Td>
+                  {issue.lastSyncError ? (
+                    <div>
+                      <div style={{ fontSize: "12px", fontWeight: 600 }}>
+                        {issue.lastSyncError.code}
+                      </div>
+                      <div style={{ color: "#64748b", fontSize: "11px" }}>
+                        {issue.lastSyncError.retryable
+                          ? t("revenue.reconciliation.retryable", locale)
+                          : t("revenue.reconciliation.notRetryable", locale)}
+                      </div>
+                    </div>
+                  ) : (
+                    <span style={{ color: "#94a3b8" }}>—</span>
+                  )}
+                </Td>
+                <Td>{issue.acceptedDriverId ?? "—"}</Td>
+                <Td>
+                  <div style={{ fontSize: "12px" }}>
+                    {t("revenue.reconciliation.fareExternal", locale)}
+                  </div>
+                  <div style={{ color: "#64748b", fontSize: "11px" }}>
+                    {t("revenue.reconciliation.settlementExternal", locale)}
+                  </div>
+                </Td>
+                <Td>
+                  <Badge variant="yellow">
+                    {t("revenue.reconciliation.shadowOnly", locale)}
+                  </Badge>
+                </Td>
+              </Tr>
+            ))}
+          </DataTable>
+        </Card>
+      )}
 
       {/* Settlement */}
       <Card>

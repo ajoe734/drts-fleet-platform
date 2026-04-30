@@ -1709,6 +1709,93 @@ export class OwnedMobilityService implements OnModuleInit {
     return this.cloneOrder(order);
   }
 
+  /**
+   * Cancel driver tasks associated with a forwarder mirror order that reached
+   * a terminal state (lost_race, cancelled_by_platform).  Called by
+   * ForwarderService when the external platform resolves the race.
+   */
+  cancelForwarderTasks(
+    mirrorOrderId: string,
+    terminalStatus: string,
+    requestId?: string,
+  ) {
+    const activeTasks = this.driverTasks.filter(
+      (task) =>
+        task.orderId === mirrorOrderId &&
+        !["completed", "cancelled", "rejected"].includes(task.status),
+    );
+    if (activeTasks.length === 0) {
+      return [];
+    }
+
+    const now = new Date().toISOString();
+    const cancelledTasks: DriverTaskRecord[] = [];
+
+    for (const task of activeTasks) {
+      task.status = "cancelled";
+      task.completedAt = now;
+
+      const assignment = this.findTaskByAssignmentId(task.assignmentId)
+        ? this.dispatchAssignments.find(
+            (a) => a.assignmentId === task.assignmentId,
+          )
+        : null;
+      if (assignment && ["assigned", "accepted"].includes(assignment.status)) {
+        assignment.status = "cancelled";
+        assignment.updatedAt = now;
+      }
+
+      this.appendTrace(mirrorOrderId, "forwarder.terminal_state", {
+        terminalStatus,
+        taskId: task.taskId,
+        driverId: task.driverId,
+      });
+
+      cancelledTasks.push(task);
+    }
+
+    this.persistChanges(
+      {
+        driverTasks: cancelledTasks,
+        dispatchTraceLogs: this.dispatchTraceLogs.slice(
+          0,
+          cancelledTasks.length,
+        ),
+      },
+      "cancel_forwarder_tasks",
+    );
+    this.recordAudit(
+      {
+        actorId: null,
+        actorType: "system",
+        tenantId: null,
+        moduleName: "forwarder",
+        actionName: "cancel_forwarder_tasks",
+        resourceType: "driver_task",
+        resourceId: mirrorOrderId,
+        newValuesSummary: {
+          terminalStatus,
+          cancelledTaskIds: cancelledTasks.map((t) => t.taskId),
+        },
+      },
+      requestId,
+    );
+
+    // Notify each cancelled driver task through the event stream
+    for (const task of cancelledTasks) {
+      const order = this.orders.find((o) => o.orderId === mirrorOrderId);
+      if (order) {
+        this.ownedMobilityTaskEventsService.publishTaskCancelled(
+          task,
+          order,
+          requestId,
+        );
+      }
+    }
+
+    return cancelledTasks.map((t) => this.cloneTask(t));
+  }
+
   queueCheckIn(command: QueueCheckInCommand, requestId?: string) {
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");

@@ -89,6 +89,7 @@ import type {
   PlatformPresenceRecord,
   PlatformPresenceSummary,
   PlatformPricingRuleRecord,
+  ProductRuleCatalog,
   PublishDriverFeePlanCommand,
   PublishPlacardVersionCommand,
   PublishPlatformPricingRuleCommand,
@@ -112,8 +113,10 @@ import type {
   SettlementMatrixRecord,
   ShiftRecord,
   TenantAddressRecord,
+  TenantAddressExportViewRecord,
   TenantApiKeyRecord,
   TenantBootstrapSession,
+  TenantIntegrationGovernancePackage,
   TenantInvoiceRecord,
   TenantPassengerRecord,
   TenantRoleCatalogRecord,
@@ -143,6 +146,7 @@ import type {
   DriverCompleteTaskCommand,
   UpdateTenantBookingCommand,
   ForwardedOrderRecord,
+  ForwarderReconciliationIssue,
 } from "@drts/contracts";
 
 export interface ApiClientConfig {
@@ -884,6 +888,11 @@ export class ApiClient {
     return this.getList<TenantAddressRecord>("/api/tenant/addresses");
   }
 
+  async listAddressExportView(): Promise<TenantAddressExportViewRecord[]> {
+    return this.getList<TenantAddressExportViewRecord>(
+      "/api/tenant/addresses/export-view",
+    );
+  }
   async upsertAddress(command: UpsertTenantAddressCommand) {
     return this.post("/api/tenant/addresses", { body: command });
   }
@@ -946,6 +955,12 @@ export class ApiClient {
     return this.getList<NotificationRecord>("/api/tenant/notifications/feed");
   }
 
+  async getTenantIntegrationGovernancePackage(): Promise<TenantIntegrationGovernancePackage> {
+    return this.get<TenantIntegrationGovernancePackage>(
+      "/api/tenant/integration-governance",
+    );
+  }
+
   async getNotificationPreferences() {
     return this.get("/api/tenant/notifications");
   }
@@ -994,6 +1009,20 @@ export class ApiClient {
 
   async getForwarderAdaptersHealth() {
     return this.getList("/api/forwarder/adapters/health");
+  }
+
+  async listForwarderSyncErrors(): Promise<ForwardedOrderRecord[]> {
+    return this.getList<ForwardedOrderRecord>(
+      "/api/forwarder/orders/sync-errors",
+    );
+  }
+
+  async listForwarderReconciliationIssues(): Promise<
+    ForwarderReconciliationIssue[]
+  > {
+    return this.getList<ForwarderReconciliationIssue>(
+      "/api/forwarder/reconciliation-issues",
+    );
   }
 
   // ── Platform Admin ──
@@ -1215,6 +1244,10 @@ export class ApiClient {
     );
   }
 
+  async getProductRuleCatalog(): Promise<ProductRuleCatalog> {
+    return this.get<ProductRuleCatalog>("/api/product-rule/catalog");
+  }
+
   async createPlatformPricingRule(
     command: CreatePlatformPricingRuleCommand,
   ): Promise<PlatformPricingRuleRecord> {
@@ -1277,7 +1310,7 @@ export class ApiClient {
     command: UpdateDriverMasterLifecycleCommand,
   ): Promise<DriverRegistryRecord> {
     return this.post<DriverRegistryRecord>(
-      `/api/regulatory-registry/drivers/${encodeURIComponent(driverId)}/lifecycle`,
+      `/api/regulatory-registry/drivers/${driverId}/lifecycle`,
       {
         body: command,
       },

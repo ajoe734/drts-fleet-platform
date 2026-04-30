@@ -2631,6 +2631,20 @@ export interface ReconciliationJobRecord {
   completedAt: string | null;
 }
 
+export interface ForwarderReconciliationIssue {
+  reconciliationJob: ReconciliationJobRecord;
+  mirrorOrderId: string;
+  platformCode: PlatformCode;
+  externalOrderId: string;
+  status: ForwardedOrderStatus;
+  acceptedDriverId: string | null;
+  lastSyncError: ForwarderSyncErrorRecord | null;
+  financeContext: ForwardedOrderFinanceContext;
+  manualFallback: ForwardedOrderManualFallbackRecord;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ---------------------------------------------------------------------------
 // W7-001D: Async job accepted responses
 //
