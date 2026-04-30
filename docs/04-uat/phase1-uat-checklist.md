@@ -87,8 +87,11 @@ Before starting UAT, confirm:
 | TP-027 | Change user role                                | `tenant_admin`           | P2       | ⬜        | Audit entry written                        |
 | TP-028 | View audit trail (tenant scope)                 | `tenant_admin`           | P2       | ⬜        | Only own tenant events visible             |
 | TP-029 | RBAC — tenant admin blocked from pricing engine | `tenant_admin`           | P1       | ⬜        | `403 Forbidden`                            |
+| TP-030 | Tenant bootstrap rejects wrong tenant scope     | `tenant_admin`           | P1       | ⬜        | `TENANT_SCOPE_MISMATCH`; no session issued |
+| TP-031 | Suspended tenant user cannot bootstrap session  | `tenant_admin`           | P1       | ⬜        | `TENANT_USER_SUSPENDED`                    |
+| TP-032 | Inactive partner entry cannot bootstrap         | `partner_api_client`     | P1       | ⬜        | `PARTNER_ENTRY_INACTIVE`; audit written    |
 
-**Tenant Portal P1 pass gate:** TP-001, TP-002, TP-003, TP-004, TP-006, TP-015, TP-016, TP-017, TP-019, TP-023, TP-029
+**Tenant Portal P1 pass gate:** TP-001, TP-002, TP-003, TP-004, TP-006, TP-015, TP-016, TP-017, TP-019, TP-023, TP-029, TP-030, TP-031, TP-032
 
 ---
 
@@ -149,33 +152,35 @@ Before starting UAT, confirm:
 
 ## Surface 4 — Driver App
 
-| ID     | Scenario                                       | Role     | Priority | Pass/Fail | Notes                               |
-| ------ | ---------------------------------------------- | -------- | -------- | --------- | ----------------------------------- |
-| DA-001 | Jobs list — platform badge per task            | `driver` | P1       | ⬜        | TaskTypeBadge, PlatformBadge        |
-| DA-002 | Accept task before timeout                     | `driver` | P1       | ⬜        | Acceptance time stored              |
-| DA-003 | Reject task — reason required                  | `driver` | P1       | ⬜        | Reason stored with attempt          |
-| DA-004 | Cannot start trip before arrived_pickup        | `driver` | P1       | ⬜        | `PICKUP_NOT_ARRIVED`                |
-| DA-005 | Forwarded task — routeLocked hides override    | `driver` | P1       | ⬜        | Third-party waypoints authoritative |
-| DA-006 | Fixed-price task — fare modification rejected  | `driver` | P1       | ⬜        | `FIXED_PRICE_IMMUTABLE`             |
-| DA-007 | Completion — min photo count                   | `driver` | P1       | ⬜        | `MIN_PHOTO_COUNT_NOT_MET`           |
-| DA-008 | Enterprise dispatch — signoff required         | `driver` | P1       | ⬜        | `PROOF_REQUIRED`                    |
-| DA-009 | Airport transfer — expense proof required      | `driver` | P1       | ⬜        | `EXPENSE_PROOF_REQUIRED`            |
-| DA-010 | Per-platform online/offline toggle             | `driver` | P1       | ⬜        | Correct API called                  |
-| DA-011 | Token expiry warning with countdown            | `driver` | P2       | ⬜        | Xd Yh format                        |
-| DA-012 | Re-auth flow updates token                     | `driver` | P1       | ⬜        | Urgency indicator removed after     |
-| DA-013 | Platform eligibility status displayed          | `driver` | P2       | ⬜        |                                     |
-| DA-014 | Bind new platform account                      | `driver` | P2       | ⬜        |                                     |
-| DA-015 | Unbind platform account                        | `driver` | P2       | ⬜        |                                     |
-| DA-016 | Earnings summary by platform                   | `driver` | P1       | ⬜        | gross / fee / subsidy / net         |
-| DA-017 | Driver only sees own earnings                  | `driver` | P1       | ⬜        | No cross-driver data                |
-| DA-018 | Platform discount NOT deducted from driver net | `driver` | P1       | ⬜        | ⏸ Deferred pending billing job      |
-| DA-019 | Trip lifecycle buttons match state             | `driver` | P1       | ⬜        |                                     |
-| DA-020 | Settings — update preference                   | `driver` | P3       | ⬜        |                                     |
-| DA-021 | Clock in — happy path                          | `driver` | P1       | ⬜        | work*state → `available*\*`         |
-| DA-022 | Clock in — blocked by expired license          | `driver` | P1       | ⬜        | `DRIVER_CERT_INVALID`               |
-| DA-023 | Driver reports incident during trip            | `driver` | P2       | ⬜        |                                     |
+| ID     | Scenario                                           | Role     | Priority | Pass/Fail | Notes                                                     |
+| ------ | -------------------------------------------------- | -------- | -------- | --------- | --------------------------------------------------------- |
+| DA-001 | Jobs list — platform badge per task                | `driver` | P1       | ⬜        | TaskTypeBadge, PlatformBadge                              |
+| DA-002 | Accept task before timeout                         | `driver` | P1       | ⬜        | Acceptance time stored                                    |
+| DA-003 | Reject task — reason required                      | `driver` | P1       | ⬜        | Reason stored with attempt                                |
+| DA-004 | Cannot start trip before arrived_pickup            | `driver` | P1       | ⬜        | `PICKUP_NOT_ARRIVED`                                      |
+| DA-005 | Forwarded task — routeLocked hides override        | `driver` | P1       | ⬜        | Third-party waypoints authoritative                       |
+| DA-006 | Fixed-price task — fare modification rejected      | `driver` | P1       | ⬜        | `FIXED_PRICE_IMMUTABLE`                                   |
+| DA-007 | Completion — min photo count                       | `driver` | P1       | ⬜        | `MIN_PHOTO_COUNT_NOT_MET`                                 |
+| DA-008 | Enterprise dispatch — signoff required             | `driver` | P1       | ⬜        | `PROOF_REQUIRED`                                          |
+| DA-009 | Airport transfer — expense proof required          | `driver` | P1       | ⬜        | `EXPENSE_PROOF_REQUIRED`                                  |
+| DA-010 | Per-platform online/offline toggle                 | `driver` | P1       | ⬜        | Correct API called                                        |
+| DA-011 | Token expiry warning with countdown                | `driver` | P2       | ⬜        | Xd Yh format                                              |
+| DA-012 | Re-auth flow updates token                         | `driver` | P1       | ⬜        | Urgency indicator removed after                           |
+| DA-013 | Platform eligibility status displayed              | `driver` | P2       | ⬜        |                                                           |
+| DA-014 | Bind new platform account                          | `driver` | P2       | ⬜        |                                                           |
+| DA-015 | Unbind platform account                            | `driver` | P2       | ⬜        |                                                           |
+| DA-016 | Earnings summary by platform                       | `driver` | P1       | ⬜        | gross / fee / subsidy / net                               |
+| DA-017 | Driver only sees own earnings                      | `driver` | P1       | ⬜        | No cross-driver data                                      |
+| DA-018 | Platform discount NOT deducted from driver net     | `driver` | P1       | ⬜        | ⏸ Deferred pending billing job                            |
+| DA-019 | Trip lifecycle buttons match state                 | `driver` | P1       | ⬜        |                                                           |
+| DA-020 | Settings — update preference                       | `driver` | P3       | ⬜        |                                                           |
+| DA-021 | Clock in — happy path                              | `driver` | P1       | ⬜        | work*state → `available*\*`                               |
+| DA-022 | Clock in — blocked by expired license              | `driver` | P1       | ⬜        | `DRIVER_CERT_INVALID`                                     |
+| DA-023 | Driver reports incident during trip                | `driver` | P2       | ⬜        |                                                           |
+| DA-024 | Driver device registration denied by auth gate     | `driver` | P1       | ⬜        | `DRIVER_AUTH_SUSPENDED` or `DRIVER_CERT_INVALID`          |
+| DA-025 | Revoked or suspended driver session cannot re-auth | `driver` | P1       | ⬜        | `DRIVER_DEVICE_SESSION_INVALID` / `DRIVER_AUTH_SUSPENDED` |
 
-**Driver App P1 pass gate:** DA-001 through DA-010, DA-012, DA-016, DA-017, DA-019, DA-021, DA-022
+**Driver App P1 pass gate:** DA-001 through DA-010, DA-012, DA-016, DA-017, DA-019, DA-021, DA-022, DA-024, DA-025
 
 ---
 

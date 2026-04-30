@@ -140,9 +140,9 @@ export class AuthController {
       });
     }
 
+    const requestedTenantId = command.tenantId?.trim() || null;
     const tenantId =
-      command.tenantId?.trim() ||
-      this.tenantPartnerService.getDefaultTenantId();
+      requestedTenantId || this.tenantPartnerService.getDefaultTenantId();
     const existingUser =
       this.tenantPartnerService
         .listTenantUsers(tenantId)
@@ -161,6 +161,21 @@ export class AuthController {
     }
 
     if (!existingUser) {
+      const crossTenantUser =
+        requestedTenantId &&
+        this.tenantPartnerService.findTenantUserByEmail(normalizedEmail);
+      if (crossTenantUser && crossTenantUser.tenantId !== tenantId) {
+        throw new ApiRequestError(
+          403,
+          "TENANT_SCOPE_MISMATCH",
+          "The tenant user is not invited under the requested tenant scope.",
+          {
+            email: normalizedEmail,
+            tenantId,
+          },
+        );
+      }
+
       throw new ApiRequestError(
         403,
         "TENANT_USER_NOT_INVITED",

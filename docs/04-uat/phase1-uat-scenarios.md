@@ -542,6 +542,61 @@ for current coverage math, deferred-item triage, and gate decisions, use the fin
 
 ---
 
+#### TP-030 — Tenant bootstrap rejects wrong tenant scope
+
+**Pre-conditions**
+
+- The email is invited under a different tenant than the one supplied to bootstrap
+
+**Steps**
+
+1. Call tenant bootstrap session with a valid invited email
+2. Supply a mismatched `tenantId`
+
+**Expected**
+
+- Backend returns `TENANT_SCOPE_MISMATCH`
+- No tenant bearer session is issued
+- Request does not silently fall back to another tenant
+
+---
+
+#### TP-031 — Suspended tenant user cannot bootstrap
+
+**Pre-conditions**
+
+- Tenant user status is `suspended`
+
+**Steps**
+
+1. Submit tenant bootstrap session for the suspended email
+
+**Expected**
+
+- Backend returns `TENANT_USER_SUSPENDED`
+- No tenant bearer session is issued
+- Existing tenant scope is preserved for audit review
+
+---
+
+#### TP-032 — Inactive partner entry cannot bootstrap
+
+**Pre-conditions**
+
+- Partner entry status is `inactive`
+
+**Steps**
+
+1. Submit partner bootstrap session with the entry slug and a previously valid API key
+
+**Expected**
+
+- Backend returns `PARTNER_ENTRY_INACTIVE`
+- No partner bearer session is issued
+- Audit trail records `partner_ingress_rejected` with reason `entry_inactive`
+
+---
+
 ## 2. Platform Admin UAT
 
 ### 2.1 Tenant Management
@@ -1575,6 +1630,43 @@ for current coverage math, deferred-item triage, and gate decisions, use the fin
 
 - Incident created and linked to current trip/order
 - Driver work state updated appropriately (may enter `incident_hold`)
+
+---
+
+#### DA-024 — Driver device registration denied by auth gate
+
+**Pre-conditions**
+
+- Driver is either `suspended` or has invalid / expired certifications
+
+**Steps**
+
+1. Attempt device registration or first-session bootstrap for the driver
+
+**Expected**
+
+- Backend returns `DRIVER_AUTH_SUSPENDED` or `DRIVER_CERT_INVALID`
+- No access token or refresh token is issued
+- Driver remains outside authenticated task views
+
+---
+
+#### DA-025 — Revoked or suspended driver session cannot re-auth
+
+**Pre-conditions**
+
+- Driver previously held a valid device binding
+
+**Steps**
+
+1. Revoke the bound device or suspend the driver master
+2. Attempt token refresh or open a protected driver API route with the old bearer token
+
+**Expected**
+
+- Revoked device returns `DRIVER_DEVICE_SESSION_INVALID`
+- Suspended driver returns `DRIVER_AUTH_SUSPENDED`
+- Old session is unusable without issuing a replacement binding
 
 ---
 

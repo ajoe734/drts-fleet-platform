@@ -1,11 +1,14 @@
 import { Reflector } from "@nestjs/core";
+import { EventEmitter2 } from "@nestjs/event-emitter";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
+import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { AuthController } from "../../src/modules/auth/auth.controller";
 import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
+import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import {
   AUTH_REALM_PATH_MATRIX,
@@ -35,15 +38,38 @@ function createExecutionContext(
   } as never;
 }
 
-function createAuthController(jwtAuthService = new JwtAuthService()) {
-  return new AuthController(
-    jwtAuthService,
-    new TenantPartnerService(new AuditNotificationService()),
-    new DriverDeviceSessionService(
-      jwtAuthService,
-      new DriverProfileService(new AuditNotificationService()),
-    ),
+function createAuthFixture(jwtAuthService = new JwtAuthService()) {
+  const auditNotificationService = new AuditNotificationService();
+  const driverProfileService = new DriverProfileService(
+    auditNotificationService,
   );
+  const regulatoryRegistryService = new RegulatoryRegistryService(
+    new OpsDispatchEventsService(new EventEmitter2()),
+    auditNotificationService,
+    driverProfileService,
+  );
+  const tenantPartnerService = new TenantPartnerService(
+    auditNotificationService,
+  );
+  const driverDeviceSessionService = new DriverDeviceSessionService(
+    jwtAuthService,
+    driverProfileService,
+    regulatoryRegistryService,
+  );
+  const controller = new AuthController(
+    jwtAuthService,
+    tenantPartnerService,
+    driverDeviceSessionService,
+  );
+
+  return {
+    auditNotificationService,
+    controller,
+    driverDeviceSessionService,
+    driverProfileService,
+    regulatoryRegistryService,
+    tenantPartnerService,
+  };
 }
 
 describe("bootstrap auth extraction", () => {
@@ -841,7 +867,7 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.JWT_AUDIENCE = "drts-api";
 
     const jwtAuthService = new JwtAuthService();
-    const controller = createAuthController(jwtAuthService);
+    const { controller } = createAuthFixture(jwtAuthService);
 
     const response = controller.issueTenantBootstrapSession(
       {
@@ -895,7 +921,7 @@ describe("tenant bootstrap-session auth controller", () => {
     process.env.JWT_ISSUER = "drts-tests";
     process.env.JWT_AUDIENCE = "drts-api";
 
-    const controller = createAuthController(new JwtAuthService());
+    const { controller } = createAuthFixture(new JwtAuthService());
 
     const response = controller.issueTenantBootstrapSession(
       {
@@ -922,7 +948,7 @@ describe("tenant bootstrap-session auth controller", () => {
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
 
-    const controller = createAuthController(new JwtAuthService());
+    const { controller } = createAuthFixture(new JwtAuthService());
 
     const response = controller.issueTenantBootstrapSession(
       {
@@ -951,7 +977,7 @@ describe("tenant bootstrap-session auth controller", () => {
   it("rejects bootstrap session issuance for emails without an invited tenant user", () => {
     process.env.JWT_SECRET = "test-secret";
 
-    const controller = createAuthController(new JwtAuthService());
+    const { controller } = createAuthFixture(new JwtAuthService());
 
     try {
       controller.issueTenantBootstrapSession(
@@ -975,6 +1001,106 @@ describe("tenant bootstrap-session auth controller", () => {
 
     delete process.env.JWT_SECRET;
   });
+
+  it("rejects bootstrap session issuance for suspended tenant users", () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const { controller, tenantPartnerService } = createAuthFixture(
+      new JwtAuthService(),
+    );
+    const suspendedUser = tenantPartnerService
+      .listTenantUsers("tenant-demo-001")
+      .find((user) => user.email === "viewer@acme.example");
+    expect(suspendedUser).toBeDefined();
+    if (!suspendedUser) {
+      throw new Error("expected seeded tenant user");
+    }
+
+    tenantPartnerService.updateTenantUserRole(
+      "tenant-demo-001",
+      suspendedUser.userId,
+      {
+        roleCode: suspendedUser.roleCode,
+        status: "suspended",
+      },
+      "req-tenant-bootstrap-suspend-001",
+    );
+
+    expect(() =>
+      controller.issueTenantBootstrapSession(
+        {
+          email: "viewer@acme.example",
+        },
+        "req-tenant-bootstrap-005",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      controller.issueTenantBootstrapSession(
+        {
+          email: "viewer@acme.example",
+        },
+        "req-tenant-bootstrap-005",
+      );
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "TENANT_USER_SUSPENDED",
+        },
+      });
+    }
+
+    delete process.env.JWT_SECRET;
+  });
+
+  it("rejects bootstrap session issuance when the tenant scope does not match the invited user", () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const { controller, tenantPartnerService } = createAuthFixture(
+      new JwtAuthService(),
+    );
+    tenantPartnerService.createTenantUser(
+      "tenant-other-001",
+      {
+        email: "cross-tenant@acme.example",
+        displayName: "Cross Tenant Admin",
+        roleCode: "tenant_admin",
+      },
+      "req-tenant-bootstrap-cross-001",
+    );
+
+    expect(() =>
+      controller.issueTenantBootstrapSession(
+        {
+          email: "cross-tenant@acme.example",
+          tenantId: "tenant-demo-001",
+        },
+        "req-tenant-bootstrap-006",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      controller.issueTenantBootstrapSession(
+        {
+          email: "cross-tenant@acme.example",
+          tenantId: "tenant-demo-001",
+        },
+        "req-tenant-bootstrap-006",
+      );
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "TENANT_SCOPE_MISMATCH",
+        },
+      });
+    }
+
+    delete process.env.JWT_SECRET;
+  });
 });
 
 describe("partner bootstrap-session auth controller", () => {
@@ -986,7 +1112,7 @@ describe("partner bootstrap-session auth controller", () => {
       "pk_demo_alpha_airport_20260428";
 
     const jwtAuthService = new JwtAuthService();
-    const controller = createAuthController(jwtAuthService);
+    const { controller } = createAuthFixture(jwtAuthService);
 
     const response = controller.issuePartnerBootstrapSession(
       {
@@ -1041,7 +1167,7 @@ describe("partner bootstrap-session auth controller", () => {
     process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
       "pk_demo_alpha_airport_20260428";
 
-    const controller = createAuthController(new JwtAuthService());
+    const { controller } = createAuthFixture(new JwtAuthService());
 
     expect(() =>
       controller.issuePartnerBootstrapSession(
@@ -1056,6 +1182,46 @@ describe("partner bootstrap-session auth controller", () => {
     delete process.env.JWT_SECRET;
     delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
   });
+
+  it("rejects partner bootstrap-session issuance for inactive entries and records the audit reason", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+      "pk_demo_alpha_airport_20260428";
+
+    const { controller, tenantPartnerService, auditNotificationService } =
+      createAuthFixture(new JwtAuthService());
+    tenantPartnerService.updatePlatformPartnerEntry(
+      "bank-demo-alpha-airport",
+      {
+        status: "inactive",
+      },
+      "req-partner-entry-inactive-001",
+    );
+
+    expect(() =>
+      controller.issuePartnerBootstrapSession(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          apiKey: "pk_demo_alpha_airport_20260428",
+        },
+        "req-partner-bootstrap-003",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    const auditRecord = auditNotificationService
+      .listAuditLogs()
+      .find((entry) => entry.actionName === "partner_ingress_rejected");
+    expect(auditRecord).toMatchObject({
+      resourceId: "bank-demo-alpha-airport",
+      newValuesSummary: expect.objectContaining({
+        reason: "entry_inactive",
+        outcome: "rejected",
+      }),
+    });
+
+    delete process.env.JWT_SECRET;
+    delete process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT;
+  });
 });
 
 describe("driver device-session auth controller", () => {
@@ -1065,7 +1231,7 @@ describe("driver device-session auth controller", () => {
     process.env.JWT_AUDIENCE = "drts-api";
 
     const jwtAuthService = new JwtAuthService();
-    const controller = createAuthController(jwtAuthService);
+    const { controller } = createAuthFixture(jwtAuthService);
 
     const response = controller.issueDriverDeviceSession(
       {
@@ -1107,15 +1273,8 @@ describe("driver device-session auth controller", () => {
     process.env.JWT_AUDIENCE = "drts-api";
 
     const jwtAuthService = new JwtAuthService();
-    const driverDeviceSessionService = new DriverDeviceSessionService(
-      jwtAuthService,
-      new DriverProfileService(new AuditNotificationService()),
-    );
-    const controller = new AuthController(
-      jwtAuthService,
-      new TenantPartnerService(new AuditNotificationService()),
-      driverDeviceSessionService,
-    );
+    const { controller, driverDeviceSessionService } =
+      createAuthFixture(jwtAuthService);
 
     const firstSession = controller.issueDriverDeviceSession(
       {
@@ -1172,6 +1331,100 @@ describe("driver device-session auth controller", () => {
     expect(() =>
       guard.canActivate(createExecutionContext(request)),
     ).toThrowError(ApiRequestError);
+
+    delete process.env.JWT_SECRET;
+    delete process.env.JWT_ISSUER;
+    delete process.env.JWT_AUDIENCE;
+  });
+
+  it("rejects device registration when the driver certifications are invalid", () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const { controller } = createAuthFixture(new JwtAuthService());
+
+    expect(() =>
+      controller.issueDriverDeviceSession(
+        {
+          registrationCode: "drv-demo-003",
+          deviceId: "device-test-invalid-cert-001",
+        },
+        "req-driver-device-005",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      controller.issueDriverDeviceSession(
+        {
+          registrationCode: "drv-demo-003",
+          deviceId: "device-test-invalid-cert-001",
+        },
+        "req-driver-device-005",
+      );
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "DRIVER_CERT_INVALID",
+        },
+      });
+    }
+
+    delete process.env.JWT_SECRET;
+  });
+
+  it("rejects driver bearer access after the driver is suspended", () => {
+    process.env.JWT_SECRET = "test-secret";
+    process.env.JWT_ISSUER = "drts-tests";
+    process.env.JWT_AUDIENCE = "drts-api";
+
+    const jwtAuthService = new JwtAuthService();
+    const {
+      controller,
+      driverDeviceSessionService,
+      regulatoryRegistryService,
+    } = createAuthFixture(jwtAuthService);
+
+    const session = controller.issueDriverDeviceSession(
+      {
+        registrationCode: "demo-driver",
+        deviceId: "device-test-003",
+      },
+      "req-driver-device-006",
+    ).data;
+    regulatoryRegistryService.updateDriverLifecycle("drv-demo-001", {
+      lifecycleStatus: "suspended",
+      reason: "manual compliance hold",
+    });
+
+    const guard = new BootstrapAuthGuard(
+      new Reflector(),
+      jwtAuthService,
+      driverDeviceSessionService,
+    );
+    const request: AuthenticatedRequestLike = {
+      headers: {
+        authorization: `Bearer ${session.accessToken}`,
+      },
+      method: "GET",
+      originalUrl: "/api/driver/profile",
+    };
+
+    expect(() =>
+      guard.canActivate(createExecutionContext(request)),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      guard.canActivate(createExecutionContext(request));
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "DRIVER_AUTH_SUSPENDED",
+        },
+      });
+    }
 
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;

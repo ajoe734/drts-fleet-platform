@@ -1118,6 +1118,49 @@ export class RegulatoryRegistryService implements OnModuleInit {
     );
   }
 
+  assertDriverAuthEligible(driverId: string) {
+    const driver = this.decorateDriver(this.requireDriver(driverId));
+
+    if (driver.lifecycleStatus === "suspended") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "DRIVER_AUTH_SUSPENDED",
+        "The driver account is suspended and cannot use authenticated driver sessions.",
+        {
+          driverId: driver.driverId,
+          lifecycleStatus: driver.lifecycleStatus,
+          eligibilityBlockedReasons: [...driver.eligibilityBlockedReasons],
+        },
+      );
+    }
+
+    if (driver.lifecycleStatus === "retired") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "DRIVER_AUTH_REVOKED",
+        "The driver account has been retired or revoked and cannot use authenticated driver sessions.",
+        {
+          driverId: driver.driverId,
+          lifecycleStatus: driver.lifecycleStatus,
+          eligibilityBlockedReasons: [...driver.eligibilityBlockedReasons],
+        },
+      );
+    }
+
+    if (!driver.licensesValid) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "DRIVER_CERT_INVALID",
+        "The driver certifications are invalid or expired and the driver cannot use authenticated driver sessions.",
+        {
+          driverId: driver.driverId,
+          lifecycleStatus: driver.lifecycleStatus,
+          eligibilityBlockedReasons: [...driver.eligibilityBlockedReasons],
+        },
+      );
+    }
+  }
+
   private reconcileSupplyLifecycleForAll(options?: {
     emitEvent?: boolean;
     persistContext?: string | null;

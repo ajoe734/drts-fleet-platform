@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Optional } from "@nestjs/common";
 
 import type {
   DriverDeviceBindingSummary,
@@ -11,6 +11,7 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { DriverProfileService } from "../driver-profile/driver-profile.service";
+import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 
 type DriverDeviceBindingRecord = {
   bindingId: string;
@@ -45,6 +46,8 @@ export class DriverDeviceSessionService {
   constructor(
     private readonly jwtAuthService: JwtAuthService,
     private readonly driverProfileService: DriverProfileService,
+    @Optional()
+    private readonly regulatoryRegistryService?: RegulatoryRegistryService,
   ) {}
 
   register(
@@ -82,6 +85,7 @@ export class DriverDeviceSessionService {
       );
     }
 
+    this.assertDriverAuthEligible(driverId);
     this.revokeActiveBindingForDevice(deviceId);
 
     const now = new Date().toISOString();
@@ -141,6 +145,7 @@ export class DriverDeviceSessionService {
       );
     }
 
+    this.assertDriverAuthEligible(binding.driverId);
     binding.refreshToken = createOpaqueToken("drvrefresh");
     binding.refreshedAt = new Date().toISOString();
     this.bindingsById.set(binding.bindingId, binding);
@@ -229,6 +234,31 @@ export class DriverDeviceSessionService {
       this.activeBindingIdsByDeviceId.get(resolvedDeviceId) ===
         resolvedBindingId
     );
+  }
+
+  assertSessionAccessAllowed(
+    bindingId: string | null | undefined,
+    deviceId: string | null | undefined,
+    driverId: string | null | undefined,
+    route: string,
+  ) {
+    if (!this.isBindingActive(bindingId, deviceId, driverId)) {
+      throw new ApiRequestError(
+        401,
+        "DRIVER_DEVICE_SESSION_INVALID",
+        "Driver device session is invalid, revoked, or no longer bound to this device.",
+        {
+          route,
+          bindingId: bindingId ?? null,
+          deviceId: deviceId ?? null,
+          actorId: driverId ?? null,
+        },
+      );
+    }
+
+    if (driverId) {
+      this.assertDriverAuthEligible(driverId);
+    }
   }
 
   private resolveBindingForRevoke(
@@ -332,5 +362,9 @@ export class DriverDeviceSessionService {
         ],
       },
     };
+  }
+
+  private assertDriverAuthEligible(driverId: string) {
+    this.regulatoryRegistryService?.assertDriverAuthEligible(driverId);
   }
 }

@@ -307,26 +307,11 @@ export class BootstrapAuthGuard implements CanActivate {
       return;
     }
 
-    if (
-      this.driverDeviceSessionService.isBindingActive(
-        payload.driverBindingId,
-        payload.driverDeviceId,
-        payload.sub,
-      )
-    ) {
-      return;
-    }
-
-    throw new ApiRequestError(
-      401,
-      "DRIVER_DEVICE_SESSION_INVALID",
-      "Driver device session is invalid, revoked, or no longer bound to this device.",
-      {
-        route,
-        bindingId: payload.driverBindingId ?? null,
-        deviceId: payload.driverDeviceId ?? null,
-        actorId: payload.sub,
-      },
+    this.driverDeviceSessionService.assertSessionAccessAllowed(
+      payload.driverBindingId,
+      payload.driverDeviceId,
+      payload.sub,
+      route,
     );
   }
 }

@@ -37,6 +37,55 @@ describe("TenantPartnerService sensitive-data governance", () => {
     });
   });
 
+  it("rejects partner eligibility verification when the authenticated partner scope targets another entry", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
+
+    await expect(
+      service.verifyPartnerEligibility(
+        {
+          entrySlug: "bank-demo-beta-airport",
+          referenceToken: "raw-secret-token-scope-001",
+        },
+        "req-eligibility-scope-001",
+        {
+          actorType: "partner_api_key",
+          actorId: "partner-key-alpha-demo",
+          realm: "partner",
+          scopes: [
+            "partner:entries:read",
+            "partner:eligibility:read",
+            "partner:eligibility:write",
+          ],
+          tenantId: "tenant-demo-001",
+          partnerId: "partner-bank-demo-001",
+          partnerProgramId: "program-airport-alpha",
+          partnerEntrySlug: "bank-demo-alpha-airport",
+          requestId: "req-eligibility-scope-001",
+        },
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "PARTNER_SCOPE_MISMATCH",
+        },
+      },
+    });
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "partner_ingress_rejected",
+          resourceId: "bank-demo-beta-airport",
+          newValuesSummary: expect.objectContaining({
+            reason: "identity_scope_mismatch",
+            identityPartnerEntrySlug: "bank-demo-alpha-airport",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("redacts webhook delivery signatures and tenant passenger audit payloads", async () => {
     const auditNotificationService = new AuditNotificationService();
     const webhookDispatchService = new WebhookDispatchService(

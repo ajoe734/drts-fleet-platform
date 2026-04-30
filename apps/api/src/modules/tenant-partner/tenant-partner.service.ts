@@ -1102,6 +1102,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return TENANT_ROLE_CATALOG.map((role) => ({ ...role }));
   }
 
+  findTenantUserByEmail(email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    const userRole = this.userRoles.find(
+      (candidate) => candidate.email === normalizedEmail,
+    );
+    return userRole ? this.cloneUserRole(userRole) : null;
+  }
+
   listPartnerEntries() {
     return this.partnerEntries
       .filter((entry) => entry.activeFlag && entry.status === "active")
@@ -1323,7 +1335,50 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: CreatePartnerBootstrapSessionCommand,
     requestId?: string,
   ): PartnerIngressResolution {
-    const entry = this.requirePartnerEntry(command.entrySlug);
+    const normalizedEntrySlug = command.entrySlug?.trim();
+    if (!normalizedEntrySlug) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_REQUIRED",
+        "entrySlug is required.",
+        {},
+      );
+    }
+
+    const entry = this.findPartnerEntryBySlug(normalizedEntrySlug);
+    if (!entry) {
+      this.recordPartnerIngressAttempt(null, requestId, "rejected", {
+        reason: "entry_not_found",
+        entrySlug: normalizedEntrySlug,
+      });
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "PARTNER_ENTRY_NOT_FOUND",
+        "The partner entry could not be found.",
+        {
+          entrySlug: normalizedEntrySlug,
+        },
+      );
+    }
+
+    if (!entry.activeFlag || entry.status !== "active") {
+      this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
+        reason: "entry_inactive",
+        entrySlug: entry.entrySlug,
+        status: entry.status,
+        activeFlag: entry.activeFlag,
+      });
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PARTNER_ENTRY_INACTIVE",
+        "The partner entry is inactive and cannot authenticate.",
+        {
+          entrySlug: entry.entrySlug,
+          status: entry.status,
+        },
+      );
+    }
+
     const apiKey = command.apiKey?.trim();
     if (!apiKey) {
       this.recordPartnerIngressAttempt(entry, requestId, "rejected", {
