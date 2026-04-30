@@ -50,6 +50,13 @@ export const PARTNER_ENTRY_AUTH_MODES = [
 ] as const;
 export type PartnerEntryAuthMode = (typeof PARTNER_ENTRY_AUTH_MODES)[number];
 
+export const PARTNER_ENTRY_STATUSES = [
+  "active",
+  "inactive",
+  "revoked",
+] as const;
+export type PartnerEntryStatus = (typeof PARTNER_ENTRY_STATUSES)[number];
+
 export const PARTNER_ELIGIBILITY_MODES = [
   "none",
   "bank_card_inline",
@@ -346,6 +353,35 @@ export interface PartnerEligibilityManualFallbackRecord {
   notes: string | null;
 }
 
+export interface PartnerIngressCredentialRecord {
+  keyId: string;
+  entrySlug: string;
+  keyPrefix: string;
+  maskedSuffix: string;
+  source: "env_bootstrap" | "platform_admin";
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+  issuedBy: string | null;
+  revokedBy: string | null;
+  rotationReason: string | null;
+  revokeReason: string | null;
+}
+
+export interface IssuePartnerIngressCredentialCommand {
+  rotationReason?: string | null;
+}
+
+export interface RevokePartnerIngressCredentialCommand {
+  revokeReason?: string | null;
+}
+
+export interface PartnerIngressCredentialIssued {
+  credential: PartnerIngressCredentialRecord;
+  plaintextKey: string;
+  revokedCredentialId: string | null;
+}
+
 export interface PartnerChannelEntryRecord {
   partnerId: string;
   partnerCode: string;
@@ -364,8 +400,11 @@ export interface PartnerChannelEntryRecord {
   themeAccent: string | null;
   brandingMetadata: PartnerEntryBrandingMetadata | null;
   eligibilityContract: PartnerEligibilityIntegrationContractRecord | null;
-  status: "active" | "inactive";
+  status: PartnerEntryStatus;
   activeFlag: boolean;
+  revokedAt: string | null;
+  revokedBy: string | null;
+  revokeReason: string | null;
   createdAt: string;
   updatedAt: string;
   auditMetadata: PartnerRecordAuditMetadata;
@@ -387,7 +426,7 @@ export interface CreatePartnerChannelEntryCommand {
   entryPath?: string | null;
   themeAccent?: string | null;
   brandingMetadata?: Partial<PartnerEntryBrandingMetadata> | null;
-  status?: "active" | "inactive";
+  status?: PartnerEntryStatus;
   activeFlag?: boolean;
 }
 
@@ -406,7 +445,7 @@ export interface UpdatePartnerChannelEntryCommand {
   entryPath?: string | null;
   themeAccent?: string | null;
   brandingMetadata?: Partial<PartnerEntryBrandingMetadata> | null;
-  status?: "active" | "inactive";
+  status?: PartnerEntryStatus;
   activeFlag?: boolean;
 }
 
@@ -2186,6 +2225,116 @@ export const COMPLAINT_CATEGORIES = [
 ] as const;
 export type ComplaintCategory = (typeof COMPLAINT_CATEGORIES)[number];
 
+export const COMPLAINT_RESOLUTION_CODES = [
+  "resolved_with_apology",
+  "resolved_with_refund",
+  "resolved_with_credit",
+  "resolved_with_corrective_action",
+  "resolved_driver_warning",
+  "resolved_driver_suspension",
+  "resolved_no_fault",
+  "resolved_duplicate",
+  "resolved_withdrawn",
+  "resolved_item_returned",
+  "resolved_item_not_found",
+  "resolved_other",
+] as const;
+export type ComplaintResolutionCode =
+  (typeof COMPLAINT_RESOLUTION_CODES)[number];
+
+export const COMPLAINT_CATEGORY_VALID_RESOLUTIONS: Record<
+  ComplaintCategory,
+  readonly ComplaintResolutionCode[]
+> = {
+  late_arrival: [
+    "resolved_with_apology",
+    "resolved_with_refund",
+    "resolved_with_credit",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  no_arrival: [
+    "resolved_with_apology",
+    "resolved_with_refund",
+    "resolved_with_credit",
+    "resolved_with_corrective_action",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  driver_service: [
+    "resolved_with_apology",
+    "resolved_with_refund",
+    "resolved_with_credit",
+    "resolved_driver_warning",
+    "resolved_driver_suspension",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  vehicle_condition: [
+    "resolved_with_apology",
+    "resolved_with_refund",
+    "resolved_with_corrective_action",
+    "resolved_driver_warning",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  route_issue: [
+    "resolved_with_apology",
+    "resolved_with_refund",
+    "resolved_with_credit",
+    "resolved_with_corrective_action",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  fare_dispute: [
+    "resolved_with_refund",
+    "resolved_with_credit",
+    "resolved_with_corrective_action",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  safety_concern: [
+    "resolved_with_apology",
+    "resolved_with_corrective_action",
+    "resolved_driver_warning",
+    "resolved_driver_suspension",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  lost_and_found: [
+    "resolved_item_returned",
+    "resolved_item_not_found",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  other: [
+    "resolved_with_apology",
+    "resolved_with_refund",
+    "resolved_with_credit",
+    "resolved_with_corrective_action",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+};
+
 export const COMPLAINT_CASE_STATUSES = [
   "new",
   "assigned",
@@ -2226,7 +2375,7 @@ export interface ReopenComplaintCaseCommand {
 }
 
 export interface ResolveComplaintCaseCommand {
-  resolutionCode: string;
+  resolutionCode: ComplaintResolutionCode;
   closingNote: string;
 }
 
@@ -2263,7 +2412,8 @@ export interface ComplaintCaseRecord {
   status: ComplaintCaseStatus;
   slaDueAt: string;
   slaBreach: boolean;
-  resolutionCode: string | null;
+  reopenCount: number;
+  resolutionCode: ComplaintResolutionCode | null;
   closingNote: string | null;
   createdAt: string;
   updatedAt: string;
@@ -2278,6 +2428,7 @@ export interface ComplaintTimelineEntry {
     | "case_note_added"
     | "case_reopened"
     | "sla_breached"
+    | "sla_recalculated"
     | "case_resolved"
     | "case_closed"
     | "escalated_to_incident"
@@ -2497,8 +2648,13 @@ export interface SettlementMatrixRecord {
   orderDomain: "owned" | "forwarded";
   orderSources: string[];
   payerType: string;
+  sponsorType: string;
+  invoiceOwner: string;
   invoicePath: string;
   receiptOwner: string;
+  driverPayoutAuthority: string;
+  discountFundingSource: string;
+  reimbursementRule: string;
   reconciliationPath: string;
   reportingArtifacts: string[];
   localLedgerMode: "full_service" | "shadow_only";
@@ -3336,6 +3492,130 @@ export interface SetPlatformMaintenanceModeCommand {
   reason?: string | null;
   scheduledStart?: string | null;
   scheduledEnd?: string | null;
+}
+
+export const OPERATIONAL_ALERT_KEYS = [
+  "dispatch_lag",
+  "recording_backlog",
+  "driver_state_lag",
+  "webhook_failure_burst",
+  "eligibility_review_backlog",
+] as const;
+export type OperationalAlertKey = (typeof OPERATIONAL_ALERT_KEYS)[number];
+
+export const OPERATIONAL_ALERT_STATES = [
+  "healthy",
+  "warning",
+  "critical",
+] as const;
+export type OperationalAlertState = (typeof OPERATIONAL_ALERT_STATES)[number];
+
+export const OPERATIONAL_ALERT_ROUTES = ["ops", "platform"] as const;
+export type OperationalAlertRoute = (typeof OPERATIONAL_ALERT_ROUTES)[number];
+
+export const OPERATIONAL_ALERT_UNITS = ["count", "minutes", "percent"] as const;
+export type OperationalAlertUnit = (typeof OPERATIONAL_ALERT_UNITS)[number];
+
+export interface OperationalAlertThresholds {
+  warning: number;
+  critical: number;
+  unit: OperationalAlertUnit;
+}
+
+export interface OperationalAlertRecord {
+  key: OperationalAlertKey;
+  state: OperationalAlertState;
+  measuredValue: number;
+  thresholds: OperationalAlertThresholds;
+  routes: OperationalAlertRoute[];
+  observedAt: string;
+}
+
+export interface OperationalDispatchMetrics {
+  activeOrders: number;
+  queueDepth: number;
+  laggedOrders: number;
+  redispatchOrders: number;
+  exceptionHoldOrders: number;
+  dispatchFailedOrders: number;
+  oldestReadyOrderLagMinutes: number | null;
+}
+
+export interface OperationalRecordingMetrics {
+  phoneOrders: number;
+  linkedOrders: number;
+  pendingOrders: number;
+  pendingCallSessions: number;
+  missingRecordingLinks: number;
+  oldestPendingLagMinutes: number | null;
+  linkedRatioPercent: number;
+}
+
+export interface OperationalDriverStateMetrics {
+  totalDrivers: number;
+  availableDrivers: number;
+  dispatchEligibleDrivers: number;
+  offlineDrivers: number;
+  staleLocationDrivers: number;
+  missingLocationDrivers: number;
+  oldestLocationLagMinutes: number | null;
+}
+
+export interface OperationalWebhookMetrics {
+  totalEndpoints: number;
+  activeEndpoints: number;
+  disabledEndpoints: number;
+  queuedDeliveries: number;
+  failedDeliveriesLastHour: number;
+  oldestQueuedDeliveryLagMinutes: number | null;
+}
+
+export interface OperationalEligibilityMetrics {
+  totalReviewQueue: number;
+  manualReviewQueue: number;
+  manualFallbackQueue: number;
+  ineligibleQueue: number;
+  recentFailureCount24h: number;
+}
+
+export interface OperationalReportingMetrics {
+  queuedJobs: number;
+  failedJobs: number;
+  dispatchRecordingIndexQueuedJobs: number;
+}
+
+export interface OperationalAdapterMetrics {
+  totalAdapters: number;
+  healthyAdapters: number;
+  degradedAdapters: number;
+  downAdapters: number;
+}
+
+export interface OperationalRoleView {
+  route: OperationalAlertRoute;
+  alertKeys: OperationalAlertKey[];
+  focusAreas: Array<
+    | "dispatch"
+    | "recording"
+    | "driver_state"
+    | "webhook"
+    | "eligibility"
+    | "reporting"
+    | "adapters"
+  >;
+}
+
+export interface OperationalObservabilitySnapshot {
+  generatedAt: string;
+  alerts: OperationalAlertRecord[];
+  dispatch: OperationalDispatchMetrics;
+  recording: OperationalRecordingMetrics;
+  driverState: OperationalDriverStateMetrics;
+  webhook: OperationalWebhookMetrics;
+  eligibility: OperationalEligibilityMetrics;
+  reporting: OperationalReportingMetrics;
+  adapters: OperationalAdapterMetrics;
+  roleViews: OperationalRoleView[];
 }
 
 export interface PlatformPricingRuleRecord {

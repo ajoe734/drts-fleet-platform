@@ -11,6 +11,7 @@ import {
 import type {
   AddComplaintCaseNoteCommand,
   AssignComplaintCaseCommand,
+  ComplaintCategory,
   CreateComplaintCaseCommand,
   EscalateComplaintToIncidentCommand,
   LinkComplaintToIncidentCommand,
@@ -48,6 +49,31 @@ export class ComplaintController {
     return toApiSuccessEnvelope(
       {
         items: this.complaintService.listComplaintCases(),
+      },
+      requestId,
+    );
+  }
+
+  @Post("evaluate-sla-breach")
+  evaluateAllSlaBreach(@Headers("x-request-id") requestId?: string) {
+    const breached = this.complaintService.evaluateAllSlaBreach(requestId);
+    return toApiSuccessEnvelope(
+      { breachedCount: breached.length, items: breached },
+      requestId,
+    );
+  }
+
+  @Get("resolution-codes/:category")
+  getValidResolutionCodes(
+    @Param("category") category: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      {
+        category,
+        codes: this.complaintService.getValidResolutionCodes(
+          category as ComplaintCategory,
+        ),
       },
       requestId,
     );

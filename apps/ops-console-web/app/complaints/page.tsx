@@ -7,11 +7,17 @@ import type {
   ComplaintCaseRecord,
   ComplaintCategory,
   ComplaintExportViewRecord,
+  ComplaintResolutionCode,
   ComplaintTimelineEntry,
   ComplaintCaseStatus,
   CreateComplaintCaseCommand,
+  EscalateComplaintToIncidentCommand,
 } from "@drts/contracts";
-import { COMPLAINT_CASE_STATUSES, COMPLAINT_CATEGORIES } from "@drts/contracts";
+import {
+  COMPLAINT_CASE_STATUSES,
+  COMPLAINT_CATEGORIES,
+  COMPLAINT_CATEGORY_VALID_RESOLUTIONS,
+} from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
@@ -55,15 +61,28 @@ export default function ComplaintsPage() {
   const [assigneeId, setAssigneeId] = useState("AGENT-OPS-002");
   const [assignmentNote, setAssignmentNote] = useState("");
   const [noteText, setNoteText] = useState("");
-  const [resolutionCode, setResolutionCode] = useState("RESOLVED");
+  const [resolutionCode, setResolutionCode] =
+    useState<ComplaintResolutionCode>("resolved_other");
   const [closingNote, setClosingNote] = useState("");
   const [reopenReason, setReopenReason] = useState("");
+  const [escalateTitle, setEscalateTitle] = useState("");
+  const [escalateSeverity, setEscalateSeverity] =
+    useState<EscalateComplaintToIncidentCommand["severity"]>("medium");
+  const [escalateReason, setEscalateReason] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
 
   const selectedRecord = useMemo(
     () => records.find((record) => record.caseNo === selectedCaseNo) ?? null,
     [records, selectedCaseNo],
+  );
+
+  const validResolutionCodes = useMemo(
+    () =>
+      selectedRecord
+        ? (COMPLAINT_CATEGORY_VALID_RESOLUTIONS[selectedRecord.category] ?? [])
+        : [],
+    [selectedRecord],
   );
 
   useEffect(() => {
@@ -424,6 +443,7 @@ export default function ComplaintsPage() {
                       <th>{t("complaints.col.assignee")}</th>
                       <th>{t("complaints.col.order")}</th>
                       <th>{t("complaints.col.hotline")}</th>
+                      <th>SLA</th>
                       <th>{t("complaints.col.created")}</th>
                     </tr>
                   </thead>
@@ -442,6 +462,13 @@ export default function ComplaintsPage() {
                         <td>{record.assigneeId ?? "-"}</td>
                         <td>{record.relatedOrderId ?? "-"}</td>
                         <td>{record.relatedCallId ?? "-"}</td>
+                        <td>
+                          {record.slaBreach ? (
+                            <span className="sla-badge">BREACH</span>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
                         <td>{formatDateTime(record.createdAt)}</td>
                       </tr>
                     ))}
@@ -490,6 +517,15 @@ export default function ComplaintsPage() {
                               : t("common.no"),
                           })}
                         </small>
+                        {selectedRecord.slaBreach && (
+                          <span className="sla-badge">SLA BREACH</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="label">
+                          {t("complaints.detail.reopenCount")}
+                        </span>
+                        <strong>{selectedRecord.reopenCount ?? 0}</strong>
                       </div>
                       <div>
                         <span className="label">
@@ -502,8 +538,27 @@ export default function ComplaintsPage() {
                         <span className="label">
                           {t("complaints.detail.resolution")}
                         </span>
-                        <strong>{selectedRecord.resolutionCode ?? "-"}</strong>
+                        <strong>
+                          {selectedRecord.resolutionCode
+                            ? formatOpsCodeLabel(
+                                locale,
+                                selectedRecord.resolutionCode,
+                              )
+                            : "-"}
+                        </strong>
                         <small>{selectedRecord.closingNote ?? "-"}</small>
+                      </div>
+                      <div>
+                        <span className="label">
+                          {t("complaints.detail.linkedIncident")}
+                        </span>
+                        {selectedRecord.relatedIncidentId ? (
+                          <Link className="inline-link" href="/incidents">
+                            <strong>{selectedRecord.relatedIncidentId}</strong>
+                          </Link>
+                        ) : (
+                          <strong>-</strong>
+                        )}
                       </div>
                     </div>
                     <p className="description">{selectedRecord.description}</p>
@@ -630,16 +685,20 @@ export default function ComplaintsPage() {
                         }}
                       >
                         <h4>{t("complaints.resolveCase")}</h4>
-                        <input
-                          type="text"
-                          placeholder={t(
-                            "complaints.resolutionCodePlaceholder",
-                          )}
+                        <select
                           value={resolutionCode}
                           onChange={(event) =>
-                            setResolutionCode(event.target.value)
+                            setResolutionCode(
+                              event.target.value as ComplaintResolutionCode,
+                            )
                           }
-                        />
+                        >
+                          {validResolutionCodes.map((code) => (
+                            <option key={code} value={code}>
+                              {formatOpsCodeLabel(locale, code)}
+                            </option>
+                          ))}
+                        </select>
                         <textarea
                           rows={3}
                           placeholder={t("complaints.closingNotePlaceholder")}
@@ -713,6 +772,77 @@ export default function ComplaintsPage() {
                       </form>
                     </div>
                   </section>
+
+                  {!selectedRecord.relatedIncidentId && (
+                    <section className="detail-card">
+                      <form
+                        className="stack-form"
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void runAction("escalate-incident", async () => {
+                            await getOpsClient().escalateComplaintToIncident(
+                              selectedRecord.caseNo,
+                              {
+                                title: escalateTitle,
+                                severity: escalateSeverity,
+                                reason: escalateReason,
+                              },
+                            );
+                            setEscalateTitle("");
+                            setEscalateReason("");
+                            setEscalateSeverity("medium");
+                            await loadRecords(selectedRecord.caseNo);
+                          });
+                        }}
+                      >
+                        <h4>{t("complaints.escalateToIncident")}</h4>
+                        <input
+                          type="text"
+                          placeholder={t("complaints.escalateTitlePlaceholder")}
+                          value={escalateTitle}
+                          onChange={(event) =>
+                            setEscalateTitle(event.target.value)
+                          }
+                          required
+                        />
+                        <select
+                          value={escalateSeverity}
+                          onChange={(event) =>
+                            setEscalateSeverity(
+                              event.target
+                                .value as EscalateComplaintToIncidentCommand["severity"],
+                            )
+                          }
+                        >
+                          {(["low", "medium", "high", "critical"] as const).map(
+                            (sev) => (
+                              <option key={sev} value={sev}>
+                                {formatOpsCodeLabel(locale, sev)}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                        <textarea
+                          rows={3}
+                          placeholder={t(
+                            "complaints.escalateReasonPlaceholder",
+                          )}
+                          value={escalateReason}
+                          onChange={(event) =>
+                            setEscalateReason(event.target.value)
+                          }
+                          required
+                        />
+                        <button
+                          className="btn btn-warning"
+                          type="submit"
+                          disabled={busyKey === "escalate-incident"}
+                        >
+                          {t("complaints.escalateBtn")}
+                        </button>
+                      </form>
+                    </section>
+                  )}
 
                   <section className="detail-card">
                     <h4>{t("complaints.timelineExport")}</h4>
@@ -820,6 +950,15 @@ export default function ComplaintsPage() {
             background: #9a3412;
             color: #fff;
           }
+          .btn-warning {
+            background: #fef3c7;
+            border-color: #f59e0b;
+            color: #92400e;
+          }
+          .inline-link {
+            color: #0f172a;
+            text-decoration: none;
+          }
           .content-grid {
             grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
             margin-top: 1rem;
@@ -896,6 +1035,18 @@ export default function ComplaintsPage() {
           }
           .full-span {
             grid-column: 1 / -1;
+          }
+          .sla-badge {
+            display: inline-block;
+            margin-top: 0.3rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 999px;
+            background: #fef2f2;
+            color: #dc2626;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            border: 1px solid #fca5a5;
           }
           .empty-state {
             color: #64748b;

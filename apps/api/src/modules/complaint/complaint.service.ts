@@ -10,11 +10,17 @@ import type {
   ComplaintCaseStatus,
   ComplaintCategory,
   ComplaintExportViewRecord,
+  ComplaintResolutionCode,
   ComplaintTimelineEntry,
   CreateComplaintCaseCommand,
   LinkComplaintToIncidentCommand,
   ReopenComplaintCaseCommand,
   ResolveComplaintCaseCommand,
+} from "@drts/contracts";
+
+import {
+  COMPLAINT_CATEGORY_VALID_RESOLUTIONS,
+  COMPLAINT_RESOLUTION_CODES,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -51,6 +57,7 @@ const TIMELINE_ACTIONS = {
   noteAdded: "case_note_added",
   reopened: "case_reopened",
   slaBreached: "sla_breached",
+  slaRecalculated: "sla_recalculated",
   resolved: "case_resolved",
   closed: "case_closed",
   escalatedToIncident: "escalated_to_incident",
@@ -118,6 +125,7 @@ export class ComplaintService implements OnModuleInit {
       status: "new",
       slaDueAt: this.calculateSlaDueAt(command.category, command.severity, now),
       slaBreach: false,
+      reopenCount: 0,
       resolutionCode: null,
       closingNote: null,
       createdAt,
@@ -311,6 +319,11 @@ export class ComplaintService implements OnModuleInit {
       return this.cloneComplaintCase(complaintCase);
     }
 
+    this.assertValidResolutionCode(
+      command.resolutionCode,
+      complaintCase.category,
+    );
+
     const updated = {
       ...complaintCase,
       status: "resolved" as ComplaintCaseStatus,
@@ -363,6 +376,11 @@ export class ComplaintService implements OnModuleInit {
     if (complaintCase.status === "closed") {
       return this.cloneComplaintCase(complaintCase);
     }
+
+    this.assertValidResolutionCode(
+      command.resolutionCode,
+      complaintCase.category,
+    );
 
     const updated = {
       ...complaintCase,
@@ -424,21 +442,38 @@ export class ComplaintService implements OnModuleInit {
       );
     }
 
+    const now = new Date();
+    const newSlaDueAt = this.calculateSlaDueAt(
+      complaintCase.category,
+      complaintCase.severity,
+      now,
+    );
+
     const updated = {
       ...complaintCase,
       status: "reopened" as ComplaintCaseStatus,
-      updatedAt: new Date().toISOString(),
+      slaDueAt: newSlaDueAt,
+      slaBreach: false,
+      reopenCount: (complaintCase.reopenCount ?? 0) + 1,
+      updatedAt: now.toISOString(),
     };
     this.replaceComplaintCase(updated);
-    const timelineEntry = this.appendTimelineEntry(
+    const reopenEntry = this.appendTimelineEntry(
       caseNo,
       TIMELINE_ACTIONS.reopened,
       command.reason,
+      now.toISOString(),
+    );
+    const slaEntry = this.appendTimelineEntry(
+      caseNo,
+      TIMELINE_ACTIONS.slaRecalculated,
+      `SLA recalculated on reopen. New due: ${newSlaDueAt}. Reopen #${updated.reopenCount}.`,
+      now.toISOString(),
     );
     this.persistChanges(
       {
         complaintCases: [updated],
-        complaintTimelines: [timelineEntry],
+        complaintTimelines: [reopenEntry, slaEntry],
       },
       "reopen_complaint_case",
     );
@@ -454,6 +489,9 @@ export class ComplaintService implements OnModuleInit {
         newValuesSummary: {
           status: updated.status,
           reason: command.reason,
+          reopenCount: updated.reopenCount,
+          slaDueAt: newSlaDueAt,
+          slaBreach: false,
         },
       },
       requestId,
@@ -636,6 +674,55 @@ export class ComplaintService implements OnModuleInit {
     );
 
     return this.cloneComplaintCase(updated);
+  }
+
+  evaluateAllSlaBreach(requestId?: string) {
+    const now = new Date();
+    const results: ComplaintCaseRecord[] = [];
+    for (const complaintCase of this.complaintCases) {
+      if (complaintCase.slaBreach) {
+        continue;
+      }
+      if (
+        complaintCase.status === "resolved" ||
+        complaintCase.status === "closed"
+      ) {
+        continue;
+      }
+      if (new Date(complaintCase.slaDueAt) <= now) {
+        results.push(
+          this.markComplaintSlaBreach(complaintCase.caseNo, requestId),
+        );
+      }
+    }
+    return results;
+  }
+
+  getValidResolutionCodes(category: ComplaintCategory) {
+    return [...(COMPLAINT_CATEGORY_VALID_RESOLUTIONS[category] ?? [])];
+  }
+
+  private assertValidResolutionCode(
+    code: string,
+    category: ComplaintCategory,
+  ): asserts code is ComplaintResolutionCode {
+    if (!COMPLAINT_RESOLUTION_CODES.includes(code as ComplaintResolutionCode)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "INVALID_RESOLUTION_CODE",
+        "Invalid complaint resolution code.",
+        { resolutionCode: code },
+      );
+    }
+    const validForCategory = COMPLAINT_CATEGORY_VALID_RESOLUTIONS[category];
+    if (!validForCategory?.includes(code as ComplaintResolutionCode)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RESOLUTION_CODE_NOT_VALID_FOR_CATEGORY",
+        `Resolution code "${code}" is not valid for category "${category}".`,
+        { resolutionCode: code, category },
+      );
+    }
   }
 
   private calculateSlaDueAt(

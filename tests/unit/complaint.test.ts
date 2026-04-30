@@ -59,13 +59,13 @@ describe("complaint service", () => {
     });
 
     complaintService.resolveComplaintCase(complaintCase.caseNo, {
-      resolutionCode: "TEMP_RESOLUTION",
+      resolutionCode: "resolved_driver_warning",
       closingNote: "已先提供初步處理",
     });
     const closedCase = complaintService.closeComplaintCase(
       complaintCase.caseNo,
       {
-        resolutionCode: "FINAL_CLOSE",
+        resolutionCode: "resolved_driver_warning",
         closingNote: "案件已正式結案",
       },
     );
@@ -81,6 +81,9 @@ describe("complaint service", () => {
     expect(reopenedCase.caseNo).toBe(complaintCase.caseNo);
     expect(reopenedCase.status).toBe("reopened");
 
+    expect(reopenedCase.reopenCount).toBe(1);
+    expect(reopenedCase.slaBreach).toBe(false);
+
     const timeline = complaintService.getComplaintTimeline(
       complaintCase.caseNo,
     );
@@ -89,8 +92,11 @@ describe("complaint service", () => {
       "case_resolved",
       "case_closed",
       "case_reopened",
+      "sla_recalculated",
     ]);
-    expect(timeline.at(-1)?.note).toBe("乘客提供新憑證");
+    expect(
+      timeline.find((entry) => entry.action === "case_reopened")?.note,
+    ).toBe("乘客提供新憑證");
   });
 
   it("assigns, notes, and exports complaint detail for operator closeout", () => {
@@ -116,11 +122,11 @@ describe("complaint service", () => {
       note: "Requested trip and meter evidence from operator",
     });
     complaintService.resolveComplaintCase(complaintCase.caseNo, {
-      resolutionCode: "FARE_ADJUSTED",
+      resolutionCode: "resolved_with_refund",
       closingNote: "已確認金額並回覆乘客",
     });
     complaintService.closeComplaintCase(complaintCase.caseNo, {
-      resolutionCode: "FARE_ADJUSTED",
+      resolutionCode: "resolved_with_refund",
       closingNote: "正式結案並可供匯出",
     });
     const exportView = complaintService.getComplaintExportView(
@@ -151,7 +157,7 @@ describe("complaint service", () => {
     });
 
     complaintService.resolveComplaintCase(complaintCase.caseNo, {
-      resolutionCode: "IN_REVIEW",
+      resolutionCode: "resolved_with_corrective_action",
       closingNote: "案件持續處理中",
     });
 
@@ -198,6 +204,7 @@ describe("complaint service", () => {
             caseSource: "web",
             relatedOrderId: null,
             relatedCallId: null,
+            relatedIncidentId: null,
             category: "other",
             severity: "normal",
             description: "先前已建立的案件",
@@ -205,6 +212,7 @@ describe("complaint service", () => {
             status: "new",
             slaDueAt: "2026-04-12T00:00:00Z",
             slaBreach: false,
+            reopenCount: 0,
             resolutionCode: null,
             closingNote: null,
             createdAt: "2026-04-10T08:00:00Z",

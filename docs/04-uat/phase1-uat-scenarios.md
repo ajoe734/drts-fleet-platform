@@ -26,6 +26,21 @@ This file stays as the canonical scenario inventory. It is not the live sign-off
 for current coverage math, deferred-item triage, and gate decisions, use the finalized
 `FBP-013C` evidence pack and the `FBP-013D` synthesis packet.
 
+### Workflow family map
+
+This scenario inventory feeds the workflow-family release matrix at
+`docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`.
+
+| Workflow family | Scenario clusters in this file                                      | Companion automated path                                                           |
+| --------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `WF-TEN-001`    | tenant bootstrap / tenant-boundary rows plus `E2E-004`              | `tests/e2e/E2E-004-tenant-attribution.sh`                                          |
+| `WF-ORD-001`    | tenant booking flows plus `E2E-001` / `E2E-004`                     | `tests/smoke/02-booking-create.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`     |
+| `WF-DSP-001`    | dispatch queue / assign / reassign rows plus `E2E-001`              | `tests/smoke/03-dispatch-assign.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh`    |
+| `WF-DRV-001`    | driver task, auth, and platform-presence rows plus `E2E-001`        | `tests/smoke/04-driver-task-accept.sh`, `tests/e2e/E2E-001-enterprise-dispatch.sh` |
+| `WF-FWD-001`    | forwarded-order mirror row `E2E-002` and route-locked driver rows   | `tests/e2e/E2E-002-forwarded-order.sh`                                             |
+| `WF-COM-001`    | phone-order / proof / recording / filing rows plus manual `E2E-003` | manual-only in baseline; negative/live expansion tracked separately                |
+| `WF-FIN-001`    | invoice, report, and sensitive-download rows plus `E2E-001`         | `tests/smoke/05-billing-invoice.sh`, `tests/smoke/06-report-export.sh`             |
+
 ### Scope boundary
 
 - Phase 1 only: `standard_taxi` and `business_dispatch` (subtypes: `enterprise_dispatch`,
@@ -1756,3 +1771,75 @@ manual test scripts in the WE-004 harness.
 ---
 
 _End of WE-005 UAT Scenario Pack draft. Final sign-off pending WE-004 smoke evidence mapping._
+
+---
+
+## 8. Complaint Workflow UAT Scenarios (ORX-CS-001)
+
+Added: 2026-04-30 | Owner: Claude2 | Reviewer: Codex
+
+### SC-CS-001: Complaint category → SLA mapping
+
+**Precondition:** Operator has access to Ops Console complaint workspace.
+
+| Step | Action                                                  | Expected                                                   |
+| ---- | ------------------------------------------------------- | ---------------------------------------------------------- |
+| 1    | Create a `safety_concern` / `high` severity complaint   | SLA due is set to ~2 hours from now (4h base ÷ 2 for high) |
+| 2    | Create a `lost_and_found` / `normal` severity complaint | SLA due is set to ~72 hours from now                       |
+| 3    | Create a `fare_dispute` / `normal` severity complaint   | SLA due is set to ~48 hours from now                       |
+
+**Pass criteria:** SLA due times match the category+severity matrix defined in `DEFAULT_SLA_HOURS_BY_CATEGORY`.
+
+### SC-CS-002: Complaint category → valid resolution codes
+
+| Step | Action                                                                              | Expected                                                                                            |
+| ---- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 1    | Select a `fare_dispute` complaint and open resolve form                             | Resolution dropdown shows: refund, credit, corrective action, no fault, duplicate, withdrawn, other |
+| 2    | Select a `lost_and_found` complaint and open resolve form                           | Resolution dropdown shows: item returned, item not found, no fault, duplicate, withdrawn, other     |
+| 3    | Attempt to resolve a `fare_dispute` complaint with `resolved_item_returned` via API | API rejects with `RESOLUTION_CODE_NOT_VALID_FOR_CATEGORY`                                           |
+
+**Pass criteria:** Resolution code dropdown is filtered per category. Invalid codes are rejected server-side.
+
+### SC-CS-003: Reopen preserves case identity and resets SLA
+
+| Step | Action                                 | Expected                                                                                  |
+| ---- | -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 1    | Create, resolve, and close a complaint | Case is `closed` with resolution code and closing note                                    |
+| 2    | Reopen the closed case with a reason   | Case stays on the same `caseNo`, status becomes `reopened`, `reopenCount` increments to 1 |
+| 3    | Check SLA fields                       | `slaDueAt` is recalculated from current time, `slaBreach` is reset to `false`             |
+| 4    | Check timeline                         | Timeline includes `case_reopened` and `sla_recalculated` entries                          |
+| 5    | Close and reopen again                 | `reopenCount` increments to 2                                                             |
+
+**Pass criteria:** Case identity is preserved. SLA is fresh on each reopen. Full history is visible in timeline.
+
+### SC-CS-004: SLA breach is a flag, not a state overwrite
+
+| Step | Action                                   | Expected                                                        |
+| ---- | ---------------------------------------- | --------------------------------------------------------------- |
+| 1    | Create a complaint and mark SLA breach   | `slaBreach` becomes `true`, `status` remains unchanged          |
+| 2    | Continue investigation (add note)        | Status moves to `under_investigation`, `slaBreach` stays `true` |
+| 3    | Check notifications                      | An `ops_notice` notification was created for the SLA breach     |
+| 4    | Reopen a previously breached+closed case | `slaBreach` resets to `false`, new SLA begins                   |
+
+**Pass criteria:** SLA breach never overwrites the workflow status. Breach flag is independent. Reopen resets the breach.
+
+### SC-CS-005: Automatic SLA breach sweep
+
+| Step | Action                                                                | Expected                                                       |
+| ---- | --------------------------------------------------------------------- | -------------------------------------------------------------- |
+| 1    | Create complaints with past-due SLA times (or wait for SLA to expire) | Cases exist with `slaBreach: false` and `slaDueAt` in the past |
+| 2    | Call `POST /complaints/evaluate-sla-breach`                           | All overdue open cases are marked `slaBreach: true`            |
+| 3    | Call the endpoint again                                               | Already-breached cases are not double-processed                |
+
+**Pass criteria:** Bulk SLA evaluation correctly identifies and marks all overdue cases.
+
+### SC-CS-006: Cross-lane incident linking
+
+| Step | Action                                              | Expected                                                                                                |
+| ---- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 1    | Escalate a `safety_concern` complaint to incident   | New incident is created, complaint `relatedIncidentId` is set, incident `relatedComplaintCaseNo` is set |
+| 2    | Attempt to escalate the same complaint again        | Rejected with `COMPLAINT_ALREADY_ESCALATED`                                                             |
+| 3    | Link a different complaint to an existing incident  | Both records are cross-linked                                                                           |
+| 4    | Attempt to relink either to a different counterpart | Rejected with conflict error                                                                            |
+
+**Pass criteria:** Complaint-incident links are bidirectional, exclusive, and auditable.
