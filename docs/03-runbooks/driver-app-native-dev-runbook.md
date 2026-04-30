@@ -192,8 +192,13 @@ The current Phase 1 implementation for production-grade driver identity:
 3. **Secure persistence**: The app stores the device ID and provisioning
    session in `expo-secure-store`.
 
-4. **Token refresh**: On later launches, `initializeDriverIdentity()` calls
-   `/api/auth/driver/device/refresh` before hydrating the API client.
+4. **Token refresh**: On later launches, on periodic foreground revalidation,
+   and whenever the app returns to the foreground,
+   `initializeDriverIdentity()` calls
+   `/api/auth/driver/device/refresh` before hydrating the API client again.
+   Auth failures clear the stored binding and send the user back to the
+   provisioning form; transient refresh failures keep the cached session until
+   the next successful refresh.
 
 5. **Revocation enforcement**: Driver Bearer tokens carry a backend binding
    reference, and driver routes reject revoked or stale bindings even if the
@@ -220,7 +225,8 @@ After installing the build, confirm:
 5. Trip screen can fetch active task state.
 6. Earnings screen loads summary data.
 7. Platform presence screen loads and shows connected platforms.
-8. Revoked bindings fail refresh and return the app to the provisioning form.
+8. Revoked or suspended bindings fail refresh, surface a driver-facing
+   explanation, and return the app to the provisioning form.
 9. Platform admin can revoke a driver device binding from the Fleet surface,
    after which the device may be rebound through the onboarding registration
    flow.

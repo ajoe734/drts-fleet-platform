@@ -40,6 +40,7 @@ let client: ApiClient | null = null;
 let hydrated = false;
 let hydrationPromise: Promise<void> | null = null;
 let provisionedSession: DriverDeviceProvisioningSession | null = null;
+let driverIdentityIssue: string | null = null;
 
 function createLocalId(prefix: string): string {
   if (
@@ -59,6 +60,94 @@ function applySession(session: DriverDeviceProvisioningSession | null) {
     : DEV_DRIVER_ID
       ? createDriverClient(API_URL, DEV_DRIVER_ID)
       : null;
+}
+
+function setDriverIdentityIssue(message: string | null) {
+  driverIdentityIssue = message?.trim() ? message.trim() : null;
+}
+
+function parseApiError(error: unknown): {
+  status: number | null;
+  code: string | null;
+  message: string | null;
+} {
+  const fallback =
+    error instanceof Error && error.message.trim()
+      ? error.message.trim()
+      : null;
+  if (!(error instanceof Error)) {
+    return {
+      status: null,
+      code: null,
+      message: fallback,
+    };
+  }
+
+  const apiMatch = /^API error (\d+):\s*(.*)$/s.exec(error.message);
+  if (!apiMatch) {
+    return {
+      status: null,
+      code: null,
+      message: fallback,
+    };
+  }
+
+  const [, statusText, payloadText] = apiMatch;
+  let code: string | null = null;
+  let message: string | null = null;
+
+  try {
+    const payload = JSON.parse(payloadText) as {
+      error?: { code?: string; message?: string };
+    };
+    code = payload.error?.code ?? null;
+    message = payload.error?.message ?? null;
+  } catch {
+    message = payloadText.trim() || null;
+  }
+
+  return {
+    status: Number.parseInt(statusText, 10),
+    code,
+    message: message ?? fallback,
+  };
+}
+
+function isDriverSessionAuthFailure(error: unknown): boolean {
+  const parsed = parseApiError(error);
+  if (parsed.code) {
+    return (
+      parsed.code === "DRIVER_DEVICE_REFRESH_INVALID" ||
+      parsed.code === "DRIVER_AUTH_SUSPENDED" ||
+      parsed.code === "DRIVER_AUTH_REVOKED" ||
+      parsed.code === "DRIVER_CERT_INVALID" ||
+      parsed.code === "DRIVER_DEVICE_SESSION_INVALID" ||
+      parsed.code === "JWT_INVALID"
+    );
+  }
+
+  return parsed.status === 401 || parsed.status === 403;
+}
+
+function getDriverIdentityIssueMessage(error: unknown): string {
+  const parsed = parseApiError(error);
+  switch (parsed.code) {
+    case "DRIVER_DEVICE_REFRESH_INVALID":
+    case "DRIVER_DEVICE_SESSION_INVALID":
+      return "此裝置的司機綁定已失效或被撤銷，請重新輸入註冊碼綁定。";
+    case "DRIVER_AUTH_SUSPENDED":
+      return "此司機帳號已被停權，暫時無法刷新裝置登入。";
+    case "DRIVER_AUTH_REVOKED":
+      return "此司機帳號已退役或撤銷，請聯絡平台管理員。";
+    case "DRIVER_CERT_INVALID":
+      return "司機證件狀態無效，請聯絡平台管理員重新啟用。";
+    default:
+      return parsed.message ?? "裝置登入已失效，請重新註冊。";
+  }
+}
+
+export function getDriverIdentityIssue(): string | null {
+  return driverIdentityIssue;
 }
 
 async function getOrCreateDeviceId(): Promise<string> {
@@ -93,15 +182,13 @@ export function isDriverIdentityHydrated(): boolean {
 }
 
 export async function initializeDriverIdentity(): Promise<void> {
-  if (hydrated) {
-    return;
-  }
   if (hydrationPromise) {
     return hydrationPromise;
   }
 
   hydrationPromise = (async () => {
     if (DEV_DRIVER_ID) {
+      setDriverIdentityIssue(null);
       applySession(null);
       hydrated = true;
       return;
@@ -110,22 +197,39 @@ export async function initializeDriverIdentity(): Promise<void> {
     const storedSessionJson =
       await SecureStore.getItemAsync(DRIVER_SESSION_KEY);
     if (!storedSessionJson) {
+      setDriverIdentityIssue(null);
       applySession(null);
       hydrated = true;
       return;
     }
 
+    let storedSession: DriverDeviceProvisioningSession;
     try {
-      const storedSession = JSON.parse(
+      storedSession = JSON.parse(
         storedSessionJson,
       ) as DriverDeviceProvisioningSession;
+    } catch {
+      setDriverIdentityIssue("裝置登入資料已失效，請重新註冊。");
+      await clearStoredSession();
+      hydrated = true;
+      return;
+    }
+
+    try {
+      applySession(storedSession);
       const refreshedSession = await publicClient.refreshDriverDeviceSession({
         refreshToken: storedSession.refreshToken,
         deviceId: storedSession.deviceId,
       });
+      setDriverIdentityIssue(null);
       await persistSession(refreshedSession);
-    } catch {
-      await clearStoredSession();
+    } catch (error) {
+      if (isDriverSessionAuthFailure(error)) {
+        setDriverIdentityIssue(getDriverIdentityIssueMessage(error));
+        await clearStoredSession();
+      } else {
+        applySession(provisionedSession);
+      }
     }
 
     hydrated = true;
@@ -150,12 +254,14 @@ export async function registerDriverDevice(
     deviceId,
     deviceLabel: deviceLabel?.trim() || null,
   });
+  setDriverIdentityIssue(null);
   await persistSession(session);
   hydrated = true;
   return session;
 }
 
 export async function clearDriverProvisioning(): Promise<void> {
+  setDriverIdentityIssue(null);
   await clearStoredSession();
   hydrated = true;
 }
@@ -173,6 +279,7 @@ export async function revokeDriverDeviceBinding(): Promise<void> {
       deviceId: session.deviceId,
     });
   } finally {
+    setDriverIdentityIssue(null);
     await clearStoredSession();
     hydrated = true;
   }

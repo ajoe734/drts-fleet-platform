@@ -53,6 +53,7 @@ export class DriverDeviceSessionService {
 
   register(
     command: RegisterDriverDeviceCommand,
+    requestId?: string,
   ): DriverDeviceProvisioningSession {
     const registrationCode = command.registrationCode?.trim();
     const deviceId = command.deviceId?.trim();
@@ -87,7 +88,7 @@ export class DriverDeviceSessionService {
     }
 
     this.assertDriverAuthEligible(driverId);
-    this.revokeActiveBindingForDevice(deviceId);
+    this.revokeActiveBindingForDevice(deviceId, requestId);
 
     const now = new Date().toISOString();
     const binding: DriverDeviceBindingRecord = {
@@ -107,6 +108,7 @@ export class DriverDeviceSessionService {
     this.driverProfileService.recordDeviceBinding(
       driverId,
       this.toBindingSummary(binding),
+      requestId,
     );
 
     return this.issueSession(binding);
@@ -179,22 +181,7 @@ export class DriverDeviceSessionService {
       );
     }
 
-    if (
-      identity?.realm === "driver" &&
-      identity.actorId &&
-      binding.driverId !== identity.actorId
-    ) {
-      throw new ApiRequestError(
-        403,
-        "DRIVER_DEVICE_BINDING_FORBIDDEN",
-        "The current driver identity cannot revoke another driver's device binding.",
-        {
-          actorId: identity.actorId,
-          driverId: binding.driverId,
-          bindingId: binding.bindingId,
-        },
-      );
-    }
+    this.assertIdentityCanRevokeBinding(binding, identity);
 
     const revokedAt = new Date().toISOString();
     binding.active = false;
@@ -211,6 +198,7 @@ export class DriverDeviceSessionService {
       binding.driverId,
       binding.bindingId,
       revokedAt,
+      this.resolveRevocationAuditActor(binding, identity),
       requestId,
     );
 
@@ -295,7 +283,7 @@ export class DriverDeviceSessionService {
     return binding?.active ? binding : null;
   }
 
-  private revokeActiveBindingForDevice(deviceId: string) {
+  private revokeActiveBindingForDevice(deviceId: string, requestId?: string) {
     const existing = this.getActiveBindingByDeviceId(deviceId);
     if (!existing) {
       return;
@@ -310,6 +298,12 @@ export class DriverDeviceSessionService {
       existing.driverId,
       existing.bindingId,
       existing.revokedAt,
+      {
+        actorId: existing.driverId,
+        actorType: "system",
+        tenantId: null,
+      },
+      requestId,
     );
   }
 
@@ -377,5 +371,109 @@ export class DriverDeviceSessionService {
 
   private assertDriverAuthEligible(driverId: string) {
     this.regulatoryRegistryService?.assertDriverAuthEligible(driverId);
+  }
+
+  private assertIdentityCanRevokeBinding(
+    binding: DriverDeviceBindingRecord,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (!identity) {
+      throw new ApiRequestError(
+        403,
+        "DRIVER_DEVICE_BINDING_FORBIDDEN",
+        "Only the bound driver or an authorized control-plane actor can revoke this driver device binding.",
+        {
+          bindingId: binding.bindingId,
+          deviceId: binding.deviceId,
+        },
+      );
+    }
+
+    if (identity.realm === "driver") {
+      if (
+        identity.actorId === binding.driverId &&
+        identity.scopes.includes("driver:write")
+      ) {
+        return;
+      }
+
+      throw new ApiRequestError(
+        403,
+        "DRIVER_DEVICE_BINDING_FORBIDDEN",
+        "The current driver identity cannot revoke another driver's device binding.",
+        {
+          actorId: identity.actorId,
+          driverId: binding.driverId,
+          bindingId: binding.bindingId,
+        },
+      );
+    }
+
+    if (
+      (identity.realm === "platform" ||
+        identity.realm === "ops" ||
+        identity.realm === "system") &&
+      identity.scopes.some(
+        (scope) =>
+          scope === "foundation:write" ||
+          scope === "regulatory:write" ||
+          scope === "driver:write",
+      )
+    ) {
+      return;
+    }
+
+    throw new ApiRequestError(
+      403,
+      "DRIVER_DEVICE_BINDING_FORBIDDEN",
+      "Only the bound driver or an authorized control-plane actor can revoke this driver device binding.",
+      {
+        actorType: identity.actorType,
+        actorId: identity.actorId,
+        realm: identity.realm,
+        bindingId: binding.bindingId,
+      },
+    );
+  }
+
+  private resolveRevocationAuditActor(
+    binding: DriverDeviceBindingRecord,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    if (!identity) {
+      return {
+        actorId: binding.driverId,
+        actorType: "system" as const,
+        tenantId: null,
+      };
+    }
+
+    if (identity.actorType === "driver_user") {
+      return {
+        actorId: identity.actorId,
+        actorType: "system" as const,
+        tenantId: identity.tenantId,
+      };
+    }
+
+    if (
+      identity.actorType === "system" ||
+      identity.actorType === "platform_admin" ||
+      identity.actorType === "ops_user" ||
+      identity.actorType === "tenant_admin" ||
+      identity.actorType === "partner_api_key"
+    ) {
+      return {
+        actorId: identity.actorId,
+        actorType: identity.actorType,
+        tenantId: identity.tenantId,
+      };
+    }
+
+    return {
+      actorId: binding.driverId,
+      actorType: "system" as const,
+      tenantId: identity.tenantId,
+    };
   }
 }

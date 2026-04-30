@@ -202,6 +202,20 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
+  it("requires authenticated driver or control-plane identity for driver-device revoke routes", () => {
+    const policy = resolveRouteAuthPolicy(
+      "POST",
+      "/api/auth/driver/device/revoke",
+    );
+
+    expect(policy).toEqual({
+      routeKey: "auth:driver-device:revoke",
+      requiredScopes: [],
+      allowedRealms: ["system", "platform", "ops", "driver"],
+      description: "Authenticated driver-device revoke access",
+    });
+  });
+
   it("keeps call-center order creation on ops-only callcenter scopes", () => {
     const policy = resolveRouteAuthPolicy("POST", "/api/call-center/orders");
 
@@ -1438,6 +1452,52 @@ describe("driver device-session auth controller", () => {
     delete process.env.JWT_SECRET;
   });
 
+  it("rejects unauthenticated driver device binding revoke attempts", () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const { controller } = createAuthFixture(new JwtAuthService());
+
+    const session = controller.issueDriverDeviceSession(
+      {
+        registrationCode: "demo-driver",
+        deviceId: "device-test-anon-revoke-001",
+      },
+      "req-driver-device-anon-revoke-001",
+    ).data;
+
+    expect(() =>
+      controller.revokeDriverDeviceSession(
+        null,
+        {
+          bindingId: session.bindingId,
+          deviceId: session.deviceId,
+        },
+        "req-driver-device-anon-revoke-002",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      controller.revokeDriverDeviceSession(
+        null,
+        {
+          bindingId: session.bindingId,
+          deviceId: session.deviceId,
+        },
+        "req-driver-device-anon-revoke-002",
+      );
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "DRIVER_DEVICE_BINDING_FORBIDDEN",
+        },
+      });
+    }
+
+    delete process.env.JWT_SECRET;
+  });
+
   it("rebinds a device by revoking the prior binding before issuing the replacement session", () => {
     process.env.JWT_SECRET = "test-secret";
 
@@ -1584,6 +1644,57 @@ describe("driver device-session auth controller", () => {
     delete process.env.JWT_SECRET;
     delete process.env.JWT_ISSUER;
     delete process.env.JWT_AUDIENCE;
+  });
+
+  it("rejects refresh immediately after the driver is suspended", () => {
+    process.env.JWT_SECRET = "test-secret";
+
+    const { controller, regulatoryRegistryService } = createAuthFixture(
+      new JwtAuthService(),
+    );
+
+    const session = controller.issueDriverDeviceSession(
+      {
+        registrationCode: "demo-driver",
+        deviceId: "device-test-suspended-refresh-001",
+      },
+      "req-driver-device-suspended-refresh-001",
+    ).data;
+
+    regulatoryRegistryService.updateDriverLifecycle("drv-demo-001", {
+      lifecycleStatus: "suspended",
+      reason: "manual compliance hold",
+    });
+
+    expect(() =>
+      controller.refreshDriverDeviceSession(
+        {
+          refreshToken: session.refreshToken,
+          deviceId: session.deviceId,
+        },
+        "req-driver-device-suspended-refresh-002",
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      controller.refreshDriverDeviceSession(
+        {
+          refreshToken: session.refreshToken,
+          deviceId: session.deviceId,
+        },
+        "req-driver-device-suspended-refresh-002",
+      );
+    } catch (error) {
+      const apiError = error as ApiRequestError;
+      expect(apiError.getStatus()).toBe(403);
+      expect(apiError.getResponse()).toMatchObject({
+        error: {
+          code: "DRIVER_AUTH_SUSPENDED",
+        },
+      });
+    }
+
+    delete process.env.JWT_SECRET;
   });
 });
 

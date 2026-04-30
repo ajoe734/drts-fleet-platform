@@ -10,6 +10,8 @@ import {
 } from "@/lib/driver-location-heartbeat";
 import { getDriverClient, initializeDriverIdentity } from "@/lib/api-client";
 
+const DRIVER_SESSION_REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
+
 export const unstable_settings = {
   initialRouteName: "onboarding",
 };
@@ -51,10 +53,14 @@ function DriverHeartbeatBootstrap() {
         void syncWithActiveTrip();
       }
     });
+    const refreshInterval = setInterval(() => {
+      void syncWithActiveTrip();
+    }, DRIVER_SESSION_REVALIDATE_INTERVAL_MS);
 
     return () => {
       cancelled = true;
       subscription.remove();
+      clearInterval(refreshInterval);
     };
   }, []);
 

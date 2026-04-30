@@ -10,6 +10,7 @@ import {
 import { useRouter } from "expo-router";
 
 import {
+  getDriverIdentityIssue,
   getDriverClient,
   hasDriverDevOverride,
   initializeDriverIdentity,
@@ -46,6 +47,10 @@ export default function OnboardingScreen() {
       })
       .finally(() => {
         if (!cancelled) {
+          const identityIssue = getDriverIdentityIssue();
+          if (identityIssue) {
+            setProvisioningError(identityIssue);
+          }
           setReady(true);
         }
       });

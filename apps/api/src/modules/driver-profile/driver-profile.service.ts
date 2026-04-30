@@ -86,6 +86,11 @@ function cloneDeviceBindings(
   return deviceBindings.map((binding) => ({ ...binding }));
 }
 
+type DeviceBindingAuditActor = Pick<
+  AuditLogRecord,
+  "actorId" | "actorType" | "tenantId"
+>;
+
 @Injectable()
 export class DriverProfileService implements OnModuleInit {
   private readonly seedProfiles = new Map(
@@ -359,6 +364,7 @@ export class DriverProfileService implements OnModuleInit {
     driverId: string,
     bindingId: string,
     revokedAt: string,
+    actor?: DeviceBindingAuditActor,
     requestId?: string,
   ) {
     const current = this.getProfileForDriver(driverId);
@@ -379,11 +385,16 @@ export class DriverProfileService implements OnModuleInit {
 
     this.profiles.set(updated.driverId, this.clone(updated));
     this.persist(updated, "record_device_binding_revocation");
+    const resolvedActor: DeviceBindingAuditActor = actor ?? {
+      actorId: updated.driverId,
+      actorType: "system",
+      tenantId: null,
+    };
     this.recordAudit(
       {
-        actorId: updated.driverId,
-        actorType: "system",
-        tenantId: null,
+        actorId: resolvedActor.actorId,
+        actorType: resolvedActor.actorType,
+        tenantId: resolvedActor.tenantId,
         moduleName: "driver-profile",
         actionName: "revoke_driver_device_binding",
         resourceType: "driver_device_binding",

@@ -74,6 +74,11 @@ describe("DriverProfileService sensitive-data governance", () => {
       "drv-demo-001",
       "drvbind_demo_001",
       "2026-04-29T01:00:00.000Z",
+      {
+        actorId: "platform-admin-001",
+        actorType: "platform_admin",
+        tenantId: null,
+      },
     );
 
     const profile = service.getProfileForDriver("drv-demo-001");
@@ -84,6 +89,15 @@ describe("DriverProfileService sensitive-data governance", () => {
         deviceId: "ios-demo-001",
       }),
     ]);
+
+    const auditLog = auditNotificationService
+      .listAuditLogs()
+      .find((entry) => entry.actionName === "revoke_driver_device_binding");
+    expect(auditLog).toMatchObject({
+      actorId: "platform-admin-001",
+      actorType: "platform_admin",
+      resourceId: "drvbind_demo_001",
+    });
   });
 
   it("returns null for missing persisted driver profiles", () => {

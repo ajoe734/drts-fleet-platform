@@ -92,7 +92,10 @@ export class AuthController {
     @Body() command: RegisterDriverDeviceCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const session = this.driverDeviceSessionService.register(command);
+    const session = this.driverDeviceSessionService.register(
+      command,
+      requestId,
+    );
     return toApiSuccessEnvelope<DriverDeviceProvisioningSession>(
       session,
       requestId,

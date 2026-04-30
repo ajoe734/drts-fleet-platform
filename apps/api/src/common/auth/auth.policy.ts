@@ -76,6 +76,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "auth/driver/device/revoke") {
+    return {
+      routeKey: "auth:driver-device:revoke",
+      requiredScopes: [],
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Authenticated driver-device revoke access",
+    };
+  }
+
   if (routePath.startsWith("partner/eligibility/")) {
     return {
       routeKey: "partner:eligibility:get",
