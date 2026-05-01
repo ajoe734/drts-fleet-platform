@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T08:42:59Z
+Last updated: 2026-05-01T08:44:12Z
 
 ## Objective
 
@@ -42,7 +42,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
 - `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Review passed after correction: EXT-003 has explicit blocker records EXT-003-BLK-001..007, links existing EAS evidence, names build profiles/tester groups, and blocks repo-local mobile distribution ov
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Ownership updated
 
 ## Delivery Layers
 
@@ -54,24 +54,22 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ### External / Upstream Integration Work
 
-| ID        | Phase                            | Task                                      | Owner   | Status          | Depends On | 中文說明                                                                                                                                 |
-| --------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `EXT-003` | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | review_approved | `SYNC-002` | 建立 driver app mobile distribution gate，列出 Expo、Apple team、Android keystore、tester group、build profile 與 release channel 要求。 |
-| `EXT-004` | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog         | `SYNC-002` | 建立 CTI/錄音/filing activation gate，明確 OC-022、OC-023、OC-024、E2E-003 的 live/staging/blocked 狀態與證據格式。                      |
+| ID        | Phase                            | Task                                      | Owner   | Status  | Depends On | 中文說明                                                                                                            |
+| --------- | -------------------------------- | ----------------------------------------- | ------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------- |
+| `EXT-004` | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog | `SYNC-002` | 建立 CTI/錄音/filing activation gate，明確 OC-022、OC-023、OC-024、E2E-003 的 live/staging/blocked 狀態與證據格式。 |
 
 ## Task Board (active only)
 
-| ID             | Phase                            | Task                                      | Owner   | Status          | Depends On                                                                                                |
-| -------------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- |
-| `EXT-003`      | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | review_approved | `SYNC-002`                                                                                                |
-| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog         | `SYNC-002`                                                                                                |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
+| ID             | Phase                            | Task                                      | Owner   | Status  | Depends On                                                                                                |
+| -------------- | -------------------------------- | ----------------------------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog | `SYNC-002`                                                                                                |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
 
 ## Handoff Queue
 
-| Task      | From  | To      | Message                                                                                                                                                                                                          | Status  | Created At           |
-| --------- | ----- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
-| `EXT-003` | Codex | Gemini2 | Review passed after correction: EXT-003 has explicit blocker records EXT-003-BLK-001..007, links existing EAS evidence, names build profiles/tester groups, and blocks repo-local mobile distribution overclaim. | pending | 2026-05-01T08:42:59Z |
+| Task     | From | To  | Message | Status | Created At |
+| -------- | ---- | --- | ------- | ------ | ---------- |
+| _(none)_ | -    | -   | -       | -      | -          |
 
 ## Blockers
 
@@ -81,15 +79,14 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task      | Reviewer | 修正重點                                                                                                                                                                                                                                                               | Review File |
-| --------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `EXT-003` | Codex    | 審查通過；worker 原本只回報外部憑證缺失，reviewer 已補成正式 mobile distribution gate，列出 Expo/Android/Apple/tester/EAS/channel/install evidence blocker records，並把 runbook/checklist 連回，避免把 internal build 或 simulator evidence 誤稱 production release。 | -           |
+| Task     | Reviewer | 修正重點 | Review File |
+| -------- | -------- | -------- | ----------- |
+| _(none)_ | -        | -        | -           |
 
 ## Completion Evidence (last 10)
 
 | Task                            | Commit                                   | Subject                                                           | LLM Agent | Reviewer | Recorded At          |
 | ------------------------------- | ---------------------------------------- | ----------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `ORX-DP-003-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                | Claude2   | Claude   | 2026-04-30T23:54:31Z |
 | `ORX-CS-002-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                | Claude    | Codex2   | 2026-05-01T00:24:26Z |
 | `ORX-GV-003-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                | Codex     | Claude2  | 2026-05-01T00:50:29Z |
 | `SYNC-001`                      | 6d4b7f1a99f76a260837e67bc1e80d8da70db9b3 | SYNC-001: record status dashboard sync review                     | Gemini2   | Codex    | 2026-05-01T07:52:06Z |
@@ -99,10 +96,10 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `DEPLOY-001`                    | 394c3e2201dc26a9f83ff2b78ddaa3ef7626bd01 | chore(closeout): review proof gates and stabilize chairman triage | Gemini2   | Codex    | 2026-05-01T08:14:32Z |
 | `EXT-001`                       | 8a92c1f78b2c10d34ddf6cfe964facbccd3bd985 | EXT-001: record issuer eligibility external gate                  | Gemini2   | Codex    | 2026-05-01T08:32:05Z |
 | `EXT-002`                       | 137cac133a9a7b341f01264ff908fb3876330d14 | EXT-002: record forwarder adapter proof gate                      | Gemini2   | Codex    | 2026-05-01T08:38:58Z |
+| `EXT-003`                       | 5ed2f8adc5699de90ad894a53c6fecea89d3a861 | EXT-003: record mobile distribution gate                          | Gemini2   | Codex    | 2026-05-01T08:44:11Z |
 
 ## Latest Checkpoints
 
-- 2026-05-01T08:27:50Z Orchestrator: `EXT-001` Worker started via gemini: owned_ready_dispatch
 - 2026-05-01T08:28:01Z Gemini2: `EXT-001` Investigating and documenting requirements for the real bank/issuer eligibility external gate, including contracts, credentials, sandbox, test cards, and fallback evidence.
 - 2026-05-01T08:28:31Z Gemini2: `EXT-001` Handoff to Codex: The real bank/issuer eligibility gate requirements have been documented.
 
@@ -144,3 +141,4 @@ Per `docs/03-runbooks/master-system-closeout-checklist.md`, these are external-g
 - 2026-05-01T08:40:52Z Gemini2: `EXT-003` Task EXT-003 is blocked. Required external credentials (Expo account, Android signing configuration, Apple team access) are missing. These are essential prerequisites for building and distributing the driver app, as detailed in the runbook. Progress is halted until these credentials are provided.
 - 2026-05-01T08:42:46Z Gemini2: `EXT-003` Handoff to Codex: Mobile distribution gate is ready after reviewer correction: support/sidecars/EXT-003/EXT-003-MOBILE-DISTRIBUTION-GATE.md records EXT-003-BLK-001..007 for Expo account, Android signing, Apple team, tester groups, EAS secrets, release channels, and install evidence. driver-app-native-dev-runbook and master closeout checklist now link the gate and explicitly prohibit production-distributed/mobile-release-complete overclaim. Verification run: prettier check, doc-sync audit, git diff --check.
 - 2026-05-01T08:42:59Z Codex: `EXT-003` Review passed after correction: EXT-003 has explicit blocker records EXT-003-BLK-001..007, links existing EAS evidence, names build profiles/tester groups, and blocks repo-local mobile distribution overclaim.
+- 2026-05-01T08:44:11Z Gemini2: `EXT-003` Done: mobile distribution gate committed and pushed; EXT-003-BLK-001..007 now track Expo account, Android signing, Apple team, tester groups, EAS secret policy, release channel ownership, and install evidence blockers.
