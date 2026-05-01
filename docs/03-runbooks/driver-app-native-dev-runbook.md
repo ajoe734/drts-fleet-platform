@@ -138,6 +138,11 @@ produce artifacts:
 `development-simulator` is still useful before Apple signing access exists,
 because the simulator profile does not target physical-device distribution.
 
+The full mobile distribution gate is tracked in
+`support/sidecars/EXT-003/EXT-003-MOBILE-DISTRIBUTION-GATE.md`. Until blocker records
+`EXT-003-BLK-001` through `EXT-003-BLK-007` have evidence attached, do not summarize the driver app
+as production-distributed or mobile-release complete.
+
 ### Evidence Snapshot (2026-04-28 UTC)
 
 Current repo-side evidence for `P1PX-DRV-002`:

@@ -134,7 +134,9 @@ The PRD still includes customer / call-entry surfaces that are not fully closed 
       `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` blocker records `EXT-001-BLK-001` to
       `EXT-001-BLK-006`
 - [ ] Real Grab Taiwan adapter (`EMC-X1-001`) — external-gated
-- [ ] Mobile distribution: Expo account, Apple team, Android keystore, internal tester groups — external-gated
+- [ ] Mobile distribution: Expo account, Apple team, Android keystore, internal tester groups —
+      external-gated via `support/sidecars/EXT-003/EXT-003-MOBILE-DISTRIBUTION-GATE.md` blocker
+      records `EXT-003-BLK-001` to `EXT-003-BLK-007`
 
 ### D-4. Reporting / filing / finance closure
 
