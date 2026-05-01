@@ -444,9 +444,26 @@ def build_task_brief(
     owner = str(task.get("owner") or "").strip() or "-"
     reviewer = str(task.get("reviewer") or "").strip() or "-"
     next_text = _normalize_summary(task.get("next") or "No short handoff yet.")
+    summary_zh = _normalize_summary(task.get("summary_zh") or "")
     planning_ref = str(task.get("planning_ref") or "").strip()
     artifacts = [str(item) for item in task.get("artifacts", []) if str(item).strip()]
+    display_artifacts: list[str] = []
+    skipped_external_artifacts = 0
+    for artifact in artifacts:
+        artifact_path = Path(artifact)
+        if artifact_path.is_absolute():
+            try:
+                display_artifacts.append(str(artifact_path.relative_to(ROOT)))
+            except ValueError:
+                skipped_external_artifacts += 1
+            continue
+        display_artifacts.append(artifact)
+    if skipped_external_artifacts:
+        display_artifacts.append(
+            f"(repo-external artifacts omitted: {skipped_external_artifacts}; do not stage paths outside this repository)"
+        )
     depends_on = [str(item) for item in task.get("depends_on", []) if str(item).strip()]
+    acceptance = [str(item) for item in task.get("acceptance", []) if str(item).strip()]
     evidence_refs = [str(item) for item in task.get("evidence_refs", []) if str(item).strip()]
     pauses = [
         pause
@@ -468,14 +485,21 @@ def build_task_brief(
         lines.append(f"- Planning Ref: `{planning_ref}`")
     if task.get("last_update"):
         lines.append(f"- Last Update: `{task['last_update']}`")
+    if summary_zh:
+        lines.extend(["", "## 中文說明", "", summary_zh])
     lines.extend(["", "## Short Summary", "", next_text or "-", "", "## Dependencies", ""])
     if depends_on:
         lines.extend([f"- `{item}`" for item in depends_on])
     else:
         lines.append("- None")
+    lines.extend(["", "## Acceptance", ""])
+    if acceptance:
+        lines.extend([f"- {item}" for item in acceptance])
+    else:
+        lines.append("- None listed")
     lines.extend(["", "## Artifacts", ""])
-    if artifacts:
-        lines.extend([f"- `{item}`" for item in artifacts])
+    if display_artifacts:
+        lines.extend([f"- `{item}`" for item in display_artifacts])
     else:
         lines.append("- None listed")
     if evidence_refs:

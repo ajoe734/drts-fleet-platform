@@ -15,6 +15,7 @@ if str(THIS_DIR) not in sys.path:
 from common import (
     ROOT,
     agent_config_for,
+    build_task_brief,
     config_path,
     display_name_for,
     load_config,
@@ -271,14 +272,40 @@ def render_wakeup_message(
     if template_path is None:
         raise RuntimeError("Unable to resolve wake-up template path")
     task_payload = event.get("task", {}) or {}
-    shared_files = serialize_shared_files(
-        selected_shared_files(
-            config,
-            mode=event_mode_bucket(event),
-            task=task_payload,
-            status=status,
-        )
+    shared_paths = selected_shared_files(
+        config,
+        mode=event_mode_bucket(event),
+        task=task_payload,
+        status=status,
     )
+    task_brief_inline = ""
+    visible_shared_paths = []
+    for path in shared_paths:
+        path_label = relpath(path)
+        if path_label.startswith(".orchestrator/task-briefs/"):
+            try:
+                task_brief_inline = (
+                    "\n本次 task brief 已內嵌如下；不要再讀 `.orchestrator/task-briefs/*`，"
+                    "因為部分 worker 的 file tool 會尊重 `.gitignore` 而拒絕該路徑。\n\n"
+                    "```markdown\n"
+                    f"{path.read_text(encoding='utf-8').strip()}\n"
+                    "```\n"
+                )
+            except OSError:
+                task_brief_inline = (
+                    "\n本次 task brief 無法從 runtime brief path 讀取；請直接使用下方 Task ID、"
+                    "`ai-status.json` 與列出的相關檔案繼續。\n"
+                )
+            continue
+        visible_shared_paths.append(path)
+    if not task_brief_inline and isinstance(task_payload, dict) and task_payload.get("id"):
+        task_brief_inline = (
+            "\n本次 task brief 摘要如下：\n\n"
+            "```markdown\n"
+            f"{build_task_brief(config, task_payload).strip()}\n"
+            "```\n"
+        )
+    shared_files = serialize_shared_files(visible_shared_paths)
     raw_target_files = event.get("target_files") if "target_files" in event else task_payload.get("artifacts")
     target_files, skipped_external_targets = repo_scoped_target_files(raw_target_files or [])
     display_target_files = list(target_files)
@@ -317,6 +344,7 @@ def render_wakeup_message(
         "target_files": "\n".join(f"- {path}" for path in display_target_files) if display_target_files else "- (none inferred)",
         "sidecar_guardrails": sidecar_guardrails.rstrip(),
         "closeout_guardrails": closeout_guardrails.rstrip(),
+        "task_brief_inline": task_brief_inline.rstrip(),
     }
     return render_template(template_path, variables).strip() + "\n"
 

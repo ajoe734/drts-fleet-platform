@@ -35,16 +35,24 @@ shows `249/249 done`. This wave closes the gap between:
 
 | Task ID        | Family        | Objective                                                             | Owner   | Reviewer | Depends On                                       |
 | -------------- | ------------- | --------------------------------------------------------------------- | ------- | -------- | ------------------------------------------------ |
-| `SYNC-001`     | Status Sync   | Regenerate root and docs-site status views from root machine truth    | Codex   | Claude   | -                                                |
-| `SYNC-002`     | Release Gates | Reconcile workflow release gates after ORX completion                 | Claude2 | Claude   | `SYNC-001`                                       |
-| `SYNC-003`     | UAT Evidence  | Reclassify UAT checklist rows into inventory/static/live/sign-off     | Copilot | Codex    | `SYNC-002`                                       |
-| `XREPO-001`    | Cross Repo    | Close `tenant-commute-hub` dirty diff and sync contract snapshot      | Claude2 | Codex    | -                                                |
-| `DEPLOY-001`   | Runtime Proof | Capture DB-enabled runtime persistence evidence                       | Gemini  | Codex    | `SYNC-001`                                       |
-| `EXT-001`      | External Gate | Materialize real bank / issuer eligibility gate                       | Claude2 | Claude   | `SYNC-002`                                       |
-| `EXT-002`      | External Gate | Materialize real forwarder adapter proof gate                         | Claude2 | Codex    | `SYNC-002`                                       |
-| `EXT-003`      | External Gate | Materialize mobile distribution gate                                  | Gemini2 | Claude2  | `SYNC-002`                                       |
-| `EXT-004`      | External Gate | Materialize live CTI / recording / filing activation gate             | Gemini  | Claude   | `SYNC-002`                                       |
-| `BDX-CLOSEOUT` | Governance    | Final closeout narrative after sync, repo, deploy, and external gates | Claude  | Codex    | all `SYNC-*`, `XREPO-001`, `DEPLOY-001`, `EXT-*` |
+| `SYNC-001`     | Status Sync   | Regenerate root and docs-site status views from root machine truth    | Gemini2 | Codex    | -                                                |
+| `SYNC-002`     | Release Gates | Reconcile workflow release gates after ORX completion                 | Gemini2 | Codex    | `SYNC-001`                                       |
+| `SYNC-003`     | UAT Evidence  | Reclassify UAT checklist rows into inventory/static/live/sign-off     | Gemini2 | Codex    | `SYNC-002`                                       |
+| `XREPO-001`    | Cross Repo    | Close `tenant-commute-hub` dirty diff and sync contract snapshot      | Gemini2 | Codex    | -                                                |
+| `DEPLOY-001`   | Runtime Proof | Capture DB-enabled runtime persistence evidence                       | Gemini2 | Codex    | `SYNC-001`                                       |
+| `EXT-001`      | External Gate | Materialize real bank / issuer eligibility gate                       | Gemini2 | Codex    | `SYNC-002`                                       |
+| `EXT-002`      | External Gate | Materialize real forwarder adapter proof gate                         | Gemini2 | Codex    | `SYNC-002`                                       |
+| `EXT-003`      | External Gate | Materialize mobile distribution gate                                  | Gemini2 | Codex    | `SYNC-002`                                       |
+| `EXT-004`      | External Gate | Materialize live CTI / recording / filing activation gate             | Gemini2 | Codex    | `SYNC-002`                                       |
+| `BDX-CLOSEOUT` | Governance    | Final closeout narrative after sync, repo, deploy, and external gates | Gemini2 | Codex    | all `SYNC-*`, `XREPO-001`, `DEPLOY-001`, `EXT-*` |
+
+### Provider Health Override
+
+The original lane split used Codex, Claude, Claude2, Copilot, Gemini, and
+Gemini2. Runtime health on 2026-05-01 showed Codex / Claude / Claude2 / Codex2
+auth-paused, Copilot / Gemini quota-paused, and only Gemini2 dispatch-capable.
+The active machine-truth owner for this packet is therefore Gemini2 with Codex
+review until the other lanes are explicitly restored.
 
 ## 4. Detailed Task Definitions
 
