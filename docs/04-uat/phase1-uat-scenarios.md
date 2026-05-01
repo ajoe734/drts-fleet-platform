@@ -1178,6 +1178,11 @@ This scenario inventory feeds the workflow-family release matrix at
 - `recording_pending` flag cleared
 - Audit trail entry appended
 
+**Activation gate:** `EXTERNAL-GATED` until
+`support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md` has
+`EXT-004-BLK-001` to `EXT-004-BLK-004` evidence for CTI environment, callback
+contract, webhook security, and staging callback run.
+
 **Cross-ref:** SC-004
 
 ---
@@ -1197,6 +1202,9 @@ This scenario inventory feeds the workflow-family release matrix at
 - Package manifest generated
 - Artifact immutable once created
 
+**Activation gate:** `DEFERRED` until `EXT-004-BLK-005` evidence proves the
+staging filing job profile, run log, package id, manifest hash, and audit event.
+
 **Cross-ref:** SC-033
 
 ---
@@ -1210,6 +1218,10 @@ This scenario inventory feeds the workflow-family release matrix at
 **Expected**
 
 - Each row: order number, `call_id`, `recording_id` (or explicit flag if missing)
+
+**Activation gate:** `DEFERRED` until `EXT-004-BLK-006` evidence proves the
+recording index export artifact, phone-origin rows, masked `recording_id`, and
+missing-recording flags.
 
 **Cross-ref:** SC-034
 
@@ -1727,6 +1739,10 @@ pass language requires either a seeded forwarded task or real forwarder adapter 
 
 **Evidence classification:** `DEFERRED`. This flow stays held until CTI callback and filing /
 recording export activation evidence exists.
+
+**Activation gate:** `support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md`
+defines the required `EXT-004-BLK-001` to `EXT-004-BLK-008` evidence before
+`E2E-003` can be described as live/staging proven.
 
 ---
 

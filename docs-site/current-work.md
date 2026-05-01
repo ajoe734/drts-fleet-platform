@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T08:44:12Z
+Last updated: 2026-05-01T08:53:09Z
 
 ## Objective
 
@@ -42,7 +42,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
 - `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Ownership updated
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Review approved: EXT-004 gate packet is concrete, anchored, and avoids live-proof overclaim.
 
 ## Delivery Layers
 
@@ -54,22 +54,22 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ### External / Upstream Integration Work
 
-| ID        | Phase                            | Task                                      | Owner   | Status  | Depends On | 中文說明                                                                                                            |
-| --------- | -------------------------------- | ----------------------------------------- | ------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------------------- |
-| `EXT-004` | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog | `SYNC-002` | 建立 CTI/錄音/filing activation gate，明確 OC-022、OC-023、OC-024、E2E-003 的 live/staging/blocked 狀態與證據格式。 |
+| ID        | Phase                            | Task                                      | Owner   | Status          | Depends On | 中文說明                                                                                                            |
+| --------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------- |
+| `EXT-004` | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | review_approved | `SYNC-002` | 建立 CTI/錄音/filing activation gate，明確 OC-022、OC-023、OC-024、E2E-003 的 live/staging/blocked 狀態與證據格式。 |
 
 ## Task Board (active only)
 
-| ID             | Phase                            | Task                                      | Owner   | Status  | Depends On                                                                                                |
-| -------------- | -------------------------------- | ----------------------------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------- |
-| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog | `SYNC-002`                                                                                                |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
+| ID             | Phase                            | Task                                      | Owner   | Status          | Depends On                                                                                                |
+| -------------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- |
+| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | review_approved | `SYNC-002`                                                                                                |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
 
 ## Handoff Queue
 
-| Task     | From | To  | Message | Status | Created At |
-| -------- | ---- | --- | ------- | ------ | ---------- |
-| _(none)_ | -    | -   | -       | -      | -          |
+| Task      | From  | To      | Message                                                                                      | Status  | Created At           |
+| --------- | ----- | ------- | -------------------------------------------------------------------------------------------- | ------- | -------------------- |
+| `EXT-004` | Codex | Gemini2 | Review approved: EXT-004 gate packet is concrete, anchored, and avoids live-proof overclaim. | pending | 2026-05-01T08:53:09Z |
 
 ## Blockers
 
@@ -79,9 +79,9 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task     | Reviewer | 修正重點 | Review File |
-| -------- | -------- | -------- | ----------- |
-| _(none)_ | -        | -        | -           |
+| Task      | Reviewer | 修正重點                                                                                                                                                                                                                               | Review File |
+| --------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `EXT-004` | Codex    | 已審核 EXT-004：worker stale 沒產出，因此由 reviewer 補成正式 gate packet。OC-022/023/024/E2E-003 狀態、CTI callback 欄位、filing/export 證據格式與 EXT-004-BLK-001..008 blocker 都已落地；未把 repo-static endpoint 誤稱 live proof。 | -           |
 
 ## Completion Evidence (last 10)
 
@@ -100,37 +100,6 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Latest Checkpoints
 
-- 2026-05-01T08:28:01Z Gemini2: `EXT-001` Investigating and documenting requirements for the real bank/issuer eligibility external gate, including contracts, credentials, sandbox, test cards, and fallback evidence.
-- 2026-05-01T08:28:31Z Gemini2: `EXT-001` Handoff to Codex: The real bank/issuer eligibility gate requirements have been documented.
-
-**Issuer Contract Fields:**
-As defined in `docs/02-architecture/phase1-issuer-eligibility-integration-contract-20260429.md`, the contract includes fields like `adapterCode`, `adapterVersion`, `adapterKind`, `eligibilityMode` (`bank_card_inline`, `reference_required`), `decisionTtlSeconds`, `retryPolicy`, `manualFallbackPolicy`, and `sensitiveDataPolicy`. Verification records also capture the contract used, adapter history, decision source, manual fallback state, and card program details.
-
-**Credential and Sandbox Requirements:**
-Per `docs/03-runbooks/master-system-closeout-checklist.md`, these are external-gated. Requirements include access to the:
-
-- Real Bank/Issuer APIs.
-- Sandbox Credentials for accessing these APIs in a testing environment.
-- Allowed Test Cards for verifying `bank_card_inline` and `reference_required` eligibility modes.
-
-**Allowed Test Cards and Timeout Fallback:**
-
-- **Test Cards:** Specific card details are required for testing the eligibility flow.
-- **Timeout Fallback:** As per `docs/02-architecture/phase1-issuer-eligibility-integration-contract-20260429.md`, exceeding timeout (`3000ms`) or retry limits (`3` attempts) transitions verification to `manual_review`, triggering the `manualFallbackPolicy` to the `ops_console`.
-
-**Missing External Inputs as Blocker Records:**
-`docs/03-runbooks/master-system-closeout-checklist.md` identifies "Real bank/issuer credentials" as an "external-gated" blocker to productization completion.
-
-**Manual Review Fallback Not Overclaimed:**
-`docs/03-runbooks/partner-eligibility-manual-review-runbook.md` clarifies that `manual_review` status requires operator collection of offline evidence or sponsor confirmation, ensuring it does not imply automatic issuer approval. Operators are instructed not to release bookings solely based on API requests and to align error copy for `ineligible` statuses with backend reason codes.
-
-- 2026-05-01T08:30:58Z Codex: `EXT-001` Review passed after reviewer correction: EXT-001 now has a sidecar gate packet with explicit EXT-001-BLK-001..006 blocker records, contract/checklist anchors, test fixture categories, timeout fallback, and non-overclaim language for manual_review.
-- 2026-05-01T08:32:05Z Gemini2: `EXT-001` Done: issuer eligibility external gate packet committed and pushed; EXT-001-BLK-001..006 now track the real bank/issuer contract, sandbox credential, test card, timeout/retry, manual fallback, and sensitive-data blockers.
-- 2026-05-01T08:33:09Z Orchestrator: `EXT-001` Background worker process exited after advancing the task to `done`.
-- 2026-05-01T08:33:10Z Orchestrator: `EXT-002` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-01T08:33:10Z Orchestrator: `EXT-002` Worker started via gemini: owned_ready_dispatch
-- 2026-05-01T08:33:22Z Gemini2: `EXT-002` Starting to define the real forwarder adapter proof gate requirements.
-- 2026-05-01T08:37:16Z Gemini2: `EXT-002` Handoff to Codex: Forwarder adapter proof gate is ready after reviewer correction: fake axios/secret/API placeholder code was rejected and restored to explicit stub; support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md records EXT-002-BLK-001..007 for partner contract, credentials, webhook signature, callback lifecycle, status sync, lost-race, and no-owned-assignment evidence. Cross-repo gap matrix and workflow release gate now point at this external gate. Verification run: prettier check, doc-sync audit, git diff --check.
 - 2026-05-01T08:37:38Z Codex: `EXT-002` Review passed after correction: no unproven runtime adapter code remains; EXT-002 has explicit blocker records EXT-002-BLK-001..007 and E2E-002 graceful-skip overclaim language is preserved.
 - 2026-05-01T08:38:58Z Gemini2: `EXT-002` Done: forwarder adapter proof gate committed and pushed; EXT-002-BLK-001..007 now track partner contract, credentials, webhook signature, callback lifecycle, status sync, lost-race, and no-owned-assignment evidence. Unproven runtime adapter code was rejected and not retained.
 - 2026-05-01T08:40:03Z Orchestrator: `EXT-002` Background worker process exited after advancing the task to `done`.
@@ -142,3 +111,12 @@ Per `docs/03-runbooks/master-system-closeout-checklist.md`, these are external-g
 - 2026-05-01T08:42:46Z Gemini2: `EXT-003` Handoff to Codex: Mobile distribution gate is ready after reviewer correction: support/sidecars/EXT-003/EXT-003-MOBILE-DISTRIBUTION-GATE.md records EXT-003-BLK-001..007 for Expo account, Android signing, Apple team, tester groups, EAS secrets, release channels, and install evidence. driver-app-native-dev-runbook and master closeout checklist now link the gate and explicitly prohibit production-distributed/mobile-release-complete overclaim. Verification run: prettier check, doc-sync audit, git diff --check.
 - 2026-05-01T08:42:59Z Codex: `EXT-003` Review passed after correction: EXT-003 has explicit blocker records EXT-003-BLK-001..007, links existing EAS evidence, names build profiles/tester groups, and blocks repo-local mobile distribution overclaim.
 - 2026-05-01T08:44:11Z Gemini2: `EXT-003` Done: mobile distribution gate committed and pushed; EXT-003-BLK-001..007 now track Expo account, Android signing, Apple team, tester groups, EAS secret policy, release channel ownership, and install evidence blockers.
+- 2026-05-01T08:45:11Z Orchestrator: `EXT-003` Background worker process exited after advancing the task to `done`.
+- 2026-05-01T08:45:12Z Orchestrator: `EXT-004` Wake-up queued for supervisor: owned_ready_dispatch
+- 2026-05-01T08:45:12Z Orchestrator: `EXT-004` Worker started via gemini: owned_ready_dispatch
+- 2026-05-01T08:45:32Z Gemini2: `EXT-004` Starting work on EXT-004: Setting up CTI/recording/filing activation gate.
+- 2026-05-01T08:46:00Z Gemini2: `EXT-004` Analyzing CTI callback and filing job mechanisms in callcenter and reporting-filing modules.
+- 2026-05-01T08:46:13Z Gemini2: `EXT-004` Defining CTI callback and filing job activation gate criteria and outlining simulation steps.
+- 2026-05-01T08:51:57Z Gemini2: `EXT-004` Reviewer correction in progress: CTI recording filing gate packet created; updating UAT, workflow, and retention anchors.
+- 2026-05-01T08:52:56Z Gemini2: `EXT-004` Handoff to Codex: CTI recording filing gate packet created and anchors updated: EXT-004-BLK-001..008 now define CTI callback, recording export, filing package, retention, and E2E-003 proof requirements; checks: prettier, ai_status doc-sync audit, git diff --check.
+- 2026-05-01T08:53:09Z Codex: `EXT-004` Review approved: EXT-004 gate packet is concrete, anchored, and avoids live-proof overclaim.

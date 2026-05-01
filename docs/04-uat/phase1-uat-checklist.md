@@ -274,15 +274,15 @@ Items marked `DEFERRED` or `EXTERNAL-GATED` require explicit sign-off before Pha
 complete. This table is intentionally separate from `Pass/Fail`: a row can have static evidence
 and still require live UAT before production language is allowed.
 
-| Scenario | Classification | Reason for Deferral / Gate                      | Required Evidence                          | Sign-off |
-| -------- | -------------- | ----------------------------------------------- | ------------------------------------------ | -------- |
-| DA-005   | EXTERNAL-GATED | Forwarded task behavior needs live adapter/seed | Forwarder credential, seed, or sandbox run | ⬜       |
-| OC-022   | EXTERNAL-GATED | CTI webhook integration not in staging          | Real CTI stub or live CTI callback         | ⬜       |
-| OC-023   | DEFERRED       | Month-end filing job not activated on staging   | Staging job run evidence                   | ⬜       |
-| OC-024   | DEFERRED       | Filing + recording export job not activated     | Staging job run evidence                   | ⬜       |
-| DA-018   | DEFERRED       | Period-end billing job not activated            | Billing job run evidence                   | ⬜       |
-| E2E-002  | EXTERNAL-GATED | Depends on forwarded task seed/live adapter     | Graceful-skip log or live adapter proof    | ⬜       |
-| E2E-003  | DEFERRED       | Depends on OC-022 + OC-024                      | Same as above                              | ⬜       |
+| Scenario | Classification | Reason for Deferral / Gate                      | Required Evidence                           | Sign-off |
+| -------- | -------------- | ----------------------------------------------- | ------------------------------------------- | -------- |
+| DA-005   | EXTERNAL-GATED | Forwarded task behavior needs live adapter/seed | Forwarder credential, seed, or sandbox run  | ⬜       |
+| OC-022   | EXTERNAL-GATED | CTI webhook integration not in staging          | `EXT-004-BLK-001` to `EXT-004-BLK-004`      | ⬜       |
+| OC-023   | DEFERRED       | Month-end filing job not activated on staging   | `EXT-004-BLK-005` filing run evidence       | ⬜       |
+| OC-024   | DEFERRED       | Filing + recording export job not activated     | `EXT-004-BLK-006` recording export evidence | ⬜       |
+| DA-018   | DEFERRED       | Period-end billing job not activated            | Billing job run evidence                    | ⬜       |
+| E2E-002  | EXTERNAL-GATED | Depends on forwarded task seed/live adapter     | Graceful-skip log or live adapter proof     | ⬜       |
+| E2E-003  | DEFERRED       | Depends on OC-022 + OC-024                      | `EXT-004-BLK-001` to `EXT-004-BLK-008`      | ⬜       |
 
 ---
 

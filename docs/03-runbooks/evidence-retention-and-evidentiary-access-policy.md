@@ -75,6 +75,15 @@ Enforcement notes:
 - every allowed read or download emits an audit entry that includes the evidence
   family, access action, and retention-policy version
 
+Live activation note:
+
+- `call_recording` and `filing_package` retention rules are repo-static until
+  `support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md` blocker
+  evidence is attached. `EXT-004-BLK-001` to `EXT-004-BLK-008` define the CTI
+  callback, recording export, filing-package activation, signed-download,
+  audit, and retention sign-off evidence required before these families can be
+  described as live-proven.
+
 ## 4. Legal Hold Workflow
 
 Legal hold is supported for all evidence families in this matrix.

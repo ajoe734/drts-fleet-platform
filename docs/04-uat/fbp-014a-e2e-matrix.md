@@ -166,6 +166,9 @@ This scenario requires a live CTI session (`call_id`) and a recording callback w
 environment or stub). It is covered by the WE-004 smoke harness guidance and the UAT checklist
 pending items (`OC-021`, `OC-022`, `OC-024`).
 Treat this as `DEFERRED` until CTI callback plus filing / recording export evidence is attached.
+The exact activation evidence is tracked in
+`support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md` as
+`EXT-004-BLK-001` to `EXT-004-BLK-008`.
 
 **Manual steps** (reference only):
 
