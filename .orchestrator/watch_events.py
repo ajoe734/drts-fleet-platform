@@ -340,6 +340,7 @@ def render_wakeup_message(
     variables = {
         "shared_files": shared_files,
         "task_id": event.get("task_id") or "(none)",
+        "target_agent": display_name_for(config, str(target_agent or "")) or str(target_agent or ""),
         "reason": event.get("reason") or "wakeup",
         "target_files": "\n".join(f"- {path}" for path in display_target_files) if display_target_files else "- (none inferred)",
         "sidecar_guardrails": sidecar_guardrails.rstrip(),
@@ -366,15 +367,17 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
     status = load_status(config)
     task_payload = event.get("task", {}) if isinstance(event.get("task"), dict) else {}
     message = render_wakeup_message(config, event, target_agent, status=status)
-    context_files = [
-        relpath(path)
-        for path in selected_shared_files(
-            config,
-            mode=event_mode_bucket(event),
-            task=task_payload,
-            status=status,
-        )
-    ]
+    context_files = []
+    for path in selected_shared_files(
+        config,
+        mode=event_mode_bucket(event),
+        task=task_payload,
+        status=status,
+    ):
+        label = relpath(path)
+        if label.startswith(".orchestrator/task-briefs/"):
+            continue
+        context_files.append(label)
     raw_target_files = event.get("target_files") if "target_files" in event else task_payload.get("artifacts")
     target_files, _skipped_external_targets = repo_scoped_target_files(raw_target_files or [])
     queue_payload = {

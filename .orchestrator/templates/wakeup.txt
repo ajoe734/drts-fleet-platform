@@ -10,10 +10,19 @@
 不要用臨時 Python/heredoc 直接改 `ai-status.json`、`current-work.md` 或 `ai-activity-log.jsonl`。
 `current-work.md` 與 dashboard 類檔案是給人看的摘要，不是預設 machine truth。
 如果你的工具清單沒有 shell，就不要呼叫不存在的 shell tool；若需要執行檢查，先用可用工具完成檔案修改與 evidence 記錄，並明確說明無法執行的驗證。
+
+重要：不能只在最後文字回覆「完成」。supervisor 只認 machine truth 狀態。
+- 執行狀態命令時若 `AI_NAME` 沒有自動設定，請顯式加上 `AI_NAME={{target_agent}}`。
+- owner 收到 `backlog` / `todo` / `in_progress` 任務後，先用 `AI_NAME={{target_agent}} scripts/ai-status.sh start {{task_id}} "<你正在做什麼>"` 或 `progress` 落盤。
+- owner 完成 acceptance 並跑完可執行檢查後，必須用 `AI_NAME={{target_agent}} scripts/ai-status.sh handoff {{task_id}} <reviewer> "<完成內容與驗證>"` 交給 reviewer，讓狀態進入 `review`。
+- reviewer 收到 `review` 任務後，通過就用 `AI_NAME={{target_agent}} scripts/ai-status.sh approve {{task_id}} "<review 結論>"`；不通過就 `reopen` 或 `blocker`。
+- owner 收到 `review_approved` closeout 時，只有在已完成 task-scoped commit、普通 non-force push，且可提供 `COMMIT_HASH` / `COMMIT_SUBJECT` / `PUSH_REMOTE` / `PUSH_BRANCH` 後，才能 `done`。
+- 如果你無法完成，請用 `progress` 或 `blocker` 說清楚卡點；不要安靜退出，否則會被 supervisor 視為 failure。
 {{sidecar_guardrails}}
 {{closeout_guardrails}}
 
 Task ID: {{task_id}}
+目標 Agent: {{target_agent}}
 原因: {{reason}}
 可能相關檔案:
 {{target_files}}

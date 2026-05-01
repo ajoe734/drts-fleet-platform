@@ -132,7 +132,8 @@ class WatcherBookkeepingTests(unittest.TestCase):
 
             self.assertTrue(queued)
             payload = json.loads(event_queue_path.read_text(encoding="utf-8").splitlines()[0])
-            self.assertIn(".orchestrator/task-briefs/P3-002.md", payload["context_files"])
+            self.assertNotIn(".orchestrator/task-briefs/P3-002.md", payload["context_files"])
+            self.assertIn("# Task Brief: P3-002", payload["message"])
             self.assertNotIn("current-work.md", payload["context_files"])
             self.assertNotIn("ai-activity-log.jsonl", payload["context_files"])
             self.assertNotIn("docs-site/index.html", payload["context_files"])
@@ -177,8 +178,9 @@ class WatcherBookkeepingTests(unittest.TestCase):
             self.assertTrue(queued)
             payload = json.loads(event_queue_path.read_text(encoding="utf-8").splitlines()[0])
             self.assertEqual(payload["target_files"], ["docs/example.md"])
-            self.assertIn("repo-external artifacts omitted: 1", payload["message"])
-            self.assertNotIn("/home/edna/workspace/tenant-commute-hub/src", payload["message"])
+            self.assertIn("## Repo-External Artifacts", payload["message"])
+            self.assertIn("/home/edna/workspace/tenant-commute-hub/src", payload["message"])
+            self.assertIn("do not stage repo-external paths from this repository", payload["message"])
 
 
 if __name__ == "__main__":

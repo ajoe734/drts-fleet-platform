@@ -448,20 +448,16 @@ def build_task_brief(
     planning_ref = str(task.get("planning_ref") or "").strip()
     artifacts = [str(item) for item in task.get("artifacts", []) if str(item).strip()]
     display_artifacts: list[str] = []
-    skipped_external_artifacts = 0
+    external_artifacts: list[str] = []
     for artifact in artifacts:
         artifact_path = Path(artifact)
         if artifact_path.is_absolute():
             try:
                 display_artifacts.append(str(artifact_path.relative_to(ROOT)))
             except ValueError:
-                skipped_external_artifacts += 1
+                external_artifacts.append(artifact)
             continue
         display_artifacts.append(artifact)
-    if skipped_external_artifacts:
-        display_artifacts.append(
-            f"(repo-external artifacts omitted: {skipped_external_artifacts}; do not stage paths outside this repository)"
-        )
     depends_on = [str(item) for item in task.get("depends_on", []) if str(item).strip()]
     acceptance = [str(item) for item in task.get("acceptance", []) if str(item).strip()]
     evidence_refs = [str(item) for item in task.get("evidence_refs", []) if str(item).strip()]
@@ -502,6 +498,13 @@ def build_task_brief(
         lines.extend([f"- `{item}`" for item in display_artifacts])
     else:
         lines.append("- None listed")
+    if external_artifacts:
+        lines.extend(["", "## Repo-External Artifacts", ""])
+        lines.extend([f"- `{item}`" for item in external_artifacts])
+        lines.append(
+            "- These paths are intentionally outside this repository. Operate inside their own repo/worktree only; "
+            "do not stage repo-external paths from this repository."
+        )
     if evidence_refs:
         lines.extend(["", "## Evidence Refs", ""])
         lines.extend([f"- `{item}`" for item in evidence_refs[:8]])
