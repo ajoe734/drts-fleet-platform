@@ -29,7 +29,7 @@ const UI_LABELS: Record<string, LocalizedText> = {
   remittanceProofExample: { en: "remit-proof-001", zh: "匯款證明-001" },
   applicableTo: { en: "Applicable To", zh: "適用對象" },
   call: { en: "Call", zh: "客服" },
-  complaint: { en: "Complaint", zh: "投訴" },
+  complaint: { en: "Complaint", zh: "客訴" },
   pendingArtifactId: { en: "pending-artifact-id", zh: "待產生成品 ID" },
   defaultPlanName: {
     en: "Phase 1 Driver Fee Plan",
@@ -102,6 +102,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   pending_review: { en: "Pending Review", zh: "待審核" },
   resolved: { en: "Resolved", zh: "已解決" },
   retired: { en: "Retired", zh: "已退役" },
+  rollback_hold: { en: "Rollback Hold", zh: "回滾保留" },
   revoked: { en: "Revoked", zh: "已撤銷" },
   reporting: { en: "Reporting", zh: "報表" },
   scheduled: { en: "Scheduled", zh: "已排程" },
@@ -133,6 +134,13 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   exclusivity_expired: { en: "Exclusivity Expired", zh: "排他已過期" },
   exclusivity_revoked: { en: "Exclusivity Revoked", zh: "排他已撤銷" },
   exclusivity_rejected: { en: "Exclusivity Rejected", zh: "排他遭退回" },
+  offboarding_pending_debranding: {
+    en: "Debranding Required",
+    zh: "待完成除標識",
+  },
+  debranding_required: { en: "Debranding Required", zh: "待完成除標識" },
+  not_required: { en: "Not Required", zh: "不需要" },
+  completed: { en: "Completed", zh: "已完成" },
 };
 
 function formatTemplate(

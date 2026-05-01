@@ -21,7 +21,7 @@ function featureFlagDescription(locale: string, flag: FlagRecord) {
     "driver-app.shift": "啟用司機 App 班次與出勤追蹤",
     "driver-app.tasks": "啟用司機 App 任務生命週期",
     "ops-console.callcenter": "啟用營運後台客服中心工作階段檢視",
-    "ops-console.complaint": "啟用營運後台投訴案件管理",
+    "ops-console.complaint": "啟用營運後台客訴案件管理",
     "ops-console.dispatch": "啟用營運後台派車調度板",
     "ops-console.reports": "啟用營運後台報表任務管理",
     "phase1.read-models": "啟用 Phase 1 讀模型介面",

@@ -81,7 +81,7 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   exception_hold: { en: "Exception Hold", zh: "異常暫停" },
   exception_hold_confirmation_window_expired: {
     en: "Confirmation Window Expired",
-    zh: "確認視窗已到",
+    zh: "確認視窗已到期",
   },
   exception_hold_driver_rejected_in_window: {
     en: "Driver Rejected In Window",
@@ -105,8 +105,23 @@ const CODE_LABELS: Record<string, LocalizedText> = {
   high: { en: "High", zh: "高" },
   immutable: { en: "Immutable", zh: "不可變" },
   in_progress: { en: "In Progress", zh: "進行中" },
+  incident_assigned: { en: "Incident Assigned", zh: "事故已指派" },
+  incident_closed: { en: "Incident Closed", zh: "事故已關閉" },
+  incident_created: { en: "Incident Created", zh: "事故已建立" },
   incident_hold: { en: "Incident Hold", zh: "事故暫停" },
   incident_register: { en: "Incident Register", zh: "事故名冊" },
+  incident_resolved: { en: "Incident Resolved", zh: "事故已解決" },
+  escalation_target_set: { en: "Escalation Target Set", zh: "升級對象已設定" },
+  severity_escalated: { en: "Severity Escalated", zh: "嚴重程度已升級" },
+  dispatch_exception_handoff: {
+    en: "Dispatch Exception Handoff",
+    zh: "派遣異常移交",
+  },
+  service_recovery_action: {
+    en: "Service Recovery Action",
+    zh: "服務恢復行動",
+  },
+  complaint_linked: { en: "Complaint Linked", zh: "客訴已連結" },
   inspection: { en: "Inspection", zh: "檢查" },
   insurance_roster: { en: "Insurance Roster", zh: "保險名冊" },
   investigating: { en: "Investigating", zh: "調查中" },
