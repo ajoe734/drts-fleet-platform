@@ -130,7 +130,9 @@ The PRD still includes customer / call-entry surfaces that are not fully closed 
 - [x] Driver app production identity and device-binding hardening (P1PX-DRV-001)
 - [x] EAS internal build evidence and external credential blockers documented (P1PX-DRV-002)
 - [x] Blueprint truth sync — gap matrix, task board, backlog, checklist updated (P1PX-DOC-001)
-- [ ] Real bank/issuer API contract, sandbox credentials, allowed test cards — external-gated
+- [ ] Real bank/issuer API contract, sandbox credentials, allowed test cards — external-gated via
+      `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` blocker records `EXT-001-BLK-001` to
+      `EXT-001-BLK-006`
 - [ ] Real Grab Taiwan adapter (`EMC-X1-001`) — external-gated
 - [ ] Mobile distribution: Expo account, Apple team, Android keystore, internal tester groups — external-gated
 

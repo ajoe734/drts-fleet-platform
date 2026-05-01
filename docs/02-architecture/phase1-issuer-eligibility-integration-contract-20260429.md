@@ -47,6 +47,23 @@ Each verification record now snapshots:
 Current repo adapters are contract-complete stubs. They define the runtime seam
 and persistence shape now, while live upstream evidence stays external-gated.
 
+## External Activation Gate
+
+`EXT-001` records the live issuer / bank activation blockers in
+`support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md`. Production wording is not allowed until the
+following inputs are attached:
+
+- issuer-approved API contract and endpoint authority
+- sandbox credentials, secret path, and network allowlist requirements
+- issuer-approved test card / reference matrix for eligible, ineligible, expired, timeout, and
+  rate-limited cases
+- confirmation that timeout and retry behavior is accepted by the issuer
+- business sign-off for manual review fallback and offline evidence handling
+- security / compliance approval for sensitive-data masking, hashing, audit visibility, and
+  retention
+
+Missing inputs remain `EXTERNAL-GATED`; they must not be summarized as a passed issuer UAT.
+
 ## Timeout / Retry / Manual Review Baseline
 
 Default retry policy:
