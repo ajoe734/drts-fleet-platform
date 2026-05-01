@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T07:21:40Z
+Last updated: 2026-05-01T07:39:23Z
 
 ## Objective
 
@@ -116,15 +116,6 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Latest Checkpoints
 
-- 2026-05-01T07:20:31Z Orchestrator: `SYNC-001` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-01T07:20:31Z Orchestrator: `SYNC-001` Worker started via gemini: owned_ready_dispatch
-- 2026-05-01T07:20:39Z Codex: `SYNC-003` Assigned SYNC-003 to Gemini2 with reviewer Codex
-- 2026-05-01T07:20:42Z Orchestrator: `SYNC-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260501T072031Z-f696ccd3.json)
-- 2026-05-01T07:20:45Z Orchestrator: `SYNC-001` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-01T07:20:46Z Orchestrator: `SYNC-001` Worker started via gemini: owned_ready_dispatch
-- 2026-05-01T07:20:49Z Codex: `XREPO-001` Assigned XREPO-001 to Gemini2 with reviewer Codex
-- 2026-05-01T07:20:56Z Orchestrator: `SYNC-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260501T072046Z-67c93c4e.json)
-- 2026-05-01T07:20:57Z Orchestrator: `XREPO-001` Wake-up queued for supervisor: owned_ready_dispatch
 - 2026-05-01T07:20:57Z Orchestrator: `XREPO-001` Worker started via gemini: owned_ready_dispatch
 - 2026-05-01T07:20:58Z Codex: `DEPLOY-001` Assigned DEPLOY-001 to Gemini2 with reviewer Codex
 - 2026-05-01T07:21:06Z Codex: `EXT-001` Assigned EXT-001 to Gemini2 with reviewer Codex
@@ -136,3 +127,12 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - 2026-05-01T07:21:25Z Orchestrator: `XREPO-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260501T072111Z-7817849e.json)
 - 2026-05-01T07:21:31Z Codex: `EXT-004` Assigned EXT-004 to Gemini2 with reviewer Codex
 - 2026-05-01T07:21:39Z Codex: `BDX-CLOSEOUT` Assigned BDX-CLOSEOUT to Gemini2 with reviewer Codex
+- 2026-05-01T07:34:26Z Orchestrator: `SYNC-001` Cleared terminal dispatch pause after fixing Gemini2 inline task brief, yolo shell access, and maxSessionTurns runtime setting.
+- 2026-05-01T07:34:26Z Orchestrator: `XREPO-001` Cleared terminal dispatch pause after fixing Gemini2 inline task brief, yolo shell access, and maxSessionTurns runtime setting.
+- 2026-05-01T07:37:01Z Orchestrator: `SYNC-001` Cleared stale awaiting_chair owner guard after fixing Gemini2 prompt/runtime dispatch settings.
+- 2026-05-01T07:37:01Z Orchestrator: `XREPO-001` Cleared stale awaiting_chair owner guard after fixing Gemini2 prompt/runtime dispatch settings.
+- 2026-05-01T07:37:02Z Orchestrator: `SYNC-001` Wake-up queued for supervisor: owned_ready_dispatch
+- 2026-05-01T07:37:03Z Orchestrator: `SYNC-001` Worker started via gemini: owned_ready_dispatch
+- 2026-05-01T07:39:06Z Orchestrator: `SYNC-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260501T073703Z-76325974.json)
+- 2026-05-01T07:39:06Z Orchestrator: `SYNC-001` Wake-up queued for supervisor: owned_ready_dispatch
+- 2026-05-01T07:39:06Z Orchestrator: `SYNC-001` Worker started via gemini: owned_ready_dispatch
