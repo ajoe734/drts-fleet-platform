@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T08:37:39Z
+Last updated: 2026-05-01T08:38:58Z
 
 ## Objective
 
@@ -42,7 +42,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
 - `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Review passed after correction: no unproven runtime adapter code remains; EXT-002 has explicit blocker records EXT-002-BLK-001..007 and E2E-002 graceful-skip overclaim language is preserved.
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Ownership updated
 
 ## Delivery Layers
 
@@ -54,26 +54,24 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ### External / Upstream Integration Work
 
-| ID        | Phase                            | Task                                      | Owner   | Status          | Depends On | 中文說明                                                                                                                                     |
-| --------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `EXT-002` | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Gemini2 | review_approved | `SYNC-002` | 定義 forwarder 從 stub/scaffold 升級到真實外部平台的 proof gate，包括 credential、webhook signature、callback、status sync、lost-race 證據。 |
-| `EXT-003` | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog         | `SYNC-002` | 建立 driver app mobile distribution gate，列出 Expo、Apple team、Android keystore、tester group、build profile 與 release channel 要求。     |
-| `EXT-004` | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog         | `SYNC-002` | 建立 CTI/錄音/filing activation gate，明確 OC-022、OC-023、OC-024、E2E-003 的 live/staging/blocked 狀態與證據格式。                          |
+| ID        | Phase                            | Task                                      | Owner   | Status  | Depends On | 中文說明                                                                                                                                 |
+| --------- | -------------------------------- | ----------------------------------------- | ------- | ------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXT-003` | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog | `SYNC-002` | 建立 driver app mobile distribution gate，列出 Expo、Apple team、Android keystore、tester group、build profile 與 release channel 要求。 |
+| `EXT-004` | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog | `SYNC-002` | 建立 CTI/錄音/filing activation gate，明確 OC-022、OC-023、OC-024、E2E-003 的 live/staging/blocked 狀態與證據格式。                      |
 
 ## Task Board (active only)
 
-| ID             | Phase                            | Task                                      | Owner   | Status          | Depends On                                                                                                |
-| -------------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- |
-| `EXT-002`      | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Gemini2 | review_approved | `SYNC-002`                                                                                                |
-| `EXT-003`      | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog         | `SYNC-002`                                                                                                |
-| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog         | `SYNC-002`                                                                                                |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
+| ID             | Phase                            | Task                                      | Owner   | Status  | Depends On                                                                                                |
+| -------------- | -------------------------------- | ----------------------------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| `EXT-003`      | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog | `SYNC-002`                                                                                                |
+| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog | `SYNC-002`                                                                                                |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
 
 ## Handoff Queue
 
-| Task      | From  | To      | Message                                                                                                                                                                                        | Status  | Created At           |
-| --------- | ----- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
-| `EXT-002` | Codex | Gemini2 | Review passed after correction: no unproven runtime adapter code remains; EXT-002 has explicit blocker records EXT-002-BLK-001..007 and E2E-002 graceful-skip overclaim language is preserved. | pending | 2026-05-01T08:37:38Z |
+| Task     | From | To  | Message | Status | Created At |
+| -------- | ---- | --- | ------- | ------ | ---------- |
+| _(none)_ | -    | -   | -       | -      | -          |
 
 ## Blockers
 
@@ -83,15 +81,14 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task      | Reviewer | 修正重點                                                                                                                                                                                                                               | Review File |
-| --------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `EXT-002` | Codex    | 審查通過；Gemini2 原本留下未完成 fake adapter code 並 hit turn limit，reviewer 已還原 runtime stub、拒絕未證實的 axios/secret/API 假實作，改以 EXT-002 sidecar 明確列出外部 partner proof blockers，並同步 release gate / gap matrix。 | -           |
+| Task     | Reviewer | 修正重點 | Review File |
+| -------- | -------- | -------- | ----------- |
+| _(none)_ | -        | -        | -           |
 
 ## Completion Evidence (last 10)
 
 | Task                            | Commit                                   | Subject                                                           | LLM Agent | Reviewer | Recorded At          |
 | ------------------------------- | ---------------------------------------- | ----------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `ORX-FN-001-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                | Claude    | Codex2   | 2026-04-30T14:24:42Z |
 | `ORX-DP-003-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                | Claude2   | Claude   | 2026-04-30T23:54:31Z |
 | `ORX-CS-002-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                | Claude    | Codex2   | 2026-05-01T00:24:26Z |
 | `ORX-GV-003-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                | Codex     | Claude2  | 2026-05-01T00:50:29Z |
@@ -101,10 +98,10 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `XREPO-001`                     | c74f82cd87c5b774286a9740c3f49a229504ed1d | chore(status): approve cross-repo closeout                        | Gemini2   | Codex    | 2026-05-01T08:14:24Z |
 | `DEPLOY-001`                    | 394c3e2201dc26a9f83ff2b78ddaa3ef7626bd01 | chore(closeout): review proof gates and stabilize chairman triage | Gemini2   | Codex    | 2026-05-01T08:14:32Z |
 | `EXT-001`                       | 8a92c1f78b2c10d34ddf6cfe964facbccd3bd985 | EXT-001: record issuer eligibility external gate                  | Gemini2   | Codex    | 2026-05-01T08:32:05Z |
+| `EXT-002`                       | 137cac133a9a7b341f01264ff908fb3876330d14 | EXT-002: record forwarder adapter proof gate                      | Gemini2   | Codex    | 2026-05-01T08:38:58Z |
 
 ## Latest Checkpoints
 
-- 2026-05-01T08:18:27Z Orchestrator: `SYNC-003` Wake-up queued for supervisor: owned_ready_dispatch
 - 2026-05-01T08:18:27Z Orchestrator: `SYNC-003` Worker started via gemini: owned_ready_dispatch
 - 2026-05-01T08:18:37Z Gemini2: `SYNC-003` Reclassifying UAT checklist items from unchecked mixed list to inventory/static/live/sign-off/deferred states.
 - 2026-05-01T08:19:13Z Gemini2: `SYNC-003` Reading and parsing UAT checklist markdown to identify items for reclassification into inventory, static, live, sign-off, and deferred states based on existing notes, workflow status, and priority.
@@ -146,3 +143,4 @@ Per `docs/03-runbooks/master-system-closeout-checklist.md`, these are external-g
 - 2026-05-01T08:33:22Z Gemini2: `EXT-002` Starting to define the real forwarder adapter proof gate requirements.
 - 2026-05-01T08:37:16Z Gemini2: `EXT-002` Handoff to Codex: Forwarder adapter proof gate is ready after reviewer correction: fake axios/secret/API placeholder code was rejected and restored to explicit stub; support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md records EXT-002-BLK-001..007 for partner contract, credentials, webhook signature, callback lifecycle, status sync, lost-race, and no-owned-assignment evidence. Cross-repo gap matrix and workflow release gate now point at this external gate. Verification run: prettier check, doc-sync audit, git diff --check.
 - 2026-05-01T08:37:38Z Codex: `EXT-002` Review passed after correction: no unproven runtime adapter code remains; EXT-002 has explicit blocker records EXT-002-BLK-001..007 and E2E-002 graceful-skip overclaim language is preserved.
+- 2026-05-01T08:38:58Z Gemini2: `EXT-002` Done: forwarder adapter proof gate committed and pushed; EXT-002-BLK-001..007 now track partner contract, credentials, webhook signature, callback lifecycle, status sync, lost-race, and no-owned-assignment evidence. Unproven runtime adapter code was rejected and not retained.
