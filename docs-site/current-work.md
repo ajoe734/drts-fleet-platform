@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T07:46:23Z
+Last updated: 2026-05-01T07:52:06Z
 
 ## Objective
 
@@ -48,14 +48,13 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ### Primary Project Work
 
-| ID             | Phase                            | Task                                     | Owner   | Status          | Depends On                                                                                                | 中文說明                                                                                                                                          |
-| -------------- | -------------------------------- | ---------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SYNC-001`     | Phase 1 Blueprint Delta Closeout | Status and dashboard truth sync          | Gemini2 | review_approved | -                                                                                                         | 同步 root ai-status、current-work 與 docs-site 狀態，移除 ORX-GV-003 stale active narrative，讓新 closeout wave 成為唯一 active view。            |
-| `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation     | Gemini2 | backlog         | `SYNC-001`                                                                                                | 更新 workflow release gates 與 closeout wording，讓 ORX 完成後的 gate 狀態、external-gated、HOLD、pilot/production 邊界一致。                     |
-| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification  | Gemini2 | backlog         | `SYNC-002`                                                                                                | 把 UAT checklist 由未勾選混合清單整理成 inventory/static/live/sign-off/external/deferred 狀態，避免把靜態證據誤稱人工 UAT 通過。                  |
-| `XREPO-001`    | Phase 1 Blueprint Delta Closeout | Tenant commute hub cross-repo closure    | Gemini2 | in_progress     | -                                                                                                         | 檢查 tenant-commute-hub 未提交變更，完成 contract snapshot 與 tenant UI 同步，讓雙 repo 都乾淨並推到遠端。                                        |
-| `DEPLOY-001`   | Phase 1 Blueprint Delta Closeout | DB-enabled runtime persistence proof     | Gemini2 | backlog         | `SYNC-001`                                                                                                | 補 DB-enabled runtime proof，確認 DATABASE_URL、migration、DB-backed repository 與 driver device binding durability 的 production closeout 證據。 |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` | 在所有 sync、cross-repo、deploy、external gate 任務完成或明確 blocked 後，產出最終 release-language closeout，避免再說 everything done。          |
+| ID             | Phase                            | Task                                     | Owner   | Status      | Depends On                                                                                                | 中文說明                                                                                                                                          |
+| -------------- | -------------------------------- | ---------------------------------------- | ------- | ----------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation     | Gemini2 | backlog     | `SYNC-001`                                                                                                | 更新 workflow release gates 與 closeout wording，讓 ORX 完成後的 gate 狀態、external-gated、HOLD、pilot/production 邊界一致。                     |
+| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification  | Gemini2 | backlog     | `SYNC-002`                                                                                                | 把 UAT checklist 由未勾選混合清單整理成 inventory/static/live/sign-off/external/deferred 狀態，避免把靜態證據誤稱人工 UAT 通過。                  |
+| `XREPO-001`    | Phase 1 Blueprint Delta Closeout | Tenant commute hub cross-repo closure    | Gemini2 | in_progress | -                                                                                                         | 檢查 tenant-commute-hub 未提交變更，完成 contract snapshot 與 tenant UI 同步，讓雙 repo 都乾淨並推到遠端。                                        |
+| `DEPLOY-001`   | Phase 1 Blueprint Delta Closeout | DB-enabled runtime persistence proof     | Gemini2 | backlog     | `SYNC-001`                                                                                                | 補 DB-enabled runtime proof，確認 DATABASE_URL、migration、DB-backed repository 與 driver device binding durability 的 production closeout 證據。 |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Gemini2 | backlog     | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` | 在所有 sync、cross-repo、deploy、external gate 任務完成或明確 blocked 後，產出最終 release-language closeout，避免再說 everything done。          |
 
 ### External / Upstream Integration Work
 
@@ -68,24 +67,23 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Task Board (active only)
 
-| ID             | Phase                            | Task                                      | Owner   | Status          | Depends On                                                                                                |
-| -------------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- |
-| `SYNC-001`     | Phase 1 Blueprint Delta Closeout | Status and dashboard truth sync           | Gemini2 | review_approved | -                                                                                                         |
-| `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation      | Gemini2 | backlog         | `SYNC-001`                                                                                                |
-| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification   | Gemini2 | backlog         | `SYNC-002`                                                                                                |
-| `XREPO-001`    | Phase 1 Blueprint Delta Closeout | Tenant commute hub cross-repo closure     | Gemini2 | in_progress     | -                                                                                                         |
-| `DEPLOY-001`   | Phase 1 Blueprint Delta Closeout | DB-enabled runtime persistence proof      | Gemini2 | backlog         | `SYNC-001`                                                                                                |
-| `EXT-001`      | Phase 1 Blueprint Delta Closeout | Real bank issuer eligibility gate         | Gemini2 | backlog         | `SYNC-002`                                                                                                |
-| `EXT-002`      | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Gemini2 | backlog         | `SYNC-002`                                                                                                |
-| `EXT-003`      | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog         | `SYNC-002`                                                                                                |
-| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog         | `SYNC-002`                                                                                                |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
+| ID             | Phase                            | Task                                      | Owner   | Status      | Depends On                                                                                                |
+| -------------- | -------------------------------- | ----------------------------------------- | ------- | ----------- | --------------------------------------------------------------------------------------------------------- |
+| `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation      | Gemini2 | backlog     | `SYNC-001`                                                                                                |
+| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification   | Gemini2 | backlog     | `SYNC-002`                                                                                                |
+| `XREPO-001`    | Phase 1 Blueprint Delta Closeout | Tenant commute hub cross-repo closure     | Gemini2 | in_progress | -                                                                                                         |
+| `DEPLOY-001`   | Phase 1 Blueprint Delta Closeout | DB-enabled runtime persistence proof      | Gemini2 | backlog     | `SYNC-001`                                                                                                |
+| `EXT-001`      | Phase 1 Blueprint Delta Closeout | Real bank issuer eligibility gate         | Gemini2 | backlog     | `SYNC-002`                                                                                                |
+| `EXT-002`      | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Gemini2 | backlog     | `SYNC-002`                                                                                                |
+| `EXT-003`      | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog     | `SYNC-002`                                                                                                |
+| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog     | `SYNC-002`                                                                                                |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog     | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
 
 ## Handoff Queue
 
-| Task       | From  | To      | Message                                                                              | Status  | Created At           |
-| ---------- | ----- | ------- | ------------------------------------------------------------------------------------ | ------- | -------------------- |
-| `SYNC-001` | Codex | Gemini2 | Review passed: status/dashboard truth sync is consistent and acceptance checks pass. | pending | 2026-05-01T07:46:23Z |
+| Task     | From | To  | Message | Status | Created At |
+| -------- | ---- | --- | ------- | ------ | ---------- |
+| _(none)_ | -    | -   | -       | -      | -          |
 
 ## Blockers
 
@@ -95,35 +93,27 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task       | Reviewer | 修正重點                                                                                                                                                                                     | Review File |
-| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `SYNC-001` | Codex    | root/docs-site status counts match; doc-sync audit and git diff --check pass; ORX-GV-003 is only present in historical completion evidence/checkpoints, not as the active handoff narrative. | -           |
+| Task     | Reviewer | 修正重點 | Review File |
+| -------- | -------- | -------- | ----------- |
+| _(none)_ | -        | -        | -           |
 
 ## Completion Evidence (last 10)
 
-| Task                            | Commit  | Subject                                                                            | LLM Agent | Reviewer | Recorded At          |
-| ------------------------------- | ------- | ---------------------------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `ORX-GV-001`                    | 97e4c63 | feat(ORX-GV-001): negative-path UAT pack and release gate expansion                | Claude2   | Claude   | 2026-04-30T23:08:56Z |
-| `ORX-GV-002`                    | 8ce6fe5 | docs(ORX-GV-002): add operator ownership routing runbooks                          | Codex2    | Claude   | 2026-05-01T00:32:34Z |
-| `ORX-GV-003`                    | 51df49f | feat(ORX-GV-003): glossary, error-copy, and multilingual failure-state consistency | Codex2    | Claude2  | 2026-05-01T00:55:05Z |
-| `ORX-DP-001-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Claude2   | Claude   | 2026-04-30T23:14:19Z |
-| `OPX-DP-003-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Codex2    | Codex    | 2026-04-30T14:12:11Z |
-| `OPX-DP-004-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Claude2   | Codex    | 2026-04-30T14:27:12Z |
-| `ORX-FN-001-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Claude    | Codex2   | 2026-04-30T14:24:42Z |
-| `ORX-DP-003-SIDECAR-REVIEW`     | -       | no-commit closeout                                                                 | Claude2   | Claude   | 2026-04-30T23:54:31Z |
-| `ORX-CS-002-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Claude    | Codex2   | 2026-05-01T00:24:26Z |
-| `ORX-GV-003-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Codex     | Claude2  | 2026-05-01T00:50:29Z |
+| Task                            | Commit                                   | Subject                                                                            | LLM Agent | Reviewer | Recorded At          |
+| ------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------- | --------- | -------- | -------------------- |
+| `ORX-GV-002`                    | 8ce6fe5                                  | docs(ORX-GV-002): add operator ownership routing runbooks                          | Codex2    | Claude   | 2026-05-01T00:32:34Z |
+| `ORX-GV-003`                    | 51df49f                                  | feat(ORX-GV-003): glossary, error-copy, and multilingual failure-state consistency | Codex2    | Claude2  | 2026-05-01T00:55:05Z |
+| `ORX-DP-001-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                                 | Claude2   | Claude   | 2026-04-30T23:14:19Z |
+| `OPX-DP-003-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                                 | Codex2    | Codex    | 2026-04-30T14:12:11Z |
+| `OPX-DP-004-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                                 | Claude2   | Codex    | 2026-04-30T14:27:12Z |
+| `ORX-FN-001-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                                 | Claude    | Codex2   | 2026-04-30T14:24:42Z |
+| `ORX-DP-003-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                                 | Claude2   | Claude   | 2026-04-30T23:54:31Z |
+| `ORX-CS-002-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                                 | Claude    | Codex2   | 2026-05-01T00:24:26Z |
+| `ORX-GV-003-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                                 | Codex     | Claude2  | 2026-05-01T00:50:29Z |
+| `SYNC-001`                      | 6d4b7f1a99f76a260837e67bc1e80d8da70db9b3 | SYNC-001: record status dashboard sync review                                      | Gemini2   | Codex    | 2026-05-01T07:52:06Z |
 
 ## Latest Checkpoints
 
-- 2026-05-01T07:39:51Z Orchestrator: `SYNC-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260501T073906Z-7d824c85.json)
-- 2026-05-01T07:39:54Z Orchestrator: `XREPO-001` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-01T07:39:54Z Orchestrator: `XREPO-001` Worker started via gemini: owned_ready_dispatch
-- 2026-05-01T07:40:48Z Orchestrator: `XREPO-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260501T073954Z-3021f4d7.json)
-- 2026-05-01T07:40:48Z Orchestrator: `XREPO-001` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-01T07:40:48Z Orchestrator: `XREPO-001` Worker started via gemini: owned_ready_dispatch
-- 2026-05-01T07:41:08Z Orchestrator: `XREPO-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260501T074048Z-ca3790eb.json)
-- 2026-05-01T07:44:33Z Orchestrator: `SYNC-001` Cleared stale guard after tightening worker lifecycle prompt and exposing safe repo-external artifact paths.
 - 2026-05-01T07:44:33Z Orchestrator: `XREPO-001` Cleared stale guard after tightening worker lifecycle prompt and exposing safe repo-external artifact paths.
 - 2026-05-01T07:44:35Z Orchestrator: `SYNC-001` Wake-up queued for supervisor: owned_ready_dispatch
 - 2026-05-01T07:44:36Z Orchestrator: `SYNC-001` Worker started via gemini: owned_ready_dispatch
@@ -136,3 +126,11 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - 2026-05-01T07:45:48Z Orchestrator: `SYNC-001` Background worker process exited after advancing the task to `review`.
 - 2026-05-01T07:46:06Z Gemini2: `XREPO-001` Beginning cross-repo closure for tenant-commute-hub, starting with checking git status.
 - 2026-05-01T07:46:23Z Codex: `SYNC-001` Review passed: status/dashboard truth sync is consistent and acceptance checks pass.
+- 2026-05-01T07:46:25Z Orchestrator: `XREPO-001` Worker superseded to prioritize higher-priority review/finalize work.
+- 2026-05-01T07:46:25Z Orchestrator: `SYNC-001` Wake-up queued for supervisor: owned_finalize_dispatch
+- 2026-05-01T07:46:25Z Orchestrator: `SYNC-001` Worker started via gemini: owned_finalize_dispatch
+- 2026-05-01T07:46:25Z Orchestrator: `XREPO-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260501T074548Z-168fa268.json)
+- 2026-05-01T07:50:52Z Orchestrator: `SYNC-001` Stopped by Codex to reload Gemini workspace include-directory configuration.
+- 2026-05-01T07:50:52Z Orchestrator: `SYNC-001` Cleared stale guard after Gemini2 adapter gained tenant-commute-hub include-directory access.
+- 2026-05-01T07:50:52Z Orchestrator: `XREPO-001` Cleared stale guard after Gemini2 adapter gained tenant-commute-hub include-directory access.
+- 2026-05-01T07:52:06Z Gemini2: `SYNC-001` Done: status/dashboard truth sync reviewed, pushed, and recorded with closeout metadata.
