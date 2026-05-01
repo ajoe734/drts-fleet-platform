@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T08:10:16Z
+Last updated: 2026-05-01T08:11:53Z
 
 ## Objective
 
@@ -52,7 +52,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | -------------- | -------------------------------- | ---------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation     | Gemini2 | in_progress     | `SYNC-001`                                                                                                | 更新 workflow release gates 與 closeout wording，讓 ORX 完成後的 gate 狀態、external-gated、HOLD、pilot/production 邊界一致。                     |
 | `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification  | Gemini2 | backlog         | `SYNC-002`                                                                                                | 把 UAT checklist 由未勾選混合清單整理成 inventory/static/live/sign-off/external/deferred 狀態，避免把靜態證據誤稱人工 UAT 通過。                  |
-| `XREPO-001`    | Phase 1 Blueprint Delta Closeout | Tenant commute hub cross-repo closure    | Gemini2 | review          | -                                                                                                         | 檢查 tenant-commute-hub 未提交變更，完成 contract snapshot 與 tenant UI 同步，讓雙 repo 都乾淨並推到遠端。                                        |
+| `XREPO-001`    | Phase 1 Blueprint Delta Closeout | Tenant commute hub cross-repo closure    | Gemini2 | review_approved | -                                                                                                         | 檢查 tenant-commute-hub 未提交變更，完成 contract snapshot 與 tenant UI 同步，讓雙 repo 都乾淨並推到遠端。                                        |
 | `DEPLOY-001`   | Phase 1 Blueprint Delta Closeout | DB-enabled runtime persistence proof     | Gemini2 | review_approved | `SYNC-001`                                                                                                | 補 DB-enabled runtime proof，確認 DATABASE_URL、migration、DB-backed repository 與 driver device binding durability 的 production closeout 證據。 |
 | `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` | 在所有 sync、cross-repo、deploy、external gate 任務完成或明確 blocked 後，產出最終 release-language closeout，避免再說 everything done。          |
 
@@ -71,7 +71,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | -------------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- |
 | `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation      | Gemini2 | in_progress     | `SYNC-001`                                                                                                |
 | `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification   | Gemini2 | backlog         | `SYNC-002`                                                                                                |
-| `XREPO-001`    | Phase 1 Blueprint Delta Closeout | Tenant commute hub cross-repo closure     | Gemini2 | review          | -                                                                                                         |
+| `XREPO-001`    | Phase 1 Blueprint Delta Closeout | Tenant commute hub cross-repo closure     | Gemini2 | review_approved | -                                                                                                         |
 | `DEPLOY-001`   | Phase 1 Blueprint Delta Closeout | DB-enabled runtime persistence proof      | Gemini2 | review_approved | `SYNC-001`                                                                                                |
 | `EXT-001`      | Phase 1 Blueprint Delta Closeout | Real bank issuer eligibility gate         | Gemini2 | backlog         | `SYNC-002`                                                                                                |
 | `EXT-002`      | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Gemini2 | backlog         | `SYNC-002`                                                                                                |
@@ -83,8 +83,8 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 | Task         | From  | To      | Message                                                                                                                                                                           | Status  | Created At           |
 | ------------ | ----- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
-| `XREPO-001`  | Codex | Copilot | Availability-first reassignment: Copilot claimed XREPO-001 while Codex was unavailable or occupied.                                                                               | pending | 2026-05-01T08:01:33Z |
 | `DEPLOY-001` | Codex | Gemini2 | Review passed: DB-enabled runtime proof gate is documented and local pnpm phase1:verify:backfill passed; production/staging DATABASE_URL parity remains an explicit rollout gate. | pending | 2026-05-01T08:09:49Z |
+| `XREPO-001`  | Codex | Gemini2 | Review passed: tenant-commute-hub is clean and pushed at 1183a1a; core is clean and pushed at 394c3e2; tenant typecheck/build pass with only Browserslist stale-data warning.     | pending | 2026-05-01T08:11:53Z |
 
 ## Blockers
 
@@ -94,9 +94,10 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task         | Reviewer | 修正重點                                                                                                                                                                                                                                                                                                                                                                                                                     | Review File |
-| ------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `DEPLOY-001` | Codex    | 審查通過：DEPLOY-001 runbook 已移除重複段落並補成可審查 DB proof gate。文件現在明確列出 local/staging boot path、migration/seed/verify 命令、2026-05-01 local pnpm phase1:verify:backfill 通過證據、production-critical runtime state inventory、driver device binding durability caveat，以及 DB-unavailable exact gate。注意：這不是 production go-live approval；staging/production 仍需 explicit DATABASE_URL evidence。 | -           |
+| Task         | Reviewer | 修正重點                                                                                                                                                                                                                                                                                                                                                                                                                                              | Review File |
+| ------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `XREPO-001`  | Codex    | 審查通過：tenant-commute-hub 已 merge remote main 並推到 origin/main，HEAD=1183a1a508275ba7331aa304ec3a68b672d0eab1；tenant snapshot commit e72678c 記錄 core snapshot source d3244c8，並以 1183a1a 補上 @supabase/supabase-js dependency。tenant npm run typecheck 通過，npm run build 通過（僅 Browserslist/caniuse-lite stale data warning）。core drts-fleet-platform 也已乾淨並推到 origin/main，HEAD=394c3e2201dc26a9f83ff2b78ddaa3ef7626bd01。 | -           |
+| `DEPLOY-001` | Codex    | 審查通過：DEPLOY-001 runbook 已移除重複段落並補成可審查 DB proof gate。文件現在明確列出 local/staging boot path、migration/seed/verify 命令、2026-05-01 local pnpm phase1:verify:backfill 通過證據、production-critical runtime state inventory、driver device binding durability caveat，以及 DB-unavailable exact gate。注意：這不是 production go-live approval；staging/production 仍需 explicit DATABASE_URL evidence。                          | -           |
 
 ## Completion Evidence (last 10)
 
@@ -115,7 +116,6 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Latest Checkpoints
 
-- 2026-05-01T08:03:49Z Codex: `DEPLOY-001` Review failed: handoff only cites existing evidence and does not add or refresh a concrete DB-enabled runtime persistence proof artifact. Create or update the required runbook/support evidence with DATABASE_URL boot path, migration/backfill command output or exact DB-unavailable blocker, production-critical in-memory fallback inventory with mitigation, driver device binding durability assessment, and verification commands before handoff.
 - 2026-05-01T08:04:07Z Gemini2: `SYNC-001` Blocked: Git push operation is timing out and failing, preventing task finalization. Cannot proceed to mark task as done without a successful push.
 - 2026-05-01T08:05:12Z Orchestrator: `SYNC-002` quota/terminal: 402 You have no quota (Request ID: 9776:1E1E89:175734:1B8B10:69F45DEC) (raw_ref: .orchestrator/evidence/copilot-20260501T080143Z-f04e0574.json)
 - 2026-05-01T08:05:12Z Orchestrator: Coordination worker exited cleanly.
@@ -135,3 +135,4 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - 2026-05-01T08:09:09Z Codex: `SYNC-002` Review failed: handoff claimed workflow release gate rows were updated, but docs/03-runbooks/phase1-workflow-acceptance-release-gates.md still has WF-DSP-001, WF-FWD-001, WF-COM-001, and WF-FIN-001 negative-path gate reads at PENDING (ORX-GV-001 rows). Update the runbook/checklist/audit artifacts with evidence-backed gate wording, keep external-gated and HOLD semantics explicit, then rerun doc-sync and diff checks before handoff.
 - 2026-05-01T08:09:49Z Codex: `DEPLOY-001` Review passed: DB-enabled runtime proof gate is documented and local pnpm phase1:verify:backfill passed; production/staging DATABASE_URL parity remains an explicit rollout gate.
 - 2026-05-01T08:10:16Z Codex: `SYNC-001` Done: status/dashboard truth sync reviewed, pushed, and recorded with closeout metadata.
+- 2026-05-01T08:11:53Z Codex: `XREPO-001` Review passed: tenant-commute-hub is clean and pushed at 1183a1a; core is clean and pushed at 394c3e2; tenant typecheck/build pass with only Browserslist stale-data warning.
