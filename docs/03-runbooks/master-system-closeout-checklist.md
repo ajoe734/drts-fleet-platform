@@ -16,19 +16,29 @@ Use it to separate:
 
 ## Current Reality Snapshot
 
-As of `2026-04-28`, the switchboard follow-up wave is closed, the protected
-control-plane auth cutover is merged and staging-verified, and the P1PX
-productization wave has landed partner channel and driver app baselines.
-The current visible delta is now:
+As of `2026-05-01`, the switchboard follow-up wave, protected control-plane auth
+cutover, P1PX productization wave, ORX operational remediation wave, and BDX
+blueprint-delta closeout wave are closed for the repo-local Phase 1 claim. The
+current visible delta is now:
 
-- external-gated integrations: real bank/issuer credentials, Grab Taiwan real adapter, mobile distribution inputs
-- consciously deferred future-gated surfaces: passenger app/web, passenger receipt UI, call point/concierge, AV/ODD, live board (captured in `MSC-P1-001`)
+- external-gated integrations: real bank/issuer credentials, Grab Taiwan or
+  equivalent real adapter, mobile distribution inputs, and live CTI /
+  recording / filing activation
+- pilot-gated evidence: tenant-by-tenant rollout acceptance, human UAT sign-off,
+  operator acceptance, and mobile tester install proof when in scope
+- production-gated evidence: production `DATABASE_URL` boot, migrations,
+  retention/object-store controls, secrets, SLO/pager routing, rollback owner,
+  and legal/compliance sign-off
+- consciously deferred future-gated surfaces: passenger app/web, passenger
+  receipt UI, call point/concierge, AV/ODD, live board (captured in `MSC-P1-001`)
 
 This means:
 
 - **gap-fix execution is complete enough to stop being the main story**
-- **partner channel and driver app baselines are now landed; only external credentials block productization completion**
-- **the repo-local closeout bar is met, while deferred and external-gated scope remains explicit**
+- **partner channel and driver app baselines are landed; external credentials
+  and distribution inputs block productization completion**
+- **the repo-local closeout bar is met, while deferred, external-gated,
+  pilot-gated, and production-gated scope remains explicit**
 
 Release wording should now cite workflow families from
 `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` instead of
@@ -133,10 +143,15 @@ The PRD still includes customer / call-entry surfaces that are not fully closed 
 - [ ] Real bank/issuer API contract, sandbox credentials, allowed test cards — external-gated via
       `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` blocker records `EXT-001-BLK-001` to
       `EXT-001-BLK-006`
-- [ ] Real Grab Taiwan adapter (`EMC-X1-001`) — external-gated
+- [ ] Real Grab Taiwan adapter (`EMC-X1-001`) — external-gated via
+      `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md` blocker records
+      `EXT-002-BLK-001` to `EXT-002-BLK-007`
 - [ ] Mobile distribution: Expo account, Apple team, Android keystore, internal tester groups —
       external-gated via `support/sidecars/EXT-003/EXT-003-MOBILE-DISTRIBUTION-GATE.md` blocker
       records `EXT-003-BLK-001` to `EXT-003-BLK-007`
+- [ ] Live CTI / recording / filing activation — external-gated via
+      `support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md` blocker records
+      `EXT-004-BLK-001` to `EXT-004-BLK-008`
 
 ### D-4. Reporting / filing / finance closure
 
@@ -183,7 +198,12 @@ We can honestly say the system is operationally complete only when all of the fo
 - [x] partner channel and driver app baselines are implemented (P1PX wave done)
 - [x] `current-work.md`, `ai-status.json`, evidence packets, and rollout docs tell the same story
 - [x] the remaining gap between “implemented slices” and “operationally complete system” is either closed or consciously deferred by decision
-- [ ] external-gated: real bank/issuer credentials, Grab adapter, mobile distribution (blocked on partner / external inputs)
+- [ ] external-gated: real bank/issuer credentials, Grab / equivalent adapter, mobile distribution,
+      CTI / recording / filing activation (blocked on partner / external inputs)
+- [ ] pilot-gated: human UAT, operator acceptance, tenant rollout acceptance, and install evidence
+      when mobile distribution is in scope
+- [ ] production-gated: target-environment DB boot, migrations, retention/object-store controls,
+      secret policy, SLO/pager routing, rollback owner, and legal/compliance sign-off
 
 ## Reference Anchors
 

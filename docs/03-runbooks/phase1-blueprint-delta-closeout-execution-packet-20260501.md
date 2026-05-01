@@ -1,17 +1,19 @@
 # Phase 1 Blueprint Delta Closeout Execution Packet
 
-Status: ready for supervisor-managed execution  
-Date: 2026-05-01  
-Source audit: `docs/02-architecture/phase1-implementation-blueprint-delta-audit-20260501.md`  
+Status: executed; final closeout metadata recorded through `BDX-CLOSEOUT`
+Date: 2026-05-01
+Source audit: `docs/02-architecture/phase1-implementation-blueprint-delta-audit-20260501.md`
 Scope: `drts-fleet-platform` plus sibling repo `tenant-commute-hub`
 
 ## 1. Purpose
 
 This packet materializes the remaining delta from the 2026-05-01 implementation
-vs blueprint audit into supervisor-dispatchable execution tasks.
+vs blueprint audit into supervisor-dispatchable execution tasks, then records
+their closeout result.
 
 The goal is not to reopen the ORX implementation wave. Root machine truth already
-shows `249/249 done`. This wave closes the gap between:
+showed the ORX wave closed when this packet was created. This wave closes the
+gap between:
 
 - repo-local implementation completion;
 - release / UAT / dashboard truth synchronization;
@@ -24,8 +26,10 @@ shows `249/249 done`. This wave closes the gap between:
 - Do not claim production completion from repo-local task completion alone.
 - Do not mark external-gated items done by inventing missing credentials,
   partner contracts, live CTI callbacks, or mobile distribution accounts.
-- If an external input is unavailable, create the gate tracker, document the
-  exact blocker, and move the task to `blocked` with a named waiting owner.
+- If an external input is unavailable, create the gate tracker and document the
+  exact blocker. The execution task may close as a gate-packet task, but the
+  release claim must remain `EXTERNAL-GATED` / `HOLD` until the blocker evidence
+  is attached.
 - Keep `drts-fleet-platform` as business authority and `tenant-commute-hub` as
   the tenant / partner frontend consumer.
 - Every task must finish with evidence links, commit hash, push confirmation,
@@ -45,6 +49,21 @@ shows `249/249 done`. This wave closes the gap between:
 | `EXT-003`      | External Gate | Materialize mobile distribution gate                                  | Gemini2 | Codex    | `SYNC-002`                                       |
 | `EXT-004`      | External Gate | Materialize live CTI / recording / filing activation gate             | Gemini2 | Codex    | `SYNC-002`                                       |
 | `BDX-CLOSEOUT` | Governance    | Final closeout narrative after sync, repo, deploy, and external gates | Gemini2 | Codex    | all `SYNC-*`, `XREPO-001`, `DEPLOY-001`, `EXT-*` |
+
+### Execution Result
+
+| Task ID        | Closeout status        | Commit           | Release-language result                                                                        |
+| -------------- | ---------------------- | ---------------- | ---------------------------------------------------------------------------------------------- |
+| `SYNC-001`     | `done`                 | `6d4b7f1`        | Root and docs-site status surfaces synchronized.                                               |
+| `SYNC-002`     | `done`                 | `6c5ba68`        | Workflow release gates reconciled; stale ORX pending rows removed.                             |
+| `SYNC-003`     | `done`                 | `0ee6948`        | UAT rows reclassified into evidence / sign-off / external / deferred categories.               |
+| `XREPO-001`    | `done`                 | `c74f82c`        | `tenant-commute-hub` is clean and synced; latest observed tenant commit is `1183a1a`.          |
+| `DEPLOY-001`   | `done`                 | `394c3e2`        | DB-enabled runtime proof gate documented; local backfill verification passed.                  |
+| `EXT-001`      | `done as gate packet`  | `8a92c1f`        | Real bank / issuer launch remains external-gated on `EXT-001-BLK-*`.                           |
+| `EXT-002`      | `done as gate packet`  | `137cac1`        | Real forwarder launch remains external-gated on `EXT-002-BLK-*`.                               |
+| `EXT-003`      | `done as gate packet`  | `5ed2f8a`        | Mobile distribution remains external-gated on `EXT-003-BLK-*`.                                 |
+| `EXT-004`      | `done as gate packet`  | `0afd144`        | CTI / recording / filing activation remains external/HOLD-gated on `EXT-004-BLK-*`.            |
+| `BDX-CLOSEOUT` | final status recording | `ai-status.json` | This final narrative distinguishes repo-local done from external, pilot, and production gates. |
 
 ### Provider Health Override
 
@@ -147,8 +166,9 @@ with unchecked rows.
 
 ### Objective
 
-Close the dirty working tree in `/home/edna/workspace/tenant-commute-hub` and
-record the exact contract snapshot / UI sync status.
+Close the audit-time dirty working tree in
+`/home/edna/workspace/tenant-commute-hub` and record the exact contract snapshot
+/ UI sync status.
 
 ### Write Scope
 
