@@ -9,6 +9,9 @@ provisioning through sandbox, pilot, and production.
 Tenant API key and webhook operating rules are defined in
 `docs/03-runbooks/tenant-api-webhook-governance-runbook.md`.
 
+Cross-lane ownership routing for rollback and escalation is summarized in
+`docs/03-runbooks/phase1-operator-routing-runbook.md`.
+
 ## Bootstrap Defaults
 
 Provision every new tenant with these platform-owned defaults:

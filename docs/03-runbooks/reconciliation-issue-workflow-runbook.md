@@ -6,6 +6,9 @@ Use this runbook when finance or ops needs to triage a settlement mismatch that
 requires explicit assignment, retained evidence comments, and a formal
 resolve/reopen trail.
 
+Cross-lane ownership routing for settlement mismatches is summarized in
+`docs/03-runbooks/phase1-operator-routing-runbook.md`.
+
 Supported issue families:
 
 - `forwarder_status_mismatch`

@@ -8,6 +8,10 @@ This runbook describes the operational procedures for incident escalation,
 service recovery actions, and the handoff path from dispatch exceptions to
 formal incidents.
 
+Cross-lane ownership routing for incident escalation and adjacent exception /
+override states is summarized in
+`docs/03-runbooks/phase1-operator-routing-runbook.md`.
+
 ## 2. Escalation Targets
 
 Every incident may optionally have an `escalationTarget` that routes ownership:

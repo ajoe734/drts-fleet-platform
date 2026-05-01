@@ -12,6 +12,9 @@ The canonical operator lane is the ops console `Contracts` page, which now
 surfaces the partner eligibility exception queue from
 `GET /api/ops/partner/eligibility/reviews`.
 
+Cross-lane ownership routing for this manual-review lane is summarized in
+`docs/03-runbooks/phase1-operator-routing-runbook.md`.
+
 ## Outcome Matrix
 
 | Verification status | Reason family                            | Operator meaning                               | Required action                                                                           |
