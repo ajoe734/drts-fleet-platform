@@ -58,6 +58,36 @@ def _gemini_provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict, 
     return provider_key, provider, provider.get("gemini", {})
 
 
+def _gemini_include_directories(config: dict, gemini_settings: dict) -> list[str]:
+    repo_root = config_path(config, "status_file").parents[0]
+    include_setting = gemini_settings.get("include_directories")
+    directories: list[str] = []
+    if include_setting is True:
+        directories.append(str(repo_root))
+    elif isinstance(include_setting, list):
+        directories.extend(str(value) for value in include_setting if str(value).strip())
+    elif isinstance(include_setting, str) and include_setting.strip():
+        directories.append(include_setting.strip())
+
+    for value in gemini_settings.get("extra_include_directories", []) or []:
+        text = str(value).strip()
+        if text:
+            directories.append(text)
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in directories:
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = repo_root / path
+        resolved = str(path)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        result.append(resolved)
+    return result
+
+
 def _gemini_selected_auth_type(runtime: dict | None = None, env: dict[str, str] | None = None) -> str | None:
     if _truthy_env("GOOGLE_GENAI_USE_GCA", env):
         return "oauth-personal"
@@ -160,8 +190,8 @@ class GeminiAdapter(BaseAdapter):
         approval_mode = approval.get("default_approval_mode")
         if approval_mode:
             command.extend(["--approval-mode", approval_mode])
-        if gemini_settings.get("include_directories"):
-            command.extend(["--include-directories", str(config_path(self.config, "status_file").parents[0])])
+        for directory in _gemini_include_directories(self.config, gemini_settings):
+            command.extend(["--include-directories", directory])
 
         run_id = new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)
