@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T07:52:06Z
+Last updated: 2026-05-01T07:53:03Z
 
 ## Objective
 
@@ -42,7 +42,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
 - `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Beginning cross-repo closure for tenant-commute-hub, starting with checking git status.
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Checking git status for tenant-commute-hub repository.
 
 ## Delivery Layers
 
@@ -114,10 +114,6 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Latest Checkpoints
 
-- 2026-05-01T07:44:33Z Orchestrator: `XREPO-001` Cleared stale guard after tightening worker lifecycle prompt and exposing safe repo-external artifact paths.
-- 2026-05-01T07:44:35Z Orchestrator: `SYNC-001` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-01T07:44:36Z Orchestrator: `SYNC-001` Worker started via gemini: owned_ready_dispatch
-- 2026-05-01T07:44:51Z Gemini2: `SYNC-001` Starting SYNC-001: Synchronizing status and dashboard truth.
 - 2026-05-01T07:45:16Z Gemini2: `SYNC-001` Synchronizing status and dashboard truth, removing stale ORX-GV-003 narrative.
 - 2026-05-01T07:45:44Z Gemini2: `SYNC-001` Handoff to Codex: SYNC-001 task completed. Status and dashboard truth synchronized. Removed stale ORX-GV-003 narrative. All acceptance criteria met.
 - 2026-05-01T07:45:47Z Orchestrator: `SYNC-001` Worker superseded after task responsibility moved to another agent.
@@ -134,3 +130,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - 2026-05-01T07:50:52Z Orchestrator: `SYNC-001` Cleared stale guard after Gemini2 adapter gained tenant-commute-hub include-directory access.
 - 2026-05-01T07:50:52Z Orchestrator: `XREPO-001` Cleared stale guard after Gemini2 adapter gained tenant-commute-hub include-directory access.
 - 2026-05-01T07:52:06Z Gemini2: `SYNC-001` Done: status/dashboard truth sync reviewed, pushed, and recorded with closeout metadata.
+- 2026-05-01T07:52:51Z Orchestrator: Restarting supervisor after Gemini2 tenant include-directory adapter fix and SYNC-001 closeout.
+- 2026-05-01T07:52:52Z Orchestrator: `XREPO-001` Wake-up queued for supervisor: owned_in_progress_dispatch
+- 2026-05-01T07:52:52Z Orchestrator: `XREPO-001` Worker started via gemini: owned_in_progress_dispatch
+- 2026-05-01T07:53:02Z Gemini2: `XREPO-001` Checking git status for tenant-commute-hub repository.
