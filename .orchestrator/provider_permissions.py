@@ -7,7 +7,18 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from common import ROOT, command_exists, config_path, load_config, load_json, run_command, to_bool, utc_now, write_json
+from common import (
+    ROOT,
+    command_exists,
+    config_path,
+    load_config,
+    load_json,
+    run_command,
+    runtime_env_overrides,
+    to_bool,
+    utc_now,
+    write_json,
+)
 
 WORKSPACE_SETTINGS_PATH = ROOT / ".vscode" / "settings.json"
 CLAUDE_LOCAL_SETTINGS_PATH = ROOT / ".claude" / "settings.local.json"
@@ -42,51 +53,72 @@ def _claude_local_settings() -> dict[str, Any]:
     return load_json(CLAUDE_LOCAL_SETTINGS_PATH, default={}) or {}
 
 
-def _gemini_settings() -> dict[str, Any]:
-    return load_json(GEMINI_SETTINGS_PATH, default={}) or {}
+def _gemini_paths(runtime: dict[str, Any] | None = None) -> tuple[Path, Path]:
+    overrides = runtime_env_overrides(runtime)
+    home = Path(overrides.get("HOME") or str(Path.home()))
+    base = home / ".gemini"
+    return base / "settings.json", base / "oauth_creds.json"
+
+
+def _gemini_settings(runtime: dict[str, Any] | None = None) -> dict[str, Any]:
+    settings_path, _ = _gemini_paths(runtime)
+    return load_json(settings_path, default={}) or {}
 
 
 def _qwen_settings() -> dict[str, Any]:
     return load_json(QWEN_SETTINGS_PATH, default={}) or {}
 
 
-def _truthy_env(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+def _truthy_env(name: str, env: dict[str, str] | None = None) -> bool:
+    source = env or os.environ
+    return source.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _gemini_env_auth_type() -> str | None:
-    if _truthy_env("GOOGLE_GENAI_USE_GCA"):
+def _gemini_env_auth_type(env: dict[str, str] | None = None) -> str | None:
+    source = env or os.environ
+    if _truthy_env("GOOGLE_GENAI_USE_GCA", source):
         return "oauth-personal"
-    if _truthy_env("GEMINI_CLI_USE_COMPUTE_ADC"):
+    if _truthy_env("GEMINI_CLI_USE_COMPUTE_ADC", source):
         return "compute-default-credentials"
-    if _truthy_env("GOOGLE_GENAI_USE_VERTEXAI"):
+    if _truthy_env("GOOGLE_GENAI_USE_VERTEXAI", source):
         return "vertex-ai"
-    if os.environ.get("GEMINI_API_KEY"):
+    if source.get("GEMINI_API_KEY"):
         return "gemini-api-key"
     return None
 
 
-def _gemini_selected_auth_type(settings: dict[str, Any]) -> str | None:
+def _gemini_selected_auth_type(
+    settings: dict[str, Any],
+    *,
+    env: dict[str, str] | None = None,
+    oauth_creds_path: Path = GEMINI_OAUTH_CREDS_PATH,
+) -> str | None:
     return (
-        _gemini_env_auth_type()
+        _gemini_env_auth_type(env)
         or settings.get("security", {}).get("auth", {}).get("selectedType")
-        or ("oauth-personal" if GEMINI_OAUTH_CREDS_PATH.exists() else None)
+        or ("oauth-personal" if oauth_creds_path.exists() else None)
     )
 
 
-def _gemini_auth_ready(settings: dict[str, Any]) -> bool:
-    auth_type = _gemini_selected_auth_type(settings)
+def _gemini_auth_ready(
+    settings: dict[str, Any],
+    *,
+    env: dict[str, str] | None = None,
+    oauth_creds_path: Path = GEMINI_OAUTH_CREDS_PATH,
+) -> bool:
+    source = env or os.environ
+    auth_type = _gemini_selected_auth_type(settings, env=source, oauth_creds_path=oauth_creds_path)
     if auth_type == "oauth-personal":
-        return GEMINI_OAUTH_CREDS_PATH.exists()
+        return oauth_creds_path.exists()
     if auth_type == "gemini-api-key":
-        return bool(os.environ.get("GEMINI_API_KEY"))
+        return bool(source.get("GEMINI_API_KEY"))
     if auth_type == "vertex-ai":
         return bool(
-            os.environ.get("GOOGLE_API_KEY")
-            or (os.environ.get("GOOGLE_CLOUD_PROJECT") and os.environ.get("GOOGLE_CLOUD_LOCATION"))
+            source.get("GOOGLE_API_KEY")
+            or (source.get("GOOGLE_CLOUD_PROJECT") and source.get("GOOGLE_CLOUD_LOCATION"))
         )
     if auth_type == "compute-default-credentials":
-        if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+        if source.get("GOOGLE_APPLICATION_CREDENTIALS"):
             return True
         gcloud = command_exists("gcloud")
         return bool(gcloud) and run_command([gcloud, "auth", "application-default", "print-access-token"]).returncode == 0
@@ -134,8 +166,8 @@ def _gh_version(binary: str | None) -> tuple[int, int, int] | None:
     return tuple(int(part) for part in match.groups())
 
 
-def _json_command(command: list[str]) -> dict[str, Any]:
-    result = run_command(command)
+def _json_command(command: list[str], *, env: dict[str, str] | None = None) -> dict[str, Any]:
+    result = run_command(command, env=env)
     if result.returncode != 0 or not result.stdout:
         return {}
     try:
@@ -144,10 +176,10 @@ def _json_command(command: list[str]) -> dict[str, Any]:
         return {}
 
 
-def _claude_auth_ready(binary: str | None) -> bool:
+def _claude_auth_ready(binary: str | None, *, env: dict[str, str] | None = None) -> bool:
     if not binary:
         return False
-    payload = _json_command([binary, "auth", "status"])
+    payload = _json_command([binary, "auth", "status"], env=env)
     return bool(payload.get("loggedIn"))
 
 
@@ -802,6 +834,115 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
             },
         },
     }
+    if "qwen" not in (config.get("providers", {}) or {}):
+        report["providers"].pop("qwen", None)
+    claude_template = report["providers"].get("claude", {})
+    for provider_key, provider_cfg in (config.get("providers", {}) or {}).items():
+        if provider_key == "claude" or provider_cfg.get("delivery_mode") != "claude_cli":
+            continue
+        runtime = provider_cfg.get("runtime", {})
+        runtime_cli = command_exists(runtime.get("cli") or "claude")
+        runtime_env = os.environ.copy()
+        runtime_overrides = runtime_env_overrides(runtime)
+        runtime_env.update(runtime_overrides)
+        runtime_auth_ready = _claude_auth_ready(runtime_cli, env=runtime_env)
+        paths = dict(claude_template.get("paths", {}) or {})
+        paths.update(
+            {
+                "binary": runtime_cli,
+                "config_home": runtime.get("config_home"),
+                "resolved_home": runtime_overrides.get("HOME"),
+                "resolved_xdg_config_home": runtime_overrides.get("XDG_CONFIG_HOME"),
+            }
+        )
+        settings = dict(claude_template.get("settings", {}) or {})
+        settings.update(
+            {
+                "runtime.config_home": runtime.get("config_home"),
+                "runtime.output_format": runtime.get("output_format"),
+                "runtime.permission_mode": runtime.get("permission_mode"),
+            }
+        )
+        notes = list(claude_template.get("notes", []) or [])
+        if runtime.get("config_home"):
+            notes.append(
+                "This Claude lane is isolated with runtime.config_home, so CLI auth/quota can differ from the primary Claude provider."
+            )
+        report["providers"][provider_key] = {
+            **claude_template,
+            "installed": bool(claude_path or runtime_cli),
+            "host_layer": "CLI + VS Code extension" if runtime_cli and claude_path else ("CLI" if runtime_cli else "VS Code extension"),
+            "delivery_mode": provider_cfg.get("delivery_mode", "claude_cli"),
+            "local_cli_worker_supported": bool(runtime_cli and runtime_auth_ready),
+            "supports_auto_approve": bool(runtime_cli and runtime_auth_ready),
+            "supports_defer_resume": bool(runtime_cli),
+            "auth_ready": runtime_auth_ready,
+            "verified": "verified" if (runtime_cli and runtime_auth_ready) else ("partial" if runtime_cli else "unavailable"),
+            "paths": paths,
+            "settings": settings,
+            "notes": notes,
+        }
+    gemini_template = report["providers"].get("gemini", {})
+    for provider_key, provider_cfg in (config.get("providers", {}) or {}).items():
+        if provider_key == "gemini" or provider_cfg.get("delivery_mode") != "gemini":
+            continue
+        gemini_runtime = provider_cfg.get("gemini", {})
+        runtime_cli = command_exists(gemini_runtime.get("cli") or "gemini")
+        runtime_env = os.environ.copy()
+        runtime_overrides = runtime_env_overrides(gemini_runtime)
+        runtime_env.update(runtime_overrides)
+        settings_path, oauth_creds_path = _gemini_paths(gemini_runtime)
+        runtime_settings = _gemini_settings(gemini_runtime)
+        runtime_auth_ready = _gemini_auth_ready(runtime_settings, env=runtime_env, oauth_creds_path=oauth_creds_path)
+        runtime_auth_type = _gemini_selected_auth_type(
+            runtime_settings,
+            env=runtime_env,
+            oauth_creds_path=oauth_creds_path,
+        )
+        paths = dict(gemini_template.get("paths", {}) or {})
+        paths.update(
+            {
+                "extension": str(gemini_path) if gemini_path else None,
+                "cli_settings": str(settings_path),
+                "oauth_creds": str(oauth_creds_path) if oauth_creds_path.exists() else None,
+                "resolved_home": runtime_overrides.get("HOME"),
+                "resolved_xdg_config_home": runtime_overrides.get("XDG_CONFIG_HOME"),
+            }
+        )
+        settings = dict(gemini_template.get("settings", {}) or {})
+        settings.update(
+            {
+                "runtime.config_home": gemini_runtime.get("config_home"),
+                "runtime.model": gemini_runtime.get("model"),
+                "security.auth.selectedType": runtime_auth_type,
+                "general.defaultApprovalMode": runtime_settings.get("general", {}).get("defaultApprovalMode"),
+            }
+        )
+        notes = list(gemini_template.get("notes", []) or [])
+        if gemini_runtime.get("config_home"):
+            notes.append(
+                "This Gemini lane is isolated with gemini.config_home, so CLI auth/quota can differ from the primary Gemini provider."
+            )
+        report["providers"][provider_key] = {
+            **gemini_template,
+            "installed": bool(gemini_path or runtime_cli),
+            "host_layer": "VS Code extension + CLI" if gemini_path and runtime_cli else ("CLI" if runtime_cli else "VS Code extension"),
+            "delivery_mode": provider_cfg.get("delivery_mode", "gemini"),
+            "approval_mode": runtime_settings.get("general", {}).get("defaultApprovalMode") or "default",
+            "default_auto_approve_supported": bool(runtime_cli and runtime_auth_ready),
+            "full_access_supported": bool(runtime_cli and runtime_auth_ready),
+            "per_tool_allow_supported": bool(runtime_cli and runtime_auth_ready),
+            "local_cli_worker_supported": bool(runtime_cli and runtime_auth_ready),
+            "supports_auto_approve": bool(runtime_cli and runtime_auth_ready),
+            "auth_ready": runtime_auth_ready,
+            "supported_models": provider_cfg.get("model_preference", {}).get("supported", []) if isinstance(provider_cfg.get("model_preference"), dict) else [],
+            "selected_model": gemini_runtime.get("model"),
+            "applied": bool(runtime_cli),
+            "verified": "verified" if (runtime_cli and runtime_auth_ready) else ("partial" if runtime_cli else "unavailable"),
+            "paths": paths,
+            "settings": settings,
+            "notes": notes,
+        }
     return report
 
 

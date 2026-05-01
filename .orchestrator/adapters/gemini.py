@@ -12,6 +12,7 @@ from common import (
     load_json,
     new_runtime_id,
     runtime_log_path,
+    runtime_env_overrides,
     spawn_background_process,
 )
 
@@ -20,42 +21,75 @@ GEMINI_SETTINGS_PATH = Path.home() / ".gemini" / "settings.json"
 GEMINI_OAUTH_CREDS_PATH = Path.home() / ".gemini" / "oauth_creds.json"
 
 
-def _truthy_env(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+def _truthy_env(name: str, env: dict[str, str] | None = None) -> bool:
+    source = env or os.environ
+    return source.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _gemini_settings() -> dict:
-    return load_json(GEMINI_SETTINGS_PATH, default={}) or {}
+def _gemini_paths(runtime: dict | None = None) -> tuple[Path, Path]:
+    overrides = runtime_env_overrides(runtime)
+    home = Path(overrides.get("HOME") or str(Path.home()))
+    base = home / ".gemini"
+    return base / "settings.json", base / "oauth_creds.json"
 
 
-def _gemini_selected_auth_type() -> str | None:
-    if _truthy_env("GOOGLE_GENAI_USE_GCA"):
+def _gemini_runtime_env(runtime: dict | None = None, *, ensure_dirs: bool = False) -> dict[str, str]:
+    overrides = runtime_env_overrides(runtime)
+    if ensure_dirs:
+        settings_path, _ = _gemini_paths(runtime)
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        for key in ("HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"):
+            if overrides.get(key):
+                Path(overrides[key]).mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env.update(overrides)
+    return env
+
+
+def _gemini_settings(runtime: dict | None = None) -> dict:
+    settings_path, _ = _gemini_paths(runtime)
+    return load_json(settings_path, default={}) or {}
+
+
+def _gemini_provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict, dict]:
+    agent = agent_config_for(config, agent_id)
+    provider_key = str(agent.get("provider") or "gemini").strip() or "gemini"
+    provider = config.get("providers", {}).get(provider_key, {})
+    return provider_key, provider, provider.get("gemini", {})
+
+
+def _gemini_selected_auth_type(runtime: dict | None = None, env: dict[str, str] | None = None) -> str | None:
+    if _truthy_env("GOOGLE_GENAI_USE_GCA", env):
         return "oauth-personal"
-    if _truthy_env("GEMINI_CLI_USE_COMPUTE_ADC"):
+    if _truthy_env("GEMINI_CLI_USE_COMPUTE_ADC", env):
         return "compute-default-credentials"
-    if _truthy_env("GOOGLE_GENAI_USE_VERTEXAI"):
+    if _truthy_env("GOOGLE_GENAI_USE_VERTEXAI", env):
         return "vertex-ai"
-    if os.environ.get("GEMINI_API_KEY"):
+    source = env or os.environ
+    if source.get("GEMINI_API_KEY"):
         return "gemini-api-key"
-    settings = _gemini_settings()
+    settings = _gemini_settings(runtime)
+    _, oauth_creds_path = _gemini_paths(runtime)
     return settings.get("security", {}).get("auth", {}).get("selectedType") or (
-        "oauth-personal" if GEMINI_OAUTH_CREDS_PATH.exists() else None
+        "oauth-personal" if oauth_creds_path.exists() else None
     )
 
 
-def _gemini_auth_ready() -> bool:
-    auth_type = _gemini_selected_auth_type()
+def _gemini_auth_ready(runtime: dict | None = None, env: dict[str, str] | None = None) -> bool:
+    auth_type = _gemini_selected_auth_type(runtime, env)
+    _, oauth_creds_path = _gemini_paths(runtime)
+    source = env or os.environ
     if auth_type == "oauth-personal":
-        return GEMINI_OAUTH_CREDS_PATH.exists()
+        return oauth_creds_path.exists()
     if auth_type == "gemini-api-key":
-        return bool(os.environ.get("GEMINI_API_KEY"))
+        return bool(source.get("GEMINI_API_KEY"))
     if auth_type == "vertex-ai":
         return bool(
-            os.environ.get("GOOGLE_API_KEY")
-            or (os.environ.get("GOOGLE_CLOUD_PROJECT") and os.environ.get("GOOGLE_CLOUD_LOCATION"))
+            source.get("GOOGLE_API_KEY")
+            or (source.get("GOOGLE_CLOUD_PROJECT") and source.get("GOOGLE_CLOUD_LOCATION"))
         )
     if auth_type == "compute-default-credentials":
-        return bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or command_exists("gcloud"))
+        return bool(source.get("GOOGLE_APPLICATION_CREDENTIALS") or command_exists("gcloud"))
     return False
 
 
@@ -63,13 +97,17 @@ class GeminiAdapter(BaseAdapter):
     name = "gemini"
 
     def capability(self, agent_id: str) -> DeliveryCapability:
-        cli = command_exists("gemini")
-        auth_ready = _gemini_auth_ready()
+        provider_key, _, gemini_settings = _gemini_provider_for_agent(self.config, agent_id)
+        cli = command_exists(gemini_settings.get("cli") or "gemini")
+        env = _gemini_runtime_env(gemini_settings)
+        auth_ready = _gemini_auth_ready(gemini_settings, env)
         supported = bool(cli and auth_ready)
         if cli and auth_ready:
-            notes = "Uses the verified Gemini CLI `--prompt`, local auth config, and approval mode settings."
+            notes = f"Uses the verified Gemini CLI `--prompt`, local auth config, and approval mode settings for provider `{provider_key}`."
+            if gemini_settings.get("config_home"):
+                notes = f"{notes} Auth is isolated by provider gemini.config_home."
         elif cli:
-            notes = "Gemini CLI is installed but not authenticated for non-interactive use, so delivery falls back to inbox."
+            notes = f"Gemini CLI is installed but provider `{provider_key}` is not authenticated for non-interactive use, so delivery falls back to inbox."
         else:
             notes = "Gemini CLI is not installed."
         return DeliveryCapability(
@@ -111,23 +149,28 @@ class GeminiAdapter(BaseAdapter):
                 metadata=result.metadata,
             )
 
-        provider = self.config.get("providers", {}).get("gemini", {})
+        provider_key, provider, gemini_settings = _gemini_provider_for_agent(self.config, request.agent_id)
         gemini_settings = provider.get("gemini", {})
         approval = provider.get("approval", {})
         cli = gemini_settings.get("cli") or "gemini"
-        command = [cli, "--prompt", request.message]
+        command = [cli, "--prompt", request.message, "--output-format", "json"]
+        model = str(request.metadata.get("model_preference") or gemini_settings.get("model") or "").strip()
+        if model:
+            command.extend(["--model", model])
         approval_mode = approval.get("default_approval_mode")
         if approval_mode:
             command.extend(["--approval-mode", approval_mode])
         if gemini_settings.get("include_directories"):
             command.extend(["--include-directories", str(config_path(self.config, "status_file").parents[0])])
 
-        run_id = new_runtime_id("gemini")
-        log_path = runtime_log_path("gemini", request.agent_id)
+        run_id = new_runtime_id(provider_key)
+        log_path = runtime_log_path(provider_key, request.agent_id)
+        env = _gemini_runtime_env(gemini_settings, ensure_dirs=True)
         process, _ = spawn_background_process(
             command,
             cwd=config_path(self.config, "status_file").parents[0],
             log_path=log_path,
+            env=env,
         )
 
         return DeliveryResult(
@@ -137,7 +180,7 @@ class GeminiAdapter(BaseAdapter):
             target=agent_config_for(self.config, request.agent_id).get("display_name", request.agent_id),
             auto_delivered=True,
             manual_confirmation_required=False,
-            notes="Gemini CLI wake-up started in the background.",
+            notes=f"Gemini CLI wake-up started in the background for provider `{provider_key}`.",
             command=command,
             log_path=str(log_path),
             pid=process.pid,

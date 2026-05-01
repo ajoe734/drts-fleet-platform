@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -81,25 +82,40 @@ def _strip_js_comments(text: str) -> str:
 def load_json(path: Path, default: Any | None = None) -> Any:
     if not path.exists():
         return deepcopy(default)
-    text = path.read_text(encoding="utf-8").strip()
-    if not text:
-        return deepcopy(default)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        sanitized = _strip_js_comments(text)
-        sanitized = re.sub(r",(\s*[}\]])", r"\1", sanitized)
+    last_error: json.JSONDecodeError | None = None
+
+    def parse_text(text: str) -> Any:
         try:
-            return json.loads(sanitized)
-        except json.JSONDecodeError as exc:
-            if exc.msg != "Extra data":
+            return json.loads(text)
+        except json.JSONDecodeError:
+            sanitized = _strip_js_comments(text)
+            sanitized = re.sub(r",(\s*[}\]])", r"\1", sanitized)
+            try:
+                return json.loads(sanitized)
+            except json.JSONDecodeError as exc:
+                if exc.msg != "Extra data":
+                    raise
+                decoder = json.JSONDecoder()
+                payload, end = decoder.raw_decode(sanitized)
+                trailing = sanitized[end:].strip()
+                if trailing.startswith("{") or trailing.startswith("["):
+                    return payload
                 raise
-            decoder = json.JSONDecoder()
-            payload, end = decoder.raw_decode(sanitized)
-            trailing = sanitized[end:].strip()
-            if trailing.startswith("{") or trailing.startswith("["):
-                return payload
-            raise
+
+    for attempt in range(3):
+        text = path.read_text(encoding="utf-8").strip()
+        if not text:
+            return deepcopy(default)
+        try:
+            return parse_text(text)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(0.05)
+                continue
+            raise last_error
+
+    return deepcopy(default)
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -175,12 +191,14 @@ def run_command(
     command: list[str],
     *,
     cwd: Path | None = None,
+    env: dict[str, str] | None = None,
     timeout: float | None = None,
     check: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         cwd=str(cwd or ROOT),
+        env=env,
         check=check,
         timeout=timeout,
         text=True,
@@ -190,6 +208,26 @@ def run_command(
 
 def command_exists(name: str) -> str | None:
     return shutil.which(name)
+
+
+def runtime_env_overrides(runtime: dict[str, Any] | None) -> dict[str, str]:
+    if not isinstance(runtime, dict):
+        return {}
+    env: dict[str, str] = {}
+    config_home = str(runtime.get("config_home") or "").strip()
+    if config_home:
+        home = os.path.expandvars(os.path.expanduser(config_home))
+        env["HOME"] = home
+        env.setdefault("XDG_CONFIG_HOME", str(Path(home) / ".config"))
+        env.setdefault("XDG_CACHE_HOME", str(Path(home) / ".cache"))
+        env.setdefault("XDG_DATA_HOME", str(Path(home) / ".local" / "share"))
+    configured_env = runtime.get("env")
+    if isinstance(configured_env, dict):
+        for key, value in configured_env.items():
+            if value is None:
+                continue
+            env[str(key)] = os.path.expandvars(os.path.expanduser(str(value)))
+    return env
 
 
 def shell_quote(parts: list[str]) -> str:

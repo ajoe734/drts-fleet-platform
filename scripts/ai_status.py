@@ -68,6 +68,7 @@ RETIRED_AGENTS = {
 AGENT_ALIASES = {
     "grok": "Copilot",
     "copilot": "Copilot",
+    "copilot (legacy alias)": "Copilot",
     "copilot host": "Copilot",
     "copilot_host": "Copilot",
     "claude2": "Claude2",
@@ -381,7 +382,12 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
     commit_hash = os.environ.get("COMMIT_HASH", "").strip()
     commit_subject = os.environ.get("COMMIT_SUBJECT", "").strip()
     commit_agent = os.environ.get("COMMIT_AGENT", "").strip() or actor
+    push_remote = os.environ.get("PUSH_REMOTE", "").strip()
+    push_branch = os.environ.get("PUSH_BRANCH", "").strip()
+    push_ref = os.environ.get("PUSH_REF", "").strip()
+    push_commit = os.environ.get("PUSH_COMMIT", "").strip() or commit_hash
     reviewer = canonical_agent_name(task.get("reviewer"))
+    timestamp = iso_now()
 
     if commit_required:
         if no_commit_required:
@@ -392,12 +398,23 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
             raise SystemExit(f"COMMIT_HASH does not resolve to a local commit: {commit_hash}")
         if not commit_subject:
             raise SystemExit("done requires COMMIT_SUBJECT for canonical tasks")
+        if not push_remote or not push_branch:
+            raise SystemExit("done requires PUSH_REMOTE and PUSH_BRANCH for canonical tasks after a normal non-force push")
+        if any(ch.isspace() for ch in push_remote) or any(ch.isspace() for ch in push_branch):
+            raise SystemExit("PUSH_REMOTE and PUSH_BRANCH must not contain whitespace")
+        if push_commit != commit_hash:
+            raise SystemExit("PUSH_COMMIT must match COMMIT_HASH for canonical tasks")
         return {
             "commit_hash": commit_hash,
             "commit_subject": commit_subject,
             "commit_agent": canonical_agent_name(commit_agent),
             "commit_reviewer": reviewer,
-            "commit_recorded_at": iso_now(),
+            "commit_recorded_at": timestamp,
+            "push_remote": push_remote,
+            "push_branch": push_branch,
+            "push_ref": push_ref or f"{push_remote}/{push_branch}",
+            "push_commit": push_commit,
+            "push_recorded_at": timestamp,
         }
 
     if no_commit_required:
@@ -406,7 +423,7 @@ def completion_metadata_from_env(task: dict[str, Any], actor: str) -> dict[str, 
             "commit_subject": "no-commit closeout",
             "commit_agent": canonical_agent_name(commit_agent),
             "commit_reviewer": reviewer,
-            "commit_recorded_at": iso_now(),
+            "commit_recorded_at": timestamp,
         }
     return {}
 
@@ -421,6 +438,9 @@ def canonical_agent_name(name: str | None) -> str:
     trimmed = str(name).strip()
     if not trimmed:
         return ""
+    legacy_alias_match = re.fullmatch(r"(.+?)\s+\(legacy alias\)", trimmed, re.IGNORECASE)
+    if legacy_alias_match:
+        trimmed = legacy_alias_match.group(1).strip()
     canonical_by_lower = {agent.lower(): agent for agent in {**KNOWN_AGENTS, **RETIRED_AGENTS}}
     lowered = trimmed.lower()
     if lowered in canonical_by_lower:
@@ -539,7 +559,17 @@ def load_logs() -> list[dict[str, Any]]:
         if not line:
             continue
         try:
-            logs.append(json.loads(line))
+            entry = json.loads(line)
+            if isinstance(entry, dict):
+                # Tolerate legacy or external review log schemas so summary generation
+                # does not fail when adjacent tooling writes timestamp/summary fields.
+                if "ts" not in entry and entry.get("timestamp"):
+                    entry["ts"] = entry["timestamp"]
+                if "message" not in entry and entry.get("summary"):
+                    entry["message"] = entry["summary"]
+                if "type" not in entry and entry.get("action"):
+                    entry["type"] = entry["action"]
+            logs.append(entry)
         except json.JSONDecodeError as exc:
             print(
                 f"Warning: skipping malformed ai-activity-log.jsonl line {line_no}: {exc}",

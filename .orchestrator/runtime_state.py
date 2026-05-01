@@ -9,7 +9,7 @@ from common import append_jsonl, config_path, load_json, load_jsonl, utc_now, wr
 
 def default_state() -> dict[str, Any]:
     return {
-        "version": 2,
+        "version": 3,
         "initialized_at": None,
         "last_scan_at": None,
         "tasks": {},
@@ -27,13 +27,30 @@ def default_state() -> dict[str, Any]:
             "last_sidecar_wave_at": None,
             "last_sidecar_wave_reason": None,
             "last_ratio": None,
+            "last_main_task_wave_at": None,
         },
         "quota_paused_agents": {},
+        "provider_pauses": {},
+        "failure_streaks": {},
+        "chair_reassignment_guards": {},
         "dispatch_pauses": [],
+        "chair_review": {
+            "active_review": None,
+            "rotation_index": 0,
+            "cooldown_until": None,
+            "last_review_at": None,
+            "last_reviewer": None,
+            "last_reason": None,
+            "last_decision": None,
+            "sidecar_approved_until": None,
+            "max_sidecars": None,
+            "blocked_sidecar_parents": [],
+        },
         "supervisor": {
             "pid": None,
             "started_at": None,
             "last_heartbeat_at": None,
+            "lifecycle": "running",
         },
     }
 
@@ -62,13 +79,39 @@ def migrate_state(raw: dict[str, Any] | None) -> dict[str, Any]:
     state["underutilization"].setdefault("last_sidecar_wave_at", None)
     state["underutilization"].setdefault("last_sidecar_wave_reason", None)
     state["underutilization"].setdefault("last_ratio", None)
+    state["underutilization"].setdefault("last_main_task_wave_at", None)
     state.setdefault("quota_paused_agents", {})
+    state.setdefault("provider_pauses", {})
+    state.setdefault("failure_streaks", {})
+    state.setdefault("chair_reassignment_guards", {})
     state.setdefault("dispatch_pauses", [])
+    if not isinstance(state.get("chair_review"), dict):
+        state["chair_review"] = {}
+    state["chair_review"].setdefault("active_review", None)
+    state["chair_review"].setdefault("rotation_index", 0)
+    state["chair_review"].setdefault("cooldown_until", None)
+    state["chair_review"].setdefault("last_review_at", None)
+    state["chair_review"].setdefault("last_reviewer", None)
+    state["chair_review"].setdefault("last_reason", None)
+    state["chair_review"].setdefault("last_decision", None)
+    state["chair_review"].setdefault("sidecar_approved_until", None)
+    state["chair_review"].setdefault("max_sidecars", None)
+    state["chair_review"].setdefault("blocked_sidecar_parents", [])
     state.setdefault("supervisor", {})
     state["supervisor"].setdefault("pid", None)
     state["supervisor"].setdefault("started_at", None)
     state["supervisor"].setdefault("last_heartbeat_at", None)
-    state["version"] = 2
+    state["supervisor"].setdefault("lifecycle", "running")
+    if state.get("quota_paused_agents"):
+        provider_pauses = state.setdefault("provider_pauses", {})
+        for agent_id, pause in state.get("quota_paused_agents", {}).items():
+            merged = deepcopy(pause)
+            merged.setdefault("kind", "quota")
+            provider_pauses.setdefault(agent_id, merged)
+    for pause in state.get("provider_pauses", {}).values():
+        if isinstance(pause, dict):
+            pause.setdefault("kind", "quota")
+    state["version"] = 3
     return state
 
 

@@ -115,9 +115,10 @@ Rules:
 ## 3. Capability Lanes
 
 - `Claude`: governance review, architecture arbitration, consensus synthesis
+- `Claude2`: API integration, vertical slice feasibility, adapter implications, separate Claude account/quota lane
 - `Gemini`: runtime packaging, CI/CD, infra, worker-ops implications
+- `Gemini2`: runtime packaging, CI/CD, infra, worker-ops implications, separate Gemini account/quota lane
 - `Codex`: contracts, schema, state-system, acceptance implications
-- `Qwen`: API integration, vertical slice feasibility, adapter implications
 - `Copilot`: contradiction scan, external critique, second-pass review
 
 ## 3.5 Two-Mode Supervisor
@@ -185,10 +186,11 @@ Required sections:
 Default baton order:
 
 1. `Codex` creates the first `starter-draft.md` from L1 and L2 product truth
-2. `Qwen` reviews for flow feasibility, API seams, and adapter boundaries
+2. `Claude2` reviews for flow feasibility, API seams, and adapter boundaries
 3. `Gemini` reviews for rollout, infra, migration, and CI implications
-4. `Copilot` reviews for contradictions, weak assumptions, and missing citations
-5. `Claude` either synthesizes the accepted changes into the next draft or returns the baton for another loop
+4. `Gemini2` reviews for second-pass rollout, infra, migration, and CI implications
+5. `Copilot` reviews for contradictions, weak assumptions, and missing citations
+6. `Claude` either synthesizes the accepted changes into the next draft or returns the baton for another loop
 
 Loop rule:
 
@@ -241,6 +243,9 @@ For canonical implementation tasks:
   - `LLM-Agent: <lane>`
   - `Task-ID: <task-id>`
   - `Reviewer: <reviewer>`
+- after committing, the owner must push the task-scoped commit with a normal non-force push
+- the owner must provide `PUSH_REMOTE` and `PUSH_BRANCH` when finalizing the task
+- if a safe normal push is not possible, record a blocker/progress note and do not mark `done`
 
 For sidecar or explicit non-canonical closeout tasks:
 
@@ -272,6 +277,6 @@ AI_NAME=Codex ./scripts/ai-status.sh start <task-id> "Started implementation"
 AI_NAME=Codex ./scripts/ai-status.sh progress <task-id> "Updated progress"
 AI_NAME=Codex ./scripts/ai-status.sh handoff <task-id> Claude "Ready for review"
 AI_NAME=Claude REVIEW_NOTES_ZH="審查通過||回到 owner 收尾" ./scripts/ai-status.sh approve <task-id> "Review approved and returned to the owner for finalization"
-AI_NAME=Codex COMMIT_HASH=<sha> COMMIT_SUBJECT="feat(w8-001a): close rollout blockers" ./scripts/ai-status.sh done <task-id> "Owner finalized approved task and closed it"
+AI_NAME=Codex COMMIT_HASH=<sha> COMMIT_SUBJECT="feat(w8-001a): close rollout blockers" PUSH_REMOTE=origin PUSH_BRANCH=<branch> ./scripts/ai-status.sh done <task-id> "Owner finalized approved task, committed, pushed, and closed it"
 ./scripts/sync-state.sh
 ```

@@ -153,6 +153,9 @@ Primary implementation tasks must not close with `done` until all of the followi
   - `LLM-Agent: <lane>`
   - `Task-ID: <task-id>`
   - `Reviewer: <reviewer>`
+- the owner has pushed the task-scoped commit with a normal non-force push
+- the owner records `PUSH_REMOTE` and `PUSH_BRANCH` when finalizing the task
+- if a safe normal push is not possible, the task must stay open with a blocker/progress note
 
 Support-only tasks may skip commit evidence only when they are explicitly non-canonical:
 
@@ -163,9 +166,48 @@ Support-only tasks may skip commit evidence only when they are explicitly non-ca
 
 Those closeouts must use `NO_COMMIT_REQUIRED=1` and must not be used for primary delivery work.
 
+## Chairman Operational Review
+
+The chairman lane is a rotating supervisor-operations reviewer. It is not the
+discussion supervisor, not the starter lane, and not the owner of normal product
+implementation tasks.
+
+The supervisor queues a chairman review when it needs an operational decision,
+including:
+
+- pending approval triage
+- repeated worker failure or reassignment loops
+- sidecar-wave approval while the system is underutilized
+- focused recommendations for unhealthy routing or blocked execution
+
+The chairman must write both a Markdown report and a JSON decision file. The
+supervisor reads the JSON back and may apply only the supported operational
+actions:
+
+- allow or deny routine-safe approval requests
+- approve a sidecar window with a TTL and maximum sidecar count
+- block sidecar parents for the current approval window
+- reassign a reviewer only while a task is in `review`
+- reassign an owner only while a task is in `todo`, `in_progress`, or `review_approved`
+- trigger `dispatch_now` only for tasks that are already eligible under machine truth
+- pause or clear an exact provider lane through `provider_actions`
+
+The chairman still must not bypass dependency gates, review gates, or commit
+evidence rules. In particular, chairman actions cannot directly mark canonical
+implementation tasks `done`.
+
+The chairman does not bypass product acceptance, change product semantics, or
+implement the main task. When the JSON decision is missing or invalid, the
+supervisor invalidates the chair review instead of guessing.
+
+Practical templates live in:
+
+- `.orchestrator/templates/chairman-review-report-template.md`
+- `.orchestrator/templates/chairman-decision-packet.example.json`
+
 ## Recommended Default
 
 - discussion supervisor: `Claude`
 - starter lane: `Codex`
-- first review order: `Qwen -> Gemini -> Copilot -> Claude`
+- first review order: `Claude2 -> Gemini -> Gemini2 -> Copilot -> Claude`
 - execution ownership later follows the accepted consensus packet

@@ -7,11 +7,12 @@ import json
 import os
 import random
 import re
+import shlex
 import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -24,6 +25,7 @@ from adapters import build_adapter
 from approval_queue import prune_stale_approvals, resolve_approval
 from adapters.base import DeliveryRequest
 from common import (
+    AI_GUIDE_PATH,
     agent_config_for,
     command_exists,
     config_path,
@@ -36,6 +38,7 @@ from common import (
     new_runtime_id,
     normalize_agent_id,
     relpath,
+    runtime_env_overrides,
     selected_shared_files,
     shell_quote,
     snapshot_task,
@@ -67,6 +70,8 @@ SESSION_ID_PATTERNS = [
 URL_PATTERN = re.compile(r"https://github\.com/[^\s)]+")
 WORKER_FAILURE_PATTERNS = (
     re.compile(r"^Error when talking to gemini api\b", re.IGNORECASE),
+    re.compile(r"^Error authenticating:\s*IneligibleTierError\b", re.IGNORECASE),
+    re.compile(r"^reasonCode:\s*['\"]?RESTRICTED_DASHER_USER\b", re.IGNORECASE),
     re.compile(r'"error"\s*:\s*"rate_limit"', re.IGNORECASE),
     re.compile(r'"type"\s*:\s*"rate_limit_event"', re.IGNORECASE),
     re.compile(
@@ -79,19 +84,26 @@ WORKER_FAILURE_PATTERNS = (
     ),
     re.compile(r"^status:\s*(401|429)\b", re.IGNORECASE),
     re.compile(r"\[API Error:\s*401\b", re.IGNORECASE),
+    re.compile(r"\bAPI Error:\s*401\b", re.IGNORECASE),
+    re.compile(r"\bFailed to authenticate\b", re.IGNORECASE),
+    re.compile(r"\bauthentication_error\b", re.IGNORECASE),
+    re.compile(r"\bInvalid authentication credentials\b", re.IGNORECASE),
+    re.compile(r'^Error:\s*Model\s+".+"\s+from --model flag is not available\.', re.IGNORECASE),
     re.compile(r"^402\b.*\byou have no quota\b", re.IGNORECASE),
     re.compile(r"^(?:error:\s*)?\b(?:you have no quota|no quota remaining|payment required)\b", re.IGNORECASE),
     re.compile(r"^(?:you(?:'ve| have)\s+)?hit your limit\b", re.IGNORECASE),
     re.compile(r"^An unexpected critical error occurred", re.IGNORECASE),
-    re.compile(r"^(?:Error|error|fatal):", re.IGNORECASE),
+    re.compile(r"^fatal:", re.IGNORECASE),
 )
 JSON_WORKER_FAILURE_PATTERN = re.compile(
     r"quota_exhausted|oauth quota exceeded|free daily quota has been reached|"
     r"you have no quota|no quota remaining|payment required|"
     r"you have exhausted your capacity|exhausted your capacity|resource_exhausted|"
     r"rate limit|rate limited|hit your limit|an unexpected critical error occurred|"
-    r"permission denied|invalid api key|auth failed|status:\s*401|"
-    r"\[api error:\s*401\b|invalid access token",
+    r"permission denied|invalid api key|auth failed|failed to authenticate|"
+    r"authentication_error|invalid authentication credentials|status:\s*401|"
+    r"\[api error:\s*401\b|api error:\s*401\b|invalid access token|"
+    r"ineligibletiererror|not eligible for gemini code assist|restricted_dasher_user",
     re.IGNORECASE,
 )
 
@@ -108,6 +120,31 @@ ACTIVE_RUNTIME_STATUSES = {
     "fallback",
 }
 MODE_BUCKETS = ("planning", "execution", "coordination")
+EXECUTION_DISPATCH_REASONS = {
+    "review_ready_dispatch",
+    "owned_finalize_dispatch",
+    "owned_in_progress_dispatch",
+    "owned_ready_dispatch",
+}
+CHAIR_REVIEW_OUTPUT_KEYS = {
+    "version",
+    "decision",
+    "sidecar_approved",
+    "approval_ttl_minutes",
+    "max_sidecars",
+    "reason",
+    "blocked_by",
+    "blocked_sidecar_parents",
+    "approval_actions",
+    "reassignment_actions",
+    "task_actions",
+    "provider_actions",
+    "recommended_focus",
+}
+CLOSEOUT_SKILL_PATH = THIS_DIR / "skills" / "task-closeout-finalization.md"
+CHAIRMAN_SKILL_PATH = THIS_DIR / "skills" / "chairman-operational-review.md"
+CHAIRMAN_JSON_TEMPLATE_PATH = THIS_DIR / "templates" / "chairman-decision-packet.example.json"
+CHAIRMAN_REPORT_TEMPLATE_PATH = THIS_DIR / "templates" / "chairman-review-report-template.md"
 
 
 def supervisor_pid_path(config: dict[str, Any]) -> Path:
@@ -247,7 +284,7 @@ def format_runtime_timestamp_local(ts: str | None) -> str:
 def summarize_runtime(state: dict[str, Any], approval_state: dict[str, Any]) -> dict[str, Any]:
     workers = state.get("workers", {}) or {}
     queue_events = state.get("queue", {}).get("events", {}) or {}
-    pending_approvals = approval_state.get("pending", []) or []
+    pending_approvals = pending_approval_items(approval_state)
     active_statuses = {"running", "started", "waiting_approval", "suspended_approval", "manual_pending", "retry_backoff", "stalled", "fallback"}
     active_workers = [
         {
@@ -586,11 +623,14 @@ def ensure_planning_baton_dispatch(
 
 
 def load_provider_report(config: dict[str, Any]) -> dict[str, Any]:
-    if config.get("supervisor", {}).get("auto_refresh_provider_capabilities", True):
-        report = build_provider_capabilities(config)
-        write_provider_capabilities(config, report=report)
-        return report
-    return load_json(config_path(config, "provider_capabilities"), default={}) or {}
+    try:
+        if config.get("supervisor", {}).get("auto_refresh_provider_capabilities", True):
+            report = build_provider_capabilities(config)
+            write_provider_capabilities(config, report=report)
+            return report
+        return load_json(config_path(config, "provider_capabilities"), default={}) or {}
+    except KeyError:
+        return {}
 
 
 def resolve_agent_model_preference(config: dict[str, Any], agent: dict[str, Any]) -> str | None:
@@ -636,6 +676,11 @@ def build_request(config: dict[str, Any], event: dict[str, Any]) -> DeliveryRequ
                 task=task_payload,
             )
         ]
+    if request_reason := str(event.get("reason") or ""):
+        if request_reason == "owned_finalize_dispatch" and CLOSEOUT_SKILL_PATH.exists():
+            closeout_path = relpath(CLOSEOUT_SKILL_PATH)
+            if closeout_path not in context_files:
+                context_files.append(closeout_path)
     return DeliveryRequest(
         agent_id=agent["id"],
         provider=agent.get("provider", agent["id"]),
@@ -862,10 +907,28 @@ def pid_is_alive(pid: int | None) -> bool:
 def terminate_worker_pid(pid: int | None) -> bool:
     if not pid:
         return False
+    signaled = False
     try:
-        os.kill(pid, signal.SIGTERM)
+        os.killpg(pid, signal.SIGTERM)
+        signaled = True
     except OSError:
-        return False
+        try:
+            os.kill(pid, signal.SIGTERM)
+            signaled = True
+        except OSError:
+            return False
+    deadline = time.time() + 1.0
+    while time.time() < deadline:
+        if not pid_is_alive(pid):
+            return True
+        time.sleep(0.05)
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except OSError:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            return signaled
     return True
 
 
@@ -945,7 +1008,9 @@ def _iter_json_string_values(payload: Any) -> list[str]:
     if isinstance(payload, str):
         values.append(payload)
     elif isinstance(payload, dict):
-        for item in payload.values():
+        for key, item in payload.items():
+            if key in {"thinking", "signature"}:
+                continue
             values.extend(_iter_json_string_values(item))
     elif isinstance(payload, list):
         for item in payload:
@@ -954,7 +1019,22 @@ def _iter_json_string_values(payload: Any) -> list[str]:
 
 
 def _ignore_embedded_failure_line(stripped: str) -> bool:
+    embedded_state_key = r"(?:summary|reason|last_error|last_failure_summary|next)"
     if re.match(r"^\d+\t", stripped):
+        return True
+    if re.match(r"^\d+:\s+", stripped):
+        return True
+    if re.match(r"^\d+-\s+", stripped):
+        return True
+    if re.match(rf'^"{embedded_state_key}"\s*:', stripped):
+        return True
+    if re.match(r"^(?:Error|error):\s*\{\s*[a-z]{2}\s*:", stripped):
+        return True
+    if stripped.startswith("|"):
+        return True
+    if re.match(r"^\d+\.\s+", stripped):
+        return True
+    if re.match(r"^[-*]\s+", stripped):
         return True
     if re.match(r"^[-*]\s+`[^`]+`:", stripped):
         return True
@@ -1010,7 +1090,20 @@ def _detect_json_worker_failure(line: str) -> str | None:
         return None
     if payload.get("ts"):
         return None
-    for candidate in _iter_json_string_values(payload):
+    if payload.get("type") == "rate_limit_event":
+        rate_info = payload.get("rate_limit_info") if isinstance(payload.get("rate_limit_info"), dict) else {}
+        status = str(rate_info.get("status") or payload.get("status") or "").strip().lower()
+        if status in {"allowed", "allowed_warning"}:
+            return None
+    if payload.get("type") == "user":
+        message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+        content = message.get("content") if isinstance(message.get("content"), list) else []
+        if any(isinstance(item, dict) and item.get("type") == "tool_result" for item in content):
+            return None
+    candidates = _iter_json_string_values(payload)
+    if payload.get("type") not in {"assistant", "user"}:
+        candidates = [*candidates, line]
+    for candidate in candidates:
         stripped = candidate.strip()
         if not stripped:
             continue
@@ -1018,6 +1111,35 @@ def _detect_json_worker_failure(line: str) -> str | None:
         if detected:
             return detected
     return None
+
+
+def _is_result_level_provider_blocker(candidate: str) -> bool:
+    normalized = candidate.lower()
+    markers = (
+        "quota_exhausted",
+        "resource_exhausted",
+        "oauth quota exceeded",
+        "free daily quota has been reached",
+        "you have no quota",
+        "no quota remaining",
+        "payment required",
+        "hit your limit",
+        "exhausted your capacity",
+        "rate limit",
+        "rate limited",
+        "invalid api key",
+        "failed to authenticate",
+        "authentication_error",
+        "invalid authentication credentials",
+        "auth failed",
+        "invalid access token",
+        "[api error: 401",
+        "api error: 401",
+        "ineligibletiererror",
+        "not eligible for gemini code assist",
+        "restricted_dasher_user",
+    )
+    return any(marker in normalized for marker in markers)
 
 
 def detect_worker_failure(worker: dict[str, Any]) -> str | None:
@@ -1032,20 +1154,42 @@ def detect_worker_failure(worker: dict[str, Any]) -> str | None:
     except OSError:
         return None
 
+    fallback_detected: str | None = None
     for line in reversed(lines):
         stripped = line.strip()
         if not stripped:
             continue
         if stripped.startswith("{"):
+            try:
+                payload = json.loads(stripped)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("type") == "result" and not payload.get("is_error"):
+                detected = _detect_json_worker_failure(stripped)
+                if detected and _is_result_level_provider_blocker(detected):
+                    return detected
+                return None
             detected = _detect_json_worker_failure(stripped)
             if detected:
+                if "an unexpected critical error occurred" in detected.lower():
+                    fallback_detected = fallback_detected or detected
+                    continue
                 return detected
+            try:
+                if payload is None:
+                    json.loads(stripped)
+                continue
+            except json.JSONDecodeError:
+                pass
         if '"ts":' in stripped and '"type":' in stripped:
             continue
         detected = _extract_failure_candidate(stripped)
         if detected:
+            if "an unexpected critical error occurred" in detected.lower():
+                fallback_detected = fallback_detected or detected
+                continue
             return detected
-    return None
+    return fallback_detected
 
 
 def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str | None) -> dict[str, Any]:
@@ -1058,10 +1202,16 @@ def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reas
         "status: 401",
         "unauthorized",
         "authentication",
+        "authentication_error",
+        "failed to authenticate",
+        "invalid authentication credentials",
         "auth failed",
         "invalid api key",
         "forbidden",
         "permission denied",
+        "ineligibletiererror",
+        "not eligible for gemini code assist",
+        "restricted_dasher_user",
     }
     # Terminal quota: agent has no quota left — reassign immediately, do not retry
     quota_terminal_markers = {
@@ -1123,6 +1273,7 @@ def worker_retry_settings(config: dict[str, Any], provider: str | None) -> dict[
     retry.setdefault("max_attempts", 5)
     retry.setdefault("backoff_schedule_seconds", [5, 15, 30, 60, 120])
     retry.setdefault("jitter_seconds", 3)
+    retry.setdefault("capacity_pause_seconds", 300)
     retry.setdefault(
         "transient_error_patterns",
         [
@@ -1143,31 +1294,146 @@ def worker_retry_settings(config: dict[str, Any], provider: str | None) -> dict[
     return retry
 
 
+def provider_report_key_for_agent(config: dict[str, Any], agent_id: str) -> str:
+    agent = agent_config_for(config, agent_id)
+    candidates = [
+        str(agent.get("provider") or "").strip(),
+        str(agent.get("id") or "").strip(),
+        normalize_agent_id(agent_id),
+    ]
+    return candidates[0] or normalize_agent_id(agent_id)
+
+
+def provider_info_for_agent(
+    config: dict[str, Any],
+    provider_report: dict[str, Any],
+    agent_id: str,
+) -> dict[str, Any]:
+    provider_key = provider_report_key_for_agent(config, agent_id)
+    candidates = [provider_key, normalize_agent_id(agent_id)]
+    providers = (provider_report.get("providers", {}) or {}) if isinstance(provider_report, dict) else {}
+    for candidate in candidates:
+        info = providers.get(candidate)
+        if isinstance(info, dict):
+            return info
+    return {}
+
+
+def provider_pause_registry(state: dict[str, Any]) -> dict[str, Any]:
+    registry = state.setdefault("provider_pauses", {})
+    quota_registry = state.setdefault("quota_paused_agents", {})
+    for agent_id, pause in list(quota_registry.items()):
+        if agent_id not in registry and isinstance(pause, dict):
+            merged = dict(pause)
+            merged.setdefault("kind", "quota")
+            registry[agent_id] = merged
+    return registry
+
+
+def pause_provider(
+    state: dict[str, Any],
+    agent_id: str,
+    reason: str,
+    *,
+    kind: str,
+    reset_seconds: int | None = None,
+) -> None:
+    normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
+    entry = {
+        "kind": kind,
+        "reason": reason,
+        "paused_at": utc_now(),
+        "resume_at": (
+            datetime.now(timezone.utc).timestamp() + reset_seconds
+            if reset_seconds is not None
+            else None
+        ),
+    }
+    provider_pause_registry(state)[normalized] = entry
+    if kind == "quota":
+        state.setdefault("quota_paused_agents", {})[normalized] = {
+            "reason": reason,
+            "resume_at": entry["resume_at"],
+            "paused_at": entry["paused_at"],
+        }
+    console_log(
+        f"{kind} pause: agent={normalized} reset_in={reset_seconds or 0}s reason={reason}",
+        quiet=SUPERVISOR_LOG_QUIET,
+    )
+
+
+def clear_provider_pause(state: dict[str, Any], agent_id: str) -> None:
+    normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
+    provider_pause_registry(state).pop(normalized, None)
+    state.setdefault("quota_paused_agents", {}).pop(normalized, None)
+
+
+def is_agent_dispatch_paused(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    agent_id: str,
+    *,
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
+    normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
+    report = provider_report or load_provider_report(config)
+    provider_info = provider_info_for_agent(config, report, normalized)
+    if provider_info.get("auth_ready") is False:
+        return True
+    pauses = provider_pause_registry(state)
+    entry = pauses.get(normalized)
+    if not entry:
+        return False
+    if str(entry.get("kind") or "") == "auth":
+        return True
+    resume_at = entry.get("resume_at")
+    if resume_at is None:
+        return True
+    return float(resume_at) > datetime.now(timezone.utc).timestamp()
+
+
+def expire_provider_pauses(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> list[str]:
+    pauses = provider_pause_registry(state)
+    expired: list[str] = []
+    now_ts = datetime.now(timezone.utc).timestamp()
+    for agent_id, entry in list(pauses.items()):
+        kind = str(entry.get("kind") or "")
+        resume_at = entry.get("resume_at")
+        if kind == "auth":
+            # Auth failures from real worker runs are stronger evidence than a
+            # lightweight capability probe. Keep the lane paused until a human
+            # or explicit repair flow clears it.
+            continue
+        if resume_at is not None and float(resume_at) <= now_ts:
+            clear_provider_pause(state, agent_id)
+            expired.append(agent_id)
+            console_log(f"provider pause expired: agent={agent_id} now available", quiet=SUPERVISOR_LOG_QUIET)
+    return expired
+
+
 def quota_pause_agent(state: dict[str, Any], agent_id: str, reason: str, reset_seconds: int = 14400) -> None:
-    """Mark an agent as quota-exhausted; dispatch will skip it until reset_seconds have elapsed."""
-    paused = state.setdefault("quota_paused_agents", {})
-    resume_at = datetime.now(timezone.utc).timestamp() + reset_seconds
-    paused[agent_id] = {"reason": reason, "resume_at": resume_at, "paused_at": utc_now()}
-    console_log(f"quota pause: agent={agent_id} reset_in={reset_seconds}s reason={reason}", quiet=SUPERVISOR_LOG_QUIET)
+    pause_provider(state, agent_id, reason, kind="quota", reset_seconds=reset_seconds)
 
 
 def is_agent_quota_paused(state: dict[str, Any], agent_id: str) -> bool:
-    """Return True if the agent is currently in the quota-pause registry."""
-    paused = state.get("quota_paused_agents") or {}
-    # Support both agent_id (lowercase) and display name (capitalized) lookups
-    entry = paused.get(agent_id) or paused.get(agent_id.lower()) or paused.get(agent_id.capitalize())
+    normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
+    entry = provider_pause_registry(state).get(normalized)
     if not entry:
         return False
-    return float(entry.get("resume_at", 0)) > datetime.now(timezone.utc).timestamp()
+    resume_at = entry.get("resume_at")
+    return bool(resume_at is not None and float(resume_at) > datetime.now(timezone.utc).timestamp())
 
 
 def expire_quota_pauses(state: dict[str, Any]) -> list[str]:
-    """Remove agents whose quota cooldown has elapsed. Returns list of expired agent IDs."""
     paused = state.get("quota_paused_agents") or {}
     now = datetime.now(timezone.utc).timestamp()
-    expired = [aid for aid, info in paused.items() if float(info.get("resume_at", 0)) <= now]
+    expired = [aid for aid, info in paused.items() if float(info.get("resume_at", 0) or 0) <= now]
     for aid in expired:
-        del paused[aid]
+        clear_provider_pause(state, aid)
         console_log(f"quota pause expired: agent={aid} now available", quiet=SUPERVISOR_LOG_QUIET)
     return expired
 
@@ -1186,15 +1452,270 @@ def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
                 default_eligible_statuses.append(normalized)
     settings.setdefault("eligible_statuses", default_eligible_statuses or ["backlog", "todo", "in_progress", "review", "review_approved"])
     default_fallbacks = {
-        "Claude": ["Codex", "Qwen", "Grok", "Gemini"],
-        "Gemini": ["Codex", "Qwen", "Claude", "Grok"],
-        "Codex": ["Qwen", "Claude", "Grok", "Gemini"],
-        "Qwen": ["Codex", "Claude", "Grok", "Gemini"],
-        "Grok": ["Codex", "Qwen", "Claude", "Gemini"],
+        "Claude": ["Claude2", "Codex", "Codex2", "Gemini", "Gemini2", "Copilot"],
+        "Claude2": ["Codex", "Codex2", "Claude", "Gemini", "Gemini2", "Copilot"],
+        "Gemini": ["Gemini2", "Codex", "Codex2", "Claude", "Claude2", "Copilot"],
+        "Gemini2": ["Gemini", "Codex", "Codex2", "Claude", "Claude2", "Copilot"],
+        "Codex": ["Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
+        "Codex2": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
+        "Copilot": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
     }
     settings.setdefault("owner_fallbacks", default_fallbacks)
     settings.setdefault("reviewer_fallbacks", default_fallbacks)
     return settings
+
+
+def chair_review_settings(config: dict[str, Any]) -> dict[str, Any]:
+    settings = dict(config.get("chair_review", {}) or {})
+    settings.setdefault("enabled", False)
+    settings.setdefault("cooldown_seconds", 900)
+    settings.setdefault(
+        "failure_streak_threshold",
+        int(worker_reassignment_settings(config).get("after_attempts", 2)),
+    )
+    settings.setdefault("default_approval_ttl_minutes", 45)
+    settings.setdefault(
+        "default_max_sidecars",
+        int(underutilization_settings(config).get("max_new_sidecars_per_wave", 2)),
+    )
+    return settings
+
+
+def chair_review_dir(config: dict[str, Any]) -> Path:
+    path = config_path(config, "state_file").parent / "chair-reviews"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def failure_streak_key(task_id: str, role: str) -> str:
+    return f"{task_id}:{role}"
+
+
+def failure_streak_registry(state: dict[str, Any]) -> dict[str, Any]:
+    return state.setdefault("failure_streaks", {})
+
+
+def chair_reassignment_guard_registry(state: dict[str, Any]) -> dict[str, Any]:
+    return state.setdefault("chair_reassignment_guards", {})
+
+
+def chair_reassignment_guard_key(task_id: str, role: str) -> str:
+    return f"{task_id}:{role}"
+
+
+def remember_chair_reassignment_guard(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    *,
+    task_id: str,
+    role: str,
+    from_agent: str,
+    to_agent: str,
+) -> None:
+    seconds = float(chair_review_settings(config).get("reassignment_guard_seconds", 1800))
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=max(60.0, seconds))).replace(microsecond=0)
+    chair_reassignment_guard_registry(state)[chair_reassignment_guard_key(task_id, role)] = {
+        "task_id": task_id,
+        "role": role,
+        "from": from_agent,
+        "to": to_agent,
+        "created_at": utc_now(),
+        "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+    }
+
+
+def chair_reassignment_guard_active(state: dict[str, Any] | None, task_id: str, role: str, assigned_agent: str) -> bool:
+    if state is None:
+        return False
+    guard = chair_reassignment_guard_registry(state).get(chair_reassignment_guard_key(task_id, role))
+    if not isinstance(guard, dict):
+        return False
+    expires_at = _parse_iso_utc(guard.get("expires_at"))
+    if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+        chair_reassignment_guard_registry(state).pop(chair_reassignment_guard_key(task_id, role), None)
+        return False
+    return str(guard.get("to") or "") == str(assigned_agent or "")
+
+
+def clear_failure_streak(state: dict[str, Any], task_id: str, role: str | None = None) -> None:
+    registry = failure_streak_registry(state)
+    if role is None:
+        prefix = f"{task_id}:"
+        for key in [key for key in registry if key.startswith(prefix)]:
+            registry.pop(key, None)
+        return
+    registry.pop(failure_streak_key(task_id, role), None)
+
+
+def task_role_for_dispatch_reason(reason: str | None) -> str | None:
+    normalized = str(reason or "").strip()
+    if normalized == "review_ready_dispatch":
+        return "reviewer"
+    if normalized in {"owned_finalize_dispatch", "owned_in_progress_dispatch", "owned_ready_dispatch"}:
+        return "owner"
+    return None
+
+
+def worker_assignment_role(config: dict[str, Any], worker: dict[str, Any], task: dict[str, Any] | None) -> str | None:
+    role = task_role_for_dispatch_reason(((worker.get("request_snapshot") or {}).get("reason")))
+    if role:
+        return role
+    if not task:
+        return None
+    agent_name = display_name_for(config, str(worker.get("agent_id") or worker.get("provider") or ""))
+    task_status = str(task.get("status") or "").lower()
+    if task_status == "review" and str(task.get("reviewer") or "") == agent_name:
+        return "reviewer"
+    if str(task.get("owner") or "") == agent_name:
+        return "owner"
+    return None
+
+
+def repeated_failure_records(state: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        dict(record)
+        for record in failure_streak_registry(state).values()
+        if isinstance(record, dict) and record.get("awaiting_chair")
+    ]
+
+
+def failing_agents_in_reassignment_loops(state: dict[str, Any]) -> set[str]:
+    return {
+        str(record.get("agent") or "").strip()
+        for record in repeated_failure_records(state)
+        if str(record.get("agent") or "").strip()
+    }
+
+
+def active_provider_pause_records(state: dict[str, Any]) -> list[dict[str, Any]]:
+    now_ts = datetime.now(timezone.utc).timestamp()
+    records: list[dict[str, Any]] = []
+    for agent_id, entry in provider_pause_registry(state).items():
+        if not isinstance(entry, dict):
+            continue
+        resume_at = entry.get("resume_at")
+        if resume_at is not None and float(resume_at or 0) <= now_ts:
+            continue
+        records.append(
+            {
+                "agent_id": agent_id,
+                "kind": entry.get("kind") or "quota",
+                "reason": entry.get("reason") or "",
+                "paused_at": entry.get("paused_at"),
+                "resume_at": resume_at,
+            }
+        )
+    return sorted(records, key=lambda item: str(item.get("paused_at") or ""), reverse=True)
+
+
+def actionable_dispatch_pause_records(state: dict[str, Any], *, limit: int = 8) -> list[dict[str, Any]]:
+    records = [
+        dict(item)
+        for item in state.get("dispatch_pauses", []) or []
+        if isinstance(item, dict) and str(item.get("task_id") or "").strip()
+    ]
+    records.sort(key=lambda item: str(item.get("paused_at") or ""), reverse=True)
+    return records[:limit]
+
+
+def chair_review_needs_immediate_attention(state: dict[str, Any]) -> bool:
+    return bool(
+        repeated_failure_records(state)
+        or active_provider_pause_records(state)
+        or actionable_dispatch_pause_records(state, limit=1)
+    )
+
+
+def prune_failure_streaks(state: dict[str, Any], status: dict[str, Any]) -> bool:
+    task_map = {str(task.get("id") or ""): task for task in status.get("tasks", []) or [] if task.get("id")}
+    keep: dict[str, Any] = {}
+    changed = False
+    for key, record in failure_streak_registry(state).items():
+        task_id = str(record.get("task_id") or "")
+        role = str(record.get("role") or "")
+        agent = str(record.get("agent") or "")
+        task = task_map.get(task_id)
+        if not task:
+            changed = True
+            continue
+        task_status = str(task.get("status") or "").lower()
+        if task_status in {"done", "superseded"}:
+            changed = True
+            continue
+        if role == "reviewer":
+            if task_status != "review" or str(task.get("reviewer") or "") != agent:
+                changed = True
+                continue
+        elif role == "owner":
+            if task_status not in {"todo", "backlog", "in_progress", "review_approved"} or str(task.get("owner") or "") != agent:
+                changed = True
+                continue
+        keep[key] = record
+    if changed:
+        state["failure_streaks"] = keep
+    return changed
+
+
+def register_worker_failure_streak(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    reason: str,
+    *,
+    terminal: bool,
+) -> dict[str, Any] | None:
+    task_id = str(worker.get("task_id") or "").strip()
+    if not task_id:
+        return None
+    status = load_status(config)
+    task = next((item for item in status.get("tasks", []) or [] if str(item.get("id") or "") == task_id), None)
+    if task is None:
+        return None
+    role = worker_assignment_role(config, worker, task)
+    if role is None:
+        return None
+    agent_name = display_name_for(config, str(worker.get("agent_id") or worker.get("provider") or ""))
+    if not agent_name:
+        return None
+    failure = classify_worker_failure(config, worker, reason)
+    kind = str(failure.get("kind") or "terminal")
+    threshold = 1 if kind in {"auth", "quota_terminal"} else int(chair_review_settings(config).get("failure_streak_threshold", 2))
+    registry = failure_streak_registry(state)
+    key = failure_streak_key(task_id, role)
+    previous = registry.get(key, {}) if isinstance(registry.get(key), dict) else {}
+    count = int(previous.get("count", 0)) + 1 if previous.get("agent") == agent_name else 1
+    record = {
+        "task_id": task_id,
+        "role": role,
+        "agent": agent_name,
+        "count": count,
+        "threshold": threshold,
+        "awaiting_chair": bool(terminal and count >= threshold),
+        "last_failure_at": utc_now(),
+        "last_failure_kind": kind,
+        "last_failure_summary": str(worker.get("last_error_summary") or reason),
+        "last_worker_run_id": worker.get("run_id"),
+        "last_evidence_ref": worker.get("last_evidence_ref"),
+    }
+    registry[key] = record
+    return record
+
+
+def task_waiting_on_chair_reassignment(
+    state: dict[str, Any],
+    task: dict[str, Any],
+    *,
+    reason: str,
+    target_agent: str,
+) -> bool:
+    role = task_role_for_dispatch_reason(reason)
+    if role is None:
+        return False
+    task_id = str(task.get("id") or "")
+    record = failure_streak_registry(state).get(failure_streak_key(task_id, role))
+    if not isinstance(record, dict) or not record.get("awaiting_chair"):
+        return False
+    return str(record.get("agent") or "") == str(target_agent or "")
 
 
 def normalized_mapping_values(mapping: dict[str, Any], key: str) -> list[str]:
@@ -1214,16 +1735,21 @@ def known_agent_display_names(config: dict[str, Any]) -> set[str]:
     }
 
 
+def display_name_is_legacy_alias(name: str | None) -> bool:
+    return "legacy alias" in str(name or "").lower()
+
+
 def first_viable_agent(config: dict[str, Any], preferred: list[str], exclude: set[str], state: dict[str, Any] | None = None) -> str | None:
     known = known_agent_display_names(config)
     seen: set[str] = set()
+    provider_report = load_provider_report(config) if state is not None else None
     for candidate in preferred:
         name = str(candidate or "").strip()
-        if not name or name in seen or name in exclude:
+        if not name or name in seen or name in exclude or display_name_is_legacy_alias(name):
             continue
         seen.add(name)
         if name in known:
-            if state is not None and is_agent_quota_paused(state, name):
+            if state is not None and is_agent_dispatch_paused(config, state, name, provider_report=provider_report):
                 continue
             return name
     return None
@@ -1330,6 +1856,9 @@ def proactive_claim_plan_for_idle_agent(
         reason = "owned_ready_dispatch"
 
     if not reason or not assigned_agent or assigned_agent == idle_agent_name:
+        return None
+
+    if chair_reassignment_guard_active(state, str(task.get("id") or ""), claim_role, assigned_agent):
         return None
 
     if helper_settings.get("prefer_assigned_when_idle", True) and assigned_agent in idle_agent_names:
@@ -1607,6 +2136,11 @@ def maybe_reassign_task_after_worker_failure(
     if not settings.get("enabled", True):
         return None
 
+    if chair_review_settings(config).get("enabled", True):
+        if state is not None and terminal:
+            register_worker_failure_streak(config, state, worker, reason, terminal=True)
+        return None
+
     attempt_number = int(worker.get("retry_count", 0)) + 1
     if not terminal and attempt_number < int(settings.get("after_attempts", 2)):
         return None
@@ -1808,6 +2342,14 @@ def maybe_trigger_retry_or_fallback(
         return True, True
     if retry_count < max_attempts:
         schedule_worker_retry(config, worker, failure_summary)
+        if failure.get("kind") == "capacity":
+            agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+            next_retry_at = _parse_iso_utc(worker.get("next_retry_at"))
+            reset_seconds = None
+            if next_retry_at is not None:
+                reset_seconds = max(1, int((next_retry_at - datetime.now(timezone.utc)).total_seconds()))
+            if agent_id:
+                pause_provider(state, agent_id, failure_summary, kind="capacity", reset_seconds=reset_seconds)
         upsert_worker_dispatch_pause(
             state,
             worker,
@@ -1976,11 +2518,39 @@ def retry_due_workers(
     now: datetime,
 ) -> bool:
     changed = False
+    active_sibling_statuses = {"running", "manual_pending", "waiting_approval", "suspended_approval", "stalled", "fallback"}
     for worker in list(state.get("workers", {}).values()):
         if worker.get("status") != "retry_backoff":
             continue
         next_retry_at = _parse_iso_utc(worker.get("next_retry_at"))
         if next_retry_at is None or next_retry_at > now:
+            continue
+        queue_event_id = worker.get("queue_event_id")
+        run_id = str(worker.get("run_id") or "")
+        shadowed = False
+        for sibling in state.get("workers", {}).values():
+            if sibling is worker or sibling.get("queue_event_id") != queue_event_id:
+                continue
+            sibling_status = str(sibling.get("status") or "")
+            sibling_run_id = str(sibling.get("run_id") or "")
+            if sibling_status in active_sibling_statuses or (sibling_status == "retry_backoff" and sibling_run_id > run_id):
+                shadowed = True
+                break
+        if shadowed:
+            worker["status"] = "superseded"
+            worker["last_event_at"] = utc_now()
+            worker["last_error"] = "Retry suppressed because another worker already owns this queue event."
+            write_activity_log(
+                config,
+                {
+                    "type": "worker_superseded",
+                    "provider": worker.get("provider"),
+                    "task_id": worker.get("task_id"),
+                    "message": worker["last_error"],
+                    "worker_run_id": worker.get("run_id"),
+                },
+            )
+            changed = True
             continue
         request = request_for_worker(config, worker)
         if request is None:
@@ -2041,7 +2611,7 @@ def _claude_resume_allowed_tools(approval: dict[str, Any] | None) -> list[str]:
 
 def worker_supports_approval_resume(worker: dict[str, Any]) -> bool:
     return bool(
-        worker.get("provider") == "claude"
+        str(worker.get("provider") or "").startswith("claude")
         and (worker.get("session_id") or worker.get("resume_token"))
     )
 
@@ -2056,11 +2626,12 @@ def resume_claude_worker(
     session_id = worker.get("session_id") or worker.get("resume_token")
     if not session_id:
         return None
-    cli = command_exists("claude")
+    provider_key = str(worker.get("provider") or "claude").strip() or "claude"
+    provider = config.get("providers", {}).get(provider_key, config.get("providers", {}).get("claude", {}))
+    runtime = provider.get("runtime", {})
+    cli = command_exists(runtime.get("cli") or "claude")
     if not cli:
         return None
-    provider = config.get("providers", {}).get("claude", {})
-    runtime = provider.get("runtime", {})
     command = [
         runtime.get("cli") or cli,
         "--resume",
@@ -2079,7 +2650,7 @@ def resume_claude_worker(
     )
     if allowed_tools:
         command.extend(["--allowedTools", *allowed_tools])
-    provider_info = (provider_report or {}).get("providers", {}).get("claude", {})
+    provider_info = (provider_report or {}).get("providers", {}).get(provider_key, {})
     resume_permission_mode = runtime.get("resume_permission_mode_after_approval", "bypassPermissions")
     if worker.get("last_approval_id"):
         command.extend(["--permission-mode", resume_permission_mode])
@@ -2090,8 +2661,13 @@ def resume_claude_worker(
     mcp_config = runtime.get("mcp_config")
     if mcp_config:
         command.extend(["--mcp-config", str(config_path(config, "claude_mcp_config"))])
-    log_path = config_path(config, "state_file").parent / "logs" / f"{new_runtime_id('claude-resume')}.log"
+    log_path = config_path(config, "state_file").parent / "logs" / f"{new_runtime_id(f'{provider_key}-resume')}.log"
     env = os.environ.copy()
+    runtime_overrides = runtime_env_overrides(runtime)
+    for key in ("HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"):
+        if runtime_overrides.get(key):
+            Path(runtime_overrides[key]).mkdir(parents=True, exist_ok=True)
+    env.update(runtime_overrides)
     env.update(
         {
             "ORCH_RUN_ID": worker["run_id"],
@@ -2380,7 +2956,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             latest = resolved[-1]
             if latest.get("approval_id") != worker.get("last_approval_id"):
                 worker["last_approval_id"] = latest.get("approval_id")
-                if latest.get("decision") == "allow" and worker.get("provider") == "claude":
+                if latest.get("decision") == "allow" and worker_supports_approval_resume(worker):
                     resumed = resume_claude_worker(config, worker, provider_report, approval=latest)
                     write_activity_log(
                         config,
@@ -2449,6 +3025,54 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             changed = True
 
         if alive:
+            live_failure_reason = detect_worker_failure(worker)
+            if live_failure_reason:
+                failure = classify_worker_failure(config, worker, live_failure_reason)
+                if failure.get("kind") in {"auth", "quota_terminal", "capacity"}:
+                    console_log(
+                        f"live worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} reason={live_failure_reason}",
+                        quiet=SUPERVISOR_LOG_QUIET,
+                    )
+                    terminate_worker_pid(worker.get("pid"))
+                    if failure.get("kind") == "quota_terminal":
+                        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+                        if agent_id:
+                            pause_provider(state, agent_id, live_failure_reason, kind="quota", reset_seconds=14400)
+                    if failure.get("kind") == "auth":
+                        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+                        if agent_id:
+                            pause_provider(state, agent_id, live_failure_reason, kind="auth", reset_seconds=None)
+                    if failure.get("kind") == "capacity" and current_mode == "coordination":
+                        agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+                        reset_seconds = int(worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300))
+                        if agent_id:
+                            pause_provider(state, agent_id, live_failure_reason, kind="capacity", reset_seconds=reset_seconds)
+                        finalize_terminal_worker_outcome(config, state, worker, live_failure_reason)
+                        changed = True
+                        continue
+                    if is_transient_worker_failure(config, worker, live_failure_reason):
+                        handled, retry_changed = maybe_trigger_retry_or_fallback(config, state, provider_report, worker, live_failure_reason)
+                        if handled:
+                            changed = changed or retry_changed
+                            continue
+                    reassigned_to = maybe_reassign_task_after_worker_failure(
+                        config,
+                        worker,
+                        live_failure_reason,
+                        terminal=True,
+                        state=state,
+                    )
+                    if reassigned_to:
+                        worker["status"] = "reassigned"
+                        worker["reassigned_to"] = reassigned_to
+                        worker["last_error"] = live_failure_reason
+                        worker["last_event_at"] = utc_now()
+                        finalize_queue_event_record(config, state, worker, "completed")
+                        changed = True
+                        continue
+                    finalize_terminal_worker_outcome(config, state, worker, live_failure_reason)
+                    changed = True
+                    continue
             if worker.get("status") == "stalled" and last_event_advanced:
                 worker["status"] = "running"
                 worker["last_event_at"] = worker.get("last_event_at") or utc_now()
@@ -2507,7 +3131,19 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             if failure.get("kind") == "quota_terminal":
                 agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                 if agent_id:
-                    quota_pause_agent(state, agent_id, failure_reason, reset_seconds=14400)
+                    pause_provider(state, agent_id, failure_reason, kind="quota", reset_seconds=14400)
+            if failure.get("kind") == "auth":
+                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+                if agent_id:
+                    pause_provider(state, agent_id, failure_reason, kind="auth", reset_seconds=None)
+            if failure.get("kind") == "capacity" and current_mode == "coordination":
+                agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
+                reset_seconds = int(worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300))
+                if agent_id:
+                    pause_provider(state, agent_id, failure_reason, kind="capacity", reset_seconds=reset_seconds)
+                finalize_terminal_worker_outcome(config, state, worker, failure_reason)
+                changed = True
+                continue
             if is_transient_worker_failure(config, worker, failure_reason):
                 handled, retry_changed = maybe_trigger_retry_or_fallback(config, state, provider_report, worker, failure_reason)
                 if handled:
@@ -2533,7 +3169,22 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             continue
 
         if worker.get("status") not in {"completed", "failed", "manual_pending"}:
-            if task_status in expected_completion_statuses:
+            if current_mode in {"planning", "coordination"}:
+                worker["status"] = "completed"
+                worker["last_event_at"] = utc_now()
+                write_activity_log(
+                    config,
+                    {
+                        "type": "worker_completed",
+                        "provider": worker.get("provider"),
+                        "task_id": worker.get("task_id"),
+                        "message": f"{current_mode.title()} worker exited cleanly.",
+                        "worker_run_id": worker["run_id"],
+                        "session_url": worker.get("session_url"),
+                    },
+                )
+                finalize_queue_event_record(config, state, worker, "completed")
+            elif task_status in expected_completion_statuses:
                 worker["status"] = "completed"
                 worker["last_event_at"] = utc_now()
                 write_activity_log(
@@ -2608,7 +3259,10 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
     legacy_done_statuses = settings.get("done_statuses", ["done", "review_approved"])
     settings.setdefault("dependency_done_statuses", ["done"])
     settings.setdefault("worker_terminal_statuses", legacy_done_statuses)
-    settings.setdefault("active_worker_statuses", ["running", "waiting_approval", "retry_backoff", "manual_pending", "stalled"])
+    settings.setdefault(
+        "active_worker_statuses",
+        ["running", "started", "waiting_approval", "suspended_approval", "retry_backoff", "manual_pending", "stalled", "fallback"],
+    )
     settings.setdefault("max_tasks_per_agent", 1)
     settings.setdefault("max_dispatches_per_tick", 4)
     return settings
@@ -2616,7 +3270,7 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
 
 def helper_claim_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict(ready_dispatch_settings(config).get("helper_claim", {}) or {})
-    settings.setdefault("enabled", True)
+    settings.setdefault("enabled", False)
     settings.setdefault("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])
     settings.setdefault("availability_first", True)
     settings.setdefault("allow_any_idle_lane", True)
@@ -2754,11 +3408,11 @@ def dynamic_sidecar_kind(task: dict[str, Any]) -> str | None:
 
 def preferred_agents_for_sidecar(kind: str) -> list[str]:
     mapping = {
-        "review_packet": ["Qwen", "Codex", "Copilot", "Claude", "Gemini"],
-        "acceptance_packet": ["Codex", "Qwen", "Copilot", "Claude", "Gemini"],
-        "bff_handoff_packet": ["Copilot", "Codex", "Qwen", "Claude", "Gemini"],
+        "review_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
+        "acceptance_packet": ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"],
+        "bff_handoff_packet": ["Copilot", "Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2"],
     }
-    return mapping.get(kind, ["Codex", "Qwen", "Copilot", "Claude", "Gemini"])
+    return mapping.get(kind, ["Codex", "Codex2", "Claude2", "Claude", "Gemini", "Gemini2", "Copilot"])
 
 
 def agent_has_dispatchable_primary_work(
@@ -2807,6 +3461,7 @@ def eligible_idle_agents_for_sidecars(
     status: dict[str, Any],
     *,
     max_active_sidecars_per_agent: int,
+    provider_report: dict[str, Any] | None = None,
 ) -> list[str]:
     settings = ready_dispatch_settings(config)
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
@@ -2820,6 +3475,8 @@ def eligible_idle_agents_for_sidecars(
             continue
         normalized = normalize_agent_id(agent_id)
         if normalized in active_agents or normalized in pending_agents:
+            continue
+        if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
         if count_open_sidecars_for_agent(status, display_name) >= max_active_sidecars_per_agent:
             continue
@@ -3491,7 +4148,1107 @@ def build_dispatch_event(task: dict[str, Any], target_agent: str, reason: str, t
     }
 
 
-def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
+def task_is_dispatch_eligible_for_agent(task: dict[str, Any], agent_name: str) -> bool:
+    raw = task.get("eligible_agents")
+    if raw is None:
+        raw = task.get("eligibility")
+    if raw is None:
+        return True
+    if isinstance(raw, list):
+        allowed = {str(item).strip() for item in raw if str(item).strip()}
+        return not allowed or agent_name in allowed
+    if isinstance(raw, dict):
+        allowed = raw.get("agents")
+        if isinstance(allowed, list):
+            normalized = {str(item).strip() for item in allowed if str(item).strip()}
+            return not normalized or agent_name in normalized
+    return True
+
+
+def chair_review_output_paths(config: dict[str, Any], agent_name: str) -> tuple[Path, Path]:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    slug = normalize_agent_id(agent_name) or "chair"
+    review_dir = chair_review_dir(config)
+    return review_dir / f"{stamp}-{slug}.md", review_dir / f"{stamp}-{slug}.json"
+
+
+def pending_approval_items(approval_state: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        item
+        for item in approval_state.get("pending", []) or []
+        if str(item.get("status") or "pending") == "pending" and not item.get("decision")
+    ]
+
+
+def _chair_review_summary_lines(
+    config: dict[str, Any],
+    approval_state: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any] | None = None,
+) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
+    approval_lines: list[str] = []
+    for item in pending_approval_items(approval_state)[:6]:
+        tool_input = item.get("tool_input") if isinstance(item.get("tool_input"), dict) else {}
+        description = tool_input.get("description") or item.get("suggested_rule") or ""
+        description_text = f" description={brief_reason_text(description, max_length=120)}" if description else ""
+        approval_lines.append(
+            f"- {item.get('approval_id')}: task={item.get('task_id') or '-'} tool={item.get('tool_name') or '-'} risk={item.get('risk_class') or '-'}{description_text}"
+        )
+    if not approval_lines:
+        approval_lines.append("- none")
+
+    failure_lines: list[str] = []
+    for item in repeated_failure_records(state)[:6]:
+        failure_lines.append(
+            f"- {item.get('task_id')}: role={item.get('role')} agent={item.get('agent')} count={item.get('count')}/{item.get('threshold')} kind={item.get('last_failure_kind')}"
+        )
+    if not failure_lines:
+        failure_lines.append("- none")
+
+    provider_lines: list[str] = []
+    for item in active_provider_pause_records(state)[:8]:
+        resume = item.get("resume_at")
+        resume_text = f" resume_at={resume}" if resume is not None else ""
+        provider_lines.append(
+            f"- {item.get('agent_id')}: kind={item.get('kind')} paused_at={item.get('paused_at') or '-'}{resume_text} reason={brief_reason_text(item.get('reason'), max_length=180)}"
+        )
+    if not provider_lines:
+        provider_lines.append("- none")
+
+    dispatchable_provider_lines: list[str] = []
+    report = provider_report if isinstance(provider_report, dict) else {}
+    now_ts = datetime.now(timezone.utc).timestamp()
+    pauses = provider_pause_registry(state)
+    for agent_id, agent in (config.get("agents", {}) or {}).items():
+        display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        normalized = normalize_agent_id(agent_id)
+        if not display_name or display_name_is_legacy_alias(display_name):
+            continue
+        pause = pauses.get(normalized)
+        if isinstance(pause, dict):
+            resume_at = pause.get("resume_at")
+            try:
+                resume_ts = float(resume_at) if resume_at is not None else None
+            except (TypeError, ValueError):
+                resume_ts = None
+            if str(pause.get("kind") or "") == "auth" or resume_ts is None or resume_ts > now_ts:
+                continue
+        provider_info = provider_info_for_agent(config, report, normalized)
+        adapter_info = (report.get("agent_adapters", {}) or {}).get(normalized, {})
+        if provider_info.get("auth_ready") is False:
+            continue
+        if provider_info.get("local_cli_worker_supported") is False and adapter_info.get("can_auto_deliver") is False:
+            continue
+        details = ["not_paused=true"]
+        if provider_info.get("auth_ready") is not None:
+            details.append(f"auth_ready={provider_info.get('auth_ready')}")
+        supported = provider_info.get("local_cli_worker_supported")
+        if supported is None:
+            supported = adapter_info.get("can_auto_deliver")
+        if supported is not None:
+            details.append(f"auto_dispatch={supported}")
+        model = provider_info.get("selected_model")
+        if model:
+            details.append(f"model={model}")
+        dispatchable_provider_lines.append(f"- {normalized} ({display_name}): " + " ".join(details))
+    if not dispatchable_provider_lines:
+        dispatchable_provider_lines.append("- none")
+
+    dispatch_pause_lines: list[str] = []
+    for item in actionable_dispatch_pause_records(state):
+        blocked_until = item.get("blocked_until") or "-"
+        dispatch_pause_lines.append(
+            f"- task={item.get('task_id')} provider={item.get('provider') or '-'} kind={item.get('failure_kind') or '-'} paused_at={item.get('paused_at') or '-'} blocked_until={blocked_until} summary={brief_reason_text(item.get('summary'), max_length=180)}"
+        )
+    if not dispatch_pause_lines:
+        dispatch_pause_lines.append("- none")
+
+    return approval_lines, failure_lines, provider_lines, dispatchable_provider_lines, dispatch_pause_lines
+
+
+def build_chair_review_message(
+    config: dict[str, Any],
+    *,
+    reason: str,
+    markdown_path: Path,
+    json_path: Path,
+    approval_state: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any] | None = None,
+) -> str:
+    approval_lines, failure_lines, provider_lines, dispatchable_provider_lines, dispatch_pause_lines = _chair_review_summary_lines(
+        config,
+        approval_state,
+        state,
+        provider_report=provider_report,
+    )
+    return (
+        "你是本輪 chairman，角色是 operational reviewer，不是主線實作者。\n\n"
+        "請閱讀 machine truth（至少包含 ai-status.json、.orchestrator/state.json、.orchestrator/approval-queue.json，以及相關 task brief），"
+        "然後只做 operational 決策，不要改主線產品實作。\n\n"
+        f"Chair review reason: `{reason}`\n\n"
+        "你必須輸出兩個檔案：\n"
+        f"- Markdown report: `{relpath(markdown_path)}`\n"
+        f"- JSON decision: `{relpath(json_path)}`\n\n"
+        "可直接參考 repo 內範本：\n"
+        f"- Markdown template: `{relpath(CHAIRMAN_REPORT_TEMPLATE_PATH)}`\n"
+        f"- JSON template: `{relpath(CHAIRMAN_JSON_TEMPLATE_PATH)}`\n\n"
+        "JSON 必須完整符合以下 schema：\n"
+        "{\n"
+        '  "version": 1,\n'
+        '  "decision": "approve_sidecars",\n'
+        '  "sidecar_approved": true,\n'
+        '  "approval_ttl_minutes": 45,\n'
+        '  "max_sidecars": 2,\n'
+        '  "reason": "why",\n'
+        '  "blocked_by": [],\n'
+        '  "blocked_sidecar_parents": [],\n'
+        '  "approval_actions": [],\n'
+        '  "reassignment_actions": [\n'
+        '    {"task_id": "TASK-ID", "role": "owner", "from": "OldAgent", "to": "NewAgent", "reason": "why"}\n'
+        "  ],\n"
+        '  "task_actions": [\n'
+        '    {"task_id": "TASK-ID", "action": "dispatch_now", "reason": "why now"}\n'
+        "  ],\n"
+        '  "provider_actions": [\n'
+        '    {"agent": "AgentName", "action": "pause", "kind": "auth", "reason": "why"}\n'
+        '  ],\n'
+        '  "recommended_focus": []\n'
+        "}\n\n"
+        "硬規則：\n"
+        "- `approval_ttl_minutes` 與 `max_sidecars` 必須是整數；即使 `sidecar_approved=false` 也不要填 `null`。\n"
+        "- reassignment_actions 必須使用 `role` 與 `reason`；不要用 `field` / `rationale`。\n"
+        "- reviewer 改派只允許 `todo` / `in_progress` / `review` 狀態，用來維持 owner/reviewer 分離或處理 review 交接。\n"
+        "- owner 改派只允許 `backlog` / `todo` / `in_progress` / `review_approved`；若是 `backlog` / `todo` / `in_progress`，代表重開成 `todo` 重新派工。\n"
+        "- `task_actions` 目前只允許 `dispatch_now`，而且只能對 machine truth 已經符合條件的任務觸發；不能繞過 dependency gate 或 commit gate。\n"
+        "- `provider_actions` 目前只允許 `pause` / `clear_pause`，只針對 exact lane 生效；暫停原因必須具體；不要重複 pause 已在 Provider lane pauses 列出的 lane，除非你要改變其狀態。\n"
+        "- 若 Chair review reason 是 `approval_triage`，Pending approvals 不可只評論；每一個 pending approval 都必須在 `approval_actions` 中明確 `allow` 或 `deny`，並寫具體 reason。\n"
+        "- `approval_actions` 必須使用 `decision` 欄位，不要用 `action`；格式是 `{\"approval_id\":\"...\",\"decision\":\"allow|deny\",\"reason\":\"...\"}`。\n"
+        "- `approval_triage` 只處理 approval；不要輸出 `provider_actions`。Provider 狀態放在 recommended_focus，等 `provider_health_triage` 再改 lane。\n"
+        "- `Agent`/subagent approval 只有在 prompt 明確是 read-only explore/review、無修改/無祕密/無破壞性操作時才可 allow；否則 deny，不要留空。\n"
+        "- approval allow 只能放行 read-only、focused test、scoped validation，或 branch/upstream 清楚的普通 non-force `git push`。\n"
+        "- `git push --force`、`--mirror`、`--delete`、`--all`、`--tags` 這類 broad push 一律不要 allow。\n"
+        "- lane/provider id 必須精確判讀：`Claude`/`Claude2`、`Gemini`/`Gemini2`、`Codex`/`Codex2` 是不同帳號/額度 lane；不要因為 `claude` paused 就推論 `claude2` 也 paused，除非 machine truth 明確列出該 exact lane。\n"
+        "- 若 provider/lane 顯示 auth、quota、capacity 或 repeated terminal degraded，不要把新工作派回該 lane；請優先用 reassignment_actions 把可改派的 owner/reviewer work 移到健康 lane。\n"
+        "- 若任務 owner/reviewer 指到 `legacy alias`，那不是可執行 lane；請用 reassignment_actions 改到真實健康 lane。\n"
+        "- 若資訊不足，保守輸出 blocked_by / recommended_focus，不要猜。\n\n"
+        "Pending approvals:\n"
+        + "\n".join(approval_lines)
+        + "\n\nRepeated failure loops:\n"
+        + "\n".join(failure_lines)
+        + "\n\nProvider lane pauses / degraded lanes:\n"
+        + "\n".join(provider_lines)
+        + "\n\nDispatch-capable lanes (not paused; may still be busy):\n"
+        + "\n".join(dispatchable_provider_lines)
+        + "\n\nDispatch pauses requiring chair attention:\n"
+        + "\n".join(dispatch_pause_lines)
+        + "\n"
+    )
+
+
+def chair_review_reason(state: dict[str, Any], approval_state: dict[str, Any]) -> str | None:
+    if pending_approval_items(approval_state):
+        return "approval_triage"
+    if repeated_failure_records(state):
+        return "reassignment_triage"
+    if active_provider_pause_records(state) or actionable_dispatch_pause_records(state, limit=1):
+        return "provider_health_triage"
+    return "operational_review"
+
+
+def choose_chair_reviewer(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    status: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> tuple[str, str] | None:
+    settings = ready_dispatch_settings(config)
+    active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
+    active_agents, _active_task_agents = active_worker_indexes(state, active_statuses)
+    pending_agents, _pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
+    task_map = task_index_from_status(config, status)
+    failing_agents = failing_agents_in_reassignment_loops(state)
+    candidates: list[tuple[str, str]] = []
+    for agent_id, agent in (config.get("agents", {}) or {}).items():
+        display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        if not display_name or "legacy alias" in display_name.lower():
+            continue
+        normalized = normalize_agent_id(agent_id)
+        if normalized in active_agents or normalized in pending_agents:
+            continue
+        if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
+            continue
+        if display_name in failing_agents:
+            continue
+        if agent_has_dispatchable_primary_work(config, status, display_name, task_map):
+            continue
+        candidates.append((normalized, display_name))
+    if not candidates:
+        return None
+    rotation_index = int(state.setdefault("chair_review", {}).get("rotation_index", 0) or 0)
+    rotation_index %= len(candidates)
+    ordered = candidates[rotation_index:] + candidates[:rotation_index]
+    chosen = ordered[0]
+    state.setdefault("chair_review", {})["rotation_index"] = (rotation_index + 1) % len(candidates)
+    return chosen
+
+
+def queue_chair_review(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    status: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    settings = chair_review_settings(config)
+    if not settings.get("enabled", True):
+        return False
+    chair_state = state.setdefault("chair_review", {})
+    if chair_state.get("active_review"):
+        return False
+    approval_state = safe_load_approval_state(config)
+    reason = chair_review_reason(state, approval_state)
+    if reason is None:
+        return False
+    bypass_cooldown = bool(pending_approval_items(approval_state) or chair_review_needs_immediate_attention(state))
+    cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
+    now = datetime.now(timezone.utc)
+    if not bypass_cooldown and cooldown_until is not None and cooldown_until > now:
+        return False
+    chosen = choose_chair_reviewer(config, state, status, provider_report)
+    if chosen is None:
+        return False
+    agent_id, display_name = chosen
+    markdown_path, json_path = chair_review_output_paths(config, display_name)
+    context_files = [config_path(config, "status_file"), config_path(config, "state_file"), config_path(config, "approval_queue")]
+    if AI_GUIDE_PATH.exists():
+        context_files.insert(0, AI_GUIDE_PATH)
+    if CHAIRMAN_SKILL_PATH.exists():
+        context_files.append(CHAIRMAN_SKILL_PATH)
+    for item in pending_approval_items(approval_state):
+        brief = ensure_task_brief(config, task_id=str(item.get("task_id") or ""), runtime_state=state)
+        if brief is not None:
+            context_files.append(brief)
+    for item in repeated_failure_records(state):
+        brief = ensure_task_brief(config, task_id=str(item.get("task_id") or ""), runtime_state=state)
+        if brief is not None:
+            context_files.append(brief)
+    message = build_chair_review_message(
+        config,
+        reason=reason,
+        markdown_path=markdown_path,
+        json_path=json_path,
+        approval_state=approval_state,
+        state=state,
+        provider_report=provider_report,
+    )
+    queue_payload = {
+        "event_id": new_runtime_id("evt"),
+        "created_at": utc_now(),
+        "event_key": f"chair:{reason}:{display_name}:{json_path.name}",
+        "task_id": None,
+        "target_agent": agent_id,
+        "target_display_name": display_name,
+        "provider": agent_config_for(config, agent_id).get("provider", agent_id),
+        "reason": f"chair_review:{reason}",
+        "message": message,
+        "context_files": [relpath(path) for path in context_files if path.exists()],
+        "target_files": [relpath(markdown_path), relpath(json_path)],
+        "metadata": {
+            "mode": "coordination",
+            "chair_review": {
+                "reason": reason,
+                "markdown_path": relpath(markdown_path),
+                "json_path": relpath(json_path),
+            },
+        },
+    }
+    enqueue_event(config, queue_payload)
+    record = queue_event_record(state, queue_payload["event_id"])
+    record["status"] = "queued"
+    record["attempt_count"] = 0
+    record["mode"] = "coordination"
+    chair_state["active_review"] = {
+        "agent_id": agent_id,
+        "agent": display_name,
+        "reason": reason,
+        "requested_at": utc_now(),
+        "queue_event_id": queue_payload["event_id"],
+        "markdown_path": str(markdown_path),
+        "json_path": str(json_path),
+    }
+    write_activity_log(
+        config,
+        {
+            "type": "chair_review_queued",
+            "target_agent": display_name,
+            "message": f"Queued chairman review for {reason}.",
+            "queue_event_id": queue_payload["event_id"],
+        },
+    )
+    return True
+
+
+def _validate_string_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def normalize_chair_approval_action(action: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(action)
+    if not str(normalized.get("decision") or "").strip() and str(normalized.get("action") or "").strip():
+        normalized["decision"] = normalized.get("action")
+    return normalized
+
+
+def normalize_chair_reassignment_action(action: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(action)
+    if not str(normalized.get("role") or "").strip() and str(normalized.get("field") or "").strip():
+        normalized["role"] = normalized.get("field")
+    if not str(normalized.get("from") or "").strip():
+        normalized["from"] = normalized.get("from_agent") or normalized.get("fromAgent")
+    if not str(normalized.get("to") or "").strip():
+        normalized["to"] = normalized.get("to_agent") or normalized.get("toAgent")
+    if not str(normalized.get("reason") or "").strip() and str(normalized.get("rationale") or "").strip():
+        normalized["reason"] = normalized.get("rationale")
+    return normalized
+
+
+def normalize_chair_review_payload_defaults(config: dict[str, Any], payload: Any) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+    normalized = dict(payload)
+    settings = chair_review_settings(config)
+    if normalized.get("approval_ttl_minutes") is None:
+        normalized["approval_ttl_minutes"] = int(settings.get("default_approval_ttl_minutes", 45))
+    if normalized.get("max_sidecars") is None:
+        normalized["max_sidecars"] = int(settings.get("default_max_sidecars", 2))
+    return normalized
+
+
+def normalize_chair_review_payload_for_reason(payload: Any, *, reason: str | None) -> Any:
+    if not isinstance(payload, dict):
+        return payload
+    normalized = dict(payload)
+    if reason == "approval_triage" and normalized.get("provider_actions"):
+        # Approval triage must not mutate provider state, but a noisy chairman
+        # response should not block safe approval decisions from being applied.
+        normalized["provider_actions"] = []
+    return normalized
+
+
+def validate_chair_review_payload(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return "payload must be an object"
+    missing = [key for key in CHAIR_REVIEW_OUTPUT_KEYS if key not in payload]
+    if missing:
+        return f"missing keys: {', '.join(sorted(missing))}"
+    if payload.get("version") != 1:
+        return "version must be 1"
+    if not isinstance(payload.get("decision"), str):
+        return "decision must be a string"
+    if not isinstance(payload.get("sidecar_approved"), bool):
+        return "sidecar_approved must be a boolean"
+    approval_ttl_minutes = payload.get("approval_ttl_minutes")
+    max_sidecars = payload.get("max_sidecars")
+    if payload.get("sidecar_approved") and not isinstance(approval_ttl_minutes, int):
+        return "approval_ttl_minutes must be an integer when sidecar_approved is true"
+    if approval_ttl_minutes is not None and not isinstance(approval_ttl_minutes, int):
+        return "approval_ttl_minutes must be an integer or null"
+    if payload.get("sidecar_approved") and not isinstance(max_sidecars, int):
+        return "max_sidecars must be an integer when sidecar_approved is true"
+    if max_sidecars is not None and not isinstance(max_sidecars, int):
+        return "max_sidecars must be an integer or null"
+    if not isinstance(payload.get("reason"), str):
+        return "reason must be a string"
+    if not _validate_string_list(payload.get("blocked_by")):
+        return "blocked_by must be a string list"
+    if not _validate_string_list(payload.get("blocked_sidecar_parents")):
+        return "blocked_sidecar_parents must be a string list"
+    if not isinstance(payload.get("approval_actions"), list):
+        return "approval_actions must be a list"
+    if not isinstance(payload.get("reassignment_actions"), list):
+        return "reassignment_actions must be a list"
+    if not isinstance(payload.get("task_actions"), list):
+        return "task_actions must be a list"
+    if not isinstance(payload.get("provider_actions"), list):
+        return "provider_actions must be a list"
+    if not _validate_string_list(payload.get("recommended_focus")):
+        return "recommended_focus must be a string list"
+    for action in payload.get("approval_actions", []):
+        if not isinstance(action, dict):
+            return "approval_actions items must be objects"
+        normalized = normalize_chair_approval_action(action)
+        if normalized.get("decision") not in {"allow", "deny"}:
+            return "approval_actions decision must be allow or deny"
+        if not isinstance(normalized.get("approval_id"), str) or not isinstance(normalized.get("reason"), str):
+            return "approval_actions require approval_id and reason strings"
+        if "remember" in normalized and not isinstance(normalized.get("remember"), bool):
+            return "approval_actions remember must be a boolean"
+    for action in payload.get("reassignment_actions", []):
+        if not isinstance(action, dict):
+            return "reassignment_actions items must be objects"
+        normalized = normalize_chair_reassignment_action(action)
+        if normalized.get("role") not in {"owner", "reviewer"}:
+            return "reassignment_actions role must be owner or reviewer"
+        required = ("task_id", "from", "to", "reason")
+        if any(not isinstance(normalized.get(key), str) or not str(normalized.get(key)).strip() for key in required):
+            return "reassignment_actions require task_id/from/to/reason strings"
+    for action in payload.get("task_actions", []):
+        if not isinstance(action, dict):
+            return "task_actions items must be objects"
+        if action.get("action") not in {"dispatch_now"}:
+            return "task_actions action must be dispatch_now"
+        required = ("task_id", "reason")
+        if any(not isinstance(action.get(key), str) or not str(action.get(key)).strip() for key in required):
+            return "task_actions require task_id/reason strings"
+        if "target_agent" in action and (
+            not isinstance(action.get("target_agent"), str) or not str(action.get("target_agent")).strip()
+        ):
+            return "task_actions target_agent must be a non-empty string when provided"
+    for action in payload.get("provider_actions", []):
+        if not isinstance(action, dict):
+            return "provider_actions items must be objects"
+        if action.get("action") not in {"pause", "clear_pause"}:
+            return "provider_actions action must be pause or clear_pause"
+        if not isinstance(action.get("agent"), str) or not str(action.get("agent")).strip():
+            return "provider_actions require agent string"
+        if action.get("action") == "pause":
+            if action.get("kind") not in {"auth", "quota", "capacity", "manual"}:
+                return "provider_actions pause kind must be auth, quota, capacity, or manual"
+            if not isinstance(action.get("reason"), str) or not str(action.get("reason")).strip():
+                return "provider_actions pause requires reason string"
+            if "reset_seconds" in action and action.get("reset_seconds") is not None and not isinstance(action.get("reset_seconds"), int):
+                return "provider_actions reset_seconds must be an integer or null"
+        if action.get("action") == "clear_pause" and "reason" in action and not isinstance(action.get("reason"), str):
+            return "provider_actions clear_pause reason must be a string when provided"
+    return None
+
+
+def validate_chair_review_context(
+    payload: dict[str, Any],
+    *,
+    reason: str | None,
+    approval_state: dict[str, Any],
+) -> str | None:
+    if reason != "approval_triage":
+        return None
+    if payload.get("provider_actions"):
+        return "approval_triage must not emit provider_actions"
+    pending_ids = [
+        str(item.get("approval_id") or "").strip()
+        for item in pending_approval_items(approval_state)
+        if str(item.get("approval_id") or "").strip()
+    ]
+    if not pending_ids:
+        return None
+    action_ids = {
+        str(normalize_chair_approval_action(action).get("approval_id") or "").strip()
+        for action in payload.get("approval_actions", []) or []
+        if isinstance(action, dict)
+        and normalize_chair_approval_action(action).get("decision") in {"allow", "deny"}
+        and str(normalize_chair_approval_action(action).get("approval_id") or "").strip()
+    }
+    missing = [approval_id for approval_id in pending_ids if approval_id not in action_ids]
+    if missing:
+        return f"approval_triage must resolve pending approvals: {', '.join(missing[:6])}"
+    return None
+
+
+def _approval_is_routine_safe(approval: dict[str, Any]) -> bool:
+    risk_class = str(approval.get("risk_class") or "")
+    if risk_class in {"safe_read", "settings_allowed"}:
+        return True
+    tool_name = str(approval.get("tool_name") or "")
+    tool_input = approval.get("tool_input") if isinstance(approval.get("tool_input"), dict) else {}
+    if tool_name == "Agent":
+        text = " ".join(
+            str(tool_input.get(key) or "")
+            for key in ("description", "prompt", "subagent_type")
+        ).lower()
+        safety_qualified_text = text
+        for phrase in ("do not edit", "don't edit", "without editing", "no edits"):
+            safety_qualified_text = safety_qualified_text.replace(phrase, "")
+        read_only_terms = (
+            "read",
+            "review",
+            "inspect",
+            "explore",
+            "analyze",
+            "analyse",
+            "report",
+            "look for",
+        )
+        unsafe_terms = (
+            "edit",
+            "modify",
+            "write",
+            "delete",
+            "remove",
+            "commit",
+            "push",
+            "secret",
+            "token",
+            "credential",
+            "password",
+            "apply_patch",
+            "run command",
+            "execute",
+        )
+        return (
+            bool(text)
+            and any(term in text for term in read_only_terms)
+            and not any(term in safety_qualified_text for term in unsafe_terms)
+        )
+    if tool_name != "Bash":
+        return False
+    command = str(tool_input.get("command") or tool_input.get("cmd") or "").strip()
+    if not command:
+        return False
+    tokens = shlex.split(command)
+    if not tokens:
+        return False
+    normalized = " ".join(tokens)
+    if tokens[:2] == ["git", "push"]:
+        disallowed = {"--force", "-f", "--force-with-lease", "--mirror", "--delete", "--all", "--tags", "--prune"}
+        if any(token in disallowed for token in tokens[2:]):
+            return False
+        positionals = [token for token in tokens[2:] if not token.startswith("-")]
+        return len(positionals) >= 2
+    try:
+        from permission_broker import classify_command
+    except Exception:
+        classify_command = None
+    if classify_command is not None and classify_command(normalized) == "allow":
+        return True
+    verify_prefixes = (
+        "pytest",
+        "python3 -m pytest",
+        "python3 -m unittest",
+        "npm test",
+        "npm run test",
+        "pnpm test",
+        "go test",
+        "cargo test",
+    )
+    return normalized.startswith(verify_prefixes)
+
+
+def apply_chair_approval_actions(config: dict[str, Any], payload: dict[str, Any]) -> bool:
+    changed = False
+    approval_state = safe_load_approval_state(config)
+    pending_by_id = {
+        str(item.get("approval_id") or ""): item
+        for item in pending_approval_items(approval_state)
+        if str(item.get("approval_id") or "")
+    }
+    for action in payload.get("approval_actions", []) or []:
+        if not isinstance(action, dict):
+            continue
+        action = normalize_chair_approval_action(action)
+        approval_id = str(action.get("approval_id") or "").strip()
+        decision = str(action.get("decision") or "").strip()
+        if not approval_id or decision not in {"allow", "deny"}:
+            continue
+        approval = pending_by_id.get(approval_id)
+        if approval is None:
+            continue
+        note = str(action.get("reason") or payload.get("reason") or "").strip() or None
+        remember = bool(action.get("remember", False))
+        resolved_decision = decision
+        if decision == "allow" and not _approval_is_routine_safe(approval):
+            resolved_decision = "deny"
+            note = note or "Denied by supervisor policy: approval exceeded chairman routine-allow scope."
+        try:
+            resolve_approval(
+                config,
+                approval_id,
+                decision=resolved_decision,
+                note=note,
+                remember=remember if resolved_decision == "allow" else False,
+            )
+            changed = True
+        except KeyError:
+            continue
+    return changed
+
+
+def apply_chair_reassignment_action(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    action: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    action = normalize_chair_reassignment_action(action)
+    task_id = str(action.get("task_id") or "").strip()
+    role = str(action.get("role") or "").strip()
+    from_agent = str(action.get("from") or "").strip()
+    to_agent = str(action.get("to") or "").strip()
+    reason = str(action.get("reason") or "").strip()
+    if not task_id or role not in {"owner", "reviewer"} or not from_agent or not to_agent or not reason:
+        return False
+    if to_agent not in known_agent_display_names(config):
+        return False
+    if is_agent_dispatch_paused(config, state, to_agent, provider_report=provider_report):
+        return False
+    status_path = config_path(config, "status_file")
+    status = load_status(config)
+    task = next((item for item in status.get("tasks", []) or [] if str(item.get("id") or "") == task_id), None)
+    if task is None or not task_is_dispatch_eligible_for_agent(task, to_agent):
+        return False
+    timestamp = utc_now()
+    if role == "reviewer":
+        if str(task.get("status") or "").lower() not in {"todo", "in_progress", "review"}:
+            return False
+        if str(task.get("reviewer") or "") != from_agent:
+            return False
+        task["reviewer"] = to_agent
+    else:
+        if str(task.get("status") or "").lower() not in {"backlog", "todo", "in_progress", "review_approved"}:
+            return False
+        if str(task.get("owner") or "") != from_agent:
+            return False
+        task["owner"] = to_agent
+        if str(task.get("status") or "").lower() in {"backlog", "todo", "in_progress"}:
+            task["status"] = "todo"
+    task["last_update"] = timestamp
+    task["next"] = brief_reason_text(f"Chairman reassigned {role} from {from_agent} to {to_agent}: {reason}", max_length=280)
+    for handoff in status.get("handoffs", []) or []:
+        if handoff.get("task_id") != task_id or handoff.get("status") == "done":
+            continue
+        if str(handoff.get("to") or "") == from_agent:
+            handoff["status"] = "done"
+            handoff["resolved_at"] = timestamp
+    status.setdefault("handoffs", []).append(
+        {
+            "task_id": task_id,
+            "from": from_agent,
+            "to": to_agent,
+            "message": task["next"],
+            "status": "pending",
+            "created_at": timestamp,
+        }
+    )
+    write_json(status_path, status)
+    if not sync_status_pipeline(config):
+        return False
+    clear_failure_streak(state, task_id, role)
+    remember_chair_reassignment_guard(
+        config,
+        state,
+        task_id=task_id,
+        role=role,
+        from_agent=from_agent,
+        to_agent=to_agent,
+    )
+    write_activity_log(
+        config,
+        {
+            "type": "chair_reassignment_applied",
+            "task_id": task_id,
+            "message": task["next"],
+            "role": role,
+            "from_agent": from_agent,
+            "to_agent": to_agent,
+        },
+    )
+    return True
+
+
+def apply_chair_reassignment_actions(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    payload: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    changed = False
+    for action in payload.get("reassignment_actions", []) or []:
+        changed = apply_chair_reassignment_action(config, state, action, provider_report) or changed
+    return changed
+
+
+def chair_dispatch_action_reason(
+    config: dict[str, Any],
+    task: dict[str, Any],
+    task_map: dict[str, dict[str, Any]],
+) -> tuple[str, str] | None:
+    settings = ready_dispatch_settings(config)
+    review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
+    finalize_statuses = {str(value).lower() for value in settings.get("finalize_statuses", ["review_approved"])}
+    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
+    status_value = str(task.get("status") or "").lower()
+    owner = str(task.get("owner") or "").strip()
+    reviewer = str(task.get("reviewer") or "").strip()
+
+    if status_value in review_statuses and reviewer:
+        return reviewer, "review_ready_dispatch"
+    if status_value in finalize_statuses and owner:
+        return owner, "owned_finalize_dispatch"
+    if status_value == "in_progress" and owner and dependencies_satisfied(task, task_map, dependency_done_statuses):
+        return owner, "owned_in_progress_dispatch"
+    if status_value in {"todo", "backlog"} and owner and dependencies_satisfied(task, task_map, dependency_done_statuses):
+        return owner, "owned_ready_dispatch"
+    return None
+
+
+def apply_chair_task_action(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    action: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    task_id = str(action.get("task_id") or "").strip()
+    action_name = str(action.get("action") or "").strip()
+    chair_reason = str(action.get("reason") or "").strip()
+    requested_target = str(action.get("target_agent") or "").strip()
+    if not task_id or action_name != "dispatch_now" or not chair_reason:
+        return False
+
+    status = load_status(config)
+    task_map = task_index_from_status(config, status)
+    task = task_map.get(task_id)
+    if task is None:
+        return False
+
+    dispatch_plan = chair_dispatch_action_reason(config, task, task_map)
+    if dispatch_plan is None:
+        return False
+    target_agent, dispatch_reason = dispatch_plan
+    if requested_target and requested_target != target_agent:
+        return False
+    if task_waiting_on_chair_reassignment(state, task, reason=dispatch_reason, target_agent=target_agent):
+        return False
+
+    agent_id = normalize_agent_id(target_agent)
+    if agent_id not in (config.get("agents", {}) or {}):
+        return False
+    if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
+        return False
+
+    _active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
+    _active_agents, active_task_agents = active_worker_indexes(state, _active_statuses)
+    _pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
+    if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
+        return False
+    if not task_is_dispatch_eligible_for_agent(task, target_agent):
+        return False
+
+    event = build_dispatch_event(task, target_agent, dispatch_reason, task_map)
+    if event["key"] in pending_event_keys:
+        return False
+    if not queue_delivery_event(config, event):
+        return False
+
+    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
+    write_activity_log(
+        config,
+        {
+            "type": "chair_task_action_applied",
+            "task_id": task_id,
+            "action": action_name,
+            "dispatch_reason": dispatch_reason,
+            "target_agent": target_agent,
+            "message": f"Chairman triggered {dispatch_reason} for {task_id}: {chair_reason}",
+        },
+    )
+    return True
+
+
+def apply_chair_task_actions(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    payload: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    changed = False
+    for action in payload.get("task_actions", []) or []:
+        changed = apply_chair_task_action(config, state, action, provider_report) or changed
+    return changed
+
+
+def apply_chair_provider_action(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    action: dict[str, Any],
+) -> bool:
+    agent = str(action.get("agent") or "").strip()
+    action_name = str(action.get("action") or "").strip()
+    if not agent or action_name not in {"pause", "clear_pause"}:
+        return False
+    agent_id = normalize_agent_id(agent)
+    if agent_id not in (config.get("agents", {}) or {}):
+        return False
+    reason = str(action.get("reason") or "").strip()
+    if action_name == "pause":
+        kind = str(action.get("kind") or "").strip()
+        if kind not in {"auth", "quota", "capacity", "manual"} or not reason:
+            return False
+        if not chair_provider_pause_reason_is_actionable(kind, reason):
+            write_activity_log(
+                config,
+                {
+                    "type": "chair_provider_action_rejected",
+                    "action": "pause",
+                    "agent": display_name_for(config, agent_id),
+                    "provider": agent_id,
+                    "kind": kind,
+                    "message": f"Rejected non-actionable chair pause reason: {reason}",
+                },
+            )
+            return False
+        reset_seconds = action.get("reset_seconds")
+        existing = provider_pause_registry(state).get(agent_id)
+        if (
+            isinstance(existing, dict)
+            and reset_seconds is None
+            and kind in {"quota", "capacity"}
+            and str(existing.get("kind") or "") == kind
+            and existing.get("resume_at") is not None
+        ):
+            existing["reason"] = reason
+            if kind == "quota":
+                state.setdefault("quota_paused_agents", {})[agent_id] = {
+                    "reason": reason,
+                    "resume_at": existing.get("resume_at"),
+                    "paused_at": existing.get("paused_at"),
+                }
+            write_activity_log(
+                config,
+                {
+                    "type": "chair_provider_action_applied",
+                    "action": "pause",
+                    "agent": display_name_for(config, agent_id),
+                    "provider": agent_id,
+                    "kind": kind,
+                    "message": (
+                        f"Chairman updated {display_name_for(config, agent_id)} pause reason "
+                        "while preserving existing resume_at."
+                    ),
+                },
+            )
+            return True
+        pause_provider(state, agent_id, reason, kind=kind, reset_seconds=reset_seconds)
+        write_activity_log(
+            config,
+            {
+                "type": "chair_provider_action_applied",
+                "action": "pause",
+                "agent": display_name_for(config, agent_id),
+                "provider": agent_id,
+                "kind": kind,
+                "message": f"Chairman paused {display_name_for(config, agent_id)}: {reason}",
+            },
+        )
+        return True
+    if agent_id in provider_pause_registry(state) or agent_id in state.setdefault("quota_paused_agents", {}):
+        clear_provider_pause(state, agent_id)
+        write_activity_log(
+            config,
+            {
+                "type": "chair_provider_action_applied",
+                "action": "clear_pause",
+                "agent": display_name_for(config, agent_id),
+                "provider": agent_id,
+                "message": reason or f"Chairman cleared provider pause for {display_name_for(config, agent_id)}.",
+            },
+        )
+        return True
+    return False
+
+
+def chair_provider_pause_reason_is_actionable(kind: str, reason: str) -> bool:
+    if kind != "auth":
+        return True
+    lowered = reason.lower()
+    non_actionable_markers = (
+        "investigate",
+        "verify ",
+        "garbled",
+        "erroneous",
+        "propagat",
+        "cross-lane",
+        "not a real",
+        "mentioned",
+        "citing",
+    )
+    if any(marker in lowered for marker in non_actionable_markers):
+        return False
+    concrete_auth_markers = (
+        "failed to authenticate",
+        "authentication_error",
+        "invalid authentication credentials",
+        "status: 401",
+        "api error: 401",
+        "error authenticating:",
+        "ineligibletiererror:",
+        "restricted_dasher_user",
+    )
+    return any(marker in lowered for marker in concrete_auth_markers)
+
+
+def apply_chair_provider_actions(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    payload: dict[str, Any],
+) -> bool:
+    changed = False
+    for action in payload.get("provider_actions", []) or []:
+        changed = apply_chair_provider_action(config, state, action) or changed
+    return changed
+
+
+def _chair_review_active_worker(
+    state: dict[str, Any],
+    queue_event_id: str | None,
+    active_statuses: set[str],
+) -> dict[str, Any] | None:
+    if not queue_event_id:
+        return None
+    for worker in state.get("workers", {}).values():
+        if worker.get("queue_event_id") != queue_event_id:
+            continue
+        if str(worker.get("status") or "") in active_statuses:
+            return worker
+    return None
+
+
+def refresh_chair_review_state(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    chair_state = state.setdefault("chair_review", {})
+    active = chair_state.get("active_review")
+    if not isinstance(active, dict):
+        return False
+    active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
+    queue_event_id = str(active.get("queue_event_id") or "")
+    queue_events = state.get("queue", {}).get("events", {}) or {}
+    record = queue_events.get(queue_event_id, {})
+    active_worker = _chair_review_active_worker(state, queue_event_id, active_statuses)
+    markdown_path = Path(str(active.get("markdown_path") or ""))
+    json_path = Path(str(active.get("json_path") or ""))
+    now = utc_now()
+
+    current_pending_approvals = pending_approval_items(safe_load_approval_state(config))
+    if str(active.get("reason") or "") != "approval_triage" and current_pending_approvals:
+        message = "Chair review preempted because pending approvals require immediate approval_triage."
+        if active_worker is not None:
+            terminate_worker_pid(active_worker.get("pid"))
+            active_worker["status"] = "superseded"
+            active_worker["last_event_at"] = now
+            active_worker["last_error"] = message
+            finalize_queue_event_record(config, state, active_worker, "completed", message)
+        chair_state["active_review"] = None
+        chair_state["cooldown_until"] = None
+        write_activity_log(
+            config,
+            {
+                "type": "chair_review_preempted",
+                "message": message,
+                "target_agent": active.get("agent"),
+                "queue_event_id": queue_event_id or None,
+                "pending_approval_count": len(current_pending_approvals),
+            },
+        )
+        return True
+
+    def invalidate(reason: str) -> bool:
+        chair_state["active_review"] = None
+        chair_state["cooldown_until"] = None
+        write_activity_log(
+            config,
+            {
+                "type": "chair_review_invalid_schema",
+                "message": reason,
+                "target_agent": active.get("agent"),
+                "queue_event_id": queue_event_id or None,
+            },
+        )
+        return True
+
+    if json_path.exists():
+        payload = load_json(json_path, default=None)
+        payload = normalize_chair_review_payload_defaults(config, payload)
+        payload = normalize_chair_review_payload_for_reason(payload, reason=str(active.get("reason") or ""))
+        error = validate_chair_review_payload(payload)
+        if not error and isinstance(payload, dict):
+            error = validate_chair_review_context(
+                payload,
+                reason=str(active.get("reason") or ""),
+                approval_state=safe_load_approval_state(config),
+            )
+        if not markdown_path.exists():
+            error = error or "markdown report missing"
+        if error:
+            if active_worker is not None:
+                try:
+                    output_age_seconds = time.time() - json_path.stat().st_mtime
+                except OSError:
+                    output_age_seconds = 0.0
+                if output_age_seconds < float(chair_review_settings(config).get("invalid_output_grace_seconds", 15)):
+                    return False
+                terminate_worker_pid(active_worker.get("pid"))
+                active_worker["status"] = "failed"
+                active_worker["last_event_at"] = utc_now()
+                active_worker["last_error"] = f"Chair review output invalid: {error}"
+                finalize_queue_event_record(config, state, active_worker, "failed", active_worker["last_error"])
+                write_activity_log(
+                    config,
+                    {
+                        "type": "chair_review_invalid_worker_terminated",
+                        "message": active_worker["last_error"],
+                        "target_agent": active.get("agent"),
+                        "worker_run_id": active_worker.get("run_id"),
+                        "queue_event_id": queue_event_id or None,
+                    },
+                )
+            return invalidate(f"Chair review output invalid for {active.get('agent')}: {error}")
+        changed = False
+        changed = apply_chair_approval_actions(config, payload) or changed
+        changed = apply_chair_provider_actions(config, state, payload) or changed
+        changed = apply_chair_reassignment_actions(config, state, payload, provider_report) or changed
+        changed = apply_chair_task_actions(config, state, payload, provider_report) or changed
+        ttl_minutes = int(payload.get("approval_ttl_minutes") or chair_review_settings(config).get("default_approval_ttl_minutes", 45))
+        if bool(payload.get("sidecar_approved")):
+            chair_state["sidecar_approved_until"] = (
+                datetime.now(timezone.utc) + timedelta(minutes=max(1, ttl_minutes))
+            ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        else:
+            chair_state["sidecar_approved_until"] = None
+        chair_state["max_sidecars"] = int(payload.get("max_sidecars") or chair_review_settings(config).get("default_max_sidecars", 2))
+        chair_state["blocked_sidecar_parents"] = list(payload.get("blocked_sidecar_parents", []) or [])
+        chair_state["last_review_at"] = now
+        chair_state["last_reviewer"] = active.get("agent")
+        chair_state["last_reason"] = active.get("reason")
+        chair_state["last_decision"] = payload
+        chair_state["cooldown_until"] = (
+            datetime.now(timezone.utc) + timedelta(seconds=float(chair_review_settings(config).get("cooldown_seconds", 900)))
+        ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        chair_state["active_review"] = None
+        write_activity_log(
+            config,
+            {
+                "type": "chair_review_applied",
+                "message": f"Applied chairman review from {active.get('agent')} ({active.get('reason')}).",
+                "target_agent": active.get("agent"),
+                "queue_event_id": queue_event_id or None,
+            },
+        )
+        return True or changed
+
+    if active_worker is not None:
+        return False
+    if not queue_event_id or queue_event_id not in queue_events:
+        return invalidate(f"Chair review from {active.get('agent')} lost its queue event before completion.")
+    if record.get("status") not in {"completed", "failed"}:
+        return False
+    return invalidate(f"Chair review from {active.get('agent')} finished without producing the required JSON report.")
+
+
+def dispatch_ready_tasks(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
     settings = ready_dispatch_settings(config)
     if not settings.get("enabled", True):
         return False
@@ -3512,6 +5269,7 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
     max_tasks_per_agent = max(1, int(settings.get("max_tasks_per_agent", 1)))
     max_dispatches_per_tick = max(1, int(settings.get("max_dispatches_per_tick", 4)))
+    provider_report = provider_report or load_provider_report(config)
 
     agent_ids = list(config.get("agents", {}).keys())
     active_agents, active_task_agents = active_worker_indexes(state, active_statuses)
@@ -3521,14 +5279,17 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
     agent_loads = agent_dispatch_loads(config, state, active_statuses)
     helper_settings = helper_claim_settings(config)
     seen = state.setdefault("seen_event_keys", {})
-    idle_agent_names = [
-        display_name_for(config, agent_id)
-        for agent_id in agent_ids
-        if agent_id not in active_agents
-        and agent_id not in pending_agents
-        and not is_agent_quota_paused(state, agent_id)
-        and display_name_for(config, agent_id)
-    ]
+    idle_agent_names: list[str] = []
+    for agent_id in agent_ids:
+        display_name = display_name_for(config, agent_id)
+        if (
+            agent_id not in active_agents
+            and agent_id not in pending_agents
+            and display_name
+            and not display_name_is_legacy_alias(display_name)
+            and not is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report)
+        ):
+            idle_agent_names.append(display_name)
 
     changed = False
     dispatches = 0
@@ -3537,10 +5298,12 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
             break
         if agent_id in active_agents or agent_id in pending_agents:
             continue
-        if is_agent_quota_paused(state, agent_id):
+        if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
 
         target_agent = display_name_for(config, agent_id)
+        if not target_agent or display_name_is_legacy_alias(target_agent):
+            continue
         candidates: list[tuple[int, int, dict[str, Any], str]] = []
         for index, task in enumerate(tasks):
             task_id = str(task.get(task_id_field) or "")
@@ -3551,6 +5314,8 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
             task_reviewer = task.get(reviewer_field)
 
             if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
+                continue
+            if not task_is_dispatch_eligible_for_agent(task, target_agent):
                 continue
 
             reason = None
@@ -3568,12 +5333,16 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
                 reason = "owned_ready_dispatch"
                 priority = 3
 
+            if reason and task_waiting_on_chair_reassignment(state, task, reason=reason, target_agent=target_agent):
+                continue
+
             helper_claim_allowed_statuses = {str(v).lower() for v in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review", "review_approved"])}
             helper_claim_plan = None
             if (
                 task_status in helper_claim_allowed_statuses
                 and task_id not in active_task_ids
                 and task_id not in pending_task_ids
+                and not task_waiting_on_chair_reassignment(state, task, reason=reason or "", target_agent=target_agent)
             ):
                 helper_claim_plan = proactive_claim_plan_for_idle_agent(
                     config,
@@ -3660,6 +5429,7 @@ def dispatch_ready_tasks(config: dict[str, Any], state: dict[str, Any]) -> bool:
 def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, Any]) -> bool:
     settings = underutilization_settings(config)
     tracking = state.setdefault("underutilization", {})
+    chair_state = state.setdefault("chair_review", {})
     productive_statuses = {str(value) for value in settings.get("productive_worker_statuses", [])}
     ratio = utilization_ratio_for_sidecars(config, state, productive_statuses)
     threshold = float(settings.get("threshold_ratio", 0.5))
@@ -3694,13 +5464,27 @@ def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, 
     if last_wave_at is not None and (current_dt - last_wave_at).total_seconds() < float(settings.get("cooldown_seconds", 900)):
         return changed
 
+    if chair_review_settings(config).get("enabled", False):
+        sidecar_approved_until = _parse_iso_utc(chair_state.get("sidecar_approved_until"))
+        if sidecar_approved_until is None or sidecar_approved_until <= current_dt:
+            if chair_state.get("sidecar_approved_until") is not None:
+                chair_state["sidecar_approved_until"] = None
+                changed = True
+            wait_reason = "underutilized but waiting for a fresh chairman sidecar approval window"
+            if tracking.get("last_sidecar_wave_reason") != wait_reason:
+                tracking["last_sidecar_wave_reason"] = wait_reason
+                changed = True
+            return changed
+
     status = load_status(config)
     task_map = task_index_from_status(config, status)
+    provider_report = load_provider_report(config)
     idle_agents = eligible_idle_agents_for_sidecars(
         config,
         state,
         status,
         max_active_sidecars_per_agent=int(settings.get("max_active_sidecars_per_agent", 1)),
+        provider_report=provider_report,
     )
     if not idle_agents:
         tracking["last_sidecar_wave_at"] = now
@@ -3719,6 +5503,9 @@ def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, 
     candidates = build_catalog_sidecar_candidates(config, status, task_map, existing_signatures)
     if not candidates:
         candidates = build_dynamic_sidecar_candidates(config, status, task_map, existing_signatures)
+    blocked_parents = {str(item).strip() for item in chair_state.get("blocked_sidecar_parents", []) if str(item).strip()}
+    if blocked_parents:
+        candidates = [candidate for candidate in candidates if str(candidate.get("parent_task_id") or "") not in blocked_parents]
     if not candidates:
         tracking["last_sidecar_wave_at"] = now
         tracking["last_sidecar_wave_reason"] = "underutilized but no sidecar candidates matched the catalog or dynamic fallback"
@@ -3739,9 +5526,16 @@ def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, 
     seen = state.setdefault("seen_event_keys", {})
     per_agent_counts = {agent: count_open_sidecars_for_agent(status, agent) for agent in idle_agents}
     created = 0
+    max_sidecars = max(
+        1,
+        min(
+            int(settings.get("max_new_sidecars_per_wave", 2)),
+            int(chair_state.get("max_sidecars") or chair_review_settings(config).get("default_max_sidecars", 2)),
+        ),
+    )
 
     for candidate in candidates:
-        if created >= int(settings.get("max_new_sidecars_per_wave", 2)):
+        if created >= max_sidecars:
             break
 
         parent_owner = str(candidate.get("reviewer") or "").strip()
@@ -3895,6 +5689,7 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
     active_task_ids = {tid for tid, _ in active_task_agents}
     pending_task_ids = {tid for tid, _ in pending_task_agents}
     agent_loads = agent_dispatch_loads(config, state, active_statuses)
+    provider_report = load_provider_report(config)
 
     idle_agent_names: list[str] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
@@ -3904,7 +5699,7 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
         normalized = normalize_agent_id(agent_id)
         if normalized in active_agents or normalized in pending_agents:
             continue
-        if is_agent_quota_paused(state, agent_id):
+        if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
         idle_agent_names.append(display)
 
@@ -4020,6 +5815,7 @@ def run_once(
         current_pid = os.getpid()
         supervisor_state["pid"] = current_pid
         supervisor_state["last_heartbeat_at"] = heartbeat_at
+        supervisor_state["lifecycle"] = "running"
         if not supervisor_state.get("started_at") or previous_pid != current_pid:
             supervisor_state["started_at"] = heartbeat_at
         update_supervisor_mode_metadata(
@@ -4032,30 +5828,39 @@ def run_once(
     previous_heartbeat = state.get("supervisor", {}).get("last_heartbeat_at")
     stamp_supervisor_state(state)
     changed = False
+    provider_report = load_provider_report(config)
+    changed = bool(expire_provider_pauses(config, state, provider_report)) or changed
     pruned = prune_stale_approvals(config)
     if pruned:
         changed = True
-    provider_report = load_provider_report(config)
-    if watch and desired_focus_mode != "planning":
+    if watch:
         changed = run_scan(config, state, replay=replay, provider_capabilities=provider_report) or changed
         state = load_runtime_state(config)
         stamp_supervisor_state(state)
+        changed = bool(expire_provider_pauses(config, state, provider_report)) or changed
+    status = load_status(config)
+    desired_focus_mode = desired_focus_mode_from_status(status)
     changed = poll_workers(config, state) or changed
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
     changed = prune_completed_dispatch_pauses(state, status) or changed
-    expire_quota_pauses(state)
+    changed = prune_failure_streaks(state, status) or changed
+    changed = refresh_chair_review_state(config, state, provider_report) or changed
+    status = load_status(config)
+    desired_focus_mode = desired_focus_mode_from_status(status)
     if desired_focus_mode == "planning":
         changed = ensure_planning_baton_dispatch(config, state, status) or changed
     else:
-        changed = dispatch_ready_tasks(config, state) or changed
+        changed = queue_chair_review(config, state, status, provider_report) or changed
+        changed = dispatch_ready_tasks(config, state, provider_report) or changed
         changed = dispatch_underutilization_sidecars(config, state) or changed
-        changed = dispatch_underutilization_main_tasks(config, state) or changed
     changed = process_queue(config, state, provider_report) or changed
     changed = poll_workers(config, state) or changed
+    status = load_status(config)
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
     changed = prune_completed_dispatch_pauses(state, status) or changed
+    changed = prune_failure_streaks(state, status) or changed
     changed = sync_github_bus(config, state) or changed
     trim_worker_history(state, int(config.get("supervisor", {}).get("max_worker_history", 200)))
     trim_seen_events(state, int(config.get("watcher", {}).get("max_seen_events", 2000)))

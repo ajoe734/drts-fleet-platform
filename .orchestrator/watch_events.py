@@ -13,6 +13,7 @@ if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
 from common import (
+    ROOT,
     agent_config_for,
     config_path,
     display_name_for,
@@ -240,6 +241,24 @@ def event_mode_bucket(event: dict[str, Any]) -> str:
     return "execution"
 
 
+def repo_scoped_target_files(values: list[Any] | tuple[Any, ...] | None) -> tuple[list[str], int]:
+    result: list[str] = []
+    skipped = 0
+    for value in values or []:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        path = Path(text)
+        if path.is_absolute():
+            try:
+                result.append(str(path.relative_to(ROOT)))
+            except ValueError:
+                skipped += 1
+            continue
+        result.append(text)
+    return result, skipped
+
+
 def render_wakeup_message(
     config: dict[str, Any],
     event: dict[str, Any],
@@ -260,7 +279,13 @@ def render_wakeup_message(
             status=status,
         )
     )
-    target_files = event.get("target_files") or task_payload.get("artifacts") or []
+    raw_target_files = event.get("target_files") if "target_files" in event else task_payload.get("artifacts")
+    target_files, skipped_external_targets = repo_scoped_target_files(raw_target_files or [])
+    display_target_files = list(target_files)
+    if skipped_external_targets:
+        display_target_files.append(
+            f"(repo-external artifacts omitted: {skipped_external_targets}; do not stage paths outside this repository)"
+        )
     sidecar_guardrails = ""
     if str(task_payload.get("task_class") or "").lower() == "sidecar":
         helper_parent = str(task_payload.get("helper_parent") or "").strip() or "(unknown parent)"
@@ -274,12 +299,24 @@ def render_wakeup_message(
             "- 盡量把輸出限制在上面列出的相關檔案；若需新增檔案，只能新增 support artifact。\n"
             "- 完成後請交接給指定 reviewer，由 parent owner 決定是否吸收進主線。\n"
         )
+    closeout_guardrails = ""
+    if str(event.get("reason") or "") == "owned_finalize_dispatch":
+        closeout_guardrails = (
+            "\n這是 `review_approved` owner closeout，不是一般繼續開發。\n"
+            "- canonical 任務必須先整理 diff、確認只 stage task-owned files、建立 task-scoped commit。\n"
+            "- commit subject 必須包含 Task ID；commit body 必須含 `LLM-Agent:`、`Task-ID:`、`Reviewer:`、`Verification:`。\n"
+            "- commit 後必須做 scoped normal non-force push，例如 `git push` 或 `git push -u origin HEAD:<branch>`。\n"
+            "- `git push --force`、`--mirror`、`--delete`、`--all`、`--tags` 一律禁止。\n"
+            "- push 成功後才能用 `COMMIT_HASH`、`COMMIT_SUBJECT`、`PUSH_REMOTE`、`PUSH_BRANCH` 呼叫 `scripts/ai-status.sh done`。\n"
+            "- 如果不能安全 push，請改用 blocker/progress 說清楚原因，不要標 `done`。\n"
+        )
     variables = {
         "shared_files": shared_files,
         "task_id": event.get("task_id") or "(none)",
         "reason": event.get("reason") or "wakeup",
-        "target_files": "\n".join(f"- {path}" for path in target_files) if target_files else "- (none inferred)",
+        "target_files": "\n".join(f"- {path}" for path in display_target_files) if display_target_files else "- (none inferred)",
         "sidecar_guardrails": sidecar_guardrails.rstrip(),
+        "closeout_guardrails": closeout_guardrails.rstrip(),
     }
     return render_template(template_path, variables).strip() + "\n"
 
@@ -310,6 +347,8 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
             status=status,
         )
     ]
+    raw_target_files = event.get("target_files") if "target_files" in event else task_payload.get("artifacts")
+    target_files, _skipped_external_targets = repo_scoped_target_files(raw_target_files or [])
     queue_payload = {
         "event_id": new_runtime_id("evt"),
         "created_at": utc_now(),
@@ -321,7 +360,7 @@ def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:
         "reason": event.get("reason"),
         "message": message,
         "context_files": context_files,
-        "target_files": event.get("target_files") or task_payload.get("artifacts") or [],
+        "target_files": target_files,
         "metadata": {
             "handoff": event.get("handoff"),
             "task": task_payload,

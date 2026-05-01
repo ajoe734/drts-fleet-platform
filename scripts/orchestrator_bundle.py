@@ -236,9 +236,10 @@ This bundle only seeds the collaboration/control-plane layer. As the repo gains 
 ### Capability Lanes
 
 - `Claude`: execution plane, control plane, governance review
+- `Claude2`: integration, API implementation, adapter execution, separate Claude account/quota lane
 - `Gemini`: cloud/runtime packaging, CI/CD, worker operations
+- `Gemini2`: cloud/runtime packaging, CI/CD, worker operations, separate Gemini account/quota lane
 - `Codex`: contracts, state system, schema, acceptance
-- `Qwen`: integration, schema, acceptance, code-agent execution
 - `Copilot`: coding assist, research ingestion, external search, critique
 
 ### Task Ownership
@@ -268,7 +269,7 @@ AI_NAME=Codex ./scripts/ai-status.sh start <task-id> "Started implementation"
 AI_NAME=Codex ./scripts/ai-status.sh progress <task-id> "Updated progress"
 AI_NAME=Codex ./scripts/ai-status.sh handoff <task-id> Claude "Ready for review"
 AI_NAME=Claude REVIEW_NOTES_ZH="審查通過||回到 owner 收尾" ./scripts/ai-status.sh approve <task-id> "Review approved and returned to the owner for finalization"
-AI_NAME=Codex ./scripts/ai-status.sh done <task-id> "Owner finalized approved task and closed it"
+AI_NAME=Codex COMMIT_HASH=<sha> COMMIT_SUBJECT="<subject containing task-id>" PUSH_REMOTE=origin PUSH_BRANCH=<branch> ./scripts/ai-status.sh done <task-id> "Owner finalized approved task, committed, pushed, and closed it"
 ./scripts/sync-state.sh
 ```
 
@@ -319,7 +320,7 @@ Working rules:
 - do not directly patch `ai-status.json`, `current-work.md`, or `ai-activity-log.jsonl`
 - project-specific architecture or backlog docs are declared through `AI_COLLABORATION_GUIDE.md`; do not assume source-repo docs exist here unless the guide points to them
 - if you are the reviewer, finish `review` tasks first
-- if you are the owner of a `review_approved` task, finalize it to `done`
+- if you are the owner of a `review_approved` canonical task, verify, commit, normal non-force push, then finalize it to `done` with commit and push metadata
 - if review fails, write concrete changes and return the task to the owner
 """
 
@@ -435,7 +436,7 @@ AI_NAME=Codex ./scripts/ai-status.sh start <task-id> "Started implementation"
 AI_NAME=Codex ./scripts/ai-status.sh progress <task-id> "Updated progress"
 AI_NAME=Codex ./scripts/ai-status.sh handoff <task-id> Claude "Ready for review"
 AI_NAME=Claude REVIEW_NOTES_ZH="審查通過||回到 owner 收尾" ./scripts/ai-status.sh approve <task-id> "Review approved and returned to the owner for finalization"
-AI_NAME=Codex ./scripts/ai-status.sh done <task-id> "Owner finalized approved task and closed it"
+AI_NAME=Codex COMMIT_HASH=<sha> COMMIT_SUBJECT="<subject containing task-id>" PUSH_REMOTE=origin PUSH_BRANCH=<branch> ./scripts/ai-status.sh done <task-id> "Owner finalized approved task, committed, pushed, and closed it"
 ./scripts/sync-state.sh
 ```
 
@@ -452,7 +453,7 @@ Guardrails:
 Every LLM should follow this order:
 
 1. Review tasks assigned to you as reviewer
-2. Finalize your own `review_approved` tasks
+2. Finalize your own `review_approved` tasks by verifying, committing, pushing, and recording commit/push metadata
 3. Continue your `in_progress` tasks
 4. Pick unblocked `todo` tasks assigned to you
 

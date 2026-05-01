@@ -50,6 +50,8 @@ ai-activity-log.jsonl
 .orchestrator/claude-approval-broker.mcp.json
 .orchestrator/provider_capabilities.json
 .orchestrator/state.json
+.orchestrator/.state.json.*.tmp
+.orchestrator/chair-reviews/
 .orchestrator/evidence/
 .orchestrator/task-briefs/
 docs-site/approval-queue.json

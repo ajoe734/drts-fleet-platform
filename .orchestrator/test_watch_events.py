@@ -137,6 +137,49 @@ class WatcherBookkeepingTests(unittest.TestCase):
             self.assertNotIn("ai-activity-log.jsonl", payload["context_files"])
             self.assertNotIn("docs-site/index.html", payload["context_files"])
 
+    def test_queue_delivery_event_omits_repo_external_artifact_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            status_path = tmp / "ai-status.json"
+            event_queue_path = tmp / "event-queue.jsonl"
+            status_path.write_text('{"tasks": []}', encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "event_queue": str(event_queue_path),
+                    "activity_log": str(tmp / "activity.jsonl"),
+                },
+                "agents": {
+                    "codex": {
+                        "id": "codex",
+                        "display_name": "Codex",
+                        "provider": "codex",
+                        "adapter": "codex",
+                    }
+                },
+            }
+            event = {
+                "key": "P3-003:status:review:Codex",
+                "task_id": "P3-003",
+                "target_agent": "Codex",
+                "reason": "review_ready_dispatch",
+                "task": {
+                    "id": "P3-003",
+                    "artifacts": [
+                        "docs/example.md",
+                        "/home/edna/workspace/tenant-commute-hub/src",
+                    ],
+                },
+            }
+
+            queued = watch_events.queue_delivery_event(config, event)
+
+            self.assertTrue(queued)
+            payload = json.loads(event_queue_path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(payload["target_files"], ["docs/example.md"])
+            self.assertIn("repo-external artifacts omitted: 1", payload["message"])
+            self.assertNotIn("/home/edna/workspace/tenant-commute-hub/src", payload["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

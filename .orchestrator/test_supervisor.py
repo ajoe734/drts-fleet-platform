@@ -35,6 +35,113 @@ class DetectWorkerFailureTests(unittest.TestCase):
 
         self.assertIsNone(supervisor.detect_worker_failure(worker))
 
+    def test_ignores_embedded_auth_error_from_ripgrep_context_line(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "Reviewing provider pause records.",
+                    '7198-      "reason": "Failed to authenticate. API Error: 401 authentication_error: Invalid authentication credentials",',
+                    '7890:      "summary": "\\"gemini2 auth is IneligibleTierError (permanent?) — consider reassigning ORX-GV-003 owner in next review.\\",",',
+                    "No live auth error was emitted by this worker.",
+                ]
+            )
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_i18n_error_label_object(self) -> None:
+        worker = self._worker_for_log('error: { en: "Error", zh: "錯誤" },\n')
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_test_assertion_error_object_literal(self) -> None:
+        worker = self._worker_for_log("error: expect.objectContaining({ message: 'expected copy' })\n")
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_embedded_auth_error_from_json_state_summary_field(self) -> None:
+        worker = self._worker_for_log(
+            '"summary": "7198- \\"reason\\": \\"Failed to authenticate. API Error: 401 authentication_error: Invalid authentication credentials\\",",\n'
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_embedded_auth_error_from_nested_json_state_summary_field(self) -> None:
+        worker = self._worker_for_log(
+            '"summary": "\\"summary\\": \\"\\\\\\"gemini2 auth is IneligibleTierError (permanent?) — consider reassigning ORX-GV-003 owner in next review.\\\\\\"\\",",\n'
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_markdown_table_that_mentions_old_ineligible_tier(self) -> None:
+        worker = self._worker_for_log(
+            "| codex2 | paused | auth | Garbled reason referencing gemini2 IneligibleTierError. |\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_recommendation_text_that_mentions_ineligible_tier(self) -> None:
+        worker = self._worker_for_log(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Verify gemini2 auth health before dispatching ORX-GV-002 because old notes mention IneligibleTierError.",
+                            }
+                        ]
+                    },
+                }
+            )
+            + "\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_embedded_auth_error_from_claude_tool_result_json(self) -> None:
+        worker = self._worker_for_log(
+            json.dumps(
+                {
+                    "type": "user",
+                    "message": {
+                        "role": "user",
+                        "content": [
+                            {
+                                "tool_use_id": "toolu_test",
+                                "type": "tool_result",
+                                "content": '7198-      "reason": "Failed to authenticate. API Error: 401 authentication_error: Invalid authentication credentials",',
+                            }
+                        ],
+                    },
+                }
+            )
+            + "\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_auth_error_mentions_from_assistant_thinking_json(self) -> None:
+        worker = self._worker_for_log(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "thinking",
+                                "thinking": "Provider notes mention claude had auth 401 and gemini2 had IneligibleTierError, but this is analysis, not a live worker failure.",
+                            }
+                        ]
+                    },
+                }
+            )
+            + "\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
     def test_detects_real_model_availability_failure(self) -> None:
         worker = self._worker_for_log('Error: Model "grok-code-fast-1" from --model flag is not available.\n')
 
@@ -57,7 +164,7 @@ class DetectWorkerFailureTests(unittest.TestCase):
 
         self.assertEqual(
             supervisor.detect_worker_failure(worker),
-            "An unexpected critical error occurred:[object Object]",
+            "reason: 'QUOTA_EXHAUSTED'",
         )
 
     def test_detects_qwen_quota_failure_inside_json_result_log(self) -> None:
@@ -76,6 +183,19 @@ class DetectWorkerFailureTests(unittest.TestCase):
             "Qwen OAuth quota exceeded: Your free daily quota has been reached.",
         )
 
+    def test_detects_claude_auth_failure_inside_json_result_log(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    '{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401 {\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"authentication_error\\",\\"message\\":\\"Invalid authentication credentials\\"}}"}]}}',
+                    '{"type":"result","is_error":true,"result":"Failed to authenticate. API Error: 401 {\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"authentication_error\\",\\"message\\":\\"Invalid authentication credentials\\"}}"}',
+                ]
+            )
+            + "\n"
+        )
+
+        self.assertIn("Failed to authenticate", supervisor.detect_worker_failure(worker) or "")
+
     def test_detects_copilot_no_quota_plain_text_log(self) -> None:
         worker = self._worker_for_log("402 You have no quota (Request ID: test)\n")
 
@@ -83,6 +203,22 @@ class DetectWorkerFailureTests(unittest.TestCase):
             supervisor.detect_worker_failure(worker),
             "402 You have no quota (Request ID: test)",
         )
+
+    def test_detects_gemini_ineligible_tier_auth_failure(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "Error authenticating: IneligibleTierError: Your current account is not eligible for Gemini Code Assist for individuals, the free version of Gemini Code Assist.",
+                    "reasonCode: 'RESTRICTED_DASHER_USER'",
+                    "An unexpected critical error occurred:IneligibleTierError: Your current account is not eligible for Gemini Code Assist for individuals.",
+                ]
+            )
+            + "\n"
+        )
+
+        detected = supervisor.detect_worker_failure(worker)
+        self.assertIsNotNone(detected)
+        self.assertTrue("IneligibleTierError" in (detected or "") or "RESTRICTED_DASHER_USER" in (detected or ""))
 
     def test_ignores_json_artifact_listing_that_contains_unauthorized_path_names(self) -> None:
         worker = self._worker_for_log(
@@ -148,6 +284,48 @@ class DetectWorkerFailureTests(unittest.TestCase):
         worker = {"provider": "gemini"}
 
         result = supervisor.classify_worker_failure(config, worker, "status: 401 unauthorized")
+
+        self.assertEqual(result["kind"], "auth")
+        self.assertFalse(result["transient"])
+
+    def test_classifies_gemini_ineligible_tier_as_auth_failure(self) -> None:
+        config = {"worker_retry": {"transient_error_patterns": ["429", "resource_exhausted", "rate limit"]}}
+        worker = {"provider": "gemini2"}
+
+        result = supervisor.classify_worker_failure(
+            config,
+            worker,
+            "IneligibleTierError: Your current account is not eligible for Gemini Code Assist for individuals.",
+        )
+
+        self.assertEqual(result["kind"], "auth")
+        self.assertFalse(result["transient"])
+
+    def test_rejects_non_actionable_chair_auth_pause_reason(self) -> None:
+        self.assertFalse(
+            supervisor.chair_provider_pause_reason_is_actionable(
+                "auth",
+                "Investigate supervisor pause-propagation bug and cross-lane issue citing gemini2 IneligibleTierError.",
+            )
+        )
+
+    def test_allows_concrete_chair_auth_pause_reason(self) -> None:
+        self.assertTrue(
+            supervisor.chair_provider_pause_reason_is_actionable(
+                "auth",
+                "Failed to authenticate. API Error: 401 authentication_error: Invalid authentication credentials",
+            )
+        )
+
+    def test_classifies_claude_authentication_error(self) -> None:
+        config = {"worker_retry": {"transient_error_patterns": ["429", "resource_exhausted", "rate limit"]}}
+        worker = {"provider": "claude"}
+
+        result = supervisor.classify_worker_failure(
+            config,
+            worker,
+            'Failed to authenticate. API Error: 401 {"error":{"type":"authentication_error","message":"Invalid authentication credentials"}}',
+        )
 
         self.assertEqual(result["kind"], "auth")
         self.assertFalse(result["transient"])
@@ -2403,6 +2581,14 @@ class WorkerReassignmentTests(unittest.TestCase):
             },
         }
 
+    def test_default_reassignment_fallbacks_do_not_reintroduce_qwen(self) -> None:
+        settings = supervisor.worker_reassignment_settings({})
+
+        serialized = json.dumps(settings.get("owner_fallbacks", {})) + json.dumps(settings.get("reviewer_fallbacks", {}))
+        self.assertNotIn("Qwen", serialized)
+        self.assertIn("Claude2", serialized)
+        self.assertIn("Gemini2", serialized)
+
     def test_reassigns_review_task_to_new_reviewer_after_repeated_failure(self) -> None:
         worker = {
             "task_id": "P3-001",
@@ -2632,6 +2818,122 @@ class WorkerReassignmentTests(unittest.TestCase):
         self.assertEqual(worker["reassigned_to"], "Codex")
         self.assertIs(maybe_reassign.call_args.kwargs["state"], state)
 
+    def test_capacity_retry_temporarily_pauses_exact_lane(self) -> None:
+        config = {
+            **self.config,
+            "agents": {
+                **self.config["agents"],
+                "gemini2": {"display_name": "Gemini2", "provider": "gemini2"},
+            },
+            "worker_retry": {
+                "max_attempts": 1,
+                "backoff_schedule_seconds": [60],
+                "jitter_seconds": 0,
+                "fallback_mode": "none",
+                "transient_error_patterns": ["429", "resource_exhausted", "no capacity available"],
+            },
+        }
+        state = {}
+        worker = {
+            "run_id": "gemini2-run-capacity",
+            "task_id": "CAP-001",
+            "provider": "gemini2",
+            "agent_id": "gemini2",
+            "retry_count": 0,
+            "queue_event_id": "evt-capacity-1",
+            "log_path": "/tmp/gemini2-run-capacity.log",
+        }
+
+        with (
+            mock.patch.object(supervisor, "request_for_worker", return_value={"task_id": "CAP-001"}),
+            mock.patch.object(supervisor, "maybe_reassign_task_after_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "record_worker_evidence", return_value=".orchestrator/evidence/capacity.json"),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            handled, changed = supervisor.maybe_trigger_retry_or_fallback(
+                config,
+                state,
+                {"providers": {"gemini2": {"auth_ready": True}}},
+                worker,
+                "status: 429 RESOURCE_EXHAUSTED No capacity available for model gemini-2.5-flash",
+            )
+
+        self.assertTrue(handled)
+        self.assertTrue(changed)
+        self.assertEqual(worker["status"], "retry_backoff")
+        self.assertIn("gemini2", state["provider_pauses"])
+        self.assertEqual(state["provider_pauses"]["gemini2"]["kind"], "capacity")
+        self.assertTrue(
+            supervisor.is_agent_dispatch_paused(
+                config,
+                state,
+                "gemini2",
+                provider_report={"providers": {"gemini2": {"auth_ready": True}}},
+            )
+        )
+
+    def test_live_capacity_failure_terminates_and_pauses_exact_lane(self) -> None:
+        config = {
+            "agents": {
+                "gemini2": {"display_name": "Gemini2", "provider": "gemini2"},
+            },
+            "worker_retry": {
+                "max_attempts": 1,
+                "backoff_schedule_seconds": [60],
+                "jitter_seconds": 0,
+                "fallback_mode": "none",
+                "transient_error_patterns": ["429", "resource_exhausted", "no capacity available"],
+            },
+            "ready_dispatch": {
+                "active_worker_statuses": ["running", "retry_backoff", "stalled", "waiting_approval", "manual_pending"],
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-live-capacity": {"status": "started"}}},
+            "workers": {
+                "gemini2-live-capacity": {
+                    "run_id": "gemini2-live-capacity",
+                    "provider": "gemini2",
+                    "agent_id": "gemini2",
+                    "task_id": None,
+                    "pid": 4242,
+                    "status": "running",
+                    "mode": "coordination",
+                    "request_snapshot": {"reason": "chair_review:reassignment_triage", "metadata": {"mode": "coordination"}},
+                    "queue_event_id": "evt-live-capacity",
+                    "last_event_at": "2026-04-30T13:33:00Z",
+                    "retry_count": 0,
+                }
+            },
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": []}),
+            mock.patch.object(supervisor, "load_provider_report", return_value={"providers": {"gemini2": {"auth_ready": True}}}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "update_from_log"),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+            mock.patch.object(
+                supervisor,
+                "detect_worker_failure",
+                return_value="status: 429 RESOURCE_EXHAUSTED No capacity available for model gemini-2.5-pro",
+            ),
+            mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
+            mock.patch.object(supervisor, "request_for_worker", return_value={"task_id": None}),
+            mock.patch.object(supervisor, "maybe_reassign_task_after_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "record_worker_evidence", return_value=".orchestrator/evidence/live-capacity.json"),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        terminate.assert_called_once_with(4242)
+        worker = state["workers"]["gemini2-live-capacity"]
+        self.assertEqual(worker["status"], "failed")
+        self.assertEqual(state["queue"]["events"]["evt-live-capacity"]["status"], "failed")
+        self.assertEqual(state["provider_pauses"]["gemini2"]["kind"], "capacity")
+
     def test_finalize_terminal_wrapper_passes_state_into_reassignment(self) -> None:
         config = dict(self.config)
         state = {"quota_paused_agents": {"qwen": {"resume_at": 9999999999}}}
@@ -2658,6 +2960,1027 @@ class WorkerReassignmentTests(unittest.TestCase):
         self.assertEqual(worker["status"], "reassigned")
         self.assertEqual(worker["reassigned_to"], "Grok")
         self.assertIs(maybe_reassign.call_args.kwargs["state"], state)
+
+
+class ChairmanFlowTests(unittest.TestCase):
+    def test_chair_review_message_includes_provider_health_context(self) -> None:
+        message = supervisor.build_chair_review_message(
+            {
+                "paths": {},
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                },
+            },
+            reason="provider_health_triage",
+            markdown_path=Path(".orchestrator/chair-reviews/test.md"),
+            json_path=Path(".orchestrator/chair-reviews/test.json"),
+            approval_state={"pending": []},
+            state={
+                "provider_pauses": {
+                    "claude": {
+                        "kind": "auth",
+                        "reason": "Invalid authentication credentials",
+                        "paused_at": "2026-04-30T12:51:53Z",
+                        "resume_at": None,
+                    }
+                },
+                "dispatch_pauses": [
+                    {
+                        "provider": "claude",
+                        "task_id": "OPX-DP-003-SIDECAR-ACCEPTANCE",
+                        "failure_kind": "auth",
+                        "summary": "auth: Invalid authentication credentials",
+                        "paused_at": "2026-04-30T12:51:53Z",
+                    }
+                ],
+                "failure_streaks": {},
+            },
+            provider_report={
+                "providers": {
+                    "codex": {
+                        "auth_ready": True,
+                        "local_cli_worker_supported": True,
+                    }
+                }
+            },
+        )
+
+        self.assertIn("Provider lane pauses / degraded lanes", message)
+        self.assertIn("claude", message)
+        self.assertIn("Invalid authentication credentials", message)
+        self.assertIn("Dispatch-capable lanes", message)
+        self.assertIn("codex (Codex): not_paused=true", message)
+        self.assertIn("Dispatch pauses requiring chair attention", message)
+        self.assertIn("OPX-DP-003-SIDECAR-ACCEPTANCE", message)
+
+    def test_chair_review_message_requires_approval_actions_for_approval_triage(self) -> None:
+        message = supervisor.build_chair_review_message(
+            {"paths": {}},
+            reason="approval_triage",
+            markdown_path=Path(".orchestrator/chair-reviews/test.md"),
+            json_path=Path(".orchestrator/chair-reviews/test.json"),
+            approval_state={
+                "pending": [
+                    {
+                        "approval_id": "apr-1",
+                        "task_id": "ORX-FN-001",
+                        "tool_name": "Agent",
+                        "risk_class": "unknown",
+                        "tool_input": {"description": "Review settlement matrix code"},
+                    }
+                ]
+            },
+            state={"failure_streaks": {}, "provider_pauses": {}, "dispatch_pauses": []},
+        )
+
+        self.assertIn("每一個 pending approval 都必須在 `approval_actions` 中明確", message)
+        self.assertIn("description=Review settlement matrix code", message)
+
+    def test_validate_chair_review_context_requires_pending_approval_resolution(self) -> None:
+        payload = {
+            "version": 1,
+            "decision": "approve_sidecars",
+            "sidecar_approved": False,
+            "approval_ttl_minutes": 45,
+            "max_sidecars": 2,
+            "reason": "approval remains unsafe",
+            "blocked_by": [],
+            "blocked_sidecar_parents": [],
+            "approval_actions": [],
+            "reassignment_actions": [],
+            "task_actions": [],
+            "provider_actions": [],
+            "recommended_focus": [],
+        }
+        approval_state = {
+            "pending": [
+                {
+                    "approval_id": "apr-1",
+                    "status": "pending",
+                    "decision": None,
+                }
+            ]
+        }
+
+        self.assertIn(
+            "approval_triage must resolve pending approvals",
+            supervisor.validate_chair_review_context(payload, reason="approval_triage", approval_state=approval_state),
+        )
+        payload["approval_actions"] = [{"approval_id": "apr-1", "action": "deny", "reason": "not safe"}]
+        self.assertIsNone(
+            supervisor.validate_chair_review_context(payload, reason="approval_triage", approval_state=approval_state)
+        )
+        payload["provider_actions"] = [
+            {"agent": "Claude2", "action": "pause", "kind": "capacity", "reason": "stale prompt"}
+        ]
+        self.assertEqual(
+            supervisor.validate_chair_review_context(payload, reason="approval_triage", approval_state=approval_state),
+            "approval_triage must not emit provider_actions",
+        )
+
+    def test_agent_read_only_approval_is_routine_safe(self) -> None:
+        approval = {
+            "tool_name": "Agent",
+            "risk_class": "unknown",
+            "tool_input": {
+                "description": "Review settlement matrix code",
+                "prompt": "Read these files thoroughly and report any issues. Do not edit files.",
+                "subagent_type": "Explore",
+            },
+        }
+
+        self.assertTrue(supervisor._approval_is_routine_safe(approval))
+
+    def test_chair_review_reason_prioritizes_provider_health_triage(self) -> None:
+        reason = supervisor.chair_review_reason(
+            {
+                "provider_pauses": {
+                    "claude": {
+                        "kind": "auth",
+                        "reason": "Invalid authentication credentials",
+                        "paused_at": "2026-04-30T12:51:53Z",
+                    }
+                }
+            },
+            {"pending": []},
+        )
+
+        self.assertEqual(reason, "provider_health_triage")
+
+    def test_dispatcher_skips_task_waiting_on_chair_reassignment(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {},
+            "chair_review": {"enabled": True},
+            "agents": {
+                "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+            },
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {},
+            "seen_event_keys": {},
+            "failure_streaks": {
+                "REG-777:owner": {
+                    "task_id": "REG-777",
+                    "role": "owner",
+                    "agent": "Codex",
+                    "count": 2,
+                    "threshold": 2,
+                    "awaiting_chair": True,
+                }
+            },
+        }
+        status = {
+            "tasks": [
+                {
+                    "id": "REG-777",
+                    "status": "todo",
+                    "owner": "Codex",
+                    "reviewer": "Claude",
+                    "depends_on": [],
+                }
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertFalse(changed)
+        queue_delivery_event.assert_not_called()
+
+    def test_dispatcher_skips_legacy_alias_helper_claim(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "helper_claim": {
+                    "enabled": True,
+                    "availability_first": True,
+                    "allow_any_idle_lane": True,
+                    "require_assigned_agent_busy": True,
+                }
+            },
+            "agents": {
+                "copilot": {"id": "copilot", "display_name": "Copilot", "provider": "copilot"},
+                "grok": {"id": "grok", "display_name": "Copilot (legacy alias)", "provider": "grok"},
+            },
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {},
+            "provider_pauses": {
+                "copilot": {
+                    "kind": "quota",
+                    "reason": "quota exhausted",
+                    "paused_at": "2026-04-30T15:00:00Z",
+                    "resume_at": None,
+                }
+            },
+        }
+        status = {
+            "tasks": [
+                {
+                    "id": "OPX-GV-004",
+                    "status": "review",
+                    "owner": "Codex2",
+                    "reviewer": "Copilot",
+                    "depends_on": [],
+                }
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertFalse(changed)
+        queue_delivery_event.assert_not_called()
+
+    def test_underutilization_sidecars_wait_for_chair_approval_when_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "ai-status.json").write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "id": "MAIN-1",
+                                "status": "in_progress",
+                                "owner": "Codex",
+                                "reviewer": "Claude",
+                                "depends_on": [],
+                                "title": "Main task",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            (root / "sidecar_catalog.json").write_text('{"templates": []}\n', encoding="utf-8")
+            config = {
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "status_field": "status",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                    "sidecar_catalog": str(root / "sidecar_catalog.json"),
+                },
+                "chair_review": {"enabled": True},
+                "underutilization_dispatch": {
+                    "enabled": True,
+                    "threshold_ratio": 0.5,
+                    "continuous_window_seconds": 60,
+                    "cooldown_seconds": 60,
+                    "max_new_sidecars_per_wave": 2,
+                },
+                "agents": {
+                    "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                    "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+                },
+            }
+            state = {
+                "queue": {"events": {}},
+                "workers": {},
+                "underutilization": {"below_threshold_since": "2026-04-10T00:00:00Z"},
+                "chair_review": {},
+            }
+
+            with mock.patch.object(supervisor, "create_sidecar_task") as create_sidecar_task:
+                changed = supervisor.dispatch_underutilization_sidecars(config, state)
+
+            self.assertTrue(changed)
+            create_sidecar_task.assert_not_called()
+            self.assertEqual(
+                state["underutilization"]["last_sidecar_wave_reason"],
+                "underutilized but waiting for a fresh chairman sidecar approval window",
+            )
+
+    def test_refresh_chair_review_state_applies_sidecar_window_and_approval_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260429T000000Z-claude.md"
+            json_path = review_dir / "20260429T000000Z-claude.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "approve_sidecars",
+                        "sidecar_approved": True,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "safe and idle",
+                        "blocked_by": [],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [
+                            {
+                                "approval_id": "apr-1",
+                                "action": "allow",
+                                "reason": "read-only context check",
+                                "remember": False,
+                            }
+                        ],
+                        "reassignment_actions": [],
+                        "task_actions": [],
+                        "provider_actions": [
+                            {
+                                "agent": "Gemini2",
+                                "action": "pause",
+                                "kind": "capacity",
+                                "reason": "Noisy approval triage output should not mutate provider state.",
+                            }
+                        ],
+                        "recommended_focus": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            config = {
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "status_field": "status",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            (root / "ai-status.json").write_text('{"tasks": []}\n', encoding="utf-8")
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "claude",
+                        "agent": "Claude",
+                        "reason": "approval_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(
+                    supervisor,
+                    "safe_load_approval_state",
+                    return_value={
+                        "pending": [
+                            {
+                                "approval_id": "apr-1",
+                                "tool_name": "Read",
+                                "risk_class": "safe_read",
+                            }
+                        ],
+                        "history": [],
+                    },
+                ),
+                mock.patch.object(supervisor, "resolve_approval") as resolve_approval,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            resolve_approval.assert_called_once_with(
+                config,
+                "apr-1",
+                decision="allow",
+                note="read-only context check",
+                remember=False,
+            )
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["last_reviewer"], "Claude")
+            self.assertEqual(state["chair_review"]["max_sidecars"], 2)
+            self.assertIsNotNone(state["chair_review"]["sidecar_approved_until"])
+            self.assertNotIn("gemini2", state.get("provider_pauses", {}))
+
+    def test_refresh_chair_review_state_accepts_reassignment_aliases_and_preserves_separation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260429T000000Z-claude2.md"
+            json_path = review_dir / "20260429T000000Z-claude2.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "approve_sidecars",
+                        "sidecar_approved": True,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "break owner failure loop",
+                        "blocked_by": [],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [
+                            {
+                                "task_id": "OPX-MD-003",
+                                "role": "owner",
+                                "from_agent": "Codex2",
+                                "to_agent": "Codex",
+                                "rationale": "Codex2 hit repeated terminal failures.",
+                            },
+                            {
+                                "task_id": "OPX-MD-003",
+                                "field": "reviewer",
+                                "from": "Codex",
+                                "to": "Claude",
+                                "rationale": "Keep owner and reviewer separate after the owner move.",
+                            },
+                        ],
+                        "task_actions": [],
+                        "provider_actions": [],
+                        "recommended_focus": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "id": "OPX-MD-003",
+                                "owner": "Codex2",
+                                "reviewer": "Codex",
+                                "status": "in_progress",
+                                "last_update": "2026-04-29T00:00:00Z",
+                            }
+                        ],
+                        "handoffs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                    "claude": {"display_name": "Claude", "provider": "claude"},
+                    "claude2": {"display_name": "Claude2", "provider": "claude2"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "failure_streaks": {
+                    "OPX-MD-003:owner": {
+                        "task_id": "OPX-MD-003",
+                        "role": "owner",
+                        "agent": "Codex2",
+                        "awaiting_chair": True,
+                    },
+                    "OPX-MD-003:reviewer": {
+                        "task_id": "OPX-MD-003",
+                        "role": "reviewer",
+                        "agent": "Codex",
+                        "awaiting_chair": True,
+                    },
+                },
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "claude2",
+                        "agent": "Claude2",
+                        "reason": "reassignment_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            updated = json.loads(status_path.read_text(encoding="utf-8"))
+            task = updated["tasks"][0]
+            self.assertEqual(task["owner"], "Codex")
+            self.assertEqual(task["reviewer"], "Claude")
+            self.assertEqual(task["status"], "todo")
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertNotIn("OPX-MD-003:owner", state["failure_streaks"])
+            self.assertNotIn("OPX-MD-003:reviewer", state["failure_streaks"])
+            self.assertEqual(state["chair_reassignment_guards"]["OPX-MD-003:owner"]["to"], "Codex")
+            self.assertEqual(state["chair_reassignment_guards"]["OPX-MD-003:reviewer"]["to"], "Claude")
+
+    def test_refresh_chair_review_state_reassigns_backlog_owner_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260430T000000Z-gemini.md"
+            json_path = review_dir / "20260430T000000Z-gemini.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "operational_review",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": None,
+                        "max_sidecars": None,
+                        "reason": "Claude auth lane is degraded; move backlog owner work.",
+                        "blocked_by": [],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [
+                            {
+                                "task_id": "OPX-DP-003-SIDECAR-ACCEPTANCE",
+                                "role": "owner",
+                                "from": "Claude",
+                                "to": "Claude2",
+                                "reason": "Claude auth failed before doing work.",
+                            }
+                        ],
+                        "task_actions": [],
+                        "provider_actions": [],
+                        "recommended_focus": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "id": "OPX-DP-003-SIDECAR-ACCEPTANCE",
+                                "owner": "Claude",
+                                "reviewer": "Codex2",
+                                "status": "backlog",
+                                "last_update": "2026-04-30T12:43:03Z",
+                            }
+                        ],
+                        "handoffs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "claude": {"display_name": "Claude", "provider": "claude"},
+                    "claude2": {"display_name": "Claude2", "provider": "claude2"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "failure_streaks": {
+                    "OPX-DP-003-SIDECAR-ACCEPTANCE:owner": {
+                        "task_id": "OPX-DP-003-SIDECAR-ACCEPTANCE",
+                        "role": "owner",
+                        "agent": "Claude",
+                        "awaiting_chair": True,
+                    }
+                },
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "gemini",
+                        "agent": "Gemini",
+                        "reason": "provider_health_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            updated = json.loads(status_path.read_text(encoding="utf-8"))
+            task = updated["tasks"][0]
+            self.assertEqual(task["owner"], "Claude2")
+            self.assertEqual(task["status"], "todo")
+            self.assertNotIn("OPX-DP-003-SIDECAR-ACCEPTANCE:owner", state["failure_streaks"])
+
+    def test_refresh_chair_review_state_applies_provider_pause_and_reassignment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260430T000000Z-claude.md"
+            json_path = review_dir / "20260430T000000Z-claude.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "operational_review",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": None,
+                        "max_sidecars": None,
+                        "reason": "Gemini2 lane is degraded; pause it and move backlog work to a healthy owner.",
+                        "blocked_by": [],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [
+                            {
+                                "task_id": "ORX-GV-003",
+                                "role": "owner",
+                                "from": "Gemini2",
+                                "to": "Claude2",
+                                "reason": "Gemini2 provider-health worker stalled while output already existed.",
+                            }
+                        ],
+                        "task_actions": [],
+                        "provider_actions": [
+                            {
+                                "agent": "Gemini2",
+                                "action": "pause",
+                                "kind": "auth",
+                                "reason": "Stalled provider-health worker; no new dispatches until verified.",
+                                "reset_seconds": None,
+                            }
+                        ],
+                        "recommended_focus": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "id": "ORX-GV-003",
+                                "owner": "Gemini2",
+                                "reviewer": "Codex",
+                                "status": "backlog",
+                                "last_update": "2026-04-30T14:30:00Z",
+                            }
+                        ],
+                        "handoffs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "gemini2": {"display_name": "Gemini2", "provider": "gemini2"},
+                    "claude2": {"display_name": "Claude2", "provider": "claude2"},
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "claude",
+                        "agent": "Claude",
+                        "reason": "provider_health_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "sync_status_pipeline", return_value=True),
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            updated = json.loads(status_path.read_text(encoding="utf-8"))
+            task = updated["tasks"][0]
+            self.assertEqual(task["owner"], "Claude2")
+            self.assertEqual(task["reviewer"], "Codex")
+            self.assertEqual(task["status"], "todo")
+            self.assertEqual(state["provider_pauses"]["gemini2"]["kind"], "auth")
+            self.assertIsNone(state["chair_review"]["active_review"])
+
+    def test_refresh_chair_review_state_dispatches_review_approved_task_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260430T000000Z-claude.json.md"
+            json_path = review_dir / "20260430T000000Z-claude.json"
+            status_path = root / "ai-status.json"
+            event_queue_path = root / "event-queue.jsonl"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "approve_sidecars",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "finalize owner should be woken now",
+                        "blocked_by": [],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [],
+                        "task_actions": [
+                            {
+                                "task_id": "OPX-CM-003",
+                                "action": "dispatch_now",
+                                "reason": "Owner already has review-approved work ready to finalize.",
+                            }
+                        ],
+                        "recommended_focus": [],
+                        "provider_actions": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "id": "OPX-CM-003",
+                                "owner": "Codex",
+                                "reviewer": "Claude",
+                                "status": "review_approved",
+                                "depends_on": [],
+                                "artifacts": [],
+                                "last_update": "2026-04-30T00:00:00Z",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            event_queue_path.write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(event_queue_path),
+                },
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "status_field": "status",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "agents": {
+                    "codex": {
+                        "id": "codex",
+                        "display_name": "Codex",
+                        "provider": "codex",
+                        "adapter": "codex",
+                    },
+                    "claude": {
+                        "id": "claude",
+                        "display_name": "Claude",
+                        "provider": "claude",
+                        "adapter": "claude",
+                    },
+                },
+                "providers": {
+                    "codex": {"delivery_mode": "codex"},
+                    "claude": {"delivery_mode": "claude"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "claude",
+                        "agent": "Claude",
+                        "reason": "operational_review",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            self.assertIsNone(state["chair_review"]["active_review"])
+            events = [json.loads(line) for line in event_queue_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["task_id"], "OPX-CM-003")
+            self.assertEqual(events[0]["reason"], "owned_finalize_dispatch")
+
+    def test_proactive_claim_respects_chair_reassignment_guard(self) -> None:
+        config = {
+            "agents": {
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            }
+        }
+        task = {
+            "id": "OPX-IN-001",
+            "status": "todo",
+            "owner": "Codex",
+            "reviewer": "Claude",
+            "depends_on": [],
+        }
+        state = {
+            "chair_reassignment_guards": {
+                "OPX-IN-001:owner": {
+                    "task_id": "OPX-IN-001",
+                    "role": "owner",
+                    "from": "Codex2",
+                    "to": "Codex",
+                    "expires_at": "2999-01-01T00:00:00Z",
+                }
+            }
+        }
+
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            config,
+            task=task,
+            task_map={"OPX-IN-001": task},
+            idle_agent_name="Codex2",
+            idle_agent_names=["Codex2"],
+            agent_loads={"Codex": [0], "Codex2": []},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["todo", "in_progress", "review", "review_approved"],
+                "availability_first": True,
+                "allow_any_idle_lane": True,
+                "prefer_assigned_when_idle": True,
+                "require_assigned_agent_busy": True,
+                "require_owner_higher_priority_load": False,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+            state=state,
+        )
+
+        self.assertIsNone(plan)
+
+    def test_dispatch_paused_when_provider_auth_is_not_ready(self) -> None:
+        config = {"agents": {"gemini2": {"display_name": "Gemini2", "provider": "gemini2"}}}
+        provider_report = {"providers": {"gemini2": {"auth_ready": False}}}
+
+        self.assertTrue(supervisor.is_agent_dispatch_paused(config, {}, "gemini2", provider_report=provider_report))
+
+    def test_numbered_lane_does_not_inherit_primary_provider_pause(self) -> None:
+        config = {
+            "agents": {
+                "claude": {"display_name": "Claude", "provider": "claude"},
+                "claude2": {"display_name": "Claude2", "provider": "claude2"},
+            }
+        }
+        state = {
+            "provider_pauses": {
+                "claude": {
+                    "kind": "auth",
+                    "reason": "Invalid authentication credentials",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                    "resume_at": None,
+                }
+            },
+            "quota_paused_agents": {},
+        }
+        provider_report = {
+            "providers": {
+                "claude": {"auth_ready": False},
+                "claude2": {"auth_ready": True},
+            }
+        }
+
+        self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "claude", provider_report=provider_report))
+        self.assertFalse(supervisor.is_agent_dispatch_paused(config, state, "claude2", provider_report=provider_report))
+
+    def test_numbered_lane_does_not_fallback_to_primary_provider_report(self) -> None:
+        config = {"agents": {"claude2": {"display_name": "Claude2", "provider": "claude2"}}}
+        provider_report = {"providers": {"claude": {"auth_ready": False}}}
+
+        self.assertFalse(supervisor.is_agent_dispatch_paused(config, {}, "claude2", provider_report=provider_report))
+
+    def test_auth_pause_does_not_expire_from_surface_auth_ready_probe(self) -> None:
+        config = {"agents": {"claude": {"display_name": "Claude", "provider": "claude"}}}
+        state = {
+            "provider_pauses": {
+                "claude": {
+                    "kind": "auth",
+                    "reason": "Invalid authentication credentials",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                    "resume_at": None,
+                }
+            },
+            "quota_paused_agents": {},
+        }
+        provider_report = {"providers": {"claude": {"auth_ready": True}}}
+
+        expired = supervisor.expire_provider_pauses(config, state, provider_report)
+
+        self.assertEqual(expired, [])
+        self.assertIn("claude", state["provider_pauses"])
+        self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "claude", provider_report=provider_report))
 
 
 if __name__ == "__main__":

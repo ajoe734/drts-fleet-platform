@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "decision": "operational_review",
+  "sidecar_approved": false,
+  "approval_ttl_minutes": 45,
+  "max_sidecars": 2,
+  "reason": "Brief operational decision summary.",
+  "blocked_by": [
+    "List unresolved blockers when chairman should not force progress."
+  ],
+  "blocked_sidecar_parents": [],
+  "approval_actions": [
+    {
+      "approval_id": "apr-safe-read-001",
+      "decision": "allow",
+      "reason": "Read-only validation is routine-safe.",
+      "remember": false
+    }
+  ],
+  "reassignment_actions": [
+    {
+      "task_id": "OPX-MD-003",
+      "role": "owner",
+      "from": "Codex2",
+      "to": "Codex",
+      "reason": "Repeated provider failures on the current owner lane."
+    }
+  ],
+  "task_actions": [
+    {
+      "task_id": "OPX-CM-003",
+      "action": "dispatch_now",
+      "reason": "Task is already review-approved and should be finalized by the owner now."
+    }
+  ],
+  "provider_actions": [
+    {
+      "agent": "AgentName",
+      "action": "pause",
+      "kind": "auth",
+      "reason": "Exact lane is failing provider health checks and should not receive new dispatches.",
+      "reset_seconds": null
+    }
+  ],
+  "recommended_focus": [
+    "Use this list for follow-up investigation or the next chair scan."
+  ]
+}

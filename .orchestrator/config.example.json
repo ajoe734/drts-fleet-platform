@@ -58,18 +58,20 @@
     "reassign_on_terminal_failure": true,
     "eligible_statuses": ["todo", "in_progress", "review"],
     "owner_fallbacks": {
-      "Claude": ["Codex", "Qwen", "Copilot", "Gemini"],
-      "Gemini": ["Codex", "Qwen", "Claude", "Copilot"],
-      "Codex": ["Qwen", "Claude", "Copilot", "Gemini"],
-      "Copilot": ["Codex", "Qwen", "Claude", "Gemini"],
-      "Qwen": ["Codex", "Claude", "Copilot", "Gemini"]
+      "Claude": ["Claude2", "Codex", "Copilot", "Gemini", "Gemini2"],
+      "Claude2": ["Codex", "Claude", "Copilot", "Gemini", "Gemini2"],
+      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2", "Copilot"],
+      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2", "Copilot"],
+      "Codex": ["Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
+      "Copilot": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"]
     },
     "reviewer_fallbacks": {
-      "Claude": ["Codex", "Qwen", "Copilot", "Gemini"],
-      "Gemini": ["Codex", "Qwen", "Claude", "Copilot"],
-      "Codex": ["Qwen", "Claude", "Copilot", "Gemini"],
-      "Copilot": ["Codex", "Qwen", "Claude", "Gemini"],
-      "Qwen": ["Codex", "Claude", "Copilot", "Gemini"]
+      "Claude": ["Claude2", "Codex", "Copilot", "Gemini", "Gemini2"],
+      "Claude2": ["Codex", "Claude", "Copilot", "Gemini", "Gemini2"],
+      "Gemini": ["Gemini2", "Codex", "Claude", "Claude2", "Copilot"],
+      "Gemini2": ["Gemini", "Codex", "Claude", "Claude2", "Copilot"],
+      "Codex": ["Claude2", "Claude", "Copilot", "Gemini", "Gemini2"],
+      "Copilot": ["Codex", "Claude2", "Claude", "Gemini", "Gemini2"]
     }
   },
   "underutilization_dispatch": {
@@ -85,6 +87,13 @@
       "suspended_approval",
       "retry_backoff"
     ]
+  },
+  "chair_review": {
+    "enabled": true,
+    "cooldown_seconds": 900,
+    "failure_streak_threshold": 2,
+    "default_approval_ttl_minutes": 45,
+    "default_max_sidecars": 2
   },
   "approvals": {
     "stale_pending_seconds": 1800
@@ -113,9 +122,10 @@
     ],
     "reviewers": {
       "Claude": ["your-github-handle"],
+      "Claude2": ["your-github-handle"],
       "Gemini": ["your-github-handle"],
+      "Gemini2": ["your-github-handle"],
       "Codex": ["your-github-handle"],
-      "Qwen": ["your-github-handle"],
       "Copilot": ["your-github-handle"]
     },
     "templates": {
@@ -182,6 +192,20 @@
       "wake_template": ".orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/gemini.md"
     },
+    "claude2": {
+      "display_name": "Claude2",
+      "provider": "claude2",
+      "adapter": "claude_cli",
+      "wake_template": ".orchestrator/templates/wakeup.txt",
+      "file_inbox_path": ".llm-inbox/claude2.md"
+    },
+    "gemini2": {
+      "display_name": "Gemini2",
+      "provider": "gemini2",
+      "adapter": "gemini",
+      "wake_template": ".orchestrator/templates/wakeup.txt",
+      "file_inbox_path": ".llm-inbox/gemini2.md"
+    },
     "codex": {
       "display_name": "Codex",
       "provider": "codex",
@@ -195,13 +219,6 @@
       "adapter": "copilot_local",
       "wake_template": ".orchestrator/templates/wakeup.txt",
       "file_inbox_path": ".llm-inbox/copilot.md"
-    },
-    "qwen": {
-      "display_name": "Qwen",
-      "provider": "qwen",
-      "adapter": "qwen",
-      "wake_template": ".orchestrator/templates/wakeup.txt",
-      "file_inbox_path": ".llm-inbox/qwen.md"
     },
     "grok": {
       "display_name": "Copilot (legacy alias)",
@@ -244,6 +261,39 @@
         "disable_bypass_permissions": true
       }
     },
+    "claude2": {
+      "delivery_mode": "claude_cli",
+      "file_inbox": {
+        "path": ".llm-inbox/claude2.md",
+        "open_in_vscode": false
+      },
+      "runtime": {
+        "cli": "claude",
+        "config_home": "~/.claude2-home",
+        "output_format": "stream-json",
+        "include_hook_events": true,
+        "permission_mode": "acceptEdits",
+        "resume_permission_mode_after_approval": "acceptEdits",
+        "resume_use_allowed_tools_from_approval": true,
+        "enable_auto_mode_if_supported": true,
+        "auto_permission_mode": "auto",
+        "mcp_config": ".orchestrator/claude-approval-broker.mcp.json",
+        "permission_prompt_tool": "mcp__orchestrator_approval_broker__approval_prompt"
+      },
+      "broker": {
+        "approval_wait_seconds": 3600,
+        "http_host": "127.0.0.1",
+        "http_port": 8765,
+        "persist_allow_by_default": false
+      },
+      "approval": {
+        "workspace_permission_mode": "acceptEdits",
+        "allow_dangerous_skip": false,
+        "copilot_allow_dangerous_skip": false,
+        "rule_default_mode": "acceptEdits",
+        "disable_bypass_permissions": true
+      }
+    },
     "gemini": {
       "delivery_mode": "gemini",
       "file_inbox": {
@@ -253,6 +303,39 @@
       "gemini": {
         "cli": "gemini",
         "include_directories": true
+      },
+      "approval": {
+        "default_approval_mode": "auto_edit",
+        "workspace_agent_yolo_mode": false,
+        "enable_permanent_tool_approval": true,
+        "auto_add_to_policy_by_default": true,
+        "disable_yolo_mode": false,
+        "disable_always_allow": false
+      }
+    },
+    "gemini2": {
+      "delivery_mode": "gemini",
+      "file_inbox": {
+        "path": ".llm-inbox/gemini2.md",
+        "open_in_vscode": false
+      },
+      "gemini": {
+        "cli": "gemini",
+        "config_home": "~/.gemini2-home",
+        "env": {
+          "GEMINI_CLI_TRUST_WORKSPACE": "true",
+          "GOOGLE_GENAI_USE_GCA": "true",
+          "GOOGLE_CLOUD_PROJECT": "YOUR_WORKSPACE_GCA_PROJECT_ID",
+          "GOOGLE_CLOUD_PROJECT_ID": "YOUR_WORKSPACE_GCA_PROJECT_ID",
+          "GOOGLE_CLOUD_LOCATION": "us-central1"
+        },
+        "model": "gemini-2.5-flash-lite",
+        "include_directories": true
+      },
+      "model_preference": {
+        "default": "gemini-2.5-flash-lite",
+        "gemini2": "gemini-2.5-flash-lite",
+        "supported": ["gemini-2.5-flash-lite", "gemini-2.5-flash"]
       },
       "approval": {
         "default_approval_mode": "auto_edit",
@@ -316,27 +399,6 @@
         "default": "claude",
         "grok": null,
         "supported": ["claude"]
-      }
-    },
-    "qwen": {
-      "delivery_mode": "qwen",
-      "file_inbox": {
-        "path": ".llm-inbox/qwen.md",
-        "open_in_vscode": false
-      },
-      "qwen": {
-        "cli": "qwen",
-        "approval_mode": "yolo",
-        "include_directories": true,
-        "output_format": "stream-json",
-        "include_partial_messages": false,
-        "channel": "CI",
-        "auth_type": null,
-        "model": null,
-        "model_env": "OPENAI_MODEL",
-        "openai_api_key_env": "OPENAI_API_KEY",
-        "openai_base_url_env": "OPENAI_BASE_URL",
-        "extra_args": []
       }
     }
   },

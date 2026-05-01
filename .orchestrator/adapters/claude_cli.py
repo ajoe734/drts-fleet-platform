@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 import json
+from pathlib import Path
 
 from adapters.base import DeliveryCapability, DeliveryRequest, DeliveryResult
 from adapters.claude_code import ClaudeCodeAdapter
 from common import (
+    agent_config_for,
     config_path,
     new_runtime_id,
     runtime_log_path,
@@ -13,13 +15,31 @@ from common import (
     spawn_background_process,
     command_exists,
     run_command,
+    runtime_env_overrides,
 )
 
 
-def _claude_auth_ready(cli: str | None) -> bool:
+def _claude_provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict]:
+    agent = agent_config_for(config, agent_id)
+    provider_key = str(agent.get("provider") or "claude").strip() or "claude"
+    return provider_key, config.get("providers", {}).get(provider_key, {})
+
+
+def _claude_runtime_env(runtime: dict, *, ensure_dirs: bool = False) -> dict[str, str]:
+    overrides = runtime_env_overrides(runtime)
+    if ensure_dirs:
+        for key in ("HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME"):
+            if overrides.get(key):
+                Path(overrides[key]).mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env.update(overrides)
+    return env
+
+
+def _claude_auth_ready(cli: str | None, env: dict[str, str] | None = None) -> bool:
     if not cli:
         return False
-    status = run_command([cli, "auth", "status"])
+    status = run_command([cli, "auth", "status"], env=env)
     if status.returncode != 0 or not status.stdout:
         return False
     try:
@@ -33,8 +53,14 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
     name = "claude_cli"
 
     def capability(self, agent_id: str) -> DeliveryCapability:
-        cli = command_exists("claude")
-        if cli and _claude_auth_ready(cli):
+        provider_key, provider = _claude_provider_for_agent(self.config, agent_id)
+        runtime = provider.get("runtime", {})
+        cli = command_exists(runtime.get("cli") or "claude")
+        auth_env = _claude_runtime_env(runtime)
+        if cli and _claude_auth_ready(cli, env=auth_env):
+            notes = "Uses non-interactive Claude CLI sessions with the local approval broker hooks."
+            if runtime.get("config_home"):
+                notes = f"{notes} Auth is isolated by provider runtime.config_home."
             return DeliveryCapability(
                 adapter=self.name,
                 supported=True,
@@ -44,7 +70,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
                 delivery_mode="claude_cli",
                 verified="verified",
                 host="Claude Code CLI",
-                notes="Uses non-interactive Claude CLI sessions with the local approval broker hooks.",
+                notes=notes,
             )
         fallback = super().capability(agent_id)
         missing_reason = "Claude CLI is not installed" if not cli else "Claude CLI is installed but not authenticated"
@@ -57,12 +83,15 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
             delivery_mode="file_inbox",
             verified="partial",
             host="Claude Code CLI + inbox fallback",
-            notes=f"{missing_reason}, so delivery falls back to the workspace inbox path.",
+            notes=f"{missing_reason} for provider `{provider_key}`, so delivery falls back to the workspace inbox path.",
         )
 
     def deliver(self, request: DeliveryRequest) -> DeliveryResult:
-        cli = command_exists("claude")
-        auth_ready = _claude_auth_ready(cli)
+        provider_key, provider = _claude_provider_for_agent(self.config, request.agent_id)
+        runtime = provider.get("runtime", {})
+        cli = command_exists(runtime.get("cli") or "claude")
+        env = _claude_runtime_env(runtime, ensure_dirs=True)
+        auth_ready = _claude_auth_ready(cli, env=env)
         if not cli or not auth_ready:
             result = super().deliver(request)
             result.adapter = self.name
@@ -70,11 +99,9 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
             if not cli:
                 result.notes = f"{result.notes}. Claude CLI is unavailable, so inbox fallback was used."
             else:
-                result.notes = f"{result.notes}. Claude CLI is not authenticated, so inbox fallback was used."
+                result.notes = f"{result.notes}. Claude CLI provider `{provider_key}` is not authenticated, so inbox fallback was used."
             return result
 
-        provider = self.config.get("providers", {}).get("claude", {})
-        runtime = provider.get("runtime", {})
         output_format = runtime.get("output_format", "stream-json")
         command = [
             runtime.get("cli") or cli,
@@ -88,7 +115,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         if runtime.get("include_hook_events", True):
             command.append("--include-hook-events")
 
-        provider_info = (self.provider_capabilities or {}).get("providers", {}).get("claude", {})
+        provider_info = (self.provider_capabilities or {}).get("providers", {}).get(provider_key, {})
         if runtime.get("enable_auto_mode_if_supported", True) and provider_info.get("supports_auto_approve"):
             command.extend(["--permission-mode", runtime.get("auto_permission_mode", "auto")])
         else:
@@ -98,9 +125,8 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         if mcp_config:
             command.extend(["--mcp-config", str(config_path(self.config, "claude_mcp_config"))])
 
-        run_id = new_runtime_id("claude")
-        log_path = runtime_log_path("claude", request.agent_id)
-        env = os.environ.copy()
+        run_id = new_runtime_id(provider_key)
+        log_path = runtime_log_path(provider_key, request.agent_id)
         env.update(
             {
                 "ORCH_RUN_ID": run_id,
@@ -124,7 +150,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
             target=request.agent_id,
             auto_delivered=True,
             manual_confirmation_required=False,
-            notes="Claude CLI wake-up started in the background.",
+            notes=f"Claude CLI wake-up started in the background for provider `{provider_key}`.",
             command=command,
             log_path=str(log_path),
             pid=process.pid,

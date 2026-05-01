@@ -27,6 +27,17 @@ class RuntimeStateMigrationTests(unittest.TestCase):
 
         self.assertIn("quota_paused_agents", migrated)
         self.assertEqual(migrated["quota_paused_agents"]["qwen"]["reason"], "Qwen OAuth quota exceeded")
+        self.assertEqual(migrated["provider_pauses"]["qwen"]["kind"], "quota")
+
+    def test_migrate_state_initializes_chair_review_and_failure_streaks(self) -> None:
+        migrated = runtime_state.migrate_state({"version": 2})
+
+        self.assertIn("chair_review", migrated)
+        self.assertEqual(migrated["chair_review"]["active_review"], None)
+        self.assertEqual(migrated["chair_review"]["rotation_index"], 0)
+        self.assertEqual(migrated["failure_streaks"], {})
+        self.assertEqual(migrated["chair_reassignment_guards"], {})
+        self.assertEqual(migrated["supervisor"]["lifecycle"], "running")
 
     def test_upsert_and_clear_dispatch_pause(self) -> None:
         state = runtime_state.default_state()
