@@ -15,6 +15,7 @@ import type { Observable } from "rxjs";
 
 import type {
   ApplyManualFareOverrideCommand,
+  ApproveExceptionOverrideCommand,
   AssignDispatchCommand,
   CancelOwnedOrderCommand,
   CreateCallCenterOrderCommand,
@@ -31,6 +32,8 @@ import type {
   QueueCheckOutCommand,
   ReassignDispatchCommand,
   RedispatchOrderCommand,
+  RejectExceptionOverrideCommand,
+  RequestExceptionOverrideCommand,
   ResolveExceptionHoldCommand,
   UpdateTenantBookingCommand,
 } from "@drts/contracts";
@@ -327,6 +330,60 @@ export class OwnedMobilityController {
   ) {
     return toApiSuccessEnvelope(
       this.ownedMobilityService.resolveExceptionHold(
+        orderId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("orders/:orderId/request-override")
+  requestExceptionOverride(
+    @Param("orderId") orderId: string,
+    @Body() command: RequestExceptionOverrideCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.requestExceptionOverride(
+        orderId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("orders/:orderId/approve-override")
+  approveExceptionOverride(
+    @Param("orderId") orderId: string,
+    @Body() command: ApproveExceptionOverrideCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.approveExceptionOverride(
+        orderId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("orders/:orderId/reject-override")
+  rejectExceptionOverride(
+    @Param("orderId") orderId: string,
+    @Body() command: RejectExceptionOverrideCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.ownedMobilityService.rejectExceptionOverride(
         orderId,
         command,
         identity,

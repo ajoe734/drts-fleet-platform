@@ -698,7 +698,8 @@ export class ComplaintService implements OnModuleInit {
     return results;
   }
 
-  getValidResolutionCodes(category: ComplaintCategory) {
+  getValidResolutionCodes(category: string) {
+    this.assertValidCategory(category);
     return [...(COMPLAINT_CATEGORY_VALID_RESOLUTIONS[category] ?? [])];
   }
 

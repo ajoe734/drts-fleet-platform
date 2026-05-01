@@ -278,6 +278,7 @@ h1 {
 }
 
 .status-blocked,
+.status-paused,
 .status-failed,
 .status-stalled {
   color: var(--red);
@@ -302,6 +303,7 @@ h1 {
 }
 
 .status-waiting,
+.status-backlog,
 .status-manual_pending,
 .status-retry_backoff,
 .status-pending {
@@ -311,6 +313,7 @@ h1 {
 
 .status-done,
 .status-completed,
+.status-unassigned,
 .status-idle {
   color: var(--muted);
   background: var(--slate-soft);
@@ -444,13 +447,18 @@ h1 {
 }
 
 .board-column {
-  min-width: 260px;
+  min-width: 220px;
   border-radius: var(--radius-lg);
   background: rgba(22, 34, 32, 0.04);
   border: 1px solid var(--line);
   padding: 14px;
   display: grid;
   gap: 12px;
+  align-content: start;
+}
+
+.board-column-empty {
+  min-width: 180px;
 }
 
 .board-column.collapsed .column-stack { display: none; }
@@ -483,6 +491,63 @@ h1 {
   margin-bottom: 8px;
 }
 
+.task-summary-compact {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.task-meta,
+.task-foot,
+.lane-meta,
+.sys-card-body,
+.approval-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.task-card {
+  display: grid;
+  gap: 10px;
+}
+
+.task-card-muted {
+  background: rgba(22, 34, 32, 0.035);
+  box-shadow: none;
+}
+
+.task-details {
+  border-top: 1px dashed var(--line);
+  padding-top: 10px;
+}
+
+.task-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.84rem;
+}
+
+.task-details-body {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.review-block {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(22, 34, 32, 0.04);
+  border: 1px solid var(--line);
+}
+
+.review-title {
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
 .inline-details {
   margin-top: 10px;
   border-top: 1px dashed var(--line);
@@ -508,6 +573,27 @@ h1 {
 .snapshot-card {
   padding: 12px 14px;
   border-radius: var(--radius-md);
+  display: grid;
+  gap: 6px;
+}
+
+.snapshot-kicker {
+  font-size: 0.74rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+.snapshot-value {
+  font-size: 0.98rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.snapshot-note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
 }
 
 .dependency-wave {

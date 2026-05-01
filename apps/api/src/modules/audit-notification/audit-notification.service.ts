@@ -254,7 +254,7 @@ export class AuditNotificationService implements OnModuleInit {
       resourceType: "evidence_legal_hold",
       resourceId: holdRecord.holdId,
       newValuesSummary: { ...holdRecord },
-      requestId,
+      ...(requestId !== undefined ? { requestId } : {}),
     });
 
     return cloneEvidenceLegalHold(holdRecord);
@@ -309,7 +309,7 @@ export class AuditNotificationService implements OnModuleInit {
       resourceId: updated.holdId,
       oldValuesSummary: { ...existing },
       newValuesSummary: { ...updated },
-      requestId,
+      ...(requestId !== undefined ? { requestId } : {}),
     });
 
     return cloneEvidenceLegalHold(updated);
@@ -409,7 +409,7 @@ export class AuditNotificationService implements OnModuleInit {
       resourceType: "evidence_deletion_exception",
       resourceId: exceptionRecord.exceptionId,
       newValuesSummary: { ...exceptionRecord },
-      requestId,
+      ...(requestId !== undefined ? { requestId } : {}),
     });
 
     return cloneEvidenceDeletionException(exceptionRecord);

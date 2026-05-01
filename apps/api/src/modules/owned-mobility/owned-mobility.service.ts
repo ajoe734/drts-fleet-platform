@@ -33,9 +33,13 @@ import type {
   DriverStartTaskCommand,
   DriverTaskRecord,
   EtaSnapshot,
+  ApproveExceptionOverrideCommand,
   ExceptionHoldRecord,
   ExceptionHoldReasonCode,
   MoneyAmount,
+  OverrideRequestRecord,
+  RejectExceptionOverrideCommand,
+  RequestExceptionOverrideCommand,
   NoSupplyEscalationAction,
   OwnedOrderRecord,
   PassengerProfile,
@@ -1662,6 +1666,354 @@ export class OwnedMobilityService implements OnModuleInit {
           traceId,
           downstreamReviewerLabels: downstreamReview.labels,
           downstreamStages: downstreamReview.stages,
+        },
+      },
+      requestId,
+    );
+    this.publishOrderUpdate(order, requestId);
+
+    return this.cloneOrder(order);
+  }
+
+  requestExceptionOverride(
+    orderId: string,
+    command: RequestExceptionOverrideCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ) {
+    const order = this.requireOrder(orderId);
+    const actor = this.requireExceptionHoldActor(identity, command.operatorId);
+    const reason = this.requireNonBlankText(command.reason, "reason");
+
+    if (order.status !== "exception_hold") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ORDER_NOT_IN_EXCEPTION_HOLD",
+        "Order is not in exception hold state.",
+        { orderId, status: order.status },
+      );
+    }
+
+    if (!order.exceptionHold) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "EXCEPTION_HOLD_RECORD_MISSING",
+        "Exception hold record is missing.",
+        { orderId },
+      );
+    }
+
+    const existingRequest = order.exceptionHold.overrideRequest;
+    if (existingRequest && existingRequest.status === "pending_approval") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "OVERRIDE_REQUEST_ALREADY_PENDING",
+        "An override request is already pending approval for this order.",
+        { orderId, overrideRequestId: existingRequest.overrideRequestId },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const expiresInMinutes = command.expiresInMinutes ?? 30;
+    const expiresAt = new Date(
+      Date.now() + expiresInMinutes * 60_000,
+    ).toISOString();
+
+    const overrideRequest: OverrideRequestRecord = {
+      overrideRequestId: `ovr-${randomUUID()}`,
+      orderId,
+      overrideType: command.overrideType,
+      status: "pending_approval",
+      requestedBy: {
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+      },
+      reason,
+      requestedAt: now,
+      expiresAt,
+      approval: null,
+      rejection: null,
+      expiredAt: null,
+    };
+
+    order.exceptionHold.overrideRequest = overrideRequest;
+    order.updatedAt = now;
+
+    const traceLog = this.appendTrace(
+      orderId,
+      "exception_hold.override_requested",
+      {
+        overrideRequestId: overrideRequest.overrideRequestId,
+        overrideType: command.overrideType,
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        reason,
+        expiresAt,
+      },
+    );
+    this.persistChanges(
+      { orders: [order], dispatchTraceLogs: [traceLog] },
+      "request_exception_override",
+    );
+    this.recordAudit(
+      {
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        tenantId: order.tenantId,
+        moduleName: "dispatch",
+        actionName: "request_exception_override",
+        resourceType: "order",
+        resourceId: orderId,
+        newValuesSummary: {
+          overrideRequestId: overrideRequest.overrideRequestId,
+          overrideType: command.overrideType,
+          reason,
+          expiresAt,
+        },
+      },
+      requestId,
+    );
+    this.publishOrderUpdate(order, requestId);
+
+    return this.cloneOrder(order);
+  }
+
+  approveExceptionOverride(
+    orderId: string,
+    command: ApproveExceptionOverrideCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ) {
+    const order = this.requireOrder(orderId);
+    const actor = this.requireExceptionHoldActor(identity, command.operatorId);
+    const approvalNote = this.requireNonBlankText(
+      command.approvalNote,
+      "approvalNote",
+    );
+
+    if (order.status !== "exception_hold") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ORDER_NOT_IN_EXCEPTION_HOLD",
+        "Order is not in exception hold state.",
+        { orderId, status: order.status },
+      );
+    }
+
+    if (!order.exceptionHold?.overrideRequest) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "NO_OVERRIDE_REQUEST_PENDING",
+        "No override request is pending for this order.",
+        { orderId },
+      );
+    }
+
+    const overrideRequest = order.exceptionHold.overrideRequest;
+    if (overrideRequest.status !== "pending_approval") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "OVERRIDE_REQUEST_NOT_PENDING",
+        "Override request is not in pending_approval state.",
+        { orderId, status: overrideRequest.status },
+      );
+    }
+
+    const now = new Date().toISOString();
+
+    if (now > overrideRequest.expiresAt) {
+      overrideRequest.status = "expired";
+      overrideRequest.expiredAt = now;
+      order.updatedAt = now;
+      const expireTrace = this.appendTrace(
+        orderId,
+        "exception_hold.override_expired",
+        {
+          overrideRequestId: overrideRequest.overrideRequestId,
+        },
+      );
+      this.persistChanges(
+        { orders: [order], dispatchTraceLogs: [expireTrace] },
+        "expire_exception_override",
+      );
+      this.recordAudit(
+        {
+          actorId: actor.actorId,
+          actorType: actor.actorType,
+          tenantId: order.tenantId,
+          moduleName: "dispatch",
+          actionName: "expire_exception_override",
+          resourceType: "order",
+          resourceId: orderId,
+          newValuesSummary: {
+            overrideRequestId: overrideRequest.overrideRequestId,
+            overrideType: overrideRequest.overrideType,
+            expiresAt: overrideRequest.expiresAt,
+            requestedBy: overrideRequest.requestedBy.actorId,
+          },
+        },
+        requestId,
+      );
+      this.publishOrderUpdate(order, requestId);
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "OVERRIDE_REQUEST_EXPIRED",
+        "Override request has expired and can no longer be approved.",
+        {
+          orderId,
+          overrideRequestId: overrideRequest.overrideRequestId,
+          expiresAt: overrideRequest.expiresAt,
+        },
+      );
+    }
+
+    if (overrideRequest.requestedBy.actorId === actor.actorId) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "OVERRIDE_SELF_APPROVAL_FORBIDDEN",
+        "The same actor who requested the override cannot approve it.",
+        { orderId, actorId: actor.actorId },
+      );
+    }
+
+    overrideRequest.status = "approved";
+    overrideRequest.approval = {
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      approvalNote,
+      approvedAt: now,
+    };
+    order.updatedAt = now;
+
+    const traceLog = this.appendTrace(
+      orderId,
+      "exception_hold.override_approved",
+      {
+        overrideRequestId: overrideRequest.overrideRequestId,
+        overrideType: overrideRequest.overrideType,
+        approverActorId: actor.actorId,
+        approverActorType: actor.actorType,
+        approvalNote,
+      },
+    );
+
+    const resolveCommand: ResolveExceptionHoldCommand = {
+      resolution: overrideRequest.overrideType,
+      reason: `Override approved: ${overrideRequest.reason} — ${approvalNote}`,
+      traceId: overrideRequest.overrideRequestId,
+    };
+
+    this.persistChanges(
+      { orders: [order], dispatchTraceLogs: [traceLog] },
+      "approve_exception_override",
+    );
+    this.recordAudit(
+      {
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        tenantId: order.tenantId,
+        moduleName: "dispatch",
+        actionName: "approve_exception_override",
+        resourceType: "order",
+        resourceId: orderId,
+        newValuesSummary: {
+          overrideRequestId: overrideRequest.overrideRequestId,
+          overrideType: overrideRequest.overrideType,
+          approvalNote,
+          requestedBy: overrideRequest.requestedBy.actorId,
+        },
+      },
+      requestId,
+    );
+
+    return this.resolveExceptionHold(
+      orderId,
+      resolveCommand,
+      identity,
+      requestId,
+    );
+  }
+
+  rejectExceptionOverride(
+    orderId: string,
+    command: RejectExceptionOverrideCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ) {
+    const order = this.requireOrder(orderId);
+    const actor = this.requireExceptionHoldActor(identity, command.operatorId);
+    const rejectionReason = this.requireNonBlankText(
+      command.rejectionReason,
+      "rejectionReason",
+    );
+
+    if (order.status !== "exception_hold") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ORDER_NOT_IN_EXCEPTION_HOLD",
+        "Order is not in exception hold state.",
+        { orderId, status: order.status },
+      );
+    }
+
+    if (!order.exceptionHold?.overrideRequest) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "NO_OVERRIDE_REQUEST_PENDING",
+        "No override request is pending for this order.",
+        { orderId },
+      );
+    }
+
+    const overrideRequest = order.exceptionHold.overrideRequest;
+    if (overrideRequest.status !== "pending_approval") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "OVERRIDE_REQUEST_NOT_PENDING",
+        "Override request is not in pending_approval state.",
+        { orderId, status: overrideRequest.status },
+      );
+    }
+
+    const now = new Date().toISOString();
+    overrideRequest.status = "rejected";
+    overrideRequest.rejection = {
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      rejectionReason,
+      rejectedAt: now,
+    };
+    order.updatedAt = now;
+
+    const traceLog = this.appendTrace(
+      orderId,
+      "exception_hold.override_rejected",
+      {
+        overrideRequestId: overrideRequest.overrideRequestId,
+        overrideType: overrideRequest.overrideType,
+        rejectorActorId: actor.actorId,
+        rejectorActorType: actor.actorType,
+        rejectionReason,
+      },
+    );
+    this.persistChanges(
+      { orders: [order], dispatchTraceLogs: [traceLog] },
+      "reject_exception_override",
+    );
+    this.recordAudit(
+      {
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        tenantId: order.tenantId,
+        moduleName: "dispatch",
+        actionName: "reject_exception_override",
+        resourceType: "order",
+        resourceId: orderId,
+        newValuesSummary: {
+          overrideRequestId: overrideRequest.overrideRequestId,
+          overrideType: overrideRequest.overrideType,
+          rejectionReason,
+          requestedBy: overrideRequest.requestedBy.actorId,
         },
       },
       requestId,
@@ -4753,6 +5105,18 @@ export class OwnedMobilityService implements OnModuleInit {
       overrideAllowed: true,
       overrideActors: ["ops_user", "platform_admin"],
       resolution: null,
+      overrideRequest: null,
+    };
+  }
+
+  private cloneOverrideRequestRecord(
+    record: OverrideRequestRecord,
+  ): OverrideRequestRecord {
+    return {
+      ...record,
+      requestedBy: { ...record.requestedBy },
+      approval: record.approval ? { ...record.approval } : null,
+      rejection: record.rejection ? { ...record.rejection } : null,
     };
   }
 
@@ -4771,6 +5135,9 @@ export class OwnedMobilityService implements OnModuleInit {
             ],
             downstreamStages: [...record.resolution.downstreamStages],
           }
+        : null,
+      overrideRequest: record.overrideRequest
+        ? this.cloneOverrideRequestRecord(record.overrideRequest)
         : null,
     };
   }

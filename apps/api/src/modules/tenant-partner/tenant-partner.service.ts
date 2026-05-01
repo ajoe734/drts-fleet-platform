@@ -3990,9 +3990,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private toPartnerIngressCredentialResponse(
     credential: StoredPartnerIngressCredentialRecord,
   ): PartnerIngressCredentialRecord {
-    const response = { ...credential };
-    delete response.keyHash;
-    return response;
+    return {
+      keyId: credential.keyId,
+      entrySlug: credential.entrySlug,
+      keyPrefix: credential.keyPrefix,
+      maskedSuffix: credential.maskedSuffix,
+      source: credential.source,
+      createdAt: credential.createdAt,
+      lastUsedAt: credential.lastUsedAt,
+      revokedAt: credential.revokedAt,
+      issuedBy: credential.issuedBy,
+      revokedBy: credential.revokedBy,
+      rotationReason: credential.rotationReason,
+      revokeReason: credential.revokeReason,
+    };
   }
 
   private clonePartnerEligibilityVerification(

@@ -433,6 +433,12 @@ export class RegulatoryRegistryService implements OnModuleInit {
     );
   }
 
+  listLatestDriverLocations() {
+    return Array.from(this.latestDriverLocations.values()).map((location) =>
+      this.cloneDriverLocation(location),
+    );
+  }
+
   createDriver(command: CreateDriverMasterCommand, requestId?: string) {
     const driverId = command.driverId?.trim() || `drv_${randomUUID()}`;
     this.assertNonBlank(driverId, "driverId");
@@ -1285,6 +1291,8 @@ export class RegulatoryRegistryService implements OnModuleInit {
           operatingArea: vehicle.operatingArea,
           serviceBuckets: [...vehicle.supportedServiceBuckets],
           etaMinutes,
+          currentLocation:
+            this.latestDriverLocations.get(decoratedDriver.driverId) ?? null,
         };
       })
       .filter((candidate): candidate is NonNullable<typeof candidate> =>

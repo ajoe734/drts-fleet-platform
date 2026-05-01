@@ -202,13 +202,22 @@ export default function PaymentsPage() {
   const [issueComments, setIssueComments] = useState<Record<string, string>>(
     {},
   );
+  const [issueCommentArtifactIds, setIssueCommentArtifactIds] = useState<
+    Record<string, string>
+  >({});
   const [issueResolutionSummaries, setIssueResolutionSummaries] = useState<
+    Record<string, string>
+  >({});
+  const [issueResolutionArtifactIds, setIssueResolutionArtifactIds] = useState<
     Record<string, string>
   >({});
   const [issueResolutionCodes, setIssueResolutionCodes] = useState<
     Record<string, ReconciliationIssueRecord["resolutionCode"] | "">
   >({});
   const [issueReopenReasons, setIssueReopenReasons] = useState<
+    Record<string, string>
+  >({});
+  const [issueReopenArtifactIds, setIssueReopenArtifactIds] = useState<
     Record<string, string>
   >({});
   const [newIssue, setNewIssue] = useState({
@@ -408,6 +417,9 @@ export default function PaymentsPage() {
       setError(t("payments.reconciliation.commentRequired"));
       return;
     }
+    const artifactIds = parseArtifactIds(
+      issueCommentArtifactIds[issue.issueId] ?? "",
+    );
 
     setIssueActionId(issue.issueId);
     setError(null);
@@ -415,8 +427,13 @@ export default function PaymentsPage() {
       await client.addReconciliationIssueComment(issue.issueId, {
         actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
         message,
+        artifactIds,
       });
       setIssueComments((current) => ({ ...current, [issue.issueId]: "" }));
+      setIssueCommentArtifactIds((current) => ({
+        ...current,
+        [issue.issueId]: "",
+      }));
       await loadFinance();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -432,6 +449,9 @@ export default function PaymentsPage() {
       setError(t("payments.reconciliation.resolveSummaryRequired"));
       return;
     }
+    const artifactIds = parseArtifactIds(
+      issueResolutionArtifactIds[issue.issueId] ?? "",
+    );
 
     setIssueActionId(issue.issueId);
     setError(null);
@@ -443,7 +463,20 @@ export default function PaymentsPage() {
             ReconciliationIssueRecord["resolutionCode"]
           >) || "resolved_other",
         resolutionSummary,
+        artifactIds,
       });
+      setIssueResolutionSummaries((current) => ({
+        ...current,
+        [issue.issueId]: "",
+      }));
+      setIssueResolutionCodes((current) => ({
+        ...current,
+        [issue.issueId]: "",
+      }));
+      setIssueResolutionArtifactIds((current) => ({
+        ...current,
+        [issue.issueId]: "",
+      }));
       await loadFinance();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -458,6 +491,9 @@ export default function PaymentsPage() {
       setError(t("payments.reconciliation.reopenReasonRequired"));
       return;
     }
+    const artifactIds = parseArtifactIds(
+      issueReopenArtifactIds[issue.issueId] ?? "",
+    );
 
     setIssueActionId(issue.issueId);
     setError(null);
@@ -465,7 +501,16 @@ export default function PaymentsPage() {
       await client.reopenReconciliationIssue(issue.issueId, {
         actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
         reason,
+        artifactIds,
       });
+      setIssueReopenReasons((current) => ({
+        ...current,
+        [issue.issueId]: "",
+      }));
+      setIssueReopenArtifactIds((current) => ({
+        ...current,
+        [issue.issueId]: "",
+      }));
       await loadFinance();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1057,6 +1102,20 @@ export default function PaymentsPage() {
                               placeholder={t("payments.reconciliation.comment")}
                               style={inputStyle}
                             />
+                            <input
+                              value={
+                                issueCommentArtifactIds[issue.issueId] ?? ""
+                              }
+                              onChange={(event) =>
+                                setIssueCommentArtifactIds((current) => ({
+                                  ...current,
+                                  [issue.issueId]: event.target.value,
+                                }))
+                              }
+                              placeholder={`${t("payments.reconciliation.artifactIds")} · ${t("payments.reconciliation.comment")}`}
+                              aria-label={`${t("payments.reconciliation.artifactIds")} (${t("payments.reconciliation.comment")})`}
+                              style={inputStyle}
+                            />
                             <button
                               className="admin-btn admin-btn--secondary"
                               onClick={() => void handleCommentIssue(issue)}
@@ -1099,6 +1158,20 @@ export default function PaymentsPage() {
                               )}
                               style={inputStyle}
                             />
+                            <input
+                              value={
+                                issueResolutionArtifactIds[issue.issueId] ?? ""
+                              }
+                              onChange={(event) =>
+                                setIssueResolutionArtifactIds((current) => ({
+                                  ...current,
+                                  [issue.issueId]: event.target.value,
+                                }))
+                              }
+                              placeholder={`${t("payments.reconciliation.artifactIds")} · ${t("payments.reconciliation.resolve")}`}
+                              aria-label={`${t("payments.reconciliation.artifactIds")} (${t("payments.reconciliation.resolve")})`}
+                              style={inputStyle}
+                            />
                             <button
                               className="admin-btn admin-btn--primary"
                               onClick={() => void handleResolveIssue(issue)}
@@ -1121,6 +1194,20 @@ export default function PaymentsPage() {
                               placeholder={t(
                                 "payments.reconciliation.reopenReason",
                               )}
+                              style={inputStyle}
+                            />
+                            <input
+                              value={
+                                issueReopenArtifactIds[issue.issueId] ?? ""
+                              }
+                              onChange={(event) =>
+                                setIssueReopenArtifactIds((current) => ({
+                                  ...current,
+                                  [issue.issueId]: event.target.value,
+                                }))
+                              }
+                              placeholder={`${t("payments.reconciliation.artifactIds")} · ${t("payments.reconciliation.reopen")}`}
+                              aria-label={`${t("payments.reconciliation.artifactIds")} (${t("payments.reconciliation.reopen")})`}
                               style={inputStyle}
                             />
                             <button

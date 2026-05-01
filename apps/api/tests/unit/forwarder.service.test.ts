@@ -49,10 +49,22 @@ function createOwnedMobilityServiceMock() {
   };
 }
 
+function createForwarderRepositoryMock() {
+  return {
+    loadState: vi.fn(async () => ({
+      forwardedOrders: [],
+      adapterHealth: [],
+    })),
+    persistChanges: vi.fn(async () => undefined),
+    reportPersistenceFailure: vi.fn(),
+  };
+}
+
 function createService(options?: {
   adapter?: ForwarderAdapterInterface;
   eligibleDriverIds?: string[];
   ownedMobilityService?: ReturnType<typeof createOwnedMobilityServiceMock>;
+  forwarderRepository?: ReturnType<typeof createForwarderRepositoryMock>;
 }) {
   const eligibleDriverIds = options?.eligibleDriverIds ?? [];
   const regulatoryRegistryService = {
@@ -65,12 +77,13 @@ function createService(options?: {
   };
   const adapter = options?.adapter ?? createAdapter();
   const ownedMobilityService = options?.ownedMobilityService;
+  const forwarderRepository = options?.forwarderRepository;
 
   const service = new ForwarderService(
     regulatoryRegistryService as never,
     auditNotificationService as never,
     [adapter],
-    undefined,
+    forwarderRepository as never,
     ownedMobilityService as never,
   );
 
@@ -78,6 +91,7 @@ function createService(options?: {
     service,
     adapter,
     auditNotificationService,
+    forwarderRepository,
     ownedMobilityService,
   };
 }
@@ -95,6 +109,62 @@ describe("ForwarderService", () => {
         lastError: null,
       }),
     ]);
+  });
+
+  it("re-registers persisted forwarded orders with owned-mobility on module init", async () => {
+    const ownedMobilityService = createOwnedMobilityServiceMock();
+    const forwarderRepository = createForwarderRepositoryMock();
+    forwarderRepository.loadState.mockResolvedValue({
+      forwardedOrders: [
+        {
+          mirrorOrderId: "FWD-persisted-001",
+          platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+          externalOrderId: "grab-order-persisted-001",
+          orderDomain: "forwarded",
+          dispatchSemantics: "forwarder_broadcast",
+          status: "received",
+          candidateDriverIds: [],
+          acceptedDriverId: null,
+          lastNativeStatus: null,
+          payload: { serviceBucket: "standard_taxi" },
+          authoritativeSnapshot: {
+            platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+            externalOrderId: "grab-order-persisted-001",
+            nativeStatus: "received",
+            serviceBucket: "standard_taxi",
+          },
+          financeContext: {
+            fareAuthority: "external_platform",
+            settlementAuthority: "external_platform",
+            driverPayoutAuthority: "external_platform",
+            localLedgerMode: "shadow_only",
+          },
+          lastSyncError: null,
+          manualFallback: {
+            required: false,
+            reason: null,
+            requestedAt: null,
+            requestedBy: null,
+            notes: null,
+          },
+          reconciliationJob: null,
+          createdAt: "2026-04-30T09:00:00.000Z",
+          updatedAt: "2026-04-30T09:00:00.000Z",
+        },
+      ],
+      adapterHealth: [],
+    });
+    const { service } = createService({
+      ownedMobilityService,
+      forwarderRepository,
+    });
+
+    await service.onModuleInit();
+
+    expect(ownedMobilityService.registerForwarderSource).toHaveBeenCalledWith(
+      "FWD-persisted-001",
+      GRAB_TAIWAN_PLATFORM_CODE,
+    );
   });
 
   it("ingests Grab Taiwan webhooks through the generic forwarder flow", () => {

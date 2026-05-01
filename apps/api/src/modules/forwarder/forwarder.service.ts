@@ -91,6 +91,12 @@ export class ForwarderService implements OnModuleInit {
       this.forwardedOrders = persistedState.forwardedOrders.map((order) =>
         this.cloneOrder(order),
       );
+      for (const order of this.forwardedOrders) {
+        this.ownedMobilityService?.registerForwarderSource(
+          order.mirrorOrderId,
+          order.platformCode,
+        );
+      }
       this.adapterHealth = persistedState.adapterHealth.map((adapter) => ({
         ...adapter,
       }));

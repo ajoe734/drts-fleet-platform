@@ -19,6 +19,25 @@
 - UI wireframe 細節
 - Tesla / AV 監控與接管設計
 
+### 0.1 營運級補充件
+
+本文件的原始主體已定義 Phase 1 的產品邊界、角色責任與核心 domain。
+若問題涉及實際營運閉環，例如：
+
+- 司機如何進入 App 與綁定裝置
+- 平台如何新增司機、合作方、銀行方案
+- 電話進單如何進待派
+- 調度員如何派遣、重派、處理錄音與 eligibility 例外
+- 哪些後台流程尚未 productize 成正式營運流程
+
+請併讀補充文件：
+
+- `docs/02-architecture/phase1-operational-sa-gap-supplement-20260429.md`
+- `docs/02-architecture/phase1-role-scenario-and-negative-flow-matrix-20260430.md`
+- `docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md`
+
+該文件屬於本 SA 的營運級補充說明，用於把 code-backed 實際盤點發現的操作閉環缺口正式掛回 SA 脈絡。
+
 ---
 
 ## 1. 專案背景與分析前提

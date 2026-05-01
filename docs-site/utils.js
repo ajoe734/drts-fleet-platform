@@ -5,6 +5,7 @@ export const qs = (selector) => document.querySelector(selector);
 // ── Board & status constants ──────────────────────────────────────────────────
 
 export const boardColumns = [
+  { key: "backlog", label: "待派工" },
   { key: "todo", label: "待開始" },
   { key: "in_progress", label: "進行中" },
   { key: "review", label: "待審查" },
@@ -15,6 +16,7 @@ export const boardColumns = [
 
 export const activeTaskStatuses = new Set(["in_progress", "review"]);
 export const scheduleOpenTaskStatuses = new Set([
+  "backlog",
   "todo",
   "in_progress",
   "review",
@@ -31,6 +33,9 @@ export const statusLabelMap = {
   finalize: "待收尾",
   ready: "可開工",
   waiting: "等前置",
+  paused: "暫停中",
+  unassigned: "無任務",
+  backlog: "待派工",
   todo: "待開始",
   in_progress: "進行中",
   review: "待審查",
@@ -123,8 +128,11 @@ export function agentLabel(value) {
   if (!value) return "-";
   const normalized = String(value).toLowerCase();
   if (normalized === "claude") return "Claude";
+  if (normalized === "claude2") return "Claude2";
   if (normalized === "gemini") return "Gemini";
+  if (normalized === "gemini2") return "Gemini2";
   if (normalized === "codex") return "Codex";
+  if (normalized === "codex2") return "Codex2";
   if (normalized === "qwen") return "Qwen";
   if (normalized === "grok") return "Copilot";
   if (normalized === "copilot") return "Copilot";

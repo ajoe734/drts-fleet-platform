@@ -824,4 +824,143 @@ describe("W8-001A shared api client list handling", () => {
       },
     ]);
   });
+
+  it("lists and resolves partner eligibility review queue items", async () => {
+    const seen: Array<{
+      path: string;
+      method: string;
+      body?: unknown;
+    }> = [];
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const path = url.replace("http://localhost:3001", "");
+        const method = init?.method ?? "GET";
+        const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+        seen.push({ path, method, body });
+
+        if (path === "/api/ops/partner/eligibility/reviews") {
+          return {
+            ok: true,
+            json: async () => ({
+              data: {
+                items: [
+                  {
+                    eligibility_verification_id: "elig-review-001",
+                    partner_entry_slug: "bank-demo-beta-airport",
+                    verification_status: "manual_review",
+                    verification_reason_code:
+                      "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+                    decision_source: "manual_fallback",
+                    attempt_count: 3,
+                    latest_attempt_status: "error",
+                    latest_attempt_reason_code: "ISSUER_UNAVAILABLE",
+                    manual_fallback: {
+                      required: true,
+                      reason_code: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+                      requested_at: "2026-04-30T15:00:00.000Z",
+                      requested_by: "system:auto_fallback",
+                      notes: null,
+                    },
+                    request_hints: {
+                      card_last4: null,
+                      flight_no: "BR102",
+                    },
+                    verified_at: "2026-04-30T15:00:00.000Z",
+                    created_at: "2026-04-30T15:00:00.000Z",
+                    updated_at: "2026-04-30T15:00:00.000Z",
+                  },
+                ],
+              },
+            }),
+            text: async () => "",
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              eligibility_verification_id: "elig-review-001",
+              previous_status: "manual_review",
+              resolved_status: "eligible",
+              decision: "approve",
+              reason_code: "OFFLINE_ISSUER_CONFIRMATION_RECEIVED",
+              notes: "Issuer confirmed offline.",
+              resolved_at: "2026-04-30T15:05:00.000Z",
+              resolved_by: "ops-reviewer-001",
+            },
+          }),
+          text: async () => "",
+        } as Response;
+      },
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient({ baseUrl: "http://localhost:3001" });
+
+    await expect(client.listPartnerEligibilityReviewQueue()).resolves.toEqual([
+      {
+        eligibilityVerificationId: "elig-review-001",
+        partnerEntrySlug: "bank-demo-beta-airport",
+        verificationStatus: "manual_review",
+        verificationReasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+        decisionSource: "manual_fallback",
+        attemptCount: 3,
+        latestAttemptStatus: "error",
+        latestAttemptReasonCode: "ISSUER_UNAVAILABLE",
+        manualFallback: {
+          required: true,
+          reasonCode: "ISSUER_RETRY_EXHAUSTED_REVIEW_REQUIRED",
+          requestedAt: "2026-04-30T15:00:00.000Z",
+          requestedBy: "system:auto_fallback",
+          notes: null,
+        },
+        requestHints: {
+          cardLast4: null,
+          flightNo: "BR102",
+        },
+        verifiedAt: "2026-04-30T15:00:00.000Z",
+        createdAt: "2026-04-30T15:00:00.000Z",
+        updatedAt: "2026-04-30T15:00:00.000Z",
+      },
+    ]);
+
+    await expect(
+      client.resolvePartnerEligibilityReview({
+        eligibilityVerificationId: "elig-review-001",
+        decision: "approve",
+        reasonCode: "OFFLINE_ISSUER_CONFIRMATION_RECEIVED",
+        notes: "Issuer confirmed offline.",
+      }),
+    ).resolves.toEqual({
+      eligibilityVerificationId: "elig-review-001",
+      previousStatus: "manual_review",
+      resolvedStatus: "eligible",
+      decision: "approve",
+      reasonCode: "OFFLINE_ISSUER_CONFIRMATION_RECEIVED",
+      notes: "Issuer confirmed offline.",
+      resolvedAt: "2026-04-30T15:05:00.000Z",
+      resolvedBy: "ops-reviewer-001",
+    });
+
+    expect(seen).toEqual([
+      {
+        path: "/api/ops/partner/eligibility/reviews",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        path: "/api/ops/partner/eligibility/reviews/resolve",
+        method: "POST",
+        body: {
+          eligibilityVerificationId: "elig-review-001",
+          decision: "approve",
+          reasonCode: "OFFLINE_ISSUER_CONFIRMATION_RECEIVED",
+          notes: "Issuer confirmed offline.",
+        },
+      },
+    ]);
+  });
 });

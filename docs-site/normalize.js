@@ -9,6 +9,8 @@ import {
   actorLabel,
 } from "./utils.js";
 
+const queuedTaskStatuses = new Set(["todo", "backlog"]);
+
 // ── Task helpers ──────────────────────────────────────────────────────────────
 
 export function terminalTaskStatus(value) {
@@ -191,19 +193,63 @@ export function normalizeDispatchQueue(orchState, status) {
 
 // ── Agent state derivation ────────────────────────────────────────────────────
 
+function normalizeProviderPauses(orchState) {
+  const raw = orchState?.provider_pauses;
+  if (!raw || typeof raw !== "object") return [];
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  return Object.entries(raw).map(([provider, pause]) => ({
+    provider,
+    ...(pause || {}),
+  }));
+}
+
+function normalizeFailureStreaks(orchState) {
+  const raw = orchState?.failure_streaks;
+  if (!raw || typeof raw !== "object") return [];
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  return Object.entries(raw).map(([key, value]) => ({
+    key,
+    ...(value || {}),
+  }));
+}
+
+function latestByTimestamp(entries, fieldNames) {
+  return [...entries].sort((a, b) => {
+    const aValue =
+      fieldNames.map((field) => a?.[field] || "").find(Boolean) || "";
+    const bValue =
+      fieldNames.map((field) => b?.[field] || "").find(Boolean) || "";
+    return bValue.localeCompare(aValue);
+  })[0];
+}
+
 export function deriveAgentState(status, orchState) {
   const taskMap = new Map((status.tasks || []).map((task) => [task.id, task]));
   const workers = normalizeWorkerRecords(orchState, status);
+  const dispatchPauses = Array.isArray(orchState?.dispatch_pauses)
+    ? orchState.dispatch_pauses
+    : [];
+  const providerPauses = normalizeProviderPauses(orchState);
+  const failureStreaks = normalizeFailureStreaks(orchState);
+  const allTasks = status.tasks || [];
 
   return (status.agents || []).map((agent) => {
     const agentId = String(agent.name || "").toLowerCase();
-    const owned = (status.tasks || []).filter(
-      (task) => task.owner === agent.name,
-    );
+    const owned = allTasks.filter((task) => task.owner === agent.name);
     const active = owned.filter((task) =>
       ["in_progress", "review", "blocked"].includes(task.status),
     );
-    const queued = owned.filter((task) => task.status === "todo");
+    const ownedReview = active.filter((task) => task.status === "review");
+    const incomingReview = allTasks.filter(
+      (task) => task.reviewer === agent.name && task.status === "review",
+    );
+    const reviewTasks = [
+      ...new Map(
+        [...ownedReview, ...incomingReview].map((task) => [task.id, task]),
+      ).values(),
+    ];
+    const approved = owned.filter((t) => t.status === "review_approved");
+    const queued = owned.filter((task) => queuedTaskStatuses.has(task.status));
     const ready = queued.filter((task) =>
       (task.depends_on || []).every(
         (depId) => (taskMap.get(depId)?.status || "done") === "done",
@@ -220,9 +266,47 @@ export function deriveAgentState(status, orchState) {
     const liveTransitionWorkers = workers.filter(
       (w) => w.logical_agent_id === agentId && w.bucket === "transition",
     );
+    const agentDispatchPauses = dispatchPauses.filter((pause) => {
+      const logicalId = logicalWorkerAgentId(pause);
+      return (
+        logicalId === agentId ||
+        String(pause?.provider || "").toLowerCase() === agentId
+      );
+    });
+    const agentProviderPauses = providerPauses.filter((pause) => {
+      const logicalId = logicalWorkerAgentId(pause);
+      return (
+        logicalId === agentId ||
+        String(pause?.provider || "").toLowerCase() === agentId
+      );
+    });
+    const agentFailureStreaks = failureStreaks.filter((entry) => {
+      const logicalId = logicalWorkerAgentId(entry);
+      return (
+        logicalId === agentId ||
+        String(entry?.provider || "").toLowerCase() === agentId ||
+        String(entry?.agent || "").toLowerCase() === agentId
+      );
+    });
+    const latestDispatchPause = latestByTimestamp(agentDispatchPauses, [
+      "paused_at",
+      "last_failure_at",
+      "updated_at",
+    ]);
+    const latestProviderPause = latestByTimestamp(agentProviderPauses, [
+      "paused_at",
+      "until",
+      "updated_at",
+    ]);
+    const latestFailureStreak = latestByTimestamp(agentFailureStreaks, [
+      "last_failure_at",
+      "updated_at",
+    ]);
 
-    let derivedStatus = "idle";
-    let derivedTaskIds = [];
+    let derivedStatus = agent.status || "idle";
+    let derivedTaskIds = Array.isArray(agent.current_task_ids)
+      ? [...agent.current_task_ids]
+      : [];
     let derivedNext = agent.next || "尚未指定";
     let derivedLastUpdate = agent.last_update || null;
 
@@ -241,9 +325,43 @@ export function deriveAgentState(status, orchState) {
     } else if (active.some((t) => t.status === "in_progress")) {
       derivedStatus = "working";
       derivedTaskIds = active.map((t) => t.id);
-    } else if (active.some((t) => t.status === "review")) {
+    } else if (reviewTasks.length) {
       derivedStatus = "reviewing";
-      derivedTaskIds = active.map((t) => t.id);
+      derivedTaskIds = reviewTasks.map((t) => t.id);
+    } else if (approved.length) {
+      derivedStatus = "finalize";
+      derivedTaskIds = approved.map((t) => t.id);
+      derivedNext = approved[0].next || derivedNext;
+      derivedLastUpdate = approved[0].last_update || derivedLastUpdate;
+    } else if (
+      agentDispatchPauses.length ||
+      agentProviderPauses.length ||
+      agentFailureStreaks.length
+    ) {
+      derivedStatus = "paused";
+      derivedTaskIds = derivedTaskIds.length
+        ? derivedTaskIds
+        : [
+            latestDispatchPause?.task_id,
+            latestProviderPause?.task_id,
+            latestFailureStreak?.task_id,
+            ...ready.map((t) => t.id),
+            ...waiting.map((t) => t.id),
+          ].filter(Boolean);
+      derivedNext =
+        latestDispatchPause?.summary ||
+        latestProviderPause?.reason ||
+        latestProviderPause?.kind ||
+        (agentFailureStreaks.length
+          ? `failure streak ${latestFailureStreak?.count || agentFailureStreaks.length}`
+          : "") ||
+        derivedNext;
+      derivedLastUpdate =
+        latestDispatchPause?.paused_at ||
+        latestProviderPause?.paused_at ||
+        latestProviderPause?.updated_at ||
+        latestFailureStreak?.last_failure_at ||
+        derivedLastUpdate;
     } else if (livePendingWorkers.length || liveTransitionWorkers.length) {
       derivedStatus = "pending";
       derivedTaskIds = [...livePendingWorkers, ...liveTransitionWorkers]
@@ -265,6 +383,10 @@ export function deriveAgentState(status, orchState) {
       derivedTaskIds = waiting.slice(0, 3).map((t) => t.id);
       derivedNext = waiting[0].next || derivedNext;
       derivedLastUpdate = waiting[0].last_update || derivedLastUpdate;
+    } else if (!owned.length && !reviewTasks.length) {
+      derivedStatus = "unassigned";
+      derivedTaskIds = [];
+      derivedNext = "目前沒有分配給這個 lane 的 open task。";
     }
 
     if (!liveRunningWorkers.length && active.length) {
@@ -275,7 +397,17 @@ export function deriveAgentState(status, orchState) {
       derivedLastUpdate = latest?.last_update || derivedLastUpdate;
     }
 
-    const approved = owned.filter((t) => t.status === "review_approved");
+    const queueBlocked =
+      derivedStatus === "paused" || agentFailureStreaks.length > 0;
+    const unavailabilityReason =
+      latestDispatchPause?.summary ||
+      latestProviderPause?.reason ||
+      latestProviderPause?.kind ||
+      (agentFailureStreaks.length
+        ? `failure streak ${latestFailureStreak?.count || agentFailureStreaks.length}`
+        : derivedStatus === "unassigned"
+          ? "目前沒有分配到 open task"
+          : "");
 
     return {
       ...agent,
@@ -283,11 +415,20 @@ export function deriveAgentState(status, orchState) {
       current_task_ids: derivedTaskIds,
       next: derivedNext,
       last_update: derivedLastUpdate,
+      queued_count: queued.length,
       ready_count: ready.length,
       waiting_count: waiting.length,
       approved_count: approved.length,
+      review_count: reviewTasks.length,
       live_running_count: liveRunningWorkers.length,
       live_pending_count: livePendingWorkers.length,
+      dispatch_pause_count: agentDispatchPauses.length,
+      provider_pause_count: agentProviderPauses.length,
+      provider_pause_kind: latestProviderPause?.kind || null,
+      failure_streak_count:
+        latestFailureStreak?.count || agentFailureStreaks.length,
+      queue_blocked: queueBlocked,
+      unavailability_reason: unavailabilityReason,
     };
   });
 }
@@ -304,7 +445,11 @@ export function dependencyBatchState(task, index, unresolvedDeps = []) {
       ? { key: "waiting", label: "等待前置" }
       : { key: "active", label: "進行中" };
   }
-  if (status === "todo" && unresolvedDeps.length === 0 && index === 0)
+  if (
+    ["todo", "backlog"].includes(status) &&
+    unresolvedDeps.length === 0 &&
+    index === 0
+  )
     return { key: "ready", label: "可開工" };
   return { key: "waiting", label: "等待前置" };
 }

@@ -38,6 +38,14 @@ describe("Complaint taxonomy and resolution codes", () => {
     expect(lostFoundCodes).not.toContain("resolved_with_refund");
   });
 
+  it("rejects invalid categories when requesting resolution codes", () => {
+    const { complaintController } = createServices();
+
+    expect(() =>
+      complaintController.getValidResolutionCodes("not_a_real_category"),
+    ).toThrowError(ApiRequestError);
+  });
+
   it("rejects an invalid resolution code on resolve", () => {
     const { complaintService } = createServices();
 

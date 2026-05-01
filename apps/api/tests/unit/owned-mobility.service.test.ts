@@ -728,6 +728,433 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(order.reservationHoldStatus).toBe("exception_hold");
   });
 
+  it("creates an auditable pending exception override request", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T12:20:00.000Z",
+        reservationWindowEnd: "2026-04-29T13:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+
+    const requestedOrder = service.requestExceptionOverride(
+      booking.orderId,
+      {
+        operatorId: "ops-request-001",
+        reason: "Supervisor requested manual release review",
+        overrideType: "release_to_dispatch",
+        expiresInMinutes: 45,
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-request-001",
+      } as never,
+      "req-override-request-001",
+    );
+
+    expect(requestedOrder.status).toBe("exception_hold");
+    expect(requestedOrder.exceptionHold?.overrideRequest).toMatchObject({
+      orderId: booking.orderId,
+      overrideType: "release_to_dispatch",
+      status: "pending_approval",
+      reason: "Supervisor requested manual release review",
+      requestedBy: {
+        actorType: "ops_user",
+        actorId: "ops-request-001",
+      },
+      approval: null,
+      rejection: null,
+      expiredAt: null,
+    });
+
+    const trace = service.listDispatchTrace(booking.orderId);
+    expect(trace).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "exception_hold.override_requested",
+          details: expect.objectContaining({
+            actorId: "ops-request-001",
+            actorType: "ops_user",
+            overrideType: "release_to_dispatch",
+            reason: "Supervisor requested manual release review",
+          }),
+        }),
+      ]),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "request_exception_override",
+        requestId: "req-override-request-001",
+        newValuesSummary: expect.objectContaining({
+          overrideType: "release_to_dispatch",
+          reason: "Supervisor requested manual release review",
+        }),
+      }),
+    );
+  });
+
+  it("approves exception override with a second actor and resolves the hold", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T12:20:00.000Z",
+        reservationWindowEnd: "2026-04-29T13:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+    service.requestExceptionOverride(
+      booking.orderId,
+      {
+        operatorId: "ops-request-002",
+        reason: "Approved manual fallback review completed",
+        overrideType: "release_to_dispatch",
+        expiresInMinutes: 30,
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-request-002",
+      } as never,
+    );
+
+    const approvedOrder = service.approveExceptionOverride(
+      booking.orderId,
+      {
+        operatorId: "ops-approve-002",
+        approvalNote: "Dual-control check complete",
+      },
+      {
+        actorType: "platform_admin",
+        actorId: "ops-approve-002",
+      } as never,
+      "req-override-approve-002",
+    );
+
+    expect(approvedOrder.status).toBe("ready_for_dispatch");
+    expect(approvedOrder.reservationHoldStatus).toBe("requested");
+    expect(approvedOrder.exceptionHold?.overrideRequest).toMatchObject({
+      status: "approved",
+      approval: {
+        actorType: "platform_admin",
+        actorId: "ops-approve-002",
+        approvalNote: "Dual-control check complete",
+      },
+    });
+    expect(approvedOrder.exceptionHold?.resolution).toMatchObject({
+      resolution: "release_to_dispatch",
+      actorId: "ops-approve-002",
+    });
+
+    const trace = service.listDispatchTrace(booking.orderId);
+    expect(trace).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "exception_hold.override_approved",
+          details: expect.objectContaining({
+            approverActorId: "ops-approve-002",
+            approverActorType: "platform_admin",
+            approvalNote: "Dual-control check complete",
+          }),
+        }),
+        expect.objectContaining({
+          eventType: "exception_hold.resolved.release",
+          details: expect.objectContaining({
+            operatorId: "ops-approve-002",
+            traceId:
+              approvedOrder.exceptionHold?.overrideRequest?.overrideRequestId,
+          }),
+        }),
+      ]),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "approve_exception_override",
+        requestId: "req-override-approve-002",
+        newValuesSummary: expect.objectContaining({
+          requestedBy: "ops-request-002",
+        }),
+      }),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "resolve_exception_hold",
+        requestId: "req-override-approve-002",
+        newValuesSummary: expect.objectContaining({
+          resolution: "release_to_dispatch",
+        }),
+      }),
+    );
+  });
+
+  it("rejects exception override while preserving the hold and audit trail", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T12:20:00.000Z",
+        reservationWindowEnd: "2026-04-29T13:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+    service.requestExceptionOverride(
+      booking.orderId,
+      {
+        operatorId: "ops-request-003",
+        reason: "Ops wants cancellation review",
+        overrideType: "cancel_order",
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-request-003",
+      } as never,
+    );
+
+    const rejectedOrder = service.rejectExceptionOverride(
+      booking.orderId,
+      {
+        operatorId: "ops-approve-003",
+        rejectionReason: "Downstream compliance review still pending",
+      },
+      {
+        actorType: "platform_admin",
+        actorId: "ops-approve-003",
+      } as never,
+      "req-override-reject-003",
+    );
+
+    expect(rejectedOrder.status).toBe("exception_hold");
+    expect(rejectedOrder.reservationHoldStatus).toBe("exception_hold");
+    expect(rejectedOrder.exceptionHold?.overrideRequest).toMatchObject({
+      overrideType: "cancel_order",
+      status: "rejected",
+      rejection: {
+        actorType: "platform_admin",
+        actorId: "ops-approve-003",
+        rejectionReason: "Downstream compliance review still pending",
+      },
+    });
+    expect(rejectedOrder.exceptionHold?.resolution).toBeNull();
+
+    const trace = service.listDispatchTrace(booking.orderId);
+    expect(trace).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "exception_hold.override_rejected",
+          details: expect.objectContaining({
+            rejectorActorId: "ops-approve-003",
+            overrideType: "cancel_order",
+            rejectionReason: "Downstream compliance review still pending",
+          }),
+        }),
+      ]),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "reject_exception_override",
+        requestId: "req-override-reject-003",
+        newValuesSummary: expect.objectContaining({
+          requestedBy: "ops-request-003",
+        }),
+      }),
+    );
+  });
+
+  it("expires pending exception overrides explicitly before approval", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service, auditNotificationService } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T12:20:00.000Z",
+        reservationWindowEnd: "2026-04-29T13:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+    service.requestExceptionOverride(
+      booking.orderId,
+      {
+        operatorId: "ops-request-004",
+        reason: "Short-lived emergency approval window",
+        overrideType: "release_to_dispatch",
+        expiresInMinutes: 5,
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-request-004",
+      } as never,
+    );
+
+    vi.setSystemTime(new Date("2026-04-29T12:06:00.000Z"));
+
+    try {
+      service.approveExceptionOverride(
+        booking.orderId,
+        {
+          operatorId: "ops-approve-004",
+          approvalNote: "Too late",
+        },
+        {
+          actorType: "platform_admin",
+          actorId: "ops-approve-004",
+        } as never,
+        "req-override-expire-004",
+      );
+      throw new Error("Expected approval to fail after expiry");
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "OVERRIDE_REQUEST_EXPIRED",
+        },
+      });
+    }
+
+    const expiredOrder = service.getOrder(booking.orderId);
+    expect(expiredOrder.status).toBe("exception_hold");
+    expect(expiredOrder.exceptionHold?.overrideRequest).toMatchObject({
+      status: "expired",
+    });
+    expect(
+      expiredOrder.exceptionHold?.overrideRequest?.expiredAt,
+    ).not.toBeNull();
+
+    const trace = service.listDispatchTrace(booking.orderId);
+    expect(trace).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "exception_hold.override_expired",
+          details: expect.objectContaining({
+            overrideRequestId:
+              expiredOrder.exceptionHold?.overrideRequest?.overrideRequestId,
+          }),
+        }),
+      ]),
+    );
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "expire_exception_override",
+        requestId: "req-override-expire-004",
+        newValuesSummary: expect.objectContaining({
+          requestedBy: "ops-request-004",
+        }),
+      }),
+    );
+  });
+
+  it("forbids self-approval on exception override requests", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-04-29T12:20:00.000Z",
+        reservationWindowEnd: "2026-04-29T13:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+
+    service.dispatchOrder(booking.orderId, { mode: "auto" });
+    service.requestExceptionOverride(
+      booking.orderId,
+      {
+        operatorId: "ops-request-005",
+        reason: "Requester cannot approve",
+        overrideType: "release_to_dispatch",
+      },
+      {
+        actorType: "ops_user",
+        actorId: "ops-request-005",
+      } as never,
+    );
+
+    expect(() =>
+      service.approveExceptionOverride(
+        booking.orderId,
+        {
+          operatorId: "ops-request-005",
+          approvalNote: "Trying to self-approve",
+        },
+        {
+          actorType: "ops_user",
+          actorId: "ops-request-005",
+        } as never,
+      ),
+    ).toThrowError(ApiRequestError);
+
+    try {
+      service.approveExceptionOverride(
+        booking.orderId,
+        {
+          operatorId: "ops-request-005",
+          approvalNote: "Trying to self-approve",
+        },
+        {
+          actorType: "ops_user",
+          actorId: "ops-request-005",
+        } as never,
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: {
+          code: "OVERRIDE_SELF_APPROVAL_FORBIDDEN",
+        },
+      });
+    }
+
+    const order = service.getOrder(booking.orderId);
+    expect(order.exceptionHold?.overrideRequest?.status).toBe(
+      "pending_approval",
+    );
+    expect(order.status).toBe("exception_hold");
+  });
+
   it("allows dispatch assignment after release_to_dispatch without invalid hold transitions", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));

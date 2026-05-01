@@ -11,16 +11,19 @@ import {
 
 // ── Discussion state fetcher ──────────────────────────────────────────────────
 
-export async function fetchDiscussionState() {
+export async function fetchDiscussionState(options = {}) {
+  const { timeoutMs = 2500 } = options;
   const lanes = ["Codex", "Qwen", "Gemini", "Copilot", "Claude"];
   const roundPaths = CONSENSUS_FILES.rounds;
 
   const [batonResult, queueResult, packetResult, ...rest] = await Promise.all([
-    probeFile(CONSENSUS_FILES.batonLog),
-    probeFile(CONSENSUS_FILES.supervisorQueue),
-    probeFile(CONSENSUS_FILES.consensusPacket),
-    ...lanes.map((lane) => probeFile(CONSENSUS_FILES.readouts[lane])),
-    ...roundPaths.map((path) => probeFile(path)),
+    probeFile(CONSENSUS_FILES.batonLog, { timeoutMs }),
+    probeFile(CONSENSUS_FILES.supervisorQueue, { timeoutMs }),
+    probeFile(CONSENSUS_FILES.consensusPacket, { timeoutMs }),
+    ...lanes.map((lane) =>
+      probeFile(CONSENSUS_FILES.readouts[lane], { timeoutMs }),
+    ),
+    ...roundPaths.map((path) => probeFile(path, { timeoutMs })),
   ]);
 
   const readouts = Object.fromEntries(lanes.map((lane, i) => [lane, rest[i]]));

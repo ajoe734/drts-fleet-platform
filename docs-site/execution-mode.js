@@ -24,6 +24,14 @@ import {
   terminalTaskStatus,
 } from "./normalize.js";
 
+function compactCopy(value, maxLen = 110) {
+  const text = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return "尚未補上中文說明。";
+  return text.length > maxLen ? `${text.slice(0, maxLen)}...` : text;
+}
+
 // ── Workload ──────────────────────────────────────────────────────────────────
 
 export function renderWorkload(status) {
@@ -84,11 +92,16 @@ export function renderAgentLanes(status, orchState) {
       <div class="lane-meta">
         <span class="chip">${agent.branch || "未指定分支"}</span>
         <span class="chip">${activeTasks}</span>
+        <span class="chip">待派工 ${agent.queued_count || 0}</span>
         <span class="chip">可開工 ${agent.ready_count || 0}</span>
         <span class="chip">等前置 ${agent.waiting_count || 0}</span>
+        <span class="chip">待審查 ${agent.review_count || 0}</span>
         <span class="chip">已批准 ${agent.approved_count || 0}</span>
+        ${agent.dispatch_pause_count ? `<span class="chip">dispatch pause ${agent.dispatch_pause_count}</span>` : ""}
+        ${agent.provider_pause_kind ? `<span class="chip">provider ${agent.provider_pause_kind}</span>` : ""}
       </div>
       ${focusTasks ? `<ul class="note-list compact">${focusTasks}</ul>` : ""}
+      ${agent.unavailability_reason ? `<p class="lane-copy">目前不可派工：${truncate(agent.unavailability_reason, 120)}</p>` : ""}
       <p class="lane-copy">下一步：${truncate(agent.next, 120)}</p>
       <p class="lane-copy">最後更新：${formatTime(agent.last_update)}</p>
     `;
@@ -176,6 +189,7 @@ export function renderDeliveryLayers(status) {
 
 export function renderTaskBoard(status, orchState) {
   const board = qs("#task-board");
+  const boardSummary = qs("#board-summary");
   if (!board) return;
   board.innerHTML = "";
 
@@ -196,7 +210,7 @@ export function renderTaskBoard(status, orchState) {
     let displayStatus = task.status;
     if (!terminalTaskStatus(task.status) && hasRunning)
       displayStatus = "in_progress";
-    else if (task.status === "todo" && hasPending)
+    else if (["todo", "backlog"].includes(task.status) && hasPending)
       displayStatus = "in_progress";
     return {
       ...task,
@@ -204,12 +218,57 @@ export function renderTaskBoard(status, orchState) {
       live_workers: liveWorkers,
     };
   });
+  const displayTaskMap = new Map(displayTasks.map((task) => [task.id, task]));
+
+  if (boardSummary) {
+    const openTasks = displayTasks.filter(
+      (task) => task.display_status !== "done",
+    );
+    const readyTasks = openTasks.filter(
+      (task) =>
+        ["todo", "backlog"].includes(task.display_status) &&
+        (task.depends_on || []).every((depId) => {
+          const dependency = displayTaskMap.get(depId);
+          return !dependency || dependency.status === "done";
+        }),
+    );
+    const activeTasks = openTasks.filter((task) =>
+      ["in_progress", "review"].includes(task.display_status),
+    );
+    const blockedTasks = openTasks.filter(
+      (task) => task.display_status === "blocked",
+    );
+    const liveWorkers = workers.filter((worker) => worker.bucket === "running");
+
+    boardSummary.innerHTML = `
+      <span class="chip">Open ${openTasks.length}</span>
+      <span class="chip">進行中 ${activeTasks.length}</span>
+      <span class="chip">可直接開工 ${readyTasks.length}</span>
+      <span class="chip">阻塞 ${blockedTasks.length}</span>
+      <span class="chip">Live workers ${liveWorkers.length}</span>
+    `;
+  }
 
   for (const column of boardColumns) {
     const wrapper = document.createElement("section");
-    wrapper.className = "board-column";
-    const tasks = displayTasks.filter((t) => t.display_status === column.key);
-    wrapper.innerHTML = `<h3>${column.label}</h3><div class="column-stack"></div>`;
+    const tasks = displayTasks
+      .filter((task) => task.display_status === column.key)
+      .sort((a, b) =>
+        String(b.last_update || "").localeCompare(String(a.last_update || "")),
+      );
+    const visibleTasks =
+      column.key === "done" && tasks.length > 6 ? tasks.slice(0, 6) : tasks;
+    wrapper.className = `board-column${tasks.length ? "" : " board-column-empty"}`;
+    wrapper.innerHTML = `
+      <div class="board-column-head">
+        <div>
+          <h3>${column.label}</h3>
+          <p class="stack-subtitle">${tasks.length ? `${tasks.length} 個任務` : "目前沒有任務"}</p>
+        </div>
+        <span class="status-pill">${tasks.length}</span>
+      </div>
+      <div class="column-stack"></div>
+    `;
     const stack = wrapper.querySelector(".column-stack");
 
     if (!tasks.length) {
@@ -219,7 +278,7 @@ export function renderTaskBoard(status, orchState) {
       stack.appendChild(empty);
     }
 
-    for (const task of tasks) {
+    for (const task of visibleTasks) {
       const card = document.createElement("article");
       card.className = "task-card";
       const depends = (task.depends_on || []).length
@@ -236,44 +295,62 @@ export function renderTaskBoard(status, orchState) {
         task.status === "review_approved"
           ? `<span class="chip">待收尾回到 ${task.owner}</span>`
           : "";
+      const summary = compactCopy(task.summary_zh || task.title, 120);
+      const detailSummary = task.summary_zh || "尚未補上中文說明。";
+      const reviewNotes = normalizeReviewNotes(task.review_notes_zh);
       card.innerHTML = `
         <div class="task-head">
           <strong>${task.id}</strong>
           <span class="status-pill status-${task.display_status}">${statusLabel(task.display_status)}</span>
         </div>
-        <p>${task.title}</p>
-        <p class="task-summary">工作說明：${task.summary_zh || "尚未補上中文說明。"}</p>
+        <p class="task-title">${task.title}</p>
+        <p class="task-summary task-summary-compact">${summary}</p>
         <div class="task-meta">
-          <span class="chip">${task.phase}</span>
           <span class="chip">負責人 ${task.owner}</span>
           <span class="chip">審查者 ${task.reviewer}</span>
+          <span class="chip">${task.phase}</span>
         </div>
-        ${taskBadgeRow(task)}
         <div class="task-foot">
           <span class="chip">依賴 ${depends}</span>
-          <span class="chip">${formatTime(task.last_update)}</span>
+          <span class="chip">更新 ${timeAgo(task.last_update)}</span>
         </div>
         <div class="task-meta">
           ${runtimeBadge}
           ${canonicalBadge}
           ${approvedFollowupBadge}
         </div>
-        ${
-          normalizeReviewNotes(task.review_notes_zh).length
-            ? `<div class="review-block">
-                <p class="review-title">審查重點</p>
-                <ul class="note-list">${normalizeReviewNotes(
-                  task.review_notes_zh,
-                )
-                  .map((n) => `<li>${n}</li>`)
-                  .join("")}</ul>
-                ${task.review_file ? `<p class="card-copy">參考檔案：<code>${task.review_file}</code></p>` : ""}
-              </div>`
-            : ""
-        }
-        <p class="card-copy">下一步：${truncate(task.next, 120)}</p>
+        ${taskBadgeRow(task)}
+        <details class="task-details">
+          <summary>查看細節</summary>
+          <div class="task-details-body">
+            <p class="card-copy">工作說明：${detailSummary}</p>
+            <p class="card-copy">下一步：${truncate(task.next, 140)}</p>
+            ${
+              reviewNotes.length
+                ? `<div class="review-block">
+                    <p class="review-title">審查重點</p>
+                    <ul class="note-list">${reviewNotes
+                      .map((note) => `<li>${note}</li>`)
+                      .join("")}</ul>
+                    ${task.review_file ? `<p class="card-copy">參考檔案：<code>${task.review_file}</code></p>` : ""}
+                  </div>`
+                : ""
+            }
+            <p class="card-copy">最後更新：${formatTime(task.last_update)}</p>
+          </div>
+        </details>
       `;
       stack.appendChild(card);
+    }
+
+    if (column.key === "done" && tasks.length > visibleTasks.length) {
+      const note = document.createElement("article");
+      note.className = "task-card task-card-muted";
+      note.innerHTML = `
+        <p class="task-title">已隱藏 ${tasks.length - visibleTasks.length} 筆較早完成任務</p>
+        <p class="task-summary task-summary-compact">首頁只保留最近完成的項目，避免完成欄把整個 board 拉成歷史清單。</p>
+      `;
+      stack.appendChild(note);
     }
     board.appendChild(wrapper);
   }

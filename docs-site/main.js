@@ -19,7 +19,7 @@ import {
   fetchJson,
   fetchText,
   requestDashboardRefresh,
-  parseJsonLines,
+  parseRecentJsonLines,
   parseCurrentWork,
 } from "./data.js";
 import {
@@ -41,6 +41,13 @@ import {
   applyModeVisualState,
 } from "./discussion-mode.js";
 
+function basename(value) {
+  const text = String(value || "").trim();
+  if (!text) return "-";
+  const segments = text.split("/");
+  return segments[segments.length - 1] || text;
+}
+
 // ── Progress bar ──────────────────────────────────────────────────────────────
 
 function renderProgressBar(tasks) {
@@ -50,7 +57,7 @@ function renderProgressBar(tasks) {
     (t) => t.status === "review_approved",
   ).length;
   const open = (tasks || []).filter((t) =>
-    ["todo", "in_progress", "review", "blocked"].includes(
+    ["backlog", "todo", "in_progress", "review", "blocked"].includes(
       String(t.status || "").toLowerCase(),
     ),
   ).length;
@@ -73,7 +80,7 @@ function renderOverviewMetrics(status, orchState, approvalQueue) {
   const done = tasks.filter((t) => t.status === "done").length;
   const approvedTasks = tasks.filter((t) => t.status === "review_approved");
   const backlogTasks = tasks.filter((t) =>
-    ["todo", "in_progress", "review", "blocked"].includes(
+    ["backlog", "todo", "in_progress", "review", "blocked"].includes(
       String(t.status || "").toLowerCase(),
     ),
   );
@@ -201,6 +208,16 @@ function renderOverviewMetrics(status, orchState, approvalQueue) {
 
 // ── System status (supervisor + worker history) ───────────────────────────────
 
+function agentStatusIcon(agent, running, failed) {
+  if (running > 0) return "🟡";
+  if (agent?.status === "paused") return "⛔";
+  if (agent?.status === "blocked" || failed > 0) return "🔴";
+  if (agent?.status === "ready") return "🟢";
+  if (["waiting", "pending"].includes(agent?.status)) return "🟠";
+  if (["reviewing", "finalize"].includes(agent?.status)) return "🔵";
+  return "⚪";
+}
+
 function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
   const statusEl = qs("#system-status");
   const historyEl = qs("#worker-history");
@@ -312,10 +329,11 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
   // Per-agent worker summary cards
   const logicalAgents = [
     "claude",
+    "claude2",
     "gemini",
+    "gemini2",
     "codex",
     "codex2",
-    "qwen",
     "copilot",
   ];
   const agentStateMap = new Map(
@@ -338,18 +356,32 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
     card.className = "sys-card";
     card.innerHTML = `
       <div class="sys-card-head">
-        <span class="sys-icon">${running > 0 ? "🟡" : failed > 0 ? "🔴" : "⚪"}</span>
+        <span class="sys-icon">${agentStatusIcon(agent, running, failed)}</span>
         <strong>${agentLabel(agentId)}</strong>
       </div>
       <div class="sys-card-body">
+        ${agent ? `<span class="status-pill status-${agent.status}">${statusLabel(agent.status)}</span>` : ""}
         <span class="chip">執行中 ${running}</span>
-        <span class="chip">等待 ${waiting}</span>
+        <span class="chip">worker 等待 ${waiting}</span>
         ${transition ? `<span class="chip">改派 ${transition}</span>` : ""}
         <span class="chip">失敗 ${failed}</span>
         <span class="chip">完成 ${completed}</span>
         ${retryHistory ? `<span class="chip">retry 史 ${retryHistory}</span>` : ""}
         ${runningTasks.length ? `<span class="chip">任務 ${runningTasks.join(", ")}</span>` : ""}
-        ${agent ? `<span class="chip">可開工 ${agent.ready_count || 0}</span><span class="chip">等前置 ${agent.waiting_count || 0}</span>` : ""}
+        ${
+          agent
+            ? `
+              <span class="chip">待派工 ${agent.queued_count || 0}</span>
+              <span class="chip">可開工 ${agent.ready_count || 0}</span>
+              <span class="chip">等前置 ${agent.waiting_count || 0}</span>
+              <span class="chip">待審查 ${agent.review_count || 0}</span>
+              <span class="chip">待收尾 ${agent.approved_count || 0}</span>
+              ${agent.dispatch_pause_count ? `<span class="chip">dispatch pause ${agent.dispatch_pause_count}</span>` : ""}
+              ${agent.provider_pause_kind ? `<span class="chip">provider ${agent.provider_pause_kind}</span>` : ""}
+            `
+            : ""
+        }
+        ${agent?.unavailability_reason ? `<p class="meta-line">${truncate(agent.unavailability_reason, 100)}</p>` : ""}
       </div>
     `;
     statusEl.appendChild(card);
@@ -464,10 +496,11 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
 
 // ── Activity log ──────────────────────────────────────────────────────────────
 
-function renderActivity(entries) {
+function renderActivity(entries, options = {}) {
   const container = qs("#activity-list");
   if (!container) return;
   container.innerHTML = "";
+  const { prefiltered = false } = options;
 
   const highSignalTypes = new Set([
     "worker_started",
@@ -484,10 +517,12 @@ function renderActivity(entries) {
     "done",
     "blocker",
   ]);
-  const recent = entries
-    .filter((e) => highSignalTypes.has(e.type))
-    .slice(-8)
-    .reverse();
+  const recent = prefiltered
+    ? entries.slice(0, 8)
+    : entries
+        .filter((e) => highSignalTypes.has(e.type))
+        .slice(-8)
+        .reverse();
 
   if (!recent.length) {
     const empty = document.createElement("p");
@@ -611,18 +646,53 @@ function renderAuditStatus(status) {
 
 // ── Sprint snapshot ───────────────────────────────────────────────────────────
 
-function renderSnapshot(snapshot) {
+function renderSnapshot(status, snapshot) {
   const container = qs("#snapshot");
   if (!container) return;
   container.innerHTML = "";
-  const blocks = [
-    snapshot.objective || "目前沒有可顯示的目標。",
-    ...(snapshot.sprint || []),
+
+  const sprint = status?.sprint || {};
+  const tiers = Object.keys(status?.canonical_document_layers || {});
+  const reviewOrder = status?.discussion_loop?.review_order || [];
+  const cards = [
+    {
+      kicker: "Current Wave",
+      value: sprint.phase || "目前沒有 wave metadata",
+      note: [sprint.name, sprint.wave].filter(Boolean).join(" · ") || "-",
+    },
+    {
+      kicker: "Mode",
+      value: status?.execution_mode || "未指定",
+      note: `Consensus ${status?.consensus_status || "-"} · Discussion ${status?.discussion_mode || "-"}`,
+    },
+    {
+      kicker: "Source of Truth",
+      value: `${status?.canonical_files?.length || 0} canonical files`,
+      note: tiers.length ? tiers.join(" / ") : "尚未提供 canonical tiers",
+    },
+    {
+      kicker: "Discussion",
+      value: basename(status?.discussion_workspace || ""),
+      note: `Round ${status?.discussion_loop?.round || "-"} · ${status?.discussion_loop?.status || "-"}${reviewOrder.length ? ` · review ${reviewOrder.length} lanes` : ""}`,
+    },
   ];
-  for (const block of blocks) {
+
+  if (!status?.sprint && snapshot?.objective) {
+    cards.unshift({
+      kicker: "Objective",
+      value: "目前目標",
+      note: snapshot.objective,
+    });
+  }
+
+  for (const cardData of cards) {
     const card = document.createElement("article");
     card.className = "snapshot-card";
-    card.innerHTML = `<p class="snapshot-item">${block}</p>`;
+    card.innerHTML = `
+      <p class="snapshot-kicker">${cardData.kicker}</p>
+      <p class="snapshot-value">${cardData.value}</p>
+      <p class="snapshot-note">${cardData.note}</p>
+    `;
     container.appendChild(card);
   }
 }
@@ -630,10 +700,215 @@ function renderSnapshot(snapshot) {
 // ── Main render ───────────────────────────────────────────────────────────────
 
 let renderInFlight = false;
+let renderVersion = 0;
+let latestCoreState = null;
+let activityLoadedVersion = 0;
+let discussionLoadedVersion = 0;
+let activityLoadPromise = null;
+let discussionLoadPromise = null;
+
+function buildFallbackActivity(status, orchState, approvalQueue) {
+  const workerEntries = normalizeWorkerRecords(orchState, status)
+    .filter((worker) =>
+      ["running", "pending", "transition"].includes(worker.bucket),
+    )
+    .slice(0, 4)
+    .map((worker) => ({
+      type:
+        worker.status === "reassigned" || worker.status === "superseded"
+          ? "task_reassigned"
+          : "worker_started",
+      agent: worker.display_actor,
+      ts: worker.last_event_at || worker.started_at,
+      task_id: worker.task_id,
+      message: `${statusLabel(worker.status)} · ${worker.reason || worker.mode || "worker update"}`,
+    }));
+
+  const handoffEntries = (status?.handoffs || [])
+    .filter((handoff) => handoff.status !== "done")
+    .slice(-3)
+    .map((handoff) => ({
+      type: "handoff",
+      agent: handoff.from || "-",
+      ts: handoff.created_at,
+      task_id: handoff.task_id,
+      message: `${handoff.from || "-"} -> ${handoff.to || "-"} · ${handoff.message || "待處理交接"}`,
+    }));
+
+  const blockerEntries = (status?.blockers || [])
+    .filter((blocker) => blocker.status === "open")
+    .slice(-2)
+    .map((blocker) => ({
+      type: "blocker",
+      agent: blocker.owner || "-",
+      ts: blocker.updated_at || blocker.created_at,
+      task_id: blocker.task_id,
+      message: `${blocker.waiting_for || "等待處理"} · ${blocker.message || "阻塞中"}`,
+    }));
+
+  const approvalEntries = (approvalQueue?.pending || [])
+    .slice(0, 2)
+    .map((entry) => ({
+      type: "approval_requested",
+      agent: actorLabel(entry.agent_id, entry.provider),
+      ts: entry.created_at,
+      task_id: entry.task_id,
+      message: `${entry.tool_name || "tool"} 等待批准`,
+    }));
+
+  return [
+    ...workerEntries,
+    ...handoffEntries,
+    ...blockerEntries,
+    ...approvalEntries,
+  ]
+    .filter((entry) => entry.message)
+    .sort((a, b) => String(b.ts || "").localeCompare(String(a.ts || "")))
+    .slice(0, 8);
+}
+
+function renderDiscussionPlaceholder(
+  status,
+  message = "展開此區可載入討論 artifacts。",
+) {
+  const loop = status?.discussion_loop || {};
+  const supervisor = loop.supervisor || "Claude";
+  const reviewOrder = loop.review_order || [];
+
+  const placeholder = (title, kicker, copy, meta = "") => `
+    <div class="discussion-card">
+      <div class="discussion-card-head">
+        <div>
+          <p class="discussion-kicker">${kicker}</p>
+          <h3>${title}</h3>
+        </div>
+      </div>
+      <p class="body-copy">${copy}</p>
+      ${meta ? `<p class="discussion-label">${meta}</p>` : ""}
+    </div>
+  `;
+
+  const batonStatus = qs("#baton-status");
+  if (batonStatus) {
+    batonStatus.innerHTML = `
+      <div class="discussion-card baton-card">
+        <div class="discussion-card-head">
+          <div>
+            <p class="discussion-kicker">Baton Loop</p>
+            <h3>討論狀態摘要</h3>
+          </div>
+          <span class="baton-owner-badge">${loop.current_owner || loop.status || "-"}</span>
+        </div>
+        <div class="baton-meta">
+          <span class="chip">Supervisor：${supervisor}</span>
+          <span class="chip">Round：${loop.round || "-"}</span>
+          <span class="chip">Status：${loop.status || "-"}</span>
+        </div>
+        <p class="body-copy">${message}</p>
+      </div>
+    `;
+  }
+
+  const readoutProgress = qs("#readout-progress");
+  if (readoutProgress) {
+    readoutProgress.innerHTML = placeholder(
+      "Lane Readout",
+      "Phase B",
+      reviewOrder.length
+        ? `已設定 ${reviewOrder.length} 個 review lane。`
+        : "尚未提供 lane readout metadata。",
+      reviewOrder.length ? reviewOrder.join(" -> ") : "",
+    );
+  }
+
+  const reviewRounds = qs("#review-rounds");
+  if (reviewRounds) {
+    reviewRounds.innerHTML = placeholder(
+      "Cross-Review",
+      "Phase C / D",
+      loop.round ? `目前記錄到第 ${loop.round} 輪。` : "尚未提供輪次資料。",
+      loop.accepted_packet ? basename(loop.accepted_packet) : "",
+    );
+  }
+
+  const consensusPanel = qs("#consensus-status-panel");
+  if (consensusPanel) {
+    consensusPanel.innerHTML = placeholder(
+      "Consensus Packet",
+      "Phase E",
+      status?.consensus_status === "accepted"
+        ? "Consensus packet 已接受，可回看細節。"
+        : "Consensus packet 尚未完成或仍待確認。",
+      status?.consensus_status || "-",
+    );
+  }
+}
+
+async function loadActivityFeed(status, orchState, approvalQueue, version) {
+  if (activityLoadedVersion === version) return;
+  const fallbackEntries = buildFallbackActivity(
+    status,
+    orchState,
+    approvalQueue,
+  );
+  renderActivity(fallbackEntries, { prefiltered: true });
+
+  if (activityLoadPromise) return activityLoadPromise;
+
+  activityLoadPromise = fetchText(DATA_FILES.activity, { timeoutMs: 2500 })
+    .then((activityText) => {
+      if (version !== renderVersion) return;
+      const logs = parseRecentJsonLines(activityText, 32);
+      if (logs.length) renderActivity(logs);
+      activityLoadedVersion = version;
+    })
+    .catch(() => {
+      if (version !== renderVersion) return;
+      activityLoadedVersion = version;
+    })
+    .finally(() => {
+      activityLoadPromise = null;
+    });
+
+  return activityLoadPromise;
+}
+
+async function ensureDiscussionModeLoaded(
+  status,
+  version,
+  { force = false } = {},
+) {
+  if (!status) return;
+  if (!force && discussionLoadedVersion === version) return;
+  if (discussionLoadPromise) return discussionLoadPromise;
+
+  renderDiscussionPlaceholder(status, "讀取討論 artifacts 中...");
+
+  discussionLoadPromise = fetchDiscussionState({ timeoutMs: 2500 })
+    .then((discussionState) => {
+      if (version !== renderVersion) return;
+      renderDiscussionMode(discussionState, status);
+      discussionLoadedVersion = version;
+    })
+    .catch(() => {
+      if (version !== renderVersion) return;
+      renderDiscussionPlaceholder(status, "討論 artifacts 暫時無法載入。");
+      discussionLoadedVersion = version;
+    })
+    .finally(() => {
+      discussionLoadPromise = null;
+    });
+
+  return discussionLoadPromise;
+}
 
 async function render({ syncFirst = false } = {}) {
   if (renderInFlight) return;
   renderInFlight = true;
+  const version = renderVersion + 1;
+  renderVersion = version;
+  activityLoadedVersion = 0;
+  discussionLoadedVersion = 0;
 
   const refreshButton = qs("#refresh-button");
   if (refreshButton) {
@@ -644,24 +919,17 @@ async function render({ syncFirst = false } = {}) {
   try {
     if (syncFirst) await requestDashboardRefresh();
 
-    const [
-      status,
-      activityText,
-      currentWorkText,
-      orchState,
-      approvalQueue,
-      discussionState,
-    ] = await Promise.all([
-      fetchJson(DATA_FILES.status),
-      fetchText(DATA_FILES.activity),
-      fetchText(DATA_FILES.currentWork),
-      fetchJson(DATA_FILES.orchestratorState).catch(() => ({})),
-      fetchJson(DATA_FILES.approvalQueue).catch(() => null),
-      fetchDiscussionState(),
-    ]);
+    const [status, currentWorkText, orchState, approvalQueue] =
+      await Promise.all([
+        fetchJson(DATA_FILES.status),
+        fetchText(DATA_FILES.currentWork).catch(() => ""),
+        fetchJson(DATA_FILES.orchestratorState).catch(() => ({})),
+        fetchJson(DATA_FILES.approvalQueue).catch(() => null),
+      ]);
 
-    const logs = parseJsonLines(activityText);
-    const snapshot = parseCurrentWork(currentWorkText);
+    const snapshot = currentWorkText
+      ? parseCurrentWork(currentWorkText)
+      : { objective: "", sprint: [] };
     const projectName = titleCase(
       status.project || snapshot.project || "project",
     );
@@ -678,6 +946,7 @@ async function render({ syncFirst = false } = {}) {
     applyModeVisualState(currentMode);
 
     const agentStates = deriveAgentState(status, orchState);
+    latestCoreState = { status, orchState, approvalQueue, snapshot };
 
     renderProgressBar(status.tasks);
     renderOverviewMetrics(status, orchState, approvalQueue);
@@ -690,8 +959,12 @@ async function render({ syncFirst = false } = {}) {
     renderAuditStatus(status);
     renderDependencySchedule(status);
 
-    // Discussion mode panel
-    renderDiscussionMode(discussionState, status);
+    renderDiscussionPlaceholder(
+      status,
+      currentMode === "discussion_planning"
+        ? "讀取討論 artifacts 中..."
+        : "展開此區可載入討論 artifacts。",
+    );
 
     renderStackList(
       "#handoff-list",
@@ -723,8 +996,11 @@ async function render({ syncFirst = false } = {}) {
       `,
     );
 
-    renderSnapshot(snapshot);
-    renderActivity(logs);
+    renderSnapshot(status, snapshot);
+    void loadActivityFeed(status, orchState, approvalQueue, version);
+    if (currentMode === "discussion_planning") {
+      void ensureDiscussionModeLoaded(status, version, { force: true });
+    }
   } catch (error) {
     const objectiveEl = qs("#objective");
     if (objectiveEl)
@@ -743,4 +1019,11 @@ async function render({ syncFirst = false } = {}) {
 qs("#refresh-button").addEventListener("click", () =>
   render({ syncFirst: true }),
 );
+
+qs("#discussion-details")?.addEventListener("toggle", (event) => {
+  const details = event.currentTarget;
+  if (!details?.open || !latestCoreState?.status) return;
+  void ensureDiscussionModeLoaded(latestCoreState.status, renderVersion);
+});
+
 render();

@@ -11,7 +11,6 @@ import {
 import type {
   AddComplaintCaseNoteCommand,
   AssignComplaintCaseCommand,
-  ComplaintCategory,
   CreateComplaintCaseCommand,
   EscalateComplaintToIncidentCommand,
   LinkComplaintToIncidentCommand,
@@ -71,9 +70,7 @@ export class ComplaintController {
     return toApiSuccessEnvelope(
       {
         category,
-        codes: this.complaintService.getValidResolutionCodes(
-          category as ComplaintCategory,
-        ),
+        codes: this.complaintService.getValidResolutionCodes(category),
       },
       requestId,
     );

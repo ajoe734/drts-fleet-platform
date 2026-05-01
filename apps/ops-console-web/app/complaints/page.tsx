@@ -86,6 +86,17 @@ export default function ComplaintsPage() {
   );
 
   useEffect(() => {
+    if (!selectedRecord) {
+      return;
+    }
+    setResolutionCode((current) =>
+      validResolutionCodes.includes(current)
+        ? current
+        : (validResolutionCodes[0] ?? "resolved_other"),
+    );
+  }, [selectedRecord, validResolutionCodes]);
+
+  useEffect(() => {
     void loadRecords();
   }, []);
 

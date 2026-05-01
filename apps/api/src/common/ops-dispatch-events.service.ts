@@ -287,6 +287,27 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
       bookedBy: order.bookedBy ? { ...order.bookedBy } : null,
       onsiteContact: order.onsiteContact ? { ...order.onsiteContact } : null,
       quotedFare: order.quotedFare ? { ...order.quotedFare } : null,
+      manualFareOverride: order.manualFareOverride
+        ? { ...order.manualFareOverride }
+        : null,
+      exceptionHold: order.exceptionHold
+        ? {
+            ...order.exceptionHold,
+            criteria: { ...order.exceptionHold.criteria },
+            overrideActors: [...order.exceptionHold.overrideActors],
+            resolution: order.exceptionHold.resolution
+              ? {
+                  ...order.exceptionHold.resolution,
+                  downstreamReviewerLabels: [
+                    ...order.exceptionHold.resolution.downstreamReviewerLabels,
+                  ],
+                  downstreamStages: [
+                    ...order.exceptionHold.resolution.downstreamStages,
+                  ],
+                }
+              : null,
+          }
+        : null,
       proofRequirements: { ...order.proofRequirements },
       complianceFlags: [...order.complianceFlags],
     };
@@ -304,6 +325,7 @@ export class OpsDispatchEventsService implements OnModuleInit, OnModuleDestroy {
           ...vehicle.supplyLifecycle.dispatch,
           blockedReasons: [...vehicle.supplyLifecycle.dispatch.blockedReasons],
         },
+        offboarding: { ...vehicle.supplyLifecycle.offboarding },
         lastTrace: vehicle.supplyLifecycle.lastTrace
           ? { ...vehicle.supplyLifecycle.lastTrace }
           : null,

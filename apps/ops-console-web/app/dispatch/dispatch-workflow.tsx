@@ -16,6 +16,7 @@ import type {
   DispatchCandidateLocationState,
   DispatchJobRecord,
   OpsDispatchStreamEventEnvelope,
+  OverrideRequestRecord,
   OwnedOrderRecord,
 } from "@drts/contracts";
 import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
@@ -45,7 +46,10 @@ type ActionMode =
   | "cancel"
   | "fare_override"
   | "redispatch_with_reason"
-  | "resolve_no_supply";
+  | "resolve_no_supply"
+  | "request_override"
+  | "approve_override"
+  | "reject_override";
 
 type SpatialPointKind = "pickup" | "dropoff" | "candidate";
 
@@ -72,6 +76,9 @@ interface ActionDraft {
   reasonNote: string;
   escalationTarget: string;
   noSupplyResolution: "retry_dispatch" | "cancel_with_notification";
+  overrideType: "release_to_dispatch" | "cancel_order";
+  approvalNote: string;
+  rejectionReason: string;
 }
 
 const AUTO_LOAD_CANDIDATE_LIMIT = 6;
@@ -169,7 +176,40 @@ function buildActionDraft(
     reasonNote: "",
     escalationTarget: "",
     noSupplyResolution: "retry_dispatch",
+    overrideType: "release_to_dispatch",
+    approvalNote: "",
+    rejectionReason: "",
   };
+}
+
+function getOverrideStatusLabel(
+  status: OverrideRequestRecord["status"],
+): string {
+  switch (status) {
+    case "pending_approval":
+      return "dispatch.workflow.override.pending";
+    case "approved":
+      return "dispatch.workflow.override.approved";
+    case "rejected":
+      return "dispatch.workflow.override.rejected";
+    case "expired":
+      return "dispatch.workflow.override.expired";
+  }
+}
+
+function getOverrideStatusTone(
+  status: OverrideRequestRecord["status"],
+): string {
+  switch (status) {
+    case "pending_approval":
+      return "bg-amber-100 text-amber-800";
+    case "approved":
+      return "bg-green-100 text-green-800";
+    case "rejected":
+      return "bg-rose-100 text-rose-800";
+    case "expired":
+      return "bg-slate-100 text-slate-700";
+  }
 }
 
 function listDownstreamReviewDuties(gates: ComplianceGateRecord[]) {
@@ -597,6 +637,55 @@ export function DispatchWorkflow({
     order: OwnedOrderRecord,
     draft: ActionDraft,
   ) => {
+    if (draft.mode === "request_override") {
+      const reason = draft.reason.trim();
+      if (!reason) {
+        throw new Error(t("dispatch.workflow.actionFieldsRequired"));
+      }
+      const success = await runAction(order.orderId, async () => {
+        await client.requestExceptionOverride(order.orderId, {
+          reason,
+          overrideType: draft.overrideType,
+        });
+      });
+      if (success) {
+        closeActionDraft(order.orderId);
+      }
+      return;
+    }
+
+    if (draft.mode === "approve_override") {
+      const approvalNote = draft.approvalNote.trim();
+      if (!approvalNote) {
+        throw new Error(t("dispatch.workflow.actionFieldsRequired"));
+      }
+      const success = await runAction(order.orderId, async () => {
+        await client.approveExceptionOverride(order.orderId, {
+          approvalNote,
+        });
+      });
+      if (success) {
+        closeActionDraft(order.orderId);
+      }
+      return;
+    }
+
+    if (draft.mode === "reject_override") {
+      const rejectionReason = draft.rejectionReason.trim();
+      if (!rejectionReason) {
+        throw new Error(t("dispatch.workflow.actionFieldsRequired"));
+      }
+      const success = await runAction(order.orderId, async () => {
+        await client.rejectExceptionOverride(order.orderId, {
+          rejectionReason,
+        });
+      });
+      if (success) {
+        closeActionDraft(order.orderId);
+      }
+      return;
+    }
+
     if (draft.mode === "resolve_no_supply") {
       const success = await runAction(order.orderId, async () => {
         await client.resolveNoSupply(order.orderId, draft.noSupplyResolution);
@@ -1161,6 +1250,41 @@ export function DispatchWorkflow({
                                 .join(", "),
                             })}
                           </div>
+                          {exceptionHold.overrideRequest && (
+                            <div className="override-request-status">
+                              <span
+                                className={`queue-badge ${getOverrideStatusTone(exceptionHold.overrideRequest.status)}`}
+                              >
+                                {t(
+                                  getOverrideStatusLabel(
+                                    exceptionHold.overrideRequest.status,
+                                  ),
+                                )}
+                              </span>
+                              <div className="cell-subcopy">
+                                {t("dispatch.workflow.override.requestedBy", {
+                                  actor:
+                                    exceptionHold.overrideRequest.requestedBy
+                                      .actorId,
+                                })}
+                              </div>
+                              <div className="cell-subcopy">
+                                {t("dispatch.workflow.override.type", {
+                                  type: formatOpsCodeLabel(
+                                    locale,
+                                    exceptionHold.overrideRequest.overrideType,
+                                  ),
+                                })}
+                              </div>
+                              <div className="cell-subcopy">
+                                {t("dispatch.workflow.override.expiresAt", {
+                                  time: new Date(
+                                    exceptionHold.overrideRequest.expiresAt,
+                                  ).toLocaleTimeString(),
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </>
                       )}
                       {isDispatchTimeout && order.dispatchTimeout && (
@@ -1454,6 +1578,61 @@ export function DispatchWorkflow({
                             {t("dispatch.workflow.resolveNoSupply")}
                           </button>
                         )}
+                        {isExceptionHold &&
+                          !exceptionHold?.overrideRequest?.status && (
+                            <button
+                              className="btn btn-primary"
+                              disabled={loading === order.orderId}
+                              type="button"
+                              onClick={() =>
+                                openActionDraft(order, "request_override")
+                              }
+                            >
+                              {t("dispatch.workflow.override.request")}
+                            </button>
+                          )}
+                        {isExceptionHold &&
+                          exceptionHold?.overrideRequest?.status ===
+                            "pending_approval" && (
+                            <>
+                              <button
+                                className="btn btn-primary"
+                                disabled={loading === order.orderId}
+                                type="button"
+                                onClick={() =>
+                                  openActionDraft(order, "approve_override")
+                                }
+                              >
+                                {t("dispatch.workflow.override.approve")}
+                              </button>
+                              <button
+                                className="btn btn-warning"
+                                disabled={loading === order.orderId}
+                                type="button"
+                                onClick={() =>
+                                  openActionDraft(order, "reject_override")
+                                }
+                              >
+                                {t("dispatch.workflow.override.reject")}
+                              </button>
+                            </>
+                          )}
+                        {isExceptionHold &&
+                          (exceptionHold?.overrideRequest?.status ===
+                            "rejected" ||
+                            exceptionHold?.overrideRequest?.status ===
+                              "expired") && (
+                            <button
+                              className="btn"
+                              disabled={loading === order.orderId}
+                              type="button"
+                              onClick={() =>
+                                openActionDraft(order, "request_override")
+                              }
+                            >
+                              {t("dispatch.workflow.override.requestNew")}
+                            </button>
+                          )}
                         {isExceptionHold && (
                           <button
                             className="btn"
@@ -1627,6 +1806,65 @@ export function DispatchWorkflow({
                                     )}
                                   </option>
                                 </select>
+                              </label>
+                            )}
+                            {actionDraft.mode === "request_override" && (
+                              <label className="field-label">
+                                {t("dispatch.workflow.override.typeLabel")}
+                                <select
+                                  className="action-input"
+                                  value={actionDraft.overrideType}
+                                  onChange={(event) =>
+                                    updateActionDraft(order.orderId, {
+                                      overrideType: event.target.value as
+                                        | "release_to_dispatch"
+                                        | "cancel_order",
+                                    })
+                                  }
+                                >
+                                  <option value="release_to_dispatch">
+                                    {t(
+                                      "dispatch.workflow.override.releaseType",
+                                    )}
+                                  </option>
+                                  <option value="cancel_order">
+                                    {t("dispatch.workflow.override.cancelType")}
+                                  </option>
+                                </select>
+                              </label>
+                            )}
+                            {actionDraft.mode === "approve_override" && (
+                              <label className="field-label">
+                                {t(
+                                  "dispatch.workflow.override.approvalNoteLabel",
+                                )}
+                                <textarea
+                                  className="action-input"
+                                  value={actionDraft.approvalNote}
+                                  onChange={(event) =>
+                                    updateActionDraft(order.orderId, {
+                                      approvalNote: event.target.value,
+                                    })
+                                  }
+                                  rows={3}
+                                />
+                              </label>
+                            )}
+                            {actionDraft.mode === "reject_override" && (
+                              <label className="field-label">
+                                {t(
+                                  "dispatch.workflow.override.rejectionReasonLabel",
+                                )}
+                                <textarea
+                                  className="action-input"
+                                  value={actionDraft.rejectionReason}
+                                  onChange={(event) =>
+                                    updateActionDraft(order.orderId, {
+                                      rejectionReason: event.target.value,
+                                    })
+                                  }
+                                  rows={3}
+                                />
                               </label>
                             )}
                             <div className="action-row">
@@ -2019,6 +2257,15 @@ export function DispatchWorkflow({
         .exception-copy {
           margin-top: 0.4rem;
           font-size: 0.85rem;
+        }
+        .override-request-status {
+          margin-top: 0.5rem;
+          padding: 0.55rem 0.65rem;
+          border-radius: 0.7rem;
+          border: 1px solid #fcd34d;
+          background: #fffbeb;
+          display: grid;
+          gap: 0.25rem;
         }
         .row-focused {
           background: #eff6ff;

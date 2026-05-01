@@ -38,6 +38,19 @@ type RecordingAttachmentEvent = {
   requestId?: string;
 };
 
+type RecordingStateChangeEvent = {
+  callId: string;
+  linkedOrderId: string;
+  recordingState: CallRecordingState;
+  recordingId: string | null;
+  providerRecordingRef: string | null;
+  recordingUrl: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  agentId: string | null;
+  requestId?: string;
+};
+
 type PhoneOrderSessionInput = {
   callId: string;
   callType: CallType;
@@ -57,6 +70,10 @@ export class CallcenterService implements OnModuleInit {
 
   private readonly recordingAttachmentListeners: Array<
     (event: RecordingAttachmentEvent) => void
+  > = [];
+
+  private readonly recordingStateChangeListeners: Array<
+    (event: RecordingStateChangeEvent) => void
   > = [];
 
   constructor(
@@ -88,6 +105,12 @@ export class CallcenterService implements OnModuleInit {
     listener: (event: RecordingAttachmentEvent) => void,
   ) {
     this.recordingAttachmentListeners.push(listener);
+  }
+
+  registerRecordingStateChangeListener(
+    listener: (event: RecordingStateChangeEvent) => void,
+  ) {
+    this.recordingStateChangeListeners.push(listener);
   }
 
   openCallSession(command: OpenCallSessionCommand, requestId?: string) {
@@ -246,9 +269,11 @@ export class CallcenterService implements OnModuleInit {
     session.endedAt = endedAt;
     this.addFlag(session, "closed");
     if (session.linkedOrderId && !session.recordingId) {
+      this.removeFlag(session, "recording_pending");
       this.addFlag(session, "recording_missing");
     }
     this.persistSessions([session], "close_call_session");
+    this.notifyRecordingStateChange(session, requestId);
 
     this.recordAudit(
       {
@@ -331,6 +356,7 @@ export class CallcenterService implements OnModuleInit {
       };
     }
     this.persistSessions([session], "link_call_order");
+    this.notifyRecordingStateChange(session, requestId);
 
     this.recordAudit(
       {
@@ -409,6 +435,7 @@ export class CallcenterService implements OnModuleInit {
     for (const listener of this.recordingAttachmentListeners) {
       listener(event);
     }
+    this.notifyRecordingStateChange(session, requestId);
 
     this.recordAudit(
       {
@@ -589,6 +616,7 @@ export class CallcenterService implements OnModuleInit {
       };
       this.callSessions = [session, ...this.callSessions];
       this.persistSessions([session], "link_order_to_call_session");
+      this.notifyRecordingStateChange(session);
       return this.cloneSession(session);
     }
 
@@ -625,6 +653,7 @@ export class CallcenterService implements OnModuleInit {
     }
 
     this.persistSessions([existingSession], "link_order_to_call_session");
+    this.notifyRecordingStateChange(existingSession);
 
     return this.cloneSession(existingSession);
   }
@@ -829,6 +858,32 @@ export class CallcenterService implements OnModuleInit {
       return "missing";
     }
     return "pending";
+  }
+
+  private notifyRecordingStateChange(
+    session: CallSessionRecord,
+    requestId?: string,
+  ) {
+    if (!session.linkedOrderId) {
+      return;
+    }
+
+    const event: RecordingStateChangeEvent = {
+      callId: session.callId,
+      linkedOrderId: session.linkedOrderId,
+      recordingState: this.deriveRecordingState(session),
+      recordingId: session.recordingId,
+      providerRecordingRef: session.providerRecordingRef,
+      recordingUrl: session.recordingUrl,
+      startedAt: session.startedAt,
+      endedAt: session.endedAt,
+      agentId: session.agentId,
+      ...(requestId ? { requestId } : {}),
+    };
+
+    for (const listener of this.recordingStateChangeListeners) {
+      listener(event);
+    }
   }
 
   private cloneCallbackTask(callbackTask: CallbackTaskRecord) {

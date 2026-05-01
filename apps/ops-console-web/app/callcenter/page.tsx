@@ -6,6 +6,7 @@ import { PageHeader } from "@drts/ui-web";
 import type {
   AttachCallRecordingCommand,
   CallbackTaskRecord,
+  CallRecordingState,
   CallSessionRecord,
   ComplaintCategory,
   CreateCallCenterOrderCommand,
@@ -66,6 +67,32 @@ function formatDateTime(value: string | null | undefined) {
 
 function toIsoString(value: string) {
   return value ? new Date(value).toISOString() : "";
+}
+
+function getRecordingStateTone(recordingState: CallRecordingState) {
+  switch (recordingState) {
+    case "ready":
+      return "state-chip state-ready";
+    case "missing":
+      return "state-chip state-missing";
+    case "pending":
+    default:
+      return "state-chip state-pending";
+  }
+}
+
+function getOverrideStatusTone(status: string) {
+  switch (status) {
+    case "approved":
+      return "queue-badge badge-positive";
+    case "rejected":
+      return "queue-badge badge-danger";
+    case "expired":
+      return "queue-badge badge-warning";
+    case "pending_approval":
+    default:
+      return "queue-badge badge-warning";
+  }
 }
 
 export default function CallcenterPage() {
@@ -412,6 +439,7 @@ export default function CallcenterPage() {
                       <th>{t("callcenter.col.caller")}</th>
                       <th>{t("callcenter.col.agent")}</th>
                       <th>{t("callcenter.col.status")}</th>
+                      <th>{t("callcenter.col.recordingState")}</th>
                       <th>{t("callcenter.col.order")}</th>
                       <th>{t("callcenter.col.complaint")}</th>
                       <th>{t("callcenter.col.started")}</th>
@@ -433,6 +461,17 @@ export default function CallcenterPage() {
                         <td>{session.callerPhone}</td>
                         <td>{session.agentId ?? "-"}</td>
                         <td>{formatOpsCodeLabel(locale, session.status)}</td>
+                        <td>
+                          <span
+                            className={getRecordingStateTone(
+                              session.recordingState,
+                            )}
+                          >
+                            {t(
+                              `callcenter.recordingState.${session.recordingState}`,
+                            )}
+                          </span>
+                        </td>
                         <td>{session.linkedOrderId ?? "-"}</td>
                         <td>{session.linkedCaseNo ?? "-"}</td>
                         <td>{formatDateTime(session.startedAt)}</td>
@@ -479,9 +518,20 @@ export default function CallcenterPage() {
                         <span className="label">
                           {t("callcenter.detail.recording")}
                         </span>
+                        <span
+                          className={getRecordingStateTone(
+                            selectedSession.recordingState,
+                          )}
+                        >
+                          {t(
+                            `callcenter.recordingState.${selectedSession.recordingState}`,
+                          )}
+                        </span>
                         <strong>
                           {selectedSession.recordingId ??
-                            t("callcenter.detail.recordingPending")}
+                            (selectedSession.recordingState === "missing"
+                              ? t("callcenter.detail.recordingMissing")
+                              : t("callcenter.detail.recordingPending"))}
                         </strong>
                         <small>
                           {selectedSession.providerRecordingRef ?? "-"}
@@ -1008,6 +1058,180 @@ export default function CallcenterPage() {
                             <small>{selectedOrder.recordingId ?? "-"}</small>
                           </div>
                         </div>
+                        {selectedOrder.exceptionHold && (
+                          <div className="detail-card nested-detail-card">
+                            <div className="panel-head">
+                              <div>
+                                <h4>{t("callcenter.detail.exceptionHold")}</h4>
+                                <p className="panel-note">
+                                  {t("callcenter.detail.exceptionReason", {
+                                    reason: formatOpsCodeLabel(
+                                      locale,
+                                      selectedOrder.exceptionHold.reasonCode,
+                                    ),
+                                  })}
+                                </p>
+                              </div>
+                              {selectedOrder.exceptionHold.overrideRequest && (
+                                <span
+                                  className={getOverrideStatusTone(
+                                    selectedOrder.exceptionHold.overrideRequest
+                                      .status,
+                                  )}
+                                >
+                                  {formatOpsCodeLabel(
+                                    locale,
+                                    selectedOrder.exceptionHold.overrideRequest
+                                      .status,
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                            <div className="detail-grid">
+                              <div>
+                                <span className="label">
+                                  {t("callcenter.detail.overrideActors")}
+                                </span>
+                                <strong>
+                                  {selectedOrder.exceptionHold.overrideActors
+                                    .map((actor) =>
+                                      formatOpsCodeLabel(locale, actor),
+                                    )
+                                    .join(", ") || "-"}
+                                </strong>
+                                <small>
+                                  {t("callcenter.detail.exceptionRaisedAt", {
+                                    value: formatDateTime(
+                                      selectedOrder.exceptionHold.raisedAt,
+                                    ),
+                                  })}
+                                </small>
+                              </div>
+                              <div>
+                                <span className="label">
+                                  {t("callcenter.detail.overrideType")}
+                                </span>
+                                <strong>
+                                  {selectedOrder.exceptionHold.overrideRequest
+                                    ? formatOpsCodeLabel(
+                                        locale,
+                                        selectedOrder.exceptionHold
+                                          .overrideRequest.overrideType,
+                                      )
+                                    : "-"}
+                                </strong>
+                                <small>
+                                  {selectedOrder.exceptionHold.overrideRequest
+                                    ? t(
+                                        "callcenter.detail.overrideRequestedBy",
+                                        {
+                                          actor:
+                                            selectedOrder.exceptionHold
+                                              .overrideRequest.requestedBy
+                                              .actorId,
+                                        },
+                                      )
+                                    : t(
+                                        "callcenter.detail.noOverrideRequested",
+                                      )}
+                                </small>
+                              </div>
+                              <div>
+                                <span className="label">
+                                  {t("callcenter.detail.overrideDecision")}
+                                </span>
+                                <strong>
+                                  {selectedOrder.exceptionHold.overrideRequest
+                                    ?.approval
+                                    ? t("callcenter.detail.overrideApproved")
+                                    : selectedOrder.exceptionHold
+                                          .overrideRequest?.rejection
+                                      ? t("callcenter.detail.overrideRejected")
+                                      : selectedOrder.exceptionHold
+                                            .overrideRequest?.expiredAt
+                                        ? t("callcenter.detail.overrideExpired")
+                                        : "-"}
+                                </strong>
+                                <small>
+                                  {selectedOrder.exceptionHold.overrideRequest
+                                    ?.approval
+                                    ? t(
+                                        "callcenter.detail.overrideApprovedBy",
+                                        {
+                                          actor:
+                                            selectedOrder.exceptionHold
+                                              .overrideRequest.approval.actorId,
+                                        },
+                                      )
+                                    : selectedOrder.exceptionHold
+                                          .overrideRequest?.rejection
+                                      ? t(
+                                          "callcenter.detail.overrideRejectedBy",
+                                          {
+                                            actor:
+                                              selectedOrder.exceptionHold
+                                                .overrideRequest.rejection
+                                                .actorId,
+                                          },
+                                        )
+                                      : selectedOrder.exceptionHold
+                                            .overrideRequest?.expiredAt
+                                        ? t(
+                                            "callcenter.detail.overrideExpiredAt",
+                                            {
+                                              value: formatDateTime(
+                                                selectedOrder.exceptionHold
+                                                  .overrideRequest.expiredAt,
+                                              ),
+                                            },
+                                          )
+                                        : t(
+                                            "callcenter.detail.overrideAwaitingApproval",
+                                          )}
+                                </small>
+                              </div>
+                              <div>
+                                <span className="label">
+                                  {t("callcenter.detail.lastResolution")}
+                                </span>
+                                <strong>
+                                  {selectedOrder.exceptionHold.resolution
+                                    ? formatOpsCodeLabel(
+                                        locale,
+                                        selectedOrder.exceptionHold.resolution
+                                          .resolution,
+                                      )
+                                    : "-"}
+                                </strong>
+                                <small>
+                                  {selectedOrder.exceptionHold.resolution
+                                    ? t(
+                                        "callcenter.detail.resolutionActorReason",
+                                        {
+                                          actor:
+                                            selectedOrder.exceptionHold
+                                              .resolution.actorId,
+                                          reason:
+                                            selectedOrder.exceptionHold
+                                              .resolution.reason,
+                                        },
+                                      )
+                                    : t(
+                                        "callcenter.detail.noResolutionRecorded",
+                                      )}
+                                </small>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        <div className="toolbar">
+                          <Link
+                            className="btn"
+                            href={`/dispatch?orderId=${encodeURIComponent(selectedOrder.orderId)}`}
+                          >
+                            {t("callcenter.openInDispatch")}
+                          </Link>
+                        </div>
                         <div className="trace-list">
                           {dispatchTrace.length > 0 ? (
                             dispatchTrace.map((trace) => (
@@ -1120,6 +1344,49 @@ export default function CallcenterPage() {
           .toolbar {
             margin-bottom: 1rem;
           }
+          .state-chip {
+            display: inline-flex;
+            align-items: center;
+            width: fit-content;
+            margin-bottom: 0.35rem;
+            padding: 0.18rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 600;
+          }
+          .state-ready {
+            background: #dcfce7;
+            color: #166534;
+          }
+          .state-pending {
+            background: #fef3c7;
+            color: #92400e;
+          }
+          .state-missing {
+            background: #fee2e2;
+            color: #b91c1c;
+          }
+          .queue-badge {
+            display: inline-flex;
+            align-items: center;
+            width: fit-content;
+            padding: 0.18rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 600;
+          }
+          .badge-positive {
+            background: #dcfce7;
+            color: #166534;
+          }
+          .badge-warning {
+            background: #fef3c7;
+            color: #92400e;
+          }
+          .badge-danger {
+            background: #fee2e2;
+            color: #b91c1c;
+          }
           .assumption-panel {
             border: 1px solid #cbd5e1;
             border-radius: 1rem;
@@ -1173,6 +1440,11 @@ export default function CallcenterPage() {
             align-items: baseline;
             margin-bottom: 0.8rem;
           }
+          .panel-note {
+            margin: 0.2rem 0 0;
+            color: #64748b;
+            font-size: 0.92rem;
+          }
           .table-wrap {
             overflow-x: auto;
           }
@@ -1205,6 +1477,11 @@ export default function CallcenterPage() {
           }
           .detail-subgrid {
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          }
+          .nested-detail-card {
+            margin-top: 0.25rem;
+            border-style: dashed;
+            background: #fffbeb;
           }
           .label {
             display: block;
