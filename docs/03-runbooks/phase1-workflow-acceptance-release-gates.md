@@ -70,12 +70,12 @@ Rules:
 
 These items must stay explicit in every release statement:
 
-| Family                                       | Why it is not repo-only closure                                                  | Current anchor                                                                                                     |
-| -------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Real bank / issuer eligibility               | Needs real contract, sandbox credentials, and allowed test cards.                | `docs/03-runbooks/master-system-closeout-checklist.md` §D-4a; `docs/03-runbooks/cross-repo-gap-matrix-20260424.md` |
-| Grab Taiwan or equivalent live adapter proof | Needs partner API contract, credentials, and sandbox/live callback confirmation. | `docs/03-runbooks/cross-repo-gap-matrix-20260424.md`                                                               |
-| Mobile distribution                          | Needs Expo account, Apple team, Android keystore, and tester groups.             | `docs/03-runbooks/master-system-closeout-checklist.md` §D-4a                                                       |
-| Live CTI recording / filing activation       | Needs CTI or equivalent webhook environment plus activated jobs.                 | `docs/04-uat/phase1-uat-checklist.md` deferred tracker; `docs/04-uat/fbp-014a-e2e-matrix.md` §4.3                  |
+| Family                                       | Why it is not repo-only closure                                                                                              | Current anchor                                                                                                     |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Real bank / issuer eligibility               | Needs real contract, sandbox credentials, and allowed test cards.                                                            | `docs/03-runbooks/master-system-closeout-checklist.md` §D-4a; `docs/03-runbooks/cross-repo-gap-matrix-20260424.md` |
+| Grab Taiwan or equivalent live adapter proof | Needs partner API contract, credentials, webhook signature, callback, status sync, lost-race, and no-owned-assignment proof. | `docs/03-runbooks/cross-repo-gap-matrix-20260424.md`; `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md` |
+| Mobile distribution                          | Needs Expo account, Apple team, Android keystore, and tester groups.                                                         | `docs/03-runbooks/master-system-closeout-checklist.md` §D-4a                                                       |
+| Live CTI recording / filing activation       | Needs CTI or equivalent webhook environment plus activated jobs.                                                             | `docs/04-uat/phase1-uat-checklist.md` deferred tracker; `docs/04-uat/fbp-014a-e2e-matrix.md` §4.3                  |
 
 ## Closeout Wording Rules
 
