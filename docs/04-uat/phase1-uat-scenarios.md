@@ -1711,6 +1711,9 @@ This scenario inventory feeds the workflow-family release matrix at
 
 **Pass criteria:** No owned `dispatch_assignment` created; external lifecycle preserved.
 
+**Evidence classification:** `EXTERNAL-GATED`. The repo has a graceful-skip scaffold, but live
+pass language requires either a seeded forwarded task or real forwarder adapter proof.
+
 **Cross-ref:** SC-015, SC-017
 
 ---
@@ -1721,6 +1724,9 @@ This scenario inventory feeds the workflow-family release matrix at
 2. Recording callback arrives; **OC-022:** recording flag cleared
 3. Driver completes trip; **DA-019:** proof submitted
 4. **Ops Console (OC-024):** Export includes order row with `call_id` + `recording_id`
+
+**Evidence classification:** `DEFERRED`. This flow stays held until CTI callback and filing /
+recording export activation evidence exists.
 
 ---
 
@@ -1736,20 +1742,20 @@ This scenario inventory feeds the workflow-family release matrix at
 
 Minimum set of scenarios to automate first (aligns with `02_acceptance_scenarios_gherkin.md §2.12`):
 
-| Scenario ID | UAT ID     | Description                                       |
-| ----------- | ---------- | ------------------------------------------------- |
-| SC-001      | —          | Owned standard_taxi immediate booking (owned app) |
-| SC-003      | OC-021     | Phone booking with recording linkage              |
-| SC-005      | OC-002     | Standard dispatch assignment                      |
-| SC-008      | TP-001     | Enterprise dispatch booking                       |
-| SC-010      | TP-004     | Airport pickup — missing flight number            |
-| SC-013      | DA-008     | Enterprise dispatch — signoff required            |
-| SC-015      | DA-001/005 | Forwarded order accepted + confirmed              |
-| SC-020      | DA-004     | Cannot start trip before arrived_pickup           |
-| SC-023      | OC-013     | Vehicle — exclusivity review gate                 |
-| SC-024      | OC-014     | Vehicle — insurance expiry auto-suspend           |
-| SC-027      | OC-010     | Complaint case creation (not incident)            |
-| SC-033      | OC-023     | Regulatory monthly filing package                 |
+| Scenario ID | UAT ID     | Description                                       | Classification  |
+| ----------- | ---------- | ------------------------------------------------- | --------------- |
+| SC-001      | —          | Owned standard_taxi immediate booking (owned app) | LIVE            |
+| SC-003      | OC-021     | Phone booking with recording linkage              | STATIC EVIDENCE |
+| SC-005      | OC-002     | Standard dispatch assignment                      | LIVE            |
+| SC-008      | TP-001     | Enterprise dispatch booking                       | LIVE            |
+| SC-010      | TP-004     | Airport pickup — missing flight number            | LIVE            |
+| SC-013      | DA-008     | Enterprise dispatch — signoff required            | SIGN-OFF        |
+| SC-015      | DA-001/005 | Forwarded order accepted + confirmed              | EXTERNAL-GATED  |
+| SC-020      | DA-004     | Cannot start trip before arrived_pickup           | STATIC EVIDENCE |
+| SC-023      | OC-013     | Vehicle — exclusivity review gate                 | LIVE            |
+| SC-024      | OC-014     | Vehicle — insurance expiry auto-suspend           | LIVE            |
+| SC-027      | OC-010     | Complaint case creation (not incident)            | STATIC EVIDENCE |
+| SC-033      | OC-023     | Regulatory monthly filing package                 | DEFERRED        |
 
 ---
 
@@ -1757,16 +1763,17 @@ Minimum set of scenarios to automate first (aligns with `02_acceptance_scenarios
 
 The following items are blocked until WE-004 (smoke harness) produces evidence:
 
-| Gate                             | Description                                          | Unblocked by                     |
-| -------------------------------- | ---------------------------------------------------- | -------------------------------- |
-| **Recording callback**           | Real CTI webhook integration (OC-022)                | External CTI environment or stub |
-| **Insurance expiry trigger**     | Automated job that marks vehicle ineligible (OC-014) | Backend job activation           |
-| **SLA breach monitor**           | Complaint SLA job (OC-012)                           | Scheduler activation on staging  |
-| **Billing statement generation** | Period-end job (DA-016/017)                          | Staging billing job config       |
-| **Regulatory filing**            | Month-end snapshot job (OC-023)                      | Staging reporting job config     |
+| Gate                             | Description                                          | Unblocked by                     | Classification  |
+| -------------------------------- | ---------------------------------------------------- | -------------------------------- | --------------- |
+| **Recording callback**           | Real CTI webhook integration (OC-022)                | External CTI environment or stub | EXTERNAL-GATED  |
+| **Insurance expiry trigger**     | Automated job that marks vehicle ineligible (OC-014) | Backend job activation           | LIVE            |
+| **SLA breach monitor**           | Complaint SLA job (OC-012)                           | Scheduler activation on staging  | STATIC EVIDENCE |
+| **Billing statement generation** | Period-end job (DA-016/017)                          | Staging billing job config       | STATIC EVIDENCE |
+| **Regulatory filing**            | Month-end snapshot job (OC-023)                      | Staging reporting job config     | DEFERRED        |
 
-Until smoke evidence is available, these scenarios are marked **deferred** and covered by
-manual test scripts in the WE-004 harness.
+Rows marked `DEFERRED` or `EXTERNAL-GATED` stay blocked until the named evidence exists. Rows
+marked `STATIC EVIDENCE` or `LIVE` still require their own `Pass/Fail` execution result before
+human UAT pass language is allowed.
 
 ---
 

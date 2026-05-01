@@ -153,6 +153,7 @@ Driver App (visibility) ──► Driver App (accept) ──► Ops Console (no-
 
 This scenario is environment-dependent: it requires a seeded forwarded task or a live external
 platform adapter. In dry-run / staging-without-adapters it will warn and exit 0 (skip), not fail.
+Treat this as `EXTERNAL-GATED` until that seed or adapter evidence is attached.
 
 ---
 
@@ -164,6 +165,7 @@ This scenario requires a live CTI session (`call_id`) and a recording callback w
 **not automated in the scaffold** because both dependencies are environment-gated (external CTI
 environment or stub). It is covered by the WE-004 smoke harness guidance and the UAT checklist
 pending items (`OC-021`, `OC-022`, `OC-024`).
+Treat this as `DEFERRED` until CTI callback plus filing / recording export evidence is attached.
 
 **Manual steps** (reference only):
 

@@ -21,6 +21,21 @@ use `FBP-013D` for the final release / pilot / production decision read.
 4. **All P1 items must pass before Phase 1 can ship.**
 5. Deferred items require sign-off from the supervisor that the deferral is acceptable.
 
+## Classification Legend
+
+`Pass/Fail` is the human UAT execution result. `Classification` is the release-evidence state and
+must not be read as a pass mark while the row is still unchecked.
+
+| Classification        | Meaning                                                                  |
+| --------------------- | ------------------------------------------------------------------------ |
+| `LIVE`                | Live staging evidence exists or the row is covered by a live gate.       |
+| `STATIC EVIDENCE`     | Repo/static evidence exists, but no fresh human UAT pass is implied.     |
+| `REPO-LOCAL VERIFIED` | Repo-local smoke/unit/manual verification exists; no live proof implied. |
+| `SIGN-OFF`            | Human/business sign-off is required before release claim.                |
+| `EXTERNAL-GATED`      | Requires partner, CTI, app-store, credential, or other external input.   |
+| `DEFERRED`            | Explicitly deferred with owner/evidence requirement.                     |
+| `INVENTORY`           | Listed for coverage inventory; not yet release evidence.                 |
+
 ## Release-Gate Family Map
 
 This checklist is still the row-by-row inventory, but release conclusions should
@@ -75,40 +90,40 @@ Before starting UAT, confirm:
 
 ## Surface 1 — Tenant Portal
 
-| ID     | Scenario                                        | Role                     | Priority | Pass/Fail | Notes                                      |
-| ------ | ----------------------------------------------- | ------------------------ | -------- | --------- | ------------------------------------------ |
-| TP-001 | Enterprise dispatch booking — happy path        | `tenant_booking_manager` | P1       | ⬜        |                                            |
-| TP-002 | Booking wizard — address unresolvable           | `tenant_booking_manager` | P1       | ⬜        | Error message: `ADDRESS_UNRESOLVABLE`      |
-| TP-003 | Airport transfer booking — happy path           | `tenant_booking_manager` | P1       | ⬜        |                                            |
-| TP-004 | Airport pickup — missing flight number          | `tenant_booking_manager` | P1       | ⬜        | Error: `FLIGHT_NO_REQUIRED`                |
-| TP-005 | Modify booking before deadline                  | `tenant_booking_manager` | P2       | ⬜        |                                            |
-| TP-006 | Modify booking after `modifiable_until`         | `tenant_booking_manager` | P1       | ⬜        | Error: `ORDER_NOT_MODIFIABLE`              |
-| TP-007 | Booking list — filter by status                 | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-008 | Cancel booking                                  | `tenant_booking_manager` | P2       | ⬜        | Audit entry written                        |
-| TP-009 | Create passenger                                | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-010 | Update passenger name                           | `tenant_admin`           | P3       | ⬜        |                                            |
-| TP-011 | Delete passenger                                | `tenant_admin`           | P3       | ⬜        |                                            |
-| TP-012 | Create address entry                            | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-013 | Trigger report export                           | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-014 | Download report artifact                        | `tenant_admin`           | P2       | ⬜        | Audit entry written                        |
-| TP-015 | Issue API key — shown once                      | `tenant_admin`           | P1       | ⬜        | Plaintext only on first view               |
-| TP-016 | Rotate API key                                  | `tenant_admin`           | P1       | ⬜        | Old key invalidated                        |
-| TP-017 | Revoke API key                                  | `tenant_admin`           | P1       | ⬜        |                                            |
-| TP-018 | Create webhook endpoint                         | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-019 | Webhook secret rotation                         | `tenant_admin`           | P1       | ⬜        | New deliveries use new secret              |
-| TP-020 | View webhook delivery log                       | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-021 | View billing profile                            | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-022 | View invoice list                               | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-023 | Download invoice PDF                            | `tenant_admin`           | P1       | ⬜        | Amount: `amountMinor/100`, currency prefix |
-| TP-024 | Update notification preferences                 | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-025 | View and update SLA profile                     | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-026 | Invite tenant user                              | `tenant_admin`           | P2       | ⬜        |                                            |
-| TP-027 | Change user role                                | `tenant_admin`           | P2       | ⬜        | Audit entry written                        |
-| TP-028 | View audit trail (tenant scope)                 | `tenant_admin`           | P2       | ⬜        | Only own tenant events visible             |
-| TP-029 | RBAC — tenant admin blocked from pricing engine | `tenant_admin`           | P1       | ⬜        | `403 Forbidden`                            |
-| TP-030 | Tenant bootstrap rejects wrong tenant scope     | `tenant_admin`           | P1       | ⬜        | `TENANT_SCOPE_MISMATCH`; no session issued |
-| TP-031 | Suspended tenant user cannot bootstrap session  | `tenant_admin`           | P1       | ⬜        | `TENANT_USER_SUSPENDED`                    |
-| TP-032 | Inactive partner entry cannot bootstrap         | `partner_api_client`     | P1       | ⬜        | `PARTNER_ENTRY_INACTIVE`; audit written    |
+| ID     | Scenario                                        | Role                     | Priority | Pass/Fail | Notes                                      | Classification  |
+| ------ | ----------------------------------------------- | ------------------------ | -------- | --------- | ------------------------------------------ | --------------- |
+| TP-001 | Enterprise dispatch booking — happy path        | `tenant_booking_manager` | P1       | ⬜        |                                            | LIVE            |
+| TP-002 | Booking wizard — address unresolvable           | `tenant_booking_manager` | P1       | ⬜        | Error message: `ADDRESS_UNRESOLVABLE`      | LIVE            |
+| TP-003 | Airport transfer booking — happy path           | `tenant_booking_manager` | P1       | ⬜        |                                            | LIVE            |
+| TP-004 | Airport pickup — missing flight number          | `tenant_booking_manager` | P1       | ⬜        | Error: `FLIGHT_NO_REQUIRED`                | LIVE            |
+| TP-005 | Modify booking before deadline                  | `tenant_booking_manager` | P2       | ⬜        |                                            | INVENTORY       |
+| TP-006 | Modify booking after `modifiable_until`         | `tenant_booking_manager` | P1       | ⬜        | Error: `ORDER_NOT_MODIFIABLE`              | LIVE            |
+| TP-007 | Booking list — filter by status                 | `tenant_admin`           | P2       | ⬜        |                                            | INVENTORY       |
+| TP-008 | Cancel booking                                  | `tenant_booking_manager` | P2       | ⬜        | Audit entry written                        | STATIC EVIDENCE |
+| TP-009 | Create passenger                                | `tenant_admin`           | P2       | ⬜        |                                            | INVENTORY       |
+| TP-010 | Update passenger name                           | `tenant_admin`           | P3       | ⬜        |                                            | INVENTORY       |
+| TP-011 | Delete passenger                                | `tenant_admin`           | P3       | ⬜        |                                            | INVENTORY       |
+| TP-012 | Create address entry                            | `tenant_admin`           | P2       | ⬜        |                                            | INVENTORY       |
+| TP-013 | Trigger report export                           | `tenant_admin`           | P2       | ⬜        |                                            | STATIC EVIDENCE |
+| TP-014 | Download report artifact                        | `tenant_admin`           | P2       | ⬜        | Audit entry written                        | STATIC EVIDENCE |
+| TP-015 | Issue API key — shown once                      | `tenant_admin`           | P1       | ⬜        | Plaintext only on first view               | STATIC EVIDENCE |
+| TP-016 | Rotate API key                                  | `tenant_admin`           | P1       | ⬜        | Old key invalidated                        | STATIC EVIDENCE |
+| TP-017 | Revoke API key                                  | `tenant_admin`           | P1       | ⬜        |                                            | STATIC EVIDENCE |
+| TP-018 | Create webhook endpoint                         | `tenant_admin`           | P2       | ⬜        |                                            | STATIC EVIDENCE |
+| TP-019 | Webhook secret rotation                         | `tenant_admin`           | P1       | ⬜        | New deliveries use new secret              | STATIC EVIDENCE |
+| TP-020 | View webhook delivery log                       | `tenant_admin`           | P2       | ⬜        |                                            | STATIC EVIDENCE |
+| TP-021 | View billing profile                            | `tenant_admin`           | P2       | ⬜        |                                            | STATIC EVIDENCE |
+| TP-022 | View invoice list                               | `tenant_admin`           | P2       | ⬜        |                                            | STATIC EVIDENCE |
+| TP-023 | Download invoice PDF                            | `tenant_admin`           | P1       | ⬜        | Amount: `amountMinor/100`, currency prefix | STATIC EVIDENCE |
+| TP-024 | Update notification preferences                 | `tenant_admin`           | P2       | ⬜        |                                            | DEFERRED        |
+| TP-025 | View and update SLA profile                     | `tenant_admin`           | P2       | ⬜        |                                            | DEFERRED        |
+| TP-026 | Invite tenant user                              | `tenant_admin`           | P2       | ⬜        |                                            | LIVE            |
+| TP-027 | Change user role                                | `tenant_admin`           | P2       | ⬜        | Audit entry written                        | LIVE            |
+| TP-028 | View audit trail (tenant scope)                 | `tenant_admin`           | P2       | ⬜        | Only own tenant events visible             | STATIC EVIDENCE |
+| TP-029 | RBAC — tenant admin blocked from pricing engine | `tenant_admin`           | P1       | ⬜        | `403 Forbidden`                            | LIVE            |
+| TP-030 | Tenant bootstrap rejects wrong tenant scope     | `tenant_admin`           | P1       | ⬜        | `TENANT_SCOPE_MISMATCH`; no session issued | LIVE            |
+| TP-031 | Suspended tenant user cannot bootstrap session  | `tenant_admin`           | P1       | ⬜        | `TENANT_USER_SUSPENDED`                    | LIVE            |
+| TP-032 | Inactive partner entry cannot bootstrap         | `partner_api_client`     | P1       | ⬜        | `PARTNER_ENTRY_INACTIVE`; audit written    | LIVE            |
 
 **Tenant Portal P1 pass gate:** TP-001, TP-002, TP-003, TP-004, TP-006, TP-015, TP-016, TP-017, TP-019, TP-023, TP-029, TP-030, TP-031, TP-032
 
@@ -116,19 +131,19 @@ Before starting UAT, confirm:
 
 ## Surface 2 — Platform Admin
 
-| ID     | Scenario                                     | Role             | Priority | Pass/Fail | Notes                                        |
-| ------ | -------------------------------------------- | ---------------- | -------- | --------- | -------------------------------------------- |
-| PA-001 | Create tenant                                | `platform_admin` | P1       | ⬜        | Unique `tenant.code` enforced; audit written |
-| PA-002 | Edit tenant quotas and modules               | `platform_admin` | P2       | ⬜        |                                              |
-| PA-003 | Deactivate tenant                            | `platform_admin` | P2       | ⬜        | Audit written                                |
-| PA-004 | Create platform user and assign role         | `platform_admin` | P2       | ⬜        |                                              |
-| PA-005 | Roles page — RBAC tiers visible              | `platform_admin` | P2       | ⬜        |                                              |
-| PA-006 | View pricing template list                   | `platform_admin` | P2       | ⬜        |                                              |
-| PA-007 | Pricing write is audited (version published) | `platform_admin` | P1       | ⬜        | old/new version in audit                     |
-| PA-008 | Health dashboard                             | `platform_admin` | P3       | ⬜        | May use simulated data                       |
-| PA-009 | Platform-level audit trail                   | `platform_admin` | P1       | ⬜        | High-sensitivity events present              |
-| PA-010 | Feature flag toggle                          | `platform_admin` | P2       | ⬜        | Audit written                                |
-| PA-011 | View payment records                         | `platform_admin` | P2       | ⬜        |                                              |
+| ID     | Scenario                                     | Role             | Priority | Pass/Fail | Notes                                        | Classification  |
+| ------ | -------------------------------------------- | ---------------- | -------- | --------- | -------------------------------------------- | --------------- |
+| PA-001 | Create tenant                                | `platform_admin` | P1       | ⬜        | Unique `tenant.code` enforced; audit written | LIVE            |
+| PA-002 | Edit tenant quotas and modules               | `platform_admin` | P2       | ⬜        |                                              | LIVE            |
+| PA-003 | Deactivate tenant                            | `platform_admin` | P2       | ⬜        | Audit written                                | LIVE            |
+| PA-004 | Create platform user and assign role         | `platform_admin` | P2       | ⬜        |                                              | LIVE            |
+| PA-005 | Roles page — RBAC tiers visible              | `platform_admin` | P2       | ⬜        |                                              | LIVE            |
+| PA-006 | View pricing template list                   | `platform_admin` | P2       | ⬜        |                                              | STATIC EVIDENCE |
+| PA-007 | Pricing write is audited (version published) | `platform_admin` | P1       | ⬜        | old/new version in audit                     | STATIC EVIDENCE |
+| PA-008 | Health dashboard                             | `platform_admin` | P3       | ⬜        | May use simulated data                       | LIVE            |
+| PA-009 | Platform-level audit trail                   | `platform_admin` | P1       | ⬜        | High-sensitivity events present              | STATIC EVIDENCE |
+| PA-010 | Feature flag toggle                          | `platform_admin` | P2       | ⬜        | Audit written                                | LIVE            |
+| PA-011 | View payment records                         | `platform_admin` | P2       | ⬜        |                                              | STATIC EVIDENCE |
 
 **Platform Admin P1 pass gate:** PA-001, PA-007, PA-009
 
@@ -136,34 +151,34 @@ Before starting UAT, confirm:
 
 ## Surface 3 — Ops Console
 
-| ID     | Scenario                                             | Role                   | Priority | Pass/Fail | Notes                                      |
-| ------ | ---------------------------------------------------- | ---------------------- | -------- | --------- | ------------------------------------------ |
-| OC-001 | Dispatch queue visible — correct columns             | `ops_dispatcher`       | P1       | ⬜        | `exception_hold` orders distinguished      |
-| OC-002 | Assign driver to ready-for-dispatch order            | `ops_dispatcher`       | P1       | ⬜        | Trace log appended                         |
-| OC-003 | Reassign assigned order                              | `ops_dispatcher`       | P1       | ⬜        | Old assignment preserved                   |
-| OC-004 | Release assignment                                   | `ops_dispatcher`       | P2       | ⬜        |                                            |
-| OC-005 | Handle exception_hold order                          | `ops_dispatcher`       | P1       | ⬜        | SLA notification if configured             |
-| OC-006 | Dispatch fails — no eligible supply                  | `ops_dispatcher`       | P1       | ⬜        | No fake ETA returned                       |
-| OC-007 | Create incident                                      | `ops_manager`          | P2       | ⬜        |                                            |
-| OC-008 | Update incident status                               | `ops_manager`          | P2       | ⬜        | Audit written                              |
-| OC-009 | Incident ≠ complaint case (conceptual guard)         | `ops_manager`          | P1       | ⬜        | Verify no auto complaint creation          |
-| OC-010 | Create complaint case                                | `complaint_specialist` | P1       | ⬜        | Unique case number; SLA timer starts       |
-| OC-011 | Reopen closed complaint                              | `complaint_specialist` | P2       | ⬜        | Case number retained; timeline updated     |
-| OC-012 | SLA breach flag visible (non-destructive)            | `complaint_specialist` | P2       | ⬜        | Main status unchanged                      |
-| OC-013 | Vehicle onboarding — exclusivity review gate         | `ops_manager`          | P1       | ⬜        | Cannot set dispatchable before approval    |
-| OC-014 | Insurance expiry makes vehicle ineligible            | `ops_manager`          | P1       | ⬜        | Alert generated; dispatch excludes vehicle |
-| OC-015 | Vehicle offboarding — debranding task created        | `ops_manager`          | P2       | ⬜        |                                            |
-| OC-016 | Driver expired license blocks clock-in               | `ops_manager`          | P1       | ⬜        | `DRIVER_CERT_INVALID`                      |
-| OC-017 | View driver earnings statement (read-only)           | `ops_manager`          | P2       | ⬜        | Cannot modify net                          |
-| OC-018 | Create maintenance record                            | `ops_manager`          | P2       | ⬜        |                                            |
-| OC-019 | Close maintenance record                             | `ops_manager`          | P2       | ⬜        |                                            |
-| OC-020 | View driver attendance                               | `ops_manager`          | P3       | ⬜        |                                            |
-| OC-021 | Phone booking with call linkage                      | `ops_dispatcher`       | P1       | ⬜        | `call_id`, `agent_id` stored               |
-| OC-022 | Recording pending flag cleared by callback           | `ops_dispatcher`       | P2       | ⬜        | ⏸ Deferred pending CTI stub                |
-| OC-023 | Monthly regulatory filing package                    | `ops_manager`          | P1       | ⬜        | ⏸ Deferred pending job activation          |
-| OC-024 | Recording index export with call references          | `ops_manager`          | P1       | ⬜        | ⏸ Deferred pending job activation          |
-| OC-025 | Sensitive artifact download — permissioned + audited | `ops_manager`          | P1       | ⬜        | Unauthorized = `403`                       |
-| OC-026 | View tenant contract rules                           | `ops_manager`          | P2       | ⬜        |                                            |
+| ID     | Scenario                                             | Role                   | Priority | Pass/Fail | Notes                                      | Classification  |
+| ------ | ---------------------------------------------------- | ---------------------- | -------- | --------- | ------------------------------------------ | --------------- |
+| OC-001 | Dispatch queue visible — correct columns             | `ops_dispatcher`       | P1       | ⬜        | `exception_hold` orders distinguished      | LIVE            |
+| OC-002 | Assign driver to ready-for-dispatch order            | `ops_dispatcher`       | P1       | ⬜        | Trace log appended                         | LIVE            |
+| OC-003 | Reassign assigned order                              | `ops_dispatcher`       | P1       | ⬜        | Old assignment preserved                   | LIVE            |
+| OC-004 | Release assignment                                   | `ops_dispatcher`       | P2       | ⬜        |                                            | INVENTORY       |
+| OC-005 | Handle exception_hold order                          | `ops_dispatcher`       | P1       | ⬜        | SLA notification if configured             | LIVE            |
+| OC-006 | Dispatch fails — no eligible supply                  | `ops_dispatcher`       | P1       | ⬜        | No fake ETA returned                       | LIVE            |
+| OC-007 | Create incident                                      | `ops_manager`          | P2       | ⬜        |                                            | INVENTORY       |
+| OC-008 | Update incident status                               | `ops_manager`          | P2       | ⬜        | Audit written                              | STATIC EVIDENCE |
+| OC-009 | Incident ≠ complaint case (conceptual guard)         | `ops_manager`          | P1       | ⬜        | Verify no auto complaint creation          | LIVE            |
+| OC-010 | Create complaint case                                | `complaint_specialist` | P1       | ⬜        | Unique case number; SLA timer starts       | STATIC EVIDENCE |
+| OC-011 | Reopen closed complaint                              | `complaint_specialist` | P2       | ⬜        | Case number retained; timeline updated     | STATIC EVIDENCE |
+| OC-012 | SLA breach flag visible (non-destructive)            | `complaint_specialist` | P2       | ⬜        | Main status unchanged                      | STATIC EVIDENCE |
+| OC-013 | Vehicle onboarding — exclusivity review gate         | `ops_manager`          | P1       | ⬜        | Cannot set dispatchable before approval    | LIVE            |
+| OC-014 | Insurance expiry makes vehicle ineligible            | `ops_manager`          | P1       | ⬜        | Alert generated; dispatch excludes vehicle | LIVE            |
+| OC-015 | Vehicle offboarding — debranding task created        | `ops_manager`          | P2       | ⬜        |                                            | INVENTORY       |
+| OC-016 | Driver expired license blocks clock-in               | `ops_manager`          | P1       | ⬜        | `DRIVER_CERT_INVALID`                      | LIVE            |
+| OC-017 | View driver earnings statement (read-only)           | `ops_manager`          | P2       | ⬜        | Cannot modify net                          | STATIC EVIDENCE |
+| OC-018 | Create maintenance record                            | `ops_manager`          | P2       | ⬜        |                                            | INVENTORY       |
+| OC-019 | Close maintenance record                             | `ops_manager`          | P2       | ⬜        |                                            | INVENTORY       |
+| OC-020 | View driver attendance                               | `ops_manager`          | P3       | ⬜        |                                            | INVENTORY       |
+| OC-021 | Phone booking with call linkage                      | `ops_dispatcher`       | P1       | ⬜        | `call_id`, `agent_id` stored               | STATIC EVIDENCE |
+| OC-022 | Recording pending flag cleared by callback           | `ops_dispatcher`       | P2       | ⬜        | ⏸ Deferred pending CTI stub                | EXTERNAL-GATED  |
+| OC-023 | Monthly regulatory filing package                    | `ops_manager`          | P1       | ⬜        | ⏸ Deferred pending job activation          | DEFERRED        |
+| OC-024 | Recording index export with call references          | `ops_manager`          | P1       | ⬜        | ⏸ Deferred pending job activation          | DEFERRED        |
+| OC-025 | Sensitive artifact download — permissioned + audited | `ops_manager`          | P1       | ⬜        | Unauthorized = `403`                       | STATIC EVIDENCE |
+| OC-026 | View tenant contract rules                           | `ops_manager`          | P2       | ⬜        |                                            | STATIC EVIDENCE |
 
 **Ops Console P1 pass gate:** OC-001, OC-002, OC-003, OC-005, OC-006, OC-009, OC-010, OC-013, OC-014, OC-016, OC-021, OC-025
 
@@ -171,33 +186,33 @@ Before starting UAT, confirm:
 
 ## Surface 4 — Driver App
 
-| ID     | Scenario                                           | Role     | Priority | Pass/Fail | Notes                                                     |
-| ------ | -------------------------------------------------- | -------- | -------- | --------- | --------------------------------------------------------- |
-| DA-001 | Jobs list — platform badge per task                | `driver` | P1       | ⬜        | TaskTypeBadge, PlatformBadge                              |
-| DA-002 | Accept task before timeout                         | `driver` | P1       | ⬜        | Acceptance time stored                                    |
-| DA-003 | Reject task — reason required                      | `driver` | P1       | ⬜        | Reason stored with attempt                                |
-| DA-004 | Cannot start trip before arrived_pickup            | `driver` | P1       | ⬜        | `PICKUP_NOT_ARRIVED`                                      |
-| DA-005 | Forwarded task — routeLocked hides override        | `driver` | P1       | ⬜        | Third-party waypoints authoritative                       |
-| DA-006 | Fixed-price task — fare modification rejected      | `driver` | P1       | ⬜        | `FIXED_PRICE_IMMUTABLE`                                   |
-| DA-007 | Completion — min photo count                       | `driver` | P1       | ⬜        | `MIN_PHOTO_COUNT_NOT_MET`                                 |
-| DA-008 | Enterprise dispatch — signoff required             | `driver` | P1       | ⬜        | `PROOF_REQUIRED`                                          |
-| DA-009 | Airport transfer — expense proof required          | `driver` | P1       | ⬜        | `EXPENSE_PROOF_REQUIRED`                                  |
-| DA-010 | Per-platform online/offline toggle                 | `driver` | P1       | ⬜        | Correct API called                                        |
-| DA-011 | Token expiry warning with countdown                | `driver` | P2       | ⬜        | Xd Yh format                                              |
-| DA-012 | Re-auth flow updates token                         | `driver` | P1       | ⬜        | Urgency indicator removed after                           |
-| DA-013 | Platform eligibility status displayed              | `driver` | P2       | ⬜        |                                                           |
-| DA-014 | Bind new platform account                          | `driver` | P2       | ⬜        |                                                           |
-| DA-015 | Unbind platform account                            | `driver` | P2       | ⬜        |                                                           |
-| DA-016 | Earnings summary by platform                       | `driver` | P1       | ⬜        | gross / fee / subsidy / net                               |
-| DA-017 | Driver only sees own earnings                      | `driver` | P1       | ⬜        | No cross-driver data                                      |
-| DA-018 | Platform discount NOT deducted from driver net     | `driver` | P1       | ⬜        | ⏸ Deferred pending billing job                            |
-| DA-019 | Trip lifecycle buttons match state                 | `driver` | P1       | ⬜        |                                                           |
-| DA-020 | Settings — update preference                       | `driver` | P3       | ⬜        |                                                           |
-| DA-021 | Clock in — happy path                              | `driver` | P1       | ⬜        | work*state → `available*\*`                               |
-| DA-022 | Clock in — blocked by expired license              | `driver` | P1       | ⬜        | `DRIVER_CERT_INVALID`                                     |
-| DA-023 | Driver reports incident during trip                | `driver` | P2       | ⬜        |                                                           |
-| DA-024 | Driver device registration denied by auth gate     | `driver` | P1       | ⬜        | `DRIVER_AUTH_SUSPENDED` or `DRIVER_CERT_INVALID`          |
-| DA-025 | Revoked or suspended driver session cannot re-auth | `driver` | P1       | ⬜        | `DRIVER_DEVICE_SESSION_INVALID` / `DRIVER_AUTH_SUSPENDED` |
+| ID     | Scenario                                           | Role     | Priority | Pass/Fail | Notes                                                     | Classification  |
+| ------ | -------------------------------------------------- | -------- | -------- | --------- | --------------------------------------------------------- | --------------- |
+| DA-001 | Jobs list — platform badge per task                | `driver` | P1       | ⬜        | TaskTypeBadge, PlatformBadge                              | STATIC EVIDENCE |
+| DA-002 | Accept task before timeout                         | `driver` | P1       | ⬜        | Acceptance time stored                                    | STATIC EVIDENCE |
+| DA-003 | Reject task — reason required                      | `driver` | P1       | ⬜        | Reason stored with attempt outcome                        | STATIC EVIDENCE |
+| DA-004 | Cannot start trip before arrived_pickup            | `driver` | P1       | ⬜        | `PICKUP_NOT_ARRIVED`                                      | STATIC EVIDENCE |
+| DA-005 | Forwarded task — routeLocked flag hides override   | `driver` | P1       | ⬜        | Third-party waypoints authoritative                       | EXTERNAL-GATED  |
+| DA-006 | Fixed-price task — fare modification rejected      | `driver` | P1       | ⬜        | `FIXED_PRICE_IMMUTABLE`                                   | STATIC EVIDENCE |
+| DA-007 | Completion — min photo count                       | `driver` | P1       | ⬜        | `MIN_PHOTO_COUNT_NOT_MET`                                 | STATIC EVIDENCE |
+| DA-008 | Enterprise dispatch — signoff required             | `driver` | P1       | ⬜        | `PROOF_REQUIRED`                                          | SIGN-OFF        |
+| DA-009 | Airport transfer — expense proof required          | `driver` | P1       | ⬜        | `EXPENSE_PROOF_REQUIRED`                                  | STATIC EVIDENCE |
+| DA-010 | Per-platform online/offline toggle                 | `driver` | P1       | ⬜        | Correct API called                                        | STATIC EVIDENCE |
+| DA-011 | Token expiry warning with countdown                | `driver` | P2       | ⬜        | Xd Yh format                                              | INVENTORY       |
+| DA-012 | Re-auth flow updates token                         | `driver` | P1       | ⬜        | Urgency indicator removed after                           | STATIC EVIDENCE |
+| DA-013 | Platform eligibility status displayed              | `driver` | P2       | ⬜        |                                                           | INVENTORY       |
+| DA-014 | Bind new platform account                          | `driver` | P2       | ⬜        |                                                           | INVENTORY       |
+| DA-015 | Unbind platform account                            | `driver` | P2       | ⬜        |                                                           | INVENTORY       |
+| DA-016 | Earnings summary by platform                       | `driver` | P1       | ⬜        | gross / fee / subsidy / net                               | STATIC EVIDENCE |
+| DA-017 | Driver only sees own earnings                      | `driver` | P1       | ⬜        | No cross-driver data                                      | STATIC EVIDENCE |
+| DA-018 | Platform discount NOT deducted from driver net     | `driver` | P1       | ⬜        | ⏸ Deferred pending billing job                            | DEFERRED        |
+| DA-019 | Trip lifecycle buttons match state                 | `driver` | P1       | ⬜        |                                                           | STATIC EVIDENCE |
+| DA-020 | Settings — update preference                       | `driver` | P3       | ⬜        |                                                           | INVENTORY       |
+| DA-021 | Clock in — happy path                              | `driver` | P1       | ⬜        | work*state → `available*\*`                               | LIVE            |
+| DA-022 | Clock in — blocked by expired license              | `driver` | P1       | ⬜        | `DRIVER_CERT_INVALID`                                     | STATIC EVIDENCE |
+| DA-023 | Driver reports incident during trip                | `driver` | P2       | ⬜        |                                                           | INVENTORY       |
+| DA-024 | Driver device registration denied by auth gate     | `driver` | P1       | ⬜        | `DRIVER_AUTH_SUSPENDED` or `DRIVER_CERT_INVALID`          | STATIC EVIDENCE |
+| DA-025 | Revoked or suspended driver session cannot re-auth | `driver` | P1       | ⬜        | `DRIVER_DEVICE_SESSION_INVALID` / `DRIVER_AUTH_SUSPENDED` | STATIC EVIDENCE |
 
 **Driver App P1 pass gate:** DA-001 through DA-010, DA-012, DA-016, DA-017, DA-019, DA-021, DA-022, DA-024, DA-025
 
@@ -205,26 +220,69 @@ Before starting UAT, confirm:
 
 ## End-to-End Flows
 
-| ID      | Scenario                                    | Surfaces              | Priority | Pass/Fail | Notes                                   |
-| ------- | ------------------------------------------- | --------------------- | -------- | --------- | --------------------------------------- |
-| E2E-001 | Enterprise dispatch full cycle              | Portal + Ops + Driver | P1       | ⬜        | All audit entries; no cross-tenant leak |
-| E2E-002 | Forwarded order mirror lifecycle            | Driver                | P1       | ⬜        | No owned assignment created             |
-| E2E-003 | Phone booking to compliance export          | Ops                   | P1       | ⬜        | ⏸ Deferred pending CTI + filing jobs    |
-| E2E-004 | Platform admin creates tenant; tenant books | Admin + Portal + Ops  | P1       | ⬜        |                                         |
+| ID      | Scenario                                    | Surfaces              | Priority | Pass/Fail | Notes                                   | Classification |
+| ------- | ------------------------------------------- | --------------------- | -------- | --------- | --------------------------------------- | -------------- |
+| E2E-001 | Enterprise dispatch full cycle              | Portal + Ops + Driver | P1       | ⬜        | All audit entries; no cross-tenant leak | LIVE           |
+| E2E-002 | Forwarded order mirror lifecycle            | Driver                | P1       | ⬜        | No owned assignment created             | EXTERNAL-GATED |
+| E2E-003 | Phone booking to compliance export          | Ops                   | P1       | ⬜        | ⏸ Deferred pending CTI + filing jobs    | DEFERRED       |
+| E2E-004 | Platform admin creates tenant; tenant books | Admin + Portal + Ops  | P1       | ⬜        |                                         | LIVE           |
+
+---
+
+## 6. MVP Regression Reference
+
+Minimum set of scenarios to automate first (aligns with `02_acceptance_scenarios_gherkin.md §2.12`):
+
+| Scenario ID | UAT ID     | Description                                       | Priority | Classification  |
+| ----------- | ---------- | ------------------------------------------------- | -------- | --------------- |
+| SC-001      | —          | Owned standard_taxi immediate booking (owned app) | P1       | LIVE            |
+| SC-003      | OC-021     | Phone booking with recording linkage              | P1       | STATIC EVIDENCE |
+| SC-005      | OC-002     | Standard dispatch assignment                      | P1       | LIVE            |
+| SC-008      | TP-001     | Enterprise dispatch booking                       | P1       | LIVE            |
+| SC-010      | TP-004     | Airport pickup — missing flight number            | P1       | LIVE            |
+| SC-013      | DA-008     | Enterprise dispatch — signoff required            | P1       | SIGN-OFF        |
+| SC-015      | DA-001/005 | Forwarded order accepted + confirmed              | P1       | EXTERNAL-GATED  |
+| SC-020      | DA-004     | Cannot start trip before arrived_pickup           | P1       | STATIC EVIDENCE |
+| SC-023      | OC-013     | Vehicle — exclusivity review gate                 | P1       | LIVE            |
+| SC-024      | OC-014     | Vehicle — insurance expiry auto-suspend           | P1       | LIVE            |
+| SC-027      | OC-010     | Complaint case creation (not incident)            | P1       | STATIC EVIDENCE |
+| SC-033      | OC-023     | Regulatory monthly filing package                 | P1       | DEFERRED        |
+
+---
+
+## 7. Pending Evidence Gates
+
+The following items are blocked until WE-004 (smoke harness) produces evidence:
+
+| Gate                             | Description                                          | Unblocked by                     | Classification  |
+| -------------------------------- | ---------------------------------------------------- | -------------------------------- | --------------- |
+| **Recording callback**           | Real CTI webhook integration (OC-022)                | External CTI environment or stub | EXTERNAL-GATED  |
+| **Insurance expiry trigger**     | Automated job that marks vehicle ineligible (OC-014) | Backend job activation           | LIVE            |
+| **SLA breach monitor**           | Complaint SLA job (OC-012)                           | Scheduler activation on staging  | STATIC EVIDENCE |
+| **Billing statement generation** | Period-end job (DA-016/017)                          | Staging billing job config       | STATIC EVIDENCE |
+| **Regulatory filing**            | Month-end snapshot job (OC-023)                      | Staging reporting job config     | DEFERRED        |
+
+Rows marked `DEFERRED` or `EXTERNAL-GATED` stay blocked until the named evidence exists. Rows
+marked `STATIC EVIDENCE` or `LIVE` still require their own `Pass/Fail` execution result before
+human UAT pass language is allowed.
 
 ---
 
 ## Deferred Items Tracker
 
-Items marked ⏸ require explicit sign-off before Phase 1 is declared complete.
+Items marked `DEFERRED` or `EXTERNAL-GATED` require explicit sign-off before Phase 1 is declared
+complete. This table is intentionally separate from `Pass/Fail`: a row can have static evidence
+and still require live UAT before production language is allowed.
 
-| Scenario | Reason for Deferral                           | Required Evidence            | Sign-off |
-| -------- | --------------------------------------------- | ---------------------------- | -------- |
-| OC-022   | CTI webhook integration not in staging        | Real CTI stub or WE-004 mock | ⬜       |
-| OC-023   | Month-end filing job not activated on staging | Staging job run evidence     | ⬜       |
-| OC-024   | Filing + recording export job not activated   | Staging job run evidence     | ⬜       |
-| DA-018   | Period-end billing job not activated          | Billing job run evidence     | ⬜       |
-| E2E-003  | Depends on OC-022 + OC-024                    | Same as above                | ⬜       |
+| Scenario | Classification | Reason for Deferral / Gate                      | Required Evidence                          | Sign-off |
+| -------- | -------------- | ----------------------------------------------- | ------------------------------------------ | -------- |
+| DA-005   | EXTERNAL-GATED | Forwarded task behavior needs live adapter/seed | Forwarder credential, seed, or sandbox run | ⬜       |
+| OC-022   | EXTERNAL-GATED | CTI webhook integration not in staging          | Real CTI stub or live CTI callback         | ⬜       |
+| OC-023   | DEFERRED       | Month-end filing job not activated on staging   | Staging job run evidence                   | ⬜       |
+| OC-024   | DEFERRED       | Filing + recording export job not activated     | Staging job run evidence                   | ⬜       |
+| DA-018   | DEFERRED       | Period-end billing job not activated            | Billing job run evidence                   | ⬜       |
+| E2E-002  | EXTERNAL-GATED | Depends on forwarded task seed/live adapter     | Graceful-skip log or live adapter proof    | ⬜       |
+| E2E-003  | DEFERRED       | Depends on OC-022 + OC-024                      | Same as above                              | ⬜       |
 
 ---
 
@@ -239,70 +297,70 @@ checklist. Rows reference the full scenario definitions in
 
 ### Dispatch Negative-Path
 
-| ID         | Scenario                                              | Role             | Priority | Pass/Fail | Notes                                     |
-| ---------- | ----------------------------------------------------- | ---------------- | -------- | --------- | ----------------------------------------- |
-| NP-DSP-001 | Read-only dispatcher cannot assign                    | `ops_viewer`     | P1       | ⬜        | `403 Forbidden`; access attempt audited   |
-| NP-DSP-002 | Reassign to ineligible driver rejected                | `ops_dispatcher` | P1       | ⬜        | `DRIVER_NOT_ELIGIBLE`; original preserved |
-| NP-DSP-003 | Dispatch timeout triggers escalation, not silent fail | `ops_dispatcher` | P1       | ⬜        | Ops notification created                  |
+| ID         | Scenario                                              | Role             | Priority | Pass/Fail | Notes                                     | Classification      |
+| ---------- | ----------------------------------------------------- | ---------------- | -------- | --------- | ----------------------------------------- | ------------------- |
+| NP-DSP-001 | Read-only dispatcher cannot assign                    | `ops_viewer`     | P1       | ⬜        | `403 Forbidden`; access attempt audited   | REPO-LOCAL VERIFIED |
+| NP-DSP-002 | Reassign to ineligible driver rejected                | `ops_dispatcher` | P1       | ⬜        | `DRIVER_NOT_ELIGIBLE`; original preserved | REPO-LOCAL VERIFIED |
+| NP-DSP-003 | Dispatch timeout triggers escalation, not silent fail | `ops_dispatcher` | P1       | ⬜        | Ops notification created                  | REPO-LOCAL VERIFIED |
 
 **Dispatch negative-path P1 gate:** NP-DSP-001, NP-DSP-002, NP-DSP-003
 
 ### Finance Negative-Path
 
-| ID         | Scenario                                             | Role              | Priority | Pass/Fail | Notes                                      |
-| ---------- | ---------------------------------------------------- | ----------------- | -------- | --------- | ------------------------------------------ |
-| NP-FIN-001 | Invoice generation with no eligible trips            | `tenant_admin`    | P2       | ⬜        | No phantom charges                         |
-| NP-FIN-002 | Unauthorized user cannot download financial artifact | (no finance role) | P1       | ⬜        | `403 Forbidden`; audited                   |
-| NP-FIN-003 | Driver cannot view another driver's earnings         | `driver`          | P1       | ⬜        | Self-scoped only; cross-driver = forbidden |
-| NP-FIN-004 | Non-finance role cannot open reconciliation dispute  | `ops_dispatcher`  | P1       | ⬜        | `403 Forbidden`; audited                   |
+| ID         | Scenario                                             | Role              | Priority | Pass/Fail | Notes                                      | Classification  |
+| ---------- | ---------------------------------------------------- | ----------------- | -------- | --------- | ------------------------------------------ | --------------- |
+| NP-FIN-001 | Invoice generation with no eligible trips            | `tenant_admin`    | P2       | ⬜        | No phantom charges                         | STATIC EVIDENCE |
+| NP-FIN-002 | Unauthorized user cannot download financial artifact | (no finance role) | P1       | ⬜        | `403 Forbidden`; audited                   | STATIC EVIDENCE |
+| NP-FIN-003 | Driver cannot view another driver's earnings         | `driver`          | P1       | ⬜        | Self-scoped only; cross-driver = forbidden | STATIC EVIDENCE |
+| NP-FIN-004 | Non-finance role cannot open reconciliation dispute  | `ops_dispatcher`  | P1       | ⬜        | `403 Forbidden`; audited                   | STATIC EVIDENCE |
 
 **Finance negative-path P1 gate:** NP-FIN-002, NP-FIN-003, NP-FIN-004
 
 ### Forwarder Negative-Path
 
-| ID         | Scenario                                         | Role          | Priority | Pass/Fail | Notes                             |
-| ---------- | ------------------------------------------------ | ------------- | -------- | --------- | --------------------------------- |
-| NP-FWD-001 | Accept cancelled forwarded order rejected        | `driver`      | P1       | ⬜        | `TASK_CANCELLED_BY_PLATFORM`      |
-| NP-FWD-002 | Route override on forwarded order blocked        | `driver`      | P1       | ⬜        | `ROUTE_LOCKED_IMMUTABLE`; audited |
-| NP-FWD-003 | Forwarder sync failure surfaced in ops dashboard | `ops_manager` | P2       | ⬜        | Adapter failure state visible     |
+| ID         | Scenario                                         | Role          | Priority | Pass/Fail | Notes                             | Classification |
+| ---------- | ------------------------------------------------ | ------------- | -------- | --------- | --------------------------------- | -------------- |
+| NP-FWD-001 | Accept cancelled forwarded order rejected        | `driver`      | P1       | ⬜        | `TASK_CANCELLED_BY_PLATFORM`      | EXTERNAL-GATED |
+| NP-FWD-002 | Route override on forwarded order blocked        | `driver`      | P1       | ⬜        | `ROUTE_LOCKED_IMMUTABLE`; audited | EXTERNAL-GATED |
+| NP-FWD-003 | Forwarder sync failure surfaced in ops dashboard | `ops_manager` | P2       | ⬜        | Adapter failure state visible     | EXTERNAL-GATED |
 
 **Forwarder negative-path P1 gate:** NP-FWD-001, NP-FWD-002
 
 ### Compliance and Recording Negative-Path
 
-| ID         | Scenario                                              | Role                     | Priority | Pass/Fail | Notes                               |
-| ---------- | ----------------------------------------------------- | ------------------------ | -------- | --------- | ----------------------------------- |
-| NP-COM-001 | Regulatory filing flags missing recordings            | `ops_manager`            | P1       | ⬜        | Incomplete orders listed separately |
-| NP-COM-002 | Non-compliance user cannot access recording artifacts | `tenant_booking_manager` | P1       | ⬜        | `403 Forbidden`; audited            |
+| ID         | Scenario                                              | Role                     | Priority | Pass/Fail | Notes                               | Classification  |
+| ---------- | ----------------------------------------------------- | ------------------------ | -------- | --------- | ----------------------------------- | --------------- |
+| NP-COM-001 | Regulatory filing flags missing recordings            | `ops_manager`            | P1       | ⬜        | Incomplete orders listed separately | DEFERRED        |
+| NP-COM-002 | Non-compliance user cannot access recording artifacts | `tenant_booking_manager` | P1       | ⬜        | `403 Forbidden`; audited            | STATIC EVIDENCE |
 
 **Compliance negative-path P1 gate:** NP-COM-001, NP-COM-002
 
 ### Identity and Auth Negative-Path
 
-| ID          | Scenario                                           | Role                 | Priority | Pass/Fail | Notes                           |
-| ----------- | -------------------------------------------------- | -------------------- | -------- | --------- | ------------------------------- |
-| NP-AUTH-001 | Revoked API key cannot authenticate                | `partner_api_client` | P1       | ⬜        | `401 Unauthorized`; audited     |
-| NP-AUTH-002 | Cross-tenant API key cannot access other resources | `tenant_admin`       | P1       | ⬜        | No cross-tenant data leakage    |
-| NP-AUTH-003 | Device rebind invalidates old session              | `driver`             | P1       | ⬜        | `DRIVER_DEVICE_SESSION_INVALID` |
+| ID          | Scenario                                           | Role                 | Priority | Pass/Fail | Notes                           | Classification  |
+| ----------- | -------------------------------------------------- | -------------------- | -------- | --------- | ------------------------------- | --------------- |
+| NP-AUTH-001 | Revoked API key cannot authenticate                | `partner_api_client` | P1       | ⬜        | `401 Unauthorized`; audited     | STATIC EVIDENCE |
+| NP-AUTH-002 | Cross-tenant API key cannot access other resources | `tenant_admin`       | P1       | ⬜        | No cross-tenant data leakage    | STATIC EVIDENCE |
+| NP-AUTH-003 | Device rebind invalidates old session              | `driver`             | P1       | ⬜        | `DRIVER_DEVICE_SESSION_INVALID` | STATIC EVIDENCE |
 
 **Auth negative-path P1 gate:** NP-AUTH-001, NP-AUTH-002, NP-AUTH-003
 
 ### Override and Exception-Hold Negative-Path
 
-| ID         | Scenario                                    | Role             | Priority | Pass/Fail | Notes                               |
-| ---------- | ------------------------------------------- | ---------------- | -------- | --------- | ----------------------------------- |
-| NP-OVR-001 | Override release without reason rejected    | `ops_dispatcher` | P1       | ⬜        | `OVERRIDE_REASON_REQUIRED`          |
-| NP-OVR-002 | Non-manager cannot approve override release | `ops_dispatcher` | P1       | ⬜        | `403 Forbidden`; audited            |
-| NP-OVR-003 | Expired override is auto-revoked            | (system)         | P1       | ⬜        | Order returns to pre-override state |
+| ID         | Scenario                                    | Role             | Priority | Pass/Fail | Notes                               | Classification      |
+| ---------- | ------------------------------------------- | ---------------- | -------- | --------- | ----------------------------------- | ------------------- |
+| NP-OVR-001 | Override release without reason rejected    | `ops_dispatcher` | P1       | ⬜        | `OVERRIDE_REASON_REQUIRED`          | REPO-LOCAL VERIFIED |
+| NP-OVR-002 | Non-manager cannot approve override release | `ops_dispatcher` | P1       | ⬜        | `403 Forbidden`; audited            | REPO-LOCAL VERIFIED |
+| NP-OVR-003 | Expired override is auto-revoked            | (system)         | P1       | ⬜        | Order returns to pre-override state | REPO-LOCAL VERIFIED |
 
 **Override negative-path P1 gate:** NP-OVR-001, NP-OVR-002, NP-OVR-003
 
 ### Vehicle and Master Data Negative-Path
 
-| ID         | Scenario                                   | Role          | Priority | Pass/Fail | Notes                            |
-| ---------- | ------------------------------------------ | ------------- | -------- | --------- | -------------------------------- |
-| NP-VEH-001 | Offboarding vehicle cannot be redispatched | `ops_manager` | P1       | ⬜        | Debranding task must close first |
-| NP-VEH-002 | Duplicate vehicle plate number rejected    | `ops_manager` | P2       | ⬜        | Uniqueness enforced              |
+| ID         | Scenario                                   | Role          | Priority | Pass/Fail | Notes                            | Classification |
+| ---------- | ------------------------------------------ | ------------- | -------- | --------- | -------------------------------- | -------------- |
+| NP-VEH-001 | Offboarding vehicle cannot be redispatched | `ops_manager` | P1       | ⬜        | Debranding task must close first | INVENTORY      |
+| NP-VEH-002 | Duplicate vehicle plate number rejected    | `ops_manager` | P2       | ⬜        | Uniqueness enforced              | INVENTORY      |
 
 **Vehicle negative-path P1 gate:** NP-VEH-001
 
@@ -328,8 +386,8 @@ checklist. Rows reference the full scenario definitions in
 | Driver App     | —        | ⬜              | ⬜              | ⬜         | —    |
 | End-to-End     | —        | ⬜              | ⬜              | ⬜         | —    |
 
-**Phase 1 UAT PASS:** All surfaces signed off, zero open P1 bugs, deferred items either resolved
-or formally accepted by the product owner.
+**Phase 1 UAT PASS:** All surfaces signed off, zero open P1 bugs, deferred/external-gated
+items either resolved or formally accepted by the product owner.
 
 ---
 

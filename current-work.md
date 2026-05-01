@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T08:17:45Z
+Last updated: 2026-05-01T08:25:14Z
 
 ## Objective
 
@@ -42,16 +42,16 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
 - `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Ownership updated
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Review passed: UAT checklist now separates Pass/Fail from release-evidence classification, restores negative-path/sign-off sections, and explicitly labels forwarded/CTI gates as EXTERNAL-GATED or DEFE
 
 ## Delivery Layers
 
 ### Primary Project Work
 
-| ID             | Phase                            | Task                                     | Owner   | Status  | Depends On                                                                                                | 中文說明                                                                                                                                 |
-| -------------- | -------------------------------- | ---------------------------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification  | Gemini2 | backlog | `SYNC-002`                                                                                                | 把 UAT checklist 由未勾選混合清單整理成 inventory/static/live/sign-off/external/deferred 狀態，避免把靜態證據誤稱人工 UAT 通過。         |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Gemini2 | backlog | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` | 在所有 sync、cross-repo、deploy、external gate 任務完成或明確 blocked 後，產出最終 release-language closeout，避免再說 everything done。 |
+| ID             | Phase                            | Task                                     | Owner   | Status          | Depends On                                                                                                | 中文說明                                                                                                                                 |
+| -------------- | -------------------------------- | ---------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification  | Gemini2 | review_approved | `SYNC-002`                                                                                                | 把 UAT checklist 由未勾選混合清單整理成 inventory/static/live/sign-off/external/deferred 狀態，避免把靜態證據誤稱人工 UAT 通過。         |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` | 在所有 sync、cross-repo、deploy、external gate 任務完成或明確 blocked 後，產出最終 release-language closeout，避免再說 everything done。 |
 
 ### External / Upstream Integration Work
 
@@ -64,20 +64,20 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Task Board (active only)
 
-| ID             | Phase                            | Task                                      | Owner   | Status  | Depends On                                                                                                |
-| -------------- | -------------------------------- | ----------------------------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------- |
-| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification   | Gemini2 | backlog | `SYNC-002`                                                                                                |
-| `EXT-001`      | Phase 1 Blueprint Delta Closeout | Real bank issuer eligibility gate         | Gemini2 | backlog | `SYNC-002`                                                                                                |
-| `EXT-002`      | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Gemini2 | backlog | `SYNC-002`                                                                                                |
-| `EXT-003`      | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog | `SYNC-002`                                                                                                |
-| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog | `SYNC-002`                                                                                                |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
+| ID             | Phase                            | Task                                      | Owner   | Status          | Depends On                                                                                                |
+| -------------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- |
+| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification   | Gemini2 | review_approved | `SYNC-002`                                                                                                |
+| `EXT-001`      | Phase 1 Blueprint Delta Closeout | Real bank issuer eligibility gate         | Gemini2 | backlog         | `SYNC-002`                                                                                                |
+| `EXT-002`      | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Gemini2 | backlog         | `SYNC-002`                                                                                                |
+| `EXT-003`      | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog         | `SYNC-002`                                                                                                |
+| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog         | `SYNC-002`                                                                                                |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
 
 ## Handoff Queue
 
-| Task     | From | To  | Message | Status | Created At |
-| -------- | ---- | --- | ------- | ------ | ---------- |
-| _(none)_ | -    | -   | -       | -      | -          |
+| Task       | From  | To      | Message                                                                                                                                                                                                       | Status  | Created At           |
+| ---------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
+| `SYNC-003` | Codex | Gemini2 | Review passed: UAT checklist now separates Pass/Fail from release-evidence classification, restores negative-path/sign-off sections, and explicitly labels forwarded/CTI gates as EXTERNAL-GATED or DEFERRED. | pending | 2026-05-01T08:25:13Z |
 
 ## Blockers
 
@@ -87,9 +87,9 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task     | Reviewer | 修正重點 | Review File |
-| -------- | -------- | -------- | ----------- |
-| _(none)_ | -        | -        | -           |
+| Task       | Reviewer | 修正重點                                                                                                                                                                                             | Review File |
+| ---------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `SYNC-003` | Codex    | 審查通過；reviewer 已補回 worker 誤刪的 negative-path / bug triage / sign-off matrix，並把 forwarded/CTI 類項目改為明確 EXTERNAL-GATED 或 DEFERRED，避免把靜態證據或外部 blocker 誤稱人工 UAT pass。 | -           |
 
 ## Completion Evidence (last 10)
 
@@ -108,13 +108,6 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Latest Checkpoints
 
-- 2026-05-01T08:08:34Z Codex: `SYNC-002` Assigned SYNC-002 to Gemini2 with reviewer Codex
-- 2026-05-01T08:08:35Z Codex: `XREPO-001` Assigned XREPO-001 to Gemini2 with reviewer Codex
-- 2026-05-01T08:09:01Z Codex: `SYNC-002` Assigned SYNC-002 to Gemini2 with reviewer Codex
-- 2026-05-01T08:09:09Z Codex: `SYNC-002` Review failed: handoff claimed workflow release gate rows were updated, but docs/03-runbooks/phase1-workflow-acceptance-release-gates.md still has WF-DSP-001, WF-FWD-001, WF-COM-001, and WF-FIN-001 negative-path gate reads at PENDING (ORX-GV-001 rows). Update the runbook/checklist/audit artifacts with evidence-backed gate wording, keep external-gated and HOLD semantics explicit, then rerun doc-sync and diff checks before handoff.
-- 2026-05-01T08:09:49Z Codex: `DEPLOY-001` Review passed: DB-enabled runtime proof gate is documented and local pnpm phase1:verify:backfill passed; production/staging DATABASE_URL parity remains an explicit rollout gate.
-- 2026-05-01T08:10:16Z Codex: `SYNC-001` Done: status/dashboard truth sync reviewed, pushed, and recorded with closeout metadata.
-- 2026-05-01T08:11:53Z Codex: `XREPO-001` Review passed: tenant-commute-hub is clean and pushed at 1183a1a; core is clean and pushed at 394c3e2; tenant typecheck/build pass with only Browserslist stale-data warning.
 - 2026-05-01T08:12:42Z Orchestrator: `DEPLOY-001` Worker superseded to prioritize higher-priority review/finalize work.
 - 2026-05-01T08:12:43Z Orchestrator: `XREPO-001` Wake-up queued for supervisor: owned_finalize_dispatch
 - 2026-05-01T08:12:43Z Orchestrator: `XREPO-001` Worker started via gemini: owned_finalize_dispatch
@@ -133,3 +126,10 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
   These changes resolve the review failure related to pending ORX rows.
 - 2026-05-01T08:17:06Z Codex: `SYNC-002` Review passed: ORX negative-path gate reads are reconciled with explicit repo-local/static/external/HOLD wording and no PENDING ORX rows remain.
 - 2026-05-01T08:17:45Z Gemini2: `SYNC-002` Done: workflow release gate reconciliation approved, committed, and pushed. ORX pending rows are removed with explicit repo-local/static/external/HOLD wording.
+- 2026-05-01T08:18:26Z Orchestrator: `SYNC-002` Background worker process exited after advancing the task to `done`.
+- 2026-05-01T08:18:27Z Orchestrator: `SYNC-003` Wake-up queued for supervisor: owned_ready_dispatch
+- 2026-05-01T08:18:27Z Orchestrator: `SYNC-003` Worker started via gemini: owned_ready_dispatch
+- 2026-05-01T08:18:37Z Gemini2: `SYNC-003` Reclassifying UAT checklist items from unchecked mixed list to inventory/static/live/sign-off/deferred states.
+- 2026-05-01T08:19:13Z Gemini2: `SYNC-003` Reading and parsing UAT checklist markdown to identify items for reclassification into inventory, static, live, sign-off, and deferred states based on existing notes, workflow status, and priority.
+- 2026-05-01T08:19:46Z Gemini2: `SYNC-003` Handoff to Codex: UAT checklist evidence reclassification completed. The 'Classification' column has been added to `docs/04-uat/phase1-uat-checklist.md` with the following states: LIVE, STATIC EVIDENCE, DEFERRED, SIGN-OFF, INVENTORY. Items are classified based on their priority, notes, workflow family status (from `phase1-workflow-acceptance-release-gates.md`), and explicit mention of sign-off or deferral. Deferred items include those explicitly marked with '⏸' or belonging to HOLD/EXTERNAL-GATED workflow families.
+- 2026-05-01T08:25:13Z Codex: `SYNC-003` Review passed: UAT checklist now separates Pass/Fail from release-evidence classification, restores negative-path/sign-off sections, and explicitly labels forwarded/CTI gates as EXTERNAL-GATED or DEFERRED.
