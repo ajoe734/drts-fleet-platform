@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T08:14:33Z
+Last updated: 2026-05-01T08:17:06Z
 
 ## Objective
 
@@ -42,17 +42,17 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
 - `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Review failed: handoff claimed workflow release gate rows were updated, but docs/03-runbooks/phase1-workflow-acceptance-release-gates.md still has WF-DSP-001, WF-FWD-001, WF-COM-001, and WF-FIN-001 ne
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Review passed: ORX negative-path gate reads are reconciled with explicit repo-local/static/external/HOLD wording and no PENDING ORX rows remain.
 
 ## Delivery Layers
 
 ### Primary Project Work
 
-| ID             | Phase                            | Task                                     | Owner   | Status      | Depends On                                                                                                | 中文說明                                                                                                                                 |
-| -------------- | -------------------------------- | ---------------------------------------- | ------- | ----------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation     | Gemini2 | in_progress | `SYNC-001`                                                                                                | 更新 workflow release gates 與 closeout wording，讓 ORX 完成後的 gate 狀態、external-gated、HOLD、pilot/production 邊界一致。            |
-| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification  | Gemini2 | backlog     | `SYNC-002`                                                                                                | 把 UAT checklist 由未勾選混合清單整理成 inventory/static/live/sign-off/external/deferred 狀態，避免把靜態證據誤稱人工 UAT 通過。         |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Gemini2 | backlog     | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` | 在所有 sync、cross-repo、deploy、external gate 任務完成或明確 blocked 後，產出最終 release-language closeout，避免再說 everything done。 |
+| ID             | Phase                            | Task                                     | Owner   | Status          | Depends On                                                                                                | 中文說明                                                                                                                                 |
+| -------------- | -------------------------------- | ---------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation     | Gemini2 | review_approved | `SYNC-001`                                                                                                | 更新 workflow release gates 與 closeout wording，讓 ORX 完成後的 gate 狀態、external-gated、HOLD、pilot/production 邊界一致。            |
+| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification  | Gemini2 | backlog         | `SYNC-002`                                                                                                | 把 UAT checklist 由未勾選混合清單整理成 inventory/static/live/sign-off/external/deferred 狀態，避免把靜態證據誤稱人工 UAT 通過。         |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` | 在所有 sync、cross-repo、deploy、external gate 任務完成或明確 blocked 後，產出最終 release-language closeout，避免再說 everything done。 |
 
 ### External / Upstream Integration Work
 
@@ -65,21 +65,21 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Task Board (active only)
 
-| ID             | Phase                            | Task                                      | Owner   | Status      | Depends On                                                                                                |
-| -------------- | -------------------------------- | ----------------------------------------- | ------- | ----------- | --------------------------------------------------------------------------------------------------------- |
-| `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation      | Gemini2 | in_progress | `SYNC-001`                                                                                                |
-| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification   | Gemini2 | backlog     | `SYNC-002`                                                                                                |
-| `EXT-001`      | Phase 1 Blueprint Delta Closeout | Real bank issuer eligibility gate         | Gemini2 | backlog     | `SYNC-002`                                                                                                |
-| `EXT-002`      | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Gemini2 | backlog     | `SYNC-002`                                                                                                |
-| `EXT-003`      | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog     | `SYNC-002`                                                                                                |
-| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog     | `SYNC-002`                                                                                                |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog     | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
+| ID             | Phase                            | Task                                      | Owner   | Status          | Depends On                                                                                                |
+| -------------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- |
+| `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation      | Gemini2 | review_approved | `SYNC-001`                                                                                                |
+| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification   | Gemini2 | backlog         | `SYNC-002`                                                                                                |
+| `EXT-001`      | Phase 1 Blueprint Delta Closeout | Real bank issuer eligibility gate         | Gemini2 | backlog         | `SYNC-002`                                                                                                |
+| `EXT-002`      | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Gemini2 | backlog         | `SYNC-002`                                                                                                |
+| `EXT-003`      | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog         | `SYNC-002`                                                                                                |
+| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | backlog         | `SYNC-002`                                                                                                |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
 
 ## Handoff Queue
 
-| Task     | From | To  | Message | Status | Created At |
-| -------- | ---- | --- | ------- | ------ | ---------- |
-| _(none)_ | -    | -   | -       | -      | -          |
+| Task       | From  | To      | Message                                                                                                                                          | Status  | Created At           |
+| ---------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------- | -------------------- |
+| `SYNC-002` | Codex | Gemini2 | Review passed: ORX negative-path gate reads are reconciled with explicit repo-local/static/external/HOLD wording and no PENDING ORX rows remain. | pending | 2026-05-01T08:17:06Z |
 
 ## Blockers
 
@@ -89,9 +89,9 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task     | Reviewer | 修正重點 | Review File |
-| -------- | -------- | -------- | ----------- |
-| _(none)_ | -        | -        | -           |
+| Task       | Reviewer | 修正重點                                                                                                                                                                                                                                                                                                                                                     | Review File |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------- |
+| `SYNC-002` | Codex    | 審查通過：SYNC-002 已實際更新 docs/03-runbooks/phase1-workflow-acceptance-release-gates.md 的 ORX negative-path gate rows；WF-DSP-001 改為 PASS (repo-local)，WF-FWD-001 保持 EXTERNAL-GATED，WF-COM-001 保持 HOLD，WF-FIN-001 改為 PASS (static evidence)。rg 確認不再殘留 PENDING (ORX-GV-001 rows)，並已通過 doc-sync、git diff --check、prettier check。 | -           |
 
 ## Completion Evidence (last 10)
 
@@ -110,12 +110,6 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Latest Checkpoints
 
-- 2026-05-01T08:05:13Z Orchestrator: `DEPLOY-001` Worker started via gemini: owned_in_progress_dispatch
-- 2026-05-01T08:05:26Z Gemini2: `DEPLOY-001` Investigating database configuration and persistence proof artifacts for DEPLOY-001.
-- 2026-05-01T08:06:16Z Gemini2: `DEPLOY-001` Updated docs/03-runbooks/phase1-rollout.md with DB-enabled runtime persistence proof section. Documented database boot path, migration/seeding evidence capture, and identified missing information on driver device binding durability and production-critical in-memory states.
-- 2026-05-01T08:06:21Z Orchestrator: `DEPLOY-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260501T080513Z-3a7c5eec.json)
-- 2026-05-01T08:06:21Z Orchestrator: `DEPLOY-001` Wake-up queued for supervisor: owned_in_progress_dispatch
-- 2026-05-01T08:06:21Z Orchestrator: `DEPLOY-001` Worker started via gemini: owned_in_progress_dispatch
 - 2026-05-01T08:06:42Z Gemini2: `DEPLOY-001` Handoff to Codex: Added DB-enabled runtime persistence proof section to docs/03-runbooks/phase1-rollout.md, documenting boot path, migration/seeding evidence, and noting missing assessments for driver device binding durability and in-memory states. Blocked on DB unavailability is also documented. Ready for review by Codex.
 - 2026-05-01T08:08:34Z Codex: `SYNC-002` Assigned SYNC-002 to Gemini2 with reviewer Codex
 - 2026-05-01T08:08:35Z Codex: `XREPO-001` Assigned XREPO-001 to Gemini2 with reviewer Codex
@@ -130,3 +124,14 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - 2026-05-01T08:12:43Z Orchestrator: `DEPLOY-001` Background worker process exited after advancing the task to `review_approved`.
 - 2026-05-01T08:14:24Z Gemini2: `XREPO-001` Done: XREPO-001 tenant/core closeout approved, committed, and pushed. Tenant main is clean at 1183a1a; core main is clean at c74f82c.
 - 2026-05-01T08:14:32Z Gemini2: `DEPLOY-001` Done: DEPLOY-001 DB-enabled runtime proof gate documented, local backfill verification passed, and review approval recorded.
+- 2026-05-01T08:15:22Z Orchestrator: `XREPO-001` Background worker process exited after advancing the task to `done`.
+- 2026-05-01T08:15:22Z Orchestrator: `SYNC-002` Wake-up queued for supervisor: owned_in_progress_dispatch
+- 2026-05-01T08:15:22Z Orchestrator: `SYNC-002` Worker started via gemini: owned_in_progress_dispatch
+- 2026-05-01T08:15:43Z Gemini2: `SYNC-002` Updating negative-path release gate statuses in docs/03-runbooks/phase1-workflow-acceptance-release-gates.md to align with positive-path statuses and resolve review failure.
+- 2026-05-01T08:16:02Z Gemini2: `SYNC-002` Handoff to Codex: Updated negative-path gate reads in docs/03-runbooks/phase1-workflow-acceptance-release-gates.md to align with positive-path statuses:
+- WF-DSP-001: Changed from PENDING to PASS (repo-local).
+- WF-FWD-001: Changed from PENDING to EXTERNAL-GATED.
+- WF-COM-001: Changed from PENDING to HOLD.
+- WF-FIN-001: Changed from PENDING to PASS (static evidence).
+  These changes resolve the review failure related to pending ORX rows.
+- 2026-05-01T08:17:06Z Codex: `SYNC-002` Review passed: ORX negative-path gate reads are reconciled with explicit repo-local/static/external/HOLD wording and no PENDING ORX rows remain.
