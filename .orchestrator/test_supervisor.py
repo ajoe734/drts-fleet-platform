@@ -3107,6 +3107,99 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(reason, "provider_health_triage")
 
+    def test_provider_health_review_respects_cooldown_after_recent_pause_review(self) -> None:
+        state = {
+            "provider_pauses": {
+                "claude": {
+                    "kind": "auth",
+                    "reason": "Invalid authentication credentials",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                    "resume_at": None,
+                }
+            },
+            "dispatch_pauses": [],
+            "failure_streaks": {},
+            "chair_review": {
+                "last_review_at": "2026-04-30T12:52:00Z",
+                "cooldown_until": "2099-01-01T00:00:00Z",
+            },
+        }
+        config = {"chair_review": {"enabled": True}}
+
+        with (
+            mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+            mock.patch.object(supervisor, "choose_chair_reviewer") as choose_chair_reviewer,
+        ):
+            queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+
+        self.assertFalse(queued)
+        choose_chair_reviewer.assert_not_called()
+
+    def test_duplicate_chair_provider_pause_is_noop(self) -> None:
+        state = {
+            "provider_pauses": {
+                "claude": {
+                    "kind": "auth",
+                    "reason": "Invalid authentication credentials",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                    "resume_at": None,
+                }
+            }
+        }
+        config = {"agents": {"claude": {"display_name": "Claude", "provider": "claude"}}}
+
+        changed = supervisor.apply_chair_provider_action(
+            config,
+            state,
+            {
+                "agent": "Claude",
+                "action": "pause",
+                "kind": "auth",
+                "reason": "Invalid authentication credentials",
+            },
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual(state["provider_pauses"]["claude"]["paused_at"], "2026-04-30T12:51:53Z")
+
+    def test_chair_clear_pause_rejects_future_resume_at(self) -> None:
+        state = {
+            "provider_pauses": {
+                "copilot": {
+                    "kind": "quota",
+                    "reason": "Quota exhausted",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                    "resume_at": 4102444800.0,
+                }
+            },
+            "quota_paused_agents": {
+                "copilot": {
+                    "reason": "Quota exhausted",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                    "resume_at": 4102444800.0,
+                }
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = {
+                "agents": {"copilot": {"display_name": "Copilot", "provider": "copilot"}},
+                "paths": {"activity_log": str(Path(tmpdir) / "activity-log.jsonl")},
+            }
+            changed = supervisor.apply_chair_provider_action(
+                config,
+                state,
+                {
+                    "agent": "Copilot",
+                    "action": "clear_pause",
+                    "reason": "Quota limits have been met.",
+                },
+            )
+
+        self.assertFalse(changed)
+        self.assertIn("copilot", state["provider_pauses"])
+        self.assertIn("copilot", state["quota_paused_agents"])
+
     def test_dispatcher_skips_task_waiting_on_chair_reassignment(self) -> None:
         config = {
             "schema": {

@@ -54,6 +54,87 @@ approval.
 
 All commands route to `./scripts/phase1-rollout-verify.sh`.
 
+## DB-Enabled Runtime Persistence Proof
+
+`DEPLOY-001` is a proof gate, not a production go-live approval. It confirms the
+repo has an executable DB path and names the remaining runtime states that must
+not be over-claimed as durable.
+
+### Boot Path And Commands
+
+Local DB-enabled boot path:
+
+1. Start dependencies with `./scripts/dev-up.sh`.
+2. Run `pnpm db:init` to apply `infra/migrations/` and `infra/seeds/`.
+3. Run `pnpm db:verify`.
+4. Run `pnpm phase1:verify:backfill`.
+
+Production/staging boot path:
+
+1. Provide `DATABASE_URL` from the environment or secret manager.
+2. Run the migration job before serving traffic.
+3. Run health, smoke, and rollout verification before switching reads.
+
+Executable anchors:
+
+- `apps/api/src/common/db/database.service.ts` reads `process.env.DATABASE_URL`
+  and exposes `isEnabled()` for repository-backed modules.
+- `scripts/db-common.sh` supplies the local default `DATABASE_URL` when unset
+  and wraps `psql` execution for migration, seed, and verification scripts.
+- `scripts/db-apply.sh`, `scripts/db-seed.sh`, `scripts/db-verify.sh`, and
+  `scripts/phase1-rollout-verify.sh` are the command path.
+
+### Evidence Status
+
+- Existing live deploy evidence is captured in
+  `support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md`.
+- Existing persistence audit evidence is captured in
+  `support/sidecars/W7-001A/W7-001A-SIDECAR-ACCEPTANCE.md`.
+- 2026-05-01 local DB proof: `pnpm phase1:verify:backfill` passed using the
+  default local `DATABASE_URL`
+  `postgresql://postgres:postgres@localhost:5432/drts_fleet_platform`.
+  `pnpm db:verify` reported schema verification passed with baseline tenants,
+  vehicles, drivers, orders, complaints, driver statements, schema migrations,
+  and seed runs present.
+- Staging/production verification still requires an explicit `DATABASE_URL`
+  supplied through environment or secret manager before claiming environment
+  parity with the local proof.
+
+### Runtime State Inventory
+
+| Runtime area             | Current durability read                                                                                                       | Release implication                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Audit log                | DB-backed proof pattern exists through `audit-log.repository.ts`.                                                             | Usable as the repository pattern for other modules.                                                              |
+| Regulatory registry      | Repository-backed paths exist, but service fallback remains relevant when DB is unavailable.                                  | Confirm DB-enabled smoke before pilot expansion.                                                                 |
+| Owned mobility/dispatch  | Repository/event bridge files exist, but dispatch runtime must still be proven under restart and DB-enabled read/write paths. | Do not claim production dispatch durability from static evidence alone.                                          |
+| Callcenter/complaint     | Repository files exist; CTI/recording and filing remain live-gated elsewhere.                                                 | Keep `WF-COM-001` as `HOLD` until live hooks and export proof are captured.                                      |
+| Billing/reporting        | Repository paths exist for billing/reporting slices; report export still needs release evidence.                              | Keep finance/report export wording at static or live-evidence level based on the workflow gate matrix.           |
+| Forwarder/tenant partner | Repository paths exist, but real adapter/webhook delivery remains external-gated.                                             | Keep forwarded-order and partner callbacks `EXTERNAL-GATED` until live adapter credentials/evidence are present. |
+| Driver device binding    | Device session binding uses process-local maps, while driver profile stores binding summaries through the profile service.    | Revocation/rebind behavior is tested, but active session rehydration after process restart is not fully durable. |
+
+### Driver Device Binding Durability
+
+Driver device registration, refresh, revoke, and rebind behavior is covered by
+`apps/api/tests/unit/auth-bootstrap.test.ts`, including revoked-session rejection,
+admin revoke, unauthenticated revoke denial, same-device rebind, invalid
+certification rejection, and suspended-driver refresh rejection.
+
+The durability caveat is explicit: `DriverDeviceSessionService` keeps active
+binding/session lookup in process-local maps. It mirrors binding summaries into
+`DriverProfileService`, which can persist through the driver-profile repository
+when DB is enabled, but the active bearer/refresh session lookup is not yet a
+fully DB-rehydrated authority. Production rollout must either add DB-backed
+device-session persistence or document a restart-safe rehydration path before
+claiming durable driver-device auth.
+
+### DB-Unavailable Gate
+
+If the verifier cannot provide a running local Postgres instance or an explicit
+`DATABASE_URL`, DEPLOY-001 is not "passed"; it is blocked with this exact
+requirement:
+
+`Start local Postgres with ./scripts/dev-up.sh or export DATABASE_URL, then run pnpm db:init, pnpm db:verify, and pnpm phase1:verify:backfill.`
+
 ## Pack 1: Backfill
 
 ### Inputs

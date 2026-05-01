@@ -1619,11 +1619,14 @@ def actionable_dispatch_pause_records(state: dict[str, Any], *, limit: int = 8) 
 
 
 def chair_review_needs_immediate_attention(state: dict[str, Any]) -> bool:
-    return bool(
-        repeated_failure_records(state)
-        or active_provider_pause_records(state)
-        or actionable_dispatch_pause_records(state, limit=1)
-    )
+    if repeated_failure_records(state) or actionable_dispatch_pause_records(state, limit=1):
+        return True
+    last_review_at = _parse_iso_utc((state.get("chair_review") or {}).get("last_review_at"))
+    for pause in active_provider_pause_records(state):
+        paused_at = _parse_iso_utc(str(pause.get("paused_at") or ""))
+        if last_review_at is None or paused_at is None or paused_at > last_review_at:
+            return True
+    return False
 
 
 def prune_failure_streaks(state: dict[str, Any], status: dict[str, Any]) -> bool:
@@ -4999,6 +5002,13 @@ def apply_chair_provider_action(
         if (
             isinstance(existing, dict)
             and reset_seconds is None
+            and str(existing.get("kind") or "") == kind
+            and str(existing.get("reason") or "") == reason
+        ):
+            return False
+        if (
+            isinstance(existing, dict)
+            and reset_seconds is None
             and kind in {"quota", "capacity"}
             and str(existing.get("kind") or "") == kind
             and existing.get("resume_at") is not None
@@ -5038,6 +5048,27 @@ def apply_chair_provider_action(
             },
         )
         return True
+    existing = provider_pause_registry(state).get(agent_id)
+    if isinstance(existing, dict):
+        resume_at = existing.get("resume_at")
+        if resume_at is not None and float(resume_at) > datetime.now(timezone.utc).timestamp():
+            write_activity_log(
+                config,
+                {
+                    "type": "chair_provider_action_rejected",
+                    "action": "clear_pause",
+                    "agent": display_name_for(config, agent_id),
+                    "provider": agent_id,
+                    "kind": existing.get("kind") or "unknown",
+                    "message": (
+                        f"Rejected premature clear_pause for {display_name_for(config, agent_id)}; "
+                        "resume_at has not passed."
+                    ),
+                },
+            )
+            return False
+        if str(existing.get("kind") or "") == "auth" and not reason:
+            return False
     if agent_id in provider_pause_registry(state) or agent_id in state.setdefault("quota_paused_agents", {}):
         clear_provider_pause(state, agent_id)
         write_activity_log(
