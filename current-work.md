@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T08:53:09Z
+Last updated: 2026-05-01T08:54:13Z
 
 ## Objective
 
@@ -42,7 +42,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
 - `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Review approved: EXT-004 gate packet is concrete, anchored, and avoids live-proof overclaim.
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Ownership updated
 
 ## Delivery Layers
 
@@ -54,22 +54,21 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ### External / Upstream Integration Work
 
-| ID        | Phase                            | Task                                      | Owner   | Status          | Depends On | 中文說明                                                                                                            |
-| --------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | ---------- | ------------------------------------------------------------------------------------------------------------------- |
-| `EXT-004` | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | review_approved | `SYNC-002` | 建立 CTI/錄音/filing activation gate，明確 OC-022、OC-023、OC-024、E2E-003 的 live/staging/blocked 狀態與證據格式。 |
+| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
+| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
+| _(none)_ | -     | -    | -     | -      | -          | -        |
 
 ## Task Board (active only)
 
-| ID             | Phase                            | Task                                      | Owner   | Status          | Depends On                                                                                                |
-| -------------- | -------------------------------- | ----------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- |
-| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini2 | review_approved | `SYNC-002`                                                                                                |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Gemini2 | backlog         | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
+| ID             | Phase                            | Task                                     | Owner   | Status  | Depends On                                                                                                |
+| -------------- | -------------------------------- | ---------------------------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Gemini2 | backlog | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
 
 ## Handoff Queue
 
-| Task      | From  | To      | Message                                                                                      | Status  | Created At           |
-| --------- | ----- | ------- | -------------------------------------------------------------------------------------------- | ------- | -------------------- |
-| `EXT-004` | Codex | Gemini2 | Review approved: EXT-004 gate packet is concrete, anchored, and avoids live-proof overclaim. | pending | 2026-05-01T08:53:09Z |
+| Task     | From | To  | Message | Status | Created At |
+| -------- | ---- | --- | ------- | ------ | ---------- |
+| _(none)_ | -    | -   | -       | -      | -          |
 
 ## Blockers
 
@@ -79,15 +78,14 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task      | Reviewer | 修正重點                                                                                                                                                                                                                               | Review File |
-| --------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `EXT-004` | Codex    | 已審核 EXT-004：worker stale 沒產出，因此由 reviewer 補成正式 gate packet。OC-022/023/024/E2E-003 狀態、CTI callback 欄位、filing/export 證據格式與 EXT-004-BLK-001..008 blocker 都已落地；未把 repo-static endpoint 誤稱 live proof。 | -           |
+| Task     | Reviewer | 修正重點 | Review File |
+| -------- | -------- | -------- | ----------- |
+| _(none)_ | -        | -        | -           |
 
 ## Completion Evidence (last 10)
 
 | Task                            | Commit                                   | Subject                                                           | LLM Agent | Reviewer | Recorded At          |
 | ------------------------------- | ---------------------------------------- | ----------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `ORX-CS-002-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                | Claude    | Codex2   | 2026-05-01T00:24:26Z |
 | `ORX-GV-003-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                | Codex     | Claude2  | 2026-05-01T00:50:29Z |
 | `SYNC-001`                      | 6d4b7f1a99f76a260837e67bc1e80d8da70db9b3 | SYNC-001: record status dashboard sync review                     | Gemini2   | Codex    | 2026-05-01T07:52:06Z |
 | `SYNC-002`                      | 6c5ba6865af075f1b2cde9a69f37eac9d141caba | SYNC-002: reconcile workflow release gates                        | Gemini2   | Codex    | 2026-05-01T08:17:45Z |
@@ -97,10 +95,10 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `EXT-001`                       | 8a92c1f78b2c10d34ddf6cfe964facbccd3bd985 | EXT-001: record issuer eligibility external gate                  | Gemini2   | Codex    | 2026-05-01T08:32:05Z |
 | `EXT-002`                       | 137cac133a9a7b341f01264ff908fb3876330d14 | EXT-002: record forwarder adapter proof gate                      | Gemini2   | Codex    | 2026-05-01T08:38:58Z |
 | `EXT-003`                       | 5ed2f8adc5699de90ad894a53c6fecea89d3a861 | EXT-003: record mobile distribution gate                          | Gemini2   | Codex    | 2026-05-01T08:44:11Z |
+| `EXT-004`                       | 0afd14413725f046fb1320fecb21a57fbf6a24b0 | EXT-004: record CTI recording filing gate                         | Gemini2   | Codex    | 2026-05-01T08:54:13Z |
 
 ## Latest Checkpoints
 
-- 2026-05-01T08:37:38Z Codex: `EXT-002` Review passed after correction: no unproven runtime adapter code remains; EXT-002 has explicit blocker records EXT-002-BLK-001..007 and E2E-002 graceful-skip overclaim language is preserved.
 - 2026-05-01T08:38:58Z Gemini2: `EXT-002` Done: forwarder adapter proof gate committed and pushed; EXT-002-BLK-001..007 now track partner contract, credentials, webhook signature, callback lifecycle, status sync, lost-race, and no-owned-assignment evidence. Unproven runtime adapter code was rejected and not retained.
 - 2026-05-01T08:40:03Z Orchestrator: `EXT-002` Background worker process exited after advancing the task to `done`.
 - 2026-05-01T08:40:04Z Orchestrator: `EXT-003` Wake-up queued for supervisor: owned_ready_dispatch
@@ -120,3 +118,4 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - 2026-05-01T08:51:57Z Gemini2: `EXT-004` Reviewer correction in progress: CTI recording filing gate packet created; updating UAT, workflow, and retention anchors.
 - 2026-05-01T08:52:56Z Gemini2: `EXT-004` Handoff to Codex: CTI recording filing gate packet created and anchors updated: EXT-004-BLK-001..008 now define CTI callback, recording export, filing package, retention, and E2E-003 proof requirements; checks: prettier, ai_status doc-sync audit, git diff --check.
 - 2026-05-01T08:53:09Z Codex: `EXT-004` Review approved: EXT-004 gate packet is concrete, anchored, and avoids live-proof overclaim.
+- 2026-05-01T08:54:13Z Gemini2: `EXT-004` Done: CTI recording filing activation gate committed and pushed; EXT-004-BLK-001..008 now track missing CTI, callback, filing, export, retention, and E2E evidence.
