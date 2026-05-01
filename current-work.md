@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T00:53:51Z
+Last updated: 2026-05-01T07:13:27Z
 
 ## Objective
 
@@ -36,39 +36,56 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Active Slices
 
-- `Claude`: governance-review, architecture-arbitration, control-plane; next: Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.
-- `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
-- `Codex`: contracts, schema, state-system, acceptance; next: Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.
-- `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
-- `Codex2`: contracts, schema, state-system, acceptance; next: Review approved: all 3 ACs pass. 投訴→客訴 normalization complete (zero residuals in apps/); 已到→已到期 fix correct; Health & Quotas→Health & Alerts aligned; driver-app upgraded to bilingual locale; remaining
-- `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
+- `Claude`: governance-review, architecture-arbitration, control-plane; next: Assignment created
+- `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Assignment created
+- `Codex`: contracts, schema, state-system, acceptance; next: Assignment created
+- `Copilot`: research-ingest, external-search, spec-review, critique; next: Assignment created
+- `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
+- `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Assignment created
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Assignment created
 
 ## Delivery Layers
 
 ### Primary Project Work
 
-| ID           | Phase                           | Task                                                             | Owner  | Status          | Depends On                 | 中文說明                                                                        |
-| ------------ | ------------------------------- | ---------------------------------------------------------------- | ------ | --------------- | -------------------------- | ------------------------------------------------------------------------------- |
-| `ORX-GV-003` | Phase 1 Operational Remediation | Glossary, error-copy, and multilingual failure-state consistency | Codex2 | review_approved | `ORX-GV-001`, `ORX-GV-002` | 對齊 admin / ops / driver / tenant / partner 的 failure-state 文案與 glossary。 |
+| ID             | Phase                            | Task                                     | Owner   | Status  | Depends On                                                                                                | 中文說明                                                                                                                                          |
+| -------------- | -------------------------------- | ---------------------------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SYNC-001`     | Phase 1 Blueprint Delta Closeout | Status and dashboard truth sync          | Codex   | backlog | -                                                                                                         | 同步 root ai-status、current-work 與 docs-site 狀態，移除 ORX-GV-003 stale active narrative，讓新 closeout wave 成為唯一 active view。            |
+| `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation     | Claude2 | backlog | `SYNC-001`                                                                                                | 更新 workflow release gates 與 closeout wording，讓 ORX 完成後的 gate 狀態、external-gated、HOLD、pilot/production 邊界一致。                     |
+| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification  | Copilot | backlog | `SYNC-002`                                                                                                | 把 UAT checklist 由未勾選混合清單整理成 inventory/static/live/sign-off/external/deferred 狀態，避免把靜態證據誤稱人工 UAT 通過。                  |
+| `XREPO-001`    | Phase 1 Blueprint Delta Closeout | Tenant commute hub cross-repo closure    | Claude2 | backlog | -                                                                                                         | 檢查 tenant-commute-hub 未提交變更，完成 contract snapshot 與 tenant UI 同步，讓雙 repo 都乾淨並推到遠端。                                        |
+| `DEPLOY-001`   | Phase 1 Blueprint Delta Closeout | DB-enabled runtime persistence proof     | Gemini  | backlog | `SYNC-001`                                                                                                | 補 DB-enabled runtime proof，確認 DATABASE_URL、migration、DB-backed repository 與 driver device binding durability 的 production closeout 證據。 |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Claude  | backlog | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` | 在所有 sync、cross-repo、deploy、external gate 任務完成或明確 blocked 後，產出最終 release-language closeout，避免再說 everything done。          |
 
 ### External / Upstream Integration Work
 
-| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
-| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
-| _(none)_ | -     | -    | -     | -      | -          | -        |
+| ID        | Phase                            | Task                                      | Owner   | Status  | Depends On | 中文說明                                                                                                                                     |
+| --------- | -------------------------------- | ----------------------------------------- | ------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EXT-001` | Phase 1 Blueprint Delta Closeout | Real bank issuer eligibility gate         | Claude2 | backlog | `SYNC-002` | 把真實銀行/issuer eligibility 從隱性 blocker 轉成可稽核 external gate，列出契約、credential、sandbox、測試卡與 fallback 證據需求。           |
+| `EXT-002` | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Claude2 | backlog | `SYNC-002` | 定義 forwarder 從 stub/scaffold 升級到真實外部平台的 proof gate，包括 credential、webhook signature、callback、status sync、lost-race 證據。 |
+| `EXT-003` | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog | `SYNC-002` | 建立 driver app mobile distribution gate，列出 Expo、Apple team、Android keystore、tester group、build profile 與 release channel 要求。     |
+| `EXT-004` | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini  | backlog | `SYNC-002` | 建立 CTI/錄音/filing activation gate，明確 OC-022、OC-023、OC-024、E2E-003 的 live/staging/blocked 狀態與證據格式。                          |
 
 ## Task Board (active only)
 
-| ID           | Phase                           | Task                                                             | Owner  | Status          | Depends On                 |
-| ------------ | ------------------------------- | ---------------------------------------------------------------- | ------ | --------------- | -------------------------- |
-| `ORX-GV-003` | Phase 1 Operational Remediation | Glossary, error-copy, and multilingual failure-state consistency | Codex2 | review_approved | `ORX-GV-001`, `ORX-GV-002` |
+| ID             | Phase                            | Task                                      | Owner   | Status  | Depends On                                                                                                |
+| -------------- | -------------------------------- | ----------------------------------------- | ------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| `SYNC-001`     | Phase 1 Blueprint Delta Closeout | Status and dashboard truth sync           | Codex   | backlog | -                                                                                                         |
+| `SYNC-002`     | Phase 1 Blueprint Delta Closeout | Workflow release gate reconciliation      | Claude2 | backlog | `SYNC-001`                                                                                                |
+| `SYNC-003`     | Phase 1 Blueprint Delta Closeout | UAT checklist evidence reclassification   | Copilot | backlog | `SYNC-002`                                                                                                |
+| `XREPO-001`    | Phase 1 Blueprint Delta Closeout | Tenant commute hub cross-repo closure     | Claude2 | backlog | -                                                                                                         |
+| `DEPLOY-001`   | Phase 1 Blueprint Delta Closeout | DB-enabled runtime persistence proof      | Gemini  | backlog | `SYNC-001`                                                                                                |
+| `EXT-001`      | Phase 1 Blueprint Delta Closeout | Real bank issuer eligibility gate         | Claude2 | backlog | `SYNC-002`                                                                                                |
+| `EXT-002`      | Phase 1 Blueprint Delta Closeout | Real forwarder adapter proof gate         | Claude2 | backlog | `SYNC-002`                                                                                                |
+| `EXT-003`      | Phase 1 Blueprint Delta Closeout | Mobile distribution gate                  | Gemini2 | backlog | `SYNC-002`                                                                                                |
+| `EXT-004`      | Phase 1 Blueprint Delta Closeout | Live CTI recording filing activation gate | Gemini  | backlog | `SYNC-002`                                                                                                |
+| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative  | Claude  | backlog | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
 
 ## Handoff Queue
 
-| Task         | From    | To     | Message                                                                                                                                                                                                                                                                                                                                 | Status  | Created At           |
-| ------------ | ------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
-| `ORX-GV-003` | Claude2 | Codex2 | Review approved: all 3 ACs pass. 投訴→客訴 normalization complete (zero residuals in apps/); 已到→已到期 fix correct; Health & Quotas→Health & Alerts aligned; driver-app upgraded to bilingual locale; remaining raw error.message passthroughs explicitly cataloged in glossary hotspot appendix. Returned to owner for finalization. | pending | 2026-05-01T00:53:51Z |
+| Task     | From | To  | Message | Status | Created At |
+| -------- | ---- | --- | ------- | ------ | ---------- |
+| _(none)_ | -    | -   | -       | -      | -          |
 
 ## Blockers
 
@@ -78,44 +95,44 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task         | Reviewer | 修正重點                                                                                                                                                                                                                                                                                    | Review File                                  |
-| ------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `ORX-GV-003` | Claude2  | 審查通過：三項 AC 全數達成。投訴→客訴正規化已完成（grep 確認 apps/ 下零殘留）；已到→已到期修正正確；Health & Quotas→Health & Alerts 對齊 glossary；driver-app 已升級為雙語 locale 介面；剩餘 raw error.message passthrough 已明確列入 glossary Section 12 hotspot 清單。<br>回到 owner 收尾 | docs/02-architecture/operational-glossary.md |
+| Task     | Reviewer | 修正重點 | Review File |
+| -------- | -------- | -------- | ----------- |
+| _(none)_ | -        | -        | -           |
 
 ## Completion Evidence (last 10)
 
-| Task                            | Commit  | Subject                                                                                   | LLM Agent | Reviewer | Recorded At          |
-| ------------------------------- | ------- | ----------------------------------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `ORX-FN-003`                    | 94fdfb8 | feat(ORX-FN-003): artifact download policy, masking, retention, and legal-hold operations | Claude2   | Claude   | 2026-04-30T17:43:42Z |
-| `ORX-GV-001`                    | 97e4c63 | feat(ORX-GV-001): negative-path UAT pack and release gate expansion                       | Claude2   | Claude   | 2026-04-30T23:08:56Z |
-| `ORX-GV-002`                    | 8ce6fe5 | docs(ORX-GV-002): add operator ownership routing runbooks                                 | Codex2    | Claude   | 2026-05-01T00:32:34Z |
-| `ORX-DP-001-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                        | Claude2   | Claude   | 2026-04-30T23:14:19Z |
-| `OPX-DP-003-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                        | Codex2    | Codex    | 2026-04-30T14:12:11Z |
-| `OPX-DP-004-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                        | Claude2   | Codex    | 2026-04-30T14:27:12Z |
-| `ORX-FN-001-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                        | Claude    | Codex2   | 2026-04-30T14:24:42Z |
-| `ORX-DP-003-SIDECAR-REVIEW`     | -       | no-commit closeout                                                                        | Claude2   | Claude   | 2026-04-30T23:54:31Z |
-| `ORX-CS-002-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                        | Claude    | Codex2   | 2026-05-01T00:24:26Z |
-| `ORX-GV-003-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                        | Codex     | Claude2  | 2026-05-01T00:50:29Z |
+| Task                            | Commit  | Subject                                                                            | LLM Agent | Reviewer | Recorded At          |
+| ------------------------------- | ------- | ---------------------------------------------------------------------------------- | --------- | -------- | -------------------- |
+| `ORX-GV-001`                    | 97e4c63 | feat(ORX-GV-001): negative-path UAT pack and release gate expansion                | Claude2   | Claude   | 2026-04-30T23:08:56Z |
+| `ORX-GV-002`                    | 8ce6fe5 | docs(ORX-GV-002): add operator ownership routing runbooks                          | Codex2    | Claude   | 2026-05-01T00:32:34Z |
+| `ORX-GV-003`                    | 51df49f | feat(ORX-GV-003): glossary, error-copy, and multilingual failure-state consistency | Codex2    | Claude2  | 2026-05-01T00:55:05Z |
+| `ORX-DP-001-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Claude2   | Claude   | 2026-04-30T23:14:19Z |
+| `OPX-DP-003-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Codex2    | Codex    | 2026-04-30T14:12:11Z |
+| `OPX-DP-004-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Claude2   | Codex    | 2026-04-30T14:27:12Z |
+| `ORX-FN-001-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Claude    | Codex2   | 2026-04-30T14:24:42Z |
+| `ORX-DP-003-SIDECAR-REVIEW`     | -       | no-commit closeout                                                                 | Claude2   | Claude   | 2026-04-30T23:54:31Z |
+| `ORX-CS-002-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Claude    | Codex2   | 2026-05-01T00:24:26Z |
+| `ORX-GV-003-SIDECAR-ACCEPTANCE` | -       | no-commit closeout                                                                 | Codex     | Claude2  | 2026-05-01T00:50:29Z |
 
 ## Latest Checkpoints
 
-- 2026-05-01T00:53:13Z Orchestrator: PreToolUse: Read
-- 2026-05-01T00:53:13Z Orchestrator: PostToolUse: Read
-- 2026-05-01T00:53:14Z Orchestrator: PreToolUse: Grep
-- 2026-05-01T00:53:14Z Orchestrator: PostToolUse: Grep
-- 2026-05-01T00:53:15Z Orchestrator: PreToolUse: Grep
-- 2026-05-01T00:53:15Z Orchestrator: PostToolUse: Grep
-- 2026-05-01T00:53:21Z Orchestrator: PreToolUse: Grep
-- 2026-05-01T00:53:21Z Orchestrator: PostToolUse: Grep
-- 2026-05-01T00:53:26Z Orchestrator: PreToolUse: Grep
-- 2026-05-01T00:53:26Z Orchestrator: PostToolUse: Grep
-- 2026-05-01T00:53:29Z Orchestrator: PreToolUse: Grep
-- 2026-05-01T00:53:29Z Orchestrator: PostToolUse: Grep
-- 2026-05-01T00:53:38Z Orchestrator: PreToolUse: Grep
-- 2026-05-01T00:53:38Z Orchestrator: PostToolUse: Grep
-- 2026-05-01T00:53:41Z Orchestrator: PreToolUse: Grep
-- 2026-05-01T00:53:42Z Orchestrator: PostToolUse: Grep
-- 2026-05-01T00:53:48Z Orchestrator: PreToolUse: Grep
-- 2026-05-01T00:53:49Z Orchestrator: PostToolUse: Grep
-- 2026-05-01T00:53:50Z Orchestrator: PreToolUse: Bash
-- 2026-05-01T00:53:51Z Claude2: `ORX-GV-003` Review approved: all 3 ACs pass. 投訴→客訴 normalization complete (zero residuals in apps/); 已到→已到期 fix correct; Health & Quotas→Health & Alerts aligned; driver-app upgraded to bilingual locale; remaining raw error.message passthroughs explicitly cataloged in glossary hotspot appendix. Returned to owner for finalization.
+- 2026-05-01T07:13:06Z Orchestrator: PostToolUse: Bash
+- 2026-05-01T07:13:06Z Orchestrator: PreToolUse: Read
+- 2026-05-01T07:13:07Z Orchestrator: PreToolUse: Read
+- 2026-05-01T07:13:07Z Orchestrator: PostToolUse: Read
+- 2026-05-01T07:13:07Z Orchestrator: PostToolUse: Read
+- 2026-05-01T07:13:10Z Codex: `EXT-003` Assigned EXT-003 to Gemini2 with reviewer Claude2
+- 2026-05-01T07:13:13Z Orchestrator: PreToolUse: Bash
+- 2026-05-01T07:13:13Z Orchestrator: PostToolUse: Bash
+- 2026-05-01T07:13:14Z Orchestrator: PreToolUse: Bash
+- 2026-05-01T07:13:14Z Orchestrator: PostToolUse: Bash
+- 2026-05-01T07:13:17Z Orchestrator: PreToolUse: Bash
+- 2026-05-01T07:13:18Z Orchestrator: PostToolUse: Bash
+- 2026-05-01T07:13:18Z Orchestrator: PreToolUse: Bash
+- 2026-05-01T07:13:18Z Orchestrator: PostToolUse: Bash
+- 2026-05-01T07:13:19Z Codex: `EXT-004` Assigned EXT-004 to Gemini with reviewer Claude
+- 2026-05-01T07:13:21Z Orchestrator: PreToolUse: Bash
+- 2026-05-01T07:13:22Z Orchestrator: PostToolUse: Bash
+- 2026-05-01T07:13:25Z Orchestrator: PreToolUse: Bash
+- 2026-05-01T07:13:26Z Orchestrator: PostToolUse: Bash
+- 2026-05-01T07:13:27Z Codex: `BDX-CLOSEOUT` Assigned BDX-CLOSEOUT to Claude with reviewer Codex
