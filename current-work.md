@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T09:01:10Z
+Last updated: 2026-05-01T09:02:17Z
 
 ## Objective
 
@@ -42,15 +42,15 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
 - `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Review approved: final closeout narrative is concrete, current, and keeps external/pilot/production gates explicit.
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
 
 ## Delivery Layers
 
 ### Primary Project Work
 
-| ID             | Phase                            | Task                                     | Owner   | Status          | Depends On                                                                                                | 中文說明                                                                                                                                 |
-| -------------- | -------------------------------- | ---------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Gemini2 | review_approved | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` | 在所有 sync、cross-repo、deploy、external gate 任務完成或明確 blocked 後，產出最終 release-language closeout，避免再說 everything done。 |
+| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
+| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
+| _(none)_ | -     | -    | -     | -      | -          | -        |
 
 ### External / Upstream Integration Work
 
@@ -60,15 +60,14 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Task Board (active only)
 
-| ID             | Phase                            | Task                                     | Owner   | Status          | Depends On                                                                                                |
-| -------------- | -------------------------------- | ---------------------------------------- | ------- | --------------- | --------------------------------------------------------------------------------------------------------- |
-| `BDX-CLOSEOUT` | Phase 1 Blueprint Delta Closeout | Final blueprint delta closeout narrative | Gemini2 | review_approved | `SYNC-001`, `SYNC-002`, `SYNC-003`, `XREPO-001`, `DEPLOY-001`, `EXT-001`, `EXT-002`, `EXT-003`, `EXT-004` |
+| ID  | Phase | Task | Owner | Status | Depends On |
+| --- | ----- | ---- | ----- | ------ | ---------- |
 
 ## Handoff Queue
 
-| Task           | From  | To      | Message                                                                                                             | Status  | Created At           |
-| -------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
-| `BDX-CLOSEOUT` | Codex | Gemini2 | Review approved: final closeout narrative is concrete, current, and keeps external/pilot/production gates explicit. | pending | 2026-05-01T09:01:10Z |
+| Task     | From | To  | Message | Status | Created At |
+| -------- | ---- | --- | ------- | ------ | ---------- |
+| _(none)_ | -    | -   | -       | -      | -          |
 
 ## Blockers
 
@@ -78,28 +77,27 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task           | Reviewer | 修正重點                                                                                                                                                                                                                                                                     | Review File |
-| -------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `BDX-CLOSEOUT` | Codex    | 已審核 BDX-CLOSEOUT：Gemini2 worker 只啟動未產出，reviewer 已補齊正式 closeout narrative。三份主文件已移除 audit-time stale 結論，改成 SYNC/XREPO/DEPLOY/EXT 的完成結果，並明確分離 repo-local done、external-gated、pilot-gated、production-gated，不再說 everything done。 | -           |
+| Task     | Reviewer | 修正重點 | Review File |
+| -------- | -------- | -------- | ----------- |
+| _(none)_ | -        | -        | -           |
 
 ## Completion Evidence (last 10)
 
-| Task                            | Commit                                   | Subject                                                           | LLM Agent | Reviewer | Recorded At          |
-| ------------------------------- | ---------------------------------------- | ----------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `ORX-GV-003-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                | Codex     | Claude2  | 2026-05-01T00:50:29Z |
-| `SYNC-001`                      | 6d4b7f1a99f76a260837e67bc1e80d8da70db9b3 | SYNC-001: record status dashboard sync review                     | Gemini2   | Codex    | 2026-05-01T07:52:06Z |
-| `SYNC-002`                      | 6c5ba6865af075f1b2cde9a69f37eac9d141caba | SYNC-002: reconcile workflow release gates                        | Gemini2   | Codex    | 2026-05-01T08:17:45Z |
-| `SYNC-003`                      | 0ee6948cded997b07b0cae009a83f30f9ff7aade | SYNC-003: reclassify UAT evidence gates                           | Gemini2   | Codex    | 2026-05-01T08:26:17Z |
-| `XREPO-001`                     | c74f82cd87c5b774286a9740c3f49a229504ed1d | chore(status): approve cross-repo closeout                        | Gemini2   | Codex    | 2026-05-01T08:14:24Z |
-| `DEPLOY-001`                    | 394c3e2201dc26a9f83ff2b78ddaa3ef7626bd01 | chore(closeout): review proof gates and stabilize chairman triage | Gemini2   | Codex    | 2026-05-01T08:14:32Z |
-| `EXT-001`                       | 8a92c1f78b2c10d34ddf6cfe964facbccd3bd985 | EXT-001: record issuer eligibility external gate                  | Gemini2   | Codex    | 2026-05-01T08:32:05Z |
-| `EXT-002`                       | 137cac133a9a7b341f01264ff908fb3876330d14 | EXT-002: record forwarder adapter proof gate                      | Gemini2   | Codex    | 2026-05-01T08:38:58Z |
-| `EXT-003`                       | 5ed2f8adc5699de90ad894a53c6fecea89d3a861 | EXT-003: record mobile distribution gate                          | Gemini2   | Codex    | 2026-05-01T08:44:11Z |
-| `EXT-004`                       | 0afd14413725f046fb1320fecb21a57fbf6a24b0 | EXT-004: record CTI recording filing gate                         | Gemini2   | Codex    | 2026-05-01T08:54:13Z |
+| Task           | Commit                                   | Subject                                                           | LLM Agent | Reviewer | Recorded At          |
+| -------------- | ---------------------------------------- | ----------------------------------------------------------------- | --------- | -------- | -------------------- |
+| `SYNC-001`     | 6d4b7f1a99f76a260837e67bc1e80d8da70db9b3 | SYNC-001: record status dashboard sync review                     | Gemini2   | Codex    | 2026-05-01T07:52:06Z |
+| `SYNC-002`     | 6c5ba6865af075f1b2cde9a69f37eac9d141caba | SYNC-002: reconcile workflow release gates                        | Gemini2   | Codex    | 2026-05-01T08:17:45Z |
+| `SYNC-003`     | 0ee6948cded997b07b0cae009a83f30f9ff7aade | SYNC-003: reclassify UAT evidence gates                           | Gemini2   | Codex    | 2026-05-01T08:26:17Z |
+| `XREPO-001`    | c74f82cd87c5b774286a9740c3f49a229504ed1d | chore(status): approve cross-repo closeout                        | Gemini2   | Codex    | 2026-05-01T08:14:24Z |
+| `DEPLOY-001`   | 394c3e2201dc26a9f83ff2b78ddaa3ef7626bd01 | chore(closeout): review proof gates and stabilize chairman triage | Gemini2   | Codex    | 2026-05-01T08:14:32Z |
+| `EXT-001`      | 8a92c1f78b2c10d34ddf6cfe964facbccd3bd985 | EXT-001: record issuer eligibility external gate                  | Gemini2   | Codex    | 2026-05-01T08:32:05Z |
+| `EXT-002`      | 137cac133a9a7b341f01264ff908fb3876330d14 | EXT-002: record forwarder adapter proof gate                      | Gemini2   | Codex    | 2026-05-01T08:38:58Z |
+| `EXT-003`      | 5ed2f8adc5699de90ad894a53c6fecea89d3a861 | EXT-003: record mobile distribution gate                          | Gemini2   | Codex    | 2026-05-01T08:44:11Z |
+| `EXT-004`      | 0afd14413725f046fb1320fecb21a57fbf6a24b0 | EXT-004: record CTI recording filing gate                         | Gemini2   | Codex    | 2026-05-01T08:54:13Z |
+| `BDX-CLOSEOUT` | f7f3e7c1808363ef600cb3aacb8b1de8bc112850 | BDX-CLOSEOUT: finalize blueprint delta closeout                   | Gemini2   | Codex    | 2026-05-01T09:02:16Z |
 
 ## Latest Checkpoints
 
-- 2026-05-01T08:42:46Z Gemini2: `EXT-003` Handoff to Codex: Mobile distribution gate is ready after reviewer correction: support/sidecars/EXT-003/EXT-003-MOBILE-DISTRIBUTION-GATE.md records EXT-003-BLK-001..007 for Expo account, Android signing, Apple team, tester groups, EAS secrets, release channels, and install evidence. driver-app-native-dev-runbook and master closeout checklist now link the gate and explicitly prohibit production-distributed/mobile-release-complete overclaim. Verification run: prettier check, doc-sync audit, git diff --check.
 - 2026-05-01T08:42:59Z Codex: `EXT-003` Review passed after correction: EXT-003 has explicit blocker records EXT-003-BLK-001..007, links existing EAS evidence, names build profiles/tester groups, and blocks repo-local mobile distribution overclaim.
 - 2026-05-01T08:44:11Z Gemini2: `EXT-003` Done: mobile distribution gate committed and pushed; EXT-003-BLK-001..007 now track Expo account, Android signing, Apple team, tester groups, EAS secret policy, release channel ownership, and install evidence blockers.
 - 2026-05-01T08:45:11Z Orchestrator: `EXT-003` Background worker process exited after advancing the task to `done`.
@@ -119,3 +117,4 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 - 2026-05-01T08:59:28Z Gemini2: `BDX-CLOSEOUT` Reviewer correction in progress: Gemini2 worker exited after start-only output; final closeout narrative is being written into audit, checklist, and execution packet with external/pilot/production gate language.
 - 2026-05-01T09:00:56Z Gemini2: `BDX-CLOSEOUT` Handoff to Codex: Final blueprint delta closeout narrative is ready: audit, master checklist, and execution packet now distinguish repo-local done from external-gated, pilot-gated, and production-gated status; stale audit-time ORX/dashboard/tenant-dirty claims are replaced with closeout results. Checks: prettier check, ai_status doc-sync audit, git diff --check.
 - 2026-05-01T09:01:10Z Codex: `BDX-CLOSEOUT` Review approved: final closeout narrative is concrete, current, and keeps external/pilot/production gates explicit.
+- 2026-05-01T09:02:16Z Gemini2: `BDX-CLOSEOUT` Done: final blueprint delta closeout narrative committed and pushed; repo-local done is separated from external-gated, pilot-gated, and production-gated status.
