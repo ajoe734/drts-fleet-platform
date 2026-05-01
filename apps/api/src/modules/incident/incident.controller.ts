@@ -11,7 +11,9 @@ import {
 
 import type {
   CreateIncidentCommand,
+  CreateIncidentFromDispatchExceptionCommand,
   LinkComplaintToIncidentCommand,
+  RecordServiceRecoveryActionCommand,
   UpdateIncidentCommand,
 } from "@drts/contracts";
 
@@ -78,6 +80,46 @@ export class IncidentController {
   ) {
     return toApiSuccessEnvelope(
       { items: this.incidentService.getTimeline(incidentId) },
+      requestId,
+    );
+  }
+
+  @Post("from-dispatch-exception")
+  createFromDispatchException(
+    @Body() command: CreateIncidentFromDispatchExceptionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.incidentService.createFromDispatchException(command, requestId),
+      requestId,
+    );
+  }
+
+  @Post(":incidentId/service-recovery")
+  recordServiceRecoveryAction(
+    @Param("incidentId") incidentId: string,
+    @Body() command: RecordServiceRecoveryActionCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.incidentService.recordServiceRecoveryAction(
+        incidentId,
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get(":incidentId/service-recovery")
+  getServiceRecoveryActions(
+    @Param("incidentId") incidentId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      {
+        items: this.incidentService.getServiceRecoveryActions(incidentId),
+      },
       requestId,
     );
   }

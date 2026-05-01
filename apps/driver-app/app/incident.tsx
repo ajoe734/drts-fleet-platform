@@ -35,14 +35,19 @@ export default function IncidentScreen() {
     setSubmitting(true);
     const client = getDriverClient();
     try {
-      await client.createIncident({
+      const created = await client.createIncident({
         title: "司機 SOS 緊急通報",
         description: details.trim() || "已由司機 App 送出 SOS 緊急通報。",
         category: "safety",
         severity: "critical",
         reportedBy: "driver",
       });
-      Alert.alert("已送出 SOS", "營運已收到你的重大安全警示。");
+      if (created?.incidentId) {
+        await client.updateIncident(created.incidentId, {
+          escalationTarget: "safety_officer",
+        });
+      }
+      Alert.alert("已送出 SOS", "營運已收到你的重大安全警示，主管將優先處理。");
       setDetails("");
       router.replace("/trip");
     } catch (e: any) {
@@ -81,7 +86,7 @@ export default function IncidentScreen() {
       <View style={styles.noticeCard}>
         <Text style={styles.noticeTitle}>派遣處理說明</Text>
         <Text style={styles.noticeBody}>
-          此畫面送出的事件會固定標記為安全類別與重大等級。
+          此畫面送出的事件會固定標記為安全類別與重大等級。營運主管將會收到升級通知並優先處理。
         </Text>
       </View>
 

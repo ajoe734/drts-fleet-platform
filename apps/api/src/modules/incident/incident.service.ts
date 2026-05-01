@@ -5,9 +5,12 @@ import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
 import type {
   AuditLogRecord,
   CreateIncidentCommand,
+  CreateIncidentFromDispatchExceptionCommand,
   IncidentRecord,
   IncidentStatus,
   IncidentTimelineEntry,
+  RecordServiceRecoveryActionCommand,
+  ServiceRecoveryActionRecord,
   UpdateIncidentCommand,
 } from "@drts/contracts";
 
@@ -36,6 +39,23 @@ const INCIDENT_CATEGORY_VALUES = [
   "other",
 ] as const;
 
+const INCIDENT_ESCALATION_TARGET_VALUES = [
+  "ops_supervisor",
+  "dispatch_manager",
+  "safety_officer",
+  "roc_duty",
+] as const;
+
+const SERVICE_RECOVERY_ACTION_TYPES = [
+  "passenger_recontact",
+  "fare_adjustment",
+  "redispatch_ordered",
+  "voucher_issued",
+  "apology_sent",
+  "driver_reassigned",
+  "other",
+] as const;
+
 const TIMELINE_ACTIONS = {
   created: "incident_created",
   statusChanged: "status_changed",
@@ -43,6 +63,10 @@ const TIMELINE_ACTIONS = {
   resolved: "incident_resolved",
   closed: "incident_closed",
   complaintLinked: "complaint_linked",
+  escalationTargetSet: "escalation_target_set",
+  severityEscalated: "severity_escalated",
+  dispatchExceptionHandoff: "dispatch_exception_handoff",
+  serviceRecoveryAction: "service_recovery_action",
 } as const;
 
 @Injectable()
@@ -50,6 +74,7 @@ export class IncidentService implements OnModuleInit {
   private incidentSequence = 1;
   private incidents: IncidentRecord[] = [];
   private timelines = new Map<string, IncidentTimelineEntry[]>();
+  private recoveryActions = new Map<string, ServiceRecoveryActionRecord[]>();
 
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
@@ -91,9 +116,12 @@ export class IncidentService implements OnModuleInit {
       relatedComplaintCaseNo: null,
       reportedBy: command.reportedBy,
       assignedTo: null,
+      escalationTarget: null,
+      sourceDispatchExceptionOrderId: null,
       occurredAt: command.occurredAt ?? null,
       location: command.location ?? null,
       resolutionNote: null,
+      serviceRecoveryActions: [],
       createdAt: now,
       updatedAt: now,
     };
@@ -170,6 +198,45 @@ export class IncidentService implements OnModuleInit {
         incidentId,
         TIMELINE_ACTIONS.assigned,
         `Assigned to ${command.assignedTo}.`,
+        "ops_user",
+      );
+    }
+
+    if (command.severity !== undefined) {
+      this.assertValidSeverity(command.severity);
+      const oldSeverity = updated.severity;
+      updated.severity = command.severity;
+      if (oldSeverity !== command.severity) {
+        this.appendTimelineEntry(
+          incidentId,
+          TIMELINE_ACTIONS.severityEscalated,
+          `Severity changed from ${oldSeverity} to ${command.severity}.`,
+          "ops_user",
+        );
+      }
+    }
+
+    if (command.escalationTarget !== undefined) {
+      if (
+        command.escalationTarget !== null &&
+        !INCIDENT_ESCALATION_TARGET_VALUES.includes(
+          command.escalationTarget as any,
+        )
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VALIDATION_ERROR",
+          "Invalid escalation target.",
+          { escalationTarget: command.escalationTarget },
+        );
+      }
+      updated.escalationTarget = command.escalationTarget;
+      this.appendTimelineEntry(
+        incidentId,
+        TIMELINE_ACTIONS.escalationTargetSet,
+        command.escalationTarget
+          ? `Escalation target set to ${command.escalationTarget}.`
+          : "Escalation target cleared.",
         "ops_user",
       );
     }
@@ -262,6 +329,166 @@ export class IncidentService implements OnModuleInit {
   getTimeline(incidentId: string) {
     this.require(incidentId);
     return (this.timelines.get(incidentId) ?? []).map((e) => ({ ...e }));
+  }
+
+  createFromDispatchException(
+    command: CreateIncidentFromDispatchExceptionCommand,
+    requestId?: string,
+  ) {
+    this.assertValidSeverity(command.severity);
+    this.assertNonBlank(command.orderId, "orderId");
+    this.assertNonBlank(command.exceptionReasonCode, "exceptionReasonCode");
+    this.assertNonBlank(command.reportedBy, "reportedBy");
+
+    if (
+      command.escalationTarget &&
+      !INCIDENT_ESCALATION_TARGET_VALUES.includes(
+        command.escalationTarget as any,
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "Invalid escalation target.",
+        { escalationTarget: command.escalationTarget },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const incidentId = this.nextIncidentId();
+    const incident: IncidentRecord = {
+      incidentId,
+      title: `Dispatch exception: ${command.exceptionReasonCode} (order ${command.orderId})`,
+      description: command.exceptionNote
+        ? `Dispatch exception ${command.exceptionReasonCode} on order ${command.orderId}: ${command.exceptionNote}`
+        : `Dispatch exception ${command.exceptionReasonCode} escalated from order ${command.orderId}.`,
+      category: "operational",
+      severity: command.severity,
+      status: "open",
+      relatedOrderId: command.orderId,
+      relatedVehicleId: null,
+      relatedDriverId: null,
+      relatedComplaintCaseNo: null,
+      reportedBy: command.reportedBy,
+      assignedTo: null,
+      escalationTarget: command.escalationTarget ?? null,
+      sourceDispatchExceptionOrderId: command.orderId,
+      occurredAt: now,
+      location: null,
+      resolutionNote: null,
+      serviceRecoveryActions: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const timelineEntry = this.createTimelineEntry(
+      incidentId,
+      TIMELINE_ACTIONS.dispatchExceptionHandoff,
+      `Incident created from dispatch exception on order ${command.orderId} (reason: ${command.exceptionReasonCode}).`,
+      command.reportedBy,
+      now,
+    );
+
+    this.incidents = [incident, ...this.incidents];
+    this.timelines.set(incidentId, [timelineEntry]);
+    this.persist(
+      { incidents: [incident], timelines: [timelineEntry] },
+      "create_from_dispatch_exception",
+    );
+    this.recordAudit(
+      {
+        actorId: command.reportedBy,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "incident",
+        actionName: "create_from_dispatch_exception",
+        resourceType: "incident",
+        resourceId: incidentId,
+        newValuesSummary: {
+          orderId: command.orderId,
+          exceptionReasonCode: command.exceptionReasonCode,
+          severity: command.severity,
+          escalationTarget: command.escalationTarget ?? null,
+        },
+      },
+      requestId,
+    );
+
+    return this.clone(incident);
+  }
+
+  recordServiceRecoveryAction(
+    incidentId: string,
+    command: RecordServiceRecoveryActionCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.actionType, "actionType");
+    this.assertNonBlank(command.note, "note");
+    this.assertNonBlank(command.actor, "actor");
+    if (!SERVICE_RECOVERY_ACTION_TYPES.includes(command.actionType as any)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "Invalid service recovery action type.",
+        { actionType: command.actionType },
+      );
+    }
+
+    const incident = this.require(incidentId);
+    const now = new Date().toISOString();
+    const action: ServiceRecoveryActionRecord = {
+      actionId: `sra-${randomUUID()}`,
+      incidentId,
+      actionType: command.actionType,
+      note: command.note,
+      actor: command.actor,
+      createdAt: now,
+    };
+
+    const existing = this.recoveryActions.get(incidentId) ?? [];
+    this.recoveryActions.set(incidentId, [...existing, action]);
+
+    const updated = {
+      ...incident,
+      serviceRecoveryActions: this.recoveryActions
+        .get(incidentId)!
+        .map((a) => ({ ...a })),
+      updatedAt: now,
+    };
+    this.replace(updated);
+
+    this.appendTimelineEntry(
+      incidentId,
+      TIMELINE_ACTIONS.serviceRecoveryAction,
+      `Service recovery: ${command.actionType} — ${command.note}`,
+      command.actor,
+      now,
+    );
+
+    this.persist({ incidents: [updated] }, "record_service_recovery_action");
+    this.recordAudit(
+      {
+        actorId: command.actor,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "incident",
+        actionName: "record_service_recovery_action",
+        resourceType: "incident",
+        resourceId: incidentId,
+        newValuesSummary: {
+          actionType: command.actionType,
+          note: command.note,
+        },
+      },
+      requestId,
+    );
+
+    return action;
+  }
+
+  getServiceRecoveryActions(incidentId: string) {
+    this.require(incidentId);
+    return (this.recoveryActions.get(incidentId) ?? []).map((a) => ({ ...a }));
   }
 
   // --- Private helpers ---

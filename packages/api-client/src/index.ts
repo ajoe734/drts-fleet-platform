@@ -7,9 +7,12 @@
 
 import type {
   AddComplaintCaseNoteCommand,
+  AddReconciliationIssueCommentCommand,
   ApplyManualFareOverrideCommand,
+  ApproveExceptionOverrideCommand,
   AnnounceCallAgentIdentityCommand,
   ApproveReimbursementBatchCommand,
+  AssignReconciliationIssueCommand,
   AssignComplaintCaseCommand,
   AttachCallRecordingCommand,
   ApiSuccessEnvelope,
@@ -25,6 +28,8 @@ import type {
   ComplaintTimelineEntry,
   CompleteCallbackTaskCommand,
   CreateDriverMasterCommand,
+  CreateEvidenceDeletionExceptionCommand,
+  CreateEvidenceLegalHoldCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
   IssuePartnerIngressCredentialCommand,
@@ -42,6 +47,8 @@ import type {
   CreateCallbackTaskCommand,
   CreateComplaintCaseCommand,
   CreateIncidentCommand,
+  CreateIncidentFromDispatchExceptionCommand,
+  CreateReconciliationIssueCommand,
   CompleteVehicleDebrandingCommand,
   CreateMaintenanceRecordCommand,
   DispatchExclusivityRecord,
@@ -63,6 +70,12 @@ import type {
   DriverStartTaskCommand,
   DriverStatementRecord,
   DriverTaskRecord,
+  EvidenceDeletionExceptionRecord,
+  EvidenceGovernanceCatalog,
+  EvidenceLegalHoldRecord,
+  EvidenceRetentionFamily,
+  EvidenceRetentionPolicyRecord,
+  EvidenceSubjectGovernanceRecord,
   FeatureFlag,
   FeatureFlagSummary,
   FilingPackageAccepted,
@@ -74,6 +87,8 @@ import type {
   GenerateTenantInvoiceCommand,
   IncidentRecord,
   IncidentTimelineEntry,
+  RecordServiceRecoveryActionCommand,
+  ServiceRecoveryActionRecord,
   InitiateVehicleOffboardingCommand,
   InsurancePolicyRecord,
   IssueTenantApiKeyCommand,
@@ -111,13 +126,20 @@ import type {
   RefreshDriverDeviceSessionCommand,
   RejectExclusivityCommand,
   ReimbursementBatchRecord,
+  ReconciliationIssueRecord,
   RevokePartnerIngressCredentialCommand,
   RegisterDriverDeviceCommand,
   ReopenComplaintCaseCommand,
+  ReleaseEvidenceLegalHoldCommand,
   ReportJobAccepted,
   ReportJobDetailRecord,
   ReportJobRecord,
+  ResolveReconciliationIssueCommand,
   ResolveComplaintCaseCommand,
+  ResolveEvidenceDeletionExceptionCommand,
+  ReopenReconciliationIssueCommand,
+  RejectExceptionOverrideCommand,
+  RequestExceptionOverrideCommand,
   ResolveExceptionHoldCommand,
   ResolvePartnerEligibilityReviewCommand,
   RevokeDriverDeviceBindingCommand,
@@ -579,6 +601,36 @@ export class ApiClient {
     );
   }
 
+  async requestExceptionOverride(
+    orderId: string,
+    command: RequestExceptionOverrideCommand,
+  ) {
+    return this.post<OwnedOrderRecord>(
+      `/api/orders/${encodeURIComponent(orderId)}/request-override`,
+      { body: command },
+    );
+  }
+
+  async approveExceptionOverride(
+    orderId: string,
+    command: ApproveExceptionOverrideCommand,
+  ) {
+    return this.post<OwnedOrderRecord>(
+      `/api/orders/${encodeURIComponent(orderId)}/approve-override`,
+      { body: command },
+    );
+  }
+
+  async rejectExceptionOverride(
+    orderId: string,
+    command: RejectExceptionOverrideCommand,
+  ) {
+    return this.post<OwnedOrderRecord>(
+      `/api/orders/${encodeURIComponent(orderId)}/reject-override`,
+      { body: command },
+    );
+  }
+
   async listDispatchJobs(): Promise<DispatchJobRecord[]> {
     const res = await this.get<ListEnvelope<DispatchJobRecord>>(
       "/api/dispatch/tasks",
@@ -639,9 +691,14 @@ export class ApiClient {
     return this.post(`/api/driver/tasks/${taskId}/start`, { body: command });
   }
 
-  async completeTask(taskId: string, command: DriverCompleteTaskCommand) {
+  async completeTask(
+    taskId: string,
+    command: DriverCompleteTaskCommand,
+    options?: RequestOptions,
+  ): Promise<DriverTaskRecord> {
     return this.post(`/api/driver/tasks/${taskId}/complete`, {
       body: command,
+      ...(options?.headers ? { headers: options.headers } : {}),
     });
   }
 
@@ -925,6 +982,71 @@ export class ApiClient {
     );
   }
 
+  async listReconciliationIssues(filters?: {
+    status?: ReconciliationIssueRecord["status"];
+    issueType?: ReconciliationIssueRecord["issueType"];
+    channelKey?: string;
+  }): Promise<ReconciliationIssueRecord[]> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.issueType) params.set("issueType", filters.issueType);
+    if (filters?.channelKey) params.set("channelKey", filters.channelKey);
+    const query = params.toString();
+    const url = query
+      ? `/api/settlement/reconciliation-issues?${query}`
+      : "/api/settlement/reconciliation-issues";
+    return this.getList<ReconciliationIssueRecord>(url);
+  }
+
+  async createReconciliationIssue(
+    command: CreateReconciliationIssueCommand,
+  ): Promise<ReconciliationIssueRecord> {
+    return this.post<ReconciliationIssueRecord>(
+      "/api/settlement/reconciliation-issues",
+      { body: command },
+    );
+  }
+
+  async assignReconciliationIssue(
+    issueId: string,
+    command: AssignReconciliationIssueCommand,
+  ): Promise<ReconciliationIssueRecord> {
+    return this.post<ReconciliationIssueRecord>(
+      `/api/settlement/reconciliation-issues/${encodeURIComponent(issueId)}/assign`,
+      { body: command },
+    );
+  }
+
+  async addReconciliationIssueComment(
+    issueId: string,
+    command: AddReconciliationIssueCommentCommand,
+  ): Promise<ReconciliationIssueRecord> {
+    return this.post<ReconciliationIssueRecord>(
+      `/api/settlement/reconciliation-issues/${encodeURIComponent(issueId)}/comment`,
+      { body: command },
+    );
+  }
+
+  async resolveReconciliationIssue(
+    issueId: string,
+    command: ResolveReconciliationIssueCommand,
+  ): Promise<ReconciliationIssueRecord> {
+    return this.post<ReconciliationIssueRecord>(
+      `/api/settlement/reconciliation-issues/${encodeURIComponent(issueId)}/resolve`,
+      { body: command },
+    );
+  }
+
+  async reopenReconciliationIssue(
+    issueId: string,
+    command: ReopenReconciliationIssueCommand,
+  ): Promise<ReconciliationIssueRecord> {
+    return this.post<ReconciliationIssueRecord>(
+      `/api/settlement/reconciliation-issues/${encodeURIComponent(issueId)}/reopen`,
+      { body: command },
+    );
+  }
+
   // ── Platform Presence ──
 
   async getPlatformPresence(): Promise<PlatformPresenceSummary> {
@@ -1141,6 +1263,97 @@ export class ApiClient {
 
   async listTenantAuditLogs() {
     return this.getList("/api/tenant/audit");
+  }
+
+  async listEvidencePolicies(): Promise<EvidenceRetentionPolicyRecord[]> {
+    const result = await this.get<EvidenceGovernanceCatalog>(
+      "/api/audit/evidence-policies",
+    );
+    return result.policies;
+  }
+
+  async getEvidencePolicy(
+    family: EvidenceRetentionFamily,
+  ): Promise<EvidenceRetentionPolicyRecord> {
+    return this.get<EvidenceRetentionPolicyRecord>(
+      `/api/audit/evidence-policies/${encodeURIComponent(family)}`,
+    );
+  }
+
+  async getEvidenceSubjectGovernance(
+    family: EvidenceRetentionFamily,
+    subjectId: string,
+    options?: {
+      tenantId?: string | null;
+      manifestHash?: string | null;
+    },
+  ): Promise<EvidenceSubjectGovernanceRecord> {
+    const params = new URLSearchParams();
+    if (options?.tenantId) {
+      params.set("tenantId", options.tenantId);
+    }
+    if (options?.manifestHash) {
+      params.set("manifestHash", options.manifestHash);
+    }
+    const query = params.toString();
+    return this.get<EvidenceSubjectGovernanceRecord>(
+      `/api/audit/evidence-governance/${encodeURIComponent(family)}/${encodeURIComponent(subjectId)}${query ? `?${query}` : ""}`,
+    );
+  }
+
+  async listEvidenceLegalHolds(): Promise<EvidenceLegalHoldRecord[]> {
+    return this.getList<EvidenceLegalHoldRecord>("/api/audit/legal-holds");
+  }
+
+  async placeEvidenceLegalHold(
+    command: CreateEvidenceLegalHoldCommand,
+  ): Promise<EvidenceLegalHoldRecord> {
+    return this.post<EvidenceLegalHoldRecord>("/api/audit/legal-holds", {
+      body: command,
+    });
+  }
+
+  async releaseEvidenceLegalHold(
+    holdId: string,
+    command: ReleaseEvidenceLegalHoldCommand,
+  ): Promise<EvidenceLegalHoldRecord> {
+    return this.post<EvidenceLegalHoldRecord>(
+      `/api/audit/legal-holds/${encodeURIComponent(holdId)}/release`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async listEvidenceDeletionExceptions(): Promise<
+    EvidenceDeletionExceptionRecord[]
+  > {
+    return this.getList<EvidenceDeletionExceptionRecord>(
+      "/api/audit/deletion-exceptions",
+    );
+  }
+
+  async registerEvidenceDeletionException(
+    command: CreateEvidenceDeletionExceptionCommand,
+  ): Promise<EvidenceDeletionExceptionRecord> {
+    return this.post<EvidenceDeletionExceptionRecord>(
+      "/api/audit/deletion-exceptions",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async resolveEvidenceDeletionException(
+    exceptionId: string,
+    command: ResolveEvidenceDeletionExceptionCommand,
+  ): Promise<EvidenceDeletionExceptionRecord> {
+    return this.post<EvidenceDeletionExceptionRecord>(
+      `/api/audit/deletion-exceptions/${encodeURIComponent(exceptionId)}/resolve`,
+      {
+        body: command,
+      },
+    );
   }
 
   async getOperationalObservability(): Promise<OperationalObservabilitySnapshot> {
@@ -1678,6 +1891,32 @@ export class ApiClient {
     return this.post<IncidentRecord>(
       `/api/incidents/${encodeURIComponent(incidentId)}/link-complaint`,
       { body: { complaintCaseNo } },
+    );
+  }
+
+  async createIncidentFromDispatchException(
+    command: CreateIncidentFromDispatchExceptionCommand,
+  ) {
+    return this.post<IncidentRecord>("/api/incidents/from-dispatch-exception", {
+      body: command,
+    });
+  }
+
+  async recordServiceRecoveryAction(
+    incidentId: string,
+    command: RecordServiceRecoveryActionCommand,
+  ) {
+    return this.post<ServiceRecoveryActionRecord>(
+      `/api/incidents/${encodeURIComponent(incidentId)}/service-recovery`,
+      { body: command },
+    );
+  }
+
+  async getServiceRecoveryActions(
+    incidentId: string,
+  ): Promise<ServiceRecoveryActionRecord[]> {
+    return this.getList<ServiceRecoveryActionRecord>(
+      `/api/incidents/${encodeURIComponent(incidentId)}/service-recovery`,
     );
   }
 

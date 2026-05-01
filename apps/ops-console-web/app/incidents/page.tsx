@@ -7,14 +7,18 @@ import { PageHeader } from "@drts/ui-web";
 import type {
   CreateIncidentCommand,
   IncidentCategory,
+  IncidentEscalationTarget,
   IncidentRecord,
   IncidentSeverity,
   IncidentStatus,
   IncidentTimelineEntry,
+  RecordServiceRecoveryActionCommand,
+  ServiceRecoveryActionRecord,
   UpdateIncidentCommand,
 } from "@drts/contracts";
 import {
   INCIDENT_CATEGORIES,
+  INCIDENT_ESCALATION_TARGETS,
   INCIDENT_SEVERITIES,
   INCIDENT_STATUSES,
 } from "@drts/contracts";
@@ -25,6 +29,19 @@ import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
 const STATUSES: IncidentStatus[] = [...INCIDENT_STATUSES];
 const SEVERITIES: IncidentSeverity[] = [...INCIDENT_SEVERITIES];
 const CATEGORIES: IncidentCategory[] = [...INCIDENT_CATEGORIES];
+const ESCALATION_TARGETS: IncidentEscalationTarget[] = [
+  ...INCIDENT_ESCALATION_TARGETS,
+];
+
+const SERVICE_RECOVERY_TYPES = [
+  "passenger_recontact",
+  "fare_adjustment",
+  "redispatch_ordered",
+  "voucher_issued",
+  "apology_sent",
+  "driver_reassigned",
+  "other",
+] as const;
 
 type IncidentFormInitialValues = {
   title?: string;
@@ -44,6 +61,10 @@ export default function IncidentsPage() {
   const searchParams = useSearchParams();
   const [records, setRecords] = useState<IncidentRecord[]>([]);
   const [timeline, setTimeline] = useState<IncidentTimelineEntry[]>([]);
+  const [recoveryActions, setRecoveryActions] = useState<
+    ServiceRecoveryActionRecord[]
+  >([]);
+  const [showRecoveryForm, setShowRecoveryForm] = useState(false);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(
     null,
   );
@@ -112,9 +133,14 @@ export default function IncidentsPage() {
   async function loadTimeline(incidentId: string) {
     try {
       const client = getOpsClient();
-      const items = await client.getIncidentTimeline(incidentId);
+      const [items, actions] = await Promise.all([
+        client.getIncidentTimeline(incidentId),
+        client.getServiceRecoveryActions(incidentId),
+      ]);
       setSelectedIncidentId(incidentId);
       setTimeline(items);
+      setRecoveryActions(actions);
+      setShowRecoveryForm(false);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : t("common.unknown"));
@@ -397,6 +423,7 @@ export default function IncidentsPage() {
                     <th>{t("incidents.col.incident")}</th>
                     <th>{t("incidents.col.severity")}</th>
                     <th>{t("incidents.col.status")}</th>
+                    <th>{t("incidents.col.escalation")}</th>
                     <th>{t("incidents.col.vehicles")}</th>
                     <th>{t("incidents.col.actions")}</th>
                   </tr>
@@ -426,6 +453,24 @@ export default function IncidentsPage() {
                         </td>
                         <td>{renderSeverityBadge(record.severity, locale)}</td>
                         <td>{formatOpsCodeLabel(locale, record.status)}</td>
+                        <td>
+                          <div className="link-stack">
+                            {record.escalationTarget ? (
+                              <span className="escalation-badge">
+                                {t(
+                                  `incidents.escalationBadge.${record.escalationTarget}` as any,
+                                )}
+                              </span>
+                            ) : (
+                              <span className="cell-subcopy">—</span>
+                            )}
+                            {record.sourceDispatchExceptionOrderId && (
+                              <span className="dispatch-exception-tag">
+                                {t("incidents.dispatchException")}
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td>
                           <div className="link-stack">
                             {record.relatedOrderId && (
@@ -517,7 +562,7 @@ export default function IncidentsPage() {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={5}>{t("incidents.empty")}</td>
+                      <td colSpan={6}>{t("incidents.empty")}</td>
                     </tr>
                   )}
                 </tbody>
@@ -554,6 +599,71 @@ export default function IncidentsPage() {
                 <p className="empty-copy">
                   {getOpsLabel(locale, "incidentsSelectHint")}
                 </p>
+              )}
+
+              {selectedIncidentId && (
+                <div className="recovery-section">
+                  <div className="panel-head">
+                    <div>
+                      <p className="eyebrow">
+                        {t("incidents.serviceRecovery")}
+                      </p>
+                      <h3>{t("incidents.serviceRecovery.title")}</h3>
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      type="button"
+                      onClick={() => setShowRecoveryForm(!showRecoveryForm)}
+                    >
+                      {t("incidents.serviceRecovery.add")}
+                    </button>
+                  </div>
+
+                  {showRecoveryForm && (
+                    <ServiceRecoveryForm
+                      onSubmit={async (command) => {
+                        try {
+                          const client = getOpsClient();
+                          await client.recordServiceRecoveryAction(
+                            selectedIncidentId,
+                            command,
+                          );
+                          await loadTimeline(selectedIncidentId);
+                        } catch (e) {
+                          setError(
+                            e instanceof Error
+                              ? e.message
+                              : t("common.unknown"),
+                          );
+                        }
+                      }}
+                      onCancel={() => setShowRecoveryForm(false)}
+                    />
+                  )}
+
+                  {recoveryActions.length > 0 ? (
+                    <ul className="timeline-list">
+                      {recoveryActions.map((action) => (
+                        <li key={action.actionId}>
+                          <strong>
+                            {t(
+                              `incidents.serviceRecovery.${action.actionType}` as any,
+                            )}
+                          </strong>
+                          <div>{action.note}</div>
+                          <small>
+                            {action.actor} ·{" "}
+                            {new Date(action.createdAt).toLocaleString()}
+                          </small>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="empty-copy">
+                      {t("incidents.serviceRecovery.empty")}
+                    </p>
+                  )}
+                </div>
               )}
             </section>
           </div>
@@ -748,6 +858,33 @@ export default function IncidentsPage() {
           .row-critical {
             background: #fef2f2;
           }
+          .escalation-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            background: #dbeafe;
+            border: 1px solid #93c5fd;
+            color: #1e40af;
+          }
+          .dispatch-exception-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.15rem 0.45rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            color: #a16207;
+          }
+          .recovery-section {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #e2e8f0;
+          }
           @media (max-width: 900px) {
             .toolbar,
             .content-grid,
@@ -784,6 +921,113 @@ function incidentSeverityWeight(severity: IncidentSeverity) {
     default:
       return 1;
   }
+}
+
+function ServiceRecoveryForm({
+  onSubmit,
+  onCancel,
+}: {
+  onSubmit: (command: RecordServiceRecoveryActionCommand) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const [pending, startTransition] = useTransition();
+  const [actionType, setActionType] = useState<string>("passenger_recontact");
+  const [note, setNote] = useState("");
+  const [actor, setActor] = useState("ops-user-001");
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    startTransition(() => {
+      void onSubmit({
+        actionType:
+          actionType as RecordServiceRecoveryActionCommand["actionType"],
+        note: note.trim(),
+        actor: actor.trim() || "ops-user-001",
+      });
+    });
+  }
+
+  return (
+    <form className="recovery-form" onSubmit={handleSubmit}>
+      <div className="form-grid">
+        <label>
+          {t("incidents.serviceRecovery.type")}
+          <select
+            value={actionType}
+            onChange={(event) => setActionType(event.target.value)}
+          >
+            {SERVICE_RECOVERY_TYPES.map((value) => (
+              <option key={value} value={value}>
+                {t(`incidents.serviceRecovery.${value}` as any)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t("incidents.serviceRecovery.actor")}
+          <input
+            value={actor}
+            onChange={(event) => setActor(event.target.value)}
+            required
+          />
+        </label>
+        <label className="full-width">
+          {t("incidents.serviceRecovery.note")}
+          <textarea
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            rows={3}
+            required
+          />
+        </label>
+      </div>
+      <div className="form-actions">
+        <button className="btn btn-primary" type="submit" disabled={pending}>
+          {t("incidents.serviceRecovery.submit")}
+        </button>
+        <button className="btn" type="button" onClick={onCancel}>
+          {t("common.cancel")}
+        </button>
+      </div>
+      <style jsx>{`
+        .recovery-form {
+          margin-bottom: 0.75rem;
+          padding: 0.75rem;
+          border-radius: 0.75rem;
+          border: 1px solid #e2e8f0;
+          background: #f8fafc;
+        }
+        .form-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 0.75rem;
+        }
+        label {
+          display: grid;
+          gap: 0.35rem;
+          color: #0f172a;
+        }
+        input,
+        select,
+        textarea {
+          width: 100%;
+          padding: 0.7rem 0.8rem;
+          border-radius: 0.75rem;
+          border: 1px solid #cbd5e1;
+          background: white;
+        }
+        .full-width {
+          grid-column: 1 / -1;
+        }
+        .form-actions {
+          display: flex;
+          gap: 0.75rem;
+          margin-top: 0.75rem;
+        }
+      `}</style>
+    </form>
+  );
 }
 
 function renderSeverityBadge(severity: IncidentSeverity, locale: "en" | "zh") {
@@ -848,6 +1092,9 @@ function IncidentForm({
   const [resolutionNote, setResolutionNote] = useState(
     editingRecord?.resolutionNote ?? "",
   );
+  const [escalationTarget, setEscalationTarget] = useState<
+    IncidentEscalationTarget | ""
+  >(editingRecord?.escalationTarget ?? "");
 
   const isEditing = Boolean(editingRecord);
 
@@ -857,10 +1104,12 @@ function IncidentForm({
       if (isEditing) {
         const command: UpdateIncidentCommand = {
           status,
+          severity,
           ...(assignedTo.trim() ? { assignedTo: assignedTo.trim() } : {}),
           ...(resolutionNote.trim()
             ? { resolutionNote: resolutionNote.trim() }
             : {}),
+          escalationTarget: escalationTarget || null,
         };
         void onSubmit(command);
         return;
@@ -1016,11 +1265,44 @@ function IncidentForm({
             </select>
           </label>
           <label>
+            {t("incidents.form.severity")}
+            <select
+              value={severity}
+              onChange={(event) =>
+                setSeverity(event.target.value as IncidentSeverity)
+              }
+            >
+              {SEVERITIES.map((value) => (
+                <option key={value} value={value}>
+                  {formatOpsCodeLabel(locale, value)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             {t("incidents.form.assignedTo")}
             <input
               value={assignedTo}
               onChange={(event) => setAssignedTo(event.target.value)}
             />
+          </label>
+          <label>
+            {t("incidents.form.escalationTarget")}
+            <select
+              value={escalationTarget}
+              onChange={(event) =>
+                setEscalationTarget(
+                  event.target.value as IncidentEscalationTarget | "",
+                )
+              }
+            >
+              <option value="">{t("incidents.form.escalationNone")}</option>
+              {ESCALATION_TARGETS.map((value) => (
+                <option key={value} value={value}>
+                  {t(`incidents.escalationBadge.${value}` as any)}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="full-width">
             {t("incidents.form.resolutionNote")}

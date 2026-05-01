@@ -1321,6 +1321,58 @@ export interface ResolveExceptionHoldCommand {
   traceId: string;
 }
 
+export const OVERRIDE_REQUEST_STATUSES = [
+  "pending_approval",
+  "approved",
+  "rejected",
+  "expired",
+] as const;
+export type OverrideRequestStatus = (typeof OVERRIDE_REQUEST_STATUSES)[number];
+
+export interface RequestExceptionOverrideCommand {
+  operatorId?: string;
+  reason: string;
+  overrideType: "release_to_dispatch" | "cancel_order";
+  expiresInMinutes?: number;
+}
+
+export interface ApproveExceptionOverrideCommand {
+  operatorId?: string;
+  approvalNote: string;
+}
+
+export interface RejectExceptionOverrideCommand {
+  operatorId?: string;
+  rejectionReason: string;
+}
+
+export interface OverrideRequestRecord {
+  overrideRequestId: string;
+  orderId: string;
+  overrideType: "release_to_dispatch" | "cancel_order";
+  status: OverrideRequestStatus;
+  requestedBy: {
+    actorType: "platform_admin" | "ops_user";
+    actorId: string;
+  };
+  reason: string;
+  requestedAt: string;
+  expiresAt: string;
+  approval: {
+    actorType: "platform_admin" | "ops_user";
+    actorId: string;
+    approvalNote: string;
+    approvedAt: string;
+  } | null;
+  rejection: {
+    actorType: "platform_admin" | "ops_user";
+    actorId: string;
+    rejectionReason: string;
+    rejectedAt: string;
+  } | null;
+  expiredAt: string | null;
+}
+
 export interface AddressPayload {
   addressId?: string | null;
   addressName?: string | null;
@@ -1566,6 +1618,7 @@ export interface ExceptionHoldRecord {
   overrideAllowed: boolean;
   overrideActors: ("platform_admin" | "ops_user")[];
   resolution: ExceptionHoldResolutionRecord | null;
+  overrideRequest: OverrideRequestRecord | null;
 }
 
 export interface ApplyManualFareOverrideCommand {
@@ -3446,10 +3499,52 @@ export interface CreateIncidentCommand {
   location?: string;
 }
 
+export const INCIDENT_ESCALATION_TARGETS = [
+  "ops_supervisor",
+  "dispatch_manager",
+  "safety_officer",
+  "roc_duty",
+] as const;
+export type IncidentEscalationTarget =
+  (typeof INCIDENT_ESCALATION_TARGETS)[number];
+
 export interface UpdateIncidentCommand {
   status?: IncidentStatus;
   assignedTo?: string;
   resolutionNote?: string;
+  escalationTarget?: IncidentEscalationTarget | null;
+  severity?: IncidentSeverity;
+}
+
+export interface CreateIncidentFromDispatchExceptionCommand {
+  orderId: string;
+  exceptionReasonCode: string;
+  exceptionNote?: string;
+  severity: IncidentSeverity;
+  escalationTarget?: IncidentEscalationTarget;
+  reportedBy: string;
+}
+
+export interface RecordServiceRecoveryActionCommand {
+  actionType:
+    | "passenger_recontact"
+    | "fare_adjustment"
+    | "redispatch_ordered"
+    | "voucher_issued"
+    | "apology_sent"
+    | "driver_reassigned"
+    | "other";
+  note: string;
+  actor: string;
+}
+
+export interface ServiceRecoveryActionRecord {
+  actionId: string;
+  incidentId: string;
+  actionType: string;
+  note: string;
+  actor: string;
+  createdAt: string;
 }
 
 export interface IncidentRecord {
@@ -3465,9 +3560,12 @@ export interface IncidentRecord {
   relatedComplaintCaseNo: string | null;
   reportedBy: string;
   assignedTo: string | null;
+  escalationTarget: IncidentEscalationTarget | null;
+  sourceDispatchExceptionOrderId: string | null;
   occurredAt: string | null;
   location: string | null;
   resolutionNote: string | null;
+  serviceRecoveryActions: ServiceRecoveryActionRecord[];
   createdAt: string;
   updatedAt: string;
 }
