@@ -1,0 +1,47 @@
+name: Deploy — Dev
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Commit SHA or ref to deploy to dev (defaults to the current branch SHA)"
+        required: false
+        type: string
+      skip_migration:
+        description: "Skip DB migration step (use only if migrations already applied)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy-dev:
+    name: Build, deploy, and verify dev
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          vars.DEV_GCP_PROJECT_ID != '' &&
+          vars.DEV_GCP_REGION != '' &&
+          vars.DEV_GCP_CLOUDSQL_INSTANCE != '' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main'
+        )
+      }}
+    uses: ./.github/workflows/deploy-environment.yml
+    with:
+      environment_name: dev
+      source_ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || inputs.source_ref || github.sha }}
+      build_images: true
+      skip_migration: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_migration == 'true' || false }}
+      protected_control_plane: false

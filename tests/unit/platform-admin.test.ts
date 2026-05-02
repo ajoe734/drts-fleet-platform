@@ -36,10 +36,12 @@ describe("platform admin service", () => {
         .listPublicInfoVersions()
         .filter((version) => version.status === "published"),
     ).toHaveLength(1);
-    expect(auditService.listAuditLogs()[0]?.actionName).toBe(
-      "publish_public_info_version",
-    );
-    expect(auditService.listAuditLogs()[0]?.newValuesSummary).toEqual(
+    const publishAudit = auditService
+      .listAuditLogs()
+      .find((entry) => entry.actionName === "publish_public_info_version");
+
+    expect(publishAudit?.actionName).toBe("publish_public_info_version");
+    expect(publishAudit?.newValuesSummary).toEqual(
       expect.objectContaining({
         newVersionId: draftVersion.versionId,
       }),
@@ -66,12 +68,16 @@ describe("platform admin service", () => {
     );
 
     expect(publishedVersion.publishedBy).toBe("platform-admin-jwt-007");
-    expect(auditService.listAuditLogs()[0]).toEqual(
+    const publishAudit = auditService
+      .listAuditLogs()
+      .find((entry) => entry.actionName === "publish_public_info_version");
+
+    expect(publishAudit).toEqual(
       expect.objectContaining({
         actorId: "platform-admin-jwt-007",
       }),
     );
-    expect(auditService.listAuditLogs()[0]?.newValuesSummary).toEqual(
+    expect(publishAudit?.newValuesSummary).toEqual(
       expect.objectContaining({
         newVersionId: draftVersion.versionId,
         publishedBy: "platform-admin-jwt-007",
@@ -394,5 +400,65 @@ describe("platform admin service", () => {
     expect(placard?.downloadMetadata?.manifestHash).toBe(
       placard?.artifactManifestHash,
     );
+  });
+
+  it("keeps placard listings bootable and blocks new placard signing when controlled downloads are not configured", () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousSigningSecret =
+      process.env.CONTROLLED_DOWNLOAD_SIGNING_SECRET;
+    delete process.env.CONTROLLED_DOWNLOAD_SIGNING_SECRET;
+    process.env.NODE_ENV = "production";
+
+    try {
+      const auditService = new AuditNotificationService();
+      const platformAdminService = new PlatformAdminService(auditService);
+
+      const existingPlacard = platformAdminService.listPlacardVersions()[0];
+      expect(existingPlacard?.artifactManifestHash).toBeTruthy();
+      expect(existingPlacard?.artifactDownloadUrl).toBeNull();
+      expect(existingPlacard?.artifactExpiresAt).toBeNull();
+      expect(existingPlacard?.downloadMetadata).toBeNull();
+
+      const publishedVersion = platformAdminService
+        .listPublicInfoVersions()
+        .find((version) => version.status === "published");
+      expect(publishedVersion).toBeTruthy();
+
+      expect(() =>
+        platformAdminService.generatePlacardVersion({
+          versionCode: "placard-no-secret-q4",
+          publicInfoVersionId: publishedVersion!.versionId,
+          templateName: "seatback-no-secret",
+        }),
+      ).toThrowError(ApiRequestError);
+
+      try {
+        platformAdminService.generatePlacardVersion({
+          versionCode: "placard-no-secret-q4",
+          publicInfoVersionId: publishedVersion!.versionId,
+          templateName: "seatback-no-secret",
+        });
+      } catch (error) {
+        expect((error as ApiRequestError).getStatus()).toBe(503);
+        expect(
+          (error as ApiRequestError).getResponse() as {
+            error: { code: string };
+          },
+        ).toEqual(
+          expect.objectContaining({
+            error: expect.objectContaining({
+              code: "CONTROLLED_DOWNLOAD_NOT_CONFIGURED",
+            }),
+          }),
+        );
+      }
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv;
+      if (previousSigningSecret === undefined) {
+        delete process.env.CONTROLLED_DOWNLOAD_SIGNING_SECRET;
+      } else {
+        process.env.CONTROLLED_DOWNLOAD_SIGNING_SECRET = previousSigningSecret;
+      }
+    }
   });
 });

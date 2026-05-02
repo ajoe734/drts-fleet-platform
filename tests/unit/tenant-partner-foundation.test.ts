@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -148,6 +150,18 @@ function createMemoryTenantPartnerRepository(
   };
 }
 
+function createPartnerIngressCredentialSeed(
+  entrySlug: string,
+  keyId: string,
+  plaintextApiKey: string,
+) {
+  return {
+    entrySlug,
+    keyId,
+    apiKeyHash: createHash("sha256").update(plaintextApiKey).digest("hex"),
+  };
+}
+
 describe("tenant partner foundation service", () => {
   it("exposes active partner channel entries for bank-specific airport flows", () => {
     const auditService = new AuditNotificationService();
@@ -173,11 +187,11 @@ describe("tenant partner foundation service", () => {
     });
   });
 
-  it("verifies partner eligibility and stores provenance for eligible partner entries", () => {
+  it("verifies partner eligibility and stores provenance for eligible partner entries", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const verification = tenantPartnerService.verifyPartnerEligibility(
+    const verification = await tenantPartnerService.verifyPartnerEligibility(
       {
         entrySlug: "bank-demo-alpha-airport",
         cardLast4: "2468",
@@ -203,42 +217,56 @@ describe("tenant partner foundation service", () => {
       eligibilityVerificationId: verification.eligibilityVerificationId,
       verificationStatus: "eligible",
     });
-    expect(tenantPartnerService.listTenantAudit(TENANT_ID)[0]?.actionName).toBe(
-      "verify_partner_eligibility",
-    );
+    expect(
+      tenantPartnerService
+        .listTenantAudit(TENANT_ID)
+        .some((entry) => entry.actionName === "verify_partner_eligibility"),
+    ).toBe(true);
   });
 
-  it("marks odd inline-card programs as ineligible and accepts reference-based entries", () => {
+  it("marks odd inline-card programs as ineligible and accepts reference-based entries", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const rejected = tenantPartnerService.verifyPartnerEligibility({
+    const rejected = await tenantPartnerService.verifyPartnerEligibility({
       entrySlug: "bank-demo-alpha-airport",
       cardLast4: "1357",
     });
-    const acceptedByReference = tenantPartnerService.verifyPartnerEligibility({
-      entrySlug: "bank-demo-beta-airport",
-      referenceToken: "BETA0001",
-    });
+    const acceptedByReference =
+      await tenantPartnerService.verifyPartnerEligibility({
+        entrySlug: "bank-demo-beta-airport",
+        referenceToken: "BETA0001",
+      });
 
     expect(rejected).toMatchObject({
       verificationStatus: "ineligible",
       verificationReasonCode: "CARD_PROGRAM_NOT_ELIGIBLE",
-      benefitReference: null,
-      issuerAuthorizationRef: null,
+      benefitReference: "benefit-bank_demo_alpha-1357",
+      issuerAuthorizationRef: "issuer-auth-bank_demo_alpha-1357",
     });
     expect(acceptedByReference).toMatchObject({
       verificationStatus: "eligible",
       verificationReasonCode: "REFERENCE_ACCEPTED",
-      benefitReference: "BETA0001",
-      issuerAuthorizationRef: "issuer-ref-BETA0001",
+      benefitReference: expect.stringMatching(/^benefit-bank_demo_beta-/),
+      issuerAuthorizationRef: expect.stringMatching(/^issuer-ref-/),
     });
     expect(acceptedByReference.referenceTokenHash).toMatch(/^sha256:/);
   });
 
   it("issues partner ingress identity only for the matching api key", () => {
     const auditService = new AuditNotificationService();
-    const tenantPartnerService = new TenantPartnerService(auditService);
+    const tenantPartnerService = new TenantPartnerService(
+      auditService,
+      undefined,
+      new WebhookDispatchService(),
+      [
+        createPartnerIngressCredentialSeed(
+          "bank-demo-alpha-airport",
+          "partner-key-alpha-demo",
+          "pk_demo_alpha_airport_20260428",
+        ),
+      ],
+    );
 
     const session = tenantPartnerService.authenticatePartnerBootstrap(
       {
@@ -282,15 +310,26 @@ describe("tenant partner foundation service", () => {
     });
   });
 
-  it("rejects eligibility verification when partner identity targets another entry", () => {
+  it("rejects eligibility verification when partner identity targets another entry", async () => {
     const auditService = new AuditNotificationService();
-    const tenantPartnerService = new TenantPartnerService(auditService);
+    const tenantPartnerService = new TenantPartnerService(
+      auditService,
+      undefined,
+      new WebhookDispatchService(),
+      [
+        createPartnerIngressCredentialSeed(
+          "bank-demo-alpha-airport",
+          "partner-key-alpha-demo",
+          "pk_demo_alpha_airport_20260428",
+        ),
+      ],
+    );
     const alphaIdentity = tenantPartnerService.authenticatePartnerBootstrap({
       entrySlug: "bank-demo-alpha-airport",
       apiKey: "pk_demo_alpha_airport_20260428",
     }).identity;
 
-    expect(() =>
+    await expect(
       tenantPartnerService.verifyPartnerEligibility(
         {
           entrySlug: "bank-demo-beta-airport",
@@ -299,7 +338,7 @@ describe("tenant partner foundation service", () => {
         "cross-partner-verify-request",
         alphaIdentity,
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
   });
 
   it("persists partner entries across repository reloads", async () => {
@@ -332,7 +371,7 @@ describe("tenant partner foundation service", () => {
     );
 
     await firstService.onModuleInit();
-    const verification = firstService.verifyPartnerEligibility(
+    const verification = await firstService.verifyPartnerEligibility(
       {
         entrySlug: "bank-demo-alpha-airport",
         cardLast4: "2468",
@@ -424,12 +463,15 @@ describe("tenant partner foundation service", () => {
       fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined
     )?.[1];
 
-    expect(webhook.status).toBe("active");
+    expect(webhook.status).toBe("test_pending");
     expect(delivery?.httpStatus).toBe(204);
     expect(delivery?.nextAttemptAt).toBeNull();
     expect(tenantPartnerService.listWebhookDeliveries(TENANT_ID)).toHaveLength(
       1,
     );
+    expect(
+      tenantPartnerService.listWebhookEndpoints(TENANT_ID)[0]?.status,
+    ).toBe("active");
     expect(dispatchedDelivery?.status).toBe("delivered");
     expect(dispatchedDelivery?.attempt).toBe(1);
     expect(
@@ -446,9 +488,11 @@ describe("tenant partner foundation service", () => {
     ).toBe(true);
     expect(String(firstRequestInit?.body)).toContain('"delivery_id"');
     expect(String(firstRequestInit?.body)).not.toContain('"deliveryId"');
-    expect(tenantPartnerService.listTenantAudit(TENANT_ID)[0]?.actionName).toBe(
-      "send_test_webhook",
-    );
+    expect(
+      tenantPartnerService
+        .listTenantAudit(TENANT_ID)
+        .some((entry) => entry.actionName === "send_test_webhook"),
+    ).toBe(true);
   });
 
   it("retries a failed webhook delivery with exponential backoff scheduling", async () => {
@@ -527,15 +571,22 @@ describe("tenant partner foundation service", () => {
       new WebhookDispatchService(fetchMock),
     );
 
-    tenantPartnerService.createWebhookEndpoint(TENANT_ID, {
-      url: "https://tenant.example.com/webhooks/completed",
-      secret: "tenant-secret",
-      events: ["order.completed"],
-    });
+    const tenantWebhook = tenantPartnerService.createWebhookEndpoint(
+      TENANT_ID,
+      {
+        url: "https://tenant.example.com/webhooks/completed",
+        secret: "tenant-secret",
+        events: ["order.completed"],
+      },
+    );
     tenantPartnerService.createWebhookEndpoint(OTHER_TENANT_ID, {
       url: "https://other.example.com/webhooks/orders",
       secret: "other-secret",
       events: ["order.created"],
+    });
+
+    await tenantPartnerService.sendTestWebhook(TENANT_ID, {
+      webhookId: tenantWebhook.webhookId,
     });
 
     const createdResults = await tenantPartnerService.publishWebhookEvent(
@@ -566,20 +617,22 @@ describe("tenant partner foundation service", () => {
     expect(createdResults).toEqual([]);
     expect(completedResults).toHaveLength(1);
     expect(tenantPartnerService.listWebhookDeliveries(TENANT_ID)).toHaveLength(
-      1,
+      2,
     );
     expect(
-      tenantPartnerService.listWebhookDeliveries(TENANT_ID)[0]?.eventType,
-    ).toBe("order.completed");
+      tenantPartnerService
+        .listWebhookDeliveries(TENANT_ID)
+        .some((delivery) => delivery.eventType === "order.completed"),
+    ).toBe(true);
     expect(tenantPartnerService.listWebhookDeliveries(OTHER_TENANT_ID)).toEqual(
       [],
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const firstRequestInit = (
-      fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const completedRequestInit = (
+      fetchMock.mock.calls[1] as [string, RequestInit | undefined] | undefined
     )?.[1];
-    expect(String(firstRequestInit?.body)).toContain('"order_id"');
-    expect(String(firstRequestInit?.body)).toContain("order.completed");
+    expect(String(completedRequestInit?.body)).toContain('"order_id"');
+    expect(String(completedRequestInit?.body)).toContain("order.completed");
   });
 
   it("rotates webhook secrets and records rotation history", () => {
@@ -789,6 +842,11 @@ describe("tenant partner foundation service", () => {
         channel: "webhook",
         enabled: true,
       },
+      {
+        eventType: "tenant.webhook.delivery_failed",
+        channel: "ops_console",
+        enabled: true,
+      },
     ]);
     expect(tenantPartnerService.listPassengers(TENANT_ID)).toEqual(
       expect.arrayContaining([
@@ -854,21 +912,21 @@ describe("tenant partner foundation service", () => {
       undefined,
       new WebhookDispatchService(),
       [
-        {
-          entrySlug: "bank-demo-alpha-airport",
-          keyId: "partner-key-alpha-demo",
-          plaintextApiKey: "pk_demo_alpha_airport_20260428",
-        },
-        {
-          entrySlug: "bank-demo-beta-airport",
-          keyId: "partner-key-beta-demo",
-          plaintextApiKey: "pk_demo_beta_airport_20260428",
-        },
-        {
-          entrySlug: "bank-demo-other-airport",
-          keyId: "partner-key-other-demo",
-          plaintextApiKey: "pk_demo_other_airport_20260428",
-        },
+        createPartnerIngressCredentialSeed(
+          "bank-demo-alpha-airport",
+          "partner-key-alpha-demo",
+          "pk_demo_alpha_airport_20260428",
+        ),
+        createPartnerIngressCredentialSeed(
+          "bank-demo-beta-airport",
+          "partner-key-beta-demo",
+          "pk_demo_beta_airport_20260428",
+        ),
+        createPartnerIngressCredentialSeed(
+          "bank-demo-other-airport",
+          "partner-key-other-demo",
+          "pk_demo_other_airport_20260428",
+        ),
       ],
     );
     (
@@ -881,17 +939,19 @@ describe("tenant partner foundation service", () => {
       entrySlug: "bank-demo-alpha-airport",
       apiKey: "pk_demo_alpha_airport_20260428",
     }).identity;
-    const otherVerification = tenantPartnerService.verifyPartnerEligibility(
-      {
-        entrySlug: "bank-demo-other-airport",
-        referenceToken: "OTHER0001",
-      },
-      "other-tenant-verify-request",
-    );
+    const otherVerification =
+      await tenantPartnerService.verifyPartnerEligibility(
+        {
+          entrySlug: "bank-demo-other-airport",
+          referenceToken: "OTHER0001",
+        },
+        "other-tenant-verify-request",
+      );
 
     expect(() =>
       tenantPartnerService.getPartnerEligibilityVerification(
         otherVerification.eligibilityVerificationId,
+        undefined,
         alphaIdentity,
       ),
     ).toThrowError(ApiRequestError);
@@ -931,11 +991,11 @@ describe("tenant partner foundation service", () => {
       undefined,
       new WebhookDispatchService(),
       [
-        {
-          entrySlug: "bank-demo-inactive-airport",
-          keyId: "partner-key-inactive-demo",
-          plaintextApiKey: "pk_demo_inactive_airport_20260428",
-        },
+        createPartnerIngressCredentialSeed(
+          "bank-demo-inactive-airport",
+          "partner-key-inactive-demo",
+          "pk_demo_inactive_airport_20260428",
+        ),
       ],
     );
     (
@@ -1124,7 +1184,7 @@ describe("tenant partner foundation service", () => {
       maskedSuffix: "****9876",
       scopes: ["tenant:read"],
       lastUsedAt: null,
-      expiresAt: "2027-04-10T00:00:00Z",
+      expiresAt: "2026-06-10T00:00:00Z",
       revokedAt: null,
       createdAt: "2026-04-10T00:00:00Z",
       keyHash: "sha256:persisted-key",

@@ -7,7 +7,11 @@ import { PARTNER_ELIGIBILITY_ADAPTERS } from "./partner-eligibility-adapter.inte
 import { ReferenceTokenEligibilityAdapter } from "./reference-token-eligibility.adapter";
 import { TenantPartnerController } from "./tenant-partner.controller";
 import { TenantPartnerRepository } from "./tenant-partner.repository";
-import { TenantPartnerService } from "./tenant-partner.service";
+import {
+  PARTNER_INGRESS_CREDENTIAL_SEEDS,
+  resolvePartnerIngressCredentialsFromEnv,
+  TenantPartnerService,
+} from "./tenant-partner.service";
 import { WebhookDispatchService } from "./webhook-dispatch.service";
 
 @Module({
@@ -19,6 +23,10 @@ import { WebhookDispatchService } from "./webhook-dispatch.service";
     WebhookDispatchService,
     BankCardInlineEligibilityAdapter,
     ReferenceTokenEligibilityAdapter,
+    {
+      provide: PARTNER_INGRESS_CREDENTIAL_SEEDS,
+      useFactory: () => resolvePartnerIngressCredentialsFromEnv(),
+    },
     {
       provide: PARTNER_ELIGIBILITY_ADAPTERS,
       useFactory: (

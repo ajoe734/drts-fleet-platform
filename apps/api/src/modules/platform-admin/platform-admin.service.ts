@@ -543,13 +543,22 @@ export class PlatformAdminService implements OnModuleInit {
       downloadMetadata: null,
     };
 
-    this.placardVersions = [
-      this.clonePlacardVersion(placard),
-      ...this.placardVersions,
-    ];
+    const clonedPlacard = this.clonePlacardVersion(placard);
+    if (!clonedPlacard.downloadMetadata) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "CONTROLLED_DOWNLOAD_NOT_CONFIGURED",
+        "Placard artifact signing is not configured for this environment.",
+        {
+          placardVersionId,
+        },
+      );
+    }
+
+    this.placardVersions = [clonedPlacard, ...this.placardVersions];
     this.persistChanges(
       {
-        placardVersions: [this.clonePlacardVersion(placard)],
+        placardVersions: [clonedPlacard],
       },
       "generate_placard_version",
     );
@@ -563,14 +572,14 @@ export class PlatformAdminService implements OnModuleInit {
         resourceType: "placard_version",
         resourceId: placard.placardVersionId,
         newValuesSummary: {
-          ...this.clonePlacardVersion(placard),
+          ...clonedPlacard,
           sourcePublicInfoStatus: publicInfoVersion.status,
         },
       },
       requestId,
     );
 
-    return this.clonePlacardVersion(placard);
+    return clonedPlacard;
   }
 
   // ── Platform Admin Users ──────────────────────────────────────────────────
@@ -1023,7 +1032,7 @@ export class PlatformAdminService implements OnModuleInit {
       placard.downloadMetadata &&
       placard.downloadMetadata.manifestHash === artifactManifestHash
         ? { ...placard.downloadMetadata }
-        : this.createPlacardDownloadMetadata(
+        : this.tryCreatePlacardDownloadMetadata(
             placard.placardVersionId,
             artifactManifestHash,
           );
@@ -1032,8 +1041,8 @@ export class PlatformAdminService implements OnModuleInit {
       ...placard,
       artifactFileId,
       artifactManifestHash,
-      artifactDownloadUrl: downloadMetadata.downloadUrl,
-      artifactExpiresAt: downloadMetadata.expiresAt,
+      artifactDownloadUrl: downloadMetadata?.downloadUrl ?? null,
+      artifactExpiresAt: downloadMetadata?.expiresAt ?? null,
       downloadMetadata,
     };
   }
@@ -1080,21 +1089,33 @@ export class PlatformAdminService implements OnModuleInit {
     }
   }
 
-  private createPlacardDownloadMetadata(
+  private tryCreatePlacardDownloadMetadata(
     subjectId: string,
     manifestHash: string,
-  ): ControlledDownloadMetadata {
-    return createControlledDownloadMetadata({
-      kind: "placard",
-      subjectId,
-      manifestHash,
-      createdAt: new Date().toISOString(),
-      host: this.placardDownloadHost,
-      keyId: this.placardSigningKeyId,
-      signingSecret: this.placardSigningSecret,
-      ttlMinutes: this.placardExpiryMinutes,
-      signatureVersion: this.placardSignatureVersion,
-    });
+  ): ControlledDownloadMetadata | null {
+    try {
+      return createControlledDownloadMetadata({
+        kind: "placard",
+        subjectId,
+        manifestHash,
+        createdAt: new Date().toISOString(),
+        host: this.placardDownloadHost,
+        keyId: this.placardSigningKeyId,
+        signingSecret: this.placardSigningSecret,
+        ttlMinutes: this.placardExpiryMinutes,
+        signatureVersion: this.placardSignatureVersion,
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes(
+          "CONTROLLED_DOWNLOAD_SIGNING_SECRET must be configured",
+        )
+      ) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   private computeHash(value: unknown) {
