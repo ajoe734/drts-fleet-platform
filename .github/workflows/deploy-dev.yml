@@ -1,9 +1,6 @@
 name: Deploy — Dev
 
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       source_ref:
@@ -57,18 +54,6 @@ jobs:
   prepare:
     name: Prepare dev deploy
     runs-on: ubuntu-latest
-    if: >-
-      ${{
-        github.event_name == 'workflow_dispatch' ||
-        (
-          vars.DEV_GCP_PROJECT_ID != '' &&
-          vars.DEV_GCP_REGION != '' &&
-          vars.DEV_GCP_CLOUDSQL_INSTANCE != '' &&
-          github.event.workflow_run.conclusion == 'success' &&
-          github.event.workflow_run.event == 'push' &&
-          github.event.workflow_run.head_branch == 'main'
-        )
-      }}
     outputs:
       source_ref: ${{ steps.resolve.outputs.source_ref }}
       project_id: ${{ steps.resolve.outputs.project_id }}
@@ -163,11 +148,7 @@ jobs:
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
           registry="${artifact_region}-docker.pkg.dev/${artifact_project_id}/${artifact_repository}"
 
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            source_ref="${{ github.event.workflow_run.head_sha }}"
-          else
-            source_ref="${INPUT_SOURCE_REF:-${GITHUB_SHA}}"
-          fi
+          source_ref="${INPUT_SOURCE_REF:-${GITHUB_SHA}}"
 
           missing=()
           [[ -n "$project_id" ]] || missing+=("vars.DEV_GCP_PROJECT_ID")
