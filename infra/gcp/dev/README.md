@@ -1,9 +1,8 @@
 # GCP Dev Environment — Deploy Config
 
 This repo now treats `dev` as the shared integration environment. The dev
-workflow is [Deploy — Dev](/home/edna/workspace/branch-archives/drts-fleet-platform-bobo-cutover/.github/workflows/deploy-dev.yml:1), which runs automatically after the `CI`
-workflow succeeds on `main`, and can also be launched manually for a specific
-ref.
+workflow is [Deploy — Dev](/home/edna/workspace/branch-archives/drts-fleet-platform-manual-dev/.github/workflows/deploy-dev.yml:1), and it is now manual-only via
+`workflow_dispatch`.
 
 ## Goal
 
@@ -13,15 +12,13 @@ shared runtime shape.
 
 ## Trigger Model
 
-- automatic: successful `CI` completion for a `push` to `main`
-- manual: `workflow_dispatch` with an optional `source_ref`
+- manual only: `workflow_dispatch` with an optional `source_ref`
 
 `Deploy — Dev` builds fresh images, pushes them to Artifact Registry, runs the
 migration job, then deploys API and web surfaces.
 
-If `DEV_GCP_PROJECT_ID`, `DEV_GCP_REGION`, or `DEV_GCP_CLOUDSQL_INSTANCE` are
-still unset, the automatic `workflow_run` path intentionally skips instead of
-falling back onto staging infrastructure.
+This is intentionally not tied to every `main` push. Run it only when the
+current merged state actually needs a shared dev refresh.
 
 ## Required Configuration
 
