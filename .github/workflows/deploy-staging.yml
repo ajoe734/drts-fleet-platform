@@ -23,12 +23,22 @@ concurrency:
   cancel-in-progress: false # serialise deploys; never cancel a running migration
 
 env:
-  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
-  REGION: ${{ vars.GCP_REGION }}
-  REGISTRY: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/drts
-  CLOUDSQL: ${{ vars.GCP_CLOUDSQL_INSTANCE }}
-  DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
-  RUNTIME_SERVICE_ACCOUNT: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+  PROJECT_ID: ${{ vars.STAGING_GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.STAGING_GCP_REGION || vars.GCP_REGION }}
+  ARTIFACT_PROJECT_ID: ${{ vars.STAGING_ARTIFACT_PROJECT_ID || vars.STAGING_GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}
+  ARTIFACT_REGION: ${{ vars.STAGING_ARTIFACT_REGION || vars.STAGING_GCP_REGION || vars.GCP_REGION }}
+  ARTIFACT_REPOSITORY: ${{ vars.STAGING_ARTIFACT_REPOSITORY || 'drts' }}
+  REGISTRY: ${{ (vars.STAGING_ARTIFACT_REGION || vars.STAGING_GCP_REGION || vars.GCP_REGION) }}-docker.pkg.dev/${{ vars.STAGING_ARTIFACT_PROJECT_ID || vars.STAGING_GCP_PROJECT_ID || vars.GCP_PROJECT_ID }}/${{ vars.STAGING_ARTIFACT_REPOSITORY || 'drts' }}
+  CLOUDSQL: ${{ vars.STAGING_GCP_CLOUDSQL_INSTANCE || vars.GCP_CLOUDSQL_INSTANCE }}
+  DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.STAGING_WIF_SERVICE_ACCOUNT || secrets.WIF_SERVICE_ACCOUNT }}
+  RUNTIME_SERVICE_ACCOUNT: ${{ vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT || vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+  RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT || secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
+  WIF_PROVIDER_VALUE: ${{ secrets.STAGING_WIF_PROVIDER || secrets.WIF_PROVIDER }}
+  SECRET_PREFIX: ${{ vars.STAGING_SECRET_PREFIX || 'drts-staging' }}
+  PLATFORM_ADMIN_ORIGIN: ${{ vars.STAGING_PLATFORM_ADMIN_ORIGIN || 'https://staging.drts-fleet.cctech-support.com' }}
+  OPS_CONSOLE_ORIGIN: ${{ vars.STAGING_OPS_CONSOLE_ORIGIN || 'https://ops.staging.drts-fleet.cctech-support.com' }}
+  CONTROL_PLANE_API_ORIGIN_ENV: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN || 'https://api.staging.drts-fleet.cctech-support.com' }}
+  IAP_CLIENT_ID_ENV: ${{ vars.STAGING_IAP_CLIENT_ID || '1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com' }}
 
 jobs:
   # ──────────────────────────────────────────────────────────────
@@ -49,20 +59,17 @@ jobs:
         run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
       - name: Validate staging GitHub config
-        env:
-          WIF_PROVIDER_VALUE: ${{ secrets.WIF_PROVIDER }}
-          RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
 
           missing=()
-          [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.GCP_PROJECT_ID")
-          [[ -n "${REGION:-}" ]] || missing+=("vars.GCP_REGION")
-          [[ -n "${CLOUDSQL:-}" ]] || missing+=("vars.GCP_CLOUDSQL_INSTANCE")
-          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.WIF_PROVIDER")
-          [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.WIF_SERVICE_ACCOUNT")
+          [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.STAGING_GCP_PROJECT_ID or vars.GCP_PROJECT_ID")
+          [[ -n "${REGION:-}" ]] || missing+=("vars.STAGING_GCP_REGION or vars.GCP_REGION")
+          [[ -n "${CLOUDSQL:-}" ]] || missing+=("vars.STAGING_GCP_CLOUDSQL_INSTANCE or vars.GCP_CLOUDSQL_INSTANCE")
+          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.STAGING_WIF_PROVIDER or secrets.WIF_PROVIDER")
+          [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.STAGING_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
           if [[ -z "${RUNTIME_SERVICE_ACCOUNT:-${RUNTIME_SERVICE_ACCOUNT_FALLBACK:-}}" ]]; then
-            missing+=("vars.GCP_RUNTIME_SERVICE_ACCOUNT or secrets.GCP_RUNTIME_SERVICE_ACCOUNT")
+            missing+=("vars.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.STAGING_GCP_RUNTIME_SERVICE_ACCOUNT or vars.GCP_RUNTIME_SERVICE_ACCOUNT or secrets.GCP_RUNTIME_SERVICE_ACCOUNT")
           fi
 
           if (( ${#missing[@]} > 0 )); then
@@ -74,8 +81,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -156,8 +163,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -166,14 +173,12 @@ jobs:
 
       - name: Resolve Cloud Run runtime service account
         id: runtime_sa
-        env:
-          RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
 
           RUNTIME_SA="${RUNTIME_SERVICE_ACCOUNT:-${RUNTIME_SERVICE_ACCOUNT_FALLBACK:-}}"
           if [[ -z "$RUNTIME_SA" ]]; then
-            echo "::error::Missing Cloud Run runtime identity. Set vars.GCP_RUNTIME_SERVICE_ACCOUNT (preferred) or secret GCP_RUNTIME_SERVICE_ACCOUNT to a service account with roles/cloudsql.client and roles/secretmanager.secretAccessor."
+            echo "::error::Missing Cloud Run runtime identity. Set STAGING_GCP_RUNTIME_SERVICE_ACCOUNT (preferred) or the shared GCP runtime service account fallback."
             exit 1
           fi
           if [[ "$RUNTIME_SA" == "$DEPLOYER_SERVICE_ACCOUNT" ]]; then
@@ -200,7 +205,7 @@ jobs:
             --image  "$IMAGE" \
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "DATABASE_URL=drts-staging-db-url:latest" \
+            --set-secrets "DATABASE_URL=${SECRET_PREFIX}-db-url:latest" \
             --max-retries 0 \
             --project "$PROJECT_ID" \
           || gcloud run jobs create drts-migrate \
@@ -208,7 +213,7 @@ jobs:
             --image  "$IMAGE" \
             --set-cloudsql-instances "$CLOUDSQL" \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "DATABASE_URL=drts-staging-db-url:latest" \
+            --set-secrets "DATABASE_URL=${SECRET_PREFIX}-db-url:latest" \
             --max-retries 0 \
             --project "$PROJECT_ID"
 
@@ -292,8 +297,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -302,14 +307,12 @@ jobs:
 
       - name: Resolve Cloud Run runtime service account
         id: runtime_sa
-        env:
-          RUNTIME_SERVICE_ACCOUNT_FALLBACK: ${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
 
           RUNTIME_SA="${RUNTIME_SERVICE_ACCOUNT:-${RUNTIME_SERVICE_ACCOUNT_FALLBACK:-}}"
           if [[ -z "$RUNTIME_SA" ]]; then
-            echo "::error::Missing Cloud Run runtime identity. Set vars.GCP_RUNTIME_SERVICE_ACCOUNT (preferred) or secret GCP_RUNTIME_SERVICE_ACCOUNT to a service account with roles/cloudsql.client and roles/secretmanager.secretAccessor."
+            echo "::error::Missing Cloud Run runtime identity. Set STAGING_GCP_RUNTIME_SERVICE_ACCOUNT (preferred) or the shared GCP runtime service account fallback."
             exit 1
           fi
           if [[ "$RUNTIME_SA" == "$DEPLOYER_SERVICE_ACCOUNT" ]]; then
@@ -357,14 +360,11 @@ jobs:
 
       - name: Resolve control-plane staging endpoints
         id: control_plane
-        env:
-          CONTROL_PLANE_API_ORIGIN: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN }}
-          STAGING_IAP_CLIENT_ID: ${{ vars.STAGING_IAP_CLIENT_ID }}
         run: |
           set -euo pipefail
 
-          api_origin="${CONTROL_PLANE_API_ORIGIN:-https://api.staging.drts-fleet.cctech-support.com}"
-          iap_client_id="${STAGING_IAP_CLIENT_ID:-1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com}"
+          api_origin="${CONTROL_PLANE_API_ORIGIN_ENV:-https://api.staging.drts-fleet.cctech-support.com}"
+          iap_client_id="${IAP_CLIENT_ID_ENV:-1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com}"
 
           echo "api_origin=${api_origin}" >> "$GITHUB_OUTPUT"
           echo "iap_client_id=${iap_client_id}" >> "$GITHUB_OUTPUT"
@@ -399,13 +399,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          secret_args="DATABASE_URL=drts-staging-db-url:latest,API_KEY_SALT=drts-staging-api-key-salt:latest,JWT_SECRET=drts-staging-jwt-secret:latest"
+          secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
 
-          if gcloud secrets describe drts-staging-internal-key --project "$PROJECT_ID" >/dev/null 2>&1; then
-            secret_args="${secret_args},DRTS_INTERNAL_KEY=drts-staging-internal-key:latest"
+          if gcloud secrets describe "${SECRET_PREFIX}-internal-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            secret_args="${secret_args},DRTS_INTERNAL_KEY=${SECRET_PREFIX}-internal-key:latest"
             echo "::notice::Including optional DRTS_INTERNAL_KEY secret in drts-api deploy."
           else
-            echo "::warning::Optional secret drts-staging-internal-key not found; deploying drts-api without DRTS_INTERNAL_KEY."
+            echo "::warning::Optional secret ${SECRET_PREFIX}-internal-key not found; deploying drts-api without DRTS_INTERNAL_KEY."
           fi
 
           printf 'api=%s\n' "$secret_args" >> "$GITHUB_OUTPUT"
@@ -449,7 +449,7 @@ jobs:
             --port   3002 \
             --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "JWT_SECRET=drts-staging-jwt-secret:latest" \
+            --set-secrets "JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest" \
             --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
             ${{ steps.exposure.outputs.platform_admin }} \
             --min-instances 0 \
@@ -465,7 +465,7 @@ jobs:
             --port   3003 \
             --ingress internal-and-cloud-load-balancing \
             --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "JWT_SECRET=drts-staging-jwt-secret:latest" \
+            --set-secrets "JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest" \
             --set-env-vars "NODE_ENV=production,DRTS_API_URL=${{ steps.control_plane.outputs.api_origin }},DRTS_API_AUTH_AUDIENCE=${{ steps.control_plane.outputs.iap_client_id }},NEXT_PUBLIC_API_URL=/control-plane-proxy" \
             ${{ steps.exposure.outputs.ops_console }} \
             --min-instances 0 \
@@ -488,8 +488,8 @@ jobs:
       - name: Authenticate to GCP
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
@@ -498,14 +498,11 @@ jobs:
 
       - name: Resolve protected staging auth endpoints
         id: control_plane
-        env:
-          CONTROL_PLANE_API_ORIGIN: ${{ vars.STAGING_CONTROL_PLANE_API_ORIGIN }}
-          STAGING_IAP_CLIENT_ID: ${{ vars.STAGING_IAP_CLIENT_ID }}
         run: |
           set -euo pipefail
 
-          api_origin="${CONTROL_PLANE_API_ORIGIN:-https://api.staging.drts-fleet.cctech-support.com}"
-          iap_client_id="${STAGING_IAP_CLIENT_ID:-1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com}"
+          api_origin="${CONTROL_PLANE_API_ORIGIN_ENV:-https://api.staging.drts-fleet.cctech-support.com}"
+          iap_client_id="${IAP_CLIENT_ID_ENV:-1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com}"
 
           echo "api_origin=${api_origin}" >> "$GITHUB_OUTPUT"
           echo "iap_client_id=${iap_client_id}" >> "$GITHUB_OUTPUT"
@@ -514,8 +511,8 @@ jobs:
         id: iap_token
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER_VALUE }}
+          service_account: ${{ env.DEPLOYER_SERVICE_ACCOUNT }}
           token_format: id_token
           id_token_audience: ${{ steps.control_plane.outputs.iap_client_id }}
           id_token_include_email: true
@@ -549,8 +546,8 @@ jobs:
           set -euo pipefail
 
           TOKEN="${{ steps.iap_token.outputs.id_token }}"
-          PLATFORM_ADMIN_ORIGIN="https://staging.drts-fleet.cctech-support.com"
-          OPS_ORIGIN="https://ops.staging.drts-fleet.cctech-support.com"
+          PLATFORM_ADMIN_ORIGIN="${PLATFORM_ADMIN_ORIGIN}"
+          OPS_ORIGIN="${OPS_CONSOLE_ORIGIN}"
 
           curl --fail --silent --show-error \
             -H "Authorization: Bearer ${TOKEN}" \
