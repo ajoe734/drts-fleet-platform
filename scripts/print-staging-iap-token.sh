@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-PROJECT_ID="${DRTS_GCP_PROJECT_ID:-autotaxi-492811}"
+PROJECT_ID="${DRTS_GCP_PROJECT_ID:-drts-staging-bobo-20260502}"
 IAP_CLIENT_ID="${DRTS_STAGING_IAP_CLIENT_ID:-1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com}"
-IMPERSONATE_SERVICE_ACCOUNT="${DRTS_STAGING_TOKEN_SERVICE_ACCOUNT:-github-actions-deployer@autotaxi-492811.iam.gserviceaccount.com}"
+IMPERSONATE_SERVICE_ACCOUNT="${DRTS_STAGING_TOKEN_SERVICE_ACCOUNT:-github-actions-deployer@drts-staging-bobo-20260502.iam.gserviceaccount.com}"
 
 if [[ -n "${IMPERSONATE_SERVICE_ACCOUNT}" ]]; then
   ACCESS_TOKEN="$(gcloud auth print-access-token 2>/dev/null)"

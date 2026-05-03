@@ -1,0 +1,546 @@
+name: Deploy — Dev
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Commit SHA or ref to deploy to dev (defaults to the current branch SHA)"
+        required: false
+        type: string
+      skip_migration:
+        description: "Skip DB migration step (use only if migrations already applied)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+  DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+  DEV_GCP_CLOUDSQL_INSTANCE: ${{ vars.DEV_GCP_CLOUDSQL_INSTANCE }}
+  DEV_GCP_RUNTIME_SERVICE_ACCOUNT_VAR: ${{ vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT }}
+  DEV_GCP_RUNTIME_SERVICE_ACCOUNT_SECRET: ${{ secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT }}
+  DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
+  DEV_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+  DEV_ARTIFACT_PROJECT_ID: ${{ vars.DEV_ARTIFACT_PROJECT_ID }}
+  DEV_ARTIFACT_REGION: ${{ vars.DEV_ARTIFACT_REGION }}
+  DEV_ARTIFACT_REPOSITORY: ${{ vars.DEV_ARTIFACT_REPOSITORY }}
+  DEV_SECRET_PREFIX: ${{ vars.DEV_SECRET_PREFIX }}
+  DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
+  DEV_GCP_PLATFORM_ADMIN_SERVICE: ${{ vars.DEV_GCP_PLATFORM_ADMIN_SERVICE }}
+  DEV_GCP_OPS_CONSOLE_SERVICE: ${{ vars.DEV_GCP_OPS_CONSOLE_SERVICE }}
+  DEV_GCP_MIGRATION_JOB: ${{ vars.DEV_GCP_MIGRATION_JOB }}
+  DEV_API_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_API_ALLOW_UNAUTHENTICATED }}
+  DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED }}
+  DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED }}
+  DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
+  DEV_IAP_CLIENT_ID: ${{ vars.DEV_IAP_CLIENT_ID }}
+  DEV_PLATFORM_ADMIN_ORIGIN: ${{ vars.DEV_PLATFORM_ADMIN_ORIGIN }}
+  DEV_OPS_CONSOLE_ORIGIN: ${{ vars.DEV_OPS_CONSOLE_ORIGIN }}
+  WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+  WIF_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+jobs:
+  prepare:
+    name: Prepare dev deploy
+    runs-on: ubuntu-latest
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        (
+          vars.DEV_GCP_PROJECT_ID != '' &&
+          vars.DEV_GCP_REGION != '' &&
+          vars.DEV_GCP_CLOUDSQL_INSTANCE != '' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main'
+        )
+      }}
+    outputs:
+      source_ref: ${{ steps.resolve.outputs.source_ref }}
+      project_id: ${{ steps.resolve.outputs.project_id }}
+      region: ${{ steps.resolve.outputs.region }}
+      cloudsql: ${{ steps.resolve.outputs.cloudsql }}
+      runtime_service_account: ${{ steps.resolve.outputs.runtime_service_account }}
+      deployer_service_account: ${{ steps.resolve.outputs.deployer_service_account }}
+      wif_provider: ${{ steps.resolve.outputs.wif_provider }}
+      registry: ${{ steps.resolve.outputs.registry }}
+      secret_prefix: ${{ steps.resolve.outputs.secret_prefix }}
+      api_service: ${{ steps.resolve.outputs.api_service }}
+      platform_admin_service: ${{ steps.resolve.outputs.platform_admin_service }}
+      ops_console_service: ${{ steps.resolve.outputs.ops_console_service }}
+      migration_job: ${{ steps.resolve.outputs.migration_job }}
+      api_exposure_flag: ${{ steps.resolve.outputs.api_exposure_flag }}
+      platform_admin_exposure_flag: ${{ steps.resolve.outputs.platform_admin_exposure_flag }}
+      ops_console_exposure_flag: ${{ steps.resolve.outputs.ops_console_exposure_flag }}
+      api_origin: ${{ steps.resolve.outputs.api_origin }}
+      platform_admin_origin: ${{ steps.resolve.outputs.platform_admin_origin }}
+      ops_console_origin: ${{ steps.resolve.outputs.ops_console_origin }}
+
+    steps:
+      - name: Resolve dev config
+        id: resolve
+        env:
+          INPUT_SOURCE_REF: ${{ inputs.source_ref }}
+          INPUT_SKIP_MIGRATION: ${{ inputs.skip_migration }}
+        run: |
+          set -euo pipefail
+
+          pick() {
+            local first="${1:-}"
+            local second="${2:-}"
+            local fallback="${3:-}"
+
+            if [[ -n "$first" ]]; then
+              printf '%s' "$first"
+            elif [[ -n "$second" ]]; then
+              printf '%s' "$second"
+            else
+              printf '%s' "$fallback"
+            fi
+          }
+
+          normalize_bool() {
+            local raw="${1:-}"
+            local default_value="${2:-true}"
+            local normalized="${raw:-$default_value}"
+
+            normalized="$(echo "$normalized" | tr '[:upper:]' '[:lower:]')"
+            case "$normalized" in
+              true|1|yes|y) echo true ;;
+              false|0|no|n) echo false ;;
+              *)
+                echo "::error::Invalid boolean value: ${raw}. Use true/false."
+                exit 1
+                ;;
+            esac
+          }
+
+          exposure_flag() {
+            if [[ "$(normalize_bool "${1:-}" "${2:-true}")" == "true" ]]; then
+              echo "--allow-unauthenticated"
+            else
+              echo "--no-allow-unauthenticated"
+            fi
+          }
+
+          emit() {
+            printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
+          }
+
+          project_id="${DEV_GCP_PROJECT_ID:-}"
+          region="${DEV_GCP_REGION:-}"
+          cloudsql="${DEV_GCP_CLOUDSQL_INSTANCE:-}"
+          runtime_sa="$(pick "${DEV_GCP_RUNTIME_SERVICE_ACCOUNT_VAR:-}" "${DEV_GCP_RUNTIME_SERVICE_ACCOUNT_SECRET:-}" "")"
+          deployer_sa="$(pick "${DEV_WIF_SERVICE_ACCOUNT:-}" "${WIF_SERVICE_ACCOUNT:-}" "")"
+          wif_provider="$(pick "${DEV_WIF_PROVIDER:-}" "${WIF_PROVIDER:-}" "")"
+          artifact_project_id="$(pick "${DEV_ARTIFACT_PROJECT_ID:-}" "" "$project_id")"
+          artifact_region="$(pick "${DEV_ARTIFACT_REGION:-}" "" "$region")"
+          artifact_repository="$(pick "${DEV_ARTIFACT_REPOSITORY:-}" "" "drts")"
+          secret_prefix="$(pick "${DEV_SECRET_PREFIX:-}" "" "drts-dev")"
+          api_service="$(pick "${DEV_GCP_API_SERVICE:-}" "" "drts-api")"
+          platform_admin_service="$(pick "${DEV_GCP_PLATFORM_ADMIN_SERVICE:-}" "" "drts-platform-admin-web")"
+          ops_console_service="$(pick "${DEV_GCP_OPS_CONSOLE_SERVICE:-}" "" "drts-ops-console-web")"
+          migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"
+          api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" true)"
+          platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" true)"
+          ops_console_exposure_flag="$(exposure_flag "${DEV_OPS_CONSOLE_ALLOW_UNAUTHENTICATED:-}" true)"
+          api_origin="${DEV_CONTROL_PLANE_API_ORIGIN:-}"
+          platform_admin_origin="${DEV_PLATFORM_ADMIN_ORIGIN:-}"
+          ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
+          registry="${artifact_region}-docker.pkg.dev/${artifact_project_id}/${artifact_repository}"
+
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            source_ref="${{ github.event.workflow_run.head_sha }}"
+          else
+            source_ref="${INPUT_SOURCE_REF:-${GITHUB_SHA}}"
+          fi
+
+          missing=()
+          [[ -n "$project_id" ]] || missing+=("vars.DEV_GCP_PROJECT_ID")
+          [[ -n "$region" ]] || missing+=("vars.DEV_GCP_REGION")
+          [[ -n "$cloudsql" ]] || missing+=("vars.DEV_GCP_CLOUDSQL_INSTANCE")
+          [[ -n "$runtime_sa" ]] || missing+=("vars.DEV_GCP_RUNTIME_SERVICE_ACCOUNT or secrets.DEV_GCP_RUNTIME_SERVICE_ACCOUNT")
+          [[ -n "$deployer_sa" ]] || missing+=("secrets.DEV_WIF_SERVICE_ACCOUNT or secrets.WIF_SERVICE_ACCOUNT")
+          [[ -n "$wif_provider" ]] || missing+=("secrets.DEV_WIF_PROVIDER or secrets.WIF_PROVIDER")
+
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Missing GitHub Actions dev configuration: ${missing[*]}."
+            exit 1
+          fi
+
+          emit source_ref "$source_ref"
+          emit project_id "$project_id"
+          emit region "$region"
+          emit cloudsql "$cloudsql"
+          emit runtime_service_account "$runtime_sa"
+          emit deployer_service_account "$deployer_sa"
+          emit wif_provider "$wif_provider"
+          emit registry "$registry"
+          emit secret_prefix "$secret_prefix"
+          emit api_service "$api_service"
+          emit platform_admin_service "$platform_admin_service"
+          emit ops_console_service "$ops_console_service"
+          emit migration_job "$migration_job"
+          emit api_exposure_flag "$api_exposure_flag"
+          emit platform_admin_exposure_flag "$platform_admin_exposure_flag"
+          emit ops_console_exposure_flag "$ops_console_exposure_flag"
+          emit api_origin "$api_origin"
+          emit platform_admin_origin "$platform_admin_origin"
+          emit ops_console_origin "$ops_console_origin"
+
+  build-push:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    needs: prepare
+    outputs:
+      image_tag: ${{ steps.tag.outputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_ref }}
+
+      - name: Derive image tag
+        id: tag
+        run: |
+          echo "tag=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ needs.prepare.outputs.wif_provider }}
+          service_account: ${{ needs.prepare.outputs.deployer_service_account }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ needs.prepare.outputs.project_id }}
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          host="$(echo "${{ needs.prepare.outputs.registry }}" | cut -d/ -f1)"
+          gcloud auth configure-docker "$host" --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push — api
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/api:${{ steps.tag.outputs.tag }}
+            ${{ needs.prepare.outputs.registry }}/api:latest
+          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/api:cache
+          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/api:cache,mode=max
+
+      - name: Build & push — migrate
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.migrate
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/migrate:${{ steps.tag.outputs.tag }}
+            ${{ needs.prepare.outputs.registry }}/migrate:latest
+          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/migrate:cache
+          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/migrate:cache,mode=max
+
+      - name: Build & push — platform-admin-web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/platform-admin-web/Dockerfile
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/platform-admin-web:${{ steps.tag.outputs.tag }}
+            ${{ needs.prepare.outputs.registry }}/platform-admin-web:latest
+          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/platform-admin-web:cache
+          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/platform-admin-web:cache,mode=max
+
+      - name: Build & push — ops-console-web
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/ops-console-web/Dockerfile
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/ops-console-web:${{ steps.tag.outputs.tag }}
+            ${{ needs.prepare.outputs.registry }}/ops-console-web:latest
+          cache-from: type=registry,ref=${{ needs.prepare.outputs.registry }}/ops-console-web:cache
+          cache-to: type=registry,ref=${{ needs.prepare.outputs.registry }}/ops-console-web:cache,mode=max
+
+  migrate:
+    name: DB migration
+    runs-on: ubuntu-latest
+    needs: [prepare, build-push]
+    if: ${{ inputs.skip_migration != 'true' }}
+    environment: dev
+
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ needs.prepare.outputs.wif_provider }}
+          service_account: ${{ needs.prepare.outputs.deployer_service_account }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ needs.prepare.outputs.project_id }}
+
+      - name: Validate runtime identity split
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ needs.prepare.outputs.runtime_service_account }}" == "${{ needs.prepare.outputs.deployer_service_account }}" ]]; then
+            echo "::error::Cloud Run runtime identity resolves to the GitHub deployer identity. Configure a separate runtime service account."
+            exit 1
+          fi
+
+      - name: Create / update migration job definition
+        run: |
+          IMAGE="${{ needs.prepare.outputs.registry }}/migrate:${{ needs.build-push.outputs.image_tag }}"
+          DB_SECRET="${{ needs.prepare.outputs.secret_prefix }}-db-url"
+
+          gcloud run jobs update "${{ needs.prepare.outputs.migration_job }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --set-cloudsql-instances "${{ needs.prepare.outputs.cloudsql }}" \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-secrets "DATABASE_URL=${DB_SECRET}:latest" \
+            --max-retries 0 \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+          || gcloud run jobs create "${{ needs.prepare.outputs.migration_job }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --set-cloudsql-instances "${{ needs.prepare.outputs.cloudsql }}" \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-secrets "DATABASE_URL=${DB_SECRET}:latest" \
+            --max-retries 0 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Execute migration job and wait for completion
+        run: |
+          gcloud run jobs execute "${{ needs.prepare.outputs.migration_job }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --wait \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+  deploy:
+    name: Deploy services
+    runs-on: ubuntu-latest
+    needs: [prepare, build-push, migrate]
+    if: ${{ always() && needs.build-push.result == 'success' && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
+    environment: dev
+
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ needs.prepare.outputs.wif_provider }}
+          service_account: ${{ needs.prepare.outputs.deployer_service_account }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ needs.prepare.outputs.project_id }}
+
+      - name: Resolve API secret mounts
+        id: api_secrets
+        run: |
+          set -euo pipefail
+
+          secret_prefix="${{ needs.prepare.outputs.secret_prefix }}"
+          project_id="${{ needs.prepare.outputs.project_id }}"
+          secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
+
+          if gcloud secrets describe "${secret_prefix}-controlled-download-signing-secret" --project "$project_id" >/dev/null 2>&1; then
+            secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${secret_prefix}-controlled-download-signing-secret:latest"
+          fi
+
+          if gcloud secrets describe "${secret_prefix}-internal-key" --project "$project_id" >/dev/null 2>&1; then
+            secret_args="${secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
+          fi
+
+          echo "api=${secret_args}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy — api
+        run: |
+          IMAGE="${{ needs.prepare.outputs.registry }}/api:${{ needs.build-push.outputs.image_tag }}"
+
+          gcloud run deploy "${{ needs.prepare.outputs.api_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3001 \
+            --ingress all \
+            --set-cloudsql-instances "${{ needs.prepare.outputs.cloudsql }}" \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-secrets "${{ steps.api_secrets.outputs.api }}" \
+            --set-env-vars "NODE_ENV=production,API_PORT=3001" \
+            ${{ needs.prepare.outputs.api_exposure_flag }} \
+            --min-instances 0 \
+            --max-instances 3 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Resolve API URL
+        id: api_url
+        run: |
+          URL="$(gcloud run services describe "${{ needs.prepare.outputs.api_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Build shared web env vars
+        id: web_env
+        run: |
+          set -euo pipefail
+
+          api_origin="${{ needs.prepare.outputs.api_origin }}"
+          if [[ -z "$api_origin" ]]; then
+            api_origin="${{ steps.api_url.outputs.url }}"
+          fi
+
+          env_vars="NODE_ENV=production,DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy"
+
+          if [[ -n "${DEV_IAP_CLIENT_ID:-}" ]]; then
+            env_vars="${env_vars},DRTS_API_AUTH_AUDIENCE=${DEV_IAP_CLIENT_ID}"
+          fi
+
+          echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy — platform-admin-web
+        run: |
+          IMAGE="${{ needs.prepare.outputs.registry }}/platform-admin-web:${{ needs.build-push.outputs.image_tag }}"
+
+          gcloud run deploy "${{ needs.prepare.outputs.platform_admin_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3002 \
+            --ingress all \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
+            --min-instances 0 \
+            --max-instances 2 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Deploy — ops-console-web
+        run: |
+          IMAGE="${{ needs.prepare.outputs.registry }}/ops-console-web:${{ needs.build-push.outputs.image_tag }}"
+
+          gcloud run deploy "${{ needs.prepare.outputs.ops_console_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3003 \
+            --ingress all \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
+            --min-instances 0 \
+            --max-instances 2 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+  health-check:
+    name: Dev health check
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy]
+    if: ${{ always() && needs.deploy.result == 'success' }}
+    environment: dev
+
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ needs.prepare.outputs.wif_provider }}
+          service_account: ${{ needs.prepare.outputs.deployer_service_account }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ needs.prepare.outputs.project_id }}
+
+      - name: Wait for services to be Ready
+        run: |
+          set -euo pipefail
+
+          for svc in \
+            "${{ needs.prepare.outputs.api_service }}" \
+            "${{ needs.prepare.outputs.platform_admin_service }}" \
+            "${{ needs.prepare.outputs.ops_console_service }}"; do
+            echo "Waiting for ${svc} ..."
+            service_ready=false
+            for i in $(seq 1 24); do
+              ready="$(gcloud run services describe "${svc}" \
+                --region "${{ needs.prepare.outputs.region }}" \
+                --project "${{ needs.prepare.outputs.project_id }}" \
+                --format='value(status.conditions[0].status)' 2>/dev/null || true)"
+              echo "  attempt ${i}: Ready=${ready}"
+              if [[ "$ready" == "True" ]]; then
+                service_ready=true
+                break
+              fi
+              sleep 10
+            done
+            if [[ "$service_ready" != "true" ]]; then
+              echo "::error::${svc} did not reach Ready=True in time."
+              gcloud run services describe "${svc}" \
+                --region "${{ needs.prepare.outputs.region }}" \
+                --project "${{ needs.prepare.outputs.project_id }}" \
+                --format='yaml(status)' || true
+              exit 1
+            fi
+          done
+
+      - name: Resolve service URLs
+        id: urls
+        run: |
+          api_url="$(gcloud run services describe "${{ needs.prepare.outputs.api_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
+          platform_admin_url="$(gcloud run services describe "${{ needs.prepare.outputs.platform_admin_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
+          ops_console_url="$(gcloud run services describe "${{ needs.prepare.outputs.ops_console_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
+
+          echo "api=${api_url}" >> "$GITHUB_OUTPUT"
+          echo "platform_admin=${platform_admin_url}" >> "$GITHUB_OUTPUT"
+          echo "ops_console=${ops_console_url}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify dev endpoints
+        run: |
+          curl --fail --silent --show-error "${{ steps.urls.outputs.api }}/health" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.platform_admin }}" >/dev/null
+          curl --fail --silent --show-error "${{ steps.urls.outputs.ops_console }}" >/dev/null
+
+      - name: Print dev URLs
+        run: |
+          echo "=== Dev deployment complete ==="
+          echo "  api: ${{ steps.urls.outputs.api }}"
+          echo "  platform-admin: ${{ steps.urls.outputs.platform_admin }}"
+          echo "  ops-console: ${{ steps.urls.outputs.ops_console }}"

@@ -135,9 +135,13 @@ The repo includes a helper for the current staging IAP client:
 
 Defaults:
 
-- project: `autotaxi-492811`
+- project: `drts-staging-bobo-20260502`
 - IAP client id / audience: `1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
-- impersonated service account: `github-actions-deployer@autotaxi-492811.iam.gserviceaccount.com`
+- impersonated service account: `github-actions-deployer@drts-staging-bobo-20260502.iam.gserviceaccount.com`
+
+These defaults assume the post-cutover `bobo` staging project. If the staging
+DNS cutover is still pending, override all three values to match the currently
+live staging project before running smoke traffic.
 
 When `DRTS_STAGING_TOKEN_SERVICE_ACCOUNT` is set, the helper always requests
 the token through service-account impersonation. This is the recommended staging
@@ -147,9 +151,9 @@ credentials or a workload-identity-derived session.
 Override with:
 
 ```bash
-DRTS_GCP_PROJECT_ID=autotaxi-492811 \
+DRTS_GCP_PROJECT_ID=drts-staging-bobo-20260502 \
 DRTS_STAGING_IAP_CLIENT_ID=...apps.googleusercontent.com \
-DRTS_STAGING_TOKEN_SERVICE_ACCOUNT=github-actions-deployer@autotaxi-492811.iam.gserviceaccount.com \
+DRTS_STAGING_TOKEN_SERVICE_ACCOUNT=github-actions-deployer@drts-staging-bobo-20260502.iam.gserviceaccount.com \
 ./scripts/print-staging-iap-token.sh
 ```
 

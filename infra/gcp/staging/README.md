@@ -1,105 +1,128 @@
-# GCP Staging Environment — Deploy Config
+# GCP Staging Environment — Promotion Config
 
-This directory contains the declarative GCP Cloud Run service definitions and migration job
-for the DRTS Phase 1 staging environment.
+This repo now treats `staging` as a manually approved candidate environment.
+The staging workflow is [Promote — Staging](/home/edna/workspace/branch-archives/drts-fleet-platform-bobo-cutover/.github/workflows/deploy-staging.yml:1), which promotes an existing image tag instead of rebuilding the app.
 
-## Prerequisites
+## Goal
 
-| Resource                 | Description                                                                   |
-| ------------------------ | ----------------------------------------------------------------------------- |
-| GCP Project              | `drts-staging` (set via `GCP_PROJECT_ID` repo variable)                       |
-| Region                   | `asia-east1` (set via `GCP_REGION` repo variable)                             |
-| Artifact Registry        | `asia-east1-docker.pkg.dev/$PROJECT/drts`                                     |
-| Cloud SQL                | PostgreSQL 16 instance `drts-staging` in `asia-east1`                         |
-| Secret Manager           | Secrets listed in §Secrets below                                              |
-| Deployer service account | `WIF_SERVICE_ACCOUNT` — GitHub Actions identity used only for GCP auth/deploy |
-| Runtime service account  | `GCP_RUNTIME_SERVICE_ACCOUNT` — attached to Cloud Run job/services at runtime |
+`staging` should represent an approved candidate build, not “whatever landed on
+main most recently”. The artifact should already exist in `dev`, and promotion
+into `staging` should happen only after a human checkpoint.
 
-## Required GitHub Secrets / Variables
+## Trigger Model
 
-| Name                          | Kind     | Value / Purpose                                     |
-| ----------------------------- | -------- | --------------------------------------------------- |
-| `GCP_PROJECT_ID`              | variable | GCP project ID                                      |
-| `GCP_REGION`                  | variable | e.g. `asia-east1`                                   |
-| `GCP_CLOUDSQL_INSTANCE`       | variable | `$PROJECT:$REGION:drts-staging`                     |
-| `GCP_RUNTIME_SERVICE_ACCOUNT` | variable | Cloud Run runtime service account email             |
-| `WIF_PROVIDER`                | secret   | Workload Identity Federation provider resource name |
-| `WIF_SERVICE_ACCOUNT`         | secret   | GitHub Actions deployer service account email       |
+- manual only: `workflow_dispatch`
+- required input: `image_tag`
+- recommended protection: GitHub Environment `staging` with required reviewers when the repo billing plan supports that protection rule
 
-`deploy-staging.yml` validates this configuration before it tries GCP auth. If any
-required repo variable or secret is missing, the workflow now fails fast with an explicit
-list of the missing keys instead of surfacing a generic `google-github-actions/auth`
-error.
+`Promote — Staging` reuses the shared deploy workflow to:
+
+1. validate staging config
+2. optionally run DB migration with the approved image tag
+3. deploy API and web services
+4. run protected post-deploy verification
+
+If staging is being moved to a different GCP project, remember that the
+protected hostnames must also be cut over at DNS / load-balancer level. Until
+`api.staging...`, `staging...`, and `ops.staging...` point at the new
+project's HTTPS load balancer, post-deploy verification can still hit the old
+environment.
+
+On the current private-repo plan, GitHub accepted the `staging` environment
+itself but rejected the required-reviewers protection rule. Promotion therefore
+remains manual via `workflow_dispatch` until the plan supports environment
+reviewers.
+
+## Required Configuration
+
+The reusable deploy workflow resolves configuration in this order:
+
+1. `STAGING_*` variables / secrets
+2. shared fallback variables / secrets without the `STAGING_` prefix
+3. workflow defaults where documented below
+
+Required values:
+
+| Name                                  | Kind               | Purpose                                             |
+| ------------------------------------- | ------------------ | --------------------------------------------------- |
+| `STAGING_GCP_PROJECT_ID`              | variable           | Staging GCP project ID                              |
+| `STAGING_GCP_REGION`                  | variable           | Staging Cloud Run / Cloud SQL region                |
+| `STAGING_GCP_CLOUDSQL_INSTANCE`       | variable           | Staging Cloud SQL instance connection name          |
+| `STAGING_GCP_RUNTIME_SERVICE_ACCOUNT` | variable or secret | Runtime identity attached to Cloud Run job/services |
+| `STAGING_WIF_PROVIDER`                | secret             | Workload Identity Federation provider resource      |
+| `STAGING_WIF_SERVICE_ACCOUNT`         | secret             | GitHub Actions deployer identity                    |
+| `STAGING_CONTROL_PLANE_API_ORIGIN`    | variable           | Protected staging API origin                        |
+| `STAGING_IAP_CLIENT_ID`               | variable           | IAP audience used for post-deploy verification      |
+
+Optional but recommended:
+
+| Name                                           | Kind     | Default                                             |
+| ---------------------------------------------- | -------- | --------------------------------------------------- |
+| `STAGING_ARTIFACT_PROJECT_ID`                  | variable | falls back to `STAGING_GCP_PROJECT_ID`              |
+| `STAGING_ARTIFACT_REGION`                      | variable | falls back to `STAGING_GCP_REGION`                  |
+| `STAGING_ARTIFACT_REPOSITORY`                  | variable | `drts`                                              |
+| `STAGING_SECRET_PREFIX`                        | variable | `drts-staging`                                      |
+| `STAGING_GCP_API_SERVICE`                      | variable | `drts-api`                                          |
+| `STAGING_GCP_PLATFORM_ADMIN_SERVICE`           | variable | `drts-platform-admin-web`                           |
+| `STAGING_GCP_OPS_CONSOLE_SERVICE`              | variable | `drts-ops-console-web`                              |
+| `STAGING_GCP_MIGRATION_JOB`                    | variable | `drts-migrate`                                      |
+| `STAGING_API_ALLOW_UNAUTHENTICATED`            | variable | `true`                                              |
+| `STAGING_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED` | variable | `true`                                              |
+| `STAGING_OPS_CONSOLE_ALLOW_UNAUTHENTICATED`    | variable | `true`                                              |
+| `STAGING_PLATFORM_ADMIN_ORIGIN`                | variable | `https://staging.drts-fleet.cctech-support.com`     |
+| `STAGING_OPS_CONSOLE_ORIGIN`                   | variable | `https://ops.staging.drts-fleet.cctech-support.com` |
+
+## Secret Manager Convention
+
+By default the workflow expects these Secret Manager names inside the staging
+GCP project:
+
+- `drts-staging-db-url`
+- `drts-staging-api-key-salt`
+- `drts-staging-jwt-secret`
+- `drts-staging-internal-key` (optional)
+- `drts-staging-controlled-download-signing-secret` (optional)
+
+Set `STAGING_SECRET_PREFIX` if your secret names differ.
 
 ## Identity Split
 
-The staging workflow now distinguishes between two identities:
+The staging workflow distinguishes between two identities:
 
-- `WIF_SERVICE_ACCOUNT`: used by `google-github-actions/auth` so GitHub Actions can call
-  `gcloud` and update Cloud Run resources.
-- `GCP_RUNTIME_SERVICE_ACCOUNT`: attached to the Cloud Run Job and Cloud Run services
-  during deploy.
+- `STAGING_WIF_SERVICE_ACCOUNT`: used by GitHub Actions to authenticate to GCP
+  and mutate Cloud Run resources
+- `STAGING_GCP_RUNTIME_SERVICE_ACCOUNT`: attached to the Cloud Run Job and Cloud
+  Run services at runtime
 
-Do not reuse the deployer identity as the Cloud Run runtime identity. The runtime service
+Do not reuse the deployer identity as the runtime identity. The runtime service
 account must have, at minimum:
 
 - `roles/cloudsql.client`
 - `roles/secretmanager.secretAccessor`
-- The GitHub WIF deployer identity (`WIF_SERVICE_ACCOUNT`) must also have
-  `iam.serviceAccounts.actAs` on `GCP_RUNTIME_SERVICE_ACCOUNT`
-  (typically via `roles/iam.serviceAccountUser`) so `gcloud run deploy` /
-  `gcloud run jobs update` can attach the runtime identity.
 
-If `GCP_RUNTIME_SERVICE_ACCOUNT` is missing, or resolves to the same email as
-`WIF_SERVICE_ACCOUNT`, `deploy-staging.yml` now fails fast before attempting the migration
-execution. The workflow also tests `iam.serviceAccounts.actAs` up front so reruns fail
-before the migration job if the deployer cannot bind the runtime service account.
+The deployer identity must also be able to attach the runtime identity
+(`iam.serviceAccounts.actAs`, typically via `roles/iam.serviceAccountUser`).
 
-## Secret Manager Secrets
+## Artifact Promotion
 
-These secrets are injected into Cloud Run services at runtime. The Cloud Run runtime
-service account, not the GitHub WIF deployer identity, must be able to access them:
+For staging to promote the same artifact created in `dev`, both environments
+must resolve to the same Artifact Registry coordinates:
 
-| Secret name                 | Consumed by          | Notes                                                                                                                                |
-| --------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `drts-staging-db-url`       | `api`, `migrate-job` | `postgresql://user:pass@/dbname?host=/cloudsql/INSTANCE`                                                                             |
-| `drts-staging-api-key-salt` | `api`                | Random 32-byte hex string                                                                                                            |
-| `drts-staging-jwt-secret`   | `api`                | Random 64-byte hex string                                                                                                            |
-| `drts-staging-internal-key` | `api`                | Shared secret used for system/machine-to-machine API requests that do not already carry a tenant/platform/ops/driver bootstrap realm |
+- `*_ARTIFACT_PROJECT_ID`
+- `*_ARTIFACT_REGION`
+- `*_ARTIFACT_REPOSITORY`
 
-## Service Map
+If those settings differ, the `image_tag` may exist in `dev` but not in the
+registry that staging reads from.
 
-| Service YAML                      | Cloud Run service name       | Port | Description                                                                                                                 |
-| --------------------------------- | ---------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------- |
-| `api-service.yaml`                | `drts-api`                   | 3001 | NestJS REST API                                                                                                             |
-| `tenant-portal-web-service.yaml`  | ~~`drts-tenant-portal-web`~~ | 3000 | **RETIRED (FBP-007)** — frozen reference only; do NOT deploy. Production tenant UI is `tenant-commute-hub` (external repo). |
-| `platform-admin-web-service.yaml` | `drts-platform-admin-web`    | 3002 | Platform Admin (Next.js)                                                                                                    |
-| `ops-console-web-service.yaml`    | `drts-ops-console-web`       | 3003 | Ops Console (Next.js)                                                                                                       |
+## Service Map Defaults
 
-## Migration Job
+| Variable                             | Default service / job     |
+| ------------------------------------ | ------------------------- |
+| `STAGING_GCP_API_SERVICE`            | `drts-api`                |
+| `STAGING_GCP_PLATFORM_ADMIN_SERVICE` | `drts-platform-admin-web` |
+| `STAGING_GCP_OPS_CONSOLE_SERVICE`    | `drts-ops-console-web`    |
+| `STAGING_GCP_MIGRATION_JOB`          | `drts-migrate`            |
 
-`migrate-job.yaml` defines a Cloud Run Job that:
-
-1. Pulls the `drts-api` image (which contains `scripts/` and `infra/migrations/`)
-2. Runs `bash scripts/db-apply.sh` against the staging Cloud SQL instance
-3. Uses `GCP_RUNTIME_SERVICE_ACCOUNT` so Cloud SQL socket access and Secret Manager
-   injection do not depend on the GitHub deployer identity
-4. Exits 0 on success — the deploy workflow gates the service rollout on job completion
-
-## Deploy Order
-
-```
-build images → push to AR → run migrate-job → deploy api → deploy web apps → health check
-```
-
-## Files
-
-```
-infra/gcp/staging/
-├── README.md                          # this file
-├── api-service.yaml                   # Cloud Run service — drts-api
-├── tenant-portal-web-service.yaml     # RETIRED (FBP-007) — frozen reference; do NOT deploy
-├── platform-admin-web-service.yaml    # Cloud Run service — platform-admin-web
-├── ops-console-web-service.yaml       # Cloud Run service — ops-console-web
-└── migrate-job.yaml                   # Cloud Run Job — db migration runner
-```
+If `dev` and `staging` share the same GCP project, override one environment’s
+names so the two tiers do not collide.
