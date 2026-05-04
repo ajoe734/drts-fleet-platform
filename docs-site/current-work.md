@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T09:02:17Z
+Last updated: 2026-05-04T06:55:10Z
 
 ## Objective
 
@@ -37,20 +37,30 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 ## Active Slices
 
 - `Claude`: governance-review, architecture-arbitration, control-plane; next: Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.
-- `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
+- `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Assignment created
 - `Codex`: contracts, schema, state-system, acceptance; next: Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
-- `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
-- `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
+- `Codex2`: contracts, schema, state-system, acceptance; next: Assignment created
+- `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Assignment created
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Approved after Codex repair: shared UI foundation compiles and driver app verification passes.
 
 ## Delivery Layers
 
 ### Primary Project Work
 
-| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
-| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
-| _(none)_ | -     | -    | -     | -      | -          | -        |
+| ID                               | Phase                     | Task                                                                        | Owner   | Status          | Depends On                                                                                                             | 中文說明                                                                                                                     |
+| -------------------------------- | ------------------------- | --------------------------------------------------------------------------- | ------- | --------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `DRV-MAT-001`                    | Driver App Productization | Driver App shared UI foundation                                             | Gemini2 | review_approved | `DRV-MAT-000`                                                                                                          | 建立 driver app 共用 tokens、screen frame、header、button、chip、form、empty/error、segmented control 與 bottom action bar。 |
+| `DRV-MAT-002`                    | Driver App Productization | Driver App shell and workstation home                                       | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          | 把 app shell 與 onboarding/workstation 首頁改成共享設計契約下的正式工作入口、配置流程與降級恢復頁。                          |
+| `DRV-MAT-003`                    | Driver App Productization | Driver task inbox materialization                                           | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          | 產品化任務收件匣，補篩選、摘要、任務卡、平台 badge、route-lock icon 與正式導航 affordance。                                  |
+| `DRV-MAT-004`                    | Driver App Productization | Driver trip workflow command center                                         | Codex2  | backlog         | `DRV-MAT-001`, `DRV-MAT-003`                                                                                           | 把 trip 頁重構成單一主要動作的行程作業台，保留 proof、replay、heartbeat、stale-session 行為。                                |
+| `DRV-MAT-005`                    | Driver App Productization | Driver SOS incident flow                                                    | Claude2 | backlog         | `DRV-MAT-001`, `DRV-MAT-004`                                                                                           | 產品化 SOS 緊急通報頁，導入 shared danger controls 並在送出重大事件前加入確認步驟。                                          |
+| `DRV-MAT-006`                    | Driver App Productization | Driver shift and attendance materialization                                 | Gemini2 | backlog         | `DRV-MAT-001`                                                                                                          | 產品化班次與出勤頁，移除 driver-demo-001，改用 provisioned driver identity 與共享 action/form 元件。                         |
+| `DRV-MAT-007`                    | Driver App Productization | Driver platform presence and binding                                        | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          | 統一 platform presence/status/binding UX，移除重複元件邏輯，改成中文 copy 與 icon controls。                                 |
+| `DRV-MAT-008`                    | Driver App Productization | Driver earnings dashboard materialization                                   | Gemini2 | backlog         | `DRV-MAT-001`                                                                                                          | 產品化收益儀表板，補 KPI tiles、period segmented control、平台收益列與對帳單列。                                             |
+| `DRV-MAT-009`                    | Driver App Productization | Driver settings materialization                                             | Claude2 | backlog         | `DRV-MAT-001`, `DRV-MAT-007`                                                                                           | 把設定頁拆成清楚區塊，補 dirty/save/validation 狀態，並整合中文化 platform binding。                                         |
+| `DRV-MAT-010`                    | Driver App Productization | Driver app productization verification pack                                 | Gemini  | backlog         | `DRV-MAT-002`, `DRV-MAT-003`, `DRV-MAT-004`, `DRV-MAT-005`, `DRV-MAT-006`, `DRV-MAT-007`, `DRV-MAT-008`, `DRV-MAT-009` | 產出 driver app 產品化的逐頁驗證包，記錄 typecheck、tests、route smoke 與視覺 evidence blocker。                             |
+| `DRV-MAT-001-SIDECAR-ACCEPTANCE` | Driver App Productization | [Sidecar] [Auto] [Parent DRV-MAT-001] DRV-MAT-001 sidecar acceptance packet | Gemini2 | review_approved | `DRV-MAT-000`                                                                                                          | 平行支援 DRV-MAT-001，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。                  |
 
 ### External / Upstream Integration Work
 
@@ -60,14 +70,26 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Task Board (active only)
 
-| ID  | Phase | Task | Owner | Status | Depends On |
-| --- | ----- | ---- | ----- | ------ | ---------- |
+| ID                               | Phase                     | Task                                                                        | Owner   | Status          | Depends On                                                                                                             |
+| -------------------------------- | ------------------------- | --------------------------------------------------------------------------- | ------- | --------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `DRV-MAT-001`                    | Driver App Productization | Driver App shared UI foundation                                             | Gemini2 | review_approved | `DRV-MAT-000`                                                                                                          |
+| `DRV-MAT-002`                    | Driver App Productization | Driver App shell and workstation home                                       | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          |
+| `DRV-MAT-003`                    | Driver App Productization | Driver task inbox materialization                                           | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          |
+| `DRV-MAT-004`                    | Driver App Productization | Driver trip workflow command center                                         | Codex2  | backlog         | `DRV-MAT-001`, `DRV-MAT-003`                                                                                           |
+| `DRV-MAT-005`                    | Driver App Productization | Driver SOS incident flow                                                    | Claude2 | backlog         | `DRV-MAT-001`, `DRV-MAT-004`                                                                                           |
+| `DRV-MAT-006`                    | Driver App Productization | Driver shift and attendance materialization                                 | Gemini2 | backlog         | `DRV-MAT-001`                                                                                                          |
+| `DRV-MAT-007`                    | Driver App Productization | Driver platform presence and binding                                        | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          |
+| `DRV-MAT-008`                    | Driver App Productization | Driver earnings dashboard materialization                                   | Gemini2 | backlog         | `DRV-MAT-001`                                                                                                          |
+| `DRV-MAT-009`                    | Driver App Productization | Driver settings materialization                                             | Claude2 | backlog         | `DRV-MAT-001`, `DRV-MAT-007`                                                                                           |
+| `DRV-MAT-010`                    | Driver App Productization | Driver app productization verification pack                                 | Gemini  | backlog         | `DRV-MAT-002`, `DRV-MAT-003`, `DRV-MAT-004`, `DRV-MAT-005`, `DRV-MAT-006`, `DRV-MAT-007`, `DRV-MAT-008`, `DRV-MAT-009` |
+| `DRV-MAT-001-SIDECAR-ACCEPTANCE` | Driver App Productization | [Sidecar] [Auto] [Parent DRV-MAT-001] DRV-MAT-001 sidecar acceptance packet | Gemini2 | review_approved | `DRV-MAT-000`                                                                                                          |
 
 ## Handoff Queue
 
-| Task     | From | To  | Message | Status | Created At |
-| -------- | ---- | --- | ------- | ------ | ---------- |
-| _(none)_ | -    | -   | -       | -      | -          |
+| Task                             | From  | To      | Message                                                                                        | Status  | Created At           |
+| -------------------------------- | ----- | ------- | ---------------------------------------------------------------------------------------------- | ------- | -------------------- |
+| `DRV-MAT-001`                    | Codex | Gemini2 | Approved after Codex repair: shared UI foundation compiles and driver app verification passes. | pending | 2026-05-04T06:54:51Z |
+| `DRV-MAT-001-SIDECAR-ACCEPTANCE` | Codex | Gemini2 | Approved sidecar acceptance packet after verification update.                                  | pending | 2026-05-04T06:55:10Z |
 
 ## Blockers
 
@@ -77,15 +99,15 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task     | Reviewer | 修正重點 | Review File |
-| -------- | -------- | -------- | ----------- |
-| _(none)_ | -        | -        | -           |
+| Task                             | Reviewer | 修正重點                                                                                                                                                        | Review File |
+| -------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `DRV-MAT-001`                    | Codex    | 審查通過：已補修 Gemini2 handoff 中的 TypeScript 問題與不相容測試檔；driver app typecheck、test、lint 均通過。Gemini CLI shell tool 也已修補並 smoke verified。 | -           |
+| `DRV-MAT-001-SIDECAR-ACCEPTANCE` | Codex    | 審查通過：sidecar acceptance packet 已更新 reviewer 與驗證門檻，並未修改 L1 canonical truth。                                                                   | -           |
 
 ## Completion Evidence (last 10)
 
 | Task           | Commit                                   | Subject                                                           | LLM Agent | Reviewer | Recorded At          |
 | -------------- | ---------------------------------------- | ----------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `SYNC-001`     | 6d4b7f1a99f76a260837e67bc1e80d8da70db9b3 | SYNC-001: record status dashboard sync review                     | Gemini2   | Codex    | 2026-05-01T07:52:06Z |
 | `SYNC-002`     | 6c5ba6865af075f1b2cde9a69f37eac9d141caba | SYNC-002: reconcile workflow release gates                        | Gemini2   | Codex    | 2026-05-01T08:17:45Z |
 | `SYNC-003`     | 0ee6948cded997b07b0cae009a83f30f9ff7aade | SYNC-003: reclassify UAT evidence gates                           | Gemini2   | Codex    | 2026-05-01T08:26:17Z |
 | `XREPO-001`    | c74f82cd87c5b774286a9740c3f49a229504ed1d | chore(status): approve cross-repo closeout                        | Gemini2   | Codex    | 2026-05-01T08:14:24Z |
@@ -95,26 +117,27 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `EXT-003`      | 5ed2f8adc5699de90ad894a53c6fecea89d3a861 | EXT-003: record mobile distribution gate                          | Gemini2   | Codex    | 2026-05-01T08:44:11Z |
 | `EXT-004`      | 0afd14413725f046fb1320fecb21a57fbf6a24b0 | EXT-004: record CTI recording filing gate                         | Gemini2   | Codex    | 2026-05-01T08:54:13Z |
 | `BDX-CLOSEOUT` | f7f3e7c1808363ef600cb3aacb8b1de8bc112850 | BDX-CLOSEOUT: finalize blueprint delta closeout                   | Gemini2   | Codex    | 2026-05-01T09:02:16Z |
+| `DRV-MAT-000`  | -                                        | no-commit closeout                                                | Gemini2   | Gemini   | 2026-05-04T06:06:23Z |
 
 ## Latest Checkpoints
 
-- 2026-05-01T08:42:59Z Codex: `EXT-003` Review passed after correction: EXT-003 has explicit blocker records EXT-003-BLK-001..007, links existing EAS evidence, names build profiles/tester groups, and blocks repo-local mobile distribution overclaim.
-- 2026-05-01T08:44:11Z Gemini2: `EXT-003` Done: mobile distribution gate committed and pushed; EXT-003-BLK-001..007 now track Expo account, Android signing, Apple team, tester groups, EAS secret policy, release channel ownership, and install evidence blockers.
-- 2026-05-01T08:45:11Z Orchestrator: `EXT-003` Background worker process exited after advancing the task to `done`.
-- 2026-05-01T08:45:12Z Orchestrator: `EXT-004` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-01T08:45:12Z Orchestrator: `EXT-004` Worker started via gemini: owned_ready_dispatch
-- 2026-05-01T08:45:32Z Gemini2: `EXT-004` Starting work on EXT-004: Setting up CTI/recording/filing activation gate.
-- 2026-05-01T08:46:00Z Gemini2: `EXT-004` Analyzing CTI callback and filing job mechanisms in callcenter and reporting-filing modules.
-- 2026-05-01T08:46:13Z Gemini2: `EXT-004` Defining CTI callback and filing job activation gate criteria and outlining simulation steps.
-- 2026-05-01T08:51:57Z Gemini2: `EXT-004` Reviewer correction in progress: CTI recording filing gate packet created; updating UAT, workflow, and retention anchors.
-- 2026-05-01T08:52:56Z Gemini2: `EXT-004` Handoff to Codex: CTI recording filing gate packet created and anchors updated: EXT-004-BLK-001..008 now define CTI callback, recording export, filing package, retention, and E2E-003 proof requirements; checks: prettier, ai_status doc-sync audit, git diff --check.
-- 2026-05-01T08:53:09Z Codex: `EXT-004` Review approved: EXT-004 gate packet is concrete, anchored, and avoids live-proof overclaim.
-- 2026-05-01T08:54:13Z Gemini2: `EXT-004` Done: CTI recording filing activation gate committed and pushed; EXT-004-BLK-001..008 now track missing CTI, callback, filing, export, retention, and E2E evidence.
-- 2026-05-01T08:55:15Z Orchestrator: `EXT-004` Background worker process exited after advancing the task to `done`.
-- 2026-05-01T08:55:15Z Orchestrator: `BDX-CLOSEOUT` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-01T08:55:15Z Orchestrator: `BDX-CLOSEOUT` Worker started via gemini: owned_ready_dispatch
-- 2026-05-01T08:55:33Z Gemini2: `BDX-CLOSEOUT` Starting final blueprint delta closeout narrative for BDX-CLOSEOUT
-- 2026-05-01T08:59:28Z Gemini2: `BDX-CLOSEOUT` Reviewer correction in progress: Gemini2 worker exited after start-only output; final closeout narrative is being written into audit, checklist, and execution packet with external/pilot/production gate language.
-- 2026-05-01T09:00:56Z Gemini2: `BDX-CLOSEOUT` Handoff to Codex: Final blueprint delta closeout narrative is ready: audit, master checklist, and execution packet now distinguish repo-local done from external-gated, pilot-gated, and production-gated status; stale audit-time ORX/dashboard/tenant-dirty claims are replaced with closeout results. Checks: prettier check, ai_status doc-sync audit, git diff --check.
-- 2026-05-01T09:01:10Z Codex: `BDX-CLOSEOUT` Review approved: final closeout narrative is concrete, current, and keeps external/pilot/production gates explicit.
-- 2026-05-01T09:02:16Z Gemini2: `BDX-CLOSEOUT` Done: final blueprint delta closeout narrative committed and pushed; repo-local done is separated from external-gated, pilot-gated, and production-gated status.
+- 2026-05-04T06:31:27Z Orchestrator: `DRV-MAT-001` Worker started via gemini: owned_in_progress_dispatch
+- 2026-05-04T06:31:35Z Gemini2: `DRV-MAT-001` Starting to build shared UI foundation for the driver app, including tokens, screen frame, header, button, chip, form, empty/error, segmented control, and bottom action bar.
+- 2026-05-04T06:31:48Z Orchestrator: `DRV-MAT-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260504T063127Z-f0d2a97b.json)
+- 2026-05-04T06:31:48Z Orchestrator: `DRV-MAT-001` Wake-up queued for supervisor: owned_in_progress_dispatch
+- 2026-05-04T06:31:48Z Orchestrator: `DRV-MAT-001` Worker started via gemini: owned_in_progress_dispatch
+- 2026-05-04T06:31:57Z Gemini2: `DRV-MAT-001` Starting to build shared UI foundation for the driver app, including tokens, screen frame, header, button, chip, form, empty/error, segmented control, and bottom action bar.
+- 2026-05-04T06:32:07Z Orchestrator: `DRV-MAT-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/gemini2-20260504T063148Z-dc7f7bec.json)
+- 2026-05-04T06:32:10Z Orchestrator: `DRV-MAT-001` Wake-up queued for supervisor: owned_in_progress_dispatch
+- 2026-05-04T06:32:10Z Orchestrator: `DRV-MAT-001` Worker started via gemini: owned_in_progress_dispatch
+- 2026-05-04T06:32:19Z Gemini2: `DRV-MAT-001` Starting to build shared UI foundation for the driver app, including tokens, screen frame, header, button, chip, form, empty/error, segmented control, and bottom action bar.
+- 2026-05-04T06:33:06Z Orchestrator: `DRV-MAT-001-SIDECAR-ACCEPTANCE` quota/terminal: reason: 'QUOTA_EXHAUSTED' (raw_ref: .orchestrator/evidence/gemini-20260504T062946Z-d5662a3e.json)
+- 2026-05-04T06:34:53Z Gemini2: `DRV-MAT-001` Handoff to Gemini: Implemented foundational UI components for the driver app: PageHeader (with left/right actions), Chip, SegmentedControl. Verified and integrated existing components: tokens, ActionButton, AppScreen, EmptyState, ErrorBanner, BottomActionBar. Updated index.ts to export new components. Ready for review.
+- 2026-05-04T06:34:55Z Orchestrator: `DRV-MAT-001` Worker superseded after task responsibility moved to another agent.
+- 2026-05-04T06:34:56Z Orchestrator: `DRV-MAT-001` Background worker process exited after advancing the task to `review`.
+- 2026-05-04T06:45:27Z Orchestrator: underutilized but no idle agents were eligible for sidecar work
+- 2026-05-04T06:53:52Z Codex: `DRV-MAT-001` Assigned DRV-MAT-001 to Gemini2 with reviewer Codex
+- 2026-05-04T06:53:52Z Codex: `DRV-MAT-001-SIDECAR-ACCEPTANCE` Assigned DRV-MAT-001-SIDECAR-ACCEPTANCE to Gemini2 with reviewer Codex
+- 2026-05-04T06:54:27Z Codex: `DRV-MAT-001` Assigned DRV-MAT-001 to Gemini2 with reviewer Codex
+- 2026-05-04T06:54:51Z Codex: `DRV-MAT-001` Approved after Codex repair: shared UI foundation compiles and driver app verification passes.
+- 2026-05-04T06:55:10Z Codex: `DRV-MAT-001-SIDECAR-ACCEPTANCE` Approved sidecar acceptance packet after verification update.

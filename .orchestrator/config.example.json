@@ -302,7 +302,9 @@
       },
       "gemini": {
         "cli": "gemini",
-        "include_directories": true
+        "include_directories": true,
+        "skip_trust": true,
+        "allowed_tools": ["run_shell_command"]
       },
       "approval": {
         "default_approval_mode": "auto_edit",
@@ -330,7 +332,9 @@
           "GOOGLE_CLOUD_LOCATION": "us-central1"
         },
         "model": "gemini-2.5-flash-lite",
-        "include_directories": true
+        "include_directories": true,
+        "skip_trust": true,
+        "allowed_tools": ["run_shell_command"]
       },
       "model_preference": {
         "default": "gemini-2.5-flash-lite",

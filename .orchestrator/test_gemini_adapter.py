@@ -65,6 +65,9 @@ class GeminiAdapterTests(unittest.TestCase):
 
             self.assertTrue(result.ok)
             command = spawn.call_args.args[0]
+            self.assertIn("--skip-trust", command)
+            self.assertIn("--allowed-tools", command)
+            self.assertIn("run_shell_command", command[command.index("--allowed-tools") + 1])
             include_values = [
                 command[index + 1]
                 for index, value in enumerate(command)
