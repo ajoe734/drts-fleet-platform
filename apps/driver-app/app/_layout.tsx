@@ -17,6 +17,8 @@ import {
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 
+import { tokens } from "@/components/ui/tokens";
+
 const DRIVER_SESSION_REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
 
 export const unstable_settings = {
@@ -76,14 +78,32 @@ export default function RootLayout() {
       <Stack
         screenOptions={{
           headerStyle: {
-            backgroundColor: "#f8fafc",
+            backgroundColor: tokens.colors.surface,
           },
-          headerTintColor: "#0f172a",
+          headerTitleStyle: {
+            ...tokens.type.sectionTitle,
+            color: tokens.colors.textStrong,
+          },
+          headerTintColor: tokens.colors.primary,
+          headerShadowVisible: false,
           contentStyle: {
-            backgroundColor: "#f4f7fb",
+            backgroundColor: tokens.colors.appBg,
           },
         }}
-      />
+      >
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding" options={{ title: "工作台" }} />
+        <Stack.Screen name="jobs" options={{ title: "任務收件匣" }} />
+        <Stack.Screen name="trip" options={{ title: "行程作業" }} />
+        <Stack.Screen name="incident" options={{ title: "SOS 緊急通報" }} />
+        <Stack.Screen name="earnings" options={{ title: "收益儀表板" }} />
+        <Stack.Screen
+          name="platform-presence"
+          options={{ title: "平台上線狀態" }}
+        />
+        <Stack.Screen name="shift" options={{ title: "班次與出勤" }} />
+        <Stack.Screen name="settings" options={{ title: "設定" }} />
+      </Stack>
     </>
   );
 }
