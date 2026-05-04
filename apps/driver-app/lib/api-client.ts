@@ -24,11 +24,56 @@ type DriverExpoExtra = {
   driverActorId?: string;
 };
 
-const expoExtra = (Constants.expoConfig?.extra ?? {}) as DriverExpoExtra;
-const API_URL =
-  process.env.EXPO_PUBLIC_API_URL ??
-  expoExtra.apiBaseUrl ??
-  "https://drts-api-kdhu6wzufa-uc.a.run.app";
+type DriverExpoConfig = {
+  extra?: DriverExpoExtra;
+  hostUri?: string;
+};
+
+const expoConfig = (Constants.expoConfig ?? {}) as DriverExpoConfig;
+const expoExtra = (expoConfig.extra ?? {}) as DriverExpoExtra;
+const PACKAGED_API_URL = "https://drts-api-kdhu6wzufa-uc.a.run.app";
+
+function normalizeApiBaseUrl(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.replace(/\/$/, "") : null;
+}
+
+function getExpoDevServerHost(): string | null {
+  const hostUri = expoConfig.hostUri?.trim();
+  if (!hostUri) {
+    return null;
+  }
+
+  const host = hostUri.replace(/^https?:\/\//, "").split(/[/:]/, 1)[0];
+  return host?.trim() || null;
+}
+
+function resolveDevApiBaseUrl(): string | null {
+  if (process.env.NODE_ENV === "production") {
+    return null;
+  }
+
+  const host = getExpoDevServerHost();
+  if (!host) {
+    return null;
+  }
+
+  const apiHost =
+    host === "localhost" || host === "127.0.0.1" ? "10.0.2.2" : host;
+  const apiPort = process.env.EXPO_PUBLIC_API_PORT?.trim() || "3001";
+  return `http://${apiHost}:${apiPort}`;
+}
+
+export function resolveDriverApiBaseUrl(): string {
+  return (
+    normalizeApiBaseUrl(process.env.EXPO_PUBLIC_API_URL) ??
+    resolveDevApiBaseUrl() ??
+    normalizeApiBaseUrl(expoExtra.apiBaseUrl) ??
+    PACKAGED_API_URL
+  );
+}
+
+const API_URL = resolveDriverApiBaseUrl();
 
 const DEV_DRIVER_ID: string | undefined =
   process.env.EXPO_PUBLIC_DRIVER_ID ??

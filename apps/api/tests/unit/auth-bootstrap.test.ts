@@ -216,6 +216,20 @@ describe("bootstrap auth extraction", () => {
     });
   });
 
+  it("allows driver identities to post location heartbeats", () => {
+    const policy = resolveRouteAuthPolicy(
+      "POST",
+      "/api/regulatory-registry/driver-location",
+    );
+
+    expect(policy).toEqual({
+      routeKey: "regulatory:driver-location:POST",
+      requiredScopes: ["driver:write"],
+      allowedRealms: ["system", "platform", "ops", "driver"],
+      description: "Driver location heartbeat ingestion",
+    });
+  });
+
   it("keeps call-center order creation on ops-only callcenter scopes", () => {
     const policy = resolveRouteAuthPolicy("POST", "/api/call-center/orders");
 

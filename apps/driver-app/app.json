@@ -47,9 +47,6 @@
         "FOREGROUND_SERVICE_LOCATION"
       ],
       "softwareKeyboardLayoutMode": "pan"
-    },
-    "extra": {
-      "apiBaseUrl": "https://drts-api-kdhu6wzufa-uc.a.run.app"
     }
   }
 }

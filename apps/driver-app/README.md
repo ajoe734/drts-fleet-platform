@@ -25,7 +25,7 @@ Set one of the following before running or building:
 | Variable                | Purpose                                                    |
 | ----------------------- | ---------------------------------------------------------- |
 | `EXPO_PUBLIC_DRIVER_ID` | Explicit driver actor ID for local dev and internal builds |
-| `EXPO_PUBLIC_API_URL`   | Override the API base URL (defaults to staging endpoint)   |
+| `EXPO_PUBLIC_API_URL`   | Override the API base URL                                  |
 
 Example local dev invocation:
 
@@ -61,9 +61,11 @@ Hosted EAS builds currently assume `npx eas-cli` unless the operator has a
 global `eas` binary installed. The repo does not vendor `eas-cli` as a
 workspace dependency.
 
-The default packaged API target is the direct staging API host
-`https://drts-api-kdhu6wzufa-uc.a.run.app`, not the IAP-protected control-plane
-host. Override with `EXPO_PUBLIC_API_URL` when needed.
+Local development defaults the API target from the Expo dev-server host on port
+`3001`, so an Android emulator connected to `http://<host>:8081` will call
+`http://<host>:3001`. Hosted EAS profiles still provide
+`EXPO_PUBLIC_API_URL` for staging/preview targets. The driver app does not use
+the IAP-protected control-plane host.
 
 For step-by-step setup, build instructions, and environment separation, see
 [Driver App Native Dev Runbook](../../docs/03-runbooks/driver-app-native-dev-runbook.md).

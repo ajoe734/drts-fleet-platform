@@ -85,6 +85,15 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (routePath === "regulatory-registry/driver-location") {
+    return {
+      routeKey: `regulatory:driver-location:${upperMethod}`,
+      requiredScopes: methodScope("driver:read", "driver:write", upperMethod),
+      allowedRealms: baseAllowedRealms("platform", "ops", "driver"),
+      description: "Driver location heartbeat ingestion",
+    };
+  }
+
   if (routePath.startsWith("partner/eligibility/")) {
     return {
       routeKey: "partner:eligibility:get",

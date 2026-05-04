@@ -1867,8 +1867,10 @@ export class ApiClient {
     return this.getList<IncidentRecord>("/api/incidents");
   }
 
-  async createIncident(command: CreateIncidentCommand) {
-    return this.post("/api/incidents", { body: command });
+  async createIncident(
+    command: CreateIncidentCommand,
+  ): Promise<IncidentRecord> {
+    return this.post<IncidentRecord>("/api/incidents", { body: command });
   }
 
   async getIncident(incidentId: string) {

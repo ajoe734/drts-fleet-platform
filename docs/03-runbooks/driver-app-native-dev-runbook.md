@@ -15,7 +15,9 @@ than the Cloud IAP control-plane host.
 - runtime: Expo Router + React Native
 - native config: `apps/driver-app/app.json`
 - EAS profiles: `apps/driver-app/eas.json`
-- default packaged API host: `https://drts-api-kdhu6wzufa-uc.a.run.app`
+- local dev API host: derived from the Expo dev-server host on port `3001`
+- hosted build API host: set via `EXPO_PUBLIC_API_URL` in the EAS profile or
+  build environment
 - driver identity: **must be explicitly provisioned** — no silent demo fallback
 - hosted build CLI: use `npx eas-cli` unless the workstation already has a
   global `eas` binary installed
@@ -55,7 +57,17 @@ pnpm install
 
 ### Local Development
 
-Set identity explicitly via env var. Use a local or staging API origin.
+Set identity explicitly via env var. If `EXPO_PUBLIC_API_URL` is omitted during
+local development, the app derives the API host from the Expo dev-server host
+and switches the port to `3001`.
+
+```bash
+EXPO_PUBLIC_DRIVER_ID=driver-dev-001 \
+pnpm --filter @drts/driver-app dev:client
+```
+
+Use `EXPO_PUBLIC_API_URL` when the API is not running on the same host as
+Metro:
 
 ```bash
 EXPO_PUBLIC_API_URL=http://192.168.1.10:3001 \
