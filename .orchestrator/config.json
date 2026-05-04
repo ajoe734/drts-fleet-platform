@@ -321,7 +321,9 @@
         "env": {
           "GEMINI_CLI_TRUST_WORKSPACE": "true"
         },
-        "include_directories": true
+        "include_directories": true,
+        "skip_trust": true,
+        "allowed_tools": ["run_shell_command"]
       },
       "approval": {
         "default_approval_mode": "auto_edit",
@@ -350,6 +352,8 @@
         },
         "model": "gemini-2.5-flash-lite",
         "include_directories": true,
+        "skip_trust": true,
+        "allowed_tools": ["run_shell_command"],
         "extra_include_directories": ["/home/edna/workspace/tenant-commute-hub"]
       },
       "model_preference": {

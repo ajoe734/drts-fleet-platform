@@ -178,10 +178,46 @@ scenario / negative-flow planning into execution-ready slices for:
 1. driver registration / rebind / revoke
 2. driver master and supply lifecycle consoles
 3. phone-order recording and partner eligibility failure paths
-4. forwarder sync-failed and reconciliation handling
-5. queue families, override workflows, and map-board MVP
-6. driver proof UX, offline replay, and finance / artifact governance
-7. negative-path UAT, role-ownership runbooks, and glossary sync
+
+## 11. 2026-05-04 Driver App Productization Wave
+
+The driver app productization design has been split into supervisor-ready
+materialization tasks in:
+
+- `docs/02-architecture/driver-app-productization-design-plan-20260504.md`
+- `docs/03-runbooks/driver-app-productization-execution-packet-20260504.md`
+
+This wave is repo-local productization work for the native Expo driver app. It
+does not reopen mobile store distribution evidence, Expo credentials, Android
+signing, Apple team access, or first-party passenger scope.
+
+Materialized task family:
+
+1. `DRV-MAT-000` — design freeze and route/task graph confirmation
+2. `DRV-MAT-001` — shared UI foundation
+3. `DRV-MAT-002` — app shell and workstation home
+4. `DRV-MAT-003` — task inbox materialization
+5. `DRV-MAT-004` — trip workflow command center
+6. `DRV-MAT-005` — SOS incident flow
+7. `DRV-MAT-006` — shift and attendance materialization
+8. `DRV-MAT-007` — platform presence and binding
+9. `DRV-MAT-008` — earnings dashboard materialization
+10. `DRV-MAT-009` — settings materialization
+11. `DRV-MAT-010` — route-by-route productization verification pack
+
+Dispatch rule:
+
+1. Dispatch `DRV-MAT-000` and `DRV-MAT-001` first.
+2. Do not dispatch page rewrites before `DRV-MAT-001` lands.
+3. After foundation, `DRV-MAT-003`, `DRV-MAT-006`, `DRV-MAT-007`, and
+   `DRV-MAT-008` may run in parallel because their write scopes are disjoint.
+4. Keep `DRV-MAT-004` under focused review because it touches trip action,
+   completion proof, pending replay, heartbeat, and stale-session behavior.
+5. Treat `DRV-MAT-010` as the final evidence gate for this wave.
+6. forwarder sync-failed and reconciliation handling
+7. queue families, override workflows, and map-board MVP
+8. driver proof UX, offline replay, and finance / artifact governance
+9. negative-path UAT, role-ownership runbooks, and glossary sync
 
 If a future wave is materialized from this packet, it should open as an
 explicit `ORX-*` family linked back to the accepted remediation plan rather
