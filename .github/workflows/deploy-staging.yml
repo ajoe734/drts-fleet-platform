@@ -398,6 +398,13 @@ jobs:
           set -euo pipefail
 
           secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest"
+          controlled_download_secret="${SECRET_PREFIX}-controlled-download-signing-secret"
+
+          if ! gcloud secrets describe "$controlled_download_secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "::error::Required secret ${controlled_download_secret} not found in project ${PROJECT_ID}."
+            exit 1
+          fi
+          secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${controlled_download_secret}:latest"
 
           if gcloud secrets describe "${SECRET_PREFIX}-internal-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${SECRET_PREFIX}-internal-key:latest"

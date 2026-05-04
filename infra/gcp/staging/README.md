@@ -80,8 +80,8 @@ GCP project:
 - `drts-staging-db-url`
 - `drts-staging-api-key-salt`
 - `drts-staging-jwt-secret`
+- `drts-staging-controlled-download-signing-secret`
 - `drts-staging-internal-key` (optional)
-- `drts-staging-controlled-download-signing-secret` (optional)
 
 Set `STAGING_SECRET_PREFIX` if your secret names differ.
 

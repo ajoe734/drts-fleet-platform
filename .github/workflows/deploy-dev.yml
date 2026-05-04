@@ -353,9 +353,12 @@ jobs:
           project_id="${{ needs.prepare.outputs.project_id }}"
           secret_args="DATABASE_URL=${secret_prefix}-db-url:latest,API_KEY_SALT=${secret_prefix}-api-key-salt:latest,JWT_SECRET=${secret_prefix}-jwt-secret:latest"
 
-          if gcloud secrets describe "${secret_prefix}-controlled-download-signing-secret" --project "$project_id" >/dev/null 2>&1; then
-            secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${secret_prefix}-controlled-download-signing-secret:latest"
+          controlled_download_secret="${secret_prefix}-controlled-download-signing-secret"
+          if ! gcloud secrets describe "$controlled_download_secret" --project "$project_id" >/dev/null 2>&1; then
+            echo "::error::Required secret ${controlled_download_secret} not found in project ${project_id}."
+            exit 1
           fi
+          secret_args="${secret_args},CONTROLLED_DOWNLOAD_SIGNING_SECRET=${controlled_download_secret}:latest"
 
           if gcloud secrets describe "${secret_prefix}-internal-key" --project "$project_id" >/dev/null 2>&1; then
             secret_args="${secret_args},DRTS_INTERNAL_KEY=${secret_prefix}-internal-key:latest"
