@@ -1,153 +1,119 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
-  getDriverIdentityIssue,
+  ActionButton,
+  AppScreen,
+  ErrorBanner,
+  FormField,
+  ListCard,
+  PageHeader,
+  StatusChip,
+  tokens,
+} from "@/components/ui";
+import {
   getDriverClient,
+  getDriverIdentityIssue,
   hasDriverDevOverride,
   initializeDriverIdentity,
   isDriverIdentityProvisioned,
   registerDriverDevice,
 } from "@/lib/api-client";
 
-type WorkspaceRoute = "/jobs" | "/earnings" | "/platform-presence" | "/shift";
+type WorkspaceRoute =
+  | "/jobs"
+  | "/trip"
+  | "/platform-presence"
+  | "/earnings"
+  | "/shift";
 
 const WORKSPACE_ACTIONS: ReadonlyArray<{
   title: string;
   subtitle: string;
   route: WorkspaceRoute;
-  icon: keyof typeof Ionicons.glyphMap;
+  tone: "success" | "info";
 }> = [
   {
     title: "任務收件匣",
     subtitle: "查看已指派任務、平台來源與派單狀態",
     route: "/jobs",
-    icon: "file-tray-full-outline",
+    tone: "success",
   },
   {
-    title: "收益儀表板",
-    subtitle: "依平台檢視今日與累計收益摘要",
-    route: "/earnings",
-    icon: "wallet-outline",
+    title: "行程作業",
+    subtitle: "進入目前行程，處理接單、載客與完單流程",
+    route: "/trip",
+    tone: "info",
   },
   {
     title: "平台上線狀態",
     subtitle: "管理各平台上線、令牌到期與重新驗證",
     route: "/platform-presence",
-    icon: "radio-outline",
+    tone: "info",
+  },
+  {
+    title: "收益儀表板",
+    subtitle: "依平台檢視今日與累計收益摘要",
+    route: "/earnings",
+    tone: "info",
   },
   {
     title: "班次與出勤",
     subtitle: "追蹤排班、出勤與當前班次狀態",
     route: "/shift",
-    icon: "time-outline",
+    tone: "info",
   },
 ] as const;
 
-function StatusPill({
-  label,
-  value,
-  tone,
+function LoadingState({ label }: { label: string }) {
+  return (
+    <AppScreen scrollable={false}>
+      <View style={styles.loadingState}>
+        <ActivityIndicator color={tokens.colors.primary} size="large" />
+        <Text style={styles.loadingLabel}>{label}</Text>
+      </View>
+    </AppScreen>
+  );
+}
+
+function Section({
+  title,
+  description,
+  children,
 }: {
-  label: string;
-  value: string;
-  tone: "success" | "warning" | "danger";
+  title: string;
+  description?: string;
+  children: React.ReactNode;
 }) {
   return (
-    <View
-      style={[
-        styles.statusPill,
-        tone === "success" && styles.statusPillSuccess,
-        tone === "warning" && styles.statusPillWarning,
-        tone === "danger" && styles.statusPillDanger,
-      ]}
-    >
-      <Text style={styles.statusPillLabel}>{label}</Text>
-      <Text
-        style={[
-          styles.statusPillValue,
-          tone === "success" && styles.statusPillValueSuccess,
-          tone === "warning" && styles.statusPillValueWarning,
-          tone === "danger" && styles.statusPillValueDanger,
-        ]}
-      >
-        {value}
-      </Text>
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {description ? (
+        <Text style={styles.sectionDescription}>{description}</Text>
+      ) : null}
+      {children}
     </View>
   );
 }
 
-function QuickActionCard({
-  title,
-  subtitle,
-  icon,
-  onPress,
+function StatusStrip({
+  items,
 }: {
-  title: string;
-  subtitle: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
+  items: ReadonlyArray<{
+    label: string;
+    value: string;
+    variant: "default" | "success" | "warning" | "danger" | "info";
+  }>;
 }) {
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.quickActionCard,
-        pressed && styles.quickActionCardPressed,
-      ]}
-    >
-      <View style={styles.quickActionIconWrap}>
-        <Ionicons name={icon} size={22} color="#1d4ed8" />
-      </View>
-      <View style={styles.quickActionBody}>
-        <Text style={styles.quickActionTitle}>{title}</Text>
-        <Text style={styles.quickActionSubtitle}>{subtitle}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={18} color="#94a3b8" />
-    </Pressable>
-  );
-}
-
-function RecoveryChecklist({
-  flagsOk,
-  identityOk,
-}: {
-  flagsOk: boolean;
-  identityOk: boolean;
-}) {
-  return (
-    <View style={styles.recoveryList}>
-      <View style={styles.recoveryRow}>
-        <Ionicons
-          color={identityOk ? "#15803d" : "#dc2626"}
-          name={identityOk ? "checkmark-circle" : "close-circle"}
-          size={18}
-        />
-        <Text style={styles.recoveryText}>
-          司機身份驗證 {identityOk ? "正常" : "失敗"}
-        </Text>
-      </View>
-      <View style={styles.recoveryRow}>
-        <Ionicons
-          color={flagsOk ? "#15803d" : "#d97706"}
-          name={flagsOk ? "checkmark-circle" : "alert-circle"}
-          size={18}
-        />
-        <Text style={styles.recoveryText}>
-          功能旗標服務 {flagsOk ? "正常" : "暫時不可用"}
-        </Text>
-      </View>
+    <View style={styles.statusStrip}>
+      {items.map((item) => (
+        <View key={item.label} style={styles.statusTile}>
+          <Text style={styles.statusTileLabel}>{item.label}</Text>
+          <StatusChip label={item.value} variant={item.variant} />
+        </View>
+      ))}
     </View>
   );
 }
@@ -156,12 +122,14 @@ function resolveWorkspaceIssue(flagsOk: boolean, identityOk: boolean): string {
   if (!identityOk && !flagsOk) {
     return "目前無法驗證司機身份，也無法取得工作台功能設定。請確認網路與登入狀態後重新檢查。";
   }
+
   if (!identityOk) {
     return (
       getDriverIdentityIssue() ??
       "目前無法驗證司機身份。請確認裝置綁定仍有效，或重新回到配置流程。"
     );
   }
+
   return "功能旗標服務暫時不可用。核心資料仍可能可讀，但部分入口會維持降級。";
 }
 
@@ -187,6 +155,7 @@ export default function OnboardingScreen() {
         if (cancelled) {
           return;
         }
+
         setProvisioningError(
           error instanceof Error
             ? error.message
@@ -194,13 +163,15 @@ export default function OnboardingScreen() {
         );
       })
       .finally(() => {
-        if (!cancelled) {
-          const identityIssue = getDriverIdentityIssue();
-          if (identityIssue) {
-            setProvisioningError(identityIssue);
-          }
-          setReady(true);
+        if (cancelled) {
+          return;
         }
+
+        const identityIssue = getDriverIdentityIssue();
+        if (identityIssue) {
+          setProvisioningError(identityIssue);
+        }
+        setReady(true);
       });
 
     return () => {
@@ -230,6 +201,7 @@ export default function OnboardingScreen() {
 
         const nextFlagsOk = flagsResult.status === "fulfilled";
         const nextIdentityOk = identityResult.status === "fulfilled";
+
         setFlagsOk(nextFlagsOk);
         setIdentityOk(nextIdentityOk);
 
@@ -238,11 +210,13 @@ export default function OnboardingScreen() {
         }
       })
       .catch(() => {
-        if (!cancelled) {
-          setFlagsOk(false);
-          setIdentityOk(false);
-          setWorkspaceIssue(resolveWorkspaceIssue(false, false));
+        if (cancelled) {
+          return;
         }
+
+        setFlagsOk(false);
+        setIdentityOk(false);
+        setWorkspaceIssue(resolveWorkspaceIssue(false, false));
       });
 
     return () => {
@@ -259,6 +233,7 @@ export default function OnboardingScreen() {
 
     setSubmitting(true);
     setProvisioningError(null);
+
     try {
       await registerDriverDevice(normalizedCode, deviceLabel);
       setFlagsOk(null);
@@ -273,525 +248,295 @@ export default function OnboardingScreen() {
     }
   };
 
+  const handleReinitializeIdentity = () => {
+    setReady(false);
+    setProvisioningError(null);
+
+    setTimeout(() => {
+      void initializeDriverIdentity()
+        .catch((error: unknown) => {
+          setProvisioningError(
+            error instanceof Error ? error.message : "無法重新初始化裝置身份。",
+          );
+        })
+        .finally(() => setReady(true));
+    }, 0);
+  };
+
   if (!ready) {
-    return (
-      <View style={styles.loadingScreen}>
-        <ActivityIndicator color="#1d4ed8" size="large" />
-        <Text style={styles.loadingLabel}>正在檢查裝置配置…</Text>
-      </View>
-    );
+    return <LoadingState label="正在檢查裝置配置…" />;
   }
 
   if (!provisioned) {
     return (
-      <SafeAreaView edges={["top", "left", "right"]} style={styles.shell}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
+      <AppScreen contentContainerStyle={styles.screenContent}>
+        <PageHeader
+          title="裝置配置"
+          subtitle="完成註冊後才會載入正式工作台"
+          rightElement={<StatusChip label="待配置" variant="warning" />}
+        />
+
+        <StatusStrip
+          items={[
+            { label: "裝置", value: "待綁定", variant: "warning" },
+            {
+              label: "身份",
+              value: hasDriverDevOverride() ? "開發覆寫" : "未就緒",
+              variant: hasDriverDevOverride() ? "info" : "danger",
+            },
+            { label: "平台", value: "未開放", variant: "default" },
+          ]}
+        />
+
+        <Section
+          title="輸入註冊資料"
+          description="請使用管理人員提供的註冊碼綁定此裝置。完成後會自動進入多平台工作站。"
         >
-          <View style={styles.heroCard}>
-            <Text style={styles.eyebrow}>DRTS Driver App</Text>
-            <Text style={styles.heroTitle}>裝置配置</Text>
-            <Text style={styles.heroDescription}>
-              先完成裝置綁定，工作台才會載入司機身份、平台任務與收益資料。
-            </Text>
-            <View style={styles.heroPillRow}>
-              <StatusPill label="裝置狀態" tone="warning" value="待配置" />
-              <StatusPill
-                label="開發覆寫"
-                tone={hasDriverDevOverride() ? "success" : "danger"}
-                value={hasDriverDevOverride() ? "已設定" : "未設定"}
-              />
-            </View>
-          </View>
+          {provisioningError ? (
+            <ErrorBanner message={provisioningError} />
+          ) : null}
+          <FormField
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!submitting}
+            label="註冊碼"
+            onChangeText={setRegistrationCode}
+            placeholder="請輸入註冊碼"
+            value={registrationCode}
+          />
+          <FormField
+            editable={!submitting}
+            helpText="選填，方便平台與營運端辨識此裝置。"
+            label="裝置名稱"
+            onChangeText={setDeviceLabel}
+            placeholder="例如：Driver Pixel 01"
+            value={deviceLabel}
+          />
+          <ActionButton
+            icon="shield-checkmark-outline"
+            loading={submitting}
+            onPress={() => {
+              void handleRegister();
+            }}
+            title={submitting ? "配置中…" : "註冊此裝置"}
+          />
+        </Section>
 
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>輸入註冊資料</Text>
-            <Text style={styles.sectionDescription}>
-              請使用管理人員提供的註冊碼綁定此裝置，成功後會自動進入多平台工作站。
-            </Text>
-            <TextInput
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!submitting}
-              onChangeText={setRegistrationCode}
-              placeholder="註冊碼"
-              placeholderTextColor="#94a3b8"
-              style={styles.input}
-              value={registrationCode}
-            />
-            <TextInput
-              editable={!submitting}
-              onChangeText={setDeviceLabel}
-              placeholder="裝置名稱（選填）"
-              placeholderTextColor="#94a3b8"
-              style={styles.input}
-              value={deviceLabel}
-            />
-            <Pressable
-              disabled={submitting}
-              onPress={() => {
-                void handleRegister();
-              }}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                (pressed || submitting) && styles.primaryButtonPressed,
-              ]}
-            >
-              <Ionicons
-                name="shield-checkmark-outline"
-                size={18}
-                color="#fff"
+        <Section
+          title="安全說明"
+          description="未配置的裝置不會直接進入任務與行程頁，避免把 demo 入口誤當正式工作流程。"
+        >
+          <ListCard
+            meta="正式環境應由後端裝置綁定流程提供會話。"
+            subtitle="開發環境可用 EXPO_PUBLIC_DRIVER_ID 明確覆寫司機身份。"
+            title={
+              hasDriverDevOverride() ? "已偵測到開發覆寫" : "目前未使用開發覆寫"
+            }
+            statusElement={
+              <StatusChip
+                label={hasDriverDevOverride() ? "DEV OVERRIDE" : "正式流程"}
+                variant={hasDriverDevOverride() ? "info" : "default"}
               />
-              <Text style={styles.primaryButtonLabel}>
-                {submitting ? "配置中…" : "註冊此裝置"}
-              </Text>
-            </Pressable>
-            {provisioningError ? (
-              <View style={styles.inlineMessageError}>
-                <Ionicons name="alert-circle" size={18} color="#b91c1c" />
-                <Text style={styles.inlineMessageErrorText}>
-                  {provisioningError}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-
-          <View style={styles.sectionCardMuted}>
-            <Text style={styles.sectionTitle}>配置說明</Text>
-            <Text style={styles.mutedNote}>
-              未配置的裝置不會直接進入正式工作台。這是安全保護，不是 demo 畫面。
-            </Text>
-            <Text style={styles.mutedNote}>
-              開發環境可用 `EXPO_PUBLIC_DRIVER_ID`
-              明確覆寫身份；正式環境應走後端裝置綁定流程。
-            </Text>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
+            }
+          />
+        </Section>
+      </AppScreen>
     );
   }
 
   if (flagsOk === null || identityOk === null) {
-    return (
-      <View style={styles.loadingScreen}>
-        <ActivityIndicator color="#1d4ed8" size="large" />
-        <Text style={styles.loadingLabel}>正在初始化司機工作台…</Text>
-      </View>
-    );
+    return <LoadingState label="正在初始化司機工作台…" />;
   }
 
   if (!flagsOk || !identityOk) {
     return (
-      <SafeAreaView edges={["top", "left", "right"]} style={styles.shell}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.heroCardDanger}>
-            <Text style={styles.eyebrow}>DRTS Driver App</Text>
-            <Text style={styles.heroTitle}>工作台暫時降級</Text>
-            <Text style={styles.heroDescription}>
-              核心身份或功能設定目前未完成同步，因此不應把這頁當成正常可交付首頁。
-            </Text>
-            <View style={styles.heroPillRow}>
-              <StatusPill
-                label="身份驗證"
-                tone={identityOk ? "success" : "danger"}
-                value={identityOk ? "正常" : "失敗"}
-              />
-              <StatusPill
-                label="功能設定"
-                tone={flagsOk ? "success" : "warning"}
-                value={flagsOk ? "正常" : "降級"}
-              />
-            </View>
-          </View>
+      <AppScreen contentContainerStyle={styles.screenContent}>
+        <PageHeader
+          title="工作台暫時降級"
+          subtitle="身份或功能設定尚未完成同步"
+          rightElement={<StatusChip label="需要恢復" variant="danger" />}
+        />
 
-          <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>恢復建議</Text>
-            <Text style={styles.sectionDescription}>
-              {workspaceIssue ?? "請稍後重新檢查連線狀態。"}
-            </Text>
-            <RecoveryChecklist flagsOk={flagsOk} identityOk={identityOk} />
-            <Pressable
-              onPress={() => setRefreshSeed((current) => current + 1)}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                pressed && styles.primaryButtonPressed,
-              ]}
-            >
-              <Ionicons name="refresh-outline" size={18} color="#fff" />
-              <Text style={styles.primaryButtonLabel}>重新檢查連線</Text>
-            </Pressable>
-            {!identityOk ? (
-              <Pressable
-                onPress={() => {
-                  setReady(false);
-                  setTimeout(() => {
-                    void initializeDriverIdentity()
-                      .catch((error: unknown) => {
-                        setProvisioningError(
-                          error instanceof Error
-                            ? error.message
-                            : "無法重新初始化裝置。",
-                        );
-                      })
-                      .finally(() => setReady(true));
-                  }, 0);
-                }}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  pressed && styles.secondaryButtonPressed,
-                ]}
-              >
-                <Ionicons
-                  name="person-circle-outline"
-                  size={18}
-                  color="#0f172a"
-                />
-                <Text style={styles.secondaryButtonLabel}>重新初始化身份</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                onPress={() => router.push("/jobs")}
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  pressed && styles.secondaryButtonPressed,
-                ]}
-              >
-                <Ionicons name="list-outline" size={18} color="#0f172a" />
-                <Text style={styles.secondaryButtonLabel}>
-                  先查看任務收件匣
-                </Text>
-              </Pressable>
-            )}
-          </View>
-        </ScrollView>
-      </SafeAreaView>
+        <StatusStrip
+          items={[
+            {
+              label: "裝置",
+              value: "已綁定",
+              variant: "success",
+            },
+            {
+              label: "身份",
+              value: identityOk ? "正常" : "失敗",
+              variant: identityOk ? "success" : "danger",
+            },
+            {
+              label: "平台",
+              value: flagsOk ? "已啟用" : "降級",
+              variant: flagsOk ? "success" : "warning",
+            },
+          ]}
+        />
+
+        <Section
+          title="恢復建議"
+          description="這不是正常首頁；在核心設定同步前，不應把此狀態當成可交付工作站。"
+        >
+          {workspaceIssue ? <ErrorBanner message={workspaceIssue} /> : null}
+          <ActionButton
+            icon="refresh-outline"
+            onPress={() => setRefreshSeed((current) => current + 1)}
+            title="重新檢查連線"
+          />
+          <ActionButton
+            icon={identityOk ? "list-outline" : "person-circle-outline"}
+            onPress={() => {
+              if (identityOk) {
+                router.push("/jobs");
+                return;
+              }
+
+              handleReinitializeIdentity();
+            }}
+            style={styles.secondaryAction}
+            title={identityOk ? "先查看任務收件匣" : "重新初始化身份"}
+            variant="secondary"
+          />
+        </Section>
+
+        <Section title="檢查項目">
+          <ListCard
+            meta="失敗時會清除失效 session 並要求重新綁定。"
+            title="司機身份驗證"
+            statusElement={
+              <StatusChip
+                label={identityOk ? "正常" : "失敗"}
+                variant={identityOk ? "success" : "danger"}
+              />
+            }
+          />
+          <ListCard
+            meta="旗標服務暫時不可用時，部分入口需維持降級。"
+            title="功能旗標服務"
+            statusElement={
+              <StatusChip
+                label={flagsOk ? "正常" : "降級"}
+                variant={flagsOk ? "success" : "warning"}
+              />
+            }
+          />
+        </Section>
+      </AppScreen>
     );
   }
 
   return (
-    <SafeAreaView edges={["top", "left", "right"]} style={styles.shell}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+    <AppScreen contentContainerStyle={styles.screenContent}>
+      <PageHeader
+        title="工作台"
+        subtitle="正式多平台作業入口"
+        rightElement={<StatusChip label="已就緒" variant="success" />}
+      />
+
+      <StatusStrip
+        items={[
+          { label: "裝置", value: "已綁定", variant: "success" },
+          { label: "身份", value: "已驗證", variant: "success" },
+          { label: "平台", value: "已啟用", variant: "success" },
+        ]}
+      />
+
+      <Section
+        title="快速進入工作"
+        description="從單一入口切換任務、行程、平台、收益與班次，不再依賴藍色文字連結或原始 route header。"
       >
-        <View style={styles.heroCard}>
-          <Text style={styles.eyebrow}>DRTS Driver App</Text>
-          <Text style={styles.heroTitle}>多平台工作站</Text>
-          <Text style={styles.heroDescription}>
-            在同一個工作台掌握任務、收益、平台上線與班次狀態，不需要再靠零散入口切畫面。
-          </Text>
-          <View style={styles.heroPillRow}>
-            <StatusPill label="API" tone="success" value="已連線" />
-            <StatusPill label="功能旗標" tone="success" value="已啟用" />
-          </View>
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>快速進入工作</Text>
-          <Text style={styles.sectionDescription}>
-            這裡是司機端首頁，不該只是幾個藍色文字連結。
-          </Text>
-          <View style={styles.quickActionList}>
-            {WORKSPACE_ACTIONS.map((action) => (
-              <QuickActionCard
-                icon={action.icon}
-                key={action.route}
-                onPress={() => router.push(action.route)}
-                subtitle={action.subtitle}
-                title={action.title}
+        {WORKSPACE_ACTIONS.map((action) => (
+          <ListCard
+            key={action.route}
+            meta="點擊後進入對應工作區"
+            onPress={() => router.push(action.route)}
+            statusElement={
+              <StatusChip
+                label={action.tone === "success" ? "主要入口" : "工作區"}
+                variant={action.tone}
               />
-            ))}
-          </View>
-        </View>
+            }
+            subtitle={action.subtitle}
+            title={action.title}
+          />
+        ))}
+      </Section>
 
-        <View style={styles.sectionCardMuted}>
-          <Text style={styles.sectionTitle}>工作台狀態</Text>
-          <View style={styles.workspaceStatusRow}>
-            <Text style={styles.workspaceStatusLabel}>裝置配置</Text>
-            <Text style={styles.workspaceStatusValue}>已綁定司機身份</Text>
-          </View>
-          <View style={styles.workspaceStatusRow}>
-            <Text style={styles.workspaceStatusLabel}>身份驗證</Text>
-            <Text style={styles.workspaceStatusValue}>可存取司機 API</Text>
-          </View>
-          <View style={styles.workspaceStatusRow}>
-            <Text style={styles.workspaceStatusLabel}>首頁定位</Text>
-            <Text style={styles.workspaceStatusValue}>正式工作入口</Text>
-          </View>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+      <Section title="下一步與狀態">
+        <ListCard
+          meta="班前檢查完成後，優先確認是否有待接受或進行中的任務。"
+          subtitle="如有指派任務，直接進入任務收件匣或行程作業。"
+          title="建議先確認今日任務與平台連線"
+          statusElement={<StatusChip label="建議動作" variant="info" />}
+        />
+        <ActionButton
+          icon="briefcase-outline"
+          onPress={() => router.push("/jobs")}
+          title="開啟任務收件匣"
+        />
+      </Section>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  shell: {
-    flex: 1,
-    backgroundColor: "#e2e8f0",
+  screenContent: {
+    paddingTop: tokens.spacing[16],
+    gap: tokens.spacing[16],
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 28,
-    gap: 16,
-  },
-  loadingScreen: {
+  loadingState: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f8fafc",
-    padding: 24,
-    gap: 10,
+    paddingHorizontal: tokens.spacing[24],
   },
   loadingLabel: {
-    color: "#475569",
-    fontSize: 15,
+    ...tokens.type.body,
+    color: tokens.colors.textBody,
+    marginTop: tokens.spacing[12],
+    textAlign: "center",
   },
-  heroCard: {
-    borderRadius: 28,
-    padding: 24,
-    backgroundColor: "#0f172a",
-    gap: 14,
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-    elevation: 5,
-  },
-  heroCardDanger: {
-    borderRadius: 28,
-    padding: 24,
-    backgroundColor: "#7f1d1d",
-    gap: 14,
-    shadowColor: "#450a0a",
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-    elevation: 5,
-  },
-  eyebrow: {
-    color: "#93c5fd",
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1.1,
-    textTransform: "uppercase",
-  },
-  heroTitle: {
-    color: "#f8fafc",
-    fontSize: 30,
-    fontWeight: "800",
-    lineHeight: 36,
-  },
-  heroDescription: {
-    color: "#cbd5e1",
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  heroPillRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  statusPill: {
-    minWidth: 132,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 4,
-  },
-  statusPillSuccess: {
-    backgroundColor: "#dcfce7",
-  },
-  statusPillWarning: {
-    backgroundColor: "#fef3c7",
-  },
-  statusPillDanger: {
-    backgroundColor: "#fee2e2",
-  },
-  statusPillLabel: {
-    fontSize: 12,
-    color: "#475569",
-    fontWeight: "600",
-  },
-  statusPillValue: {
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  statusPillValueSuccess: {
-    color: "#166534",
-  },
-  statusPillValueWarning: {
-    color: "#b45309",
-  },
-  statusPillValueDanger: {
-    color: "#b91c1c",
-  },
-  sectionCard: {
-    borderRadius: 24,
-    padding: 20,
-    backgroundColor: "#ffffff",
-    gap: 14,
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    elevation: 3,
-  },
-  sectionCardMuted: {
-    borderRadius: 24,
-    padding: 20,
-    backgroundColor: "#eff6ff",
-    gap: 12,
+  statusStrip: {
+    backgroundColor: tokens.colors.surface,
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: tokens.colors.border,
+    borderRadius: tokens.radius.md,
+    padding: tokens.spacing[16],
+    gap: tokens.spacing[12],
+  },
+  statusTile: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: tokens.spacing[12],
+  },
+  statusTileLabel: {
+    ...tokens.type.label,
+    color: tokens.colors.textBody,
+    flex: 1,
+  },
+  section: {
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: tokens.radius.md,
+    padding: tokens.spacing[16],
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#0f172a",
+    ...tokens.type.sectionTitle,
+    color: tokens.colors.textStrong,
   },
   sectionDescription: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: "#475569",
+    ...tokens.type.body,
+    color: tokens.colors.textBody,
+    marginTop: tokens.spacing[8],
+    marginBottom: tokens.spacing[16],
   },
-  input: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    backgroundColor: "#f8fafc",
-    color: "#0f172a",
-  },
-  primaryButton: {
-    minHeight: 52,
-    borderRadius: 16,
-    backgroundColor: "#2563eb",
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  primaryButtonPressed: {
-    opacity: 0.9,
-  },
-  primaryButtonLabel: {
-    color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  secondaryButton: {
-    minHeight: 52,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#f8fafc",
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 8,
-  },
-  secondaryButtonPressed: {
-    opacity: 0.9,
-  },
-  secondaryButtonLabel: {
-    color: "#0f172a",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  inlineMessageError: {
-    borderRadius: 16,
-    backgroundColor: "#fef2f2",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-  },
-  inlineMessageErrorText: {
-    flex: 1,
-    color: "#991b1b",
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  mutedNote: {
-    fontSize: 13,
-    lineHeight: 20,
-    color: "#1e3a8a",
-  },
-  quickActionList: {
-    gap: 12,
-  },
-  quickActionCard: {
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#dbeafe",
-    backgroundColor: "#f8fbff",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-  },
-  quickActionCardPressed: {
-    opacity: 0.88,
-  },
-  quickActionIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#dbeafe",
-  },
-  quickActionBody: {
-    flex: 1,
-    gap: 4,
-  },
-  quickActionTitle: {
-    color: "#0f172a",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  quickActionSubtitle: {
-    color: "#475569",
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  recoveryList: {
-    gap: 10,
-  },
-  recoveryRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  recoveryText: {
-    color: "#334155",
-    fontSize: 14,
-  },
-  workspaceStatusRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
-    paddingVertical: 2,
-  },
-  workspaceStatusLabel: {
-    flex: 1,
-    color: "#475569",
-    fontSize: 14,
-  },
-  workspaceStatusValue: {
-    flex: 1,
-    textAlign: "right",
-    color: "#0f172a",
-    fontSize: 14,
-    fontWeight: "700",
+  secondaryAction: {
+    marginTop: tokens.spacing[12],
   },
 });
