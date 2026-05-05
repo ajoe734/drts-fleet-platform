@@ -48,40 +48,40 @@ export default function RouteDisplay({
   if (platformWaypoints && platformWaypoints.length > 0) {
     platformWaypoints.forEach((wp, idx) => {
       const addr =
-        wp?.formattedAddress ?? wp?.address ?? wp?.name ?? "Waypoint";
-      displayWaypoints.push({ label: `WP ${idx + 1}`, address: String(addr) });
+        wp?.formattedAddress ?? wp?.address ?? wp?.name ?? "未命名站點";
+      displayWaypoints.push({
+        label: `途經點 ${idx + 1}`,
+        address: String(addr),
+      });
     });
   } else if (order) {
     if (order.pickup) {
       displayWaypoints.push({
-        label: "Pickup",
-        address: order.pickup.address ?? "Pickup",
+        label: "上車點",
+        address: order.pickup.address ?? "待確認上車點",
       });
     }
     if (order.dropoff) {
       displayWaypoints.push({
-        label: "Dropoff",
-        address: order.dropoff.address ?? "Dropoff",
+        label: "下車點",
+        address: order.dropoff.address ?? "待確認下車點",
       });
     }
   }
 
   const onEditPress = () => {
-    Alert.alert(
-      "Not available",
-      "Editing waypoints is disabled for this task.",
-    );
+    Alert.alert("目前無法編輯", "此任務暫不開放編輯路線。");
   };
 
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
-        <Text style={styles.sectionTitle}>Route</Text>
+        <Text style={styles.sectionTitle}>路線資訊</Text>
         <View style={styles.badgeRow}>
           {routeLocked && (
             <View style={[styles.badge, { backgroundColor: "#fff3e0" }]}>
               <Text style={[styles.badgeText, { color: "#e65100" }]}>
-                route-locked
+                路線鎖定
               </Text>
             </View>
           )}
@@ -92,14 +92,14 @@ export default function RouteDisplay({
       {forwarded && (
         <Text style={styles.note}>
           {routeIntent
-            ? `Platform route: ${routeIntent}`
-            : `Route managed by ${task.sourcePlatform}.`}
+            ? `來源平台指定路線：${routeIntent}`
+            : "此任務路線由來源平台管理，請依平台同步資訊執行。"}
         </Text>
       )}
 
       {routeProvided === false && (
         <Text style={styles.hint}>
-          Platform did not provide a route. Using pickup/dropoff only.
+          來源平台未提供完整路線，先顯示上下車點供確認。
         </Text>
       )}
 
@@ -115,12 +115,12 @@ export default function RouteDisplay({
           ))}
         </View>
       ) : (
-        <Text style={styles.empty}>No waypoint details available.</Text>
+        <Text style={styles.empty}>目前沒有可顯示的路線資料。</Text>
       )}
 
       {!routeLocked && (
         <Text style={styles.link} onPress={onEditPress}>
-          Edit waypoints
+          編輯路線
         </Text>
       )}
     </View>
