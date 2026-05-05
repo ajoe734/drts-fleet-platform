@@ -1,62 +1,260 @@
-import { useEffect, useState, useCallback, useRef } from "react";
-import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
-import { useRouter } from "expo-router";
+import { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import type {
+  DriverPayoutStatus,
   DriverStatementRecord,
+  MoneyAmount,
   PlatformEarningsItem,
+  PlatformEarningsByPlatformResponse,
+  PlatformEarningsSummary,
 } from "@drts/contracts";
-import { getDriverClient } from "@/lib/api-client";
 import { EarningsByPlatform } from "@/components/earnings-by-platform";
+import {
+  ActionButton,
+  EmptyState,
+  ErrorBanner,
+  IconButton,
+  InfoTile,
+  ListCard,
+  PageHeader,
+  SegmentedControl,
+  StatusChip,
+  Tokens,
+} from "@/components/ui";
+import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
 import { formatMoney } from "@/lib/money";
 import { formatDriverPayoutStatusLabel } from "@/lib/operational-labels";
-import { SegmentedControl } from "@/components/ui/SegmentedControl";
-import { Tokens } from "@/components/ui/tokens";
-import { AppScreen } from "@/components/ui/AppScreen";
-import { PageHeader } from "@/components/ui/PageHeader";
 
 type PeriodKey = "today" | "week" | "month";
 
-export default function EarningsScreen() {
-  const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
-  const [platformEarnings, setPlatformEarnings] = useState<
-    PlatformEarningsItem[]
-  >([]);
-  const [loading, setLoading] = useState(true);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [earningsEnabled, setEarningsEnabled] = useState(true);
-  const [period, setPeriod] = useState<PeriodKey>("today");
-  const didInitRef = useRef(false);
-  const router = useRouter();
+const PERIOD_OPTIONS = [
+  { label: "今日", value: "today" },
+  { label: "本週", value: "week" },
+  { label: "本月", value: "month" },
+] as const;
 
-  const loadStatements = async () => {
+const DEFAULT_CURRENCY = "TWD";
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+  return "資料載入失敗，請稍後再試。";
+}
+
+function buildZeroMoney(currency = DEFAULT_CURRENCY): MoneyAmount {
+  return {
+    currency,
+    amountMinor: 0,
+  };
+}
+
+function buildEmptySummary(
+  currency = DEFAULT_CURRENCY,
+): PlatformEarningsSummary {
+  return {
+    driverId: "",
+    totalGross: buildZeroMoney(currency),
+    totalServiceFee: buildZeroMoney(currency),
+    totalSubsidy: buildZeroMoney(currency),
+    totalNet: buildZeroMoney(currency),
+    notes: [],
+  };
+}
+
+function buildSummaryFromItems(
+  items: PlatformEarningsItem[],
+  driverId = "",
+  currency = DEFAULT_CURRENCY,
+): PlatformEarningsSummary {
+  return items.reduce<PlatformEarningsSummary>(
+    (summary, item) => ({
+      driverId,
+      totalGross: {
+        currency: item.grossEarning.currency,
+        amountMinor:
+          summary.totalGross.amountMinor + item.grossEarning.amountMinor,
+      },
+      totalServiceFee: {
+        currency: item.serviceFee.currency,
+        amountMinor:
+          summary.totalServiceFee.amountMinor + item.serviceFee.amountMinor,
+      },
+      totalSubsidy: {
+        currency: item.subsidy.currency,
+        amountMinor:
+          summary.totalSubsidy.amountMinor + item.subsidy.amountMinor,
+      },
+      totalNet: {
+        currency: item.netAmount.currency,
+        amountMinor: summary.totalNet.amountMinor + item.netAmount.amountMinor,
+      },
+      notes: [],
+    }),
+    buildEmptySummary(currency),
+  );
+}
+
+function sumStatementNet(
+  statements: DriverStatementRecord[],
+  predicate: (statement: DriverStatementRecord) => boolean,
+): MoneyAmount {
+  const currency =
+    statements[0]?.netAmount.currency ??
+    statements[0]?.grossEarning.currency ??
+    DEFAULT_CURRENCY;
+  return {
+    currency,
+    amountMinor: statements
+      .filter(predicate)
+      .reduce((sum, statement) => sum + statement.netAmount.amountMinor, 0),
+  };
+}
+
+function getStatementStatusVariant(status: DriverPayoutStatus) {
+  return status === "paid" ? ("success" as const) : ("warning" as const);
+}
+
+function getLatestStatementMonth(
+  statements: DriverStatementRecord[],
+): string | null {
+  const months = Array.from(
+    new Set(
+      statements
+        .map((statement) => statement.periodMonth.trim())
+        .filter((periodMonth) => periodMonth.length > 0),
+    ),
+  ).sort((left, right) => right.localeCompare(left));
+
+  return months[0] ?? null;
+}
+
+function filterStatementsForPeriod(
+  statements: DriverStatementRecord[],
+  period: PeriodKey,
+): DriverStatementRecord[] {
+  if (period !== "month") {
+    return [];
+  }
+
+  const latestMonth = getLatestStatementMonth(statements);
+  if (!latestMonth) {
+    return [];
+  }
+
+  return statements.filter(
+    (statement) => statement.periodMonth === latestMonth,
+  );
+}
+
+function getPeriodDescription(
+  period: PeriodKey,
+  latestStatementMonth: string | null,
+): string {
+  if (period === "month") {
+    return latestStatementMonth
+      ? `顯示最新月結週期 ${latestStatementMonth} 的平台收益與對帳單。`
+      : "顯示最近一次可用的月結收益與對帳資料。";
+  }
+
+  return "今日與本週會顯示平台收益彙整；對帳單仍以月結資料提供，請切換到本月查看最新結算明細。";
+}
+
+function getEmptyPeriodTitle(period: PeriodKey): string {
+  if (period === "today") {
+    return "今日尚無可用收益切片";
+  }
+
+  if (period === "week") {
+    return "本週尚無可用收益切片";
+  }
+
+  return "這個月份還沒有收益資料";
+}
+
+function StatementSectionEmpty({
+  selectedPeriod,
+  onResetPeriod,
+}: {
+  selectedPeriod: PeriodKey;
+  onResetPeriod: () => void;
+}) {
+  const isMonth = selectedPeriod === "month";
+
+  return (
+    <EmptyState
+      title={isMonth ? "尚無對帳單" : "此檢視尚無月結對帳單"}
+      description={
+        isMonth
+          ? "本月還沒有可顯示的對帳單，請稍後重新整理。"
+          : "對帳單目前只提供月結資料，切換到本月即可查看最新對帳彙整。"
+      }
+      icon="document-text-outline"
+      actionTitle={isMonth ? "重新整理" : "切換到本月"}
+      onAction={onResetPeriod}
+      style={styles.sectionEmptyState}
+    />
+  );
+}
+
+export default function EarningsScreen() {
+  const [summary, setSummary] = useState<PlatformEarningsSummary | null>(null);
+  const [summaryCurrency, setSummaryCurrency] = useState(DEFAULT_CURRENCY);
+  const [platformItems, setPlatformItems] = useState<PlatformEarningsItem[]>(
+    [],
+  );
+  const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
+  const [selectedPeriod, setSelectedPeriod] = useState<PeriodKey>("month");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [earningsEnabled, setEarningsEnabled] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const isProvisioned = isDriverIdentityProvisioned();
+
+  const loadDashboard = async (period: PeriodKey) => {
     const client = getDriverClient();
+
     try {
-      const [stmts, earningsResp] = await Promise.all([
-        client.listDriverStatements(),
+      const requests: [
+        Promise<PlatformEarningsSummary>,
+        Promise<PlatformEarningsByPlatformResponse>,
+        Promise<DriverStatementRecord[]>,
+      ] = [
+        client.getPlatformEarningsSummary(),
         client.getPlatformEarningsByPlatform(period),
-      ]);
-      setStatements(stmts);
-      setPlatformEarnings(earningsResp.items);
+        client.listDriverStatements(),
+      ];
+      const [summaryResponse, byPlatformResponse, statementRows] =
+        await Promise.all(requests);
+
+      setSummary(summaryResponse);
+      setSummaryCurrency(summaryResponse.totalNet.currency || DEFAULT_CURRENCY);
+      setPlatformItems(byPlatformResponse.items);
+      setStatements(
+        [...statementRows].sort((left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt),
+        ),
+      );
       setError(null);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (nextError) {
+      setError(toErrorMessage(nextError));
     }
   };
 
-  const reloadEarningsOnly = useCallback(async () => {
-    const client = getDriverClient();
-    try {
-      const earningsResp = await client.getPlatformEarningsByPlatform(period);
-      setPlatformEarnings(earningsResp.items);
-      setError(null);
-    } catch (e: any) {
-      setError(e.message);
-    }
-  }, [period]);
-
   useEffect(() => {
+    if (!isProvisioned) {
+      setLoading(false);
+      return;
+    }
+
     const client = getDriverClient();
 
     client
@@ -64,247 +262,318 @@ export default function EarningsScreen() {
       .then((enabled) => {
         setEarningsEnabled(enabled);
         if (enabled) {
-          loadStatements();
-        } else {
-          setLoading(false);
+          return loadDashboard(selectedPeriod);
         }
+        return undefined;
       })
-      .catch(() => {
-        loadStatements();
-      })
+      .catch(() => loadDashboard(selectedPeriod))
       .finally(() => setLoading(false));
-  }, []);
+  }, [isProvisioned, selectedPeriod]);
 
-  // refetch platform earnings when period changes
-  useEffect(() => {
-    // avoid double fetch on initial mount; first load already fetched earnings
-    const didInit = didInitRef.current;
-    if (didInit) {
-      reloadEarningsOnly();
-    } else {
-      didInitRef.current = true;
-    }
-  }, [reloadEarningsOnly]);
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadStatements();
+    await loadDashboard(selectedPeriod);
     setRefreshing(false);
   };
 
   if (loading) {
     return (
-      <AppScreen scrollable={false}>
-        <PageHeader title="收入與對帳" />
-        <View style={styles.center}>
+      <View style={styles.screen}>
+        <PageHeader title="收益儀表板" />
+        <View style={styles.centerState}>
           <ActivityIndicator size="large" color={Tokens.colors.primary} />
-          <Text style={styles.label}>載入收入資料中…</Text>
+          <Text style={styles.loadingLabel}>載入收益資料中…</Text>
         </View>
-      </AppScreen>
+      </View>
+    );
+  }
+
+  if (!isProvisioned) {
+    return (
+      <View style={styles.screen}>
+        <PageHeader title="收益儀表板" />
+        <EmptyState
+          title="裝置尚未綁定司機身份"
+          description="完成裝置註冊後，才能查看平台收益與對帳資料。"
+          icon="card-outline"
+          style={styles.fillState}
+        />
+      </View>
     );
   }
 
   if (!earningsEnabled) {
     return (
-      <AppScreen scrollable={false}>
-        <PageHeader title="收入與對帳" />
-        <View style={styles.center}>
-          <Text style={styles.title}>收入檢視暫停提供</Text>
-          <Text style={styles.empty}>此功能目前未啟用。</Text>
-        </View>
-      </AppScreen>
+      <View style={styles.screen}>
+        <PageHeader title="收益儀表板" />
+        <EmptyState
+          title="收益儀表板暫停提供"
+          description="此功能目前未啟用，請稍後再試或改從設定頁確認帳務通知。"
+          icon="wallet-outline"
+          style={styles.fillState}
+        />
+      </View>
     );
   }
 
-  const segmentedOptions = [
-    { label: "今日", value: "today" },
-    { label: "本週", value: "week" },
-    { label: "本月", value: "month" },
-  ];
+  const baseCurrency =
+    summary?.totalNet.currency ??
+    platformItems[0]?.netAmount.currency ??
+    statements[0]?.netAmount.currency ??
+    DEFAULT_CURRENCY;
+  const latestStatementMonth = getLatestStatementMonth(statements);
+  const monthlyStatements = filterStatementsForPeriod(statements, "month");
+  const displayedStatements =
+    selectedPeriod === "month" ? monthlyStatements : [];
+  const displayedPlatformItems = platformItems;
+  const displayedSummary =
+    selectedPeriod === "month"
+      ? (summary ?? buildSummaryFromItems(platformItems, "", summaryCurrency))
+      : buildSummaryFromItems(
+          platformItems,
+          "",
+          summaryCurrency || baseCurrency,
+        );
+  const pendingPayoutAmount = sumStatementNet(
+    displayedStatements,
+    (statement) => statement.payoutStatus !== "paid",
+  );
+  const hasAnyData =
+    displayedPlatformItems.length > 0 || displayedStatements.length > 0;
 
-  const totalRevenue = platformEarnings.reduce(
-    (sum, item) => sum + (item.grossEarning?.amountMinor || 0),
-    0,
-  );
-  const totalPayouts = platformEarnings.reduce(
-    (sum, item) => sum + (item.netAmount?.amountMinor || 0),
-    0,
-  );
+  if (error && !hasAnyData) {
+    return (
+      <View style={styles.screen}>
+        <PageHeader title="收益儀表板" />
+        <View style={styles.errorState}>
+          <ErrorBanner message={`收益資料同步失敗：${error}`} />
+          <ActionButton
+            title="重新整理"
+            icon="refresh"
+            onPress={onRefresh}
+            style={styles.retryButton}
+          />
+        </View>
+      </View>
+    );
+  }
 
   return (
-    <View style={{ flex: 1 }}>
-      <AppScreen>
-        <PageHeader title="收入與對帳" />
-
-        <View style={styles.kpiContainer}>
-          <View style={styles.kpiBox}>
-            <Text style={styles.kpiLabel}>總收入</Text>
-            <Text style={styles.kpiValue}>
-              {formatMoney({ currency: "USD", amountMinor: totalRevenue })}
-            </Text>
-          </View>
-          <View style={styles.kpiBox}>
-            <Text style={styles.kpiLabel}>總撥款</Text>
-            <Text style={styles.kpiValue}>
-              {formatMoney({ currency: "USD", amountMinor: totalPayouts })}
-            </Text>
-          </View>
-        </View>
-
-        {error && <Text style={styles.error}>錯誤：{error}</Text>}
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>各平台收入</Text>
-          <SegmentedControl
-            options={segmentedOptions}
-            selectedValue={period}
-            onValueChange={(val) => setPeriod(val as PeriodKey)}
-            style={styles.segmentedControl}
+    <View style={styles.screen}>
+      <PageHeader
+        title="收益儀表板"
+        subtitle={
+          latestStatementMonth
+            ? `最新月結週期 ${latestStatementMonth}`
+            : "查看平台收益與對帳單彙整"
+        }
+        rightElement={
+          <IconButton
+            icon="refresh"
+            onPress={onRefresh}
+            disabled={refreshing}
+            accessibilityLabel="重新整理收益儀表板"
           />
-          <EarningsByPlatform items={platformEarnings} />
-        </View>
+        }
+      />
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>最近對帳單</Text>
-          {statements.length === 0 ? (
-            <Text style={styles.empty}>目前尚無對帳單資料。</Text>
-          ) : (
-            <View style={styles.table}>
-              <View style={styles.tableHeader}>
-                <Text style={[styles.tableCell, styles.headerId]}>ID</Text>
-                <Text style={[styles.tableCell, styles.headerPeriod]}>
-                  期間
-                </Text>
-                <Text style={[styles.tableCell, styles.headerAmount]}>
-                  實拿
-                </Text>
-                <Text style={[styles.tableCell, styles.headerStatus]}>
-                  狀態
-                </Text>
-              </View>
-              {statements.map((s) => (
-                <View key={s.statementId} style={styles.tableRow}>
-                  <Text
-                    style={[styles.tableCell, styles.cellId]}
-                    numberOfLines={1}
-                  >
-                    {s.statementId.slice(-6)}
-                  </Text>
-                  <Text style={[styles.tableCell, styles.cellPeriod]}>
-                    {s.periodMonth}
-                  </Text>
-                  <Text style={[styles.tableCell, styles.cellAmount]}>
-                    {formatMoney(s.netAmount)}
-                  </Text>
-                  <Text style={[styles.tableCell, styles.cellStatus]}>
-                    {formatDriverPayoutStatusLabel(s.payoutStatus)}
-                  </Text>
-                </View>
-              ))}
+      <FlatList
+        data={displayedStatements}
+        keyExtractor={(item) => item.statementId}
+        renderItem={({ item }) => (
+          <ListCard
+            title={item.receiptNo}
+            subtitle={`${item.periodMonth} · ${item.feePlanVersion}`}
+            meta={`${item.lines.length} 筆行程 · 實拿 ${formatMoney(item.netAmount)}`}
+            statusElement={
+              <StatusChip
+                label={formatDriverPayoutStatusLabel(item.payoutStatus)}
+                variant={getStatementStatusVariant(item.payoutStatus)}
+              />
+            }
+            style={styles.statementCard}
+          />
+        )}
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={
+          <View style={styles.listHeader}>
+            {error ? (
+              <ErrorBanner message={`資料可能不是最新：${error}`} />
+            ) : null}
+
+            <View style={styles.periodCard}>
+              <Text style={styles.sectionEyebrow}>結算期間</Text>
+              <SegmentedControl
+                options={PERIOD_OPTIONS.map((option) => ({
+                  label: option.label,
+                  value: option.value,
+                }))}
+                selectedValue={selectedPeriod}
+                onValueChange={(value) => setSelectedPeriod(value as PeriodKey)}
+              />
+              <Text style={styles.periodDescription}>
+                {getPeriodDescription(selectedPeriod, latestStatementMonth)}
+              </Text>
             </View>
-          )}
-        </View>
 
-        <View style={styles.footer}>
-          <Text style={styles.link} onPress={() => router.push("/settings")}>
-            開啟設定 →
-          </Text>
-        </View>
-      </AppScreen>
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryRow}>
+                <InfoTile
+                  label="實拿"
+                  value={formatMoney(displayedSummary.totalNet)}
+                />
+                <InfoTile
+                  label="總收入"
+                  value={formatMoney(displayedSummary.totalGross)}
+                />
+              </View>
+              <View style={styles.summaryRow}>
+                <InfoTile
+                  label="平台數"
+                  value={String(displayedPlatformItems.length)}
+                />
+                <InfoTile
+                  label="待撥款"
+                  value={formatMoney(pendingPayoutAmount)}
+                />
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>平台收益</Text>
+              <EarningsByPlatform items={displayedPlatformItems} />
+            </View>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>對帳單</Text>
+              <Text style={styles.sectionMeta}>
+                {displayedStatements.length} 筆
+              </Text>
+            </View>
+          </View>
+        }
+        ListEmptyComponent={
+          selectedPeriod === "month" &&
+          displayedPlatformItems.length === 0 &&
+          !error ? (
+            <EmptyState
+              title={getEmptyPeriodTitle(selectedPeriod)}
+              description="本期尚未生成收益或對帳資料，請稍後重新整理。"
+              icon="cash-outline"
+              actionTitle="重新整理"
+              onAction={onRefresh}
+              style={styles.fillEmptyState}
+            />
+          ) : (
+            <StatementSectionEmpty
+              selectedPeriod={selectedPeriod}
+              onResetPeriod={
+                selectedPeriod === "month"
+                  ? onRefresh
+                  : () => setSelectedPeriod("month")
+              }
+            />
+          )
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Tokens.colors.primary}
+          />
+        }
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  center: {
+  screen: {
     flex: 1,
+    backgroundColor: Tokens.colors.appBg,
+  },
+  centerState: {
+    flex: 1,
+    alignItems: "center",
     justifyContent: "center",
-    alignItems: "center",
-    padding: Tokens.spacing.xl,
+    paddingHorizontal: Tokens.spacing.xl,
   },
-  title: { ...Tokens.type.sectionTitle, marginBottom: 4 },
-  empty: {
-    textAlign: "center",
-    color: Tokens.colors.textMuted,
-    marginTop: 32,
-    ...Tokens.type.body,
-  },
-  error: { color: Tokens.colors.danger, marginBottom: 16 },
-  section: { marginBottom: Tokens.spacing.xl },
-  sectionTitle: {
-    ...Tokens.type.label,
-    fontWeight: "bold",
-    marginBottom: Tokens.spacing.md,
-    color: Tokens.colors.textStrong,
-  },
-  kpiContainer: {
-    flexDirection: "row",
-    backgroundColor: Tokens.colors.surfaceMuted,
-    borderRadius: Tokens.radius.md,
-    padding: Tokens.spacing.lg,
-    marginBottom: Tokens.spacing.xl,
-  },
-  kpiBox: {
+  fillState: {
     flex: 1,
-    alignItems: "center",
   },
-  kpiLabel: {
+  loadingLabel: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textMuted,
+    marginTop: Tokens.spacing.md,
+  },
+  errorState: {
+    gap: Tokens.spacing.md,
+    padding: Tokens.layout.pagePadding,
+  },
+  retryButton: {
+    alignSelf: "flex-start",
+  },
+  listContent: {
+    paddingHorizontal: Tokens.layout.pagePadding,
+    paddingTop: Tokens.spacing.md,
+    paddingBottom: Tokens.spacing.lg,
+    flexGrow: 1,
+  },
+  listHeader: {
+    gap: Tokens.spacing.md,
+    marginBottom: Tokens.spacing.sm,
+  },
+  periodCard: {
+    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.md,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.sm,
+  },
+  sectionEyebrow: {
     ...Tokens.type.micro,
     color: Tokens.colors.textMuted,
-    marginBottom: 4,
   },
-  kpiValue: {
+  periodDescription: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+  },
+  summaryGrid: {
+    gap: Tokens.spacing.sm,
+  },
+  summaryRow: {
+    flexDirection: "row",
+    gap: Tokens.spacing.sm,
+  },
+  section: {
+    gap: Tokens.spacing.sm,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: Tokens.spacing.xs,
+  },
+  sectionTitle: {
     ...Tokens.type.sectionTitle,
-    color: Tokens.colors.primary,
+    color: Tokens.colors.textStrong,
   },
-  segmentedControl: {
-    marginBottom: Tokens.spacing.lg,
+  sectionMeta: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
   },
-  table: {
+  statementCard: {
+    marginBottom: 0,
+  },
+  sectionEmptyState: {
+    flex: 0,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
     borderRadius: Tokens.radius.md,
-    overflow: "hidden",
-  },
-  tableHeader: {
-    flexDirection: "row",
-    backgroundColor: Tokens.colors.surfaceMuted,
-    paddingVertical: Tokens.spacing.sm,
-    paddingHorizontal: Tokens.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Tokens.colors.border,
-  },
-  tableRow: {
-    flexDirection: "row",
-    paddingVertical: Tokens.spacing.md,
-    paddingHorizontal: Tokens.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: Tokens.colors.border,
     backgroundColor: Tokens.colors.surface,
   },
-  tableCell: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textBody,
+  fillEmptyState: {
+    flex: 1,
   },
-  headerId: { flex: 1 },
-  headerPeriod: { flex: 2 },
-  headerAmount: { flex: 2, textAlign: "right" },
-  headerStatus: { flex: 2, textAlign: "right" },
-  cellId: { flex: 1, color: Tokens.colors.textMuted },
-  cellPeriod: { flex: 2 },
-  cellAmount: {
-    flex: 2,
-    textAlign: "right",
-    fontWeight: "bold",
-    color: Tokens.colors.success,
-  },
-  cellStatus: { flex: 2, textAlign: "right" },
-  footer: {
-    marginTop: Tokens.spacing.xl,
-    paddingBottom: Tokens.spacing.xl,
-    alignItems: "center",
-  },
-  link: { ...Tokens.type.body, color: Tokens.colors.primary },
-  label: { marginTop: 8, color: Tokens.colors.textMuted },
 });
