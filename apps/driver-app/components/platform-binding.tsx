@@ -1,14 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import {
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
-import {
+  PLATFORM_CODE_REGISTRY,
   PLATFORM_CODES,
   type PlatformCode,
   type PlatformPresenceRecord,
@@ -17,8 +10,15 @@ import {
   PlatformStatusCard,
   type PlatformStatusAction,
 } from "@/components/platform-status-card";
+import { ActionButton } from "@/components/ui/ActionButton";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { FormField } from "@/components/ui/FormField";
 import { Tokens } from "@/components/ui/tokens";
 import { getDriverClient } from "@/lib/api-client";
+
+interface PlatformBindingProps {
+  showSectionTitle?: boolean;
+}
 
 type BindForm =
   | {
@@ -36,6 +36,22 @@ function isPlatformCode(value: string): value is PlatformCode {
   return PLATFORM_CODES.includes(value as PlatformCode);
 }
 
+function normalizePlatformCode(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function getPlatformDisplayName(platformCode: PlatformCode): string {
+  return PLATFORM_CODE_REGISTRY[platformCode].displayName;
+}
+
+function getPlatformOptionLabel(platformCode: PlatformCode): string {
+  return `${getPlatformDisplayName(platformCode)}（${platformCode}）`;
+}
+
+const SUPPORTED_PLATFORM_HINT = PLATFORM_CODES.map(getPlatformOptionLabel).join(
+  "、",
+);
+
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim();
@@ -43,51 +59,64 @@ function toErrorMessage(error: unknown): string {
   return "要求失敗";
 }
 
-export function PlatformBinding() {
+export function PlatformBinding({
+  showSectionTitle = true,
+}: PlatformBindingProps) {
   const [presences, setPresences] = useState<PlatformPresenceRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<BindForm | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [busyPlatform, setBusyPlatform] = useState<string | null>(null);
 
-  const loadPresences = async () => {
+  const loadPresences = async ({
+    silent = false,
+  }: { silent?: boolean } = {}) => {
     try {
       const client = getDriverClient();
       const summary = await client.getPlatformPresence();
       setPresences(summary.presences);
+      setLoadError(null);
     } catch (loadError) {
-      Alert.alert("無法載入平台綁定", toErrorMessage(loadError));
+      const message = toErrorMessage(loadError);
+      setLoadError(`平台綁定資料同步失敗：${message}`);
+      if (!silent) {
+        Alert.alert("無法載入平台綁定", message);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    void loadPresences();
+    void loadPresences({ silent: true });
   }, []);
 
   const handleSubmitForm = async () => {
-    if (!form) return;
-
-    if (form.mode === "bind" && !form.platformCode.trim()) {
-      Alert.alert("欄位未完成", "請先輸入平台代碼。");
+    if (!form) {
       return;
     }
 
     let platformCode: PlatformCode;
     if (form.mode === "bind") {
-      if (!isPlatformCode(form.platformCode)) {
+      const normalizedCode = normalizePlatformCode(form.platformCode);
+      if (!normalizedCode) {
+        Alert.alert("欄位未完成", "請先輸入平台代碼。");
+        return;
+      }
+      if (!isPlatformCode(normalizedCode)) {
         Alert.alert(
           "平台代碼無效",
-          `平台代碼必須是：${PLATFORM_CODES.join("、")}。`,
+          `平台代碼必須是：${SUPPORTED_PLATFORM_HINT}。`,
         );
         return;
       }
-      platformCode = form.platformCode;
+      platformCode = normalizedCode;
     } else {
       platformCode = form.platformCode;
     }
 
+    const platformName = getPlatformDisplayName(platformCode);
     setSubmitting(true);
     try {
       const client = getDriverClient();
@@ -96,12 +125,12 @@ export function PlatformBinding() {
         tokenExpiresAt: form.tokenExpiresAt.trim() || null,
       });
       setForm(null);
-      await loadPresences();
+      await loadPresences({ silent: true });
       Alert.alert(
         "平台綁定已更新",
         form.mode === "reauth"
-          ? `「${form.platformCode}」已重新送出驗證。`
-          : `已完成「${form.platformCode}」平台綁定。`,
+          ? `「${platformName}」已重新送出驗證。`
+          : `已完成「${platformName}」平台綁定。`,
       );
     } catch (submitError) {
       Alert.alert("無法更新平台綁定", toErrorMessage(submitError));
@@ -111,7 +140,8 @@ export function PlatformBinding() {
   };
 
   const handleUnbind = (platformCode: PlatformCode) => {
-    Alert.alert("解除平台綁定", `要解除「${platformCode}」的帳號綁定嗎？`, [
+    const platformName = getPlatformDisplayName(platformCode);
+    Alert.alert("解除平台綁定", `要解除「${platformName}」的帳號綁定嗎？`, [
       { text: "取消", style: "cancel" },
       {
         text: "確認解除",
@@ -121,7 +151,7 @@ export function PlatformBinding() {
           try {
             const client = getDriverClient();
             await client.setPlatformOffline({ platformCode });
-            await loadPresences();
+            await loadPresences({ silent: true });
           } catch (unbindError) {
             Alert.alert("無法解除綁定", toErrorMessage(unbindError));
           } finally {
@@ -146,20 +176,22 @@ export function PlatformBinding() {
     const actions: PlatformStatusAction[] = [];
 
     if (record.reauthRequired) {
+      const platformName = getPlatformDisplayName(record.platformCode);
       actions.push({
         key: "reauth",
         icon: "refresh",
-        label: `重新驗證 ${record.platformCode}`,
+        label: `重新驗證 ${platformName}`,
         onPress: () => handleOpenReauth(record.platformCode),
         tone: "warning",
         disabled: busyPlatform === record.platformCode,
       });
     }
 
+    const platformName = getPlatformDisplayName(record.platformCode);
     actions.push({
       key: "unbind",
       icon: "unlink",
-      label: `解除 ${record.platformCode} 綁定`,
+      label: `解除 ${platformName} 綁定`,
       onPress: () => handleUnbind(record.platformCode),
       tone: "danger",
       disabled: busyPlatform === record.platformCode,
@@ -179,7 +211,16 @@ export function PlatformBinding() {
 
   return (
     <View>
-      <Text style={styles.sectionTitle}>平台帳號綁定</Text>
+      {showSectionTitle ? (
+        <Text style={styles.sectionTitle}>平台帳號綁定</Text>
+      ) : null}
+      <Text style={styles.sectionDescription}>
+        已綁定 {presences.length} 個平台，可隨時新增、解除綁定或重新驗證。
+      </Text>
+
+      {loadError ? (
+        <ErrorBanner message={loadError} style={styles.errorBanner} />
+      ) : null}
 
       {presences.length === 0 ? (
         <Text style={styles.emptyText}>目前尚未綁定任何平台帳號。</Text>
@@ -194,74 +235,62 @@ export function PlatformBinding() {
       )}
 
       {form === null ? (
-        <TouchableOpacity
-          style={[styles.primaryButton, styles.addButton]}
+        <ActionButton
+          title="新增平台綁定"
+          icon="add-circle-outline"
           onPress={handleOpenBind}
-        >
-          <Text style={styles.primaryButtonText}>新增平台綁定</Text>
-        </TouchableOpacity>
+          style={styles.addButton}
+        />
       ) : (
         <View style={styles.form}>
           <Text style={styles.formTitle}>
             {form.mode === "reauth"
-              ? `重新驗證 ${form.platformCode}`
+              ? `重新驗證 ${getPlatformDisplayName(form.platformCode)}`
               : "新增平台綁定"}
           </Text>
 
           {form.mode === "bind" ? (
-            <TextInput
-              style={styles.input}
-              placeholder="平台代碼，例如 grab 或 gojek"
-              placeholderTextColor={Tokens.colors.textMuted}
+            <FormField
+              label="平台代碼"
+              placeholder="請輸入平台代碼"
               value={form.platformCode}
               onChangeText={(value) =>
                 setForm({ ...form, platformCode: value })
               }
               autoCapitalize="none"
               autoCorrect={false}
+              editable={!submitting}
+              helpText={`可輸入：${SUPPORTED_PLATFORM_HINT}`}
             />
           ) : null}
 
-          <TextInput
-            style={styles.input}
-            placeholder="平台憑證到期時間，可留空"
-            placeholderTextColor={Tokens.colors.textMuted}
+          <FormField
+            label="平台憑證到期時間（選填）"
+            placeholder="例如 2026-05-06T08:30:00Z"
             value={form.tokenExpiresAt}
             onChangeText={(value) =>
               setForm({ ...form, tokenExpiresAt: value })
             }
             autoCapitalize="none"
             autoCorrect={false}
+            editable={!submitting}
+            helpText="請使用完整時間格式；留白則代表暫不設定到期時間。"
           />
 
-          <Text style={styles.formHint}>
-            到期時間請使用完整時間格式，例如 `2026-05-06T08:30:00Z`。
-          </Text>
-
           <View style={styles.formActions}>
-            <TouchableOpacity
-              style={styles.secondaryButton}
+            <ActionButton
+              title="取消"
+              variant="secondary"
               onPress={() => setForm(null)}
               disabled={submitting}
-            >
-              <Text style={styles.secondaryButtonText}>取消</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                submitting && styles.buttonDisabled,
-              ]}
+              style={styles.formActionButton}
+            />
+            <ActionButton
+              title={form.mode === "reauth" ? "送出驗證" : "完成綁定"}
               onPress={handleSubmitForm}
-              disabled={submitting}
-            >
-              <Text style={styles.primaryButtonText}>
-                {submitting
-                  ? "處理中…"
-                  : form.mode === "reauth"
-                    ? "送出驗證"
-                    : "完成綁定"}
-              </Text>
-            </TouchableOpacity>
+              loading={submitting}
+              style={styles.formActionButton}
+            />
           </View>
         </View>
       )}
@@ -273,12 +302,20 @@ const styles = StyleSheet.create({
   sectionTitle: {
     ...Tokens.type.sectionTitle,
     color: Tokens.colors.textStrong,
+    marginBottom: Tokens.spacing.xs,
+  },
+  sectionDescription: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
     marginBottom: Tokens.spacing.md,
   },
   loadingRow: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: Tokens.spacing.sm,
+  },
+  errorBanner: {
+    marginBottom: Tokens.spacing.md,
   },
   loadingText: {
     ...Tokens.type.body,
@@ -292,37 +329,6 @@ const styles = StyleSheet.create({
   },
   addButton: {
     marginTop: Tokens.spacing.xs,
-  },
-  primaryButton: {
-    height: 44,
-    borderRadius: Tokens.radius.md,
-    backgroundColor: Tokens.colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: Tokens.spacing.lg,
-  },
-  primaryButtonText: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textInverse,
-    fontWeight: "600",
-  },
-  secondaryButton: {
-    height: 44,
-    borderRadius: Tokens.radius.md,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    backgroundColor: Tokens.colors.surface,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: Tokens.spacing.lg,
-  },
-  secondaryButtonText: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textBody,
-    fontWeight: "600",
-  },
-  buttonDisabled: {
-    opacity: 0.5,
   },
   form: {
     marginTop: Tokens.spacing.md,
@@ -338,24 +344,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginBottom: Tokens.spacing.md,
   },
-  input: {
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    borderRadius: Tokens.radius.md,
-    paddingHorizontal: Tokens.spacing.md,
-    paddingVertical: Tokens.spacing.sm,
-    backgroundColor: Tokens.colors.surface,
-    color: Tokens.colors.textStrong,
-    marginBottom: Tokens.spacing.sm,
-  },
-  formHint: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
   formActions: {
     flexDirection: "row",
     justifyContent: "flex-end",
     gap: Tokens.spacing.sm,
-    marginTop: Tokens.spacing.md,
+    marginTop: Tokens.spacing.sm,
   },
+  formActionButton: { flex: 1 },
 });
