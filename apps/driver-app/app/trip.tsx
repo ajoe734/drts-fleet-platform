@@ -50,6 +50,11 @@ import {
 } from "@/lib/driver-location-heartbeat";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
+import {
+  getPrimaryTripAction,
+  shouldShowTripCompletionProof,
+  type TripPrimaryActionKey,
+} from "@/lib/trip-workflow";
 import { usePendingCompletionReplay } from "@/lib/use-pending-completion-replay";
 
 function PlatformBadge({ platform }: { platform: string | null }) {
@@ -112,6 +117,21 @@ function ActionButton({
 
 function isForwardedTask(task: DriverTaskRecord | null): boolean {
   return task?.sourcePlatform != null;
+}
+
+function formatTripActionSuccessLabel(action: TripPrimaryActionKey): string {
+  switch (action) {
+    case "accept":
+      return "接受任務";
+    case "depart":
+      return "前往接送點";
+    case "arrived":
+      return "抵達上車點";
+    case "start":
+      return "開始行程";
+    case "complete":
+      return "完成行程";
+  }
 }
 
 function getErrorMessage(error: unknown): string {
@@ -236,6 +256,8 @@ export default function TripScreen() {
     proofPhotos.length > 0 ||
     Boolean(normalizeCompletionProofText(signoffReference)) ||
     Boolean(expenseItem);
+  const primaryTripAction = getPrimaryTripAction(taskDetail);
+  const showCompletionProofCard = shouldShowTripCompletionProof(taskDetail);
   const completionSubmitBlocker = getCompletionSubmitBlocker({
     proofRequirementsUnavailable,
     missingRequiredPhotos,
@@ -527,7 +549,7 @@ export default function TripScreen() {
     );
   }
 
-  async function handleAction(action: string) {
+  async function handleAction(action: TripPrimaryActionKey) {
     if (!taskDetail?.taskId) {
       return;
     }
@@ -608,7 +630,10 @@ export default function TripScreen() {
         lastTrackedCoordinateRef.current = null;
       }
 
-      Alert.alert("成功", `已完成任務操作：${action}`);
+      Alert.alert(
+        "成功",
+        `已完成操作：${formatTripActionSuccessLabel(action)}`,
+      );
       await loadTrip(false);
     } catch (actionError) {
       const actionErrorMessage = getErrorMessage(actionError);
@@ -646,7 +671,7 @@ export default function TripScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>行程詳情</Text>
+      <Text style={styles.title}>行程作業台</Text>
 
       {error && <Text style={styles.error}>錯誤：{error}</Text>}
 
@@ -709,7 +734,7 @@ export default function TripScreen() {
                   <>
                     <Text style={styles.metricWarning}>
                       {locationTrackingMessage ??
-                        "行程度量無法啟動。請重試定位追蹤；待前景追蹤可用後，仍可完成行程。"}
+                        "行程度量無法啟動。請先恢復定位追蹤，再完成行程。"}
                     </Text>
                     <ActionButton
                       label="重試追蹤"
@@ -775,191 +800,197 @@ export default function TripScreen() {
 
       {!isForwardedTask(taskDetail) && taskDetail && (
         <>
-          <View style={styles.proofCard}>
-            <View style={styles.proofHeader}>
-              <Text style={styles.proofTitle}>完單佐證</Text>
-              <Text style={styles.proofCounter}>
-                已附加 {proofPhotos.length}/{MAX_COMPLETION_PROOF_PHOTOS}
+          {showCompletionProofCard && (
+            <View style={styles.proofCard}>
+              <View style={styles.proofHeader}>
+                <Text style={styles.proofTitle}>完單佐證</Text>
+                <Text style={styles.proofCounter}>
+                  已附加 {proofPhotos.length}/{MAX_COMPLETION_PROOF_PHOTOS}
+                </Text>
+              </View>
+
+              <Text style={styles.proofHint}>
+                最多可附加 5 張照片。每張佐證照片壓縮後需低於 600KB。
               </Text>
+
+              {proofRequirementsUnavailable && (
+                <Text style={styles.unsupportedNote}>
+                  需待訂單詳情載入後才能確認佐證需求；請先重新整理行程，再完成任務。
+                </Text>
+              )}
+
+              {proofRequirements.minPhotoCount > 0 && (
+                <Text style={styles.requirementNote}>
+                  此行程至少需要 {proofRequirements.minPhotoCount} 張佐證照片。
+                  {missingRequiredPhotos > 0
+                    ? ` 完成前還需補上 ${missingRequiredPhotos} 張。`
+                    : " 已達照片需求。"}
+                </Text>
+              )}
+
+              {proofRequirements.signoffRequired && (
+                <View style={styles.requirementCard}>
+                  <Text style={styles.requirementCardTitle}>
+                    必須提供簽收佐證
+                  </Text>
+                  <Text style={styles.requirementCardHint}>
+                    完成行程前，請填寫乘客或現場簽收識別資料。
+                  </Text>
+                  <TextInput
+                    style={styles.proofInput}
+                    value={signoffReference}
+                    onChangeText={setSignoffReference}
+                    editable={submittingAction === null}
+                    placeholder="乘客簽收或簽收單號"
+                    autoCapitalize="characters"
+                  />
+                  <Text style={styles.requirementStatus}>
+                    {signoffRequirementMissing
+                      ? "尚未填寫簽收識別資料。"
+                      : "簽收需求已完成。"}
+                  </Text>
+                </View>
+              )}
+
+              {proofRequirements.expenseProofRequired && (
+                <View style={styles.requirementCard}>
+                  <Text style={styles.requirementCardTitle}>
+                    必須提供費用佐證
+                  </Text>
+                  <Text style={styles.requirementCardHint}>
+                    請填寫一筆可報銷費用，包含類型、金額與單據識別，供財務覆核。
+                  </Text>
+                  <TextInput
+                    style={styles.proofInput}
+                    value={expenseType}
+                    onChangeText={setExpenseType}
+                    editable={submittingAction === null}
+                    placeholder="費用類型，例如過路費或停車費"
+                    autoCapitalize="none"
+                  />
+                  <TextInput
+                    style={styles.proofInput}
+                    value={expenseAmount}
+                    onChangeText={setExpenseAmount}
+                    editable={submittingAction === null}
+                    placeholder="金額，例如 40 或 40.50"
+                    keyboardType="decimal-pad"
+                  />
+                  <TextInput
+                    style={styles.proofInput}
+                    value={expenseAttachmentRef}
+                    onChangeText={setExpenseAttachmentRef}
+                    editable={submittingAction === null}
+                    placeholder="單據或附件識別"
+                    autoCapitalize="characters"
+                  />
+                  <Text style={styles.requirementStatus}>
+                    {expenseAmountInvalid
+                      ? "請輸入有效的正數金額。"
+                      : expenseRequirementMissing
+                        ? "費用佐證資料尚未填完整。"
+                        : expenseAttachmentId
+                          ? `費用佐證已完成：${expenseAttachmentId}`
+                          : "費用佐證已完成。"}
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.proofActions}>
+                <ActionButton
+                  label="拍照上傳"
+                  onPress={() => void pickProofPhotos("camera")}
+                  disabled={
+                    submittingAction !== null ||
+                    remainingSlots <= 0 ||
+                    proofRequirementsUnavailable
+                  }
+                  variant="secondary"
+                />
+                <ActionButton
+                  label="從相簿選取"
+                  onPress={() => void pickProofPhotos("library")}
+                  disabled={
+                    submittingAction !== null ||
+                    remainingSlots <= 0 ||
+                    proofRequirementsUnavailable
+                  }
+                  variant="secondary"
+                />
+              </View>
+
+              {proofPhotos.length > 0 ? (
+                <View style={styles.photoGrid}>
+                  {proofPhotos.map((photo, index) => (
+                    <View
+                      key={`${photo.uri}-${index}`}
+                      style={styles.photoCard}
+                    >
+                      <Image
+                        source={{ uri: photo.uri }}
+                        style={styles.photoPreview}
+                      />
+                      <Text numberOfLines={1} style={styles.photoMeta}>
+                        {Math.round(photo.estimatedBytes / 1024)} KB
+                      </Text>
+                      <ActionButton
+                        label="移除"
+                        onPress={() => removeProofPhoto(index)}
+                        disabled={submittingAction !== null}
+                        variant="secondary"
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.emptyProofState}>尚未選取佐證照片。</Text>
+              )}
             </View>
+          )}
 
-            <Text style={styles.proofHint}>
-              最多可附加 5 張照片。每張佐證照片壓縮後需低於 600KB。
-            </Text>
-
-            {proofRequirementsUnavailable && (
-              <Text style={styles.unsupportedNote}>
-                需待訂單詳情載入後才能確認佐證需求；請先重新整理行程，再完成任務。
+          {primaryTripAction && (
+            <View style={styles.primaryActionCard}>
+              <Text style={styles.primaryActionEyebrow}>主要動作</Text>
+              <Text style={styles.primaryActionTitle}>
+                {primaryTripAction.title}
               </Text>
-            )}
-
-            {proofRequirements.minPhotoCount > 0 && (
-              <Text style={styles.requirementNote}>
-                此行程至少需要 {proofRequirements.minPhotoCount} 張佐證照片。
-                {missingRequiredPhotos > 0
-                  ? ` 完成前還需補上 ${missingRequiredPhotos} 張。`
-                  : " 已達照片需求。"}
+              <Text style={styles.primaryActionHint}>
+                {primaryTripAction.helperText}
               </Text>
-            )}
-
-            {proofRequirements.signoffRequired && (
-              <View style={styles.requirementCard}>
-                <Text style={styles.requirementCardTitle}>
-                  必須提供簽收佐證
-                </Text>
-                <Text style={styles.requirementCardHint}>
-                  完成行程前，請填寫乘客或現場簽收識別資料。
-                </Text>
-                <TextInput
-                  style={styles.proofInput}
-                  value={signoffReference}
-                  onChangeText={setSignoffReference}
-                  editable={submittingAction === null}
-                  placeholder="乘客簽收或簽收單號"
-                  autoCapitalize="characters"
-                />
-                <Text style={styles.requirementStatus}>
-                  {signoffRequirementMissing
-                    ? "尚未填寫簽收識別資料。"
-                    : "簽收需求已完成。"}
-                </Text>
-              </View>
-            )}
-
-            {proofRequirements.expenseProofRequired && (
-              <View style={styles.requirementCard}>
-                <Text style={styles.requirementCardTitle}>
-                  必須提供費用佐證
-                </Text>
-                <Text style={styles.requirementCardHint}>
-                  請填寫一筆可報銷費用，包含類型、金額與單據識別，供財務覆核。
-                </Text>
-                <TextInput
-                  style={styles.proofInput}
-                  value={expenseType}
-                  onChangeText={setExpenseType}
-                  editable={submittingAction === null}
-                  placeholder="費用類型，例如過路費或停車費"
-                  autoCapitalize="none"
-                />
-                <TextInput
-                  style={styles.proofInput}
-                  value={expenseAmount}
-                  onChangeText={setExpenseAmount}
-                  editable={submittingAction === null}
-                  placeholder="金額，例如 40 或 40.50"
-                  keyboardType="decimal-pad"
-                />
-                <TextInput
-                  style={styles.proofInput}
-                  value={expenseAttachmentRef}
-                  onChangeText={setExpenseAttachmentRef}
-                  editable={submittingAction === null}
-                  placeholder="單據或附件識別"
-                  autoCapitalize="characters"
-                />
-                <Text style={styles.requirementStatus}>
-                  {expenseAmountInvalid
-                    ? "請輸入有效的正數金額。"
-                    : expenseRequirementMissing
-                      ? "費用佐證資料尚未填完整。"
-                      : expenseAttachmentId
-                        ? `費用佐證已完成：${expenseAttachmentId}`
-                        : "費用佐證已完成。"}
-                </Text>
-              </View>
-            )}
-
-            <View style={styles.proofActions}>
               <ActionButton
-                label="拍照上傳"
-                onPress={() => void pickProofPhotos("camera")}
-                disabled={
-                  submittingAction !== null ||
-                  remainingSlots <= 0 ||
-                  proofRequirementsUnavailable
+                label={
+                  submittingAction === primaryTripAction.action &&
+                  primaryTripAction.action === "complete"
+                    ? "完成中…"
+                    : primaryTripAction.label
                 }
-                variant="secondary"
-              />
-              <ActionButton
-                label="從相簿選取"
-                onPress={() => void pickProofPhotos("library")}
+                onPress={() => void handleAction(primaryTripAction.action)}
                 disabled={
-                  submittingAction !== null ||
-                  remainingSlots <= 0 ||
-                  proofRequirementsUnavailable
+                  primaryTripAction.action === "complete"
+                    ? shouldDisableCompleteTripAction({
+                        submittingAction,
+                        proofRequirementsUnavailable,
+                        missingRequiredPhotos,
+                        signoffRequirementMissing,
+                        expenseRequirementMissing,
+                        expenseAmountInvalid,
+                        completionBlockedByTracking,
+                      })
+                    : submittingAction !== null
                 }
-                variant="secondary"
               />
             </View>
-
-            {proofPhotos.length > 0 ? (
-              <View style={styles.photoGrid}>
-                {proofPhotos.map((photo, index) => (
-                  <View key={`${photo.uri}-${index}`} style={styles.photoCard}>
-                    <Image
-                      source={{ uri: photo.uri }}
-                      style={styles.photoPreview}
-                    />
-                    <Text numberOfLines={1} style={styles.photoMeta}>
-                      {Math.round(photo.estimatedBytes / 1024)} KB
-                    </Text>
-                    <ActionButton
-                      label="移除"
-                      onPress={() => removeProofPhoto(index)}
-                      disabled={submittingAction !== null}
-                      variant="secondary"
-                    />
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.emptyProofState}>尚未選取佐證照片。</Text>
-            )}
-          </View>
-
-          <View style={styles.actions}>
-            <ActionButton
-              label="接受任務"
-              onPress={() => void handleAction("accept")}
-              disabled={submittingAction !== null}
-            />
-            <ActionButton
-              label="前往接送點"
-              onPress={() => void handleAction("depart")}
-              disabled={submittingAction !== null}
-            />
-            <ActionButton
-              label="抵達上車點"
-              onPress={() => void handleAction("arrived")}
-              disabled={submittingAction !== null}
-            />
-            <ActionButton
-              label="開始行程"
-              onPress={() => void handleAction("start")}
-              disabled={submittingAction !== null}
-            />
-            <ActionButton
-              label={submittingAction === "complete" ? "完成中…" : "完成行程"}
-              onPress={() => void handleAction("complete")}
-              disabled={shouldDisableCompleteTripAction({
-                submittingAction,
-                proofRequirementsUnavailable,
-                missingRequiredPhotos,
-                signoffRequirementMissing,
-                expenseRequirementMissing,
-                expenseAmountInvalid,
-                completionBlockedByTracking,
-              })}
-            />
-          </View>
+          )}
         </>
       )}
 
       {taskDetail && isForwardedTask(taskDetail) && (
-        <View style={styles.actions}>
+        <View style={styles.primaryActionCard}>
+          <Text style={styles.primaryActionEyebrow}>主要動作</Text>
+          <Text style={styles.primaryActionTitle}>等待來源平台同步</Text>
           <Text style={styles.forwardedActionNote}>
-            任務操作由 {taskDetail.sourcePlatform} 管理。
+            任務操作由 {taskDetail.sourcePlatform}{" "}
+            管理，本地只顯示同步結果與路線資訊，不會變更任務狀態。
           </Text>
         </View>
       )}
@@ -1165,7 +1196,31 @@ const styles = StyleSheet.create({
     color: "#666",
     fontStyle: "italic",
   },
-  actions: { marginBottom: 16, gap: 8 },
+  primaryActionCard: {
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 8,
+    backgroundColor: "#f3f7fb",
+    borderWidth: 1,
+    borderColor: "#d4e2f0",
+    gap: 8,
+  },
+  primaryActionEyebrow: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    color: "#45627d",
+  },
+  primaryActionTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#0f3554",
+  },
+  primaryActionHint: {
+    fontSize: 13,
+    color: "#45627d",
+    marginBottom: 4,
+  },
   actionButton: {
     minHeight: 44,
     borderRadius: 8,
@@ -1200,9 +1255,7 @@ const styles = StyleSheet.create({
   },
   forwardedActionNote: {
     fontSize: 13,
-    color: "#666",
-    textAlign: "center",
-    fontStyle: "italic",
+    color: "#45627d",
   },
   footer: { alignItems: "center" },
   link: { color: "#007AFF", fontSize: 16 },
