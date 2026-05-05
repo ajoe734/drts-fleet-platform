@@ -1,58 +1,58 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { tokens } from "./tokens";
+import { StyleSheet, View, Text, ViewStyle } from "react-native";
+import { Tokens } from "./tokens";
 
 interface InfoTileProps {
   label: string;
   value: string;
   unit?: string;
-  subtitle?: string;
+  style?: ViewStyle;
 }
 
-export function InfoTile({ label, value, unit, subtitle }: InfoTileProps) {
+export const InfoTile: React.FC<InfoTileProps> = ({
+  label,
+  value,
+  unit,
+  style,
+}) => {
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, style]}>
       <Text style={styles.label}>{label}</Text>
-      <View style={styles.valueRow}>
+      <View style={styles.valueContainer}>
         <Text style={styles.value}>{value}</Text>
         {unit ? <Text style={styles.unit}>{unit}</Text> : null}
       </View>
-      {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: tokens.colors.surface,
-    padding: tokens.spacing[12],
-    borderRadius: tokens.radius.md,
+    backgroundColor: Tokens.colors.surface,
+    padding: Tokens.spacing.md,
+    borderRadius: Tokens.radius.md,
     borderWidth: 1,
-    borderColor: tokens.colors.border,
+    borderColor: Tokens.colors.border,
+    minHeight: 80,
+    justifyContent: "center",
   },
   label: {
-    ...tokens.type.micro,
-    color: tokens.colors.textMuted,
-    fontWeight: "600",
-    marginBottom: tokens.spacing[4],
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginBottom: Tokens.spacing.xs,
   },
-  valueRow: {
+  valueContainer: {
     flexDirection: "row",
     alignItems: "baseline",
   },
   value: {
-    ...tokens.type.sectionTitle,
-    color: tokens.colors.textStrong,
+    ...Tokens.type.sectionTitle,
+    color: Tokens.colors.textStrong,
   },
   unit: {
-    ...tokens.type.micro,
-    color: tokens.colors.textMuted,
-    marginLeft: tokens.spacing[2],
-  },
-  subtitle: {
-    ...tokens.type.micro,
-    color: tokens.colors.textMuted,
-    marginTop: tokens.spacing[2],
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginLeft: 2,
   },
 });

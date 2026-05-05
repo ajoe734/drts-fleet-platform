@@ -1,148 +1,81 @@
 import React from "react";
-import { StyleSheet, Text, View, Pressable } from "react-native";
-import { tokens } from "./tokens";
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  ViewStyle,
+} from "react-native";
+import { Tokens } from "./tokens";
 
-interface SegmentedControlProps<T> {
-  options: { label: string; value: T }[];
-  selectedValue?: T;
-  onValueChange?: (value: T) => void;
-  value?: T;
-  onChange?: (value: T) => void;
-  variant?: "primary" | "secondary";
+interface SegmentedControlOption {
+  label: string;
+  value: string;
 }
 
-export function SegmentedControl<T>({
+interface SegmentedControlProps {
+  options: SegmentedControlOption[];
+  selectedValue: string;
+  onValueChange: (value: string) => void;
+  style?: ViewStyle;
+}
+
+export const SegmentedControl: React.FC<SegmentedControlProps> = ({
   options,
   selectedValue,
   onValueChange,
-  value,
-  onChange,
-  variant = "primary",
-}: SegmentedControlProps<T>) {
-  const currentValue = selectedValue ?? value;
-  const handleValueChange = onValueChange ?? onChange;
-
+  style,
+}) => {
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, style]}>
       {options.map((option) => {
-        const isSelected = Object.is(currentValue, option.value);
+        const isSelected = option.value === selectedValue;
         return (
-          <Pressable
-            disabled={!handleValueChange}
-            key={String(option.value)}
-            onPress={() => handleValueChange?.(option.value)}
-            style={({ pressed }) => [
-              styles.optionBase,
-              variantStyles[variant],
-              isSelected ? selectedStyles[variant] : unselectedStyles[variant],
-              pressed && pressedStyles[variant],
-            ]}
+          <TouchableOpacity
+            key={option.value}
+            style={[styles.segment, isSelected && styles.selectedSegment]}
+            onPress={() => onValueChange(option.value)}
+            activeOpacity={0.7}
           >
-            <Text
-              style={[
-                styles.optionText,
-                isSelected
-                  ? selectedTextStyles[variant]
-                  : unselectedTextStyles[variant],
-              ]}
-            >
+            <Text style={[styles.label, isSelected && styles.selectedLabel]}>
               {option.label}
             </Text>
-          </Pressable>
+          </TouchableOpacity>
         );
       })}
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
-    borderRadius: tokens.radius.md,
-    overflow: "hidden", // Ensures children respect the border radius
-    borderWidth: 1,
-    borderColor: tokens.colors.border, // Default border color
+    backgroundColor: Tokens.colors.surfaceMuted,
+    borderRadius: Tokens.radius.sm,
+    padding: 2,
   },
-  optionBase: {
+  segment: {
     flex: 1,
-    paddingVertical: tokens.spacing[12],
-    paddingHorizontal: tokens.spacing[16],
+    paddingVertical: Tokens.spacing.sm,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: Tokens.radius.xs,
   },
-  optionText: {
-    ...tokens.type.bodyBold,
+  selectedSegment: {
+    backgroundColor: Tokens.colors.surface,
+    // Add a light shadow for depth
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1,
+    elevation: 2,
   },
-
-  // Primary Variant
-  primary: {
-    backgroundColor: tokens.colors.surface,
+  label: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textMuted,
   },
-  primarySelected: {
-    backgroundColor: tokens.colors.primary,
-  },
-  primaryUnselected: {
-    backgroundColor: tokens.colors.surface,
-  },
-  primaryPressed: {
-    backgroundColor: tokens.colors.surfaceMuted,
-  },
-  primarySelectedText: {
-    color: tokens.colors.textInverse,
-  },
-  primaryUnselectedText: {
-    color: tokens.colors.textStrong,
-  },
-
-  // Secondary Variant
-  secondary: {
-    backgroundColor: tokens.colors.surfaceMuted,
-  },
-  secondarySelected: {
-    backgroundColor: tokens.colors.surface,
-    borderLeftWidth: 1,
-    borderLeftColor: tokens.colors.border, // Add a separator for secondary selected
-  },
-  secondaryUnselected: {
-    backgroundColor: tokens.colors.surfaceMuted,
-  },
-  secondaryPressed: {
-    backgroundColor: tokens.colors.border,
-  },
-  secondarySelectedText: {
-    color: tokens.colors.textStrong,
-  },
-  secondaryUnselectedText: {
-    color: tokens.colors.textMuted,
+  selectedLabel: {
+    color: Tokens.colors.textStrong,
+    fontWeight: "600",
   },
 });
-
-const variantStyles = {
-  primary: styles.primary,
-  secondary: styles.secondary,
-};
-
-const selectedStyles = {
-  primary: styles.primarySelected,
-  secondary: styles.secondarySelected,
-};
-
-const unselectedStyles = {
-  primary: styles.primaryUnselected,
-  secondary: styles.secondaryUnselected,
-};
-
-const pressedStyles = {
-  primary: styles.primaryPressed,
-  secondary: styles.secondaryPressed,
-};
-
-const selectedTextStyles = {
-  primary: styles.primarySelectedText,
-  secondary: styles.secondarySelectedText,
-};
-
-const unselectedTextStyles = {
-  primary: styles.primaryUnselectedText,
-  secondary: styles.secondaryUnselectedText,
-};

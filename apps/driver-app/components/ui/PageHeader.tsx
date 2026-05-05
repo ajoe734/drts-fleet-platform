@@ -1,71 +1,58 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { tokens } from "./tokens";
+import { StyleSheet, View, Text, ViewStyle } from "react-native";
+import { Tokens } from "./tokens";
 
 interface PageHeaderProps {
   title: string;
   subtitle?: string;
-  leftAction?: React.ReactNode;
-  rightAction?: React.ReactNode;
+  rightElement?: React.ReactNode;
+  style?: ViewStyle;
 }
 
-export function PageHeader({
+export const PageHeader: React.FC<PageHeaderProps> = ({
   title,
   subtitle,
-  leftAction,
-  rightAction,
-}: PageHeaderProps) {
+  rightElement,
+  style,
+}) => {
   return (
-    <View style={styles.container}>
-      {leftAction ? <View style={styles.leftAction}>{leftAction}</View> : null}
-      <View
-        style={[
-          styles.titleContainer,
-          leftAction ? styles.titleWithLeftAction : null,
-          rightAction ? styles.titleWithRightAction : null,
-        ]}
-      >
+    <View style={[styles.container, style]}>
+      <View style={styles.titleContainer}>
         <Text style={styles.title}>{title}</Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       </View>
-      {rightAction ? (
-        <View style={styles.rightAction}>{rightAction}</View>
+      {rightElement ? (
+        <View style={styles.rightElement}>{rightElement}</View>
       ) : null}
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
+    height: Tokens.layout.headerHeight,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingVertical: tokens.spacing[20],
-    backgroundColor: tokens.colors.appBg,
-    paddingHorizontal: tokens.spacing[16], // Added horizontal padding for better spacing
+    paddingHorizontal: Tokens.layout.pagePadding,
+    backgroundColor: Tokens.colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Tokens.colors.border,
   },
   titleContainer: {
     flex: 1,
-  },
-  titleWithLeftAction: {
-    marginLeft: tokens.spacing[12],
-  },
-  titleWithRightAction: {
-    marginRight: tokens.spacing[12],
+    justifyContent: "center",
   },
   title: {
-    ...tokens.type.screenTitle,
-    color: tokens.colors.textStrong,
+    ...Tokens.type.screenTitle,
+    color: Tokens.colors.textStrong,
+    fontSize: 20, // Slightly smaller for header
   },
   subtitle: {
-    ...tokens.type.label,
-    color: tokens.colors.textMuted,
-    marginTop: tokens.spacing[4],
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
   },
-  leftAction: {
-    marginRight: tokens.spacing[12],
-  },
-  rightAction: {
-    marginLeft: tokens.spacing[12],
+  rightElement: {
+    marginLeft: Tokens.spacing.md,
   },
 });

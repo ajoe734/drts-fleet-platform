@@ -1,47 +1,33 @@
 import React from "react";
-import { StyleSheet, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { tokens } from "./tokens";
+import { StyleSheet, View, ViewStyle, SafeAreaView } from "react-native";
+import { Tokens } from "./tokens";
 
 interface BottomActionBarProps {
   children: React.ReactNode;
+  style?: ViewStyle;
 }
 
-export function BottomActionBar({ children }: BottomActionBarProps) {
-  const insets = useSafeAreaInsets();
-
+export const BottomActionBar: React.FC<BottomActionBarProps> = ({
+  children,
+  style,
+}) => {
   return (
-    <View
-      style={[
-        styles.container,
-        { paddingBottom: Math.max(insets.bottom, tokens.spacing[16]) },
-      ]}
-    >
-      <View style={styles.content}>{children}</View>
-    </View>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={[styles.container, style]}>{children}</View>
+    </SafeAreaView>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  container: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: tokens.colors.surface,
+  safeArea: {
+    backgroundColor: Tokens.colors.surface,
     borderTopWidth: 1,
-    borderTopColor: tokens.colors.border,
-    paddingHorizontal: tokens.spacing[16],
-    paddingTop: tokens.spacing[16],
-    // Subtle shadow
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 10,
+    borderTopColor: Tokens.colors.border,
   },
-  content: {
+  container: {
+    padding: Tokens.spacing.lg,
     flexDirection: "row",
-    gap: tokens.spacing[12],
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

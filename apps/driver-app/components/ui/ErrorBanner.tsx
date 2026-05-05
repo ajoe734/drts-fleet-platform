@@ -1,43 +1,37 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View, Text, ViewStyle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { tokens } from "./tokens";
+import { Tokens } from "./tokens";
 
 interface ErrorBannerProps {
   message: string;
+  style?: ViewStyle;
 }
 
-export function ErrorBanner({ message }: ErrorBannerProps) {
+export const ErrorBanner: React.FC<ErrorBannerProps> = ({ message, style }) => {
   return (
-    <View style={styles.container}>
-      <Ionicons
-        name="alert-circle"
-        size={20}
-        color={tokens.colors.danger}
-        style={styles.icon}
-      />
-      <Text style={styles.text}>{message}</Text>
+    <View style={[styles.container, style]}>
+      <Ionicons name="alert-circle" size={20} color={Tokens.colors.danger} />
+      <Text style={styles.message}>{message}</Text>
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: tokens.colors.surfaceDanger,
-    padding: tokens.spacing[12],
-    borderRadius: tokens.radius.sm,
+    backgroundColor: Tokens.colors.surfaceDanger,
+    padding: Tokens.spacing.md,
+    borderRadius: Tokens.radius.md,
     borderWidth: 1,
-    borderColor: tokens.colors.danger,
-    marginVertical: tokens.spacing[8],
+    borderColor: Tokens.colors.danger,
+    marginBottom: Tokens.spacing.md,
   },
-  icon: {
-    marginRight: tokens.spacing[8],
-  },
-  text: {
-    ...tokens.type.label,
-    color: tokens.colors.danger,
+  message: {
+    ...Tokens.type.label,
+    color: Tokens.colors.danger,
+    marginLeft: Tokens.spacing.sm,
     flex: 1,
   },
 });

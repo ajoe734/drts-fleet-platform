@@ -1,71 +1,66 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View, Text, ViewStyle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { tokens } from "./tokens";
+import { Tokens } from "./tokens";
 import { ActionButton } from "./ActionButton";
 
 interface EmptyStateProps {
   title: string;
   description?: string;
   icon?: keyof typeof Ionicons.glyphMap;
-  actionLabel?: string;
+  actionTitle?: string;
   onAction?: () => void;
+  style?: ViewStyle;
 }
 
-export function EmptyState({
+export const EmptyState: React.FC<EmptyStateProps> = ({
   title,
   description,
   icon = "information-circle-outline",
-  actionLabel,
+  actionTitle,
   onAction,
-}: EmptyStateProps) {
+  style,
+}) => {
   return (
-    <View style={styles.container}>
-      <Ionicons
-        name={icon}
-        size={48}
-        color={tokens.colors.textMuted}
-        style={styles.icon}
-      />
+    <View style={[styles.container, style]}>
+      <Ionicons name={icon} size={48} color={Tokens.colors.borderStrong} />
       <Text style={styles.title}>{title}</Text>
       {description ? (
         <Text style={styles.description}>{description}</Text>
       ) : null}
-      {actionLabel && onAction ? (
-        <View style={styles.action}>
-          <ActionButton
-            label={actionLabel}
-            onPress={onAction}
-            variant="secondary"
-            fullWidth={false}
-          />
-        </View>
+      {actionTitle && onAction ? (
+        <ActionButton
+          title={actionTitle}
+          onPress={onAction}
+          variant="secondary"
+          style={styles.action}
+        />
       ) : null}
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
-    padding: tokens.spacing[24],
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-  },
-  icon: {
-    marginBottom: tokens.spacing[16],
+    padding: Tokens.spacing.xxl,
   },
   title: {
-    ...tokens.type.sectionTitle,
-    color: tokens.colors.textStrong,
+    ...Tokens.type.sectionTitle,
+    color: Tokens.colors.textStrong,
+    marginTop: Tokens.spacing.md,
     textAlign: "center",
   },
   description: {
-    ...tokens.type.body,
-    color: tokens.colors.textMuted,
+    ...Tokens.type.body,
+    color: Tokens.colors.textMuted,
+    marginTop: Tokens.spacing.sm,
     textAlign: "center",
-    marginTop: tokens.spacing[8],
   },
   action: {
-    marginTop: tokens.spacing[20],
+    marginTop: Tokens.spacing.xl,
+    minWidth: 120,
   },
 });

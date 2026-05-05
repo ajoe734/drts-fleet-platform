@@ -1,95 +1,103 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  StyleSheet,
+  TouchableOpacity,
+  View,
+  Text,
+  ViewStyle,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { tokens } from "./tokens";
+import { Tokens } from "./tokens";
 
 interface ListCardProps {
   title: string;
   subtitle?: string;
-  statusArea?: React.ReactNode;
+  meta?: string;
+  statusElement?: React.ReactNode;
   onPress?: () => void;
-  icon?: keyof typeof Ionicons.glyphMap;
+  style?: ViewStyle;
 }
 
-export function ListCard({
+export const ListCard: React.FC<ListCardProps> = ({
   title,
   subtitle,
-  statusArea,
+  meta,
+  statusElement,
   onPress,
-  icon,
-}: ListCardProps) {
+  style,
+}) => {
+  const Container = onPress ? TouchableOpacity : View;
+
   return (
-    <Pressable
+    <Container
       onPress={onPress}
-      disabled={!onPress}
-      style={({ pressed }) => [styles.container, pressed && styles.pressed]}
+      activeOpacity={0.7}
+      style={[styles.container, style]}
     >
-      <View style={styles.content}>
-        {icon ? (
-          <View style={styles.iconContainer}>
-            <Ionicons name={icon} size={20} color={tokens.colors.primary} />
-          </View>
-        ) : null}
-        <View style={styles.textContainer}>
-          <Text style={styles.title}>{title}</Text>
-          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+      <View style={styles.mainContent}>
+        <View style={styles.headerRow}>
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
+          </Text>
+          {statusElement}
         </View>
-        {statusArea ? (
-          <View style={styles.statusArea}>{statusArea}</View>
+        {subtitle ? (
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {subtitle}
+          </Text>
         ) : null}
-        {onPress ? (
+        {meta ? <Text style={styles.meta}>{meta}</Text> : null}
+      </View>
+      {onPress && (
+        <View style={styles.chevron}>
           <Ionicons
             name="chevron-forward"
-            size={16}
-            color={tokens.colors.textMuted}
-            style={styles.chevron}
+            size={20}
+            color={Tokens.colors.borderStrong}
           />
-        ) : null}
-      </View>
-    </Pressable>
+        </View>
+      )}
+    </Container>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: tokens.colors.surface,
-    padding: tokens.spacing[16],
-    borderRadius: tokens.radius.md,
-    borderWidth: 1,
-    borderColor: tokens.colors.border,
-    marginBottom: tokens.spacing[12],
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  pressed: {
-    backgroundColor: tokens.colors.surfaceMuted,
-  },
-  content: {
+    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.md,
+    padding: Tokens.spacing.md,
+    marginBottom: Tokens.spacing.sm,
     flexDirection: "row",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
   },
-  iconContainer: {
-    marginRight: tokens.spacing[12],
-  },
-  textContainer: {
+  mainContent: {
     flex: 1,
   },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 2,
+  },
   title: {
-    ...tokens.type.bodyBold,
-    color: tokens.colors.textStrong,
+    ...Tokens.type.body,
+    fontWeight: "600",
+    color: Tokens.colors.textStrong,
+    flex: 1,
+    marginRight: Tokens.spacing.sm,
   },
   subtitle: {
-    ...tokens.type.micro,
-    color: tokens.colors.textMuted,
-    marginTop: tokens.spacing[2],
+    ...Tokens.type.label,
+    color: Tokens.colors.textBody,
+    marginBottom: 2,
   },
-  statusArea: {
-    marginLeft: tokens.spacing[12],
+  meta: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
   },
   chevron: {
-    marginLeft: tokens.spacing[8],
+    marginLeft: Tokens.spacing.sm,
   },
 });

@@ -1,4 +1,30 @@
-export const tokens = {
+const spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+  4: 4,
+  8: 8,
+  12: 12,
+  16: 16,
+  20: 20,
+  24: 24,
+} as const;
+
+const radius = {
+  xs: 4,
+  sm: 6,
+  md: 8,
+  full: 9999,
+  4: 4,
+  6: 6,
+  8: 8,
+  9999: 9999,
+} as const;
+
+export const Tokens = {
   colors: {
     // Surface
     appBg: "#F5F7FA",
@@ -24,23 +50,8 @@ export const tokens = {
     border: "#D8DEE7",
     borderStrong: "#B8C0CC",
   },
-  radius: {
-    xs: 4,
-    sm: 6,
-    md: 8,
-    full: 9999,
-  },
-  spacing: {
-    2: 2,
-    4: 4,
-    8: 8,
-    10: 10,
-    12: 12,
-    16: 16,
-    20: 20,
-    24: 24,
-    32: 32,
-  },
+  radius,
+  spacing,
   type: {
     screenTitle: {
       fontSize: 24,
@@ -50,17 +61,11 @@ export const tokens = {
     sectionTitle: {
       fontSize: 18,
       lineHeight: 24,
-      fontWeight: "700" as const,
+      fontWeight: "600" as const,
     },
     body: {
       fontSize: 15,
       lineHeight: 22,
-      fontWeight: "400" as const,
-    },
-    bodyBold: {
-      fontSize: 15,
-      lineHeight: 22,
-      fontWeight: "600" as const,
     },
     label: {
       fontSize: 13,
@@ -70,7 +75,12 @@ export const tokens = {
     micro: {
       fontSize: 12,
       lineHeight: 16,
-      fontWeight: "400" as const,
     },
   },
+  layout: {
+    pagePadding: 16,
+    headerHeight: 56,
+  },
 };
+
+export const tokens = Tokens;

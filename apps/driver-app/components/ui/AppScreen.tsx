@@ -1,83 +1,56 @@
 import React from "react";
 import {
-  ActivityIndicator,
-  ScrollView,
   StyleSheet,
   View,
-  ViewProps,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  ViewStyle,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { tokens } from "./tokens";
+import { Tokens } from "./tokens";
 
-interface AppScreenProps extends ViewProps {
-  children?: React.ReactNode;
+interface AppScreenProps {
+  children: React.ReactNode;
   scrollable?: boolean;
-  isLoading?: boolean;
-  isError?: boolean;
-  isEmpty?: boolean;
-  errorComponent?: React.ReactNode;
-  emptyComponent?: React.ReactNode;
+  style?: ViewStyle;
+  contentContainerStyle?: ViewStyle;
+  backgroundColor?: string;
 }
 
-export function AppScreen({
+export const AppScreen: React.FC<AppScreenProps> = ({
   children,
   scrollable = true,
-  isLoading,
-  isError,
-  isEmpty,
-  errorComponent,
-  emptyComponent,
   style,
-  ...props
-}: AppScreenProps) {
-  const content = (
-    <View style={[styles.content, style]} {...props}>
-      {isLoading ? (
-        <View style={styles.center}>
-          <ActivityIndicator color={tokens.colors.primary} size="large" />
-        </View>
-      ) : isError ? (
-        <View style={styles.center}>{errorComponent}</View>
-      ) : isEmpty ? (
-        <View style={styles.center}>{emptyComponent}</View>
-      ) : (
-        children
-      )}
-    </View>
-  );
+  contentContainerStyle,
+  backgroundColor = Tokens.colors.appBg,
+}) => {
+  const Container = scrollable ? ScrollView : View;
 
   return (
-    <SafeAreaView style={styles.container} edges={["left", "right", "bottom"]}>
-      {scrollable ? (
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          {content}
-        </ScrollView>
-      ) : (
-        content
-      )}
+    <SafeAreaView style={[styles.safeArea, { backgroundColor }]}>
+      <StatusBar barStyle="dark-content" backgroundColor={backgroundColor} />
+      <Container
+        style={[styles.container, style]}
+        contentContainerStyle={
+          scrollable ? [styles.scrollContent, contentContainerStyle] : undefined
+        }
+      >
+        {children}
+      </Container>
     </SafeAreaView>
   );
-}
+};
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    backgroundColor: tokens.colors.appBg,
   },
   scrollContent: {
     flexGrow: 1,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: tokens.spacing[16],
-    paddingBottom: tokens.spacing[24],
-  },
-  center: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
+    paddingHorizontal: Tokens.layout.pagePadding,
+    paddingBottom: Tokens.spacing.xxl,
   },
 });

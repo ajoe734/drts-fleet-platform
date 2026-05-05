@@ -1,51 +1,46 @@
 import React from "react";
-import { Pressable, StyleSheet } from "react-native";
+import { StyleSheet, TouchableOpacity, ViewStyle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { tokens } from "./tokens";
+import { Tokens } from "./tokens";
 
 interface IconButtonProps {
-  icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
-  accessibilityLabel: string;
+  icon: keyof typeof Ionicons.glyphMap;
   size?: number;
   color?: string;
   disabled?: boolean;
+  style?: ViewStyle;
+  accessibilityLabel: string;
 }
 
-export function IconButton({
-  icon,
+export const IconButton: React.FC<IconButtonProps> = ({
   onPress,
-  accessibilityLabel,
+  icon,
   size = 24,
-  color = tokens.colors.textStrong,
-  disabled,
-}: IconButtonProps) {
+  color = Tokens.colors.textBody,
+  disabled = false,
+  style,
+  accessibilityLabel,
+}) => {
   return (
-    <Pressable
+    <TouchableOpacity
       onPress={onPress}
       disabled={disabled}
+      activeOpacity={0.7}
+      style={[styles.button, disabled && styles.disabled, style]}
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
-      style={({ pressed }) => [
-        styles.base,
-        pressed && styles.pressed,
-        disabled && styles.disabled,
-      ]}
     >
       <Ionicons name={icon} size={size} color={color} />
-    </Pressable>
+    </TouchableOpacity>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  base: {
-    padding: tokens.spacing[8],
-    borderRadius: tokens.radius.full,
+  button: {
+    padding: Tokens.spacing.xs,
     alignItems: "center",
     justifyContent: "center",
-  },
-  pressed: {
-    backgroundColor: tokens.colors.surfaceMuted,
   },
   disabled: {
     opacity: 0.5,
