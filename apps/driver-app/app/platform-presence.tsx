@@ -1,236 +1,36 @@
 import { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  FlatList,
-  StyleSheet,
   ActivityIndicator,
-  RefreshControl,
-  TouchableOpacity,
   Alert,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 import type {
   PlatformPresenceRecord,
   PlatformPresenceSummary,
 } from "@drts/contracts";
+import {
+  PlatformStatusCard,
+  type PlatformStatusAction,
+} from "@/components/platform-status-card";
+import { Tokens } from "@/components/ui/tokens";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
 
-/**
- * Calculate token expiry urgency level and remaining time display.
- * Returns: { label, urgency, isExpiring }
- * - urgent: < 1 hour remaining
- * - warning: < 24 hours remaining
- * - safe: >= 24 hours remaining
- * - expired: token already expired
- */
-function getTokenExpiryInfo(tokenExpiresAt: string | null): {
-  label: string;
-  urgency: "expired" | "urgent" | "warning" | "safe";
-  isExpiring: boolean;
-} {
-  if (!tokenExpiresAt) {
-    return { label: "無到期時間", urgency: "safe", isExpiring: false };
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
   }
-
-  const now = new Date().getTime();
-  const expiresAt = new Date(tokenExpiresAt).getTime();
-  const remainingMs = expiresAt - now;
-
-  if (remainingMs <= 0) {
-    return { label: "已到期", urgency: "expired", isExpiring: true };
-  }
-
-  const remainingMinutes = Math.floor(remainingMs / 60000);
-  const remainingHours = Math.floor(remainingMinutes / 60);
-
-  if (remainingHours < 1) {
-    return {
-      label: `剩餘 ${remainingMinutes} 分鐘`,
-      urgency: "urgent",
-      isExpiring: true,
-    };
-  }
-
-  if (remainingHours < 24) {
-    return {
-      label: `剩餘 ${remainingHours} 小時 ${remainingMinutes % 60} 分鐘`,
-      urgency: "warning",
-      isExpiring: true,
-    };
-  }
-
-  return {
-    label: `剩餘 ${remainingHours} 小時`,
-    urgency: "safe",
-    isExpiring: false,
-  };
-}
-
-function StatusIndicator({ status }: { status: string }) {
-  const isOnline = status === "online";
-  return (
-    <View
-      style={[
-        styles.statusDot,
-        { backgroundColor: isOnline ? "#4caf50" : "#9e9e9e" },
-      ]}
-    />
-  );
-}
-
-function PresenceCard({
-  record,
-  onRefresh,
-}: {
-  record: PlatformPresenceRecord;
-  onRefresh: () => void;
-}) {
-  const client = getDriverClient();
-  const [toggling, setToggling] = useState(false);
-  const [expiryInfo, setExpiryInfo] = useState(() =>
-    getTokenExpiryInfo(record.tokenExpiresAt),
-  );
-
-  // Update countdown every minute
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setExpiryInfo(getTokenExpiryInfo(record.tokenExpiresAt));
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [record.tokenExpiresAt]);
-
-  const handleToggle = async () => {
-    setToggling(true);
-    try {
-      if (record.status === "online") {
-        await client.setPlatformOffline({ platformCode: record.platformCode });
-      } else {
-        await client.setPlatformOnline({ platformCode: record.platformCode });
-      }
-      await onRefresh();
-    } catch (e: any) {
-      console.error("Failed to toggle platform presence:", e.message);
-      Alert.alert(
-        "錯誤",
-        `無法切換 ${record.platformCode} 的狀態：${e.message}`,
-      );
-    } finally {
-      setToggling(false);
-    }
-  };
-
-  const handleReauth = () => {
-    Alert.alert(
-      "重新驗證平台",
-      `即將為「${record.platformCode}」啟動重新驗證。您將被引導完成驗證流程。`,
-      [
-        { text: "取消", style: "cancel" },
-        {
-          text: "繼續",
-          onPress: async () => {
-            try {
-              await client.setPlatformOnline({
-                platformCode: record.platformCode,
-                tokenExpiresAt: null,
-              });
-              await onRefresh();
-              Alert.alert(
-                "重新驗證已啟動",
-                `請完成 ${record.platformCode} 的驗證流程。`,
-              );
-            } catch (e: any) {
-              Alert.alert("錯誤", e.message);
-            }
-          },
-        },
-      ],
-    );
-  };
-
-  const eligibilityColor =
-    record.eligibility === "eligible"
-      ? "#4caf50"
-      : record.eligibility === "pending"
-        ? "#ff9800"
-        : "#f44336";
-
-  const expiryColor =
-    expiryInfo.urgency === "expired"
-      ? "#f44336"
-      : expiryInfo.urgency === "urgent"
-        ? "#ff5722"
-        : expiryInfo.urgency === "warning"
-          ? "#ff9800"
-          : "#4caf50";
-
-  return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.platformInfo}>
-          <StatusIndicator status={record.status} />
-          <Text style={styles.platformCode}>{record.platformCode}</Text>
-        </View>
-        <View style={styles.headerActions}>
-          {record.reauthRequired && (
-            <TouchableOpacity
-              style={[styles.iconBtn, styles.reauthBtn]}
-              onPress={handleReauth}
-            >
-              <Text style={styles.iconBtnText}>🔄</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[styles.toggleBtn, toggling && styles.toggleBtnDisabled]}
-            onPress={handleToggle}
-            disabled={toggling}
-          >
-            <Text style={styles.toggleBtnText}>
-              {toggling ? "…" : record.status === "online" ? "下線" : "上線"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.cardRow}>
-        <Text style={styles.cardLabel}>資格狀態：</Text>
-        <Text style={[styles.cardValue, { color: eligibilityColor }]}>
-          {record.eligibility}
-        </Text>
-      </View>
-
-      {record.tokenExpiresAt && (
-        <View style={styles.cardRow}>
-          <Text style={styles.cardLabel}>存取令牌：</Text>
-          <Text style={[styles.cardValue, { color: expiryColor }]}>
-            {expiryInfo.label}
-          </Text>
-        </View>
-      )}
-
-      {record.reauthRequired && (
-        <TouchableOpacity style={styles.reauthBanner} onPress={handleReauth}>
-          <Text style={styles.reauthBannerText}>
-            ⚠️ 需要重新驗證 — 點擊繼續
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      {record.lastOnlineAt && (
-        <View style={styles.cardRow}>
-          <Text style={styles.cardLabel}>上次上線：</Text>
-          <Text style={styles.cardValue}>
-            {new Date(record.lastOnlineAt).toLocaleString()}
-          </Text>
-        </View>
-      )}
-    </View>
-  );
+  return "要求失敗";
 }
 
 export default function PlatformPresenceScreen() {
   const [summary, setSummary] = useState<PlatformPresenceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [busyPlatform, setBusyPlatform] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isProvisioned = isDriverIdentityProvisioned();
@@ -240,20 +40,21 @@ export default function PlatformPresenceScreen() {
       setLoading(false);
       return;
     }
+
     const client = getDriverClient();
     try {
       const data = await client.getPlatformPresence();
       setSummary(data);
       setError(null);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (loadError) {
+      setError(toErrorMessage(loadError));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadPresence();
+    void loadPresence();
   }, []);
 
   const onRefresh = async () => {
@@ -262,11 +63,63 @@ export default function PlatformPresenceScreen() {
     setRefreshing(false);
   };
 
+  const handleTogglePresence = async (record: PlatformPresenceRecord) => {
+    setBusyPlatform(record.platformCode);
+    const client = getDriverClient();
+    try {
+      if (record.status === "online") {
+        await client.setPlatformOffline({ platformCode: record.platformCode });
+      } else {
+        await client.setPlatformOnline({ platformCode: record.platformCode });
+      }
+      await onRefresh();
+    } catch (toggleError) {
+      Alert.alert(
+        "無法更新平台狀態",
+        `「${record.platformCode}」狀態更新失敗：${toErrorMessage(toggleError)}`,
+      );
+    } finally {
+      setBusyPlatform(null);
+    }
+  };
+
+  const handleReauth = (record: PlatformPresenceRecord) => {
+    Alert.alert(
+      "重新驗證平台",
+      `要為「${record.platformCode}」重新啟動平台驗證嗎？`,
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "確認",
+          onPress: async () => {
+            setBusyPlatform(record.platformCode);
+            try {
+              const client = getDriverClient();
+              await client.setPlatformOnline({
+                platformCode: record.platformCode,
+                tokenExpiresAt: null,
+              });
+              await onRefresh();
+              Alert.alert(
+                "已送出重新驗證",
+                `請完成 ${record.platformCode} 的平台驗證流程。`,
+              );
+            } catch (reauthError) {
+              Alert.alert("無法重新驗證平台", toErrorMessage(reauthError));
+            } finally {
+              setBusyPlatform(null);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   if (loading) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" />
-        <Text style={styles.label}>載入平台狀態中…</Text>
+        <Text style={styles.hintText}>載入平台狀態中…</Text>
       </View>
     );
   }
@@ -282,24 +135,49 @@ export default function PlatformPresenceScreen() {
     );
   }
 
+  const presences = summary?.presences ?? [];
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>平台上線狀態</Text>
-      <Text style={styles.subtitle}>
-        已連接 {summary?.presences.length ?? 0} 個平台
-      </Text>
+      <Text style={styles.subtitle}>已連接 {presences.length} 個平台</Text>
 
-      {error && <Text style={styles.error}>錯誤：{error}</Text>}
+      {error ? <Text style={styles.errorText}>載入失敗：{error}</Text> : null}
 
-      {!summary || summary.presences.length === 0 ? (
-        <Text style={styles.empty}>尚未連接任何平台。</Text>
+      {presences.length === 0 ? (
+        <Text style={styles.emptyText}>尚未連接任何平台。</Text>
       ) : (
         <FlatList
-          data={summary.presences}
+          data={presences}
           keyExtractor={(item) => item.platformCode}
-          renderItem={({ item }) => (
-            <PresenceCard record={item} onRefresh={onRefresh} />
-          )}
+          renderItem={({ item }) => {
+            const actions: PlatformStatusAction[] = [];
+
+            if (item.reauthRequired) {
+              actions.push({
+                key: "reauth",
+                icon: "refresh",
+                label: `重新驗證 ${item.platformCode}`,
+                onPress: () => handleReauth(item),
+                tone: "warning",
+                disabled: busyPlatform === item.platformCode,
+              });
+            }
+
+            actions.push({
+              key: "toggle",
+              icon: item.status === "online" ? "power" : "play",
+              label:
+                item.status === "online"
+                  ? `讓 ${item.platformCode} 下線`
+                  : `讓 ${item.platformCode} 上線`,
+              onPress: () => handleTogglePresence(item),
+              tone: item.status === "online" ? "danger" : "primary",
+              disabled: busyPlatform === item.platformCode,
+            });
+
+            return <PlatformStatusCard record={item} actions={actions} />;
+          }}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
@@ -310,93 +188,53 @@ export default function PlatformPresenceScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: "#fff" },
+  container: {
+    flex: 1,
+    padding: Tokens.layout.pagePadding,
+    backgroundColor: Tokens.colors.appBg,
+  },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: Tokens.spacing.xxl,
+    backgroundColor: Tokens.colors.appBg,
   },
-  title: { fontSize: 24, fontWeight: "bold", marginBottom: 4 },
-  subtitle: { fontSize: 14, color: "#666", marginBottom: 16 },
-  error: { color: "red", marginBottom: 8 },
-  empty: { textAlign: "center", color: "#999", marginTop: 32 },
-  label: { marginTop: 8, color: "#666" },
-  card: {
-    padding: 12,
-    marginBottom: 10,
-    backgroundColor: "#fafafa",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
+  title: {
+    ...Tokens.type.screenTitle,
+    color: Tokens.colors.textStrong,
+    marginBottom: Tokens.spacing.xs,
   },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
+  subtitle: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textMuted,
+    marginBottom: Tokens.spacing.lg,
   },
-  platformInfo: { flexDirection: "row", alignItems: "center" },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
+  hintText: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textMuted,
+    marginTop: Tokens.spacing.sm,
   },
-  platformCode: { fontSize: 16, fontWeight: "600" },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  toggleBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: "#1976d2",
-    borderRadius: 6,
+  errorText: {
+    ...Tokens.type.label,
+    color: Tokens.colors.danger,
+    marginBottom: Tokens.spacing.sm,
   },
-  toggleBtnDisabled: { backgroundColor: "#bdbdbd" },
-  toggleBtnText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-  iconBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 6,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  reauthBtn: { backgroundColor: "#fff3e0", borderColor: "#ff9800" },
-  iconBtnText: { fontSize: 16 },
-  reauthBanner: {
-    marginTop: 8,
-    padding: 10,
-    backgroundColor: "#fff3e0",
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "#ff9800",
-  },
-  reauthBannerText: {
-    color: "#e65100",
-    fontSize: 12,
-    fontWeight: "600",
+  emptyText: {
+    ...Tokens.type.body,
     textAlign: "center",
+    color: Tokens.colors.textMuted,
+    marginTop: Tokens.spacing.xxl,
   },
-  cardRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 4,
-  },
-  cardLabel: { fontSize: 12, color: "#666" },
-  cardValue: { fontSize: 12, fontWeight: "500" },
   errorTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#c0392b",
-    marginBottom: 12,
+    ...Tokens.type.sectionTitle,
+    color: Tokens.colors.danger,
     textAlign: "center",
+    marginBottom: Tokens.spacing.sm,
   },
   errorBody: {
-    fontSize: 14,
-    color: "#444",
+    ...Tokens.type.body,
+    color: Tokens.colors.textBody,
     textAlign: "center",
-    lineHeight: 20,
   },
 });

@@ -1,19 +1,31 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import type { PlatformPresenceRecord } from "@drts/contracts";
-import { getDriverClient } from "@/lib/api-client";
+import { Tokens } from "@/components/ui/tokens";
 
-/**
- * Calculates token expiry urgency and display label.
- * Returns countdown info with urgency level.
- */
-function getTokenExpiryInfo(tokenExpiresAt: string | null): {
+type TokenExpiryInfo = {
   label: string;
   urgency: "expired" | "urgent" | "warning" | "safe";
-  isExpiring: boolean;
-} {
+};
+
+export interface PlatformStatusAction {
+  key: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  tone?: "primary" | "warning" | "danger" | "neutral";
+  disabled?: boolean;
+}
+
+interface PlatformStatusCardProps {
+  record: PlatformPresenceRecord;
+  actions?: PlatformStatusAction[];
+}
+
+function getTokenExpiryInfo(tokenExpiresAt: string | null): TokenExpiryInfo {
   if (!tokenExpiresAt) {
-    return { label: "No expiry set", urgency: "safe", isExpiring: false };
+    return { label: "未設定到期時間", urgency: "safe" };
   }
 
   const now = new Date().getTime();
@@ -21,291 +33,311 @@ function getTokenExpiryInfo(tokenExpiresAt: string | null): {
   const remainingMs = expiresAt - now;
 
   if (remainingMs <= 0) {
-    return { label: "Expired", urgency: "expired", isExpiring: true };
+    return { label: "已到期", urgency: "expired" };
   }
 
   const remainingMinutes = Math.floor(remainingMs / 60000);
   const remainingHours = Math.floor(remainingMinutes / 60);
 
   if (remainingHours < 1) {
-    return {
-      label: `${remainingMinutes}m remaining`,
-      urgency: "urgent",
-      isExpiring: true,
-    };
+    return { label: `剩餘 ${remainingMinutes} 分鐘`, urgency: "urgent" };
   }
 
   if (remainingHours < 24) {
     return {
-      label: `${remainingHours}h ${remainingMinutes % 60}m remaining`,
+      label: `剩餘 ${remainingHours} 小時 ${remainingMinutes % 60} 分鐘`,
       urgency: "warning",
-      isExpiring: true,
     };
   }
 
   const remainingDays = Math.floor(remainingHours / 24);
   return {
-    label: `${remainingDays}d ${remainingHours % 24}h remaining`,
+    label: `剩餘 ${remainingDays} 天 ${remainingHours % 24} 小時`,
     urgency: "safe",
-    isExpiring: false,
   };
 }
 
-interface PlatformStatusCardProps {
-  record: PlatformPresenceRecord;
-  onStatusChange?: () => void;
+function getStatusText(status: PlatformPresenceRecord["status"]) {
+  return status === "online" ? "已上線" : "未上線";
 }
 
-/**
- * PlatformStatusCard - Displays a single platform's presence status
- * with online/offline toggle, token expiry countdown, re-auth trigger,
- * and eligibility display.
- */
+function getEligibilityText(
+  eligibility: PlatformPresenceRecord["eligibility"],
+) {
+  switch (eligibility) {
+    case "eligible":
+      return "可接單";
+    case "pending":
+      return "審核中";
+    default:
+      return "不可用";
+  }
+}
+
+function getMetaToneColor(
+  tone: TokenExpiryInfo["urgency"] | PlatformPresenceRecord["eligibility"],
+) {
+  switch (tone) {
+    case "eligible":
+    case "safe":
+      return Tokens.colors.success;
+    case "pending":
+    case "warning":
+      return Tokens.colors.warning;
+    case "urgent":
+      return "#D97706";
+    default:
+      return Tokens.colors.danger;
+  }
+}
+
+function getActionToneStyles(tone: PlatformStatusAction["tone"] = "neutral") {
+  switch (tone) {
+    case "primary":
+      return {
+        backgroundColor: "#E8F1FF",
+        borderColor: "#B7D1F6",
+        iconColor: Tokens.colors.primary,
+      };
+    case "warning":
+      return {
+        backgroundColor: Tokens.colors.surfaceWarning,
+        borderColor: "#F5C26B",
+        iconColor: Tokens.colors.warning,
+      };
+    case "danger":
+      return {
+        backgroundColor: Tokens.colors.surfaceDanger,
+        borderColor: "#F0A7AF",
+        iconColor: Tokens.colors.danger,
+      };
+    default:
+      return {
+        backgroundColor: Tokens.colors.surfaceMuted,
+        borderColor: Tokens.colors.border,
+        iconColor: Tokens.colors.textBody,
+      };
+  }
+}
+
 export function PlatformStatusCard({
   record,
-  onStatusChange,
+  actions = [],
 }: PlatformStatusCardProps) {
-  const client = getDriverClient();
-  const [toggling, setToggling] = useState(false);
   const [expiryInfo, setExpiryInfo] = useState(() =>
     getTokenExpiryInfo(record.tokenExpiresAt),
   );
 
-  // Update countdown every minute
   useEffect(() => {
+    setExpiryInfo(getTokenExpiryInfo(record.tokenExpiresAt));
+
+    if (!record.tokenExpiresAt) {
+      return;
+    }
+
     const interval = setInterval(() => {
       setExpiryInfo(getTokenExpiryInfo(record.tokenExpiresAt));
     }, 60000);
+
     return () => clearInterval(interval);
   }, [record.tokenExpiresAt]);
 
-  const handleToggle = async () => {
-    setToggling(true);
-    try {
-      if (record.status === "online") {
-        await client.setPlatformOffline({ platformCode: record.platformCode });
-      } else {
-        await client.setPlatformOnline({ platformCode: record.platformCode });
-      }
-      onStatusChange?.();
-    } catch (e: any) {
-      console.error("Failed to toggle platform presence:", e.message);
-      Alert.alert(
-        "Error",
-        `Failed to toggle ${record.platformCode}: ${e.message}`,
-      );
-    } finally {
-      setToggling(false);
-    }
-  };
-
-  const handleReauth = () => {
-    Alert.alert(
-      "Re-authenticate Platform",
-      `Start re-authentication for "${record.platformCode}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Continue",
-          onPress: async () => {
-            try {
-              await client.setPlatformOnline({
-                platformCode: record.platformCode,
-                tokenExpiresAt: null,
-              });
-              onStatusChange?.();
-              Alert.alert(
-                "Re-auth Started",
-                `Complete authentication for ${record.platformCode}.`,
-              );
-            } catch (e: any) {
-              Alert.alert("Error", e.message);
-            }
-          },
-        },
-      ],
-    );
-  };
-
-  const eligibilityColor =
-    record.eligibility === "eligible"
-      ? "#4caf50"
-      : record.eligibility === "pending"
-        ? "#ff9800"
-        : "#f44336";
-
-  const expiryColor =
-    expiryInfo.urgency === "expired"
-      ? "#f44336"
-      : expiryInfo.urgency === "urgent"
-        ? "#ff5722"
-        : expiryInfo.urgency === "warning"
-          ? "#ff9800"
-          : "#666";
+  const statusColor =
+    record.status === "online"
+      ? Tokens.colors.success
+      : Tokens.colors.borderStrong;
 
   return (
     <View style={styles.card}>
-      {/* Header with platform code and toggle */}
       <View style={styles.header}>
-        <View style={styles.platformRow}>
-          <View
-            style={[
-              styles.statusDot,
-              {
-                backgroundColor:
-                  record.status === "online" ? "#4caf50" : "#9e9e9e",
-              },
-            ]}
-          />
-          <Text style={styles.platformCode}>{record.platformCode}</Text>
-        </View>
-
-        <View style={styles.actions}>
-          {record.reauthRequired && (
-            <TouchableOpacity
-              style={[styles.iconBtn, styles.reauthIconBtn]}
-              onPress={handleReauth}
-              accessibilityLabel="Re-authenticate platform"
-            >
-              <Text style={styles.iconBtnText}>🔄</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[
-              styles.toggleBtn,
-              record.status === "online"
-                ? styles.goOfflineBtn
-                : styles.goOnlineBtn,
-              toggling && styles.toggleBtnDisabled,
-            ]}
-            onPress={handleToggle}
-            disabled={toggling}
-            accessibilityLabel={
-              record.status === "online" ? "Go offline" : "Go online"
-            }
-          >
-            <Text style={styles.toggleBtnText}>
-              {toggling
-                ? "..."
-                : record.status === "online"
-                  ? "Offline"
-                  : "Online"}
+        <View style={styles.platformBlock}>
+          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+          <View style={styles.platformTextBlock}>
+            <Text style={styles.platformCode}>{record.platformCode}</Text>
+            <Text style={styles.statusText}>
+              {getStatusText(record.status)}
             </Text>
-          </TouchableOpacity>
+          </View>
         </View>
+
+        {actions.length > 0 ? (
+          <View style={styles.actions}>
+            {actions.map((action) => {
+              const toneStyles = getActionToneStyles(action.tone);
+              return (
+                <TouchableOpacity
+                  key={action.key}
+                  style={[
+                    styles.actionButton,
+                    {
+                      backgroundColor: toneStyles.backgroundColor,
+                      borderColor: toneStyles.borderColor,
+                    },
+                    action.disabled && styles.actionButtonDisabled,
+                  ]}
+                  onPress={action.onPress}
+                  disabled={action.disabled}
+                  accessibilityRole="button"
+                  accessibilityLabel={action.label}
+                >
+                  <Ionicons
+                    name={action.icon}
+                    size={18}
+                    color={toneStyles.iconColor}
+                  />
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
       </View>
 
-      {/* Eligibility status */}
-      <View style={styles.infoRow}>
-        <Text style={styles.label}>Eligibility:</Text>
-        <Text style={[styles.value, { color: eligibilityColor }]}>
-          {record.eligibility}
-        </Text>
+      <View style={styles.metaGrid}>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>接單資格</Text>
+          <Text
+            style={[
+              styles.metaValue,
+              { color: getMetaToneColor(record.eligibility) },
+            ]}
+          >
+            {getEligibilityText(record.eligibility)}
+          </Text>
+        </View>
+
+        {record.tokenExpiresAt ? (
+          <View style={styles.metaRow}>
+            <Text style={styles.metaLabel}>平台憑證</Text>
+            <Text
+              style={[
+                styles.metaValue,
+                { color: getMetaToneColor(expiryInfo.urgency) },
+              ]}
+            >
+              {expiryInfo.label}
+            </Text>
+          </View>
+        ) : null}
+
+        {record.lastOnlineAt ? (
+          <View style={styles.metaRow}>
+            <Text style={styles.metaLabel}>最近上線</Text>
+            <Text style={styles.metaValue}>
+              {new Date(record.lastOnlineAt).toLocaleString()}
+            </Text>
+          </View>
+        ) : null}
+
+        {record.accountId ? (
+          <View style={styles.metaRow}>
+            <Text style={styles.metaLabel}>綁定帳號</Text>
+            <Text style={styles.metaValue}>{record.accountId}</Text>
+          </View>
+        ) : null}
       </View>
 
-      {/* Token expiry with countdown */}
-      {record.tokenExpiresAt && (
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Token:</Text>
-          <Text style={[styles.value, { color: expiryColor }]}>
-            {expiryInfo.label}
-          </Text>
+      {record.reauthRequired ? (
+        <View style={styles.noticeBanner}>
+          <Ionicons
+            name="alert-circle"
+            size={16}
+            color={Tokens.colors.warning}
+          />
+          <Text style={styles.noticeText}>平台憑證需要重新驗證</Text>
         </View>
-      )}
-
-      {/* Re-auth warning banner */}
-      {record.reauthRequired && (
-        <TouchableOpacity style={styles.warningBanner} onPress={handleReauth}>
-          <Text style={styles.warningText}>⚠️ Re-authentication required</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Last online timestamp */}
-      {record.lastOnlineAt && (
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Last online:</Text>
-          <Text style={styles.value}>
-            {new Date(record.lastOnlineAt).toLocaleString()}
-          </Text>
-        </View>
-      )}
-
-      {/* Account ID if present */}
-      {record.accountId && (
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Account:</Text>
-          <Text style={styles.value}>{record.accountId}</Text>
-        </View>
-      )}
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    padding: 14,
-    marginBottom: 10,
-    backgroundColor: "#fafafa",
-    borderRadius: 8,
+    padding: Tokens.spacing.lg,
+    marginBottom: Tokens.spacing.md,
+    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.md,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
+    borderColor: Tokens.colors.border,
+    gap: Tokens.spacing.md,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 10,
   },
-  platformRow: { flexDirection: "row", alignItems: "center" },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
-  },
-  platformCode: { fontSize: 16, fontWeight: "600", color: "#333" },
-  actions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
-    justifyContent: "center",
+  platformBlock: {
+    flexDirection: "row",
     alignItems: "center",
+    flex: 1,
+    marginRight: Tokens.spacing.sm,
   },
-  reauthIconBtn: { backgroundColor: "#fff3e0", borderColor: "#ff9800" },
-  iconBtnText: { fontSize: 16 },
-  toggleBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 6,
+  statusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: Tokens.radius.full,
+    marginRight: Tokens.spacing.sm,
   },
-  goOnlineBtn: { backgroundColor: "#4caf50" },
-  goOfflineBtn: { backgroundColor: "#f44336" },
-  toggleBtnDisabled: { opacity: 0.5 },
-  toggleBtnText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-  infoRow: {
+  platformTextBlock: {
+    gap: 2,
+  },
+  platformCode: {
+    ...Tokens.type.body,
+    fontWeight: "700",
+    color: Tokens.colors.textStrong,
+    textTransform: "uppercase",
+  },
+  statusText: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+  },
+  actions: {
+    flexDirection: "row",
+    gap: Tokens.spacing.sm,
+  },
+  actionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: Tokens.radius.full,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionButtonDisabled: {
+    opacity: 0.45,
+  },
+  metaGrid: {
+    gap: Tokens.spacing.xs,
+  },
+  metaRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 6,
+    gap: Tokens.spacing.md,
   },
-  label: { fontSize: 12, color: "#666" },
-  value: { fontSize: 12, fontWeight: "500", color: "#333" },
-  warningBanner: {
-    marginTop: 8,
-    padding: 10,
-    backgroundColor: "#fff3e0",
-    borderRadius: 6,
+  metaLabel: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textMuted,
+  },
+  metaValue: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textBody,
+    flexShrink: 1,
+    textAlign: "right",
+  },
+  noticeBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
+    paddingHorizontal: Tokens.spacing.sm,
+    paddingVertical: Tokens.spacing.sm,
+    backgroundColor: Tokens.colors.surfaceWarning,
+    borderRadius: Tokens.radius.sm,
     borderWidth: 1,
-    borderColor: "#ff9800",
+    borderColor: "#F5C26B",
   },
-  warningText: {
-    color: "#e65100",
-    fontSize: 12,
-    fontWeight: "600",
-    textAlign: "center",
+  noticeText: {
+    ...Tokens.type.label,
+    color: Tokens.colors.warning,
+    flex: 1,
   },
 });
 
