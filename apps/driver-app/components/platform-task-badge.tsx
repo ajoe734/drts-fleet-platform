@@ -24,7 +24,8 @@ export function PlatformTaskBadge({
 }: {
   platformCode: string | null;
 }) {
-  const code = (platformCode ?? "owned").toLowerCase();
+  const normalizedCode = platformCode?.trim().toLowerCase() ?? "owned";
+  const code = normalizedCode.length > 0 ? normalizedCode : "owned";
   const label = PLATFORM_LABELS[code] ?? humanizePlatformCode(code);
 
   if (code === "owned" || code === "direct") {
@@ -33,6 +34,7 @@ export function PlatformTaskBadge({
 
   return (
     <View style={styles.externalBadge}>
+      <Text style={styles.externalBadgePrefix}>來源平台</Text>
       <Text style={styles.externalBadgeText}>{label}</Text>
     </View>
   );
@@ -41,10 +43,19 @@ export function PlatformTaskBadge({
 const styles = StyleSheet.create({
   externalBadge: {
     alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: Tokens.spacing.sm,
     paddingVertical: 2,
     borderRadius: Tokens.radius.xs,
     backgroundColor: "#E6F7FA",
+    borderWidth: 1,
+    borderColor: "#B6E3EA",
+    gap: 4,
+  },
+  externalBadgePrefix: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
   },
   externalBadgeText: {
     ...Tokens.type.micro,

@@ -6,7 +6,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
-  TouchableOpacity,
+  Pressable,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -164,6 +164,22 @@ function buildOperationalNote(task: DriverTaskRecord) {
   return "點擊任務卡進入行程作業，查看目前進度與下一步操作。";
 }
 
+function getFilterDescription(
+  selectedFilter: TaskFilterValue,
+  filteredCount: number,
+): string {
+  switch (selectedFilter) {
+    case "needs_action":
+      return `待處理任務 ${filteredCount} 筆，請優先確認接單與補件。`;
+    case "in_progress":
+      return `進行中任務 ${filteredCount} 筆，可直接進入行程作業。`;
+    case "platform_closed":
+      return `平台已結案任務 ${filteredCount} 筆，僅供查閱同步狀態。`;
+    default:
+      return `全部任務 ${filteredCount} 筆，包含自營與來源平台派遣。`;
+  }
+}
+
 export default function JobsScreen() {
   const [tasks, setTasks] = useState<DriverTaskRecord[]>([]);
   const [orderMap, setOrderMap] = useState<Record<string, OwnedOrderRecord>>(
@@ -242,8 +258,15 @@ export default function JobsScreen() {
 
   const assignedCount = tasks.length;
   const forwardedCount = tasks.filter(isForwardedTask).length;
+  const needsActionCount = tasks.filter((task) =>
+    matchesFilter(task, "needs_action"),
+  ).length;
   const filteredTasks = tasks.filter((task) =>
     matchesFilter(task, selectedFilter),
+  );
+  const filterDescription = getFilterDescription(
+    selectedFilter,
+    filteredTasks.length,
   );
 
   if (loading) {
@@ -303,25 +326,37 @@ export default function JobsScreen() {
           const dispatchSemantics = order?.dispatchSemantics ?? null;
 
           return (
-            <TouchableOpacity
-              activeOpacity={0.85}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityHint="開啟目前任務的行程作業"
               onPress={() => router.push("/trip")}
-              style={[
+              style={({ pressed }) => [
                 styles.taskCard,
+                pressed && styles.taskCardPressed,
                 forwarderTerminal && styles.forwarderTerminalCard,
               ]}
             >
               <View style={styles.taskCardHeader}>
-                <Text style={styles.taskId} numberOfLines={1}>
-                  {item.taskId}
-                </Text>
-                <StatusChip
-                  label={formatDriverTaskStatusLabel(item.status)}
-                  variant={getStatusChipVariant(item)}
-                />
+                <View style={styles.taskTitleBlock}>
+                  <Text style={styles.taskEyebrow}>任務編號</Text>
+                  <Text style={styles.taskId} numberOfLines={1}>
+                    {item.taskId}
+                  </Text>
+                </View>
+                <View style={styles.taskHeaderStatus}>
+                  <StatusChip
+                    label={formatDriverTaskStatusLabel(item.status)}
+                    variant={getStatusChipVariant(item)}
+                  />
+                </View>
               </View>
 
-              <Text style={styles.orderId}>訂單 {item.orderId}</Text>
+              <View style={styles.orderRow}>
+                <Text style={styles.orderLabel}>訂單</Text>
+                <Text style={styles.orderId} numberOfLines={1}>
+                  {item.orderId}
+                </Text>
+              </View>
 
               <View style={styles.badgeRow}>
                 {forwarded ? <RouteLockBadge /> : null}
@@ -340,20 +375,40 @@ export default function JobsScreen() {
               </Text>
 
               <View style={styles.cardFooter}>
-                <Text style={styles.affordanceLabel}>查看行程作業</Text>
-                <Ionicons
-                  name="chevron-forward"
-                  size={18}
-                  color={Tokens.colors.borderStrong}
-                />
+                <View>
+                  <Text style={styles.affordanceLabel}>開啟行程作業</Text>
+                  <Text style={styles.affordanceMeta}>
+                    查看目前進度與可執行操作
+                  </Text>
+                </View>
+                <View style={styles.affordanceIcon}>
+                  <Ionicons
+                    name="arrow-forward"
+                    size={18}
+                    color={Tokens.colors.primary}
+                  />
+                </View>
               </View>
-            </TouchableOpacity>
+            </Pressable>
           );
         }}
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View style={styles.listHeader}>
-            {error ? <ErrorBanner message={`錯誤：${error}`} /> : null}
+            {error ? (
+              <View style={styles.errorPanel}>
+                <ErrorBanner
+                  message={`錯誤：${error}`}
+                  style={styles.errorBanner}
+                />
+                <ActionButton
+                  title="重新整理任務"
+                  icon="refresh"
+                  onPress={onRefresh}
+                  style={styles.retryButton}
+                />
+              </View>
+            ) : null}
 
             <SegmentedControl
               options={FILTER_OPTIONS.map((option) => ({
@@ -369,6 +424,12 @@ export default function JobsScreen() {
             <View style={styles.summaryRow}>
               <InfoTile label="指派任務" value={String(assignedCount)} />
               <InfoTile label="來源平台任務" value={String(forwardedCount)} />
+              <InfoTile label="待處理" value={String(needsActionCount)} />
+            </View>
+
+            <View style={styles.filterSummaryCard}>
+              <Text style={styles.filterSummaryLabel}>目前檢視</Text>
+              <Text style={styles.filterSummaryText}>{filterDescription}</Text>
             </View>
           </View>
         }
@@ -444,6 +505,31 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: Tokens.spacing.sm,
   },
+  errorPanel: {
+    gap: Tokens.spacing.sm,
+  },
+  errorBanner: {
+    marginBottom: 0,
+  },
+  retryButton: {
+    alignSelf: "flex-start",
+  },
+  filterSummaryCard: {
+    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.md,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.md,
+  },
+  filterSummaryLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginBottom: Tokens.spacing.xs,
+  },
+  filterSummaryText: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
+  },
   emptyState: {
     paddingHorizontal: 0,
   },
@@ -456,11 +542,26 @@ const styles = StyleSheet.create({
     marginBottom: Tokens.spacing.sm,
     minHeight: 148,
   },
+  taskCardPressed: {
+    backgroundColor: "#F9FBFF",
+    borderColor: "#B8D0F0",
+  },
   taskCardHeader: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: Tokens.spacing.sm,
+  },
+  taskTitleBlock: {
+    flex: 1,
+    gap: 2,
+  },
+  taskEyebrow: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+  },
+  taskHeaderStatus: {
+    alignItems: "flex-end",
   },
   taskId: {
     ...Tokens.type.body,
@@ -468,10 +569,20 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     flex: 1,
   },
+  orderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.xs,
+    marginTop: Tokens.spacing.sm,
+  },
+  orderLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+  },
   orderId: {
     ...Tokens.type.label,
     color: Tokens.colors.textBody,
-    marginTop: Tokens.spacing.xs,
+    flex: 1,
   },
   badgeRow: {
     flexDirection: "row",
@@ -494,6 +605,19 @@ const styles = StyleSheet.create({
     ...Tokens.type.label,
     color: Tokens.colors.primary,
     fontWeight: "600",
+  },
+  affordanceMeta: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginTop: 2,
+  },
+  affordanceIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: Tokens.radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E8F0FE",
   },
   forwarderTerminalCard: {
     borderColor: "#F2B8BE",
