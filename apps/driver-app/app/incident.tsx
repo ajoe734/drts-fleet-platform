@@ -1,15 +1,26 @@
 import { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  Alert,
-  ActivityIndicator,
-} from "react-native";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 
+import { ActionButton } from "@/components/ui/ActionButton";
+import { AppScreen } from "@/components/ui/AppScreen";
+import { BottomActionBar } from "@/components/ui/BottomActionBar";
+import { confirmDangerAction } from "@/components/ui/confirm-danger-action";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { FormField } from "@/components/ui/FormField";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatusChip } from "@/components/ui/StatusChip";
+import { Tokens } from "@/components/ui/tokens";
 import { getDriverClient } from "@/lib/api-client";
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  return "SOS 送出失敗，請稍後再試。";
+}
 
 export default function IncidentScreen() {
   const [details, setDetails] = useState("");
@@ -17,6 +28,7 @@ export default function IncidentScreen() {
   const [incidentsEnabled, setIncidentsEnabled] = useState<boolean | null>(
     null,
   );
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -27,12 +39,21 @@ export default function IncidentScreen() {
       .catch(() => setIncidentsEnabled(true));
   }, []);
 
-  const handleSubmit = async () => {
+  const handleBackToTrip = () => {
+    if (submitting) {
+      return;
+    }
+
+    router.replace("/trip");
+  };
+
+  const submitIncident = async () => {
     if (submitting) {
       return;
     }
 
     setSubmitting(true);
+    setSubmissionError(null);
     const client = getDriverClient();
     try {
       const created = await client.createIncident({
@@ -47,140 +68,234 @@ export default function IncidentScreen() {
           escalationTarget: "safety_officer",
         });
       }
-      Alert.alert("已送出 SOS", "營運已收到你的重大安全警示，主管將優先處理。");
       setDetails("");
+      setSubmissionError(null);
       router.replace("/trip");
-    } catch (e: any) {
-      Alert.alert("錯誤", e.message);
+    } catch (error: unknown) {
+      setSubmissionError(getErrorMessage(error));
     } finally {
       setSubmitting(false);
     }
   };
 
+  const handleSubmitPress = () => {
+    if (submitting) {
+      return;
+    }
+
+    setSubmissionError(null);
+    confirmDangerAction({
+      title: "確認送出 SOS",
+      message:
+        "送出後，營運與安全主管會立即收到重大安全警示。若尚未準備好，請先取消並補充現場資訊。",
+      confirmLabel: "確認送出",
+      cancelLabel: "取消",
+      onConfirm: () => {
+        void submitIncident();
+      },
+    });
+  };
+
   if (incidentsEnabled === null) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.loadingLabel}>載入中…</Text>
-      </View>
+      <AppScreen
+        scrollable={false}
+        backgroundColor={Tokens.colors.surfaceDanger}
+      >
+        <PageHeader
+          title="SOS 緊急通報"
+          subtitle="重大安全事件會立即升級給營運"
+          rightElement={<StatusChip label="準備中" variant="info" />}
+        />
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={Tokens.colors.primary} />
+          <Text style={styles.loadingLabel}>載入 SOS 流程中…</Text>
+        </View>
+      </AppScreen>
     );
   }
 
   if (!incidentsEnabled) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.disabledTitle}>事件回報暫停提供</Text>
-        <Text style={styles.empty}>此功能目前未啟用。</Text>
-      </View>
+      <AppScreen
+        scrollable={false}
+        backgroundColor={Tokens.colors.surfaceDanger}
+      >
+        <PageHeader
+          title="SOS 緊急通報"
+          subtitle="重大安全事件會立即升級給營運"
+          rightElement={<StatusChip label="未啟用" variant="warning" />}
+        />
+        <EmptyState
+          title="SOS 緊急通報暫停提供"
+          description="此功能目前未啟用，請返回行程或稍後再試。"
+          icon="warning-outline"
+          actionTitle="返回行程"
+          onAction={handleBackToTrip}
+          style={styles.fillState}
+        />
+      </AppScreen>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.heroCard}>
-        <Text style={styles.eyebrow}>司機安全</Text>
-        <Text style={styles.title}>SOS 緊急通報</Text>
-        <Text style={styles.subtitle}>一鍵立即把重大安全事件通報給營運。</Text>
-      </View>
+    <View style={styles.screen}>
+      <AppScreen backgroundColor={Tokens.colors.surfaceDanger}>
+        <PageHeader
+          title="SOS 緊急通報"
+          subtitle="重大安全事件會立即升級給營運"
+          rightElement={<StatusChip label="高風險" variant="danger" />}
+        />
 
-      <View style={styles.noticeCard}>
-        <Text style={styles.noticeTitle}>派遣處理說明</Text>
-        <Text style={styles.noticeBody}>
-          此畫面送出的事件會固定標記為安全類別與重大等級。營運主管將會收到升級通知並優先處理。
-        </Text>
-      </View>
+        <View style={styles.content}>
+          <View style={styles.heroCard}>
+            <Text style={styles.heroEyebrow}>司機安全</Text>
+            <Text style={styles.heroTitle}>重大安全通報</Text>
+            <Text style={styles.heroBody}>
+              按下送出後，系統會建立安全類別、重大等級事件，並立刻升級給安全主管優先處理。
+            </Text>
+          </View>
 
-      <Text style={styles.fieldLabel}>補充說明（選填）</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="可補充目前位置、乘客狀況或即時風險…"
-        multiline
-        numberOfLines={4}
-        value={details}
-        onChangeText={setDetails}
-        editable={!submitting}
-      />
+          {submissionError ? (
+            <ErrorBanner message={`送出失敗：${submissionError}`} />
+          ) : null}
 
-      <Text
-        style={[styles.sosButton, submitting && styles.submitBtnDisabled]}
-        onPress={submitting ? undefined : handleSubmit}
-      >
-        {submitting ? "送出中…" : "送出 SOS 警示"}
-      </Text>
+          <View style={styles.noticeCard}>
+            <Text style={styles.sectionTitle}>處理說明</Text>
+            <Text style={styles.sectionBody}>
+              若需補充目前位置、乘客狀況或即時風險，可先填寫以下欄位。送出前會再要求一次確認，取消不會建立事件。
+            </Text>
+          </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.link} onPress={() => router.replace("/trip")}>
-          返回行程
-        </Text>
-      </View>
+          <FormField
+            label="補充說明（選填）"
+            value={details}
+            onChangeText={(value) => {
+              setDetails(value);
+              if (submissionError) {
+                setSubmissionError(null);
+              }
+            }}
+            placeholder="可補充目前位置、乘客狀況或即時風險…"
+            multiline
+            numberOfLines={5}
+            editable={!submitting}
+            style={styles.detailsInput}
+            helpText="若留白，系統會送出預設 SOS 說明。"
+          />
+
+          <View style={styles.confirmationCard}>
+            <Text style={styles.sectionTitle}>確認步驟</Text>
+            <Text style={styles.sectionBody}>
+              按下「送出
+              SOS」後仍需再次確認。若情況已排除，可在確認視窗按「取消」返回本頁。
+            </Text>
+          </View>
+        </View>
+      </AppScreen>
+
+      <BottomActionBar style={styles.actionBar}>
+        <ActionButton
+          title="返回行程"
+          onPress={handleBackToTrip}
+          variant="secondary"
+          disabled={submitting}
+          style={styles.secondaryAction}
+        />
+        <ActionButton
+          title="送出 SOS"
+          onPress={handleSubmitPress}
+          variant="danger"
+          icon="warning-outline"
+          loading={submitting}
+          style={styles.primaryAction}
+        />
+      </BottomActionBar>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: "#fff5f3" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  screen: {
+    flex: 1,
+    backgroundColor: Tokens.colors.surfaceDanger,
+  },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: Tokens.spacing.xl,
+  },
+  fillState: {
+    flex: 1,
+  },
+  loadingLabel: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textBody,
+    marginTop: Tokens.spacing.md,
+  },
+  content: {
+    paddingVertical: Tokens.spacing.lg,
+  },
   heroCard: {
-    backgroundColor: "#8a0f19",
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
+    backgroundColor: "#8A0F19",
+    borderRadius: Tokens.radius.md,
+    padding: Tokens.spacing.xl,
+    marginBottom: Tokens.spacing.lg,
   },
-  eyebrow: {
-    color: "#ffd7dc",
-    fontSize: 12,
-    fontWeight: "700",
+  heroEyebrow: {
+    ...Tokens.type.label,
+    color: "#FFD7DC",
     letterSpacing: 1,
-    textTransform: "uppercase",
-    marginBottom: 8,
+    marginBottom: Tokens.spacing.xs,
   },
-  title: { fontSize: 30, fontWeight: "800", color: "#fff", marginBottom: 8 },
-  subtitle: { fontSize: 15, color: "#ffe9ec", lineHeight: 22 },
+  heroTitle: {
+    ...Tokens.type.screenTitle,
+    color: Tokens.colors.textInverse,
+    marginBottom: Tokens.spacing.sm,
+  },
+  heroBody: {
+    ...Tokens.type.body,
+    color: "#FFE9EC",
+  },
   noticeCard: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 16,
+    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.md,
     borderWidth: 1,
-    borderColor: "#f2c2c8",
+    borderColor: "#F2C2C8",
+    padding: Tokens.spacing.lg,
+    marginBottom: Tokens.spacing.lg,
   },
-  noticeTitle: {
-    color: "#8a0f19",
-    fontSize: 14,
-    fontWeight: "700",
-    marginBottom: 6,
-  },
-  noticeBody: { color: "#5f2930", fontSize: 14, lineHeight: 20 },
-  fieldLabel: {
-    marginBottom: 8,
-    color: "#5f2930",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  input: {
+  confirmationCard: {
+    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.md,
     borderWidth: 1,
-    borderColor: "#e6b7be",
-    borderRadius: 14,
-    padding: 12,
-    fontSize: 16,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.lg,
+  },
+  sectionTitle: {
+    ...Tokens.type.sectionTitle,
+    color: Tokens.colors.textStrong,
+    marginBottom: Tokens.spacing.xs,
+  },
+  sectionBody: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textBody,
+  },
+  detailsInput: {
+    height: 120,
+    paddingTop: Tokens.spacing.md,
+    paddingBottom: Tokens.spacing.md,
     textAlignVertical: "top",
-    minHeight: 100,
-    marginBottom: 16,
-    backgroundColor: "#fff",
   },
-  sosButton: {
-    backgroundColor: "#c21423",
-    color: "#fff",
-    textAlign: "center",
-    paddingVertical: 16,
-    borderRadius: 14,
-    fontSize: 18,
-    fontWeight: "800",
+  actionBar: {
+    justifyContent: "space-between",
   },
-  submitBtnDisabled: { opacity: 0.6 },
-  footer: { marginTop: 24, alignItems: "center" },
-  link: { color: "#8a0f19", fontSize: 16, fontWeight: "600" },
-  loadingLabel: { marginTop: 8, color: "#666" },
-  disabledTitle: { fontSize: 24, fontWeight: "bold", marginBottom: 4 },
-  empty: { textAlign: "center", color: "#999", marginTop: 32 },
+  secondaryAction: {
+    flex: 1,
+    marginRight: Tokens.spacing.sm,
+  },
+  primaryAction: {
+    flex: 1,
+  },
 });

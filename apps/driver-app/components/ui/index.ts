@@ -11,3 +11,4 @@ export * from "./FormField";
 export * from "./EmptyState";
 export * from "./ErrorBanner";
 export * from "./BottomActionBar";
+export * from "./confirm-danger-action";
