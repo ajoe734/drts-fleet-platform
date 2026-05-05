@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import type { PlatformPresenceRecord } from "@drts/contracts";
+import {
+  PLATFORM_CODE_REGISTRY,
+  type PlatformPresenceRecord,
+} from "@drts/contracts";
 import { Tokens } from "@/components/ui/tokens";
 
 type TokenExpiryInfo = {
@@ -127,6 +130,9 @@ export function PlatformStatusCard({
   const [expiryInfo, setExpiryInfo] = useState(() =>
     getTokenExpiryInfo(record.tokenExpiresAt),
   );
+  const platformLabel =
+    PLATFORM_CODE_REGISTRY[record.platformCode]?.displayName ??
+    record.platformCode;
 
   useEffect(() => {
     setExpiryInfo(getTokenExpiryInfo(record.tokenExpiresAt));
@@ -153,7 +159,7 @@ export function PlatformStatusCard({
         <View style={styles.platformBlock}>
           <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
           <View style={styles.platformTextBlock}>
-            <Text style={styles.platformCode}>{record.platformCode}</Text>
+            <Text style={styles.platformCode}>{platformLabel}</Text>
             <Text style={styles.statusText}>
               {getStatusText(record.status)}
             </Text>
@@ -284,7 +290,6 @@ const styles = StyleSheet.create({
     ...Tokens.type.body,
     fontWeight: "700",
     color: Tokens.colors.textStrong,
-    textTransform: "uppercase",
   },
   statusText: {
     ...Tokens.type.micro,

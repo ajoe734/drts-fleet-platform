@@ -1,26 +1,46 @@
 import { useEffect, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  Switch,
-  TextInput,
   ActivityIndicator,
   Alert,
-  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import type {
-  DriverSettings,
-  DriverProfileRecord,
-  UpdateDriverProfileCommand,
-} from "@drts/contracts";
+import type { DriverProfileRecord, DriverSettings } from "@drts/contracts";
 import { PlatformBinding } from "@/components/platform-binding";
+import { ActionButton } from "@/components/ui/ActionButton";
+import { AppScreen } from "@/components/ui/AppScreen";
+import { BottomActionBar } from "@/components/ui/BottomActionBar";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { FormField } from "@/components/ui/FormField";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatusChip, type StatusChipVariant } from "@/components/ui/StatusChip";
+import { Tokens } from "@/components/ui/tokens";
 import {
   getDriverClient,
   getDriverId,
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
+import {
+  DEFAULT_PROFILE_VALUES,
+  DEFAULT_SETTINGS_VALUES,
+  buildProfileCommand,
+  buildSettingsCommand,
+  deriveSaveState,
+  hasErrors,
+  profileValuesEqual,
+  profileValuesFromRecord,
+  settingsValuesEqual,
+  settingsValuesFromRecord,
+  validateProfileValues,
+  validateSettingsValues,
+  type ProfileFormValues,
+  type SaveState,
+  type SettingsFormValues,
+} from "@/lib/settings-form";
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -39,24 +59,101 @@ function formatSectionList(labels: string[]): string {
   return `${labels.slice(0, -1).join("、")}和${labels.at(-1)}`;
 }
 
-export default function SettingsScreen() {
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [language, setLanguage] = useState("zh-TW");
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [autoAcceptEnabled, setAutoAcceptEnabled] = useState(false);
-  const [maxAcceptRadius, setMaxAcceptRadius] = useState("");
-  const [profileName, setProfileName] = useState("");
-  const [profilePhone, setProfilePhone] = useState("");
-  const [profileEmail, setProfileEmail] = useState("");
-  const [emergencyName, setEmergencyName] = useState("");
-  const [emergencyPhone, setEmergencyPhone] = useState("");
-  const [emergencyRelationship, setEmergencyRelationship] = useState("");
-  const router = useRouter();
+interface SaveStatusDescriptor {
+  label: string;
+  variant: StatusChipVariant;
+}
 
-  // Provisioning check — must come after all hook declarations
+function describeSaveStatus(state: SaveState): SaveStatusDescriptor {
+  switch (state) {
+    case "saving":
+      return { label: "儲存中…", variant: "info" };
+    case "dirty":
+      return { label: "尚有未儲存變更", variant: "warning" };
+    case "saved":
+      return { label: "已儲存", variant: "success" };
+    case "error":
+      return { label: "儲存失敗", variant: "danger" };
+    default:
+      return { label: "尚未變更", variant: "default" };
+  }
+}
+
+interface FormSectionProps {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}
+
+function FormSection({ title, description, children }: FormSectionProps) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        {description ? (
+          <Text style={styles.sectionDescription}>{description}</Text>
+        ) : null}
+      </View>
+      <View style={styles.sectionBody}>{children}</View>
+    </View>
+  );
+}
+
+interface SwitchRowProps {
+  label: string;
+  description?: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  disabled?: boolean;
+}
+
+function SwitchRow({
+  label,
+  description,
+  value,
+  onValueChange,
+  disabled = false,
+}: SwitchRowProps) {
+  return (
+    <View style={styles.switchRow}>
+      <View style={styles.switchTextBlock}>
+        <Text style={styles.switchLabel}>{label}</Text>
+        {description ? (
+          <Text style={styles.switchDescription}>{description}</Text>
+        ) : null}
+      </View>
+      <Switch value={value} onValueChange={onValueChange} disabled={disabled} />
+    </View>
+  );
+}
+
+export default function SettingsScreen() {
+  const router = useRouter();
   const isProvisioned = isDriverIdentityProvisioned();
   const driverId = isProvisioned ? getDriverId() : "";
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<"success" | "error" | null>(
+    null,
+  );
+
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [settingsValues, setSettingsValues] = useState<SettingsFormValues>(
+    DEFAULT_SETTINGS_VALUES,
+  );
+  const [profileValues, setProfileValues] = useState<ProfileFormValues>(
+    DEFAULT_PROFILE_VALUES,
+  );
+  const [initialSettings, setInitialSettings] = useState<SettingsFormValues>(
+    DEFAULT_SETTINGS_VALUES,
+  );
+  const [initialProfile, setInitialProfile] = useState<ProfileFormValues>(
+    DEFAULT_PROFILE_VALUES,
+  );
 
   useEffect(() => {
     if (!isProvisioned) {
@@ -67,389 +164,426 @@ export default function SettingsScreen() {
     let isActive = true;
     const client = getDriverClient();
 
-    const loadSettings = async () => {
+    const loadAll = async () => {
       const [settingsResult, profileResult] = await Promise.allSettled([
         client.getDriverSettings(driverId),
         client.getDriverProfile(),
       ]);
-      const loadFailures: string[] = [];
 
       if (!isActive) {
         return;
       }
 
+      const failures: string[] = [];
+
       if (settingsResult.status === "fulfilled") {
-        const settings = settingsResult.value as DriverSettings;
-        setLanguage(settings.language ?? "zh-TW");
-        setNotificationsEnabled(settings.notificationsEnabled ?? true);
-        setAutoAcceptEnabled(settings.autoAcceptEnabled ?? false);
-        setMaxAcceptRadius(
-          settings.maxAcceptRadius != null
-            ? String(settings.maxAcceptRadius)
-            : "",
+        const next = settingsValuesFromRecord(
+          settingsResult.value as DriverSettings,
         );
+        setSettingsValues(next);
+        setInitialSettings(next);
+        setSettingsLoaded(true);
       } else {
-        loadFailures.push(
-          `偏好設定（${toErrorMessage(settingsResult.reason)}）`,
-        );
+        failures.push(`偏好設定（${toErrorMessage(settingsResult.reason)}）`);
       }
 
       if (profileResult.status === "fulfilled") {
-        const driverProfile = profileResult.value as DriverProfileRecord;
-        setProfileName(driverProfile.name ?? "");
-        setProfilePhone(driverProfile.phone ?? "");
-        setProfileEmail(driverProfile.email ?? "");
-        setEmergencyName(driverProfile.emergencyContact?.name ?? "");
-        setEmergencyPhone(driverProfile.emergencyContact?.phone ?? "");
-        setEmergencyRelationship(
-          driverProfile.emergencyContact?.relationship ?? "",
+        const next = profileValuesFromRecord(
+          profileResult.value as DriverProfileRecord,
         );
+        setProfileValues(next);
+        setInitialProfile(next);
+        setProfileLoaded(true);
       } else {
-        loadFailures.push(
-          `個人資料（${toErrorMessage(profileResult.reason)}）`,
-        );
+        failures.push(`個人資料（${toErrorMessage(profileResult.reason)}）`);
       }
 
-      if (loadFailures.length > 0) {
-        Alert.alert(
-          "部分設定無法載入",
-          `已使用可用資料。無法載入 ${formatSectionList(loadFailures)}。`,
+      if (failures.length > 0) {
+        setLoadError(
+          `已使用可用資料。無法載入 ${formatSectionList(failures)}。`,
         );
+      } else {
+        setLoadError(null);
       }
 
       setLoading(false);
     };
 
-    void loadSettings();
+    void loadAll();
 
     return () => {
       isActive = false;
     };
   }, [driverId, isProvisioned]);
 
-  const handleSave = async () => {
-    const trimmedProfileName = profileName.trim();
-    const trimmedEmergencyName = emergencyName.trim();
-    const trimmedEmergencyPhone = emergencyPhone.trim();
-    const trimmedEmergencyRelationship = emergencyRelationship.trim();
-    const hasEmergencyContact =
-      trimmedEmergencyName.length > 0 ||
-      trimmedEmergencyPhone.length > 0 ||
-      trimmedEmergencyRelationship.length > 0;
-    let profileValidationError: string | null = null;
+  const settingsErrors = validateSettingsValues(settingsValues);
+  const profileErrors = profileLoaded
+    ? validateProfileValues(profileValues)
+    : {};
 
-    if (!trimmedProfileName) {
-      profileValidationError = "司機個人資料需要填寫姓名。";
-    } else if (
-      hasEmergencyContact &&
-      (!trimmedEmergencyName || !trimmedEmergencyPhone)
-    ) {
-      profileValidationError = "新增緊急聯絡人時，姓名和電話為必填欄位。";
+  const settingsDirty =
+    settingsLoaded && !settingsValuesEqual(initialSettings, settingsValues);
+  const profileDirty =
+    profileLoaded && !profileValuesEqual(initialProfile, profileValues);
+  const dirty = settingsDirty || profileDirty;
+  const hasValidation =
+    (settingsLoaded && hasErrors(settingsErrors)) ||
+    (profileLoaded && hasErrors(profileErrors));
+  const validationMessage = hasValidation
+    ? "請先修正標示欄位後再儲存設定。"
+    : null;
+
+  const saveState = deriveSaveState({
+    saving,
+    dirty,
+    hasValidation,
+    lastResult,
+  });
+  const saveStatus = describeSaveStatus(saveState);
+
+  const updateSettings = (patch: Partial<SettingsFormValues>) => {
+    setSettingsValues((prev) => ({ ...prev, ...patch }));
+    if (lastResult) {
+      setLastResult(null);
+    }
+    if (saveError) {
+      setSaveError(null);
+    }
+  };
+
+  const updateProfile = (patch: Partial<ProfileFormValues>) => {
+    setProfileValues((prev) => ({ ...prev, ...patch }));
+    if (lastResult) {
+      setLastResult(null);
+    }
+    if (saveError) {
+      setSaveError(null);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!dirty || hasValidation) {
+      return;
     }
 
     setSaving(true);
+    setSaveError(null);
     const client = getDriverClient();
+
+    const tasks: Array<Promise<{ section: string }>> = [];
+    if (settingsDirty) {
+      tasks.push(
+        client
+          .updateDriverSettings(driverId, buildSettingsCommand(settingsValues))
+          .then(() => ({ section: "偏好設定" })),
+      );
+    }
+    if (profileDirty) {
+      tasks.push(
+        client
+          .updateDriverProfile(buildProfileCommand(profileValues))
+          .then(() => ({ section: "個人資料" })),
+      );
+    }
+
     try {
-      const [settingsResult, profileResult] = await Promise.allSettled([
-        client.updateDriverSettings(driverId, {
-          language,
-          notificationsEnabled,
-          autoAcceptEnabled,
-          maxAcceptRadius: maxAcceptRadius ? Number(maxAcceptRadius) : null,
-        }),
-        profileValidationError
-          ? Promise.reject(new Error(profileValidationError))
-          : client.updateDriverProfile({
-              name: trimmedProfileName,
-              phone: profilePhone.trim() || null,
-              email: profileEmail.trim() || null,
-              emergencyContact: hasEmergencyContact
-                ? {
-                    name: trimmedEmergencyName,
-                    phone: trimmedEmergencyPhone,
-                    relationship: trimmedEmergencyRelationship || null,
-                  }
-                : null,
-            } satisfies UpdateDriverProfileCommand),
-      ]);
+      const results = await Promise.allSettled(tasks);
+      const saved: string[] = [];
+      const failed: string[] = [];
 
-      const savedSections: string[] = [];
-      const failedSections: string[] = [];
+      results.forEach((entry, index) => {
+        const isSettingsTask = settingsDirty && index === 0;
+        const sectionLabel = isSettingsTask ? "偏好設定" : "個人資料";
+        if (entry.status === "fulfilled") {
+          saved.push(entry.value.section);
+        } else {
+          failed.push(`${sectionLabel}（${toErrorMessage(entry.reason)}）`);
+        }
+      });
 
-      if (settingsResult.status === "fulfilled") {
-        savedSections.push("偏好設定");
-      } else {
-        failedSections.push(
-          `偏好設定（${toErrorMessage(settingsResult.reason)}）`,
-        );
+      if (saved.includes("偏好設定")) {
+        setInitialSettings(settingsValues);
+      }
+      if (saved.includes("個人資料")) {
+        setInitialProfile(profileValues);
       }
 
-      if (profileResult.status === "fulfilled") {
-        savedSections.push("個人資料");
-      } else {
-        failedSections.push(
-          `個人資料（${toErrorMessage(profileResult.reason)}）`,
-        );
-      }
-
-      if (failedSections.length === 0) {
+      if (failed.length === 0) {
+        setLastResult("success");
         Alert.alert("儲存成功", "設定已成功儲存。");
         return;
       }
 
-      if (savedSections.length === 0) {
-        Alert.alert("錯誤", `無法儲存 ${formatSectionList(failedSections)}。`);
+      if (saved.length === 0) {
+        setLastResult("error");
+        setSaveError(`無法儲存 ${formatSectionList(failed)}。`);
+        Alert.alert("儲存失敗", `無法儲存 ${formatSectionList(failed)}。`);
         return;
       }
 
+      setLastResult("error");
+      setSaveError(
+        `已儲存 ${formatSectionList(saved)}。無法儲存 ${formatSectionList(failed)}。`,
+      );
       Alert.alert(
         "部分儲存成功",
-        `已儲存 ${formatSectionList(savedSections)}。無法儲存 ${formatSectionList(failedSections)}。`,
+        `已儲存 ${formatSectionList(saved)}。無法儲存 ${formatSectionList(failed)}。`,
       );
     } finally {
       setSaving(false);
     }
   };
 
-  // Guard: device not provisioned
   if (!isProvisioned) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.errorTitle}>裝置尚未配置</Text>
-        <Text style={styles.errorBody}>
-          此裝置尚未分配司機身份，無法載入設定。
-        </Text>
-      </View>
+      <AppScreen scrollable={false}>
+        <PageHeader title="設定" />
+        <EmptyState
+          title="尚未完成裝置配置"
+          description="此裝置尚未分配司機身份，無法載入設定。"
+          icon="lock-closed-outline"
+          actionTitle="前往配置裝置"
+          onAction={() => router.push("/onboarding")}
+          style={styles.fillState}
+        />
+      </AppScreen>
     );
   }
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.label}>載入設定中…</Text>
-      </View>
+      <AppScreen scrollable={false}>
+        <PageHeader title="設定" />
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={Tokens.colors.primary} />
+          <Text style={styles.loadingLabel}>載入設定中…</Text>
+        </View>
+      </AppScreen>
     );
   }
 
+  const saveDisabled = !dirty || hasValidation || saving;
+
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>設定</Text>
-      <Text style={styles.subtitle}>個人資料、偏好設定。</Text>
+    <View style={styles.root}>
+      <AppScreen>
+        <PageHeader
+          title="設定"
+          subtitle="個人資料、偏好設定與平台帳號綁定"
+          rightElement={
+            <StatusChip label={saveStatus.label} variant={saveStatus.variant} />
+          }
+        />
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>偏好設定</Text>
+        <View style={styles.content}>
+          {loadError ? <ErrorBanner message={loadError} /> : null}
+          {validationMessage ? (
+            <ErrorBanner message={validationMessage} />
+          ) : null}
+          {saveError ? <ErrorBanner message={saveError} /> : null}
 
-        <View style={styles.row}>
-          <Text style={styles.label}>語言</Text>
-          <TextInput
-            style={styles.input}
-            value={language}
-            onChangeText={setLanguage}
-            placeholder="zh-TW"
-          />
+          <FormSection
+            title="個人資料"
+            description="維持最新的聯絡方式以便派遣與行政聯繫。"
+          >
+            <FormField
+              label="姓名"
+              value={profileValues.profileName}
+              onChangeText={(value) => updateProfile({ profileName: value })}
+              placeholder="司機姓名"
+              error={profileErrors.profileName}
+              editable={profileLoaded && !saving}
+            />
+            <FormField
+              label="電話"
+              value={profileValues.profilePhone}
+              onChangeText={(value) => updateProfile({ profilePhone: value })}
+              placeholder="+886-900-000-000"
+              keyboardType="phone-pad"
+              error={profileErrors.profilePhone}
+              editable={profileLoaded && !saving}
+            />
+            <FormField
+              label="電子郵件"
+              value={profileValues.profileEmail}
+              onChangeText={(value) => updateProfile({ profileEmail: value })}
+              placeholder="driver@example.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              error={profileErrors.profileEmail}
+              editable={profileLoaded && !saving}
+            />
+          </FormSection>
+
+          <FormSection
+            title="緊急聯絡人"
+            description="緊急情況時平台會優先聯絡此人；任一欄位填寫後姓名與電話為必填。"
+          >
+            <FormField
+              label="聯絡人姓名"
+              value={profileValues.emergencyName}
+              onChangeText={(value) => updateProfile({ emergencyName: value })}
+              placeholder="緊急聯絡人姓名"
+              error={profileErrors.emergencyName}
+              editable={profileLoaded && !saving}
+            />
+            <FormField
+              label="聯絡人電話"
+              value={profileValues.emergencyPhone}
+              onChangeText={(value) => updateProfile({ emergencyPhone: value })}
+              placeholder="+886-900-000-001"
+              keyboardType="phone-pad"
+              error={profileErrors.emergencyPhone}
+              editable={profileLoaded && !saving}
+            />
+            <FormField
+              label="關係"
+              value={profileValues.emergencyRelationship}
+              onChangeText={(value) =>
+                updateProfile({ emergencyRelationship: value })
+              }
+              placeholder="配偶、兄弟姐妹、父母…"
+              editable={profileLoaded && !saving}
+            />
+          </FormSection>
+
+          <FormSection
+            title="偏好設定"
+            description="調整系統介面語言與接單行為。"
+          >
+            <FormField
+              label="介面語言"
+              value={settingsValues.language}
+              onChangeText={(value) => updateSettings({ language: value })}
+              placeholder="zh-TW"
+              autoCapitalize="none"
+              error={settingsErrors.language}
+              editable={settingsLoaded && !saving}
+            />
+            <FormField
+              label="最大接單範圍（公里）"
+              value={settingsValues.maxAcceptRadius}
+              onChangeText={(value) =>
+                updateSettings({ maxAcceptRadius: value })
+              }
+              placeholder="例如：10"
+              keyboardType="numeric"
+              error={settingsErrors.maxAcceptRadius}
+              helpText="留白代表不限制；最大可設定到 200 公里。"
+              editable={settingsLoaded && !saving}
+            />
+          </FormSection>
+
+          <FormSection
+            title="開關設定"
+            description="可隨時切換通知與自動接單行為。"
+          >
+            <SwitchRow
+              label="通知"
+              description="關閉後將不會收到任務指派與行政通知。"
+              value={settingsValues.notificationsEnabled}
+              onValueChange={(value) =>
+                updateSettings({ notificationsEnabled: value })
+              }
+              disabled={!settingsLoaded || saving}
+            />
+            <SwitchRow
+              label="自動接單"
+              description="開啟後系統會自動接受符合條件的派遣任務。"
+              value={settingsValues.autoAcceptEnabled}
+              onValueChange={(value) =>
+                updateSettings({ autoAcceptEnabled: value })
+              }
+              disabled={!settingsLoaded || saving}
+            />
+          </FormSection>
+
+          <FormSection
+            title="平台帳號綁定"
+            description="管理外部平台的接單帳號與重新驗證需求。"
+          >
+            <PlatformBinding showSectionTitle={false} />
+          </FormSection>
+
+          <View style={styles.footer}>
+            <Text style={styles.link} onPress={() => router.push("/earnings")}>
+              查看收益 →
+            </Text>
+          </View>
         </View>
+      </AppScreen>
 
-        <View style={styles.row}>
-          <Text style={styles.label}>最大接單範圍（公里）</Text>
-          <TextInput
-            style={styles.input}
-            value={maxAcceptRadius}
-            onChangeText={setMaxAcceptRadius}
-            placeholder="例如：10"
-            keyboardType="numeric"
-          />
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>個人資料</Text>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>姓名</Text>
-          <TextInput
-            style={styles.fullInput}
-            value={profileName}
-            onChangeText={setProfileName}
-            placeholder="司機姓名"
-          />
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>電話</Text>
-          <TextInput
-            style={styles.fullInput}
-            value={profilePhone}
-            onChangeText={setProfilePhone}
-            placeholder="+886-900-000-000"
-            keyboardType="phone-pad"
-          />
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>電子郵件</Text>
-          <TextInput
-            style={styles.fullInput}
-            value={profileEmail}
-            onChangeText={setProfileEmail}
-            placeholder="driver@example.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
-        </View>
-
-        <Text style={styles.sectionHint}>緊急聯絡人</Text>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>聯絡人姓名</Text>
-          <TextInput
-            style={styles.fullInput}
-            value={emergencyName}
-            onChangeText={setEmergencyName}
-            placeholder="緊急聯絡人姓名"
-          />
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>聯絡人電話</Text>
-          <TextInput
-            style={styles.fullInput}
-            value={emergencyPhone}
-            onChangeText={setEmergencyPhone}
-            placeholder="+886-900-000-001"
-            keyboardType="phone-pad"
-          />
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>關係</Text>
-          <TextInput
-            style={styles.fullInput}
-            value={emergencyRelationship}
-            onChangeText={setEmergencyRelationship}
-            placeholder="配偶、兄弟姐妹、父母…"
-          />
-        </View>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>開關設定</Text>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>通知</Text>
-          <Switch
-            value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>自動接單</Text>
-          <Switch
-            value={autoAcceptEnabled}
-            onValueChange={setAutoAcceptEnabled}
-          />
-        </View>
-      </View>
-
-      <Text
-        style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
-        onPress={handleSave}
-      >
-        {saving ? "正在儲存…" : "儲存設定"}
-      </Text>
-
-      <View style={styles.section}>
-        <PlatformBinding />
-      </View>
-      <View style={styles.footer}>
-        <Text style={styles.link} onPress={() => router.push("/earnings")}>
-          查看收益 →
-        </Text>
-      </View>
-    </ScrollView>
+      <BottomActionBar>
+        <ActionButton
+          title={
+            saving
+              ? "正在儲存…"
+              : hasValidation
+                ? "請先修正欄位"
+                : dirty
+                  ? "儲存設定"
+                  : "目前無變更"
+          }
+          icon={saving ? undefined : "save-outline"}
+          onPress={handleSave}
+          loading={saving}
+          disabled={saveDisabled}
+          style={{ flex: 1 }}
+        />
+      </BottomActionBar>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: "#fff" },
+  root: { flex: 1 },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
+    padding: Tokens.spacing.xxl,
   },
-  title: { fontSize: 24, fontWeight: "bold", marginBottom: 4 },
-  subtitle: { fontSize: 14, color: "#666", marginBottom: 24 },
-  section: { marginBottom: 24 },
+  fillState: { flex: 1 },
+  loadingLabel: {
+    marginTop: Tokens.spacing.sm,
+    color: Tokens.colors.textMuted,
+  },
+  content: { paddingVertical: Tokens.spacing.lg, gap: Tokens.spacing.lg },
+  section: {
+    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.md,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.lg,
+  },
+  sectionHeader: { marginBottom: Tokens.spacing.md },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 12,
-    color: "#333",
+    ...Tokens.type.sectionTitle,
+    color: Tokens.colors.textStrong,
   },
-  sectionHint: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#555",
-    marginTop: 8,
-    marginBottom: 8,
+  sectionDescription: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginTop: 4,
   },
-  row: {
+  sectionBody: { gap: Tokens.spacing.xs },
+  switchRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    justifyContent: "space-between",
+    paddingVertical: Tokens.spacing.sm,
   },
-  label: { fontSize: 16, flex: 1 },
-  field: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 6,
-    padding: 8,
-    fontSize: 14,
-    width: 100,
-    textAlign: "right",
-  },
-  fullInput: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 6,
-    padding: 10,
-    fontSize: 14,
-    marginTop: 8,
-  },
-  saveBtn: {
-    backgroundColor: "#007AFF",
-    color: "#fff",
-    textAlign: "center",
-    padding: 14,
-    borderRadius: 8,
-    fontSize: 16,
+  switchTextBlock: { flex: 1, marginRight: Tokens.spacing.md },
+  switchLabel: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
     fontWeight: "600",
-    marginTop: 8,
   },
-  saveBtnDisabled: { opacity: 0.6 },
-  footer: { marginTop: 24, alignItems: "center" },
-  link: { color: "#007AFF", fontSize: 16 },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#c0392b",
-    marginBottom: 12,
-    textAlign: "center",
+  switchDescription: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginTop: 2,
   },
-  errorBody: {
-    fontSize: 14,
-    color: "#444",
-    textAlign: "center",
-    lineHeight: 20,
-  },
+  footer: { alignItems: "center", marginTop: Tokens.spacing.sm },
+  link: { color: Tokens.colors.primary, fontSize: 16 },
 });
