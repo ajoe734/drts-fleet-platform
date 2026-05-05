@@ -1,40 +1,10 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
-
-/**
- * PlatformTaskBadge
- * Renders a small pill badge with the human-readable platform name.
- * When platformCode is null, shows the owned/direct label.
- */
-export function PlatformTaskBadge({
-  platformCode,
-}: {
-  platformCode: string | null;
-}) {
-  const { label, bgColor, textColor } = getBadgeStyle(platformCode);
-  return (
-    <View style={[styles.badge, { backgroundColor: bgColor }]}>
-      <Text style={[styles.badgeText, { color: textColor }]}>{label}</Text>
-    </View>
-  );
-}
-
-function getBadgeStyle(platformCode: string | null) {
-  const code = (platformCode ?? "direct").toLowerCase();
-  const label = PLATFORM_LABELS[code] ?? code;
-  // Owned/direct vs external colors
-  const isExternal = code !== "direct" && code !== "owned";
-  return {
-    label,
-    bgColor: isExternal ? "rgb(224, 247, 250)" : "rgb(232, 245, 233)",
-    textColor: isExternal ? "rgb(0, 96, 100)" : "rgb(27, 94, 32)",
-  };
-}
+import { StyleSheet, Text, View } from "react-native";
+import { StatusChip, Tokens } from "@/components/ui";
 
 const PLATFORM_LABELS: Record<string, string> = {
-  direct: "Direct",
-  owned: "Direct",
-  // Common 3P platforms
+  direct: "自營派單",
+  owned: "自營派單",
   uber: "Uber",
   lyft: "Lyft",
   grab: "Grab",
@@ -43,14 +13,44 @@ const PLATFORM_LABELS: Record<string, string> = {
   didi: "DiDi",
 };
 
+function humanizePlatformCode(platformCode: string) {
+  return platformCode
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+export function PlatformTaskBadge({
+  platformCode,
+}: {
+  platformCode: string | null;
+}) {
+  const code = (platformCode ?? "owned").toLowerCase();
+  const label = PLATFORM_LABELS[code] ?? humanizePlatformCode(code);
+
+  if (code === "owned" || code === "direct") {
+    return <StatusChip label={label} variant="success" />;
+  }
+
+  return (
+    <View style={styles.externalBadge}>
+      <Text style={styles.externalBadgeText}>{label}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  badge: {
-    paddingHorizontal: 8,
+  externalBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: Tokens.spacing.sm,
     paddingVertical: 2,
-    borderRadius: 12,
-    marginLeft: 8,
+    borderRadius: Tokens.radius.xs,
+    backgroundColor: "#E6F7FA",
   },
-  badgeText: { fontSize: 11, fontWeight: "600" },
+  externalBadgeText: {
+    ...Tokens.type.micro,
+    color: "#0B7285",
+    fontWeight: "600",
+  },
 });
 
 export default PlatformTaskBadge;

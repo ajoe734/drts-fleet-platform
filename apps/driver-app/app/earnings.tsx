@@ -1,12 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ActivityIndicator,
-  FlatList,
-  RefreshControl,
-} from "react-native";
+import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import type {
   DriverStatementRecord,
@@ -16,35 +9,12 @@ import { getDriverClient } from "@/lib/api-client";
 import { EarningsByPlatform } from "@/components/earnings-by-platform";
 import { formatMoney } from "@/lib/money";
 import { formatDriverPayoutStatusLabel } from "@/lib/operational-labels";
+import { SegmentedControl } from "@/components/ui/SegmentedControl";
+import { Tokens } from "@/components/ui/tokens";
+import { AppScreen } from "@/components/ui/AppScreen";
+import { PageHeader } from "@/components/ui/PageHeader";
 
 type PeriodKey = "today" | "week" | "month";
-
-function PeriodToggle({
-  value,
-  onChange,
-}: {
-  value: PeriodKey;
-  onChange: (p: PeriodKey) => void;
-}) {
-  const tabs: { key: PeriodKey; label: string }[] = [
-    { key: "today", label: "今日" },
-    { key: "week", label: "本週" },
-    { key: "month", label: "本月" },
-  ];
-  return (
-    <View style={styles.tabBar}>
-      {tabs.map((t) => (
-        <Text
-          key={t.key}
-          onPress={() => onChange(t.key)}
-          style={[styles.tabItem, value === t.key && styles.tabItemActive]}
-        >
-          {t.label}
-        </Text>
-      ))}
-    </View>
-  );
-}
 
 export default function EarningsScreen() {
   const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
@@ -52,6 +22,7 @@ export default function EarningsScreen() {
     PlatformEarningsItem[]
   >([]);
   const [loading, setLoading] = useState(true);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [earningsEnabled, setEarningsEnabled] = useState(true);
@@ -115,6 +86,7 @@ export default function EarningsScreen() {
     }
   }, [reloadEarningsOnly]);
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const onRefresh = async () => {
     setRefreshing(true);
     await loadStatements();
@@ -123,129 +95,216 @@ export default function EarningsScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.label}>載入收入資料中…</Text>
-      </View>
+      <AppScreen scrollable={false}>
+        <PageHeader title="收入與對帳" />
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={Tokens.colors.primary} />
+          <Text style={styles.label}>載入收入資料中…</Text>
+        </View>
+      </AppScreen>
     );
   }
 
   if (!earningsEnabled) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.title}>收入檢視暫停提供</Text>
-        <Text style={styles.empty}>此功能目前未啟用。</Text>
-      </View>
+      <AppScreen scrollable={false}>
+        <PageHeader title="收入與對帳" />
+        <View style={styles.center}>
+          <Text style={styles.title}>收入檢視暫停提供</Text>
+          <Text style={styles.empty}>此功能目前未啟用。</Text>
+        </View>
+      </AppScreen>
     );
   }
 
+  const segmentedOptions = [
+    { label: "今日", value: "today" },
+    { label: "本週", value: "week" },
+    { label: "本月", value: "month" },
+  ];
+
+  const totalRevenue = platformEarnings.reduce(
+    (sum, item) => sum + (item.grossEarning?.amountMinor || 0),
+    0,
+  );
+  const totalPayouts = platformEarnings.reduce(
+    (sum, item) => sum + (item.netAmount?.amountMinor || 0),
+    0,
+  );
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>收入總覽</Text>
-      <Text style={styles.subtitle}>
-        {statements.length} 份對帳單 | {platformEarnings.length} 個平台
-      </Text>
+    <View style={{ flex: 1 }}>
+      <AppScreen>
+        <PageHeader title="收入與對帳" />
 
-      {error && <Text style={styles.error}>錯誤：{error}</Text>}
+        <View style={styles.kpiContainer}>
+          <View style={styles.kpiBox}>
+            <Text style={styles.kpiLabel}>總收入</Text>
+            <Text style={styles.kpiValue}>
+              {formatMoney({ currency: "USD", amountMinor: totalRevenue })}
+            </Text>
+          </View>
+          <View style={styles.kpiBox}>
+            <Text style={styles.kpiLabel}>總撥款</Text>
+            <Text style={styles.kpiValue}>
+              {formatMoney({ currency: "USD", amountMinor: totalPayouts })}
+            </Text>
+          </View>
+        </View>
 
-      <FlatList
-        data={[{ key: "platforms" }, { key: "statements" }]}
-        keyExtractor={(item) => item.key}
-        renderItem={({ item }) => {
-          if (item.key === "platforms") {
-            return (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>各平台收入</Text>
-                <PeriodToggle value={period} onChange={setPeriod} />
-                <EarningsByPlatform items={platformEarnings} />
+        {error && <Text style={styles.error}>錯誤：{error}</Text>}
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>各平台收入</Text>
+          <SegmentedControl
+            options={segmentedOptions}
+            selectedValue={period}
+            onValueChange={(val) => setPeriod(val as PeriodKey)}
+            style={styles.segmentedControl}
+          />
+          <EarningsByPlatform items={platformEarnings} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>最近對帳單</Text>
+          {statements.length === 0 ? (
+            <Text style={styles.empty}>目前尚無對帳單資料。</Text>
+          ) : (
+            <View style={styles.table}>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.tableCell, styles.headerId]}>ID</Text>
+                <Text style={[styles.tableCell, styles.headerPeriod]}>
+                  期間
+                </Text>
+                <Text style={[styles.tableCell, styles.headerAmount]}>
+                  實拿
+                </Text>
+                <Text style={[styles.tableCell, styles.headerStatus]}>
+                  狀態
+                </Text>
               </View>
-            );
-          }
-          // statements section
-          if (statements.length === 0) {
-            return <Text style={styles.empty}>目前尚無收入資料。</Text>;
-          }
-          return (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>對帳單</Text>
               {statements.map((s) => (
-                <View key={s.statementId} style={styles.stmtCard}>
-                  <Text style={styles.stmtId}>{s.statementId}</Text>
-                  <Text style={styles.stmtAmount}>
-                    實拿：{formatMoney(s.netAmount)}
+                <View key={s.statementId} style={styles.tableRow}>
+                  <Text
+                    style={[styles.tableCell, styles.cellId]}
+                    numberOfLines={1}
+                  >
+                    {s.statementId.slice(-6)}
                   </Text>
-                  <Text style={styles.stmtMeta}>
-                    總收入：{formatMoney(s.grossEarning)}
+                  <Text style={[styles.tableCell, styles.cellPeriod]}>
+                    {s.periodMonth}
                   </Text>
-                  <Text style={styles.stmtMeta}>期間：{s.periodMonth}</Text>
-                  <Text style={styles.stmtPeriod}>
-                    撥款狀態：{formatDriverPayoutStatusLabel(s.payoutStatus)}
+                  <Text style={[styles.tableCell, styles.cellAmount]}>
+                    {formatMoney(s.netAmount)}
+                  </Text>
+                  <Text style={[styles.tableCell, styles.cellStatus]}>
+                    {formatDriverPayoutStatusLabel(s.payoutStatus)}
                   </Text>
                 </View>
               ))}
             </View>
-          );
-        }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      />
+          )}
+        </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.link} onPress={() => router.push("/settings")}>
-          開啟設定 →
-        </Text>
-      </View>
+        <View style={styles.footer}>
+          <Text style={styles.link} onPress={() => router.push("/settings")}>
+            開啟設定 →
+          </Text>
+        </View>
+      </AppScreen>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: "#fff" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  title: { fontSize: 24, fontWeight: "bold", marginBottom: 4 },
-  subtitle: { fontSize: 14, color: "#666", marginBottom: 16 },
-  error: { color: "red", marginBottom: 8 },
-  empty: { textAlign: "center", color: "#999", marginTop: 32 },
-  section: { marginBottom: 20 },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    marginBottom: 10,
-    color: "#333",
-  },
-  // card styles moved to reusable component
-  stmtCard: {
-    padding: 12,
-    marginBottom: 8,
-    backgroundColor: "#f0fff0",
-    borderRadius: 8,
-  },
-  // moved layout rows to reusable component
-  stmtId: { fontSize: 16, fontWeight: "600" },
-  stmtAmount: { fontSize: 20, fontWeight: "bold", color: "#2a7", marginTop: 4 },
-  stmtMeta: { fontSize: 12, color: "#444", marginTop: 4 },
-  stmtPeriod: { fontSize: 12, color: "#666", marginTop: 4 },
-  footer: { marginTop: 16, alignItems: "center" },
-  link: { color: "#007AFF", fontSize: 16 },
-  label: { marginTop: 8, color: "#666" },
-  tabBar: {
-    flexDirection: "row",
-    backgroundColor: "#eef6ff",
-    borderRadius: 8,
-    padding: 4,
-    marginBottom: 8,
-  },
-  tabItem: {
+  center: {
     flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: Tokens.spacing.xl,
+  },
+  title: { ...Tokens.type.sectionTitle, marginBottom: 4 },
+  empty: {
     textAlign: "center",
-    paddingVertical: 8,
-    color: "#0a66c2",
-    fontWeight: "600",
+    color: Tokens.colors.textMuted,
+    marginTop: 32,
+    ...Tokens.type.body,
   },
-  tabItemActive: {
-    backgroundColor: "#d6eaff",
-    borderRadius: 6,
-    color: "#084a8b",
+  error: { color: Tokens.colors.danger, marginBottom: 16 },
+  section: { marginBottom: Tokens.spacing.xl },
+  sectionTitle: {
+    ...Tokens.type.label,
+    fontWeight: "bold",
+    marginBottom: Tokens.spacing.md,
+    color: Tokens.colors.textStrong,
   },
+  kpiContainer: {
+    flexDirection: "row",
+    backgroundColor: Tokens.colors.surfaceMuted,
+    borderRadius: Tokens.radius.md,
+    padding: Tokens.spacing.lg,
+    marginBottom: Tokens.spacing.xl,
+  },
+  kpiBox: {
+    flex: 1,
+    alignItems: "center",
+  },
+  kpiLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginBottom: 4,
+  },
+  kpiValue: {
+    ...Tokens.type.sectionTitle,
+    color: Tokens.colors.primary,
+  },
+  segmentedControl: {
+    marginBottom: Tokens.spacing.lg,
+  },
+  table: {
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    borderRadius: Tokens.radius.md,
+    overflow: "hidden",
+  },
+  tableHeader: {
+    flexDirection: "row",
+    backgroundColor: Tokens.colors.surfaceMuted,
+    paddingVertical: Tokens.spacing.sm,
+    paddingHorizontal: Tokens.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Tokens.colors.border,
+  },
+  tableRow: {
+    flexDirection: "row",
+    paddingVertical: Tokens.spacing.md,
+    paddingHorizontal: Tokens.spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.surface,
+  },
+  tableCell: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textBody,
+  },
+  headerId: { flex: 1 },
+  headerPeriod: { flex: 2 },
+  headerAmount: { flex: 2, textAlign: "right" },
+  headerStatus: { flex: 2, textAlign: "right" },
+  cellId: { flex: 1, color: Tokens.colors.textMuted },
+  cellPeriod: { flex: 2 },
+  cellAmount: {
+    flex: 2,
+    textAlign: "right",
+    fontWeight: "bold",
+    color: Tokens.colors.success,
+  },
+  cellStatus: { flex: 2, textAlign: "right" },
+  footer: {
+    marginTop: Tokens.spacing.xl,
+    paddingBottom: Tokens.spacing.xl,
+    alignItems: "center",
+  },
+  link: { ...Tokens.type.body, color: Tokens.colors.primary },
+  label: { marginTop: 8, color: Tokens.colors.textMuted },
 });

@@ -77,6 +77,7 @@ python3 scripts/ai_status.py audit doc-sync
 **Write scope:** `apps/driver-app/components/ui/*`, optional minimal
 `apps/driver-app/app/_layout.tsx` integration  
 **Depends on:** `DRV-MAT-000`
+**Status: completed**
 
 Create the reusable UI contract needed by all pages: tokens, screen frame,
 headers, buttons, icon buttons, status chips, form fields, segmented control,

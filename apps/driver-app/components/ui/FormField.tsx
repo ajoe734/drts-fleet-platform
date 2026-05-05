@@ -1,37 +1,35 @@
 import React from "react";
 import {
   StyleSheet,
+  View,
   Text,
   TextInput,
+  ViewStyle,
   TextInputProps,
-  View,
 } from "react-native";
-import { tokens } from "./tokens";
+import { Tokens } from "./tokens";
 
 interface FormFieldProps extends TextInputProps {
   label: string;
   error?: string;
   helpText?: string;
+  containerStyle?: ViewStyle;
 }
 
-export function FormField({
+export const FormField: React.FC<FormFieldProps> = ({
   label,
   error,
   helpText,
+  containerStyle,
   style,
   ...props
-}: FormFieldProps) {
+}) => {
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, containerStyle]}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
-        style={[
-          styles.input,
-          error ? styles.inputError : null,
-          props.multiline ? styles.inputMultiline : null,
-          style,
-        ]}
-        placeholderTextColor={tokens.colors.textMuted}
+        style={[styles.input, error ? styles.inputError : null, style]}
+        placeholderTextColor={Tokens.colors.textMuted}
         {...props}
       />
       {error ? (
@@ -41,45 +39,38 @@ export function FormField({
       ) : null}
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: tokens.spacing[16],
+    marginBottom: Tokens.spacing.lg,
   },
   label: {
-    ...tokens.type.label,
-    color: tokens.colors.textStrong,
-    marginBottom: tokens.spacing[4],
-    fontWeight: "600",
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
+    marginBottom: Tokens.spacing.xs,
   },
   input: {
-    ...tokens.type.body,
-    backgroundColor: tokens.colors.surface,
+    height: 48,
     borderWidth: 1,
-    borderColor: tokens.colors.border,
-    borderRadius: tokens.radius.sm,
-    paddingHorizontal: tokens.spacing[12],
-    paddingVertical: tokens.spacing[10],
-    color: tokens.colors.textStrong,
-    minHeight: 44,
-  },
-  inputMultiline: {
-    minHeight: 88,
-    textAlignVertical: "top",
+    borderColor: Tokens.colors.border,
+    borderRadius: Tokens.radius.md,
+    paddingHorizontal: Tokens.spacing.md,
+    backgroundColor: Tokens.colors.surface,
+    color: Tokens.colors.textStrong,
+    ...Tokens.type.body,
   },
   inputError: {
-    borderColor: tokens.colors.danger,
-    backgroundColor: tokens.colors.surfaceDanger,
+    borderColor: Tokens.colors.danger,
   },
   errorText: {
-    ...tokens.type.micro,
-    color: tokens.colors.danger,
-    marginTop: tokens.spacing[4],
+    ...Tokens.type.micro,
+    color: Tokens.colors.danger,
+    marginTop: 4,
   },
   helpText: {
-    ...tokens.type.micro,
-    color: tokens.colors.textMuted,
-    marginTop: tokens.spacing[4],
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginTop: 4,
   },
 });

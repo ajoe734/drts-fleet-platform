@@ -1,70 +1,73 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
-import { tokens } from "./tokens";
+import { StyleSheet, View, Text, ViewStyle } from "react-native";
+import { Tokens } from "./tokens";
 
-export type StatusTone =
-  | "neutral"
-  | "primary"
+export type StatusChipVariant =
+  | "default"
   | "success"
   | "warning"
-  | "danger";
+  | "danger"
+  | "info";
 
 interface StatusChipProps {
   label: string;
-  tone?: StatusTone;
+  variant?: StatusChipVariant;
+  style?: ViewStyle;
 }
 
-export function StatusChip({ label, tone = "neutral" }: StatusChipProps) {
+export const StatusChip: React.FC<StatusChipProps> = ({
+  label,
+  variant = "default",
+  style,
+}) => {
+  const getVariantStyles = () => {
+    switch (variant) {
+      case "success":
+        return {
+          container: { backgroundColor: "#E6F4EA" },
+          text: { color: Tokens.colors.success },
+        };
+      case "warning":
+        return {
+          container: { backgroundColor: Tokens.colors.surfaceWarning },
+          text: { color: Tokens.colors.warning },
+        };
+      case "danger":
+        return {
+          container: { backgroundColor: Tokens.colors.surfaceDanger },
+          text: { color: Tokens.colors.danger },
+        };
+      case "info":
+        return {
+          container: { backgroundColor: "#E8F0FE" },
+          text: { color: Tokens.colors.primary },
+        };
+      default:
+        return {
+          container: { backgroundColor: Tokens.colors.surfaceMuted },
+          text: { color: Tokens.colors.textBody },
+        };
+    }
+  };
+
+  const variantStyles = getVariantStyles();
+
   return (
-    <View style={[styles.base, styles[tone]]}>
-      <Text style={[styles.text, styles[`${tone}Text` as keyof typeof styles]]}>
-        {label}
-      </Text>
+    <View style={[styles.container, variantStyles.container, style]}>
+      <Text style={[styles.text, variantStyles.text]}>{label}</Text>
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  base: {
-    paddingHorizontal: tokens.spacing[8],
-    paddingVertical: tokens.spacing[2],
-    borderRadius: tokens.radius.xs,
+  container: {
+    paddingHorizontal: Tokens.spacing.sm,
+    paddingVertical: 2,
+    borderRadius: Tokens.radius.xs,
     alignSelf: "flex-start",
   },
   text: {
-    ...tokens.type.micro,
+    ...Tokens.type.micro,
     fontWeight: "600",
-  },
-  neutral: {
-    backgroundColor: tokens.colors.surfaceMuted,
-  },
-  neutralText: {
-    color: tokens.colors.textMuted,
-  },
-  primary: {
-    backgroundColor: tokens.colors.surfaceMuted, // Using muted as bg for subtle chips
-    borderWidth: 1,
-    borderColor: tokens.colors.primary,
-  },
-  primaryText: {
-    color: tokens.colors.primary,
-  },
-  success: {
-    backgroundColor: "#DCFCE7", // subtle success bg
-  },
-  successText: {
-    color: tokens.colors.success,
-  },
-  warning: {
-    backgroundColor: tokens.colors.surfaceWarning,
-  },
-  warningText: {
-    color: tokens.colors.warning,
-  },
-  danger: {
-    backgroundColor: tokens.colors.surfaceDanger,
-  },
-  dangerText: {
-    color: tokens.colors.danger,
   },
 });

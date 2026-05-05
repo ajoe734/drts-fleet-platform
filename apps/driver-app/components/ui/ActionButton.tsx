@@ -1,167 +1,156 @@
 import React from "react";
 import {
-  ActivityIndicator,
-  Pressable,
   StyleSheet,
+  TouchableOpacity,
   Text,
-  View,
+  ActivityIndicator,
+  ViewStyle,
+  TextStyle,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { tokens } from "./tokens";
+import { Tokens } from "./tokens";
 
-type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
+export type ActionButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 
 interface ActionButtonProps {
-  label: string;
   onPress: () => void;
-  variant?: ButtonVariant;
+  title: string;
+  variant?: ActionButtonVariant;
   icon?: keyof typeof Ionicons.glyphMap;
-  isLoading?: boolean;
+  loading?: boolean;
   disabled?: boolean;
-  fullWidth?: boolean;
+  style?: ViewStyle;
+  textStyle?: TextStyle;
 }
 
-export function ActionButton({
-  label,
+export const ActionButton: React.FC<ActionButtonProps> = ({
   onPress,
+  title,
   variant = "primary",
   icon,
-  isLoading,
-  disabled,
-  fullWidth = true,
-}: ActionButtonProps) {
-  const iconColor =
-    variant === "primary" || variant === "danger"
-      ? tokens.colors.textInverse
-      : tokens.colors.primary;
+  loading = false,
+  disabled = false,
+  style,
+  textStyle,
+}) => {
+  const getVariantStyles = () => {
+    switch (variant) {
+      case "secondary":
+        return {
+          button: styles.secondaryButton,
+          text: styles.secondaryText,
+          iconColor: Tokens.colors.textBody,
+        };
+      case "danger":
+        return {
+          button: styles.dangerButton,
+          text: styles.dangerText,
+          iconColor: Tokens.colors.textInverse,
+        };
+      case "ghost":
+        return {
+          button: styles.ghostButton,
+          text: styles.ghostText,
+          iconColor: Tokens.colors.primary,
+        };
+      default:
+        return {
+          button: styles.primaryButton,
+          text: styles.primaryText,
+          iconColor: Tokens.colors.textInverse,
+        };
+    }
+  };
+
+  const variantStyles = getVariantStyles();
+  const isDisabled = disabled || loading;
 
   return (
-    <Pressable
+    <TouchableOpacity
       onPress={onPress}
-      disabled={disabled || isLoading}
-      style={({ pressed }) => [
-        styles.base,
-        fullWidth && styles.fullWidth,
-        variantStyles[variant],
-        pressed && pressedStyles[variant],
-        (disabled || isLoading) && styles.disabled,
+      disabled={isDisabled}
+      activeOpacity={0.7}
+      style={[
+        styles.baseButton,
+        variantStyles.button,
+        isDisabled && styles.disabledButton,
+        style,
       ]}
     >
-      <View style={styles.content}>
-        {isLoading ? (
-          <ActivityIndicator size="small" color={iconColor} />
-        ) : (
-          <>
-            {icon && (
-              <Ionicons
-                name={icon}
-                size={18}
-                color={iconColor}
-                style={styles.icon}
-              />
-            )}
-            <Text
-              style={[
-                styles.text,
-                textStyles[variant],
-                disabled && styles.disabledText,
-              ]}
-            >
-              {label}
-            </Text>
-          </>
-        )}
-      </View>
-    </Pressable>
+      {loading ? (
+        <ActivityIndicator color={variantStyles.text.color} size="small" />
+      ) : (
+        <>
+          {icon && (
+            <Ionicons
+              name={icon}
+              size={18}
+              color={variantStyles.iconColor}
+              style={styles.icon}
+            />
+          )}
+          <Text
+            style={[
+              styles.baseText,
+              variantStyles.text,
+              isDisabled && styles.disabledText,
+              textStyle,
+            ]}
+          >
+            {title}
+          </Text>
+        </>
+      )}
+    </TouchableOpacity>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  base: {
-    borderRadius: tokens.radius.md,
-    paddingVertical: tokens.spacing[12],
-    paddingHorizontal: tokens.spacing[20],
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 48,
-  },
-  fullWidth: {
-    alignSelf: "stretch",
-  },
-  content: {
+  baseButton: {
+    height: 48,
+    borderRadius: Tokens.radius.md,
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: Tokens.spacing.lg,
   },
-  icon: {
-    marginRight: tokens.spacing[8],
+  baseText: {
+    ...Tokens.type.label,
+    fontWeight: "600",
   },
-  text: {
-    ...tokens.type.bodyBold,
-  },
-  primary: {
-    backgroundColor: tokens.colors.primary,
-  },
-  primaryPressed: {
-    backgroundColor: tokens.colors.primaryPressed,
+  primaryButton: {
+    backgroundColor: Tokens.colors.primary,
   },
   primaryText: {
-    color: tokens.colors.textInverse,
+    color: Tokens.colors.textInverse,
   },
-  secondary: {
-    backgroundColor: tokens.colors.surfaceMuted,
+  secondaryButton: {
+    backgroundColor: Tokens.colors.surfaceMuted,
     borderWidth: 1,
-    borderColor: tokens.colors.border,
-  },
-  secondaryPressed: {
-    backgroundColor: tokens.colors.border,
+    borderColor: Tokens.colors.border,
   },
   secondaryText: {
-    color: tokens.colors.textStrong,
+    color: Tokens.colors.textBody,
   },
-  danger: {
-    backgroundColor: tokens.colors.danger,
-  },
-  dangerPressed: {
-    backgroundColor: tokens.colors.danger, // Could use a darker shade if available
-    opacity: 0.8,
+  dangerButton: {
+    backgroundColor: Tokens.colors.danger,
   },
   dangerText: {
-    color: tokens.colors.textInverse,
+    color: Tokens.colors.textInverse,
   },
-  ghost: {
+  ghostButton: {
     backgroundColor: "transparent",
   },
-  ghostPressed: {
-    backgroundColor: tokens.colors.surfaceMuted,
-  },
   ghostText: {
-    color: tokens.colors.primary,
+    color: Tokens.colors.primary,
   },
-  disabled: {
+  disabledButton: {
     opacity: 0.5,
   },
   disabledText: {
-    color: tokens.colors.textMuted,
+    opacity: 0.8,
+  },
+  icon: {
+    marginRight: Tokens.spacing.sm,
   },
 });
-
-const variantStyles = {
-  primary: styles.primary,
-  secondary: styles.secondary,
-  danger: styles.danger,
-  ghost: styles.ghost,
-};
-
-const pressedStyles = {
-  primary: styles.primaryPressed,
-  secondary: styles.secondaryPressed,
-  danger: styles.dangerPressed,
-  ghost: styles.ghostPressed,
-};
-
-const textStyles = {
-  primary: styles.primaryText,
-  secondary: styles.secondaryText,
-  danger: styles.dangerText,
-  ghost: styles.ghostText,
-};
