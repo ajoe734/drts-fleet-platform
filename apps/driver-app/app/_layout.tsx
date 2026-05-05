@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
-import { Stack, useRouter } from "expo-router";
+import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 
@@ -25,8 +25,23 @@ export const unstable_settings = {
   initialRouteName: "onboarding",
 };
 
+function allowUnprovisionedRoute(segments: string[]): boolean {
+  const topLevelRoute = segments[0];
+  return (
+    topLevelRoute == null ||
+    topLevelRoute === "index" ||
+    topLevelRoute === "onboarding"
+  );
+}
+
 function DriverHeartbeatBootstrap() {
   const router = useRouter();
+  const segments = useSegments();
+  const segmentsRef = useRef<string[]>(segments);
+
+  useEffect(() => {
+    segmentsRef.current = [...segments];
+  }, [segments]);
 
   useEffect(() => {
     initializeDriverLocationHeartbeat();
@@ -35,6 +50,7 @@ function DriverHeartbeatBootstrap() {
 
     const syncWithActiveTrip = async () => {
       await syncDriverIdentityBootstrap({
+        allowUnprovisionedRoute: allowUnprovisionedRoute(segmentsRef.current),
         cancelled: () => cancelled,
         getDriverIdentityIssue,
         initializeDriverIdentity,
@@ -77,6 +93,7 @@ export default function RootLayout() {
       <StatusBar style="dark" />
       <Stack
         screenOptions={{
+          headerShown: false,
           headerStyle: {
             backgroundColor: tokens.colors.surface,
           },
@@ -91,7 +108,7 @@ export default function RootLayout() {
           },
         }}
       >
-        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="index" />
         <Stack.Screen name="onboarding" options={{ title: "工作台" }} />
         <Stack.Screen name="jobs" options={{ title: "任務收件匣" }} />
         <Stack.Screen name="trip" options={{ title: "行程作業" }} />
