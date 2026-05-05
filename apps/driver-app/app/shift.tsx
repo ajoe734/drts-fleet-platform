@@ -12,20 +12,78 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { FormField } from "@/components/ui/FormField";
 import { ActionButton } from "@/components/ui/ActionButton";
 import { BottomActionBar } from "@/components/ui/BottomActionBar";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { IconButton } from "@/components/ui/IconButton";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Tokens } from "@/components/ui/tokens";
+
+const ODOMETER_PATTERN = /^\d+$/;
+
+function getOdometerValidationMessage(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!ODOMETER_PATTERN.test(trimmed)) {
+    return "里程表只能輸入 0-9 整數。";
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed)) {
+    return "里程數值過大，請重新確認。";
+  }
+
+  return null;
+}
+
+function formatShiftDateTime(value: string): string {
+  return new Date(value).toLocaleString("zh-TW");
+}
+
+function formatOdometer(value: number | null): string {
+  if (value == null) {
+    return "未填寫";
+  }
+
+  return `${value.toLocaleString("zh-TW")} km`;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  return fallback;
+}
+
+function ShiftDetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value}</Text>
+    </View>
+  );
+}
 
 export default function ShiftScreen() {
   const router = useRouter();
   const isProvisioned = isDriverIdentityProvisioned();
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [activeShift, setActiveShift] = useState<ShiftRecord | null>(null);
   const [vehicleId, setVehicleId] = useState("");
   const [location, setLocation] = useState("");
   const [odometer, setOdometer] = useState("");
   const [shiftEnabled, setShiftEnabled] = useState<boolean | null>(null);
+  const [screenError, setScreenError] = useState<string | null>(null);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+
+  const odometerError = getOdometerValidationMessage(odometer);
+  const hasValidationError = Boolean(odometerError);
 
   useEffect(() => {
     if (!isProvisioned) {
@@ -40,19 +98,23 @@ export default function ShiftScreen() {
       .then((enabled) => {
         setShiftEnabled(enabled);
         if (enabled) {
-          loadShifts();
+          void loadShifts();
         } else {
           setLoading(false);
         }
       })
       .catch(() => {
         // Fallback to loading shifts if feature flag check fails
-        loadShifts();
+        void loadShifts();
       });
   }, [isProvisioned]);
 
-  const loadShifts = async () => {
+  const loadShifts = async ({ manual = false }: { manual?: boolean } = {}) => {
     if (!isProvisioned) return;
+
+    if (manual) {
+      setRefreshing(true);
+    }
 
     const client = getDriverClient();
     const driverId = getDriverId();
@@ -60,10 +122,12 @@ export default function ShiftScreen() {
       const shifts = await client.listShifts(driverId);
       const active = shifts.find((shift) => shift.status === "active");
       setActiveShift(active ?? null);
-    } catch {
-      // No shifts or error
+      setScreenError(null);
+    } catch (error: unknown) {
+      setScreenError(getErrorMessage(error, "班次資料載入失敗，請稍後再試。"));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -72,27 +136,27 @@ export default function ShiftScreen() {
     return (
       <AppScreen scrollable={false}>
         <PageHeader title="班表與出勤" />
-        <View style={styles.center}>
-          <Text style={styles.empty}>請先完成設備綁定以存取班表功能。</Text>
-          <ActionButton
-            title="前往綁定"
-            onPress={() => router.push("/onboarding")}
-            variant="primary"
-            style={{ marginTop: Tokens.spacing.lg }}
-          />
-        </View>
+        <EmptyState
+          title="尚未完成裝置配置"
+          description="完成裝置綁定後，才能查看班表與進行上下線打卡。"
+          icon="lock-closed-outline"
+          actionTitle="前往配置裝置"
+          onAction={() => router.push("/onboarding")}
+          style={styles.fillState}
+        />
       </AppScreen>
     );
   }
 
   const handleClockIn = async () => {
-    const trimmedOdometer = odometer.trim();
-    if (trimmedOdometer && isNaN(Number(trimmedOdometer))) {
-      Alert.alert("輸入錯誤", "里程表必須是有效的數字。");
+    if (odometerError) {
+      Alert.alert("輸入錯誤", odometerError);
       return;
     }
 
+    const trimmedOdometer = odometer.trim();
     setSubmitting(true);
+    setSubmissionError(null);
     const client = getDriverClient();
     const driverId = getDriverId();
     try {
@@ -103,25 +167,27 @@ export default function ShiftScreen() {
         odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
       });
       setActiveShift(result);
+      setScreenError(null);
       Alert.alert("成功", "已完成上線打卡。");
       setVehicleId("");
       setLocation("");
       setOdometer("");
-    } catch (e: any) {
-      Alert.alert("錯誤", e.message);
+    } catch (error: unknown) {
+      setSubmissionError(getErrorMessage(error, "上線打卡失敗，請稍後再試。"));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleClockOut = async () => {
-    const trimmedOdometer = odometer.trim();
-    if (trimmedOdometer && isNaN(Number(trimmedOdometer))) {
-      Alert.alert("輸入錯誤", "里程表必須是有效的數字。");
+    if (odometerError) {
+      Alert.alert("輸入錯誤", odometerError);
       return;
     }
 
+    const trimmedOdometer = odometer.trim();
     setSubmitting(true);
+    setSubmissionError(null);
     const client = getDriverClient();
     const driverId = getDriverId();
     try {
@@ -131,9 +197,12 @@ export default function ShiftScreen() {
         odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
       });
       setActiveShift(null);
+      setScreenError(null);
       Alert.alert("成功", "已完成下線打卡。");
-    } catch (e: any) {
-      Alert.alert("錯誤", e.message);
+      setLocation("");
+      setOdometer("");
+    } catch (error: unknown) {
+      setSubmissionError(getErrorMessage(error, "下線打卡失敗，請稍後再試。"));
     } finally {
       setSubmitting(false);
     }
@@ -155,10 +224,45 @@ export default function ShiftScreen() {
     return (
       <AppScreen scrollable={false}>
         <PageHeader title="班表與出勤" />
-        <View style={styles.center}>
-          <Text style={styles.title}>班表追蹤暫停提供</Text>
-          <Text style={styles.empty}>此功能目前未啟用。</Text>
-        </View>
+        <EmptyState
+          title="班表追蹤暫停提供"
+          description="此功能目前未啟用，請稍後再試或先返回工作台。"
+          icon="calendar-outline"
+          actionTitle="返回工作台"
+          onAction={() => router.push("/onboarding")}
+          style={styles.fillState}
+        />
+      </AppScreen>
+    );
+  }
+
+  if (screenError && !activeShift && !refreshing) {
+    return (
+      <AppScreen scrollable={false}>
+        <PageHeader
+          title="班表與出勤"
+          rightElement={
+            <IconButton
+              icon="refresh"
+              onPress={() => {
+                setLoading(true);
+                void loadShifts();
+              }}
+              accessibilityLabel="重新整理班次資料"
+            />
+          }
+        />
+        <EmptyState
+          title="班次資料暫時無法載入"
+          description={screenError}
+          icon="alert-circle-outline"
+          actionTitle="重新整理"
+          onAction={() => {
+            setLoading(true);
+            void loadShifts();
+          }}
+          style={styles.fillState}
+        />
       </AppScreen>
     );
   }
@@ -169,9 +273,22 @@ export default function ShiftScreen() {
         <PageHeader
           title="班表與出勤"
           subtitle={activeShift ? "執勤中" : "準備開始班次"}
+          rightElement={
+            <IconButton
+              icon="refresh"
+              onPress={() => void loadShifts({ manual: true })}
+              disabled={loading || submitting || refreshing}
+              accessibilityLabel="重新整理班次資料"
+            />
+          }
         />
 
         <View style={styles.content}>
+          {screenError ? (
+            <ErrorBanner message={`資料同步異常：${screenError}`} />
+          ) : null}
+          {submissionError ? <ErrorBanner message={submissionError} /> : null}
+
           {activeShift ? (
             <View style={styles.activeCard}>
               <View style={styles.cardHeader}>
@@ -179,19 +296,22 @@ export default function ShiftScreen() {
                 <StatusChip label="執勤中" variant="success" />
               </View>
 
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>車輛</Text>
-                <Text style={styles.detailValue}>
-                  {activeShift.vehicleId ?? "尚未指派"}
-                </Text>
-              </View>
-
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>開始時間</Text>
-                <Text style={styles.detailValue}>
-                  {new Date(activeShift.clockedInAt).toLocaleString()}
-                </Text>
-              </View>
+              <ShiftDetailRow
+                label="車輛"
+                value={activeShift.vehicleId ?? "尚未指派"}
+              />
+              <ShiftDetailRow
+                label="開始時間"
+                value={formatShiftDateTime(activeShift.clockedInAt)}
+              />
+              <ShiftDetailRow
+                label="起始位置"
+                value={activeShift.startLocation ?? "未填寫"}
+              />
+              <ShiftDetailRow
+                label="起始里程"
+                value={formatOdometer(activeShift.startOdometer)}
+              />
 
               <View style={styles.formSeparator} />
 
@@ -202,6 +322,7 @@ export default function ShiftScreen() {
                 placeholder="例如 50000"
                 keyboardType="numeric"
                 helpText="若需更新里程請於下線前填寫"
+                error={odometerError ?? undefined}
               />
 
               <FormField
@@ -212,8 +333,16 @@ export default function ShiftScreen() {
               />
             </View>
           ) : (
-            <View style={styles.form}>
-              <Text style={styles.instruction}>請先上線打卡以開始班次。</Text>
+            <View style={styles.activeCard}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>目前狀態</Text>
+                <StatusChip label="待上線" variant="default" />
+              </View>
+              <Text style={styles.instruction}>
+                完成上線打卡後，系統會開始追蹤本班次的出勤與里程資訊。
+              </Text>
+
+              <View style={styles.formSeparator} />
 
               <FormField
                 label="車輛編號（選填）"
@@ -235,6 +364,8 @@ export default function ShiftScreen() {
                 onChangeText={setOdometer}
                 placeholder="例如 50000"
                 keyboardType="numeric"
+                helpText="僅接受整數數字，留白則不送出里程資料。"
+                error={odometerError ?? undefined}
               />
             </View>
           )}
@@ -248,6 +379,7 @@ export default function ShiftScreen() {
             onPress={handleClockOut}
             variant="danger"
             loading={submitting}
+            disabled={hasValidationError}
             style={{ flex: 1 }}
           />
         ) : (
@@ -256,6 +388,7 @@ export default function ShiftScreen() {
             onPress={handleClockIn}
             variant="primary"
             loading={submitting}
+            disabled={hasValidationError}
             style={{ flex: 1 }}
           />
         )}
@@ -271,12 +404,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: Tokens.spacing.xl,
   },
+  fillState: {
+    flex: 1,
+  },
   content: { paddingVertical: Tokens.spacing.lg },
   title: { ...Tokens.type.sectionTitle, marginBottom: 4 },
   instruction: {
     ...Tokens.type.body,
     color: Tokens.colors.textMuted,
-    marginBottom: Tokens.spacing.xl,
+    marginBottom: Tokens.spacing.md,
   },
   activeCard: {
     backgroundColor: Tokens.colors.surface,
@@ -309,8 +445,9 @@ const styles = StyleSheet.create({
     ...Tokens.type.body,
     color: Tokens.colors.textStrong,
     fontWeight: "500",
+    flex: 1,
+    textAlign: "right",
   },
-  form: { paddingHorizontal: Tokens.spacing.xs },
   formSeparator: {
     height: 1,
     backgroundColor: Tokens.colors.border,
