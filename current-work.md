@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-05T01:23:19Z
+Last updated: 2026-05-06T03:11:30Z
 
 ## Objective
 
@@ -37,30 +37,20 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 ## Active Slices
 
 - `Claude`: governance-review, architecture-arbitration, control-plane; next: Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.
-- `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Assignment created
-- `Codex`: contracts, schema, state-system, acceptance; next: Refreshing the sidecar acceptance packet against current machine truth, parent review_approved state, and the known \_layout.tsx tokens/Tokens regression before reviewer handoff.
+- `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
+- `Codex`: contracts, schema, state-system, acceptance; next: Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
-- `Codex2`: contracts, schema, state-system, acceptance; next: Assignment created
-- `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Assignment created
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: 審查通過：shared UI foundation 已到位；我補上的 tokens 相容層後，@drts/driver-app typecheck、test、lint 均通過。
+- `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
+- `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
 
 ## Delivery Layers
 
 ### Primary Project Work
 
-| ID                               | Phase                     | Task                                                                        | Owner   | Status          | Depends On                                                                                                             | 中文說明                                                                                                                     |
-| -------------------------------- | ------------------------- | --------------------------------------------------------------------------- | ------- | --------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `DRV-MAT-001`                    | Driver App Productization | Driver App shared UI foundation                                             | Gemini2 | review_approved | `DRV-MAT-000`                                                                                                          | 建立 driver app 共用 tokens、screen frame、header、button、chip、form、empty/error、segmented control 與 bottom action bar。 |
-| `DRV-MAT-002`                    | Driver App Productization | Driver App shell and workstation home                                       | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          | 把 app shell 與 onboarding/workstation 首頁改成共享設計契約下的正式工作入口、配置流程與降級恢復頁。                          |
-| `DRV-MAT-003`                    | Driver App Productization | Driver task inbox materialization                                           | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          | 產品化任務收件匣，補篩選、摘要、任務卡、平台 badge、route-lock icon 與正式導航 affordance。                                  |
-| `DRV-MAT-004`                    | Driver App Productization | Driver trip workflow command center                                         | Codex2  | backlog         | `DRV-MAT-001`, `DRV-MAT-003`                                                                                           | 把 trip 頁重構成單一主要動作的行程作業台，保留 proof、replay、heartbeat、stale-session 行為。                                |
-| `DRV-MAT-005`                    | Driver App Productization | Driver SOS incident flow                                                    | Claude2 | backlog         | `DRV-MAT-001`, `DRV-MAT-004`                                                                                           | 產品化 SOS 緊急通報頁，導入 shared danger controls 並在送出重大事件前加入確認步驟。                                          |
-| `DRV-MAT-006`                    | Driver App Productization | Driver shift and attendance materialization                                 | Gemini2 | backlog         | `DRV-MAT-001`                                                                                                          | 產品化班次與出勤頁，移除 driver-demo-001，改用 provisioned driver identity 與共享 action/form 元件。                         |
-| `DRV-MAT-007`                    | Driver App Productization | Driver platform presence and binding                                        | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          | 統一 platform presence/status/binding UX，移除重複元件邏輯，改成中文 copy 與 icon controls。                                 |
-| `DRV-MAT-008`                    | Driver App Productization | Driver earnings dashboard materialization                                   | Codex2  | backlog         | `DRV-MAT-001`                                                                                                          | 產品化收益儀表板，補 KPI tiles、period segmented control、平台收益列與對帳單列。                                             |
-| `DRV-MAT-009`                    | Driver App Productization | Driver settings materialization                                             | Claude2 | backlog         | `DRV-MAT-001`, `DRV-MAT-007`                                                                                           | 把設定頁拆成清楚區塊，補 dirty/save/validation 狀態，並整合中文化 platform binding。                                         |
-| `DRV-MAT-010`                    | Driver App Productization | Driver app productization verification pack                                 | Gemini  | backlog         | `DRV-MAT-002`, `DRV-MAT-003`, `DRV-MAT-004`, `DRV-MAT-005`, `DRV-MAT-006`, `DRV-MAT-007`, `DRV-MAT-008`, `DRV-MAT-009` | 產出 driver app 產品化的逐頁驗證包，記錄 typecheck、tests、route smoke 與視覺 evidence blocker。                             |
-| `DRV-MAT-001-SIDECAR-ACCEPTANCE` | Driver App Productization | [Sidecar] [Auto] [Parent DRV-MAT-001] DRV-MAT-001 sidecar acceptance packet | Codex   | in_progress     | `DRV-MAT-000`                                                                                                          | 平行支援 DRV-MAT-001，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。                  |
+| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
+| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
+| _(none)_ | -     | -    | -     | -      | -          | -        |
 
 ### External / Upstream Integration Work
 
@@ -70,25 +60,14 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Task Board (active only)
 
-| ID                               | Phase                     | Task                                                                        | Owner   | Status          | Depends On                                                                                                             |
-| -------------------------------- | ------------------------- | --------------------------------------------------------------------------- | ------- | --------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `DRV-MAT-001`                    | Driver App Productization | Driver App shared UI foundation                                             | Gemini2 | review_approved | `DRV-MAT-000`                                                                                                          |
-| `DRV-MAT-002`                    | Driver App Productization | Driver App shell and workstation home                                       | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          |
-| `DRV-MAT-003`                    | Driver App Productization | Driver task inbox materialization                                           | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          |
-| `DRV-MAT-004`                    | Driver App Productization | Driver trip workflow command center                                         | Codex2  | backlog         | `DRV-MAT-001`, `DRV-MAT-003`                                                                                           |
-| `DRV-MAT-005`                    | Driver App Productization | Driver SOS incident flow                                                    | Claude2 | backlog         | `DRV-MAT-001`, `DRV-MAT-004`                                                                                           |
-| `DRV-MAT-006`                    | Driver App Productization | Driver shift and attendance materialization                                 | Gemini2 | backlog         | `DRV-MAT-001`                                                                                                          |
-| `DRV-MAT-007`                    | Driver App Productization | Driver platform presence and binding                                        | Claude2 | backlog         | `DRV-MAT-001`                                                                                                          |
-| `DRV-MAT-008`                    | Driver App Productization | Driver earnings dashboard materialization                                   | Codex2  | backlog         | `DRV-MAT-001`                                                                                                          |
-| `DRV-MAT-009`                    | Driver App Productization | Driver settings materialization                                             | Claude2 | backlog         | `DRV-MAT-001`, `DRV-MAT-007`                                                                                           |
-| `DRV-MAT-010`                    | Driver App Productization | Driver app productization verification pack                                 | Gemini  | backlog         | `DRV-MAT-002`, `DRV-MAT-003`, `DRV-MAT-004`, `DRV-MAT-005`, `DRV-MAT-006`, `DRV-MAT-007`, `DRV-MAT-008`, `DRV-MAT-009` |
-| `DRV-MAT-001-SIDECAR-ACCEPTANCE` | Driver App Productization | [Sidecar] [Auto] [Parent DRV-MAT-001] DRV-MAT-001 sidecar acceptance packet | Codex   | in_progress     | `DRV-MAT-000`                                                                                                          |
+| ID  | Phase | Task | Owner | Status | Depends On |
+| --- | ----- | ---- | ----- | ------ | ---------- |
 
 ## Handoff Queue
 
-| Task          | From  | To      | Message                                                                                                          | Status  | Created At           |
-| ------------- | ----- | ------- | ---------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
-| `DRV-MAT-001` | Codex | Gemini2 | 審查通過：shared UI foundation 已到位；我補上的 tokens 相容層後，@drts/driver-app typecheck、test、lint 均通過。 | pending | 2026-05-05T00:51:09Z |
+| Task     | From | To  | Message | Status | Created At |
+| -------- | ---- | --- | ------- | ------ | ---------- |
+| _(none)_ | -    | -   | -       | -      | -          |
 
 ## Blockers
 
@@ -98,45 +77,44 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Review Notes (active tasks)
 
-| Task                             | Reviewer | 修正重點                                                                                                                                                        | Review File |
-| -------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `DRV-MAT-001`                    | Codex    | 審查通過：已補修 Gemini2 handoff 中的 TypeScript 問題與不相容測試檔；driver app typecheck、test、lint 均通過。Gemini CLI shell tool 也已修補並 smoke verified。 | -           |
-| `DRV-MAT-001-SIDECAR-ACCEPTANCE` | Gemini2  | 審查通過：sidecar acceptance packet 已更新 reviewer 與驗證門檻，並未修改 L1 canonical truth。                                                                   | -           |
+| Task     | Reviewer | 修正重點 | Review File |
+| -------- | -------- | -------- | ----------- |
+| _(none)_ | -        | -        | -           |
 
 ## Completion Evidence (last 10)
 
-| Task                         | Commit                                   | Subject                                                           | LLM Agent | Reviewer | Recorded At          |
-| ---------------------------- | ---------------------------------------- | ----------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `SYNC-003`                   | 0ee6948cded997b07b0cae009a83f30f9ff7aade | SYNC-003: reclassify UAT evidence gates                           | Gemini2   | Codex    | 2026-05-01T08:26:17Z |
-| `XREPO-001`                  | c74f82cd87c5b774286a9740c3f49a229504ed1d | chore(status): approve cross-repo closeout                        | Gemini2   | Codex    | 2026-05-01T08:14:24Z |
-| `DEPLOY-001`                 | 394c3e2201dc26a9f83ff2b78ddaa3ef7626bd01 | chore(closeout): review proof gates and stabilize chairman triage | Gemini2   | Codex    | 2026-05-01T08:14:32Z |
-| `EXT-001`                    | 8a92c1f78b2c10d34ddf6cfe964facbccd3bd985 | EXT-001: record issuer eligibility external gate                  | Gemini2   | Codex    | 2026-05-01T08:32:05Z |
-| `EXT-002`                    | 137cac133a9a7b341f01264ff908fb3876330d14 | EXT-002: record forwarder adapter proof gate                      | Gemini2   | Codex    | 2026-05-01T08:38:58Z |
-| `EXT-003`                    | 5ed2f8adc5699de90ad894a53c6fecea89d3a861 | EXT-003: record mobile distribution gate                          | Gemini2   | Codex    | 2026-05-01T08:44:11Z |
-| `EXT-004`                    | 0afd14413725f046fb1320fecb21a57fbf6a24b0 | EXT-004: record CTI recording filing gate                         | Gemini2   | Codex    | 2026-05-01T08:54:13Z |
-| `BDX-CLOSEOUT`               | f7f3e7c1808363ef600cb3aacb8b1de8bc112850 | BDX-CLOSEOUT: finalize blueprint delta closeout                   | Gemini2   | Codex    | 2026-05-01T09:02:16Z |
-| `DRV-MAT-000`                | -                                        | no-commit closeout                                                | Gemini2   | Gemini   | 2026-05-04T06:06:23Z |
-| `DRV-MAT-001-SIDECAR-REVIEW` | -                                        | no-commit closeout                                                | Codex2    | Gemini   | 2026-05-05T00:45:36Z |
+| Task                             | Commit                                   | Subject                                                  | LLM Agent | Reviewer | Recorded At          |
+| -------------------------------- | ---------------------------------------- | -------------------------------------------------------- | --------- | -------- | -------------------- |
+| `DRV-MAT-007`                    | b7e14a4                                  | DRV-MAT-007 unify driver platform status UX              | Codex2    | Codex    | 2026-05-05T02:04:06Z |
+| `DRV-MAT-008`                    | e4edb8621201f5c8aaec38d8304ad2b52994f006 | feat(DRV-MAT-008): materialize driver earnings dashboard | Codex2    | Codex    | 2026-05-05T12:25:14Z |
+| `DRV-MAT-009`                    | c13cbf41b260cbf39a022a229eb29e2b86641773 | feat(DRV-MAT-009): materialize driver settings           | Codex2    | Codex    | 2026-05-05T03:02:16Z |
+| `DRV-MAT-010`                    | 23f9ef4d0519b1fa8e7912f420e385a28f49c7dc | DRV-MAT-010: driver app productization verification pack | Claude2   | Codex    | 2026-05-05T12:55:19Z |
+| `DRV-MAT-001-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                       | Codex2    | Gemini2  | 2026-05-05T01:30:48Z |
+| `DRV-MAT-001-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                       | Codex2    | Gemini   | 2026-05-05T00:45:36Z |
+| `DRV-MAT-006-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                       | Codex2    | Claude2  | 2026-05-05T02:38:09Z |
+| `DRV-MAT-008-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                       | Codex2    | Codex    | 2026-05-05T12:08:13Z |
+| `DRV-MAT-009-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                       | Codex2    | Codex    | 2026-05-05T12:16:40Z |
+| `DRV-MAT-010-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                       | Codex     | Claude2  | 2026-05-05T13:02:37Z |
 
 ## Latest Checkpoints
 
-- 2026-05-05T01:21:57Z Orchestrator: PostToolUse: Bash
-- 2026-05-05T01:22:00Z Orchestrator: PreToolUse: Bash
-- 2026-05-05T01:22:01Z Orchestrator: PostToolUse: Bash
-- 2026-05-05T01:22:12Z Orchestrator: `DRV-MAT-001-SIDECAR-ACCEPTANCE` Wake-up queued for supervisor: owned_finalize_dispatch
-- 2026-05-05T01:22:12Z Orchestrator: `DRV-MAT-001-SIDECAR-ACCEPTANCE` Availability-first reassignment: Codex claimed DRV-MAT-001-SIDECAR-ACCEPTANCE while Gemini2 was unavailable or occupied.
-- 2026-05-05T01:22:12Z Orchestrator: `DRV-MAT-001-SIDECAR-ACCEPTANCE` Skipped stale queued wake event for DRV-MAT-001-SIDECAR-ACCEPTANCE: task is no longer eligible for owned_finalize_dispatch.
-- 2026-05-05T01:22:14Z Orchestrator: PreToolUse: Bash
-- 2026-05-05T01:22:14Z Orchestrator: PostToolUse: Bash
-- 2026-05-05T01:22:16Z Orchestrator: PreToolUse: Bash
-- 2026-05-05T01:22:17Z Orchestrator: PostToolUse: Bash
-- 2026-05-05T01:22:27Z Orchestrator: `DRV-MAT-001-SIDECAR-ACCEPTANCE` Wake-up queued for supervisor: owned_in_progress_dispatch
-- 2026-05-05T01:22:27Z Orchestrator: `DRV-MAT-001-SIDECAR-ACCEPTANCE` Worker started via codex: owned_in_progress_dispatch
-- 2026-05-05T01:22:41Z Orchestrator: PreToolUse: Bash
-- 2026-05-05T01:22:42Z Orchestrator: PostToolUse: Bash
-- 2026-05-05T01:22:51Z Orchestrator: PreToolUse: Bash
-- 2026-05-05T01:22:51Z Orchestrator: PostToolUse: Bash
-- 2026-05-05T01:23:04Z Orchestrator: PreToolUse: Bash
-- 2026-05-05T01:23:07Z Codex: `DRV-MAT-001-SIDECAR-ACCEPTANCE` Refreshing the sidecar acceptance packet against current machine truth, parent review_approved state, and the known \_layout.tsx tokens/Tokens regression before reviewer handoff.
-- 2026-05-05T01:23:16Z Orchestrator: PostToolUse: Bash
-- 2026-05-05T01:23:18Z Orchestrator: PreToolUse: Bash
+- 2026-05-05T15:01:44Z Orchestrator: SessionStart: SessionStart
+- 2026-05-05T15:01:44Z Orchestrator: SessionStart: SessionStart
+- 2026-05-05T15:01:46Z Orchestrator: SessionEnd: SessionEnd
+- 2026-05-05T15:01:48Z Orchestrator: Stop: Stop
+- 2026-05-05T15:01:48Z Orchestrator: SessionEnd: SessionEnd
+- 2026-05-05T15:10:24Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T15:25:25Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T15:40:28Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T15:55:37Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T16:10:40Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T16:25:50Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T16:40:57Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T16:56:01Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T17:11:09Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T17:26:14Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T17:41:14Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T17:56:20Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T18:11:20Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T18:26:26Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-06T03:09:26Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback

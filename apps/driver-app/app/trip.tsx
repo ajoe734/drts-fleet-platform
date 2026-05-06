@@ -15,6 +15,7 @@ import * as ImagePicker from "expo-image-picker";
 import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
 
 import RouteDisplay from "@/components/route-display";
+import { ActionButton as SharedActionButton } from "@/components/ui/ActionButton";
 import {
   appendProofPhotos,
   buildCompletionExpenseItem,
@@ -996,9 +997,20 @@ export default function TripScreen() {
       )}
 
       <View style={styles.footer}>
-        <Text style={styles.link} onPress={() => router.push("/incident")}>
-          SOS 緊急通報 →
-        </Text>
+        <View style={styles.sosCard}>
+          <Text style={styles.sosEyebrow}>安全支援</Text>
+          <Text style={styles.sosTitle}>需要立即通報重大安全事件？</Text>
+          <Text style={styles.sosNote}>
+            開啟 SOS 緊急通報後，送出前仍需再確認一次。
+          </Text>
+          <SharedActionButton
+            title="開啟 SOS 緊急通報"
+            onPress={() => router.push("/incident")}
+            variant="danger"
+            icon="warning-outline"
+            style={styles.sosButton}
+          />
+        </View>
       </View>
     </ScrollView>
   );
@@ -1257,7 +1269,32 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#45627d",
   },
-  footer: { alignItems: "center" },
-  link: { color: "#007AFF", fontSize: 16 },
+  footer: { marginTop: 8 },
+  sosCard: {
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#fff1f2",
+    borderWidth: 1,
+    borderColor: "#f6c7cd",
+    gap: 8,
+  },
+  sosEyebrow: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    color: "#8a0f19",
+  },
+  sosTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#6b0f17",
+  },
+  sosNote: {
+    fontSize: 13,
+    color: "#8a3b44",
+  },
+  sosButton: {
+    marginTop: 4,
+  },
   label: { marginTop: 8, color: "#666" },
 });
