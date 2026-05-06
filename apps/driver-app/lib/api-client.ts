@@ -124,6 +124,38 @@ function setDriverIdentityIssue(message: string | null) {
   driverIdentityIssue = message?.trim() ? message.trim() : null;
 }
 
+function canUseWebStorage(): boolean {
+  return (
+    typeof window !== "undefined" && typeof window.localStorage !== "undefined"
+  );
+}
+
+async function readStoredValue(key: string): Promise<string | null> {
+  if (canUseWebStorage()) {
+    return window.localStorage.getItem(key);
+  }
+
+  return SecureStore.getItemAsync(key);
+}
+
+async function writeStoredValue(key: string, value: string): Promise<void> {
+  if (canUseWebStorage()) {
+    window.localStorage.setItem(key, value);
+    return;
+  }
+
+  await SecureStore.setItemAsync(key, value);
+}
+
+async function deleteStoredValue(key: string): Promise<void> {
+  if (canUseWebStorage()) {
+    window.localStorage.removeItem(key);
+    return;
+  }
+
+  await SecureStore.deleteItemAsync(key);
+}
+
 function parseApiError(error: unknown): {
   status: number | null;
   code: string | null;
@@ -239,35 +271,33 @@ export async function recoverDriverSessionFromApiError(
 }
 
 async function getOrCreateDeviceId(): Promise<string> {
-  const existing = await SecureStore.getItemAsync(DRIVER_DEVICE_ID_KEY);
+  const existing = await readStoredValue(DRIVER_DEVICE_ID_KEY);
   if (existing?.trim()) {
     return existing;
   }
 
   const deviceId = createLocalId("device");
-  await SecureStore.setItemAsync(DRIVER_DEVICE_ID_KEY, deviceId);
+  await writeStoredValue(DRIVER_DEVICE_ID_KEY, deviceId);
   return deviceId;
 }
 
 async function clearStoredSession() {
   provisionedSession = null;
-  await SecureStore.deleteItemAsync(DRIVER_SESSION_KEY);
+  await deleteStoredValue(DRIVER_SESSION_KEY);
   applySession(null);
 }
 
 async function persistPendingDriverTaskCompletion(
   pending: PendingDriverTaskCompletion,
 ): Promise<void> {
-  await SecureStore.setItemAsync(
+  await writeStoredValue(
     DRIVER_PENDING_TASK_COMPLETION_KEY,
     JSON.stringify(pending),
   );
 }
 
 async function loadPendingDriverTaskCompletion(): Promise<PendingDriverTaskCompletion | null> {
-  const raw = await SecureStore.getItemAsync(
-    DRIVER_PENDING_TASK_COMPLETION_KEY,
-  );
+  const raw = await readStoredValue(DRIVER_PENDING_TASK_COMPLETION_KEY);
   if (!raw) {
     return null;
   }
@@ -284,18 +314,18 @@ async function loadPendingDriverTaskCompletion(): Promise<PendingDriverTaskCompl
 
     return pending;
   } catch {
-    await SecureStore.deleteItemAsync(DRIVER_PENDING_TASK_COMPLETION_KEY);
+    await deleteStoredValue(DRIVER_PENDING_TASK_COMPLETION_KEY);
     return null;
   }
 }
 
 async function clearPendingDriverTaskCompletion(): Promise<void> {
-  await SecureStore.deleteItemAsync(DRIVER_PENDING_TASK_COMPLETION_KEY);
+  await deleteStoredValue(DRIVER_PENDING_TASK_COMPLETION_KEY);
 }
 
 async function persistSession(session: DriverDeviceProvisioningSession) {
   provisionedSession = session;
-  await SecureStore.setItemAsync(DRIVER_SESSION_KEY, JSON.stringify(session));
+  await writeStoredValue(DRIVER_SESSION_KEY, JSON.stringify(session));
   applySession(session);
 }
 
@@ -320,8 +350,7 @@ export async function initializeDriverIdentity(): Promise<void> {
       return;
     }
 
-    const storedSessionJson =
-      await SecureStore.getItemAsync(DRIVER_SESSION_KEY);
+    const storedSessionJson = await readStoredValue(DRIVER_SESSION_KEY);
     if (!storedSessionJson) {
       setDriverIdentityIssue(null);
       applySession(null);
