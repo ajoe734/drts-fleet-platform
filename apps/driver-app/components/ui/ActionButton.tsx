@@ -4,8 +4,9 @@ import {
   TouchableOpacity,
   Text,
   ActivityIndicator,
-  ViewStyle,
-  TextStyle,
+  type StyleProp,
+  type ViewStyle,
+  type TextStyle,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Tokens } from "./tokens";
@@ -19,8 +20,8 @@ interface ActionButtonProps {
   icon?: keyof typeof Ionicons.glyphMap;
   loading?: boolean;
   disabled?: boolean;
-  style?: ViewStyle;
-  textStyle?: TextStyle;
+  style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
 }
 
 export const ActionButton: React.FC<ActionButtonProps> = ({

@@ -1,6 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { StatusChip, Tokens } from "@/components/ui";
+import { AuthorityBanner, StatusChip, Tokens } from "@/components/ui";
 
 const PLATFORM_LABELS: Record<string, string> = {
   direct: "自營派單",
@@ -37,6 +37,40 @@ export function PlatformTaskBadge({
       <Text style={styles.externalBadgePrefix}>來源平台</Text>
       <Text style={styles.externalBadgeText}>{label}</Text>
     </View>
+  );
+}
+
+export function PlatformAuthorityBanner({
+  platformCode,
+  description,
+}: {
+  platformCode: string | null;
+  description: string;
+}) {
+  const normalizedCode = platformCode?.trim().toLowerCase() ?? "owned";
+  const code = normalizedCode.length > 0 ? normalizedCode : "owned";
+  const label = PLATFORM_LABELS[code] ?? humanizePlatformCode(code);
+
+  if (code === "owned" || code === "direct") {
+    return (
+      <AuthorityBanner
+        title="DRTS 自營任務"
+        authorityLabel="本地可操作"
+        description={description}
+        tone="owned"
+        icon="shield-checkmark"
+      />
+    );
+  }
+
+  return (
+    <AuthorityBanner
+      title={`${label} 平台任務`}
+      authorityLabel="平台主導"
+      description={description}
+      tone="platform"
+      icon="swap-horizontal"
+    />
   );
 }
 
