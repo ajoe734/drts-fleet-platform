@@ -8,6 +8,7 @@ import {
 import {
   PlatformHealthCard,
   type PlatformHealthFact,
+  PlatformBadge,
   Tokens,
 } from "@/components/ui";
 
@@ -143,6 +144,7 @@ export function PlatformStatusCard({
   const platformLabel =
     PLATFORM_CODE_REGISTRY[record.platformCode]?.displayName ??
     record.platformCode;
+  const normalizedPlatformCode = String(record.platformCode).toLowerCase();
 
   useEffect(() => {
     setExpiryInfo(getTokenExpiryInfo(record.tokenExpiresAt));
@@ -251,6 +253,15 @@ export function PlatformStatusCard({
       }
       footer={
         <>
+          <PlatformBadge
+            code={record.platformCode}
+            name={platformLabel}
+            forwarded={
+              normalizedPlatformCode !== "owned" &&
+              normalizedPlatformCode !== "direct"
+            }
+            size="sm"
+          />
           <View style={styles.platformRow}>
             <View
               style={[styles.statusDot, { backgroundColor: statusColor }]}
@@ -287,7 +298,7 @@ const styles = StyleSheet.create({
   actionButton: {
     width: 36,
     height: 36,
-    borderRadius: Tokens.radius.full,
+    borderRadius: 10,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -306,7 +317,7 @@ const styles = StyleSheet.create({
     borderRadius: Tokens.radius.full,
   },
   statusText: {
-    ...Tokens.type.micro,
+    ...Tokens.type.small,
     color: Tokens.colors.textMuted,
   },
   noticeBanner: {

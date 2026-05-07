@@ -30,12 +30,14 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    height: Tokens.layout.headerHeight,
+    minHeight: Tokens.layout.headerHeight,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-end",
     justifyContent: "space-between",
     paddingHorizontal: Tokens.layout.pagePadding,
-    backgroundColor: Tokens.colors.surface,
+    paddingBottom: Tokens.spacing.md,
+    paddingTop: Tokens.spacing.lg,
+    backgroundColor: Tokens.colors.bgRaised,
     borderBottomWidth: 1,
     borderBottomColor: Tokens.colors.border,
   },
@@ -45,11 +47,11 @@ const styles = StyleSheet.create({
   },
   title: {
     ...Tokens.type.screenTitle,
-    color: Tokens.colors.textStrong,
-    fontSize: 20, // Slightly smaller for header
+    color: Tokens.colors.text,
+    fontSize: 22,
   },
   subtitle: {
-    ...Tokens.type.micro,
+    ...Tokens.type.small,
     color: Tokens.colors.textMuted,
   },
   rightElement: {
