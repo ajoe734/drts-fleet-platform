@@ -20,18 +20,18 @@ export const ErrorBanner: React.FC<ErrorBannerProps> = ({ message, style }) => {
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Tokens.colors.surfaceDanger,
+    alignItems: "flex-start",
+    backgroundColor: Tokens.colors.dangerBg,
     padding: Tokens.spacing.md,
     borderRadius: Tokens.radius.md,
     borderWidth: 1,
-    borderColor: Tokens.colors.danger,
+    borderColor: `${Tokens.colors.danger}33`,
     marginBottom: Tokens.spacing.md,
+    gap: Tokens.spacing.sm,
   },
   message: {
     ...Tokens.type.label,
     color: Tokens.colors.danger,
-    marginLeft: Tokens.spacing.sm,
     flex: 1,
   },
 });

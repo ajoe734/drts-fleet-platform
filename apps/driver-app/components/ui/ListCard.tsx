@@ -64,13 +64,14 @@ export const ListCard: React.FC<ListCardProps> = ({
 const styles = StyleSheet.create({
   container: {
     backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.md,
-    padding: Tokens.spacing.md,
+    borderRadius: Tokens.radius.lg,
+    padding: Tokens.spacing.lg,
     marginBottom: Tokens.spacing.sm,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     borderWidth: 1,
     borderColor: Tokens.colors.border,
+    ...Tokens.shadows.sm,
   },
   mainContent: {
     flex: 1,
@@ -82,14 +83,14 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   title: {
-    ...Tokens.type.body,
+    ...Tokens.type.title,
     fontWeight: "600",
-    color: Tokens.colors.textStrong,
+    color: Tokens.colors.text,
     flex: 1,
     marginRight: Tokens.spacing.sm,
   },
   subtitle: {
-    ...Tokens.type.label,
+    ...Tokens.type.body,
     color: Tokens.colors.textBody,
     marginBottom: 2,
   },

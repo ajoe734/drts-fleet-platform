@@ -40,7 +40,7 @@ export const ActionButton: React.FC<ActionButtonProps> = ({
         return {
           button: styles.secondaryButton,
           text: styles.secondaryText,
-          iconColor: Tokens.colors.textBody,
+          iconColor: Tokens.colors.text,
         };
       case "danger":
         return {
@@ -52,7 +52,7 @@ export const ActionButton: React.FC<ActionButtonProps> = ({
         return {
           button: styles.ghostButton,
           text: styles.ghostText,
-          iconColor: Tokens.colors.primary,
+          iconColor: Tokens.colors.brand,
         };
       default:
         return {
@@ -108,30 +108,36 @@ export const ActionButton: React.FC<ActionButtonProps> = ({
 
 const styles = StyleSheet.create({
   baseButton: {
-    height: 48,
-    borderRadius: Tokens.radius.md,
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "transparent",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: Tokens.spacing.lg,
+    paddingVertical: Tokens.spacing.md,
+    ...Tokens.shadows.sm,
   },
   baseText: {
     ...Tokens.type.label,
     fontWeight: "600",
   },
   primaryButton: {
-    backgroundColor: Tokens.colors.primary,
+    backgroundColor: Tokens.colors.brand,
   },
   primaryText: {
     color: Tokens.colors.textInverse,
   },
   secondaryButton: {
-    backgroundColor: Tokens.colors.surfaceMuted,
+    backgroundColor: Tokens.colors.surfaceLo,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   secondaryText: {
-    color: Tokens.colors.textBody,
+    color: Tokens.colors.text,
   },
   dangerButton: {
     backgroundColor: Tokens.colors.danger,
@@ -141,9 +147,12 @@ const styles = StyleSheet.create({
   },
   ghostButton: {
     backgroundColor: "transparent",
+    borderColor: "transparent",
+    shadowOpacity: 0,
+    elevation: 0,
   },
   ghostText: {
-    color: Tokens.colors.primary,
+    color: Tokens.colors.brand,
   },
   disabledButton: {
     opacity: 0.5,

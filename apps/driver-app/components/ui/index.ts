@@ -6,6 +6,7 @@ export * from "./IconButton";
 export * from "./StatusChip";
 export * from "./TaskStateChip";
 export * from "./AuthorityBanner";
+export * from "./PlatformBadge";
 export * from "./PlatformHealthCard";
 export * from "./InfoTile";
 export * from "./ListCard";

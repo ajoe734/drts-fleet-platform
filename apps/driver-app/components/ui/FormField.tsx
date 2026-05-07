@@ -47,17 +47,18 @@ const styles = StyleSheet.create({
   },
   label: {
     ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
+    color: Tokens.colors.text,
     marginBottom: Tokens.spacing.xs,
   },
   input: {
-    height: 48,
+    minHeight: 48,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
     borderRadius: Tokens.radius.md,
     paddingHorizontal: Tokens.spacing.md,
+    paddingVertical: Tokens.spacing.sm,
     backgroundColor: Tokens.colors.surface,
-    color: Tokens.colors.textStrong,
+    color: Tokens.colors.text,
     ...Tokens.type.body,
   },
   inputError: {
@@ -69,7 +70,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   helpText: {
-    ...Tokens.type.micro,
+    ...Tokens.type.small,
     color: Tokens.colors.textMuted,
     marginTop: 4,
   },

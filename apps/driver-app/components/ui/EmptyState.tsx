@@ -45,11 +45,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    padding: Tokens.spacing.xxl,
+    padding: Tokens.spacing["3xl"],
   },
   title: {
     ...Tokens.type.sectionTitle,
-    color: Tokens.colors.textStrong,
+    color: Tokens.colors.text,
     marginTop: Tokens.spacing.md,
     textAlign: "center",
   },

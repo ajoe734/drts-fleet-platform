@@ -83,16 +83,17 @@ export const BottomActionBar: React.FC<BottomActionBarProps> = ({
 
 const styles = StyleSheet.create({
   safeArea: {
-    backgroundColor: Tokens.colors.surface,
+    backgroundColor: Tokens.colors.bgRaised,
     borderTopWidth: 1,
     borderTopColor: Tokens.colors.border,
   },
   container: {
     padding: Tokens.spacing.lg,
     gap: Tokens.spacing.sm,
+    backgroundColor: Tokens.colors.bgRaised,
   },
   notice: {
-    ...Tokens.type.micro,
+    ...Tokens.type.small,
     color: Tokens.colors.textMuted,
   },
   actionRow: {

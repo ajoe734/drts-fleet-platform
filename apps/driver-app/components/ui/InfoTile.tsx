@@ -29,9 +29,9 @@ export const InfoTile: React.FC<InfoTileProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Tokens.colors.surface,
+    backgroundColor: Tokens.colors.surfaceLo,
     padding: Tokens.spacing.md,
-    borderRadius: Tokens.radius.md,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
     minHeight: 80,
@@ -48,7 +48,7 @@ const styles = StyleSheet.create({
   },
   value: {
     ...Tokens.type.sectionTitle,
-    color: Tokens.colors.textStrong,
+    color: Tokens.colors.text,
   },
   unit: {
     ...Tokens.type.micro,

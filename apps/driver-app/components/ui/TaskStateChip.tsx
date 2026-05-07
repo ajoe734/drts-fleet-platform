@@ -21,7 +21,7 @@ function toStatusVariant(tone: TaskStateTone = "default"): StatusChipVariant {
     case "in_progress":
       return "success";
     case "platform_pending":
-      return "info";
+      return "forwarded";
     case "platform_closed":
       return "default";
     case "sync_issue":

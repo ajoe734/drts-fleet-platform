@@ -50,25 +50,22 @@ export const SegmentedControl: React.FC<SegmentedControlProps> = ({
 const styles = StyleSheet.create({
   container: {
     flexDirection: "row",
-    backgroundColor: Tokens.colors.surfaceMuted,
-    borderRadius: Tokens.radius.sm,
+    backgroundColor: Tokens.colors.surfaceLo,
+    borderRadius: 12,
     padding: 2,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
   },
   segment: {
     flex: 1,
     paddingVertical: Tokens.spacing.sm,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: Tokens.radius.xs,
+    borderRadius: 10,
   },
   selectedSegment: {
     backgroundColor: Tokens.colors.surface,
-    // Add a light shadow for depth
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 1,
-    elevation: 2,
+    ...Tokens.shadows.sm,
   },
   label: {
     ...Tokens.type.label,

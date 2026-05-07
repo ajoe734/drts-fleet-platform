@@ -51,6 +51,8 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: Tokens.layout.pagePadding,
-    paddingBottom: Tokens.spacing.xxl,
+    paddingTop: Tokens.spacing.sm,
+    paddingBottom: Tokens.spacing["3xl"],
+    gap: Tokens.layout.screenGap,
   },
 });

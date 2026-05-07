@@ -1,5 +1,10 @@
 import React from "react";
-import { StyleSheet, TouchableOpacity, ViewStyle } from "react-native";
+import {
+  StyleSheet,
+  TouchableOpacity,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Tokens } from "./tokens";
 
@@ -9,15 +14,15 @@ interface IconButtonProps {
   size?: number;
   color?: string;
   disabled?: boolean;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   accessibilityLabel: string;
 }
 
 export const IconButton: React.FC<IconButtonProps> = ({
   onPress,
   icon,
-  size = 24,
-  color = Tokens.colors.textBody,
+  size = 20,
+  color = Tokens.colors.icon,
   disabled = false,
   style,
   accessibilityLabel,
@@ -38,7 +43,12 @@ export const IconButton: React.FC<IconButtonProps> = ({
 
 const styles = StyleSheet.create({
   button: {
-    padding: Tokens.spacing.xs,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: Tokens.colors.surfaceLo,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
     alignItems: "center",
     justifyContent: "center",
   },

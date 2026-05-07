@@ -1,6 +1,6 @@
 import React from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { StyleSheet, Text, View, ViewStyle } from "react-native";
+import { StyleSheet, Text, View, type ViewStyle } from "react-native";
 import { StatusChip } from "./StatusChip";
 import { Tokens } from "./tokens";
 
@@ -72,6 +72,7 @@ export function PlatformHealthCard({
             label={statusLabel}
             variant={getStatusVariant(statusTone)}
             style={styles.statusChip}
+            dot={statusTone !== "neutral"}
           />
         </View>
       </View>
@@ -82,13 +83,13 @@ export function PlatformHealthCard({
             <View key={`${fact.label}:${fact.value}`} style={styles.factRow}>
               <Text style={styles.factLabel}>{fact.label}</Text>
               <View style={styles.factValueRow}>
-                {fact.tone && (
+                {fact.tone ? (
                   <Ionicons
                     name="ellipse"
                     size={10}
                     color={getToneColor(fact.tone)}
                   />
-                )}
+                ) : null}
                 <Text
                   style={[
                     styles.factValue,
@@ -112,10 +113,11 @@ const styles = StyleSheet.create({
   card: {
     padding: Tokens.spacing.lg,
     backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.md,
+    borderRadius: Tokens.radius.lg,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
     gap: Tokens.spacing.md,
+    ...Tokens.shadows.sm,
   },
   header: {
     flexDirection: "row",
@@ -128,12 +130,12 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   title: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textStrong,
+    ...Tokens.type.title,
+    color: Tokens.colors.text,
     fontWeight: "700",
   },
   subtitle: {
-    ...Tokens.type.micro,
+    ...Tokens.type.small,
     color: Tokens.colors.textMuted,
   },
   statusBlock: {
@@ -144,12 +146,13 @@ const styles = StyleSheet.create({
     alignSelf: "flex-end",
   },
   facts: {
-    gap: Tokens.spacing.xs,
+    gap: Tokens.spacing.sm,
   },
   factRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     gap: Tokens.spacing.md,
+    paddingVertical: 2,
   },
   factLabel: {
     ...Tokens.type.label,
@@ -169,5 +172,8 @@ const styles = StyleSheet.create({
   },
   footer: {
     gap: Tokens.spacing.sm,
+    paddingTop: Tokens.spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: Tokens.colors.border,
   },
 });

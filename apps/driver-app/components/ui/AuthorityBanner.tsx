@@ -1,7 +1,6 @@
 import React from "react";
 import { Ionicons } from "@expo/vector-icons";
-import { StyleSheet, Text, View, ViewStyle } from "react-native";
-import { StatusChip } from "./StatusChip";
+import { StyleSheet, Text, View, type ViewStyle } from "react-native";
 import { Tokens } from "./tokens";
 
 export type AuthorityTone = "owned" | "platform" | "warning" | "danger";
@@ -20,46 +19,46 @@ function getToneStyles(tone: AuthorityTone) {
     case "platform":
       return {
         container: {
-          backgroundColor: "#E8F5FB",
-          borderColor: "#B7D8EA",
+          backgroundColor: Tokens.colors.forwardedBg,
+          borderColor: Tokens.colors.forwardedBorder,
+          borderLeftColor: Tokens.colors.forwarded,
         },
-        titleColor: "#0F4C81",
-        descriptionColor: Tokens.colors.textBody,
-        iconColor: "#0F4C81",
-        chipVariant: "info" as const,
+        titleColor: Tokens.colors.forwarded,
+        descriptionColor: Tokens.colors.textMuted,
+        iconColor: Tokens.colors.forwarded,
       };
     case "warning":
       return {
         container: {
-          backgroundColor: Tokens.colors.surfaceWarning,
-          borderColor: "#F3C66B",
+          backgroundColor: Tokens.colors.warningBg,
+          borderColor: `${Tokens.colors.warning}33`,
+          borderLeftColor: Tokens.colors.warning,
         },
         titleColor: Tokens.colors.warning,
-        descriptionColor: Tokens.colors.textBody,
+        descriptionColor: Tokens.colors.textMuted,
         iconColor: Tokens.colors.warning,
-        chipVariant: "warning" as const,
       };
     case "danger":
       return {
         container: {
-          backgroundColor: Tokens.colors.surfaceDanger,
-          borderColor: "#F1A1AA",
+          backgroundColor: Tokens.colors.dangerBg,
+          borderColor: `${Tokens.colors.danger}33`,
+          borderLeftColor: Tokens.colors.danger,
         },
         titleColor: Tokens.colors.danger,
-        descriptionColor: Tokens.colors.textBody,
+        descriptionColor: Tokens.colors.textMuted,
         iconColor: Tokens.colors.danger,
-        chipVariant: "danger" as const,
       };
     default:
       return {
         container: {
-          backgroundColor: "#EAF6EE",
-          borderColor: "#B8DEC6",
+          backgroundColor: Tokens.colors.ownedBg,
+          borderColor: Tokens.colors.ownedBorder,
+          borderLeftColor: Tokens.colors.owned,
         },
-        titleColor: Tokens.colors.success,
-        descriptionColor: Tokens.colors.textBody,
-        iconColor: Tokens.colors.success,
-        chipVariant: "success" as const,
+        titleColor: Tokens.colors.owned,
+        descriptionColor: Tokens.colors.textMuted,
+        iconColor: Tokens.colors.owned,
       };
   }
 }
@@ -79,11 +78,13 @@ export function AuthorityBanner({
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Ionicons name={icon} size={18} color={toneStyles.iconColor} />
-          <Text style={[styles.title, { color: toneStyles.titleColor }]}>
-            {title}
-          </Text>
+          <View style={styles.textBlock}>
+            <Text style={[styles.title, { color: toneStyles.titleColor }]}>
+              {title}
+            </Text>
+            <Text style={styles.authorityLabel}>{authorityLabel}</Text>
+          </View>
         </View>
-        <StatusChip label={authorityLabel} variant={toneStyles.chipVariant} />
       </View>
       <Text
         style={[styles.description, { color: toneStyles.descriptionColor }]}
@@ -97,15 +98,15 @@ export function AuthorityBanner({
 const styles = StyleSheet.create({
   container: {
     borderWidth: 1,
+    borderLeftWidth: 3,
     borderRadius: Tokens.radius.md,
-    paddingHorizontal: Tokens.spacing.md,
+    paddingHorizontal: Tokens.spacing.lg,
     paddingVertical: Tokens.spacing.md,
     gap: Tokens.spacing.xs,
   },
   header: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: Tokens.spacing.sm,
   },
   titleRow: {
@@ -114,12 +115,19 @@ const styles = StyleSheet.create({
     gap: Tokens.spacing.sm,
     flex: 1,
   },
+  textBlock: {
+    flex: 1,
+    gap: 2,
+  },
   title: {
     ...Tokens.type.label,
     fontWeight: "700",
-    flex: 1,
+  },
+  authorityLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
   },
   description: {
-    ...Tokens.type.micro,
+    ...Tokens.type.small,
   },
 });
