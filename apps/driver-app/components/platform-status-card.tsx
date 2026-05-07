@@ -5,7 +5,11 @@ import {
   PLATFORM_CODE_REGISTRY,
   type PlatformPresenceRecord,
 } from "@drts/contracts";
-import { Tokens } from "@/components/ui/tokens";
+import {
+  PlatformHealthCard,
+  type PlatformHealthFact,
+  Tokens,
+} from "@/components/ui";
 
 type TokenExpiryInfo = {
   label: string;
@@ -77,21 +81,27 @@ function getEligibilityText(
   }
 }
 
-function getMetaToneColor(
-  tone: TokenExpiryInfo["urgency"] | PlatformPresenceRecord["eligibility"],
-) {
-  switch (tone) {
-    case "eligible":
-    case "safe":
-      return Tokens.colors.success;
-    case "pending":
-    case "warning":
-      return Tokens.colors.warning;
-    case "urgent":
-      return "#D97706";
-    default:
-      return Tokens.colors.danger;
+function getHealthTone(
+  record: PlatformPresenceRecord,
+  expiryInfo: TokenExpiryInfo,
+): "healthy" | "warning" | "danger" | "neutral" {
+  if (!record.accountId || record.eligibility === "ineligible") {
+    return "danger";
   }
+
+  if (
+    record.reauthRequired ||
+    expiryInfo.urgency === "expired" ||
+    expiryInfo.urgency === "urgent"
+  ) {
+    return "warning";
+  }
+
+  if (record.status === "online" && record.eligibility === "eligible") {
+    return "healthy";
+  }
+
+  return "neutral";
 }
 
 function getActionToneStyles(tone: PlatformStatusAction["tone"] = "neutral") {
@@ -152,21 +162,63 @@ export function PlatformStatusCard({
     record.status === "online"
       ? Tokens.colors.success
       : Tokens.colors.borderStrong;
+  const healthTone = getHealthTone(record, expiryInfo);
+  const facts: PlatformHealthFact[] = [
+    {
+      label: "接單資格",
+      value: getEligibilityText(record.eligibility),
+      tone:
+        record.eligibility === "eligible"
+          ? "healthy"
+          : record.eligibility === "pending"
+            ? "warning"
+            : "danger",
+    },
+  ];
+
+  if (record.tokenExpiresAt) {
+    facts.push({
+      label: "平台憑證",
+      value: expiryInfo.label,
+      tone:
+        expiryInfo.urgency === "safe"
+          ? "healthy"
+          : expiryInfo.urgency === "warning" || expiryInfo.urgency === "urgent"
+            ? "warning"
+            : "danger",
+    });
+  }
+
+  if (record.lastOnlineAt) {
+    facts.push({
+      label: "最近上線",
+      value: new Date(record.lastOnlineAt).toLocaleString(),
+    });
+  }
+
+  facts.push({
+    label: "綁定帳號",
+    value: record.accountId ?? "尚未綁定",
+    tone: record.accountId ? "neutral" : "danger",
+  });
 
   return (
-    <View style={styles.card}>
-      <View style={styles.header}>
-        <View style={styles.platformBlock}>
-          <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-          <View style={styles.platformTextBlock}>
-            <Text style={styles.platformCode}>{platformLabel}</Text>
-            <Text style={styles.statusText}>
-              {getStatusText(record.status)}
-            </Text>
-          </View>
-        </View>
-
-        {actions.length > 0 ? (
+    <PlatformHealthCard
+      title={platformLabel}
+      subtitle={getStatusText(record.status)}
+      statusLabel={
+        healthTone === "healthy"
+          ? "可接單"
+          : healthTone === "warning"
+            ? "需要處理"
+            : healthTone === "danger"
+              ? "不可用"
+              : "待確認"
+      }
+      statusTone={healthTone}
+      facts={facts}
+      actions={
+        actions.length > 0 ? (
           <View style={styles.actions}>
             {actions.map((action) => {
               const toneStyles = getActionToneStyles(action.tone);
@@ -195,105 +247,38 @@ export function PlatformStatusCard({
               );
             })}
           </View>
-        ) : null}
-      </View>
-
-      <View style={styles.metaGrid}>
-        <View style={styles.metaRow}>
-          <Text style={styles.metaLabel}>接單資格</Text>
-          <Text
-            style={[
-              styles.metaValue,
-              { color: getMetaToneColor(record.eligibility) },
-            ]}
-          >
-            {getEligibilityText(record.eligibility)}
-          </Text>
-        </View>
-
-        {record.tokenExpiresAt ? (
-          <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>平台憑證</Text>
-            <Text
-              style={[
-                styles.metaValue,
-                { color: getMetaToneColor(expiryInfo.urgency) },
-              ]}
-            >
-              {expiryInfo.label}
+        ) : null
+      }
+      footer={
+        <>
+          <View style={styles.platformRow}>
+            <View
+              style={[styles.statusDot, { backgroundColor: statusColor }]}
+            />
+            <Text style={styles.statusText}>
+              目前狀態：{getStatusText(record.status)}
             </Text>
           </View>
-        ) : null}
-
-        {record.lastOnlineAt ? (
-          <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>最近上線</Text>
-            <Text style={styles.metaValue}>
-              {new Date(record.lastOnlineAt).toLocaleString()}
-            </Text>
-          </View>
-        ) : null}
-
-        {record.accountId ? (
-          <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>綁定帳號</Text>
-            <Text style={styles.metaValue}>{record.accountId}</Text>
-          </View>
-        ) : null}
-      </View>
-
-      {record.reauthRequired ? (
-        <View style={styles.noticeBanner}>
-          <Ionicons
-            name="alert-circle"
-            size={16}
-            color={Tokens.colors.warning}
-          />
-          <Text style={styles.noticeText}>平台憑證需要重新驗證</Text>
-        </View>
-      ) : null}
-    </View>
+          {record.reauthRequired ? (
+            <View style={styles.noticeBanner}>
+              <Ionicons
+                name="alert-circle"
+                size={16}
+                color={Tokens.colors.warning}
+              />
+              <Text style={styles.noticeText}>平台憑證需要重新驗證</Text>
+            </View>
+          ) : null}
+        </>
+      }
+      style={styles.card}
+    />
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    padding: Tokens.spacing.lg,
     marginBottom: Tokens.spacing.md,
-    backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.md,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    gap: Tokens.spacing.md,
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  platformBlock: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    marginRight: Tokens.spacing.sm,
-  },
-  statusDot: {
-    width: 12,
-    height: 12,
-    borderRadius: Tokens.radius.full,
-    marginRight: Tokens.spacing.sm,
-  },
-  platformTextBlock: {
-    gap: 2,
-  },
-  platformCode: {
-    ...Tokens.type.body,
-    fontWeight: "700",
-    color: Tokens.colors.textStrong,
-  },
-  statusText: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
   },
   actions: {
     flexDirection: "row",
@@ -310,23 +295,19 @@ const styles = StyleSheet.create({
   actionButtonDisabled: {
     opacity: 0.45,
   },
-  metaGrid: {
-    gap: Tokens.spacing.xs,
-  },
-  metaRow: {
+  platformRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    gap: Tokens.spacing.md,
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
   },
-  metaLabel: {
-    ...Tokens.type.label,
+  statusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: Tokens.radius.full,
+  },
+  statusText: {
+    ...Tokens.type.micro,
     color: Tokens.colors.textMuted,
-  },
-  metaValue: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textBody,
-    flexShrink: 1,
-    textAlign: "right",
   },
   noticeBanner: {
     flexDirection: "row",
