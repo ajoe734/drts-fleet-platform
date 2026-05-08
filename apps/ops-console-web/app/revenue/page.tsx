@@ -145,6 +145,10 @@ function ChipLink({
   );
 }
 
+function copyText(locale: "en" | "zh", en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
+
 export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const client = getOpsClient();
   const resolvedSearchParams = await (searchParams ??
@@ -239,6 +243,11 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   const forwardedSyncFailedCount = forwardedOrders.filter(
     (order) => order.status === "sync_failed",
   ).length;
+  const shadowLedgerCount = settlementMatrix.filter(
+    (row) => row.localLedgerMode === "shadow_only",
+  ).length;
+  const settlementChannels = sortSettlementMatrix(settlementMatrix);
+  const mismatchedJobsCount = reconciliationIssues.length;
 
   const describeMatrixChannel = (channelKey: string) => {
     const key = settlementMatrixKey("channel", channelKey);
@@ -442,6 +451,111 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
           accent="#b45309"
         />
       </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: "16px",
+          marginBottom: "20px",
+        }}
+      >
+        <StatCard
+          label={t("revenue.matrix.title", locale)}
+          value={formatCompactNumber(settlementChannels.length)}
+          sub={copyText(
+            locale,
+            "Settlement channels under review",
+            "目前檢視中的結算通道",
+          )}
+          accent="#0f766e"
+        />
+        <StatCard
+          label={copyText(locale, "Shadow ledger lanes", "影子帳務通道")}
+          value={formatCompactNumber(shadowLedgerCount)}
+          sub={copyText(
+            locale,
+            "Channels still settled externally",
+            "仍由外部結算的通道",
+          )}
+          accent="#b45309"
+        />
+        <StatCard
+          label={copyText(locale, "Mismatch queue", "不一致佇列")}
+          value={formatCompactNumber(mismatchedJobsCount)}
+          sub={copyText(
+            locale,
+            "Forwarded orders waiting on reconciliation follow-up",
+            "等待對帳後續處理的轉派訂單",
+          )}
+          accent="#dc2626"
+        />
+        <StatCard
+          label={copyText(locale, "Sync failures", "同步失敗")}
+          value={formatCompactNumber(forwardedSyncFailedCount)}
+          sub={copyText(
+            locale,
+            "Mirror orders with adapter sync failures",
+            "鏡像訂單發生 adapter 同步失敗",
+          )}
+          accent="#7c3aed"
+        />
+      </div>
+
+      <Card style={{ marginBottom: "20px" }}>
+        <CardBody style={{ padding: "14px 16px" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1.2fr 1fr",
+              gap: "12px",
+              alignItems: "center",
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: "11px",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  color: "#64748b",
+                  marginBottom: "4px",
+                }}
+              >
+                {copyText(locale, "Monitoring posture", "監控視角")}
+              </div>
+              <div style={{ fontWeight: 600, color: "#0f172a" }}>
+                {copyText(
+                  locale,
+                  "Settlement-matrix-first review keeps payout, receipt, and reconciliation authority visible before statement close.",
+                  "以結算矩陣優先的檢視方式，能在關帳前先看清 payout、receipt 與 reconciliation 權責。",
+                )}
+              </div>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                flexWrap: "wrap",
+                justifyContent: "flex-end",
+              }}
+            >
+              <Badge variant="green">
+                {formatCompactNumber(insights.payoutStatuses.length)}{" "}
+                {copyText(locale, "payout lanes", "付款通道")}
+              </Badge>
+              <Badge variant="yellow">
+                {formatCompactNumber(shadowLedgerCount)}{" "}
+                {copyText(locale, "shadow-only", "僅影子帳")}
+              </Badge>
+              <Badge variant={mismatchedJobsCount > 0 ? "red" : "green"}>
+                {formatCompactNumber(mismatchedJobsCount)}{" "}
+                {copyText(locale, "mismatches", "不一致")}
+              </Badge>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
 
       {/* Breakdowns */}
       <div
