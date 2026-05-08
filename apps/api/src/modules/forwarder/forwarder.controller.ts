@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
 
 import type {
   BroadcastForwardedOrderCommand,
@@ -10,12 +19,37 @@ import type {
   SyncForwardedOrderStatusCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
+import { CurrentIdentity } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { ForwarderService } from "./forwarder.service";
 
 @Controller()
 export class ForwarderController {
   constructor(private readonly forwarderService: ForwarderService) {}
+
+  private resolveDriverTaskViewDriverId(
+    identity: BootstrapRequestIdentity | null,
+    requestedDriverId?: string,
+  ) {
+    if (identity?.actorType === "driver_user" && identity.actorId) {
+      return identity.actorId;
+    }
+
+    const normalizedDriverId = requestedDriverId?.trim();
+    if (normalizedDriverId) {
+      return normalizedDriverId;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "DRIVER_ID_REQUIRED",
+      "driverId query is required when the caller is not a driver bootstrap identity.",
+    );
+  }
 
   @Post("forwarder/orders/inbound")
   ingestInboundOrder(
@@ -45,6 +79,41 @@ export class ForwarderController {
       {
         items: this.forwarderService.listOrders(),
       },
+      requestId,
+    );
+  }
+
+  @Get("driver/task-views")
+  listDriverTaskViews(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Query("driverId") requestedDriverId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverTaskViewDriverId(
+      identity,
+      requestedDriverId,
+    );
+    return toApiSuccessEnvelope(
+      {
+        items: this.forwarderService.listDriverTaskViews(driverId),
+      },
+      requestId,
+    );
+  }
+
+  @Get("driver/task-views/:taskId")
+  getDriverTaskView(
+    @Param("taskId") taskId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Query("driverId") requestedDriverId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverTaskViewDriverId(
+      identity,
+      requestedDriverId,
+    );
+    return toApiSuccessEnvelope(
+      this.forwarderService.getDriverTaskView(driverId, taskId),
       requestId,
     );
   }
