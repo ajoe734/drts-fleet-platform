@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import type { ShiftRecord } from "@drts/contracts";
 
 import {
   ActionButton,
@@ -20,6 +21,7 @@ import {
 } from "@/components/ui";
 import {
   getDriverClient,
+  getDriverId,
   getDriverIdentityIssue,
   hasDriverDevOverride,
   initializeDriverIdentity,
@@ -420,6 +422,13 @@ export default function OnboardingScreen() {
   const [platformOverrides, setPlatformOverrides] = useState<
     Record<string, boolean>
   >({});
+  const [activeShift, setActiveShift] = useState<ShiftRecord | null>(null);
+  const [shiftFeatureEnabled, setShiftFeatureEnabled] = useState<
+    boolean | null
+  >(null);
+  const [loadingShiftData, setLoadingShiftData] = useState(false);
+  const [shiftLoadError, setShiftLoadError] = useState(false);
+
   const router = useRouter();
 
   useEffect(() => {
@@ -463,49 +472,89 @@ export default function OnboardingScreen() {
 
     let cancelled = false;
     const client = getDriverClient();
+    const driverId = getDriverId();
 
     setFlagsOk(null);
     setIdentityOk(null);
     setWorkspaceIssue(null);
     setPendingTaskCount(null);
     setActiveTaskTitle(null);
+    setActiveShift(null);
+    setShiftFeatureEnabled(null);
+    setShiftLoadError(false);
+    setLoadingShiftData(false);
 
-    Promise.allSettled([
+    void Promise.allSettled([
       client.getFeatureFlags(),
       client.getIdentityContext(),
       client.listDriverTasks(),
+      client.isFeatureEnabled("driver-app.shift"),
     ])
-      .then(([flagsResult, identityResult, tasksResult]) => {
-        if (cancelled) {
-          return;
-        }
-
-        const nextFlagsOk = flagsResult.status === "fulfilled";
-        const nextIdentityOk = identityResult.status === "fulfilled";
-
-        setFlagsOk(nextFlagsOk);
-        setIdentityOk(nextIdentityOk);
-
-        if (!nextFlagsOk || !nextIdentityOk) {
-          setWorkspaceIssue(resolveWorkspaceIssue(nextFlagsOk, nextIdentityOk));
-        }
-
-        if (tasksResult.status === "fulfilled") {
-          const tasks = tasksResult.value ?? [];
-          const pending = tasks.filter(
-            (task) =>
-              task.status !== "completed" && task.status !== "cancelled",
-          );
-          setPendingTaskCount(pending.length);
-          const activeTask = tasks.find((task) => task.status === "on_trip");
-          if (activeTask) {
-            setActiveTaskTitle(activeTask.taskId);
+      .then(
+        async ([flagsResult, identityResult, tasksResult, shiftFlagResult]) => {
+          if (cancelled) {
+            return;
           }
-        } else {
-          setPendingTaskCount(null);
-        }
-      })
-      .catch(() => {
+
+          const nextFlagsOk = flagsResult.status === "fulfilled";
+          const nextIdentityOk = identityResult.status === "fulfilled";
+
+          setFlagsOk(nextFlagsOk);
+          setIdentityOk(nextIdentityOk);
+
+          if (!nextFlagsOk || !nextIdentityOk) {
+            setWorkspaceIssue(
+              resolveWorkspaceIssue(nextFlagsOk, nextIdentityOk),
+            );
+          }
+
+          if (tasksResult.status === "fulfilled") {
+            const tasks = tasksResult.value ?? [];
+            const pending = tasks.filter(
+              (task) =>
+                task.status !== "completed" && task.status !== "cancelled",
+            );
+            setPendingTaskCount(pending.length);
+            const activeTask = tasks.find((task) => task.status === "on_trip");
+            if (activeTask) {
+              setActiveTaskTitle(activeTask.taskId);
+            }
+          } else {
+            setPendingTaskCount(null);
+          }
+
+          const nextShiftFeatureEnabled =
+            shiftFlagResult.status === "fulfilled" && shiftFlagResult.value;
+          setShiftFeatureEnabled(nextShiftFeatureEnabled);
+
+          if (!nextShiftFeatureEnabled) {
+            return;
+          }
+
+          setLoadingShiftData(true);
+          try {
+            const shifts = await client.listShifts(driverId);
+            if (cancelled) {
+              return;
+            }
+
+            const active = shifts.find((shift) => shift.status === "active");
+            setActiveShift(active ?? null);
+          } catch (error: unknown) {
+            if (cancelled) {
+              return;
+            }
+
+            setShiftLoadError(true);
+            console.error("Failed to load shifts:", error);
+          } finally {
+            if (!cancelled) {
+              setLoadingShiftData(false);
+            }
+          }
+        },
+      )
+      .catch((error: unknown) => {
         if (cancelled) {
           return;
         }
@@ -513,6 +562,9 @@ export default function OnboardingScreen() {
         setFlagsOk(false);
         setIdentityOk(false);
         setWorkspaceIssue(resolveWorkspaceIssue(false, false));
+        setShiftFeatureEnabled(false);
+        setLoadingShiftData(false);
+        console.error("Error during onboarding data fetch:", error);
       });
 
     return () => {
@@ -520,12 +572,16 @@ export default function OnboardingScreen() {
     };
   }, [provisioned, refreshSeed]);
 
+  const isDriverOnShift = useMemo(() => activeShift !== null, [activeShift]);
+
   const platformStates = useMemo(
     () =>
       WORKSPACE_PLATFORMS.map((platform) => {
         const override = platformOverrides[platform.code];
         return {
           platform,
+          // A platform is considered 'enabled' if it's online AND not requiring re-auth,
+          // OR if the user has explicitly overridden it to be enabled.
           enabled: override ?? (platform.online && !platform.reauth),
         };
       }),
@@ -536,6 +592,70 @@ export default function OnboardingScreen() {
     () => platformStates.filter((entry) => entry.enabled).length,
     [platformStates],
   );
+
+  const mismatchedPlatforms = useMemo(() => {
+    return platformStates.filter(({ platform, enabled }) => {
+      return (
+        shiftFeatureEnabled === true &&
+        enabled &&
+        !isDriverOnShift &&
+        !platform.reauth &&
+        !shiftLoadError
+      );
+    });
+  }, [platformStates, isDriverOnShift, shiftFeatureEnabled, shiftLoadError]);
+
+  const cockpitStatus = useMemo(() => {
+    if (shiftFeatureEnabled === null || loadingShiftData) {
+      return {
+        dotColor: tokens.colors.warning,
+        text: "正在同步班次 · 請稍候",
+      };
+    }
+
+    if (shiftFeatureEnabled === false) {
+      return {
+        dotColor:
+          platformsOnline > 0 ? tokens.colors.warning : tokens.colors.textMuted,
+        text:
+          platformsOnline > 0
+            ? "平台連線中 · 班次功能未啟用"
+            : "平台待命 · 班次功能未啟用",
+      };
+    }
+
+    if (shiftLoadError) {
+      return {
+        dotColor: tokens.colors.warning,
+        text: "班次待確認 · 請重新整理",
+      };
+    }
+
+    if (isDriverOnShift) {
+      return {
+        dotColor: tokens.colors.success,
+        text: "上班中 · 可接派單",
+      };
+    }
+
+    return {
+      dotColor:
+        mismatchedPlatforms.length > 0
+          ? tokens.colors.warning
+          : tokens.colors.textMuted,
+      text:
+        mismatchedPlatforms.length > 0
+          ? "未上班 · 平台仍在線"
+          : "未上班 · 平台待命",
+    };
+  }, [
+    isDriverOnShift,
+    loadingShiftData,
+    mismatchedPlatforms.length,
+    platformsOnline,
+    shiftFeatureEnabled,
+    shiftLoadError,
+  ]);
 
   const handleRegister = async () => {
     const normalizedCode = registrationCode.trim();
@@ -707,8 +827,13 @@ export default function OnboardingScreen() {
         <View style={styles.cockpitGreetingBlock}>
           <Text style={styles.cockpitGreetingLabel}>工作台</Text>
           <View style={styles.cockpitStatusRow}>
-            <View style={styles.cockpitStatusDot} />
-            <Text style={styles.cockpitStatusText}>上班中 · 可接派單</Text>
+            <View
+              style={[
+                styles.cockpitStatusDot,
+                { backgroundColor: cockpitStatus.dotColor },
+              ]}
+            />
+            <Text style={styles.cockpitStatusText}>{cockpitStatus.text}</Text>
           </View>
         </View>
         <Pressable
@@ -741,6 +866,15 @@ export default function OnboardingScreen() {
           activeTaskTitle ? navigate("/trip") : navigate("/platform-presence")
         }
       />
+
+      {mismatchedPlatforms.length > 0 &&
+      !isDriverOnShift &&
+      !shiftLoadError &&
+      !loadingShiftData ? (
+        <WarningCallout
+          message={`偵測到 ${mismatchedPlatforms.length} 個平台在您未執勤時為線上狀態，可能影響派單。`}
+        />
+      ) : null}
 
       <View style={styles.kpiRow}>
         <KpiTile
