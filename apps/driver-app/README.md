@@ -22,10 +22,12 @@ provisioning screen instead of binding a demo actor.
 
 Set one of the following before running or building:
 
-| Variable                | Purpose                                                    |
-| ----------------------- | ---------------------------------------------------------- |
-| `EXPO_PUBLIC_DRIVER_ID` | Explicit driver actor ID for local dev and internal builds |
-| `EXPO_PUBLIC_API_URL`   | Override the API base URL                                  |
+| Variable                                    | Purpose                                                    |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `EXPO_PUBLIC_DRIVER_ID`                     | Explicit driver actor ID for local dev and internal builds |
+| `EXPO_PUBLIC_API_URL`                       | Override the API base URL                                  |
+| `EXPO_PUBLIC_DRIVER_TEST_REGISTRATION_CODE` | Override the onboarding registration-code prefill          |
+| `EXPO_PUBLIC_DRIVER_TEST_DEVICE_LABEL`      | Override the onboarding device-name prefill                |
 
 Example local dev invocation:
 
@@ -34,6 +36,11 @@ EXPO_PUBLIC_API_URL=http://192.168.1.10:3001 \
 EXPO_PUBLIC_DRIVER_ID=driver-dev-001 \
 pnpm --filter @drts/driver-app dev:client
 ```
+
+The unprovisioned onboarding form prefills `driver-demo-001` and
+`Driver Pixel 01` for visual/demo runs. Override the two
+`EXPO_PUBLIC_DRIVER_TEST_*` values when the final registration test uses a
+different backend-issued code.
 
 Production path: device-bound auth token from the backend identity handoff
 flow. See the runbook §Production Identity Handoff.

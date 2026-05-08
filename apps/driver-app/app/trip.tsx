@@ -3,19 +3,21 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
 
+import { PlatformTaskBadge } from "@/components/platform-task-badge";
 import RouteDisplay from "@/components/route-display";
 import { ActionButton as SharedActionButton } from "@/components/ui/ActionButton";
+import { Tokens } from "@/components/ui";
 import {
   appendProofPhotos,
   buildCompletionExpenseItem,
@@ -52,20 +54,35 @@ import {
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
 import {
+  getTripExperienceState,
   getPrimaryTripAction,
   shouldShowTripCompletionProof,
+  type TripExperienceState,
   type TripPrimaryActionKey,
 } from "@/lib/trip-workflow";
 import { usePendingCompletionReplay } from "@/lib/use-pending-completion-replay";
 
-function PlatformBadge({ platform }: { platform: string | null }) {
-  const label = platform ?? "自營派單";
-  const bgColor = platform ? "#e0f7fa" : "#e8f5e9";
-  const textColor = platform ? "#006064" : "#1b5e20";
+function ActionButton({
+  label,
+  onPress,
+  disabled = false,
+  variant = "primary",
+  loading = false,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  variant?: "primary" | "secondary" | "danger";
+  loading?: boolean;
+}) {
   return (
-    <View style={[styles.badge, { backgroundColor: bgColor }]}>
-      <Text style={[styles.badgeText, { color: textColor }]}>{label}</Text>
-    </View>
+    <SharedActionButton
+      title={label}
+      onPress={onPress}
+      disabled={disabled}
+      loading={loading}
+      variant={variant}
+    />
   );
 }
 
@@ -74,45 +91,6 @@ function RouteLockedBadge() {
     <View style={[styles.badge, { backgroundColor: "#fff3e0" }]}>
       <Text style={[styles.badgeText, { color: "#e65100" }]}>路線鎖定</Text>
     </View>
-  );
-}
-
-function ActionButton({
-  label,
-  onPress,
-  disabled = false,
-  variant = "primary",
-}: {
-  label: string;
-  onPress: () => void;
-  disabled?: boolean;
-  variant?: "primary" | "secondary";
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.actionButton,
-        variant === "secondary"
-          ? styles.actionButtonSecondary
-          : styles.actionButtonPrimary,
-        disabled && styles.actionButtonDisabled,
-        pressed && !disabled && styles.actionButtonPressed,
-      ]}
-    >
-      <Text
-        style={[
-          styles.actionButtonText,
-          variant === "secondary"
-            ? styles.actionButtonTextSecondary
-            : styles.actionButtonTextPrimary,
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -195,6 +173,140 @@ function shouldShowTripMetrics(task: DriverTaskRecord | null): boolean {
   );
 }
 
+type StatusTone = "success" | "warning" | "danger" | "neutral";
+
+function getTripStatusPresentation(
+  state: TripExperienceState | null,
+  task: DriverTaskRecord | null,
+  locationTrackingState: LocationTrackingState,
+  locationTrackingMessage: string | null,
+): {
+  label: string;
+  tone: StatusTone;
+  detail: string;
+} {
+  switch (state) {
+    case "forwarded_offered":
+      return {
+        label: "平台訂單可接單",
+        tone: "warning",
+        detail: "接受後將送交平台確認，可能被其他司機搶走。",
+      };
+    case "forwarded_pending":
+      return {
+        label: "等待平台確認",
+        tone: "warning",
+        detail: "已送出接單，請暫勿開始行程。",
+      };
+    case "forwarded_confirmed":
+      return {
+        label: "平台已確認",
+        tone: "success",
+        detail: "可依平台規則繼續本地行程流程。",
+      };
+    case "forwarded_lost":
+      return {
+        label: "其他司機已接",
+        tone: "neutral",
+        detail: "此筆平台訂單已結束，不需本地後續操作。",
+      };
+    case "forwarded_cancelled":
+      return {
+        label: "平台取消",
+        tone: "neutral",
+        detail: "來源平台已取消訂單，請等待下一筆任務。",
+      };
+    case "sync_failed":
+      return {
+        label: "同步異常",
+        tone: "danger",
+        detail: "需派車台處理，請等待指示。",
+      };
+    case "owned_active":
+    default:
+      if (task?.status === "on_trip" && locationTrackingState === "active") {
+        return {
+          label: "行程追蹤中",
+          tone: "success",
+          detail: locationTrackingMessage ?? "里程與時長正在即時更新。",
+        };
+      }
+      return {
+        label: formatDriverTaskStatusLabel(
+          task?.status ?? "pending_acceptance",
+        ),
+        tone: task?.status === "pending_acceptance" ? "warning" : "success",
+        detail: "請依行程階段完成本地操作與完單佐證。",
+      };
+  }
+}
+
+function getTripLockBody(
+  state: TripExperienceState | null,
+): {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  detail: string;
+} | null {
+  switch (state) {
+    case "forwarded_pending":
+      return {
+        icon: "time-outline",
+        title: "正在等待平台確認…",
+        detail: "平台回應前，請勿開始行程或手動變更狀態。",
+      };
+    case "forwarded_lost":
+      return {
+        icon: "close-circle-outline",
+        title: "未取得此訂單",
+        detail: "平台已將訂單分配給其他司機，此頁僅保留同步結果。",
+      };
+    case "forwarded_cancelled":
+      return {
+        icon: "ban-outline",
+        title: "平台已取消",
+        detail: "此訂單不再有效，若資訊異常請聯繫派車台。",
+      };
+    case "sync_failed":
+      return {
+        icon: "alert-circle-outline",
+        title: "同步異常",
+        detail: "派車台正在處理平台同步，請等待進一步指示。",
+      };
+    default:
+      return null;
+  }
+}
+
+function getStatusToneStyles(tone: StatusTone) {
+  switch (tone) {
+    case "warning":
+      return {
+        dot: Tokens.colors.warning,
+        background: Tokens.colors.warningBg,
+        text: Tokens.colors.warning,
+      };
+    case "danger":
+      return {
+        dot: Tokens.colors.danger,
+        background: Tokens.colors.dangerBg,
+        text: Tokens.colors.danger,
+      };
+    case "neutral":
+      return {
+        dot: Tokens.colors.neutral,
+        background: Tokens.colors.neutralBg,
+        text: Tokens.colors.neutral,
+      };
+    default:
+      return {
+        dot: Tokens.colors.success,
+        background: Tokens.colors.successBg,
+        text: Tokens.colors.success,
+      };
+  }
+}
+
 export default function TripScreen() {
   const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
   const [orderDetail, setOrderDetail] = useState<OwnedOrderRecord | null>(null);
@@ -257,7 +369,15 @@ export default function TripScreen() {
     proofPhotos.length > 0 ||
     Boolean(normalizeCompletionProofText(signoffReference)) ||
     Boolean(expenseItem);
+  const tripExperienceState = getTripExperienceState(taskDetail);
   const primaryTripAction = getPrimaryTripAction(taskDetail);
+  const tripStatusPresentation = getTripStatusPresentation(
+    tripExperienceState,
+    taskDetail,
+    locationTrackingState,
+    locationTrackingMessage,
+  );
+  const tripLockBody = getTripLockBody(tripExperienceState);
   const showCompletionProofCard = shouldShowTripCompletionProof(taskDetail);
   const completionSubmitBlocker = getCompletionSubmitBlocker({
     proofRequirementsUnavailable,
@@ -661,6 +781,32 @@ export default function TripScreen() {
     }
   }
 
+  async function handleForwardedReject() {
+    if (!taskDetail?.taskId) {
+      return;
+    }
+
+    try {
+      setSubmittingAction("reject");
+      await getDriverClient().rejectTask(taskDetail.taskId, {
+        reasonCode: "driver_declined_forwarded_offer",
+        reasonNote:
+          "Driver declined forwarded platform offer from trip screen.",
+      });
+      Alert.alert("已拒絕", "已回覆不接受此平台訂單。");
+      await loadTrip(false);
+    } catch (rejectError) {
+      if (getDriverIdentityIssue()) {
+        await routeToOnboardingAfterSessionFailure();
+        return;
+      }
+
+      Alert.alert("錯誤", getErrorMessage(rejectError));
+    } finally {
+      setSubmittingAction(null);
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -682,12 +828,62 @@ export default function TripScreen() {
             <Text style={styles.taskId}>任務：{taskDetail.taskId}</Text>
             <View style={styles.badgeRow}>
               {isForwardedTask(taskDetail) && <RouteLockedBadge />}
-              <PlatformBadge platform={taskDetail.sourcePlatform} />
+              <PlatformTaskBadge platformCode={taskDetail.sourcePlatform} />
             </View>
           </View>
           <Text style={styles.taskStatus}>
             狀態：{formatDriverTaskStatusLabel(taskDetail.status)}
           </Text>
+          <View
+            style={[
+              styles.tripStatusPanel,
+              {
+                backgroundColor: getStatusToneStyles(
+                  tripStatusPresentation.tone,
+                ).background,
+              },
+            ]}
+          >
+            <View style={styles.tripStatusHeader}>
+              <View
+                style={[
+                  styles.tripStatusDot,
+                  {
+                    backgroundColor: getStatusToneStyles(
+                      tripStatusPresentation.tone,
+                    ).dot,
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.tripStatusLabel,
+                  {
+                    color: getStatusToneStyles(tripStatusPresentation.tone)
+                      .text,
+                  },
+                ]}
+              >
+                {tripStatusPresentation.label}
+              </Text>
+            </View>
+            <Text style={styles.tripStatusDetail}>
+              {tripStatusPresentation.detail}
+            </Text>
+          </View>
+          {tripLockBody && (
+            <View style={styles.tripLockCard}>
+              <Ionicons
+                name={tripLockBody.icon}
+                size={18}
+                color={Tokens.colors.warning}
+              />
+              <View style={styles.tripLockCopy}>
+                <Text style={styles.tripLockTitle}>{tripLockBody.title}</Text>
+                <Text style={styles.tripLockDetail}>{tripLockBody.detail}</Text>
+              </View>
+            </View>
+          )}
           <Text style={styles.taskInfo}>
             {taskDetail.orderId
               ? `訂單：${taskDetail.orderId}`
@@ -993,6 +1189,14 @@ export default function TripScreen() {
             任務操作由 {taskDetail.sourcePlatform}{" "}
             管理，本地只顯示同步結果與路線資訊，不會變更任務狀態。
           </Text>
+          {taskDetail.status === "pending_acceptance" && (
+            <ActionButton
+              label={submittingAction === "reject" ? "拒絕中…" : "拒絕平台訂單"}
+              onPress={() => void handleForwardedReject()}
+              disabled={submittingAction !== null}
+              variant="secondary"
+            />
+          )}
         </View>
       )}
 
@@ -1045,6 +1249,56 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 11, fontWeight: "600" },
   taskId: { fontSize: 18, fontWeight: "600", flex: 1 },
   taskStatus: { fontSize: 14, color: "#666", marginTop: 4 },
+  tripStatusPanel: {
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+    gap: 6,
+  },
+  tripStatusHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  tripStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  tripStatusLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  tripStatusDetail: {
+    fontSize: 12,
+    color: "#334155",
+    lineHeight: 18,
+  },
+  tripLockCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#fcd34d",
+    backgroundColor: "#fffbeb",
+    padding: 12,
+    marginTop: 10,
+  },
+  tripLockCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  tripLockTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#92400e",
+  },
+  tripLockDetail: {
+    fontSize: 12,
+    color: "#92400e",
+    lineHeight: 17,
+  },
   taskInfo: { fontSize: 14, color: "#333", marginTop: 8 },
   forwardedNote: {
     fontSize: 11,

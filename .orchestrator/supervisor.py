@@ -4364,6 +4364,8 @@ def choose_chair_reviewer(
     state: dict[str, Any],
     status: dict[str, Any],
     provider_report: dict[str, Any],
+    *,
+    allow_primary_work_fallback: bool = False,
 ) -> tuple[str, str] | None:
     settings = ready_dispatch_settings(config)
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
@@ -4372,6 +4374,7 @@ def choose_chair_reviewer(
     task_map = task_index_from_status(config, status)
     failing_agents = failing_agents_in_reassignment_loops(state)
     candidates: list[tuple[str, str]] = []
+    primary_work_candidates: list[tuple[str, str]] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
         display_name = str(agent.get("display_name") or agent.get("name") or agent_id).strip()
         if not display_name or "legacy alias" in display_name.lower():
@@ -4384,8 +4387,12 @@ def choose_chair_reviewer(
         if display_name in failing_agents:
             continue
         if agent_has_dispatchable_primary_work(config, status, display_name, task_map):
+            if allow_primary_work_fallback:
+                primary_work_candidates.append((normalized, display_name))
             continue
         candidates.append((normalized, display_name))
+    if not candidates and allow_primary_work_fallback:
+        candidates = primary_work_candidates
     if not candidates:
         return None
     rotation_index = int(state.setdefault("chair_review", {}).get("rotation_index", 0) or 0)
@@ -4412,15 +4419,43 @@ def queue_chair_review(
     reason = chair_review_reason(state, approval_state)
     if reason is None:
         return False
-    bypass_cooldown = bool(pending_approval_items(approval_state) or chair_review_needs_immediate_attention(state))
+    immediate_attention = bool(chair_review_needs_immediate_attention(state))
+    bypass_cooldown = bool(pending_approval_items(approval_state) or immediate_attention)
     cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
     now = datetime.now(timezone.utc)
     if not bypass_cooldown and cooldown_until is not None and cooldown_until > now:
         return False
-    chosen = choose_chair_reviewer(config, state, status, provider_report)
+    chosen = choose_chair_reviewer(
+        config,
+        state,
+        status,
+        provider_report,
+        allow_primary_work_fallback=immediate_attention,
+    )
     if chosen is None:
-        return False
+        blocked = chair_state.setdefault("blocked", {})
+        signature = f"{reason}:{utc_now()[:13]}"
+        if blocked.get("signature") == signature:
+            return False
+        blocked.update(
+            {
+                "reason": reason,
+                "blocked_at": utc_now(),
+                "signature": signature,
+                "message": "No dispatch-capable chairman lane was available for immediate operational review.",
+            }
+        )
+        write_activity_log(
+            config,
+            {
+                "type": "chair_review_blocked",
+                "message": "Chairman review could not be queued because no dispatch-capable lane was available.",
+                "reason": reason,
+            },
+        )
+        return True
     agent_id, display_name = chosen
+    chair_state.pop("blocked", None)
     markdown_path, json_path = chair_review_output_paths(config, display_name)
     context_files = [config_path(config, "status_file"), config_path(config, "state_file"), config_path(config, "approval_queue")]
     if AI_GUIDE_PATH.exists():

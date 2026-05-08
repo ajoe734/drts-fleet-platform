@@ -1,133 +1,22 @@
-import { useState } from "react";
-import { Ionicons } from "@expo/vector-icons";
-import {
-  LayoutAnimation,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  UIManager,
-  View,
-} from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import {
   PLATFORM_CODE_REGISTRY,
   type PlatformEarningsItem,
 } from "@drts/contracts";
-import { formatMoney } from "@/lib/money";
-import { Tokens } from "@/components/ui/tokens";
+import { formatAmountNumber, formatSignedAmountNumber } from "@/lib/money";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { PlatformBadge } from "@/components/ui/PlatformBadge";
+import { Tokens } from "@/components/ui/tokens";
 
-if (Platform.OS === "android") {
-  UIManager.setLayoutAnimationEnabledExperimental?.(true);
-}
+const OWNED_PLATFORM_CODES = new Set(["owned", "direct", "drts"]);
 
-function DetailRow({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  tone?: "default" | "positive" | "muted";
-}) {
-  return (
-    <View style={styles.detailRow}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text
-        style={[
-          styles.detailValue,
-          tone === "positive" && styles.detailValuePositive,
-          tone === "muted" && styles.detailValueMuted,
-        ]}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
+const NUMERIC_FONT_FAMILY = Tokens.fonts.mono;
 
-function PlatformCard({ item }: { item: PlatformEarningsItem }) {
-  const [expanded, setExpanded] = useState(false);
-  const platformLabel =
-    PLATFORM_CODE_REGISTRY[item.platformCode]?.displayName ?? item.platformCode;
-
-  const toggle = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setExpanded((prev) => !prev);
-  };
-
-  return (
-    <Pressable
-      onPress={toggle}
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
-      accessibilityRole="button"
-      accessibilityLabel={`${platformLabel} 收益明細`}
-      accessibilityHint={expanded ? "收合收益明細" : "展開收益明細"}
-    >
-      <View style={styles.cardHeader}>
-        <View style={styles.cardTitleBlock}>
-          <Text style={styles.platformName}>{platformLabel}</Text>
-          <Text style={styles.platformCode}>{item.platformCode}</Text>
-        </View>
-
-        <View style={styles.summaryBlock}>
-          <Text style={styles.summaryLabel}>本期實拿</Text>
-          <Text style={styles.summaryValue}>{formatMoney(item.netAmount)}</Text>
-        </View>
-
-        <Ionicons
-          name={expanded ? "chevron-up" : "chevron-down"}
-          size={18}
-          color={Tokens.colors.textMuted}
-        />
-      </View>
-
-      <View style={styles.metricsRow}>
-        <View style={styles.metricChip}>
-          <Text style={styles.metricChipLabel}>總收入</Text>
-          <Text style={styles.metricChipValue}>
-            {formatMoney(item.grossEarning)}
-          </Text>
-        </View>
-        <View style={styles.metricChip}>
-          <Text style={styles.metricChipLabel}>服務費</Text>
-          <Text style={[styles.metricChipValue, styles.metricChipValueMuted]}>
-            {formatMoney(item.serviceFee)}
-          </Text>
-        </View>
-        <View style={styles.metricChip}>
-          <Text style={styles.metricChipLabel}>補貼</Text>
-          <Text style={styles.metricChipValue}>
-            {formatMoney(item.subsidy)}
-          </Text>
-        </View>
-      </View>
-
-      {expanded ? (
-        <View style={styles.detailPanel}>
-          <DetailRow label="總收入" value={formatMoney(item.grossEarning)} />
-          <DetailRow
-            label="平台服務費"
-            value={formatMoney(item.serviceFee)}
-            tone="muted"
-          />
-          <DetailRow label="補貼" value={formatMoney(item.subsidy)} />
-          <DetailRow
-            label="實際入帳"
-            value={formatMoney(item.netAmount)}
-            tone="positive"
-          />
-        </View>
-      ) : null}
-    </Pressable>
-  );
-}
-
-export function EarningsByPlatform({
-  items,
-}: {
+export interface EarningsByPlatformProps {
   items: PlatformEarningsItem[];
-}) {
+}
+
+export function EarningsByPlatform({ items }: EarningsByPlatformProps) {
   if (items.length === 0) {
     return (
       <EmptyState
@@ -142,8 +31,81 @@ export function EarningsByPlatform({
   return (
     <View style={styles.list}>
       {items.map((item) => (
-        <PlatformCard key={item.platformCode} item={item} />
+        <EarningsRow key={item.platformCode} item={item} />
       ))}
+    </View>
+  );
+}
+
+function EarningsRow({ item }: { item: PlatformEarningsItem }) {
+  const platformLabel =
+    PLATFORM_CODE_REGISTRY[item.platformCode]?.displayName ?? item.platformCode;
+  const forwarded = !OWNED_PLATFORM_CODES.has(item.platformCode);
+  const isEmpty =
+    item.grossEarning.amountMinor === 0 &&
+    item.serviceFee.amountMinor === 0 &&
+    item.subsidy.amountMinor === 0 &&
+    item.netAmount.amountMinor === 0;
+
+  const authorityLabel = forwarded ? "平台結算" : "DRTS 結算";
+  const authorityColor = forwarded
+    ? Tokens.colors.forwarded
+    : Tokens.colors.owned;
+
+  return (
+    <View
+      style={[styles.row, isEmpty ? styles.rowEmpty : null]}
+      accessibilityLabel={`${platformLabel} 收益`}
+    >
+      <View style={styles.rowHeader}>
+        <PlatformBadge
+          code={item.platformCode}
+          name={platformLabel}
+          forwarded={forwarded}
+          size="sm"
+        />
+        <View style={styles.spacer} />
+        <Text style={styles.netValue}>
+          {isEmpty ? "—" : formatAmountNumber(item.netAmount)}
+        </Text>
+      </View>
+
+      <View style={styles.detailRow}>
+        <DetailEntry
+          label="毛收"
+          value={formatAmountNumber(item.grossEarning)}
+        />
+        <DetailEntry
+          label="抽成"
+          value={
+            item.serviceFee.amountMinor === 0
+              ? "0"
+              : formatSignedAmountNumber({
+                  ...item.serviceFee,
+                  amountMinor: -Math.abs(item.serviceFee.amountMinor),
+                })
+          }
+        />
+        <DetailEntry
+          label="補助"
+          value={formatSignedAmountNumber(item.subsidy)}
+        />
+        <Text
+          style={[styles.authorityLabel, { color: authorityColor }]}
+          accessibilityLabel={`結算權威 ${authorityLabel}`}
+        >
+          {authorityLabel}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function DetailEntry({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailEntry}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value}</Text>
     </View>
   );
 }
@@ -152,105 +114,74 @@ const styles = StyleSheet.create({
   list: {
     gap: Tokens.spacing.sm,
   },
-  card: {
+  row: {
     backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.md,
+    borderRadius: Tokens.radius.lg,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.md,
-    gap: Tokens.spacing.md,
+    paddingVertical: Tokens.spacing.md,
+    paddingHorizontal: Tokens.spacing.md,
+    gap: Tokens.spacing.sm,
   },
-  cardPressed: {
-    opacity: 0.92,
+  rowEmpty: {
+    opacity: 0.6,
   },
-  cardHeader: {
+  rowHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: Tokens.spacing.sm,
   },
-  cardTitleBlock: {
+  spacer: {
     flex: 1,
-    gap: 2,
   },
-  platformName: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
+  netValue: {
+    fontSize: 18,
+    lineHeight: 22,
     fontWeight: "700",
-  },
-  platformCode: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-    textTransform: "uppercase",
-  },
-  summaryBlock: {
-    alignItems: "flex-end",
-    marginRight: Tokens.spacing.xs,
-  },
-  summaryLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
-  summaryValue: {
-    ...Tokens.type.label,
-    color: Tokens.colors.success,
-    fontWeight: "700",
-  },
-  metricsRow: {
-    flexDirection: "row",
-    gap: Tokens.spacing.sm,
-  },
-  metricChip: {
-    flex: 1,
-    backgroundColor: Tokens.colors.surfaceMuted,
-    borderRadius: Tokens.radius.sm,
-    paddingVertical: Tokens.spacing.sm,
-    paddingHorizontal: Tokens.spacing.sm,
-    gap: 2,
-  },
-  metricChipLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
-  metricChipValue: {
-    ...Tokens.type.label,
+    fontFamily: NUMERIC_FONT_FAMILY,
     color: Tokens.colors.textStrong,
-    fontWeight: "600",
-  },
-  metricChipValueMuted: {
-    color: Tokens.colors.warning,
-  },
-  detailPanel: {
-    paddingTop: Tokens.spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: Tokens.colors.border,
-    gap: Tokens.spacing.sm,
+    letterSpacing: -0.3,
   },
   detailRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
     gap: Tokens.spacing.md,
+    paddingTop: Tokens.spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Tokens.colors.borderStrong,
+    borderStyle: "dashed",
+  },
+  detailEntry: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 4,
   },
   detailLabel: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textBody,
+    fontSize: 11,
+    lineHeight: 14,
+    color: Tokens.colors.textMuted,
+    fontWeight: "500",
   },
   detailValue: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: "600",
+    color: Tokens.colors.textStrong,
+    fontFamily: NUMERIC_FONT_FAMILY,
   },
-  detailValuePositive: {
-    color: Tokens.colors.success,
-  },
-  detailValueMuted: {
-    color: Tokens.colors.warning,
+  authorityLabel: {
+    flex: 1,
+    textAlign: "right",
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "700",
+    letterSpacing: 0.4,
   },
   emptyState: {
     flex: 0,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
-    borderRadius: Tokens.radius.md,
+    borderRadius: Tokens.radius.lg,
     backgroundColor: Tokens.colors.surface,
   },
 });

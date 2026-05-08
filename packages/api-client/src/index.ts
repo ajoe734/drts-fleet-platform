@@ -149,6 +149,8 @@ import type {
   SetPlatformTenantRolloutStageCommand,
   SetPlatformOfflineCommand,
   SetPlatformOnlineCommand,
+  PlatformAdapter,
+  UpdatePlatformAdapterCommand,
   SettlementMatrixRecord,
   ShiftRecord,
   TenantAddressRecord,
@@ -1738,6 +1740,25 @@ export class ApiClient {
     return this.post<PlatformAdminTenantRecord>(
       `/api/platform-admin/tenants/${encodeURIComponent(tenantId)}/rollback-hold`,
     );
+  }
+
+  // ── Platform Adapters ──
+
+  async listPlatformAdapters(): Promise<PlatformAdapter[]> {
+    return this.getList<PlatformAdapter>("/api/platform-admin/adapters");
+  }
+
+  async getPlatformAdapter(id: string): Promise<PlatformAdapter> {
+    return this.get<PlatformAdapter>(`/api/platform-admin/adapters/${id}`);
+  }
+
+  async updatePlatformAdapter(
+    id: string,
+    command: UpdatePlatformAdapterCommand,
+  ): Promise<PlatformAdapter> {
+    return this.patch<PlatformAdapter>(`/api/platform-admin/adapters/${id}`, {
+      body: command,
+    });
   }
 
   // ── Regulatory Registry ──

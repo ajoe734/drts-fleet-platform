@@ -18,6 +18,7 @@ import {
   Flag,
   LayoutDashboard,
   Languages,
+  ShieldCheck, // Import ShieldCheck icon
 } from "lucide-react";
 
 export function AdminNav() {
@@ -61,6 +62,12 @@ export function AdminNav() {
       href: "/feature-flags",
       label: t("nav.featureFlags"),
       icon: <Flag size={16} />,
+    },
+    // New Navigation Item for Platform Adapter Registry
+    {
+      href: "/adapter-registry",
+      label: t("nav.adapterRegistry"),
+      icon: <ShieldCheck size={16} />, // Using ShieldCheck for adapter registry
     },
   ];
 
