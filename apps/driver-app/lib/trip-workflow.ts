@@ -23,6 +23,13 @@ export interface TripPrimaryActionDescriptor {
   helperText: string;
 }
 
+type ForwardedBlockingTripState =
+  | "forwarded_offered"
+  | "forwarded_pending"
+  | "forwarded_lost"
+  | "forwarded_cancelled"
+  | "sync_failed";
+
 const TRIP_PRIMARY_ACTIONS: Record<
   TripPrimaryActionKey,
   Omit<TripPrimaryActionDescriptor, "action">
@@ -153,17 +160,24 @@ export function getTripExperienceState(
 
 export function getPrimaryTripAction(
   task: DriverTaskRecord | null,
+  experienceState: TripExperienceState | null = getTripExperienceState(task),
 ): TripPrimaryActionDescriptor | null {
-  if (!task) {
+  if (!task || !experienceState) {
     return null;
   }
 
-  const tripState = getTripExperienceState(task);
+  const blockedForwardedStates: ForwardedBlockingTripState[] = [
+    "forwarded_offered",
+    "forwarded_pending",
+    "forwarded_lost",
+    "forwarded_cancelled",
+    "sync_failed",
+  ];
+
   if (
-    tripState === "forwarded_pending" ||
-    tripState === "forwarded_lost" ||
-    tripState === "forwarded_cancelled" ||
-    tripState === "sync_failed"
+    blockedForwardedStates.includes(
+      experienceState as ForwardedBlockingTripState,
+    )
   ) {
     return null;
   }
@@ -171,30 +185,26 @@ export function getPrimaryTripAction(
   const runtimeStatus = getRuntimeTaskStatus(task);
   let action: TripPrimaryActionKey | null = null;
 
-  if (tripState === "forwarded_offered") {
-    action = "accept";
-  } else {
-    switch (runtimeStatus) {
-      case "pending_acceptance":
-        action = tripState === "forwarded_confirmed" ? "depart" : "accept";
-        break;
-      case "accepted":
-        action = "depart";
-        break;
-      case "enroute_pickup":
-        action = "arrived";
-        break;
-      case "arrived_pickup":
-        action = "start";
-        break;
-      case "on_trip":
-      case "proof_pending":
-        action = "complete";
-        break;
-      default:
-        action = null;
-        break;
-    }
+  switch (runtimeStatus) {
+    case "pending_acceptance":
+      action = experienceState === "forwarded_confirmed" ? "depart" : "accept";
+      break;
+    case "accepted":
+      action = "depart";
+      break;
+    case "enroute_pickup":
+      action = "arrived";
+      break;
+    case "arrived_pickup":
+      action = "start";
+      break;
+    case "on_trip":
+    case "proof_pending":
+      action = "complete";
+      break;
+    default:
+      action = null;
+      break;
   }
 
   if (!action) {
@@ -209,6 +219,7 @@ export function getPrimaryTripAction(
 
 export function shouldShowTripCompletionProof(
   task: DriverTaskRecord | null,
+  experienceState?: TripExperienceState | null,
 ): boolean {
-  return getPrimaryTripAction(task)?.action === "complete";
+  return getPrimaryTripAction(task, experienceState)?.action === "complete";
 }

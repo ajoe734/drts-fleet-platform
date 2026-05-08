@@ -14,6 +14,7 @@ vi.mock("@/components/platform-task-badge", () => ({
     React.createElement("PlatformTaskBadge", {
       platformCode: platformCode ?? "owned",
     }),
+  PlatformAuthorityBanner: () => null,
 }));
 
 import RouteDisplay from "../../components/route-display";

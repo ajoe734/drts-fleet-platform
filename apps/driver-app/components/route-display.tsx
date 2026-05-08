@@ -1,7 +1,9 @@
 import React from "react";
 import { View, Text, StyleSheet, Alert } from "react-native";
 import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
-import PlatformTaskBadge from "@/components/platform-task-badge";
+import PlatformTaskBadge, {
+  PlatformAuthorityBanner,
+} from "@/components/platform-task-badge";
 import { Tokens } from "@/components/ui/tokens";
 
 /**
@@ -37,6 +39,13 @@ export default function RouteDisplay({
     const v = (task as any)?.routeIntent ?? (task as any)?.platformRouteIntent;
     return typeof v === "string" ? v : null;
   })();
+  const routeAuthorityDescription = forwarded
+    ? routeIntent
+      ? `來源平台指定路線：${routeIntent}`
+      : "此任務路線由來源平台管理，本地只顯示同步過來的站點資訊。"
+    : routeProvided === false
+      ? "目前僅有上下車點摘要；如需調整，請與派車台確認後再更新。"
+      : "此路線由 DRTS 任務管理，可依派遣規則確認或調整。";
 
   // Prefer platform-provided waypoints; otherwise fall back to order pickup/dropoff
   const platformWaypoints: any[] | null = Array.isArray(
@@ -90,6 +99,11 @@ export default function RouteDisplay({
           <PlatformTaskBadge platformCode={task.sourcePlatform} />
         </View>
       </View>
+
+      <PlatformAuthorityBanner
+        platformCode={task.sourcePlatform}
+        description={routeAuthorityDescription}
+      />
 
       {forwarded && (
         <Text style={styles.note}>
