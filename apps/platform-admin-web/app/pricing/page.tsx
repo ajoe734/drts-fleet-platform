@@ -152,6 +152,28 @@ export default function PricingPage() {
       filter === "all" ? rules : rules.filter((rule) => rule.status === filter),
     [filter, rules],
   );
+  const activeRules = rules.filter((rule) => rule.status === "active");
+  const draftRules = rules.filter((rule) => rule.status === "draft");
+  const pricingWorkflowCopy =
+    locale === "en"
+      ? {
+          publishWindowTitle: "Publish-window governance",
+          publishWindowNote:
+            "Pricing drafts stay isolated until a controlled publish window sets the effective range. Driver fee plans remain visible so operator overrides do not bypass the canonical pricing authority.",
+          nextPublish: "Next publish candidate",
+          overrideActors: "Override actors",
+          overrideFields: "Required override fields",
+          noDrafts: "No draft pricing rule is waiting for publication.",
+        }
+      : {
+          publishWindowTitle: "發布窗口治理",
+          publishWindowNote:
+            "定價草稿在設定生效區間前都維持隔離；司機費用方案則持續可見，避免人工 override 繞過 canonical pricing authority。",
+          nextPublish: "下一個發布候選",
+          overrideActors: "可執行 override 的角色",
+          overrideFields: "override 必填欄位",
+          noDrafts: "目前沒有等待發布的定價草稿。",
+        };
 
   async function handleCreatePricingRule(event: React.FormEvent) {
     event.preventDefault();
@@ -324,6 +346,73 @@ export default function PricingPage() {
           </p>
         </div>
       )}
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+          gap: 16,
+          marginBottom: 16,
+        }}
+      >
+        <div
+          className="admin-card"
+          style={{ marginBottom: 0, background: "rgba(15,118,110,0.04)" }}
+        >
+          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+            {pricingWorkflowCopy.publishWindowTitle}
+          </p>
+          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
+            {pricingWorkflowCopy.publishWindowNote}
+          </p>
+        </div>
+        <div className="admin-card" style={{ marginBottom: 0 }}>
+          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+            {pricingWorkflowCopy.nextPublish}
+          </p>
+          {draftRules[0] ? (
+            <>
+              <strong style={{ display: "block", fontSize: 20 }}>
+                {draftRules[0].ruleName}
+              </strong>
+              <small style={{ color: "#6b7280" }}>
+                {draftRules[0].version} · {draftRules[0].applicableTo}
+              </small>
+            </>
+          ) : (
+            <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
+              {pricingWorkflowCopy.noDrafts}
+            </p>
+          )}
+        </div>
+        <div className="admin-card" style={{ marginBottom: 0 }}>
+          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+            {pricingWorkflowCopy.overrideActors}
+          </p>
+          <strong style={{ display: "block", fontSize: 20 }}>
+            {productRuleCatalog
+              ? productRuleCatalog.pricingAuthority.manualOverrideActorTypes.join(
+                  " / ",
+                )
+              : "—"}
+          </strong>
+          <small style={{ color: "#6b7280" }}>
+            {activeRules.length} active · {draftRules.length} draft
+          </small>
+        </div>
+        <div className="admin-card" style={{ marginBottom: 0 }}>
+          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+            {pricingWorkflowCopy.overrideFields}
+          </p>
+          <strong style={{ display: "block", fontSize: 20 }}>
+            {productRuleCatalog
+              ? productRuleCatalog.pricingAuthority.manualOverrideRequiredFields.join(
+                  ", ",
+                )
+              : "—"}
+          </strong>
+        </div>
+      </div>
 
       <div
         style={{

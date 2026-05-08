@@ -138,6 +138,37 @@ export default function SwitchboardPage() {
     () => publicInfo.filter((version) => version.status === "draft"),
     [publicInfo],
   );
+  const livePublicInfoVersion = publishedVersions[0] ?? null;
+  const livePlacardVersion =
+    placards.find((placard) => placard.publishedAt != null) ??
+    placards[0] ??
+    null;
+  const switchboardWorkflowCopy =
+    locale === "en"
+      ? {
+          governanceTitle: "Versioning governance",
+          governanceNote:
+            "Public-info disclosure versions and placard artifacts remain linked so publication history, rider disclosure, and physical placard issuance can be audited together.",
+          liveVersion: "Live disclosure",
+          livePlacard: "Current placard",
+          history: "History framing",
+          historyNote:
+            "Drafts can be edited or deleted until publication. Published versions stay immutable and feed downstream placard lineage.",
+          noLiveVersion: "No published public info version yet.",
+          noLivePlacard: "No placard artifact generated yet.",
+        }
+      : {
+          governanceTitle: "版本治理",
+          governanceNote:
+            "公開資訊版本與立牌成品維持可追溯連結，讓發布歷史、乘客揭露與實體立牌發放可以一起被稽核。",
+          liveVersion: "目前生效揭露",
+          livePlacard: "現行立牌",
+          history: "歷史框架",
+          historyNote:
+            "草稿在發布前可編輯或刪除；一旦發布即保持不可變，並成為後續立牌沿革來源。",
+          noLiveVersion: "目前尚無已發布公開資訊版本。",
+          noLivePlacard: "目前尚未產生立牌成品。",
+        };
 
   useEffect(() => {
     const preferredVersion = getPreferredPlacardSourceVersion(publicInfo);
@@ -321,6 +352,78 @@ export default function SwitchboardPage() {
             <small style={{ color: "#6b7280" }}>{card.note}</small>
           </div>
         ))}
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+          gap: 16,
+          marginBottom: 16,
+        }}
+      >
+        <div
+          className="admin-card"
+          style={{ marginBottom: 0, background: "rgba(15,118,110,0.04)" }}
+        >
+          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+            {switchboardWorkflowCopy.governanceTitle}
+          </p>
+          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
+            {switchboardWorkflowCopy.governanceNote}
+          </p>
+        </div>
+        <div className="admin-card" style={{ marginBottom: 0 }}>
+          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+            {switchboardWorkflowCopy.liveVersion}
+          </p>
+          {livePublicInfoVersion ? (
+            <>
+              <strong style={{ display: "block", fontSize: 20 }}>
+                {livePublicInfoVersion.title}
+              </strong>
+              <small style={{ color: "#6b7280" }}>
+                {livePublicInfoVersion.versionId} ·{" "}
+                {formatDateTime(livePublicInfoVersion.publishedAt ?? "")}
+              </small>
+            </>
+          ) : (
+            <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
+              {switchboardWorkflowCopy.noLiveVersion}
+            </p>
+          )}
+        </div>
+        <div className="admin-card" style={{ marginBottom: 0 }}>
+          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+            {switchboardWorkflowCopy.livePlacard}
+          </p>
+          {livePlacardVersion ? (
+            <>
+              <strong style={{ display: "block", fontSize: 20 }}>
+                {livePlacardVersion.versionCode}
+              </strong>
+              <small style={{ color: "#6b7280" }}>
+                {livePlacardVersion.templateName} ·{" "}
+                {formatDateTime(
+                  livePlacardVersion.publishedAt ??
+                    livePlacardVersion.createdAt,
+                )}
+              </small>
+            </>
+          ) : (
+            <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
+              {switchboardWorkflowCopy.noLivePlacard}
+            </p>
+          )}
+        </div>
+        <div className="admin-card" style={{ marginBottom: 0 }}>
+          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+            {switchboardWorkflowCopy.history}
+          </p>
+          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
+            {switchboardWorkflowCopy.historyNote}
+          </p>
+        </div>
       </div>
 
       <div className="admin-toolbar">

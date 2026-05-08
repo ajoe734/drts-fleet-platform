@@ -5,6 +5,7 @@
 
 "use client";
 
+import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
@@ -211,6 +212,15 @@ export default function PaymentsPage() {
   const [batchActionId, setBatchActionId] = useState<string | null>(null);
   const [issueActionId, setIssueActionId] = useState<string | null>(null);
   const [issueDraftPending, setIssueDraftPending] = useState(false);
+  const [issueStatusFilter, setIssueStatusFilter] = useState<
+    "all" | ReconciliationIssueRecord["status"]
+  >("all");
+  const [issueTypeFilter, setIssueTypeFilter] = useState<
+    "all" | ReconciliationIssueRecord["issueType"]
+  >("all");
+  const [issueChannelFilter, setIssueChannelFilter] = useState<
+    "all" | (typeof RECONCILIATION_CHANNEL_OPTIONS)[number]
+  >("all");
   const [remittanceProofs, setRemittanceProofs] = useState<
     Record<string, string>
   >({});
@@ -579,6 +589,21 @@ export default function PaymentsPage() {
     invoiceFilter === "all"
       ? invoices
       : invoices.filter((invoice) => invoice.status === invoiceFilter);
+  const filteredReconciliationIssues = reconciliationIssues.filter((issue) => {
+    if (issueStatusFilter !== "all" && issue.status !== issueStatusFilter) {
+      return false;
+    }
+    if (issueTypeFilter !== "all" && issue.issueType !== issueTypeFilter) {
+      return false;
+    }
+    if (
+      issueChannelFilter !== "all" &&
+      issue.channelKey !== issueChannelFilter
+    ) {
+      return false;
+    }
+    return true;
+  });
   const totalInvoiceAmountMinor = filteredInvoices.reduce(
     (sum, invoice) => sum + (invoice.amount?.amountMinor ?? 0),
     0,
@@ -613,6 +638,28 @@ export default function PaymentsPage() {
   const forwardedShadowIssues = reconciliationIssues.filter(
     (issue) => issue.forwardedFinanceContext != null,
   );
+  const reconciliationWorkflowCopy =
+    locale === "en"
+      ? {
+          title: "Resolution workflow",
+          subtitle:
+            "Open issues here, then drill into detail to assign ownership, capture evidence, and close with an auditable resolution.",
+          status: "Status",
+          type: "Issue Type",
+          channel: "Channel",
+          filtered: "Filtered",
+          openDetail: "Open detail",
+        }
+      : {
+          title: "對帳處理流程",
+          subtitle:
+            "先在這裡建立或篩選 issue，再進入 detail 頁完成指派、證據補件與可稽核結案。",
+          status: "狀態",
+          type: "問題類型",
+          channel: "渠道",
+          filtered: "目前顯示",
+          openDetail: "查看詳情",
+        };
 
   const describeLedgerMode = (
     mode: SettlementMatrixRecord["localLedgerMode"],
@@ -813,6 +860,41 @@ export default function PaymentsPage() {
           <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
             {t("payments.reconciliation.subtitle")}
           </p>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 12,
+            marginBottom: 16,
+          }}
+        >
+          <div
+            className="admin-card"
+            style={{ marginBottom: 0, background: "rgba(15,118,110,0.04)" }}
+          >
+            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#6b7280" }}>
+              {reconciliationWorkflowCopy.title}
+            </p>
+            <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
+              {reconciliationWorkflowCopy.subtitle}
+            </p>
+          </div>
+          <div
+            className="admin-card"
+            style={{ marginBottom: 0, background: "rgba(59,130,246,0.04)" }}
+          >
+            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#6b7280" }}>
+              {reconciliationWorkflowCopy.filtered}
+            </p>
+            <strong style={{ display: "block", fontSize: 24 }}>
+              {filteredReconciliationIssues.length}
+            </strong>
+            <small style={{ color: "#6b7280" }}>
+              {openReconciliationCount} {t("payments.reconciliation.openCount")}
+            </small>
+          </div>
         </div>
 
         <div style={{ ...formGridStyle, marginBottom: 12 }}>
@@ -1027,6 +1109,85 @@ export default function PaymentsPage() {
           </button>
         </form>
 
+        <div
+          style={{
+            ...formGridStyle,
+            marginTop: 16,
+            marginBottom: 16,
+            alignItems: "end",
+          }}
+        >
+          <label style={labelStyle}>
+            {reconciliationWorkflowCopy.status}
+            <select
+              value={issueStatusFilter}
+              onChange={(event) =>
+                setIssueStatusFilter(
+                  event.target.value as
+                    | "all"
+                    | ReconciliationIssueRecord["status"],
+                )
+              }
+              style={inputStyle}
+            >
+              <option value="all">
+                {formatPlatformCodeLabel(locale, "all")}
+              </option>
+              {["open", "assigned", "reopened", "resolved"].map((status) => (
+                <option key={status} value={status}>
+                  {formatPlatformCodeLabel(locale, status)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={labelStyle}>
+            {reconciliationWorkflowCopy.type}
+            <select
+              value={issueTypeFilter}
+              onChange={(event) =>
+                setIssueTypeFilter(
+                  event.target.value as
+                    | "all"
+                    | ReconciliationIssueRecord["issueType"],
+                )
+              }
+              style={inputStyle}
+            >
+              <option value="all">
+                {formatPlatformCodeLabel(locale, "all")}
+              </option>
+              {RECONCILIATION_ISSUE_TYPE_OPTIONS.map((issueType) => (
+                <option key={issueType} value={issueType}>
+                  {formatPlatformCodeLabel(locale, issueType)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={labelStyle}>
+            {reconciliationWorkflowCopy.channel}
+            <select
+              value={issueChannelFilter}
+              onChange={(event) =>
+                setIssueChannelFilter(
+                  event.target.value as
+                    | "all"
+                    | (typeof RECONCILIATION_CHANNEL_OPTIONS)[number],
+                )
+              }
+              style={inputStyle}
+            >
+              <option value="all">
+                {formatPlatformCodeLabel(locale, "all")}
+              </option>
+              {RECONCILIATION_CHANNEL_OPTIONS.map((channelKey) => (
+                <option key={channelKey} value={channelKey}>
+                  {describeMatrixChannel(channelKey)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
         <div style={{ marginTop: 16 }}>
           <table className="admin-table">
             <thead>
@@ -1040,8 +1201,8 @@ export default function PaymentsPage() {
               </tr>
             </thead>
             <tbody>
-              {reconciliationIssues.length > 0 ? (
-                reconciliationIssues.map((issue) => (
+              {filteredReconciliationIssues.length > 0 ? (
+                filteredReconciliationIssues.map((issue) => (
                   <tr key={issue.issueId}>
                     <td style={{ fontFamily: "monospace", fontSize: 12 }}>
                       <div>{issue.issueId}</div>
@@ -1137,6 +1298,14 @@ export default function PaymentsPage() {
                       </div>
                     </td>
                     <td style={{ minWidth: 320 }}>
+                      <div style={{ ...issueActionGridStyle, marginBottom: 8 }}>
+                        <Link
+                          href={`/payments/reconciliation/${encodeURIComponent(issue.issueId)}`}
+                          className="admin-btn admin-btn--secondary"
+                        >
+                          {reconciliationWorkflowCopy.openDetail}
+                        </Link>
+                      </div>
                       <div style={issueActionGridStyle}>
                         {issue.status !== "resolved" && (
                           <>

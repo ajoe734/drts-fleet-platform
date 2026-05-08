@@ -13,6 +13,8 @@ import {
   getPlatformLabel,
 } from "@/lib/localized-labels";
 import type {
+  ReportJobDetailRecord,
+  ReportJobType,
   CreateDriverMasterCommand,
   DriverDeviceBindingSummary,
   DriverRegistryRecord,
@@ -67,12 +69,29 @@ function createInitialOffboardingForm(): InitiateVehicleOffboardingCommand {
   };
 }
 
+const FLEET_REPORT_JOB_TYPES = [
+  "vehicle_roster",
+  "driver_roster",
+  "contract_roster",
+] as const satisfies ReportJobType[];
+
+type FleetReportJobType = (typeof FLEET_REPORT_JOB_TYPES)[number];
+
+function sleep(milliseconds: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
+
 export default function FleetPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [vehicles, setVehicles] = useState<VehicleRegistryRecord[]>([]);
   const [drivers, setDrivers] = useState<DriverRegistryRecord[]>([]);
   const [contracts, setContracts] = useState<VehicleContractRecord[]>([]);
+  const [reportJobs, setReportJobs] = useState<
+    Partial<Record<FleetReportJobType, ReportJobDetailRecord>>
+  >({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
@@ -85,6 +104,8 @@ export default function FleetPage() {
   const [driverActionId, setDriverActionId] = useState<string | null>(null);
   const [bindingActionId, setBindingActionId] = useState<string | null>(null);
   const [vehicleActionId, setVehicleActionId] = useState<string | null>(null);
+  const [reportActionId, setReportActionId] =
+    useState<FleetReportJobType | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(
     null,
   );
@@ -114,6 +135,20 @@ export default function FleetPage() {
         }
         return v?.[0]?.vehicleId ?? null;
       });
+      const jobs = await client.listReportJobs();
+      const latestFleetJobs = await FLEET_REPORT_JOB_TYPES.reduce<
+        Promise<Partial<Record<FleetReportJobType, ReportJobDetailRecord>>>
+      >(async (accumulatorPromise, jobType) => {
+        const accumulator = await accumulatorPromise;
+        const latestJob = jobs.find((job) => job.jobType === jobType);
+        if (!latestJob) {
+          return accumulator;
+        }
+        const detail = await client.getReportJob(latestJob.jobId);
+        accumulator[jobType] = detail;
+        return accumulator;
+      }, Promise.resolve({}));
+      setReportJobs(latestFleetJobs);
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -129,6 +164,118 @@ export default function FleetPage() {
     vehicles.find((vehicle) => vehicle.vehicleId === selectedVehicleId) ??
     vehicles[0] ??
     null;
+  const pendingOffboardingVehicles = vehicles.filter((vehicle) => {
+    const offboardingStatus = vehicle.supplyLifecycle.offboarding.status;
+    return offboardingStatus !== "none" && offboardingStatus !== "completed";
+  });
+  const complianceWarnings = [
+    ...vehicles
+      .filter(
+        (vehicle) =>
+          !vehicle.dispatchableFlag ||
+          vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
+      )
+      .map((vehicle) => ({
+        id: vehicle.vehicleId,
+        message:
+          locale === "en"
+            ? `${vehicle.vehicleId} is not dispatchable until compliance holds are cleared.`
+            : `${vehicle.vehicleId} 仍不可派遣，需先清除合規 hold。`,
+      })),
+    ...drivers
+      .filter(
+        (driver) =>
+          !driver.dispatchEligible ||
+          driver.eligibilityBlockedReasons.length > 0,
+      )
+      .map((driver) => ({
+        id: driver.driverId,
+        message:
+          locale === "en"
+            ? `${driver.driverId} is blocked from dispatch eligibility review.`
+            : `${driver.driverId} 目前被阻擋，需完成派遣資格審查。`,
+      })),
+  ].slice(0, 5);
+  const fleetWorkflowCopy =
+    locale === "en"
+      ? {
+          summaryTitle: "Compliance workflow",
+          summaryNote:
+            "Drivers, vehicles, contracts, exclusivity, and offboarding stay visible in one governance lane so operators can clear dispatch blockers before publication or payout windows.",
+          blockedVehicles: "Blocked vehicles",
+          blockedDrivers: "Blocked drivers",
+          pendingExclusivity: "Pending exclusivity",
+          pendingOffboarding: "Pending offboarding",
+          exportVehicles: "Export vehicles",
+          exportDrivers: "Export drivers",
+          exportContracts: "Export contracts",
+          exportHint:
+            "Exports create governed report jobs and only download server-signed artifacts.",
+          exportIdle: "No governed artifact generated yet.",
+          exportPending: "Preparing governed export…",
+          exportReady: "Latest artifact ready",
+          exportOpen: "Open signed download",
+          warningTitle: "Immediate warnings",
+        }
+      : {
+          summaryTitle: "合規流程總覽",
+          summaryNote:
+            "把司機、車輛、合約、獨家供應與下線流程放在同一條治理視角，方便先清掉 dispatch blocker，再進入發布或結算窗口。",
+          blockedVehicles: "受阻車輛",
+          blockedDrivers: "受阻司機",
+          pendingExclusivity: "待審獨家供應",
+          pendingOffboarding: "待完成下線",
+          exportVehicles: "匯出車輛",
+          exportDrivers: "匯出司機",
+          exportContracts: "匯出合約",
+          exportHint:
+            "匯出會建立受治理的 report job，只透過伺服器簽發的 artifact URL 下載。",
+          exportIdle: "尚未建立受治理 artifact。",
+          exportPending: "正在準備受治理匯出…",
+          exportReady: "最新 artifact 已就緒",
+          exportOpen: "開啟簽名下載",
+          warningTitle: "即時警示",
+        };
+
+  const requestFleetReport = useCallback(
+    async (jobType: FleetReportJobType) => {
+      setReportActionId(jobType);
+      setError(null);
+      try {
+        const accepted = await client.createReportJob({
+          jobType,
+          format: "xlsx",
+        });
+        let detail: ReportJobDetailRecord | null = null;
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          detail = await client.getReportJob(accepted.jobId);
+          if (detail.artifact?.downloadMetadata.downloadUrl) {
+            break;
+          }
+          await sleep(150);
+        }
+        if (!detail) {
+          throw new Error("Unable to load report job detail.");
+        }
+        setReportJobs((current) => ({
+          ...current,
+          [jobType]: detail,
+        }));
+        if (detail.artifact?.downloadMetadata.downloadUrl) {
+          window.open(
+            detail.artifact.downloadMetadata.downloadUrl,
+            "_blank",
+            "noopener,noreferrer",
+          );
+        }
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setReportActionId(null);
+      }
+    },
+    [client],
+  );
 
   useEffect(() => {
     if (!selectedVehicle) {
@@ -369,6 +516,90 @@ export default function FleetPage() {
         </div>
       )}
 
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 16,
+          marginBottom: 16,
+        }}
+      >
+        <div
+          className="admin-card"
+          style={{ marginBottom: 0, background: "rgba(15,118,110,0.04)" }}
+        >
+          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+            {fleetWorkflowCopy.summaryTitle}
+          </p>
+          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
+            {fleetWorkflowCopy.summaryNote}
+          </p>
+        </div>
+        {[
+          {
+            label: fleetWorkflowCopy.blockedVehicles,
+            value: vehicles.filter(
+              (vehicle) =>
+                !vehicle.dispatchableFlag ||
+                vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
+            ).length,
+          },
+          {
+            label: fleetWorkflowCopy.blockedDrivers,
+            value: drivers.filter(
+              (driver) =>
+                !driver.dispatchEligible ||
+                driver.eligibilityBlockedReasons.length > 0,
+            ).length,
+          },
+          {
+            label: fleetWorkflowCopy.pendingExclusivity,
+            value: vehicles.filter(
+              (vehicle) =>
+                vehicle.supplyLifecycle.exclusivity.reviewStatus === "pending",
+            ).length,
+          },
+          {
+            label: fleetWorkflowCopy.pendingOffboarding,
+            value: pendingOffboardingVehicles.length,
+          },
+        ].map((card) => (
+          <div
+            key={card.label}
+            className="admin-card"
+            style={{ marginBottom: 0 }}
+          >
+            <p style={{ margin: "0 0 8px", fontSize: 13, color: "#6b7280" }}>
+              {card.label}
+            </p>
+            <strong style={{ display: "block", fontSize: 24 }}>
+              {card.value}
+            </strong>
+          </div>
+        ))}
+      </div>
+
+      {complianceWarnings.length > 0 && (
+        <div
+          className="admin-card"
+          style={{
+            borderColor: "rgba(245,158,11,0.28)",
+            background: "rgba(245,158,11,0.06)",
+          }}
+        >
+          <p style={{ margin: "0 0 8px", fontWeight: 600 }}>
+            {fleetWorkflowCopy.warningTitle}
+          </p>
+          <div style={{ display: "grid", gap: 6 }}>
+            {complianceWarnings.map((warning) => (
+              <div key={warning.id} style={{ fontSize: 13, color: "#92400e" }}>
+                {warning.message}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="admin-toolbar">
         <div className="admin-toggle-group">
           <button
@@ -390,9 +621,90 @@ export default function FleetPage() {
             {t("fleet.tab.contracts")} ({contracts.length})
           </button>
         </div>
+        {(
+          [
+            ["vehicle_roster", fleetWorkflowCopy.exportVehicles],
+            ["driver_roster", fleetWorkflowCopy.exportDrivers],
+            ["contract_roster", fleetWorkflowCopy.exportContracts],
+          ] as const
+        ).map(([jobType, label]) => (
+          <button
+            key={jobType}
+            className="admin-btn admin-btn--secondary"
+            type="button"
+            disabled={reportActionId === jobType}
+            onClick={() => void requestFleetReport(jobType)}
+          >
+            {reportActionId === jobType
+              ? fleetWorkflowCopy.exportPending
+              : label}
+          </button>
+        ))}
         <button className="admin-btn admin-btn--secondary" onClick={loadData}>
           {t("common.refresh")}
         </button>
+      </div>
+
+      <div
+        className="admin-card"
+        style={{
+          marginTop: -4,
+          marginBottom: 16,
+          background: "rgba(59,130,246,0.04)",
+        }}
+      >
+        <p style={{ margin: "0 0 12px", fontSize: 13, color: "#374151" }}>
+          {fleetWorkflowCopy.exportHint}
+        </p>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 12,
+          }}
+        >
+          {(
+            [
+              ["vehicle_roster", fleetWorkflowCopy.exportVehicles],
+              ["driver_roster", fleetWorkflowCopy.exportDrivers],
+              ["contract_roster", fleetWorkflowCopy.exportContracts],
+            ] as const
+          ).map(([jobType, label]) => {
+            const reportJob = reportJobs[jobType];
+            return (
+              <div
+                key={`${jobType}:artifact`}
+                style={{
+                  border: "1px solid rgba(148,163,184,0.35)",
+                  borderRadius: 12,
+                  padding: 12,
+                  background: "rgba(255,255,255,0.72)",
+                }}
+              >
+                <p style={{ margin: "0 0 6px", fontWeight: 600 }}>{label}</p>
+                <p
+                  style={{ margin: "0 0 8px", fontSize: 13, color: "#6b7280" }}
+                >
+                  {reportJob?.artifact
+                    ? `${fleetWorkflowCopy.exportReady} · ${formatDateTime(reportJob.artifact.expiresAt)}`
+                    : reportActionId === jobType
+                      ? fleetWorkflowCopy.exportPending
+                      : fleetWorkflowCopy.exportIdle}
+                </p>
+                {reportJob?.artifact && (
+                  <a
+                    className="admin-btn admin-btn--secondary"
+                    href={reportJob.artifact.downloadMetadata.downloadUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {fleetWorkflowCopy.exportOpen}
+                  </a>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {activeTab === "drivers" && (
