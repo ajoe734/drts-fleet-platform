@@ -488,8 +488,8 @@ export default function SettingsScreen() {
               disabled={!settingsLoaded || saving}
             />
             <SwitchRow
-              label="自動接單"
-              description="開啟後系統會自動接受符合條件的派遣任務。"
+              label="自動接單（全平台）"
+              description="開啟後會對所有已綁定平台的合格派遣自動接單；目前尚未提供逐平台覆寫，外部平台仍以該平台的接單規則為準。"
               value={settingsValues.autoAcceptEnabled}
               onValueChange={(value) =>
                 updateSettings({ autoAcceptEnabled: value })
@@ -500,7 +500,7 @@ export default function SettingsScreen() {
 
           <FormSection
             title="平台帳號綁定"
-            description="管理外部平台的接單帳號與重新驗證需求。"
+            description="管理外部平台帳號綁定、重新驗證、平台憑證與接單資格；狀態與「平台健康中心」即時同步。"
           >
             <PlatformBinding showSectionTitle={false} />
           </FormSection>
