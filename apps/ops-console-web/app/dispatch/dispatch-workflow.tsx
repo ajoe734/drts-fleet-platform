@@ -15,6 +15,7 @@ import type {
   DispatchCandidate,
   DispatchCandidateLocationState,
   DispatchJobRecord,
+  DispatchTraceLogRecord,
   OpsDispatchStreamEventEnvelope,
   OverrideRequestRecord,
   OwnedOrderRecord,
@@ -81,7 +82,40 @@ interface ActionDraft {
   rejectionReason: string;
 }
 
+interface DispatchTimelineEntry {
+  id: string;
+  title: string;
+  body: string;
+  at: string;
+  tone: "default" | "warning" | "critical";
+}
+
 const AUTO_LOAD_CANDIDATE_LIMIT = 6;
+
+function buildDispatchTraceSyncKey(
+  order: OwnedOrderRecord | null,
+  job?: DispatchJobRecord,
+): string | null {
+  if (!order) {
+    return null;
+  }
+
+  return [
+    order.updatedAt,
+    order.status,
+    order.dispatchAttemptCount,
+    order.lastDispatchFailureReason ?? "",
+    order.dispatchTimeout?.timeoutAt ?? "",
+    order.noSupplyEscalation?.escalatedAt ?? "",
+    order.exceptionHold?.raisedAt ?? "",
+    order.exceptionHold?.resolution?.resolvedAt ?? "",
+    order.exceptionHold?.overrideRequest?.requestedAt ?? "",
+    order.manualFareOverride?.overriddenAt ?? "",
+    job?.dispatchJobId ?? "",
+    job?.status ?? "",
+    job?.updatedAt ?? "",
+  ].join("|");
+}
 
 function getQueueState(
   order: OwnedOrderRecord,
@@ -143,6 +177,23 @@ function formatEta(
     display: `${etaMinutes} min`,
     tooltip: getOpsLabel(locale, "dispatchLastUpdated", { value: updated }),
   };
+}
+
+function formatDateTime(
+  locale: "en" | "zh",
+  value: string | null | undefined,
+): string {
+  if (!value) {
+    return "-";
+  }
+
+  return new Date(value).toLocaleString(locale === "zh" ? "zh-TW" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
 }
 
 function getComplianceTone(state: string): string {
@@ -225,6 +276,124 @@ function listDownstreamReviewDuties(gates: ComplianceGateRecord[]) {
         reason: impact.reason,
       })),
   );
+}
+
+function getTimelineTone(eventType: string): DispatchTimelineEntry["tone"] {
+  if (
+    eventType.includes("hold") ||
+    eventType.includes("blocked") ||
+    eventType.includes("cancel")
+  ) {
+    return "critical";
+  }
+  if (
+    eventType.includes("override") ||
+    eventType.includes("redispatch") ||
+    eventType.includes("timeout") ||
+    eventType.includes("no_supply")
+  ) {
+    return "warning";
+  }
+  return "default";
+}
+
+function buildFallbackTimelineEntries(
+  order: OwnedOrderRecord,
+  job?: DispatchJobRecord,
+): DispatchTimelineEntry[] {
+  const entries: DispatchTimelineEntry[] = [
+    {
+      id: `${order.orderId}:created`,
+      title: "Order created",
+      body: `${order.orderNo} entered the owned dispatch queue.`,
+      at: order.createdAt,
+      tone: "default",
+    },
+  ];
+
+  if (job) {
+    entries.push({
+      id: `${job.dispatchJobId}:job`,
+      title: "Dispatch job active",
+      body: `Job ${job.dispatchJobId} is ${job.status}.`,
+      at: job.updatedAt,
+      tone: getTimelineTone(job.status),
+    });
+  }
+
+  if (order.dispatchTimeout) {
+    entries.push({
+      id: `${order.orderId}:timeout`,
+      title: "Dispatch timeout",
+      body: `Timeout escalated as ${order.dispatchTimeout.escalationAction}.`,
+      at: order.dispatchTimeout.timeoutAt,
+      tone: "warning",
+    });
+  }
+
+  if (order.noSupplyEscalation) {
+    entries.push({
+      id: `${order.orderId}:no-supply`,
+      title: "No supply escalation",
+      body: `Attempt ${order.noSupplyEscalation.attemptCount} escalated via ${order.noSupplyEscalation.escalationAction}.`,
+      at: order.noSupplyEscalation.escalatedAt,
+      tone: "warning",
+    });
+  }
+
+  if (order.exceptionHold) {
+    entries.push({
+      id: `${order.orderId}:hold`,
+      title: "Exception hold raised",
+      body: `Reason: ${order.exceptionHold.reasonCode}.`,
+      at: order.exceptionHold.raisedAt,
+      tone: "critical",
+    });
+    if (order.exceptionHold.overrideRequest) {
+      entries.push({
+        id: order.exceptionHold.overrideRequest.overrideRequestId,
+        title: "Override request",
+        body: `${order.exceptionHold.overrideRequest.status} by ${order.exceptionHold.overrideRequest.requestedBy.actorId}.`,
+        at: order.exceptionHold.overrideRequest.requestedAt,
+        tone: "warning",
+      });
+    }
+    if (order.exceptionHold.resolution) {
+      entries.push({
+        id: `${order.orderId}:resolution`,
+        title: "Exception resolved",
+        body: `${order.exceptionHold.resolution.actorId} recorded ${order.exceptionHold.resolution.resolution}.`,
+        at: order.exceptionHold.resolution.resolvedAt,
+        tone: "default",
+      });
+    }
+  }
+
+  if (order.manualFareOverride) {
+    entries.push({
+      id: `${order.orderId}:fare-override`,
+      title: "Manual fare override",
+      body: `${order.manualFareOverride.actorId} applied a fare override.`,
+      at: order.manualFareOverride.overriddenAt,
+      tone: "warning",
+    });
+  }
+
+  return entries.sort(
+    (left, right) => new Date(right.at).getTime() - new Date(left.at).getTime(),
+  );
+}
+
+function buildCandidateSearchHaystack(items: DispatchCandidate[]): string {
+  return items
+    .flatMap((candidate) => [
+      candidate.vehicleId,
+      candidate.driverId,
+      candidate.operatingArea,
+      candidate.etaMinutes?.toString() ?? "",
+    ])
+    .join(" ")
+    .toLowerCase();
 }
 
 function hasCoordinates(
@@ -311,8 +480,24 @@ export function DispatchWorkflow({
   const [actionDrafts, setActionDrafts] = useState<
     Record<string, ActionDraft | undefined>
   >({});
+  const [dispatchTraceByOrder, setDispatchTraceByOrder] = useState<
+    Record<string, DispatchTraceLogRecord[]>
+  >({});
+  const [dispatchTraceSyncKeyByOrder, setDispatchTraceSyncKeyByOrder] =
+    useState<Record<string, string>>({});
+  const [
+    dispatchTraceFailedSyncKeyByOrder,
+    setDispatchTraceFailedSyncKeyByOrder,
+  ] = useState<Record<string, string>>({});
+  const [traceLoadingOrderId, setTraceLoadingOrderId] = useState<string | null>(
+    null,
+  );
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(
+    focusOrderId || orders[0]?.orderId || null,
+  );
   const reloadTimerRef = useRef<number | null>(null);
   const autoLoadedCandidateJobsRef = useRef<Set<string>>(new Set());
+  const lastSyncedFocusOrderIdRef = useRef<string>("");
 
   useEffect(() => {
     setLiveOrders(orders);
@@ -332,6 +517,27 @@ export function DispatchWorkflow({
         {} as Record<string, DispatchJobRecord>,
       ),
     [liveDispatchJobs],
+  );
+  const candidateSearchHaystackByOrder = useMemo(
+    () =>
+      liveOrders.reduce(
+        (acc, order) => {
+          const jobId = orderJobMap[order.orderId]?.dispatchJobId;
+          if (!jobId) {
+            return acc;
+          }
+
+          const jobCandidates = candidates[jobId];
+          if (!jobCandidates?.length) {
+            return acc;
+          }
+
+          acc[order.orderId] = buildCandidateSearchHaystack(jobCandidates);
+          return acc;
+        },
+        {} as Record<string, string>,
+      ),
+    [candidates, liveOrders, orderJobMap],
   );
 
   useEffect(() => {
@@ -368,6 +574,73 @@ export function DispatchWorkflow({
       setLiveOrders(nextOrders);
       setLiveDispatchJobs(nextDispatchJobs);
     });
+  };
+
+  const loadDispatchTrace = async (
+    orderId: string,
+    force = false,
+    expectedSyncKey?: string | null,
+  ) => {
+    const order =
+      liveOrders.find((currentOrder) => currentOrder.orderId === orderId) ??
+      null;
+    const syncKey =
+      expectedSyncKey ??
+      buildDispatchTraceSyncKey(
+        order,
+        order ? orderJobMap[order.orderId] : undefined,
+      );
+
+    if (
+      !force &&
+      syncKey &&
+      dispatchTraceByOrder[orderId] &&
+      dispatchTraceSyncKeyByOrder[orderId] === syncKey
+    ) {
+      return;
+    }
+    if (
+      !force &&
+      syncKey &&
+      dispatchTraceFailedSyncKeyByOrder[orderId] === syncKey
+    ) {
+      return;
+    }
+    setTraceLoadingOrderId(orderId);
+    try {
+      const items = await client.getOrderDispatchTrace(orderId);
+      setDispatchTraceByOrder((current) => ({ ...current, [orderId]: items }));
+      if (syncKey) {
+        setDispatchTraceSyncKeyByOrder((current) => ({
+          ...current,
+          [orderId]: syncKey,
+        }));
+        setDispatchTraceFailedSyncKeyByOrder((current) => {
+          if (!current[orderId]) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[orderId];
+          return next;
+        });
+      }
+    } catch (traceError) {
+      if (syncKey) {
+        setDispatchTraceFailedSyncKeyByOrder((current) => ({
+          ...current,
+          [orderId]: syncKey,
+        }));
+      }
+      setError(
+        traceError instanceof Error
+          ? traceError.message
+          : t("dispatch.workflow.traceLoadFailed"),
+      );
+    } finally {
+      setTraceLoadingOrderId((current) =>
+        current === orderId ? null : current,
+      );
+    }
   };
 
   const scheduleDispatchReload = () => {
@@ -513,12 +786,85 @@ export function DispatchWorkflow({
       order.status,
       order.businessDispatchSubtype ?? "",
       job?.dispatchJobId ?? "",
+      candidateSearchHaystackByOrder[order.orderId] ?? "",
     ]
       .join(" ")
       .toLowerCase();
 
     return haystack.includes(deferredSearch);
   });
+  const selectedOrder =
+    filteredOrders.find((order) => order.orderId === selectedOrderId) ??
+    liveOrders.find((order) => order.orderId === selectedOrderId) ??
+    null;
+  const selectedJob = selectedOrder
+    ? orderJobMap[selectedOrder.orderId]
+    : undefined;
+  const selectedTraceSyncKey = buildDispatchTraceSyncKey(
+    selectedOrder,
+    selectedJob,
+  );
+
+  useEffect(() => {
+    if (!filteredOrders.length) {
+      setSelectedOrderId(null);
+      return;
+    }
+
+    if (!focusOrderId && lastSyncedFocusOrderIdRef.current) {
+      lastSyncedFocusOrderIdRef.current = "";
+    }
+
+    if (
+      focusOrderId &&
+      focusOrderId !== lastSyncedFocusOrderIdRef.current &&
+      filteredOrders.some((order) => order.orderId === focusOrderId)
+    ) {
+      lastSyncedFocusOrderIdRef.current = focusOrderId;
+      setSelectedOrderId(focusOrderId);
+      return;
+    }
+
+    if (
+      selectedOrderId &&
+      filteredOrders.some((order) => order.orderId === selectedOrderId)
+    ) {
+      return;
+    }
+
+    setSelectedOrderId(filteredOrders[0]?.orderId ?? null);
+  }, [filteredOrders, focusOrderId, selectedOrderId]);
+
+  useEffect(() => {
+    if (!selectedOrderId || !selectedTraceSyncKey) {
+      return;
+    }
+    if (traceLoadingOrderId === selectedOrderId) {
+      return;
+    }
+    if (
+      dispatchTraceByOrder[selectedOrderId] &&
+      dispatchTraceSyncKeyByOrder[selectedOrderId] === selectedTraceSyncKey
+    ) {
+      return;
+    }
+    if (
+      dispatchTraceFailedSyncKeyByOrder[selectedOrderId] ===
+      selectedTraceSyncKey
+    ) {
+      return;
+    }
+    void loadDispatchTrace(selectedOrderId, false, selectedTraceSyncKey).catch(
+      () => undefined,
+    );
+  }, [
+    dispatchTraceFailedSyncKeyByOrder,
+    dispatchTraceByOrder,
+    dispatchTraceSyncKeyByOrder,
+    selectedOrderId,
+    selectedTraceSyncKey,
+    traceLoadingOrderId,
+  ]);
 
   const fetchCandidates = async (jobId: string) => {
     try {
@@ -543,6 +889,9 @@ export function DispatchWorkflow({
       setError(null);
       await action();
       await reloadDispatchState();
+      if (selectedOrderId && selectedTraceSyncKey) {
+        await loadDispatchTrace(selectedOrderId, true, selectedTraceSyncKey);
+      }
       return true;
     } catch (e) {
       setError(
@@ -860,6 +1209,436 @@ export function DispatchWorkflow({
     spatialPoints.length > 0 ? normalizeSpatialBounds(spatialPoints) : null;
   const ordersWithoutCoordinates =
     filteredOrders.length - ordersWithCoordinates;
+  const selectedQueueState = selectedOrder
+    ? getQueueState(selectedOrder, selectedJob)
+    : null;
+  const selectedCandidates = selectedJob
+    ? candidates[selectedJob.dispatchJobId] || []
+    : [];
+  const selectedDispatchTrace = selectedOrder
+    ? (dispatchTraceByOrder[selectedOrder.orderId] ?? [])
+    : [];
+  const selectedEta = selectedJob
+    ? formatEta(locale, selectedJob.latestEtaMinutes, selectedJob.updatedAt)
+    : { display: "-", tooltip: t("dispatch.workflow.noJobEta") };
+  const selectedComplianceGates = selectedOrder?.complianceGates ?? [];
+  const selectedActiveGates = selectedComplianceGates.filter(
+    (gate) => gate.state !== "clear",
+  );
+  const selectedDownstreamReviewDuties =
+    listDownstreamReviewDuties(selectedActiveGates);
+  const selectedPrimaryGate =
+    selectedActiveGates[0] ??
+    selectedComplianceGates.find((gate) => gate.required);
+  const selectedReservationWindow = selectedOrder
+    ? selectedOrder.reservationWindowStart && selectedOrder.reservationWindowEnd
+      ? `${formatDateTime(locale, selectedOrder.reservationWindowStart)} - ${formatDateTime(locale, selectedOrder.reservationWindowEnd)}`
+      : t("dispatch.workflow.detail.immediateQueue")
+    : "-";
+  const selectedTimelineEntries = selectedOrder
+    ? selectedDispatchTrace.length > 0
+      ? selectedDispatchTrace
+          .map(
+            (trace): DispatchTimelineEntry => ({
+              id: trace.traceId,
+              title: formatOpsCodeLabel(locale, trace.eventType),
+              body: trace.message,
+              at: trace.createdAt,
+              tone: getTimelineTone(trace.eventType),
+            }),
+          )
+          .sort(
+            (left, right) =>
+              new Date(right.at).getTime() - new Date(left.at).getTime(),
+          )
+      : buildFallbackTimelineEntries(selectedOrder, selectedJob)
+    : [];
+
+  const renderActionDraftForm = (
+    order: OwnedOrderRecord,
+    actionDraft: ActionDraft,
+  ) => (
+    <form
+      className="action-sheet"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submitActionDraft(order, actionDraft).catch((submitError) => {
+          setError(
+            submitError instanceof Error
+              ? submitError.message
+              : t("dispatch.workflow.actionFailed"),
+          );
+        });
+      }}
+    >
+      <label className="field-label">
+        {t("dispatch.workflow.actionReason")}
+        <textarea
+          className="action-input"
+          value={actionDraft.reason}
+          onChange={(event) =>
+            updateActionDraft(order.orderId, {
+              reason: event.target.value,
+            })
+          }
+          rows={3}
+        />
+      </label>
+      <label className="field-label">
+        {t("dispatch.workflow.actionTraceId")}
+        <input
+          className="action-input"
+          type="text"
+          value={actionDraft.traceId}
+          onChange={(event) =>
+            updateActionDraft(order.orderId, {
+              traceId: event.target.value,
+            })
+          }
+        />
+      </label>
+      {actionDraft.mode === "fare_override" && (
+        <div className="field-grid">
+          <label className="field-label">
+            {t("dispatch.workflow.actionFare")}
+            <input
+              className="action-input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={actionDraft.fareAmount}
+              onChange={(event) =>
+                updateActionDraft(order.orderId, {
+                  fareAmount: event.target.value,
+                })
+              }
+            />
+          </label>
+          <label className="field-label">
+            {t("dispatch.workflow.actionCurrency")}
+            <input
+              className="action-input"
+              type="text"
+              value={actionDraft.fareCurrency}
+              onChange={(event) =>
+                updateActionDraft(order.orderId, {
+                  fareCurrency: event.target.value,
+                })
+              }
+            />
+          </label>
+        </div>
+      )}
+      {actionDraft.mode === "redispatch_with_reason" && (
+        <>
+          <label className="field-label">
+            {t("dispatch.workflow.reasonNote")}
+            <textarea
+              className="action-input"
+              value={actionDraft.reasonNote}
+              onChange={(event) =>
+                updateActionDraft(order.orderId, {
+                  reasonNote: event.target.value,
+                })
+              }
+              rows={2}
+            />
+          </label>
+          <label className="field-label">
+            {t("dispatch.workflow.escalationTarget")}
+            <select
+              className="action-input"
+              value={actionDraft.escalationTarget}
+              onChange={(event) =>
+                updateActionDraft(order.orderId, {
+                  escalationTarget: event.target.value,
+                })
+              }
+            >
+              <option value="">{t("dispatch.workflow.noEscalation")}</option>
+              <option value="ops_supervisor">
+                {t("dispatch.workflow.escalateOps")}
+              </option>
+              <option value="dispatch_manager">
+                {t("dispatch.workflow.escalateManager")}
+              </option>
+            </select>
+          </label>
+        </>
+      )}
+      {actionDraft.mode === "resolve_no_supply" && (
+        <label className="field-label">
+          {t("dispatch.workflow.noSupplyResolution")}
+          <select
+            className="action-input"
+            value={actionDraft.noSupplyResolution}
+            onChange={(event) =>
+              updateActionDraft(order.orderId, {
+                noSupplyResolution: event.target.value as
+                  | "retry_dispatch"
+                  | "cancel_with_notification",
+              })
+            }
+          >
+            <option value="retry_dispatch">
+              {t("dispatch.workflow.retryDispatch")}
+            </option>
+            <option value="cancel_with_notification">
+              {t("dispatch.workflow.cancelWithNotification")}
+            </option>
+          </select>
+        </label>
+      )}
+      {actionDraft.mode === "request_override" && (
+        <label className="field-label">
+          {t("dispatch.workflow.override.typeLabel")}
+          <select
+            className="action-input"
+            value={actionDraft.overrideType}
+            onChange={(event) =>
+              updateActionDraft(order.orderId, {
+                overrideType: event.target.value as
+                  | "release_to_dispatch"
+                  | "cancel_order",
+              })
+            }
+          >
+            <option value="release_to_dispatch">
+              {t("dispatch.workflow.override.releaseType")}
+            </option>
+            <option value="cancel_order">
+              {t("dispatch.workflow.override.cancelType")}
+            </option>
+          </select>
+        </label>
+      )}
+      {actionDraft.mode === "approve_override" && (
+        <label className="field-label">
+          {t("dispatch.workflow.override.approvalNoteLabel")}
+          <textarea
+            className="action-input"
+            value={actionDraft.approvalNote}
+            onChange={(event) =>
+              updateActionDraft(order.orderId, {
+                approvalNote: event.target.value,
+              })
+            }
+            rows={3}
+          />
+        </label>
+      )}
+      {actionDraft.mode === "reject_override" && (
+        <label className="field-label">
+          {t("dispatch.workflow.override.rejectionReasonLabel")}
+          <textarea
+            className="action-input"
+            value={actionDraft.rejectionReason}
+            onChange={(event) =>
+              updateActionDraft(order.orderId, {
+                rejectionReason: event.target.value,
+              })
+            }
+            rows={3}
+          />
+        </label>
+      )}
+      <div className="action-row">
+        <button
+          className="btn btn-primary"
+          disabled={loading === order.orderId}
+          type="submit"
+        >
+          {t("dispatch.workflow.actionSubmit")}
+        </button>
+        <button
+          className="btn"
+          type="button"
+          onClick={() => closeActionDraft(order.orderId)}
+        >
+          {t("dispatch.workflow.actionDismiss")}
+        </button>
+      </div>
+    </form>
+  );
+
+  const renderDetailActionPanel = (
+    order: OwnedOrderRecord,
+    job?: DispatchJobRecord,
+  ) => {
+    const actionDraft = actionDrafts[order.orderId];
+    const isExceptionHold = order.status === "exception_hold";
+    const isRedispatchRequired =
+      order.status === "redispatch_required" ||
+      job?.status === "redispatch_required";
+    const isDispatchTimeout =
+      order.status === "dispatch_timeout" || job?.status === "timed_out";
+    const isNoSupply =
+      order.status === "no_supply" ||
+      order.status === "delayed_queue" ||
+      job?.status === "no_supply";
+    const exceptionHold = order.exceptionHold;
+    const incidentHref = `/incidents?sourceOrderId=${encodeURIComponent(order.orderId)}`;
+
+    return (
+      <>
+        <div className="detail-action-toolbar">
+          {job && (
+            <button
+              className="btn btn-primary"
+              disabled={
+                !selectedCandidate[job.dispatchJobId] ||
+                loading === job.dispatchJobId
+              }
+              type="button"
+              onClick={() => handleAssign(job.dispatchJobId)}
+            >
+              {t("dispatch.workflow.assign")}
+            </button>
+          )}
+          {job && job.status === "assigned" && (
+            <button
+              className="btn"
+              disabled={
+                !selectedCandidate[job.dispatchJobId] ||
+                loading === job.dispatchJobId
+              }
+              type="button"
+              onClick={() => handleReassign(job.dispatchJobId)}
+            >
+              {t("dispatch.workflow.reassign")}
+            </button>
+          )}
+          {(isRedispatchRequired || isDispatchTimeout) && (
+            <button
+              className="btn btn-warning"
+              disabled={loading === order.orderId}
+              type="button"
+              onClick={() => handleRedispatch(order.orderId)}
+            >
+              {t("dispatch.workflow.redispatch")}
+            </button>
+          )}
+          {(isRedispatchRequired || isDispatchTimeout) && (
+            <button
+              className="btn"
+              disabled={loading === order.orderId}
+              type="button"
+              onClick={() => openActionDraft(order, "redispatch_with_reason")}
+            >
+              {t("dispatch.workflow.redispatchWithReason")}
+            </button>
+          )}
+          {isNoSupply && (
+            <button
+              className="btn btn-primary"
+              disabled={loading === order.orderId}
+              type="button"
+              onClick={() =>
+                handleResolveNoSupply(order.orderId, "retry_dispatch")
+              }
+            >
+              {t("dispatch.workflow.retryDispatch")}
+            </button>
+          )}
+          {isNoSupply && (
+            <button
+              className="btn"
+              disabled={loading === order.orderId}
+              type="button"
+              onClick={() => openActionDraft(order, "resolve_no_supply")}
+            >
+              {t("dispatch.workflow.resolveNoSupply")}
+            </button>
+          )}
+          {isExceptionHold && !exceptionHold?.overrideRequest?.status && (
+            <button
+              className="btn btn-primary"
+              disabled={loading === order.orderId}
+              type="button"
+              onClick={() => openActionDraft(order, "request_override")}
+            >
+              {t("dispatch.workflow.override.request")}
+            </button>
+          )}
+          {isExceptionHold &&
+            exceptionHold?.overrideRequest?.status === "pending_approval" && (
+              <>
+                <button
+                  className="btn btn-primary"
+                  disabled={loading === order.orderId}
+                  type="button"
+                  onClick={() => openActionDraft(order, "approve_override")}
+                >
+                  {t("dispatch.workflow.override.approve")}
+                </button>
+                <button
+                  className="btn btn-warning"
+                  disabled={loading === order.orderId}
+                  type="button"
+                  onClick={() => openActionDraft(order, "reject_override")}
+                >
+                  {t("dispatch.workflow.override.reject")}
+                </button>
+              </>
+            )}
+          {isExceptionHold &&
+            (exceptionHold?.overrideRequest?.status === "rejected" ||
+              exceptionHold?.overrideRequest?.status === "expired") && (
+              <button
+                className="btn"
+                disabled={loading === order.orderId}
+                type="button"
+                onClick={() => openActionDraft(order, "request_override")}
+              >
+                {t("dispatch.workflow.override.requestNew")}
+              </button>
+            )}
+          {isExceptionHold && (
+            <button
+              className="btn"
+              disabled={loading === order.orderId}
+              type="button"
+              onClick={() => openActionDraft(order, "release")}
+            >
+              {t("dispatch.workflow.release")}
+            </button>
+          )}
+          {isExceptionHold && (
+            <button
+              className="btn"
+              disabled={loading === order.orderId}
+              type="button"
+              onClick={() => openActionDraft(order, "cancel")}
+            >
+              {t("dispatch.workflow.cancelOrder")}
+            </button>
+          )}
+          {order.fixedPrice && (
+            <button
+              className="btn"
+              disabled={loading === order.orderId}
+              type="button"
+              onClick={() => openActionDraft(order, "fare_override")}
+            >
+              {t("dispatch.workflow.overrideFare")}
+            </button>
+          )}
+          {isExceptionHold && (
+            <Link className="btn" href={incidentHref}>
+              {t("dispatch.workflow.escalateIncident")}
+            </Link>
+          )}
+        </div>
+        {actionDraft ? (
+          renderActionDraftForm(order, actionDraft)
+        ) : (
+          <div className="detail-empty-hint">
+            {t("dispatch.workflow.detail.actionPanelHint")}
+          </div>
+        )}
+      </>
+    );
+  };
 
   return (
     <div className="dispatch-workflow">
@@ -1010,6 +1789,7 @@ export function DispatchWorkflow({
                       if (point.orderId) {
                         setSearchValue(point.label);
                         setFilterMode("all");
+                        setSelectedOrderId(point.orderId);
                       }
                     }}
                   >
@@ -1063,7 +1843,16 @@ export function DispatchWorkflow({
                 {visibleOrdersForMap.slice(0, 6).map((order) => {
                   const job = orderJobMap[order.orderId];
                   return (
-                    <div key={order.orderId} className="spatial-order-card">
+                    <button
+                      key={order.orderId}
+                      type="button"
+                      className={`spatial-order-card ${
+                        selectedOrderId === order.orderId
+                          ? "spatial-order-card-active"
+                          : ""
+                      }`}
+                      onClick={() => setSelectedOrderId(order.orderId)}
+                    >
                       <div className="cell-title">{order.orderNo}</div>
                       <div className="cell-subcopy">
                         {t(getQueueStateKey(getQueueState(order, job)))}
@@ -1073,7 +1862,7 @@ export function DispatchWorkflow({
                           ? `${order.pickup.lat.toFixed(3)}, ${order.pickup.lng.toFixed(3)}`
                           : t("dispatch.workflow.map.missingPickupCoords")}
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -1102,6 +1891,341 @@ export function DispatchWorkflow({
           total: liveOrders.length,
         })}
       </div>
+
+      <section className="detail-workspace">
+        <div className="detail-workspace-header">
+          <div>
+            <div className="detail-kicker">
+              {t("dispatch.workflow.detail.title")}
+            </div>
+            <div className="detail-headline">
+              {selectedOrder
+                ? t("dispatch.workflow.detail.selectedOrder", {
+                    orderNo: selectedOrder.orderNo,
+                  })
+                : t("dispatch.workflow.detail.emptyTitle")}
+            </div>
+          </div>
+          {selectedQueueState && (
+            <span
+              className={`queue-badge ${getQueueStateColor(selectedQueueState)}`}
+            >
+              {t(getQueueStateKey(selectedQueueState))}
+            </span>
+          )}
+        </div>
+
+        {selectedOrder ? (
+          <div className="detail-workspace-grid">
+            <div className="detail-card">
+              <div className="detail-card-title">
+                {t("dispatch.workflow.detail.summary")}
+              </div>
+              <div className="detail-stat-grid">
+                <div className="detail-stat-card">
+                  <span>{t("dispatch.workflow.detail.orderStatus")}</span>
+                  <strong>
+                    {formatOpsCodeLabel(locale, selectedOrder.status)}
+                  </strong>
+                </div>
+                <div className="detail-stat-card">
+                  <span>{t("dispatch.workflow.detail.dispatchStatus")}</span>
+                  <strong>
+                    {selectedJob
+                      ? formatOpsCodeLabel(locale, selectedJob.status)
+                      : t("dispatch.workflow.noJob")}
+                  </strong>
+                </div>
+                <div className="detail-stat-card">
+                  <span>{t("dispatch.workflow.detail.reservationWindow")}</span>
+                  <strong>{selectedReservationWindow}</strong>
+                </div>
+                <div className="detail-stat-card">
+                  <span>{t("dispatch.workflow.col.eta")}</span>
+                  <strong title={selectedEta.tooltip}>
+                    {selectedEta.display}
+                  </strong>
+                </div>
+              </div>
+              <div className="detail-meta-grid">
+                <div>
+                  <div className="detail-meta-label">
+                    {t("dispatch.workflow.detail.passenger")}
+                  </div>
+                  <div className="cell-title">
+                    {selectedOrder.passenger.name}
+                  </div>
+                  <div className="cell-subcopy">
+                    {selectedOrder.passenger.phone}
+                  </div>
+                </div>
+                <div>
+                  <div className="detail-meta-label">
+                    {t("dispatch.workflow.detail.contact")}
+                  </div>
+                  <div className="cell-title">
+                    {selectedOrder.onsiteContact?.name ?? "-"}
+                  </div>
+                  <div className="cell-subcopy">
+                    {selectedOrder.onsiteContact?.phone ?? "-"}
+                  </div>
+                </div>
+                <div>
+                  <div className="detail-meta-label">
+                    {t("dispatch.workflow.col.revenue")}
+                  </div>
+                  <div className="cell-title">
+                    {formatMinorCurrency(
+                      selectedOrder.quotedFare?.amountMinor ?? 0,
+                    )}
+                  </div>
+                  <div className="cell-subcopy">
+                    {selectedOrder.fixedPrice
+                      ? t("dispatch.workflow.fixedPrice")
+                      : t("dispatch.workflow.metered")}
+                  </div>
+                </div>
+                <div>
+                  <div className="detail-meta-label">
+                    {t("dispatch.workflow.detail.lastUpdated")}
+                  </div>
+                  <div className="cell-title">
+                    {formatDateTime(locale, selectedOrder.updatedAt)}
+                  </div>
+                  <div className="cell-subcopy">
+                    {selectedJob
+                      ? formatDateTime(locale, selectedJob.updatedAt)
+                      : "-"}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="detail-card">
+              <div className="detail-card-title">
+                {t("dispatch.workflow.detail.actionPanel")}
+              </div>
+              {renderDetailActionPanel(selectedOrder, selectedJob)}
+            </div>
+
+            <div className="detail-card">
+              <div className="detail-card-title">
+                {t("dispatch.workflow.detail.route")}
+              </div>
+              <div className="route-grid">
+                <div className="route-stop">
+                  <span className="route-stop-chip route-stop-pickup">P</span>
+                  <div>
+                    <div className="detail-meta-label">
+                      {t("dispatch.workflow.detail.pickup")}
+                    </div>
+                    <div className="cell-title">
+                      {selectedOrder.pickup.addressName ??
+                        selectedOrder.pickup.address}
+                    </div>
+                    <div className="cell-subcopy">
+                      {selectedOrder.pickup.address}
+                    </div>
+                  </div>
+                </div>
+                <div className="route-stop">
+                  <span className="route-stop-chip route-stop-dropoff">D</span>
+                  <div>
+                    <div className="detail-meta-label">
+                      {t("dispatch.workflow.detail.dropoff")}
+                    </div>
+                    <div className="cell-title">
+                      {selectedOrder.dropoff.addressName ??
+                        selectedOrder.dropoff.address}
+                    </div>
+                    <div className="cell-subcopy">
+                      {selectedOrder.dropoff.address}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {selectedOrder.notes && (
+                <div className="detail-notes">
+                  <div className="detail-meta-label">
+                    {t("dispatch.workflow.detail.notes")}
+                  </div>
+                  <div className="cell-subcopy">{selectedOrder.notes}</div>
+                </div>
+              )}
+            </div>
+
+            <div className="detail-card">
+              <div className="detail-card-title">
+                {t("dispatch.workflow.detail.compliance")}
+              </div>
+              {selectedPrimaryGate ? (
+                <div className="detail-gate-grid">
+                  {selectedComplianceGates.map((gate) => (
+                    <div key={gate.gateType} className="detail-gate-card">
+                      <span
+                        className={`queue-badge ${getComplianceTone(gate.state)}`}
+                      >
+                        {t(`dispatch.workflow.gate.${gate.gateType}`)}
+                      </span>
+                      <div className="cell-title">{gate.nextAction}</div>
+                      <div className="cell-subcopy">
+                        {t(`dispatch.workflow.gateState.${gate.state}`)}
+                      </div>
+                    </div>
+                  ))}
+                  {selectedDownstreamReviewDuties.length > 0 && (
+                    <div className="detail-gate-card detail-gate-card-wide">
+                      <div className="detail-meta-label">
+                        {t("dispatch.workflow.downstreamReview")}
+                      </div>
+                      <div className="detail-list">
+                        {selectedDownstreamReviewDuties.map((duty) => (
+                          <div
+                            key={duty.key}
+                            className="cell-subcopy detail-line"
+                          >
+                            {formatOpsCodeLabel(locale, duty.stage)}
+                            {duty.reviewerLabel
+                              ? ` · ${duty.reviewerLabel}`
+                              : ""}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="cell-subcopy">
+                  {t("dispatch.workflow.detail.noComplianceIssues")}
+                </div>
+              )}
+            </div>
+
+            <div className="detail-card">
+              <div className="detail-card-title">
+                {t("dispatch.workflow.detail.candidates")}
+              </div>
+              {selectedJob ? (
+                <div className="detail-list">
+                  {selectedCandidates.length > 0 ? (
+                    <>
+                      <select
+                        className="candidate-select"
+                        value={
+                          selectedCandidate[selectedJob.dispatchJobId] || ""
+                        }
+                        onChange={(event) =>
+                          setSelectedCandidate((prev) => ({
+                            ...prev,
+                            [selectedJob.dispatchJobId]: event.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">
+                          {t("dispatch.workflow.selectCandidate")}
+                        </option>
+                        {selectedCandidates.map((candidate) => (
+                          <option
+                            key={`${candidate.vehicleId}|${candidate.driverId}`}
+                            value={`${candidate.vehicleId}|${candidate.driverId}`}
+                          >
+                            {candidate.vehicleId} / {candidate.driverId} ·{" "}
+                            {candidate.etaMinutes}m
+                          </option>
+                        ))}
+                      </select>
+                      {selectedCandidates.map((candidate) => (
+                        <div
+                          key={`${candidate.vehicleId}:${candidate.driverId}`}
+                          className="candidate-detail-card"
+                        >
+                          <div className="cell-title">
+                            {candidate.vehicleId} · {candidate.driverId}
+                          </div>
+                          <div className="cell-subcopy">
+                            {candidate.operatingArea} · {candidate.etaMinutes}m
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <button
+                      className="btn btn-primary"
+                      type="button"
+                      onClick={() => fetchCandidates(selectedJob.dispatchJobId)}
+                      disabled={loading === selectedJob.dispatchJobId}
+                    >
+                      {loading === selectedJob.dispatchJobId
+                        ? t("common.loading")
+                        : t("dispatch.workflow.viewCandidates")}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="cell-subcopy">
+                  {t("dispatch.workflow.awaitingJob")}
+                </div>
+              )}
+            </div>
+
+            <div className="detail-card detail-card-wide">
+              <div className="detail-card-title">
+                {t("dispatch.workflow.detail.timeline")}
+              </div>
+              <div className="detail-meta-grid detail-meta-grid-compact">
+                <div>
+                  <div className="detail-meta-label">
+                    {t("dispatch.workflow.detail.timelineEvents")}
+                  </div>
+                  <div className="cell-title">
+                    {selectedTimelineEntries.length}
+                  </div>
+                </div>
+                <div>
+                  <div className="detail-meta-label">
+                    {t("dispatch.workflow.detail.timelineLatest")}
+                  </div>
+                  <div className="cell-title">
+                    {selectedTimelineEntries[0]
+                      ? formatDateTime(locale, selectedTimelineEntries[0].at)
+                      : "-"}
+                  </div>
+                </div>
+              </div>
+              {traceLoadingOrderId === selectedOrder.orderId ? (
+                <div className="cell-subcopy">{t("common.loading")}</div>
+              ) : selectedTimelineEntries.length > 0 ? (
+                <div className="timeline-list">
+                  {selectedTimelineEntries.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className={`timeline-item timeline-item-${entry.tone}`}
+                    >
+                      <div className="timeline-marker" />
+                      <div className="timeline-content">
+                        <div className="timeline-row">
+                          <strong>{entry.title}</strong>
+                          <span>{formatDateTime(locale, entry.at)}</span>
+                        </div>
+                        <div className="cell-subcopy">{entry.body}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="cell-subcopy">
+                  {t("dispatch.workflow.detail.timelineEmpty")}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="detail-empty">
+            <strong>{t("dispatch.workflow.detail.emptyTitle")}</strong>
+            <span>{t("dispatch.workflow.detail.emptyBody")}</span>
+          </div>
+        )}
+      </section>
 
       <div className="data-table">
         <table>
@@ -1146,23 +2270,16 @@ export function DispatchWorkflow({
                 const complianceFocus =
                   activeGates[0] ??
                   complianceGates.find((gate) => gate.required);
-                const actionDraft = actionDrafts[order.orderId];
                 const exceptionHold = order.exceptionHold;
                 const queueFamily = order.queueFamily;
                 const queueEntryReason = order.queueEntryReason;
-                const incidentHref = `/incidents?create=1&relatedOrderId=${encodeURIComponent(order.orderId)}&title=${encodeURIComponent(
-                  `${order.orderNo} exception hold escalation`,
-                )}&description=${encodeURIComponent(
-                  exceptionHold
-                    ? `Order ${order.orderNo} entered exception hold for ${exceptionHold.reasonCode}. Review dispatch trace, rider communication, and downstream compliance duties before release.`
-                    : `Review dispatch exception handling for order ${order.orderNo}.`,
-                )}&category=operational&severity=high`;
 
                 return (
                   <tr
                     key={order.orderId}
+                    onClick={() => setSelectedOrderId(order.orderId)}
                     className={
-                      isFocused
+                      isFocused || selectedOrderId === order.orderId
                         ? "row-focused"
                         : isRedispatchRequired || isDispatchTimeout
                           ? "row-alert"
@@ -1503,387 +2620,33 @@ export function DispatchWorkflow({
                     </td>
                     <td>
                       <div className="actions">
-                        {job && (
-                          <button
-                            className="btn btn-primary"
-                            disabled={
-                              !selectedCandidate[job.dispatchJobId] ||
-                              loading === job.dispatchJobId
-                            }
-                            type="button"
-                            onClick={() => handleAssign(job.dispatchJobId)}
-                          >
-                            {t("dispatch.workflow.assign")}
-                          </button>
+                        <button
+                          className={
+                            selectedOrderId === order.orderId
+                              ? "btn btn-primary"
+                              : "btn"
+                          }
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelectedOrderId(order.orderId);
+                          }}
+                        >
+                          {selectedOrderId === order.orderId
+                            ? t("dispatch.workflow.detail.activeWorkspace")
+                            : t("dispatch.workflow.detail.openWorkspace")}
+                        </button>
+                        {job && !selectedCandidate[job.dispatchJobId] && (
+                          <div className="cell-subcopy">
+                            {t("dispatch.workflow.detail.selectCandidateHint")}
+                          </div>
                         )}
-                        {job && job.status === "assigned" && (
-                          <button
-                            className="btn"
-                            disabled={
-                              !selectedCandidate[job.dispatchJobId] ||
-                              loading === job.dispatchJobId
-                            }
-                            type="button"
-                            onClick={() => handleReassign(job.dispatchJobId)}
-                          >
-                            {t("dispatch.workflow.reassign")}
-                          </button>
-                        )}
-                        {(isRedispatchRequired || isDispatchTimeout) && (
-                          <button
-                            className="btn btn-warning"
-                            disabled={loading === order.orderId}
-                            type="button"
-                            onClick={() => handleRedispatch(order.orderId)}
-                          >
-                            {t("dispatch.workflow.redispatch")}
-                          </button>
-                        )}
-                        {(isRedispatchRequired || isDispatchTimeout) && (
-                          <button
-                            className="btn"
-                            disabled={loading === order.orderId}
-                            type="button"
-                            onClick={() =>
-                              openActionDraft(order, "redispatch_with_reason")
-                            }
-                          >
-                            {t("dispatch.workflow.redispatchWithReason")}
-                          </button>
-                        )}
-                        {isNoSupply && (
-                          <button
-                            className="btn btn-primary"
-                            disabled={loading === order.orderId}
-                            type="button"
-                            onClick={() =>
-                              handleResolveNoSupply(
-                                order.orderId,
-                                "retry_dispatch",
-                              )
-                            }
-                          >
-                            {t("dispatch.workflow.retryDispatch")}
-                          </button>
-                        )}
-                        {isNoSupply && (
-                          <button
-                            className="btn"
-                            disabled={loading === order.orderId}
-                            type="button"
-                            onClick={() =>
-                              openActionDraft(order, "resolve_no_supply")
-                            }
-                          >
-                            {t("dispatch.workflow.resolveNoSupply")}
-                          </button>
-                        )}
-                        {isExceptionHold &&
-                          !exceptionHold?.overrideRequest?.status && (
-                            <button
-                              className="btn btn-primary"
-                              disabled={loading === order.orderId}
-                              type="button"
-                              onClick={() =>
-                                openActionDraft(order, "request_override")
-                              }
-                            >
-                              {t("dispatch.workflow.override.request")}
-                            </button>
-                          )}
-                        {isExceptionHold &&
-                          exceptionHold?.overrideRequest?.status ===
-                            "pending_approval" && (
-                            <>
-                              <button
-                                className="btn btn-primary"
-                                disabled={loading === order.orderId}
-                                type="button"
-                                onClick={() =>
-                                  openActionDraft(order, "approve_override")
-                                }
-                              >
-                                {t("dispatch.workflow.override.approve")}
-                              </button>
-                              <button
-                                className="btn btn-warning"
-                                disabled={loading === order.orderId}
-                                type="button"
-                                onClick={() =>
-                                  openActionDraft(order, "reject_override")
-                                }
-                              >
-                                {t("dispatch.workflow.override.reject")}
-                              </button>
-                            </>
-                          )}
-                        {isExceptionHold &&
-                          (exceptionHold?.overrideRequest?.status ===
-                            "rejected" ||
-                            exceptionHold?.overrideRequest?.status ===
-                              "expired") && (
-                            <button
-                              className="btn"
-                              disabled={loading === order.orderId}
-                              type="button"
-                              onClick={() =>
-                                openActionDraft(order, "request_override")
-                              }
-                            >
-                              {t("dispatch.workflow.override.requestNew")}
-                            </button>
-                          )}
-                        {isExceptionHold && (
-                          <button
-                            className="btn"
-                            disabled={loading === order.orderId}
-                            type="button"
-                            onClick={() => openActionDraft(order, "release")}
-                          >
-                            {t("dispatch.workflow.release")}
-                          </button>
-                        )}
-                        {isExceptionHold && (
-                          <button
-                            className="btn"
-                            disabled={loading === order.orderId}
-                            type="button"
-                            onClick={() => openActionDraft(order, "cancel")}
-                          >
-                            {t("dispatch.workflow.cancelOrder")}
-                          </button>
-                        )}
-                        {order.fixedPrice && (
-                          <button
-                            className="btn"
-                            disabled={loading === order.orderId}
-                            type="button"
-                            onClick={() =>
-                              openActionDraft(order, "fare_override")
-                            }
-                          >
-                            {t("dispatch.workflow.overrideFare")}
-                          </button>
-                        )}
-                        {isExceptionHold && (
-                          <Link className="btn" href={incidentHref}>
-                            {t("dispatch.workflow.escalateIncident")}
-                          </Link>
-                        )}
-                        {actionDraft && (
-                          <form
-                            className="action-sheet"
-                            onSubmit={(event) => {
-                              event.preventDefault();
-                              void submitActionDraft(order, actionDraft).catch(
-                                (submitError) => {
-                                  setError(
-                                    submitError instanceof Error
-                                      ? submitError.message
-                                      : t("dispatch.workflow.actionFailed"),
-                                  );
-                                },
-                              );
-                            }}
-                          >
-                            <label className="field-label">
-                              {t("dispatch.workflow.actionReason")}
-                              <textarea
-                                className="action-input"
-                                value={actionDraft.reason}
-                                onChange={(event) =>
-                                  updateActionDraft(order.orderId, {
-                                    reason: event.target.value,
-                                  })
-                                }
-                                rows={3}
-                              />
-                            </label>
-                            <label className="field-label">
-                              {t("dispatch.workflow.actionTraceId")}
-                              <input
-                                className="action-input"
-                                type="text"
-                                value={actionDraft.traceId}
-                                onChange={(event) =>
-                                  updateActionDraft(order.orderId, {
-                                    traceId: event.target.value,
-                                  })
-                                }
-                              />
-                            </label>
-                            {actionDraft.mode === "fare_override" && (
-                              <div className="field-grid">
-                                <label className="field-label">
-                                  {t("dispatch.workflow.actionFare")}
-                                  <input
-                                    className="action-input"
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={actionDraft.fareAmount}
-                                    onChange={(event) =>
-                                      updateActionDraft(order.orderId, {
-                                        fareAmount: event.target.value,
-                                      })
-                                    }
-                                  />
-                                </label>
-                                <label className="field-label">
-                                  {t("dispatch.workflow.actionCurrency")}
-                                  <input
-                                    className="action-input"
-                                    type="text"
-                                    value={actionDraft.fareCurrency}
-                                    onChange={(event) =>
-                                      updateActionDraft(order.orderId, {
-                                        fareCurrency: event.target.value,
-                                      })
-                                    }
-                                  />
-                                </label>
-                              </div>
-                            )}
-                            {actionDraft.mode === "redispatch_with_reason" && (
-                              <>
-                                <label className="field-label">
-                                  {t("dispatch.workflow.reasonNote")}
-                                  <textarea
-                                    className="action-input"
-                                    value={actionDraft.reasonNote}
-                                    onChange={(event) =>
-                                      updateActionDraft(order.orderId, {
-                                        reasonNote: event.target.value,
-                                      })
-                                    }
-                                    rows={2}
-                                  />
-                                </label>
-                                <label className="field-label">
-                                  {t("dispatch.workflow.escalationTarget")}
-                                  <select
-                                    className="action-input"
-                                    value={actionDraft.escalationTarget}
-                                    onChange={(event) =>
-                                      updateActionDraft(order.orderId, {
-                                        escalationTarget: event.target.value,
-                                      })
-                                    }
-                                  >
-                                    <option value="">
-                                      {t("dispatch.workflow.noEscalation")}
-                                    </option>
-                                    <option value="ops_supervisor">
-                                      {t("dispatch.workflow.escalateOps")}
-                                    </option>
-                                    <option value="dispatch_manager">
-                                      {t("dispatch.workflow.escalateManager")}
-                                    </option>
-                                  </select>
-                                </label>
-                              </>
-                            )}
-                            {actionDraft.mode === "resolve_no_supply" && (
-                              <label className="field-label">
-                                {t("dispatch.workflow.noSupplyResolution")}
-                                <select
-                                  className="action-input"
-                                  value={actionDraft.noSupplyResolution}
-                                  onChange={(event) =>
-                                    updateActionDraft(order.orderId, {
-                                      noSupplyResolution: event.target.value as
-                                        | "retry_dispatch"
-                                        | "cancel_with_notification",
-                                    })
-                                  }
-                                >
-                                  <option value="retry_dispatch">
-                                    {t("dispatch.workflow.retryDispatch")}
-                                  </option>
-                                  <option value="cancel_with_notification">
-                                    {t(
-                                      "dispatch.workflow.cancelWithNotification",
-                                    )}
-                                  </option>
-                                </select>
-                              </label>
-                            )}
-                            {actionDraft.mode === "request_override" && (
-                              <label className="field-label">
-                                {t("dispatch.workflow.override.typeLabel")}
-                                <select
-                                  className="action-input"
-                                  value={actionDraft.overrideType}
-                                  onChange={(event) =>
-                                    updateActionDraft(order.orderId, {
-                                      overrideType: event.target.value as
-                                        | "release_to_dispatch"
-                                        | "cancel_order",
-                                    })
-                                  }
-                                >
-                                  <option value="release_to_dispatch">
-                                    {t(
-                                      "dispatch.workflow.override.releaseType",
-                                    )}
-                                  </option>
-                                  <option value="cancel_order">
-                                    {t("dispatch.workflow.override.cancelType")}
-                                  </option>
-                                </select>
-                              </label>
-                            )}
-                            {actionDraft.mode === "approve_override" && (
-                              <label className="field-label">
-                                {t(
-                                  "dispatch.workflow.override.approvalNoteLabel",
-                                )}
-                                <textarea
-                                  className="action-input"
-                                  value={actionDraft.approvalNote}
-                                  onChange={(event) =>
-                                    updateActionDraft(order.orderId, {
-                                      approvalNote: event.target.value,
-                                    })
-                                  }
-                                  rows={3}
-                                />
-                              </label>
-                            )}
-                            {actionDraft.mode === "reject_override" && (
-                              <label className="field-label">
-                                {t(
-                                  "dispatch.workflow.override.rejectionReasonLabel",
-                                )}
-                                <textarea
-                                  className="action-input"
-                                  value={actionDraft.rejectionReason}
-                                  onChange={(event) =>
-                                    updateActionDraft(order.orderId, {
-                                      rejectionReason: event.target.value,
-                                    })
-                                  }
-                                  rows={3}
-                                />
-                              </label>
-                            )}
-                            <div className="action-row">
-                              <button
-                                className="btn btn-primary"
-                                disabled={loading === order.orderId}
-                                type="submit"
-                              >
-                                {t("dispatch.workflow.actionSubmit")}
-                              </button>
-                              <button
-                                className="btn"
-                                type="button"
-                                onClick={() => closeActionDraft(order.orderId)}
-                              >
-                                {t("dispatch.workflow.actionDismiss")}
-                              </button>
-                            </div>
-                          </form>
+                        {(isExceptionHold ||
+                          isDispatchTimeout ||
+                          isNoSupply) && (
+                          <div className="cell-subcopy">
+                            {t("dispatch.workflow.detail.actionPanelHint")}
+                          </div>
                         )}
                       </div>
                     </td>
@@ -2117,6 +2880,12 @@ export function DispatchWorkflow({
           border-radius: 0.9rem;
           background: #f8fafc;
           border: 1px solid #e2e8f0;
+          text-align: left;
+          cursor: pointer;
+        }
+        .spatial-order-card-active {
+          border-color: #60a5fa;
+          background: #eff6ff;
         }
         .spatial-empty {
           padding: 1rem;
@@ -2142,6 +2911,135 @@ export function DispatchWorkflow({
         .results-note,
         .cell-subcopy {
           color: #64748b;
+        }
+        .detail-workspace {
+          margin-bottom: 1rem;
+          padding: 1rem;
+          border-radius: 1rem;
+          border: 1px solid #e2e8f0;
+          background:
+            radial-gradient(
+              circle at top right,
+              rgba(14, 165, 233, 0.08),
+              transparent 28%
+            ),
+            #ffffff;
+        }
+        .detail-workspace-header,
+        .detail-workspace-grid,
+        .detail-stat-grid,
+        .detail-meta-grid,
+        .route-grid,
+        .detail-gate-grid {
+          display: grid;
+          gap: 0.85rem;
+        }
+        .detail-workspace-header {
+          margin-bottom: 0.9rem;
+          align-items: center;
+        }
+        .detail-kicker,
+        .detail-meta-label,
+        .detail-stat-card span {
+          font-size: 0.75rem;
+          color: #64748b;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        .detail-headline {
+          font-size: 1.1rem;
+          font-weight: 700;
+          color: #0f172a;
+        }
+        .detail-card {
+          padding: 0.95rem;
+          border-radius: 0.95rem;
+          border: 1px solid #e2e8f0;
+          background: #f8fafc;
+          display: grid;
+          gap: 0.85rem;
+        }
+        .detail-card-title {
+          font-size: 0.95rem;
+          font-weight: 700;
+          color: #0f172a;
+        }
+        .detail-card-wide {
+          grid-column: 1 / -1;
+        }
+        .detail-stat-grid,
+        .detail-meta-grid {
+          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        }
+        .detail-meta-grid-compact {
+          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        }
+        .detail-stat-card,
+        .detail-gate-card,
+        .candidate-detail-card {
+          padding: 0.8rem;
+          border-radius: 0.85rem;
+          border: 1px solid #dbeafe;
+          background: #ffffff;
+          display: grid;
+          gap: 0.35rem;
+        }
+        .detail-stat-card strong {
+          font-size: 0.95rem;
+          line-height: 1.4;
+          color: #0f172a;
+        }
+        .route-stop {
+          display: grid;
+          grid-template-columns: auto 1fr;
+          gap: 0.75rem;
+          align-items: start;
+        }
+        .route-stop-chip {
+          width: 1.8rem;
+          height: 1.8rem;
+          border-radius: 999px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-size: 0.8rem;
+          font-weight: 700;
+        }
+        .route-stop-pickup {
+          background: #2563eb;
+        }
+        .route-stop-dropoff {
+          background: #0f766e;
+        }
+        .detail-notes {
+          padding-top: 0.35rem;
+          border-top: 1px dashed #cbd5e1;
+        }
+        .detail-action-toolbar {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+        .detail-gate-card-wide {
+          grid-column: 1 / -1;
+        }
+        .detail-empty-hint {
+          padding: 0.75rem 0.85rem;
+          border-radius: 0.8rem;
+          border: 1px dashed #cbd5e1;
+          background: #ffffff;
+          color: #475569;
+          font-size: 0.84rem;
+        }
+        .detail-empty {
+          padding: 1rem;
+          border-radius: 0.95rem;
+          border: 1px dashed #cbd5e1;
+          background: #f8fafc;
+          display: grid;
+          gap: 0.35rem;
+          color: #334155;
         }
         .results-note {
           margin-bottom: 0.75rem;
@@ -2231,6 +3129,57 @@ export function DispatchWorkflow({
           border: 1px solid #dbeafe;
           background: #f8fbff;
         }
+        .timeline-list {
+          display: grid;
+          gap: 0.75rem;
+        }
+        .timeline-item {
+          display: grid;
+          grid-template-columns: auto 1fr;
+          gap: 0.75rem;
+          align-items: start;
+          padding: 0.85rem;
+          border-radius: 0.9rem;
+          border: 1px solid #dbeafe;
+          background: #ffffff;
+        }
+        .timeline-item-warning {
+          border-color: #fcd34d;
+          background: #fffbeb;
+        }
+        .timeline-item-critical {
+          border-color: #fecaca;
+          background: #fef2f2;
+        }
+        .timeline-marker {
+          width: 0.75rem;
+          height: 0.75rem;
+          margin-top: 0.25rem;
+          border-radius: 999px;
+          background: #2563eb;
+          box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+        }
+        .timeline-item-warning .timeline-marker {
+          background: #d97706;
+          box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.12);
+        }
+        .timeline-item-critical .timeline-marker {
+          background: #dc2626;
+          box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.12);
+        }
+        .timeline-content,
+        .timeline-row {
+          display: grid;
+          gap: 0.25rem;
+        }
+        .timeline-row {
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: start;
+        }
+        .timeline-row span {
+          font-size: 0.78rem;
+          color: #64748b;
+        }
         .field-label {
           display: grid;
           gap: 0.35rem;
@@ -2281,6 +3230,13 @@ export function DispatchWorkflow({
           .spatial-board-footer,
           .spatial-map-shell {
             grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+          }
+          .detail-workspace-header {
+            grid-template-columns: minmax(0, 1fr) auto;
+          }
+          .detail-workspace-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            align-items: start;
           }
           .spatial-board-header > :first-child,
           .spatial-board-footer > :first-child,
