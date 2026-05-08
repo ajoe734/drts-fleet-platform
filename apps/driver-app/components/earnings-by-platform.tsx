@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 import {
+  FinanceAuthorityMode,
   PLATFORM_CODE_REGISTRY,
   type PlatformEarningsItem,
 } from "@drts/contracts";
@@ -8,12 +9,41 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { PlatformBadge } from "@/components/ui/PlatformBadge";
 import { Tokens } from "@/components/ui/tokens";
 
-const OWNED_PLATFORM_CODES = new Set(["owned", "direct", "drts"]);
-
 const NUMERIC_FONT_FAMILY = Tokens.fonts.mono;
 
 export interface EarningsByPlatformProps {
   items: PlatformEarningsItem[];
+}
+
+export function getFinanceAuthorityModeForPlatformCode(
+  platformCode: string,
+): FinanceAuthorityMode {
+  const registryEntry =
+    PLATFORM_CODE_REGISTRY[platformCode as keyof typeof PLATFORM_CODE_REGISTRY];
+
+  if (!registryEntry) {
+    return FinanceAuthorityMode.OWNED;
+  }
+
+  if (registryEntry.status === "forwarder_stub") {
+    return FinanceAuthorityMode.SHADOW;
+  }
+
+  return FinanceAuthorityMode.EXTERNAL;
+}
+
+export function isOwnedPlatformCode(platformCode: string): boolean {
+  return (
+    getFinanceAuthorityModeForPlatformCode(platformCode) ===
+    FinanceAuthorityMode.OWNED
+  );
+}
+
+export function isShadowOnlyPlatformCode(platformCode: string): boolean {
+  return (
+    getFinanceAuthorityModeForPlatformCode(platformCode) ===
+    FinanceAuthorityMode.SHADOW
+  );
 }
 
 export function EarningsByPlatform({ items }: EarningsByPlatformProps) {
@@ -40,17 +70,38 @@ export function EarningsByPlatform({ items }: EarningsByPlatformProps) {
 function EarningsRow({ item }: { item: PlatformEarningsItem }) {
   const platformLabel =
     PLATFORM_CODE_REGISTRY[item.platformCode]?.displayName ?? item.platformCode;
-  const forwarded = !OWNED_PLATFORM_CODES.has(item.platformCode);
+  const authorityMode = getFinanceAuthorityModeForPlatformCode(
+    item.platformCode,
+  );
+  const owned = authorityMode === FinanceAuthorityMode.OWNED;
+  const shadowOnly = authorityMode === FinanceAuthorityMode.SHADOW;
+  const forwarded = !owned;
   const isEmpty =
     item.grossEarning.amountMinor === 0 &&
     item.serviceFee.amountMinor === 0 &&
     item.subsidy.amountMinor === 0 &&
     item.netAmount.amountMinor === 0;
 
-  const authorityLabel = forwarded ? "平台結算" : "DRTS 結算";
+  const settlementLabel = owned ? "結算：DRTS" : "結算：外部平台";
+  const payoutLabel = owned ? "撥款：DRTS" : "撥款：外部平台";
+  const ledgerLabel = owned
+    ? "列入 DRTS 對帳"
+    : shadowOnly
+      ? "Shadow-only 鏡像"
+      : "外部平台結算";
   const authorityColor = forwarded
     ? Tokens.colors.forwarded
     : Tokens.colors.owned;
+  const authorityNote = owned
+    ? "會進入 DRTS 對帳單與待撥款計算。"
+    : shadowOnly
+      ? "僅供對帳檢視；不列入 DRTS 待撥款。"
+      : "由外部平台結算與撥款，不列入 DRTS 待撥款。";
+  const netAmountAccessibilityLabel = owned
+    ? "DRTS 淨額"
+    : shadowOnly
+      ? "shadow-only 淨額"
+      : "外部平台淨額";
 
   return (
     <View
@@ -64,8 +115,19 @@ function EarningsRow({ item }: { item: PlatformEarningsItem }) {
           forwarded={forwarded}
           size="sm"
         />
+        <Text
+          style={[
+            styles.ledgerPill,
+            forwarded ? styles.ledgerPillForwarded : styles.ledgerPillOwned,
+          ]}
+        >
+          {ledgerLabel}
+        </Text>
         <View style={styles.spacer} />
-        <Text style={styles.netValue}>
+        <Text
+          style={styles.netValue}
+          accessibilityLabel={netAmountAccessibilityLabel}
+        >
           {isEmpty ? "—" : formatAmountNumber(item.netAmount)}
         </Text>
       </View>
@@ -90,13 +152,23 @@ function EarningsRow({ item }: { item: PlatformEarningsItem }) {
           label="補助"
           value={formatSignedAmountNumber(item.subsidy)}
         />
-        <Text
-          style={[styles.authorityLabel, { color: authorityColor }]}
-          accessibilityLabel={`結算權威 ${authorityLabel}`}
-        >
-          {authorityLabel}
+      </View>
+
+      <View style={styles.authorityRow}>
+        <Text style={[styles.authorityLabel, { color: authorityColor }]}>
+          {settlementLabel}
+        </Text>
+        <Text style={[styles.authorityLabel, { color: authorityColor }]}>
+          {payoutLabel}
         </Text>
       </View>
+
+      <Text
+        style={styles.authorityNote}
+        accessibilityLabel={`${platformLabel} 帳務說明 ${authorityNote}`}
+      >
+        {authorityNote}
+      </Text>
     </View>
   );
 }
@@ -130,6 +202,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Tokens.spacing.sm,
+    flexWrap: "wrap",
+  },
+  ledgerPill: {
+    ...Tokens.type.micro,
+    borderWidth: 1,
+    borderRadius: Tokens.radius.pill,
+    paddingHorizontal: Tokens.spacing.sm,
+    paddingVertical: 2,
+  },
+  ledgerPillOwned: {
+    color: Tokens.colors.owned,
+    backgroundColor: Tokens.colors.ownedBg,
+    borderColor: Tokens.colors.ownedBorder,
+  },
+  ledgerPillForwarded: {
+    color: Tokens.colors.forwarded,
+    backgroundColor: Tokens.colors.forwardedBg,
+    borderColor: Tokens.colors.forwardedBorder,
   },
   spacer: {
     flex: 1,
@@ -150,6 +240,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Tokens.colors.borderStrong,
     borderStyle: "dashed",
+    flexWrap: "wrap",
   },
   detailEntry: {
     flexDirection: "row",
@@ -169,13 +260,20 @@ const styles = StyleSheet.create({
     color: Tokens.colors.textStrong,
     fontFamily: NUMERIC_FONT_FAMILY,
   },
+  authorityRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
+  },
   authorityLabel: {
-    flex: 1,
-    textAlign: "right",
     fontSize: 11,
     lineHeight: 14,
     fontWeight: "700",
-    letterSpacing: 0.4,
+    letterSpacing: 0.2,
+  },
+  authorityNote: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
   },
   emptyState: {
     flex: 0,

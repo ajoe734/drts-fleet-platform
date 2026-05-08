@@ -9,6 +9,16 @@ const CURRENCY_LABELS: Record<string, string> = {
   JPY: "¥",
 };
 
+export function buildMoneyAmount(
+  amountMinor = 0,
+  currency = "TWD",
+): MoneyAmount {
+  return {
+    currency,
+    amountMinor,
+  };
+}
+
 export function formatMoney(amount: MoneyAmount | null | undefined): string {
   if (!amount) {
     return "金額待確認";
@@ -80,4 +90,20 @@ export function formatSignedAmountNumber(
   options: Omit<AmountFormatOptions, "showSign"> = {},
 ): string {
   return formatAmountNumber(amount, { ...options, showSign: "always" });
+}
+
+export function sumMoneyAmounts(
+  amounts: Array<MoneyAmount | null | undefined>,
+  currencyFallback = "TWD",
+): MoneyAmount {
+  const currency =
+    amounts.find((amount) => amount?.currency)?.currency ?? currencyFallback;
+
+  return {
+    currency,
+    amountMinor: amounts.reduce(
+      (sum, amount) => sum + (amount?.amountMinor ?? 0),
+      0,
+    ),
+  };
 }
