@@ -7,12 +7,28 @@ export type TripPrimaryActionKey =
   | "start"
   | "complete";
 
+export type TripExperienceState =
+  | "owned_active"
+  | "forwarded_offered"
+  | "forwarded_pending"
+  | "forwarded_confirmed"
+  | "forwarded_lost"
+  | "forwarded_cancelled"
+  | "sync_failed";
+
 export interface TripPrimaryActionDescriptor {
   action: TripPrimaryActionKey;
   label: string;
   title: string;
   helperText: string;
 }
+
+type ForwardedBlockingTripState =
+  | "forwarded_offered"
+  | "forwarded_pending"
+  | "forwarded_lost"
+  | "forwarded_cancelled"
+  | "sync_failed";
 
 const TRIP_PRIMARY_ACTIONS: Record<
   TripPrimaryActionKey,
@@ -49,18 +65,129 @@ function isForwardedTask(task: DriverTaskRecord | null): boolean {
   return task?.sourcePlatform != null;
 }
 
-export function getPrimaryTripAction(
+function getRuntimeTaskStatus(task: DriverTaskRecord | null): string | null {
+  const status = (task as { status?: unknown } | null)?.status;
+  return typeof status === "string" ? status : null;
+}
+
+function getForwardedRuntimeStatus(
   task: DriverTaskRecord | null,
-): TripPrimaryActionDescriptor | null {
-  if (!task || isForwardedTask(task)) {
+): string | null {
+  if (!task) {
     return null;
   }
 
+  const candidates = [
+    (task as { forwardedStatus?: unknown }).forwardedStatus,
+    (task as { forwardedOrderStatus?: unknown }).forwardedOrderStatus,
+    (task as { platformStatus?: unknown }).platformStatus,
+    (task as { nativeStatus?: unknown }).nativeStatus,
+    (task as { mirrorStatus?: unknown }).mirrorStatus,
+    (task as { sourceStatus?: unknown }).sourceStatus,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  const manualFallbackRequired = (
+    task as {
+      manualFallback?: { required?: unknown };
+    }
+  ).manualFallback?.required;
+  if (manualFallbackRequired === true) {
+    return "sync_failed";
+  }
+
+  const syncIssue =
+    (task as { lastSyncError?: unknown }).lastSyncError ??
+    (task as { syncIssue?: unknown }).syncIssue;
+  if (syncIssue) {
+    return "sync_failed";
+  }
+
+  return null;
+}
+
+export function getTripExperienceState(
+  task: DriverTaskRecord | null,
+): TripExperienceState | null {
+  if (!task) {
+    return null;
+  }
+
+  if (!isForwardedTask(task)) {
+    return "owned_active";
+  }
+
+  const forwardedStatus = getForwardedRuntimeStatus(task);
+  const runtimeStatus = getRuntimeTaskStatus(task);
+
+  switch (forwardedStatus) {
+    case "accept_pending":
+      return "forwarded_pending";
+    case "confirmed_by_platform":
+    case "confirmed":
+      return "forwarded_confirmed";
+    case "lost_race":
+    case "taken":
+      return "forwarded_lost";
+    case "cancelled_by_platform":
+      return "forwarded_cancelled";
+    case "sync_failed":
+      return "sync_failed";
+  }
+
+  if (runtimeStatus === "cancelled" || runtimeStatus === "rejected") {
+    return "forwarded_cancelled";
+  }
+
+  if (
+    runtimeStatus === "accepted" ||
+    runtimeStatus === "enroute_pickup" ||
+    runtimeStatus === "arrived_pickup" ||
+    runtimeStatus === "on_trip" ||
+    runtimeStatus === "proof_pending" ||
+    (runtimeStatus === "pending_acceptance" && Boolean(task.acceptedAt))
+  ) {
+    return "forwarded_confirmed";
+  }
+
+  return "forwarded_offered";
+}
+
+export function getPrimaryTripAction(
+  task: DriverTaskRecord | null,
+  experienceState: TripExperienceState | null = getTripExperienceState(task),
+): TripPrimaryActionDescriptor | null {
+  if (!task || !experienceState) {
+    return null;
+  }
+
+  const blockedForwardedStates: ForwardedBlockingTripState[] = [
+    "forwarded_offered",
+    "forwarded_pending",
+    "forwarded_lost",
+    "forwarded_cancelled",
+    "sync_failed",
+  ];
+
+  if (
+    blockedForwardedStates.includes(
+      experienceState as ForwardedBlockingTripState,
+    )
+  ) {
+    return null;
+  }
+
+  const runtimeStatus = getRuntimeTaskStatus(task);
   let action: TripPrimaryActionKey | null = null;
 
-  switch (task.status) {
+  switch (runtimeStatus) {
     case "pending_acceptance":
-      action = "accept";
+      action = experienceState === "forwarded_confirmed" ? "depart" : "accept";
       break;
     case "accepted":
       action = "depart";
@@ -92,6 +219,7 @@ export function getPrimaryTripAction(
 
 export function shouldShowTripCompletionProof(
   task: DriverTaskRecord | null,
+  experienceState?: TripExperienceState | null,
 ): boolean {
-  return getPrimaryTripAction(task)?.action === "complete";
+  return getPrimaryTripAction(task, experienceState)?.action === "complete";
 }

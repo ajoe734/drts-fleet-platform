@@ -20,6 +20,7 @@ import type {
 } from "@drts/contracts";
 
 import { PlatformTaskBadge } from "@/components/platform-task-badge";
+import { PlatformAuthorityBanner } from "@/components/platform-task-badge";
 import RouteDisplay from "@/components/route-display";
 import { ActionButton as SharedActionButton } from "@/components/ui/ActionButton";
 import { Tokens } from "@/components/ui";
@@ -229,6 +230,34 @@ function describeForwardedActionOutcome(
   }
 }
 
+function getForwardedActionCardCopy(state: TripExperienceState | null): {
+  title: string;
+  note: string;
+} {
+  switch (state) {
+    case "forwarded_offered":
+      return {
+        title: "回覆來源平台派單",
+        note: "接受後仍需等待平台完成確認，本地不會直接變更任務狀態。",
+      };
+    case "forwarded_pending":
+      return {
+        title: "等待來源平台同步",
+        note: "平台確認前請暫勿開始行程，本地只會顯示最新同步結果。",
+      };
+    case "forwarded_confirmed":
+      return {
+        title: "來源平台已確認",
+        note: "平台已確認此單，本地可依目前任務階段繼續後續流程。",
+      };
+    default:
+      return {
+        title: "平台同步結果",
+        note: "本地只顯示同步結果與路線資訊，不會直接改寫平台任務。",
+      };
+  }
+}
+
 function getTripStatusPresentation(
   state: TripExperienceState | null,
   task: DriverTaskRecord | null,
@@ -330,6 +359,71 @@ function getTripLockBody(state: TripExperienceState | null): {
   }
 }
 
+function getTripAuthorityDescription(
+  task: DriverTaskRecord | null,
+  state: TripExperienceState | null,
+): string {
+  if (!task || !isForwardedTask(task)) {
+    return "DRTS 在此頁負責行程狀態、定位追蹤與完單佐證；請依目前階段完成單一步驟。";
+  }
+
+  switch (state) {
+    case "forwarded_offered":
+      return "此任務仍由來源平台主導；目前僅可回覆是否承接平台派單，本地不直接切換行程狀態。";
+    case "forwarded_pending":
+      return "已送出接單要求，等待來源平台確認前，本地所有行程操作維持鎖定。";
+    case "forwarded_confirmed":
+      return "來源平台已確認任務，但平台仍掌管最終行程規則；此頁只保留鏡像狀態與路線資訊。";
+    case "forwarded_lost":
+      return "來源平台已將此訂單交給其他司機，本地僅保留結果供查閱。";
+    case "forwarded_cancelled":
+      return "來源平台已取消此訂單，本地不再提供任何行程操作。";
+    case "sync_failed":
+      return "平台同步異常時，派車台會接手處理；司機端只顯示安全可讀的同步摘要。";
+    default:
+      return "來源平台仍是此任務的操作權限來源，本地不直接處理平台生命周期。";
+  }
+}
+
+function getTripCapabilityItems(
+  task: DriverTaskRecord | null,
+  state: TripExperienceState | null,
+): string[] {
+  if (!task || !isForwardedTask(task)) {
+    return [
+      "可在此頁依序執行接單、前往接送點、抵達、開始行程與完成行程。",
+      "行程進行中會記錄本地定位追蹤、距離與時長。",
+      "完單前需補齊照片、簽收或費用佐證需求。",
+    ];
+  }
+
+  switch (state) {
+    case "forwarded_offered":
+      return [
+        "可送出：接受平台訂單。",
+        "可送出：婉拒平台訂單。",
+        "不可用：前往、抵達、開始、完成等本地生命周期操作。",
+      ];
+    case "forwarded_pending":
+      return ["目前沒有可用本地操作。", "系統正在等待來源平台確認接單結果。"];
+    case "forwarded_confirmed":
+      return [
+        "此頁提供平台狀態、鏡像狀態與路線資訊。",
+        "如需後續人工協調，請依派車台或來源平台指示處理。",
+      ];
+    case "forwarded_lost":
+    case "forwarded_cancelled":
+      return ["此任務已進入終態，本地不再提供操作。"];
+    case "sync_failed":
+      return [
+        "平台同步異常時，本地會鎖定操作，避免司機端誤改狀態。",
+        "派車台正在處理同步，請等待進一步指示。",
+      ];
+    default:
+      return ["來源平台仍掌管此任務，本地僅顯示安全同步資訊。"];
+  }
+}
+
 function getStatusToneStyles(tone: StatusTone) {
   switch (tone) {
     case "warning":
@@ -396,8 +490,9 @@ export default function TripScreen() {
     proofRequirements.minPhotoCount - proofPhotos.length,
     0,
   );
-  const isTripInProgress = taskDetail?.status === "on_trip";
-  const showTripMetrics = shouldShowTripMetrics(taskDetail);
+  const isForwardedTrip = isForwardedTask(taskDetail);
+  const isTripInProgress = !isForwardedTrip && taskDetail?.status === "on_trip";
+  const showTripMetrics = !isForwardedTrip && shouldShowTripMetrics(taskDetail);
   const completionBlockedByTracking =
     isTripInProgress && locationTrackingState !== "active";
   const complianceGates = orderDetail?.complianceGates ?? [];
@@ -428,7 +523,10 @@ export default function TripScreen() {
     baseTripExperienceState,
     forwardedActionResult,
   );
-  const primaryTripAction = getPrimaryTripAction(taskDetail);
+  const primaryTripAction = getPrimaryTripAction(
+    taskDetail,
+    tripExperienceState,
+  );
   const tripStatusPresentation = getTripStatusPresentation(
     tripExperienceState,
     taskDetail,
@@ -436,7 +534,20 @@ export default function TripScreen() {
     locationTrackingMessage,
   );
   const tripLockBody = getTripLockBody(tripExperienceState);
-  const showCompletionProofCard = shouldShowTripCompletionProof(taskDetail);
+  const tripAuthorityDescription = getTripAuthorityDescription(
+    taskDetail,
+    tripExperienceState,
+  );
+  const tripCapabilityItems = getTripCapabilityItems(
+    taskDetail,
+    tripExperienceState,
+  );
+  const showCompletionProofCard = shouldShowTripCompletionProof(
+    taskDetail,
+    tripExperienceState,
+  );
+  const forwardedActionCardCopy =
+    getForwardedActionCardCopy(tripExperienceState);
   const completionSubmitBlocker = getCompletionSubmitBlocker({
     proofRequirementsUnavailable,
     missingRequiredPhotos,
@@ -918,6 +1029,10 @@ export default function TripScreen() {
           <Text style={styles.taskStatus}>
             狀態：{formatDriverTaskStatusLabel(taskDetail.status)}
           </Text>
+          <PlatformAuthorityBanner
+            platformCode={taskDetail.sourcePlatform}
+            description={tripAuthorityDescription}
+          />
           <View
             style={[
               styles.tripStatusPanel,
@@ -973,6 +1088,14 @@ export default function TripScreen() {
               ? `訂單：${taskDetail.orderId}`
               : "尚未關聯訂單"}
           </Text>
+          <View style={styles.authorityCard}>
+            <Text style={styles.authorityCardTitle}>可用操作與邊界</Text>
+            {tripCapabilityItems.map((item) => (
+              <Text key={item} style={styles.authorityCardItem}>
+                • {item}
+              </Text>
+            ))}
+          </View>
           <RouteDisplay task={taskDetail} order={orderDetail} />
           {showTripMetrics && (
             <View style={styles.metricsCard}>
@@ -1029,6 +1152,22 @@ export default function TripScreen() {
                 )}
             </View>
           )}
+          {isForwardedTrip && (
+            <>
+              <View style={styles.infoStateCard}>
+                <Text style={styles.infoStateTitle}>行程度量</Text>
+                <Text style={styles.infoStateBody}>
+                  來源平台任務不在此端啟用本地距離/時長追蹤；若平台同步延遲，請以派車台指示為準。
+                </Text>
+              </View>
+              <View style={styles.infoStateCard}>
+                <Text style={styles.infoStateTitle}>完單佐證</Text>
+                <Text style={styles.infoStateBody}>
+                  照片、簽收與費用佐證只會套用在自營行程。平台任務的完單需求由來源平台或派車台決定。
+                </Text>
+              </View>
+            </>
+          )}
           {complianceGates.length > 0 && (
             <View style={styles.complianceCard}>
               <Text style={styles.complianceTitle}>合規檢查</Text>
@@ -1068,7 +1207,7 @@ export default function TripScreen() {
               })}
             </View>
           )}
-          {isForwardedTask(taskDetail) && (
+          {isForwardedTrip && (
             <Text style={styles.forwardedNote}>
               此任務由 {taskDetail.sourcePlatform}{" "}
               派發，派遣規則由來源平台管理。
@@ -1079,7 +1218,7 @@ export default function TripScreen() {
         <Text style={styles.empty}>目前沒有進行中的行程。</Text>
       )}
 
-      {!isForwardedTask(taskDetail) && taskDetail && (
+      {!isForwardedTrip && taskDetail && (
         <>
           {showCompletionProofCard && (
             <View style={styles.proofCard}>
@@ -1265,17 +1404,15 @@ export default function TripScreen() {
         </>
       )}
 
-      {taskDetail && isForwardedTask(taskDetail) && (
+      {taskDetail && isForwardedTrip && (
         <View style={styles.primaryActionCard}>
           <Text style={styles.primaryActionEyebrow}>主要動作</Text>
           <Text style={styles.primaryActionTitle}>
-            {tripExperienceState === "forwarded_offered"
-              ? "回覆來源平台派單"
-              : "等待來源平台同步"}
+            {forwardedActionCardCopy.title}
           </Text>
           <Text style={styles.forwardedActionNote}>
-            任務操作由 {taskDetail.sourcePlatform}{" "}
-            管理，本地只顯示同步結果與路線資訊，不會變更任務狀態。
+            {taskDetail.sourcePlatform} 平台管理此任務；
+            {forwardedActionCardCopy.note}
           </Text>
           {forwardedActionResult && (
             <View
@@ -1415,6 +1552,25 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 11, fontWeight: "600" },
   taskId: { fontSize: 18, fontWeight: "600", flex: 1 },
   taskStatus: { fontSize: 14, color: "#666", marginTop: 4 },
+  authorityCard: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#d9e7f5",
+    gap: 6,
+  },
+  authorityCardTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0f3554",
+  },
+  authorityCardItem: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#45627d",
+  },
   tripStatusPanel: {
     borderRadius: 12,
     padding: 12,
@@ -1513,6 +1669,25 @@ const styles = StyleSheet.create({
   metricValue: { fontSize: 20, fontWeight: "700", color: "#0f3554" },
   metricHint: { fontSize: 12, color: "#0f6cbd" },
   metricWarning: { fontSize: 12, color: "#b42318" },
+  infoStateCard: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#d9e7f5",
+    gap: 6,
+  },
+  infoStateTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#0f3554",
+  },
+  infoStateBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: "#45627d",
+  },
   complianceCard: {
     marginTop: 12,
     padding: 12,
