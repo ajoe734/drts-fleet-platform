@@ -1,3 +1,4 @@
+import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
@@ -1979,6 +1980,61 @@ export interface DriverTaskStreamEventData {
 
 export interface DriverTaskStreamEventEnvelope extends DomainEventEnvelope<DriverTaskStreamEventData> {
   eventType: DriverTaskStreamEventType;
+}
+
+export const DRIVER_TASK_VIEW_SOURCES = ["drts", ...PLATFORM_CODES] as const;
+export type DriverTaskViewSource = (typeof DRIVER_TASK_VIEW_SOURCES)[number];
+
+export const DRIVER_TASK_ACTIONS = [
+  "accept",
+  "reject",
+  "depart",
+  "arrived_pickup",
+  "start",
+  "complete",
+] as const;
+export type DriverTaskAction = (typeof DRIVER_TASK_ACTIONS)[number];
+
+export const DRIVER_TASK_ACTION_STATES = [
+  "action_required",
+  "awaiting_platform",
+  "in_progress",
+  "blocked",
+  "completed",
+  "read_only",
+] as const;
+export type DriverTaskActionState = (typeof DRIVER_TASK_ACTION_STATES)[number];
+
+export const DRIVER_TASK_AUTHORITY_MODES = [
+  "drts",
+  "external_platform",
+] as const;
+export type DriverTaskAuthorityMode =
+  (typeof DRIVER_TASK_AUTHORITY_MODES)[number];
+
+export interface UnifiedDriverTaskView {
+  taskId: string;
+  orderId: string;
+  orderDomain: OrderDomain;
+  sourcePlatform: DriverTaskViewSource;
+  platformDisplayName: string;
+  externalOrderId: string | null;
+  nativeStatus: string | null;
+  localStatus: DriverTaskStatus | ForwardedOrderStatus;
+  driverActionState: DriverTaskActionState;
+  allowedActions: DriverTaskAction[];
+  routeLocked: boolean;
+  fareAuthority: DriverTaskAuthorityMode;
+  settlementAuthority: DriverTaskAuthorityMode;
+  driverPayoutAuthority: DriverTaskAuthorityMode;
+  requiresManualFallback: boolean;
+  requiresReauth: boolean;
+  syncIssueSummary: string | null;
+  blockingReason: string | null;
+  pickupSummary: string | null;
+  dropoffSummary: string | null;
+  deadlineAt: string | null;
+  updatedAt: string;
 }
 
 export type OpsDispatchStreamEventType =

@@ -8,23 +8,30 @@ import {
   OnModuleInit,
   Optional,
 } from "@nestjs/common";
-import { FORWARDER_ROUTING_SERVICE_BUCKETS } from "@drts/contracts";
+import {
+  FORWARDER_ROUTING_SERVICE_BUCKETS,
+  PLATFORM_CODE_REGISTRY,
+} from "@drts/contracts";
 
 import type {
   AdapterHealthRecord,
   AuditLogRecord,
   BroadcastForwardedOrderCommand,
+  DriverTaskAction,
+  DriverTaskRecord,
   CompleteForwarderReconciliationCommand,
   EngageForwarderManualFallbackCommand,
   ForwardedOrderRecord,
   ForwardedOrderFinanceContext,
   ForwarderSyncErrorRecord,
   IngestExternalOrderCommand,
+  OwnedOrderRecord,
   PlatformCode,
   ReconciliationJobRecord,
   ReportForwarderSyncFailureCommand,
   RelayDriverAcceptCommand,
   SyncForwardedOrderStatusCommand,
+  UnifiedDriverTaskView,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -60,6 +67,20 @@ const DEFAULT_FORWARDED_ORDER_FINANCE_CONTEXT: ForwardedOrderFinanceContext = {
   settlementAuthority: "external_platform",
   driverPayoutAuthority: "external_platform",
   localLedgerMode: "shadow_only",
+};
+
+const DRTS_PLATFORM_DISPLAY_NAME = "DRTS";
+
+const DRIVER_TASK_VIEW_PRIORITY: Record<
+  UnifiedDriverTaskView["driverActionState"],
+  number
+> = {
+  action_required: 0,
+  blocked: 1,
+  awaiting_platform: 2,
+  in_progress: 3,
+  read_only: 4,
+  completed: 5,
 };
 
 @Injectable()
@@ -216,6 +237,94 @@ export class ForwarderService implements OnModuleInit {
 
   listOrders() {
     return this.forwardedOrders.map((order) => this.cloneOrder(order));
+  }
+
+  getOrder(orderId: string) {
+    return this.cloneOrder(this.requireOrder(orderId));
+  }
+
+  listDriverTaskViews(driverId: string) {
+    this.assertNonBlank(driverId, "driverId");
+
+    const ownedTasks = this.ownedMobilityService?.listDriverTasks() ?? [];
+    const ownedOrders = new Map(
+      (this.ownedMobilityService?.listOrders() ?? []).map((order) => [
+        order.orderId,
+        order,
+      ]),
+    );
+
+    const ownedViews = ownedTasks
+      .filter((task) => task.driverId === driverId)
+      .map((task) =>
+        this.mapOwnedTaskToView(task, ownedOrders.get(task.orderId) ?? null),
+      );
+
+    const forwardedViews = this.forwardedOrders
+      .filter((order) => this.isForwardedOrderVisibleToDriver(order, driverId))
+      .map((order) => this.mapForwardedOrderToView(order));
+
+    return [...ownedViews, ...forwardedViews].sort((left, right) =>
+      this.compareDriverTaskViews(left, right),
+    );
+  }
+
+  getDriverTaskView(driverId: string, taskId: string) {
+    this.assertNonBlank(driverId, "driverId");
+
+    const ownedTask = this.ownedMobilityService
+      ?.listDriverTasks()
+      .find((task) => task.taskId === taskId);
+    if (ownedTask) {
+      if (ownedTask.driverId !== driverId) {
+        throw this.driverTaskViewNotFound(taskId);
+      }
+      const ownedOrder = this.ownedMobilityService
+        ?.listOrders()
+        .find((order) => order.orderId === ownedTask.orderId);
+      return this.mapOwnedTaskToView(ownedTask, ownedOrder ?? null);
+    }
+
+    const forwardedOrder = this.forwardedOrders.find(
+      (order) => order.mirrorOrderId === taskId,
+    );
+    if (forwardedOrder) {
+      if (!this.isForwardedOrderVisibleToDriver(forwardedOrder, driverId)) {
+        throw this.driverTaskViewNotFound(taskId);
+      }
+      return this.mapForwardedOrderToView(forwardedOrder);
+    }
+
+    throw this.driverTaskViewNotFound(taskId);
+  }
+
+  private driverTaskViewNotFound(taskId: string) {
+    return new ApiRequestError(
+      HttpStatus.NOT_FOUND,
+      "DRIVER_TASK_VIEW_NOT_FOUND",
+      "Driver task view was not found.",
+      { taskId },
+    );
+  }
+
+  private isForwardedOrderVisibleToDriver(
+    order: ForwardedOrderRecord,
+    driverId: string,
+  ): boolean {
+    switch (order.status) {
+      case "received":
+        return false;
+      case "broadcasted":
+        return order.candidateDriverIds.includes(driverId);
+      case "accept_pending":
+      case "confirmed_by_platform":
+      case "lost_race":
+      case "cancelled_by_platform":
+      case "sync_failed":
+        return order.acceptedDriverId === driverId;
+      default:
+        return false;
+    }
   }
 
   broadcastOrder(
@@ -1000,6 +1109,284 @@ export class ForwarderService implements OnModuleInit {
         ? { ...order.reconciliationJob }
         : null,
     };
+  }
+
+  private compareDriverTaskViews(
+    left: UnifiedDriverTaskView,
+    right: UnifiedDriverTaskView,
+  ) {
+    const priorityDiff =
+      DRIVER_TASK_VIEW_PRIORITY[left.driverActionState] -
+      DRIVER_TASK_VIEW_PRIORITY[right.driverActionState];
+    if (priorityDiff !== 0) {
+      return priorityDiff;
+    }
+
+    return right.updatedAt.localeCompare(left.updatedAt);
+  }
+
+  private mapOwnedTaskToView(
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord | null,
+  ): UnifiedDriverTaskView {
+    const blockingReason = this.resolveOwnedBlockingReason(task);
+
+    return {
+      taskId: task.taskId,
+      orderId: task.orderId,
+      orderDomain: "owned",
+      sourcePlatform: "drts",
+      platformDisplayName: DRTS_PLATFORM_DISPLAY_NAME,
+      externalOrderId: null,
+      nativeStatus: null,
+      localStatus: task.status,
+      driverActionState: this.resolveOwnedDriverActionState(task),
+      allowedActions: this.resolveOwnedAllowedActions(task),
+      routeLocked: false,
+      fareAuthority: "drts",
+      settlementAuthority: "drts",
+      driverPayoutAuthority: "drts",
+      requiresManualFallback: false,
+      requiresReauth: false,
+      syncIssueSummary: null,
+      blockingReason,
+      pickupSummary: order?.pickup.address ?? null,
+      dropoffSummary: order?.dropoff.address ?? null,
+      deadlineAt:
+        order?.dispatchTimeout?.timeoutAt ??
+        order?.reservationWindowStart ??
+        null,
+      updatedAt: order?.updatedAt ?? this.resolveOwnedTaskUpdatedAt(task),
+    };
+  }
+
+  private mapForwardedOrderToView(
+    order: ForwardedOrderRecord,
+  ): UnifiedDriverTaskView {
+    const syncIssueSummary = this.resolveForwardedSyncIssueSummary(order);
+    const requiresReauth = this.resolveForwardedRequiresReauth(order);
+    const blockingReason =
+      this.resolveForwardedBlockingReason(order) ??
+      (requiresReauth
+        ? "Platform re-authentication is required before driver actions can resume."
+        : null);
+
+    return {
+      taskId: order.mirrorOrderId,
+      orderId: order.mirrorOrderId,
+      orderDomain: "forwarded",
+      sourcePlatform: order.platformCode,
+      platformDisplayName: this.resolvePlatformDisplayName(order.platformCode),
+      externalOrderId: order.externalOrderId,
+      nativeStatus: order.lastNativeStatus,
+      localStatus: order.status,
+      driverActionState: this.resolveForwardedDriverActionState(order),
+      allowedActions: this.resolveForwardedAllowedActions(order),
+      routeLocked: true,
+      fareAuthority: "external_platform",
+      settlementAuthority: "external_platform",
+      driverPayoutAuthority: "external_platform",
+      requiresManualFallback: order.manualFallback.required,
+      requiresReauth,
+      syncIssueSummary,
+      blockingReason,
+      pickupSummary: this.extractForwardedSummary(order, [
+        "pickupSummary",
+        "pickupAddress",
+        "pickup.address",
+      ]),
+      dropoffSummary: this.extractForwardedSummary(order, [
+        "dropoffSummary",
+        "dropoffAddress",
+        "dropoff.address",
+      ]),
+      deadlineAt: order.reconciliationJob?.createdAt ?? null,
+      updatedAt: order.updatedAt,
+    };
+  }
+
+  private resolveOwnedDriverActionState(
+    task: DriverTaskRecord,
+  ): UnifiedDriverTaskView["driverActionState"] {
+    switch (task.status) {
+      case "pending_acceptance":
+        return "action_required";
+      case "accepted":
+      case "enroute_pickup":
+      case "arrived_pickup":
+      case "on_trip":
+        return "in_progress";
+      case "proof_pending":
+        return "blocked";
+      case "completed":
+        return "completed";
+      case "rejected":
+      case "cancelled":
+        return "read_only";
+    }
+  }
+
+  private resolveOwnedAllowedActions(
+    task: DriverTaskRecord,
+  ): DriverTaskAction[] {
+    switch (task.status) {
+      case "pending_acceptance":
+        return ["accept", "reject"];
+      case "accepted":
+        return ["depart"];
+      case "enroute_pickup":
+        return ["arrived_pickup"];
+      case "arrived_pickup":
+        return ["start"];
+      case "on_trip":
+        return ["complete"];
+      default:
+        return [];
+    }
+  }
+
+  private resolveOwnedBlockingReason(task: DriverTaskRecord) {
+    const gate = task.complianceGates?.find(
+      (candidate) => candidate.blocking || candidate.state !== "clear",
+    );
+    if (gate) {
+      return gate.nextAction;
+    }
+    if (task.status === "proof_pending") {
+      return "Completion proof must be submitted before the trip can close.";
+    }
+    return null;
+  }
+
+  private resolveOwnedTaskUpdatedAt(task: DriverTaskRecord) {
+    return (
+      task.completedAt ??
+      task.startedAt ??
+      task.arrivedPickupAt ??
+      task.departedAt ??
+      task.acceptedAt ??
+      new Date(0).toISOString()
+    );
+  }
+
+  private resolveForwardedDriverActionState(
+    order: ForwardedOrderRecord,
+  ): UnifiedDriverTaskView["driverActionState"] {
+    if (order.manualFallback.required || order.status === "sync_failed") {
+      return "blocked";
+    }
+
+    switch (order.status) {
+      case "received":
+      case "broadcasted":
+        return "action_required";
+      case "accept_pending":
+        return "awaiting_platform";
+      case "confirmed_by_platform":
+        return "in_progress";
+      case "lost_race":
+      case "cancelled_by_platform":
+        return "read_only";
+      default:
+        return "completed";
+    }
+  }
+
+  private resolveForwardedAllowedActions(
+    order: ForwardedOrderRecord,
+  ): DriverTaskAction[] {
+    if (order.status === "broadcasted") {
+      return ["accept"];
+    }
+
+    return [];
+  }
+
+  private resolveForwardedSyncIssueSummary(order: ForwardedOrderRecord) {
+    if (order.manualFallback.required) {
+      return order.manualFallback.reason ?? "Dispatch follow-up is required.";
+    }
+    if (order.lastSyncError) {
+      return order.lastSyncError.retryable
+        ? "Platform sync failed and is waiting for dispatch follow-up."
+        : "Platform sync failed and requires manual dispatch resolution.";
+    }
+    if (order.reconciliationJob?.status === "queued") {
+      return "Order is waiting for reconciliation with the platform.";
+    }
+    return null;
+  }
+
+  private resolveForwardedBlockingReason(order: ForwardedOrderRecord) {
+    if (order.manualFallback.required) {
+      return order.manualFallback.reason ?? "Manual fallback has been engaged.";
+    }
+    if (order.status === "lost_race") {
+      return "Another driver was confirmed by the platform.";
+    }
+    if (order.status === "cancelled_by_platform") {
+      return "The external platform cancelled this order.";
+    }
+    if (order.status === "sync_failed") {
+      return "Dispatch must verify platform confirmation before continuing.";
+    }
+    return null;
+  }
+
+  private resolveForwardedRequiresReauth(order: ForwardedOrderRecord) {
+    const authSignals = [
+      order.lastSyncError?.code,
+      order.lastSyncError?.message,
+      order.manualFallback.reason,
+      typeof order.authoritativeSnapshot.authStatus === "string"
+        ? order.authoritativeSnapshot.authStatus
+        : null,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.toLowerCase());
+
+    return authSignals.some(
+      (value) =>
+        value.includes("reauth") ||
+        value.includes("auth") ||
+        value.includes("token expired"),
+    );
+  }
+
+  private resolvePlatformDisplayName(platformCode: PlatformCode) {
+    return PLATFORM_CODE_REGISTRY[platformCode]?.displayName ?? platformCode;
+  }
+
+  private extractForwardedSummary(
+    order: ForwardedOrderRecord,
+    keys: readonly string[],
+  ) {
+    for (const key of keys) {
+      const value =
+        this.readStringPath(order.authoritativeSnapshot, key) ??
+        this.readStringPath(order.payload, key);
+      if (value) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private readStringPath(
+    source: Record<string, unknown>,
+    path: string,
+  ): string | null {
+    const parts = path.split(".");
+    let cursor: unknown = source;
+
+    for (const part of parts) {
+      if (!cursor || typeof cursor !== "object" || !(part in cursor)) {
+        return null;
+      }
+      cursor = (cursor as Record<string, unknown>)[part];
+    }
+
+    return typeof cursor === "string" && cursor.trim() ? cursor : null;
   }
 
   private assertNonBlank(value: string, field: string) {

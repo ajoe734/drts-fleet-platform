@@ -70,6 +70,7 @@ import type {
   DriverStartTaskCommand,
   DriverStatementRecord,
   DriverTaskRecord,
+  UnifiedDriverTaskView,
   EvidenceDeletionExceptionRecord,
   EvidenceGovernanceCatalog,
   EvidenceLegalHoldRecord,
@@ -667,6 +668,31 @@ export class ApiClient {
 
   async listDriverTasks(): Promise<DriverTaskRecord[]> {
     return this.getList<DriverTaskRecord>("/api/driver/tasks");
+  }
+
+  async listUnifiedDriverTasks(filters?: {
+    driverId?: string;
+  }): Promise<UnifiedDriverTaskView[]> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/task-views?${query}`
+      : "/api/driver/task-views";
+    return this.getList<UnifiedDriverTaskView>(url);
+  }
+
+  async getUnifiedDriverTask(
+    taskId: string,
+    filters?: { driverId?: string },
+  ): Promise<UnifiedDriverTaskView> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/task-views/${taskId}?${query}`
+      : `/api/driver/task-views/${taskId}`;
+    return this.get<UnifiedDriverTaskView>(url);
   }
 
   async acceptTask(taskId: string, command: DriverAcceptTaskCommand) {
