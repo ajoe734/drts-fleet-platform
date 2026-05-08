@@ -47,6 +47,10 @@ function copy(locale: "en" | "zh", en: string, zh: string) {
   return locale === "zh" ? zh : en;
 }
 
+function todayDateKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function shiftDurationHours(shift: ShiftRecord) {
   if (typeof shift.totalHours === "number") return shift.totalHours;
   const end = shift.clockedOutAt ? new Date(shift.clockedOutAt) : new Date();
@@ -123,10 +127,10 @@ export default async function AttendancePage() {
     (sum, record) => sum + (record.totalHours ?? 0),
     0,
   );
-  const latestAttendanceDate = recentAttendance[0]?.date;
+  const currentAttendanceDate = todayDateKey();
   const completedTodayCount = attendance.filter(
     (record) =>
-      record.status === "present" && record.date === latestAttendanceDate,
+      record.status === "present" && record.date === currentAttendanceDate,
   ).length;
   const monitorCards = [
     {
@@ -319,8 +323,8 @@ export default async function AttendancePage() {
               <div style={{ fontSize: "12px", color: "#64748b" }}>
                 {copy(
                   locale,
-                  "Present attendance rows on the latest service day",
-                  "最近服務日已完成出勤筆數",
+                  "Present attendance rows dated today",
+                  "日期為今日的已完成出勤筆數",
                 )}
               </div>
             </div>
