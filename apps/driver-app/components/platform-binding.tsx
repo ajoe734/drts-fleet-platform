@@ -16,6 +16,7 @@ import {
 import { ActionButton } from "@/components/ui/ActionButton";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { FormField } from "@/components/ui/FormField";
+import { StatusChip } from "@/components/ui/StatusChip";
 import { Tokens } from "@/components/ui/tokens";
 import { getDriverClient } from "@/lib/api-client";
 
@@ -69,6 +70,7 @@ export function PlatformBinding({
   const [adapterStatuses, setAdapterStatuses] = useState<
     PlatformPresenceSummary["adapterStatuses"]
   >([]);
+  const [notes, setNotes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<BindForm | null>(null);
@@ -83,6 +85,7 @@ export function PlatformBinding({
       const summary = await client.getPlatformPresence();
       setPresences(summary.presences);
       setAdapterStatuses(summary.adapterStatuses ?? []);
+      setNotes(summary.notes ?? []);
       setLoadError(null);
     } catch (loadError) {
       const message = toErrorMessage(loadError);
@@ -237,6 +240,12 @@ export function PlatformBinding({
   const readyCount = enrichedPresences.filter(
     (item) => item.assessment.canReceiveOrders,
   ).length;
+  const attentionCount = enrichedPresences.filter(
+    (item) => item.assessment.statusTone === "warning",
+  ).length;
+  const blockedCount = enrichedPresences.filter(
+    (item) => item.assessment.statusTone === "danger",
+  ).length;
 
   return (
     <View>
@@ -244,12 +253,31 @@ export function PlatformBinding({
         <Text style={styles.sectionTitle}>平台帳號綁定</Text>
       ) : null}
       <Text style={styles.sectionDescription}>
-        已綁定 {presences.length} 個平台，其中 {readyCount}{" "}
-        個目前可接單，可隨時新增、解除綁定或重新驗證。
+        已綁定 {presences.length}{" "}
+        個平台，可在此檢視綁定、重新驗證、平台憑證與接單資格狀態，與「平台健康中心」即時同步。
       </Text>
+
+      {enrichedPresences.length > 0 ? (
+        <View style={styles.summaryChips}>
+          <StatusChip label={`可接單 ${readyCount}`} variant="success" />
+          <StatusChip label={`需處理 ${attentionCount}`} variant="warning" />
+          <StatusChip label={`已阻塞 ${blockedCount}`} variant="danger" />
+        </View>
+      ) : null}
 
       {loadError ? (
         <ErrorBanner message={loadError} style={styles.errorBanner} />
+      ) : null}
+
+      {notes.length > 0 ? (
+        <View style={styles.notesCard}>
+          <Text style={styles.notesTitle}>同步說明</Text>
+          {notes.map((note) => (
+            <Text key={note} style={styles.noteLine}>
+              • {note}
+            </Text>
+          ))}
+        </View>
       ) : null}
 
       {enrichedPresences.length === 0 ? (
@@ -339,6 +367,29 @@ const styles = StyleSheet.create({
     ...Tokens.type.micro,
     color: Tokens.colors.textMuted,
     marginBottom: Tokens.spacing.md,
+  },
+  summaryChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
+    marginBottom: Tokens.spacing.md,
+  },
+  notesCard: {
+    padding: Tokens.spacing.md,
+    borderRadius: Tokens.radius.md,
+    backgroundColor: Tokens.colors.bgRaised,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    gap: Tokens.spacing.xs,
+    marginBottom: Tokens.spacing.md,
+  },
+  notesTitle: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
+  },
+  noteLine: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
   },
   loadingRow: {
     flexDirection: "row",
