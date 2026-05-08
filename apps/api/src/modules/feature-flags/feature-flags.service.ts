@@ -131,58 +131,32 @@ export class FeatureFlagsService {
     return this.inMemoryFlags.get(this.inMemoryOverrideKey(key, tenantId));
   }
 
+  private mergeGlobalFlagsWithTenantOverrides(
+    flags: FeatureFlag[],
+    tenantId: string,
+  ): FeatureFlag[] {
+    const tenantOverrides = flags.filter((flag) => flag.tenantId === tenantId);
+    const globalFlags = flags.filter((flag) => !flag.tenantId);
+    const globalKeys = new Set(globalFlags.map((flag) => flag.key));
+
+    return [
+      ...globalFlags,
+      ...tenantOverrides.filter((override) => !globalKeys.has(override.key)),
+      ...tenantOverrides.filter((override) => globalKeys.has(override.key)),
+    ];
+  }
+
   async getAll(tenantId?: string): Promise<FeatureFlag[]> {
     if (this.getDb()) {
       const dbFlags = await this.featureFlagRepository!.findAll();
-      // Filter to global + tenant-specific overrides
       if (tenantId) {
-        const globalKeys = new Set<string>();
-        const result: FeatureFlag[] = [];
-        // First pass: collect tenant overrides
-        for (const f of dbFlags) {
-          if (f.tenantId === tenantId) {
-            globalKeys.add(f.key);
-            result.push(f);
-          }
-        }
-        // Second pass: add globals not overridden
-        for (const f of dbFlags) {
-          if (!f.tenantId && !globalKeys.has(f.key)) {
-            result.push(f);
-          }
-        }
-        return result;
+        return this.mergeGlobalFlagsWithTenantOverrides(dbFlags, tenantId);
       }
-      // Return only global flags
       return dbFlags.filter((f) => !f.tenantId);
     }
-    // In-memory fallback
     const flags = Array.from(this.inMemoryFlags.values());
     if (tenantId) {
-      const tenantOverrides = new Map<string, FeatureFlag>();
-      const globalFlags: FeatureFlag[] = [];
-
-      for (const flag of flags) {
-        if (flag.tenantId === tenantId) {
-          tenantOverrides.set(flag.key, flag);
-          continue;
-        }
-        if (!flag.tenantId) {
-          globalFlags.push(flag);
-        }
-      }
-
-      const mergedFlags = globalFlags.map(
-        (flag) => tenantOverrides.get(flag.key) ?? flag,
-      );
-
-      for (const override of tenantOverrides.values()) {
-        if (!mergedFlags.some((flag) => flag.key === override.key)) {
-          mergedFlags.push(override);
-        }
-      }
-
-      return mergedFlags;
+      return this.mergeGlobalFlagsWithTenantOverrides(flags, tenantId);
     }
     return flags.filter((flag) => !flag.tenantId);
   }

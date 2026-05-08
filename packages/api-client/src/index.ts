@@ -368,8 +368,18 @@ export class ApiClient {
 
   // ── Feature Flags ──
 
-  async getFeatureFlags(): Promise<FeatureFlagSummary> {
-    return this.get<FeatureFlagSummary>("/api/admin/flags");
+  async getFeatureFlags(options?: {
+    tenantId?: string | null;
+  }): Promise<FeatureFlagSummary> {
+    return this.get<FeatureFlagSummary>("/api/admin/flags", {
+      ...(options?.tenantId
+        ? {
+            headers: {
+              "x-tenant-id": options.tenantId,
+            },
+          }
+        : {}),
+    });
   }
 
   async getFeatureFlag(key: string): Promise<FeatureFlag> {
