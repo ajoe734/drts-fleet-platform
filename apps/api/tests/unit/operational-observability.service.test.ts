@@ -6,6 +6,8 @@ import type {
   DispatchJobRecord,
   DriverLocationSnapshot,
   DriverRegistryRecord,
+  ForwardedOrderRecord,
+  ForwarderReconciliationIssue,
   OwnedOrderRecord,
   PartnerEligibilityReviewQueueItem,
   ReportJobRecord,
@@ -477,6 +479,157 @@ function createServiceFixture() {
     },
   ];
 
+  const forwardedOrders: ForwardedOrderRecord[] = [
+    {
+      mirrorOrderId: "mirror-001",
+      platformCode: "line-taxi",
+      externalOrderId: "line-001",
+      orderDomain: "forwarded",
+      dispatchSemantics: "forwarder_broadcast",
+      status: "sync_failed",
+      candidateDriverIds: ["drv-001", "drv-002"],
+      acceptedDriverId: null,
+      lastNativeStatus: "dispatch_error",
+      payload: {},
+      authoritativeSnapshot: {},
+      financeContext: {
+        fareAuthority: "external_platform",
+        settlementAuthority: "external_platform",
+        driverPayoutAuthority: "external_platform",
+        localLedgerMode: "shadow_only",
+      },
+      lastSyncError: {
+        code: "timeout",
+        message: "Webhook timed out",
+        retryable: true,
+        failedAt: "2026-04-30T10:11:00.000Z",
+        nativeStatus: "dispatch_error",
+        payload: {},
+      },
+      manualFallback: {
+        required: false,
+        reason: null,
+        requestedAt: null,
+        requestedBy: null,
+        notes: null,
+      },
+      reconciliationJob: {
+        reconciliationJobId: "recon-001",
+        mirrorOrderId: "mirror-001",
+        platformCode: "line-taxi",
+        externalOrderId: "line-001",
+        reason: "sync_failed",
+        status: "queued",
+        mismatchCount: 0,
+        notes: null,
+        createdAt: "2026-04-30T10:06:00.000Z",
+        completedAt: null,
+      },
+      createdAt: "2026-04-30T10:05:00.000Z",
+      updatedAt: "2026-04-30T10:11:00.000Z",
+    },
+    {
+      mirrorOrderId: "mirror-002",
+      platformCode: "uber",
+      externalOrderId: "uber-001",
+      orderDomain: "forwarded",
+      dispatchSemantics: "forwarder_broadcast",
+      status: "accept_pending",
+      candidateDriverIds: ["drv-003"],
+      acceptedDriverId: "drv-003",
+      lastNativeStatus: "driver_confirming",
+      payload: {},
+      authoritativeSnapshot: {},
+      financeContext: {
+        fareAuthority: "external_platform",
+        settlementAuthority: "external_platform",
+        driverPayoutAuthority: "external_platform",
+        localLedgerMode: "shadow_only",
+      },
+      lastSyncError: null,
+      manualFallback: {
+        required: true,
+        reason: "driver_no_response",
+        requestedAt: "2026-04-30T10:14:00.000Z",
+        requestedBy: "ops-console",
+        notes: "Waiting for manual confirmation",
+      },
+      reconciliationJob: {
+        reconciliationJobId: "recon-002",
+        mirrorOrderId: "mirror-002",
+        platformCode: "uber",
+        externalOrderId: "uber-001",
+        reason: "manual_fallback",
+        status: "queued",
+        mismatchCount: 1,
+        notes: "Pending operator follow-up",
+        createdAt: "2026-04-30T10:18:00.000Z",
+        completedAt: null,
+      },
+      createdAt: "2026-04-30T10:07:00.000Z",
+      updatedAt: "2026-04-30T10:13:00.000Z",
+    },
+    {
+      mirrorOrderId: "mirror-003",
+      platformCode: "grab_taiwan",
+      externalOrderId: "grab-001",
+      orderDomain: "forwarded",
+      dispatchSemantics: "forwarder_broadcast",
+      status: "confirmed_by_platform",
+      candidateDriverIds: ["drv-001"],
+      acceptedDriverId: "drv-001",
+      lastNativeStatus: "confirmed",
+      payload: {},
+      authoritativeSnapshot: {},
+      financeContext: {
+        fareAuthority: "external_platform",
+        settlementAuthority: "external_platform",
+        driverPayoutAuthority: "external_platform",
+        localLedgerMode: "shadow_only",
+      },
+      lastSyncError: null,
+      manualFallback: {
+        required: false,
+        reason: null,
+        requestedAt: null,
+        requestedBy: null,
+        notes: null,
+      },
+      reconciliationJob: null,
+      createdAt: "2026-04-30T10:08:00.000Z",
+      updatedAt: "2026-04-30T10:20:00.000Z",
+    },
+  ];
+
+  const reconciliationIssues: ForwarderReconciliationIssue[] = [
+    {
+      reconciliationJob: forwardedOrders[0].reconciliationJob!,
+      mirrorOrderId: "mirror-001",
+      platformCode: "line-taxi",
+      externalOrderId: "line-001",
+      status: "sync_failed",
+      acceptedDriverId: null,
+      lastSyncError: forwardedOrders[0].lastSyncError,
+      financeContext: forwardedOrders[0].financeContext,
+      manualFallback: forwardedOrders[0].manualFallback,
+      createdAt: "2026-04-30T10:05:00.000Z",
+      updatedAt: "2026-04-30T10:11:00.000Z",
+    },
+    {
+      reconciliationJob: forwardedOrders[1].reconciliationJob!,
+      mirrorOrderId: "mirror-002",
+      platformCode: "uber",
+      externalOrderId: "uber-001",
+      status: "accept_pending",
+      acceptedDriverId: "drv-003",
+      lastSyncError: null,
+      financeContext: forwardedOrders[1].financeContext,
+      manualFallback: forwardedOrders[1].manualFallback,
+      createdAt: "2026-04-30T10:07:00.000Z",
+      updatedAt: "2026-04-30T10:18:00.000Z",
+    },
+  ];
+
   const reportJobs: ReportJobRecord[] = [
     {
       jobId: "report-001",
@@ -574,6 +727,8 @@ function createServiceFixture() {
   };
   const forwarderService = {
     listAdapterHealth: vi.fn(() => adapterHealth),
+    listOrders: vi.fn(() => forwardedOrders),
+    listReconciliationIssues: vi.fn(() => reconciliationIssues),
   };
   const reportingFilingService = {
     listReportJobs: vi.fn(() => reportJobs),
@@ -667,6 +822,34 @@ describe("OperationalObservabilityService", () => {
       degradedAdapters: 1,
       downAdapters: 1,
     });
+    expect(snapshot.forwarderOps).toMatchObject({
+      totalForwardedOrders: 3,
+      syncFailedOrders: 1,
+      acceptPendingOrders: 1,
+      manualFallbackQueue: 1,
+      reconciliationQueue: 2,
+      oldestSyncFailedLagMinutes: 19,
+      oldestAcceptPendingLagMinutes: 17,
+      oldestManualFallbackLagMinutes: 16,
+      oldestReconciliationLagMinutes: 24,
+    });
+    expect(snapshot.adapterDetails).toEqual([
+      expect.objectContaining({
+        platformCode: "line-taxi",
+        status: "down",
+        webhookStatus: "failing",
+      }),
+      expect.objectContaining({
+        platformCode: "uber",
+        status: "degraded",
+        authStatus: "authenticated",
+      }),
+      expect.objectContaining({
+        platformCode: "grab_taiwan",
+        status: "healthy",
+        credentialStatus: "stub",
+      }),
+    ]);
 
     expect(snapshot.alerts).toEqual(
       expect.arrayContaining([
@@ -700,6 +883,12 @@ describe("OperationalObservabilityService", () => {
           measuredValue: 2,
           routes: ["ops", "platform"],
         }),
+        expect.objectContaining({
+          key: "adapter_degradation",
+          state: "critical",
+          measuredValue: 2,
+          routes: ["ops", "platform"],
+        }),
       ]),
     );
 
@@ -711,7 +900,9 @@ describe("OperationalObservabilityService", () => {
             "dispatch_lag",
             "recording_backlog",
             "driver_state_lag",
+            "adapter_degradation",
           ]),
+          focusAreas: expect.arrayContaining(["adapters", "forwarder_ops"]),
         }),
         expect.objectContaining({
           route: "platform",
@@ -719,7 +910,9 @@ describe("OperationalObservabilityService", () => {
             "dispatch_lag",
             "webhook_failure_burst",
             "eligibility_review_backlog",
+            "adapter_degradation",
           ]),
+          focusAreas: expect.arrayContaining(["adapters", "forwarder_ops"]),
         }),
       ]),
     );

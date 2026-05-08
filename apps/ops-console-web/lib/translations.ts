@@ -104,7 +104,7 @@ const en = {
   "dashboard.quicklink.reports": "Generate reports",
   "dashboard.operational.title": "Operational Alerts",
   "dashboard.operational.subtitle":
-    "Live workflow lag thresholds for dispatch, recording, driver state, and eligibility follow-up",
+    "Live workflow thresholds for dispatch, recording, driver state, eligibility follow-up, and platform degradation",
   "dashboard.operational.empty": "No operational alerts are configured yet.",
   "dashboard.operational.thresholds": "Warn {warning} · Critical {critical}",
   "dashboard.alert.dispatch_lag.title": "Dispatch lag",
@@ -120,6 +120,35 @@ const en = {
     "Eligibility review backlog",
   "dashboard.alert.eligibility_review_backlog.summary":
     "{count} partner cases still need ops follow-up",
+  "dashboard.alert.adapter_degradation.title": "Adapter degradation",
+  "dashboard.alert.adapter_degradation.summary":
+    "{count} adapter(s) are degraded or down",
+  "dashboard.platformOps.title": "Platform Operations",
+  "dashboard.platformOps.subtitle":
+    "Adapter health, sync errors, and reconciliation backlog across {count} forwarded order(s)",
+  "dashboard.platformOps.empty":
+    "No adapter health snapshots are available yet.",
+  "dashboard.platformOps.degradedBanner":
+    "{count} adapter(s) need attention. Review auth, webhook, and rate-limit signals before mirrored dispatch backlog grows.",
+  "dashboard.platformOps.openDispatch": "Open forwarded dispatch triage",
+  "dashboard.platformOps.notReported": "Not reported",
+  "dashboard.platformOps.noLag": "No backlog",
+  "dashboard.platformOps.oldestLag": "Oldest {value}",
+  "dashboard.platformOps.noError": "No current error",
+  "dashboard.platformOps.metrics.adapters": "Adapters needing attention",
+  "dashboard.platformOps.metrics.adaptersSub":
+    "{healthy} healthy · {down} down · {total} total",
+  "dashboard.platformOps.metrics.syncFailed": "Sync failed",
+  "dashboard.platformOps.metrics.acceptPending": "Accept pending",
+  "dashboard.platformOps.metrics.manualFallback": "Manual fallback",
+  "dashboard.platformOps.metrics.reconciliation": "Reconciliation queue",
+  "dashboard.platformOps.signal.credential": "Credential",
+  "dashboard.platformOps.signal.auth": "Auth",
+  "dashboard.platformOps.signal.webhook": "Webhook",
+  "dashboard.platformOps.signal.rateLimit": "Rate limit",
+  "dashboard.platformOps.signal.reason": "Reason",
+  "dashboard.platformOps.signal.lastChecked": "Last checked",
+  "dashboard.platformOps.signal.lastError": "Last error",
 
   // ── Vehicles ──
   "vehicles.title": "Vehicles Registry",
@@ -1223,7 +1252,7 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.quicklink.reports": "產生報表",
   "dashboard.operational.title": "營運警示",
   "dashboard.operational.subtitle":
-    "派車、錄音、司機狀態與 eligibility 跟進的即時流程 lag 門檻",
+    "派車、錄音、司機狀態、eligibility 跟進與平台降級門檻的即時概覽",
   "dashboard.operational.empty": "目前尚未設定營運警示。",
   "dashboard.operational.thresholds": "警示 {warning} · 重大 {critical}",
   "dashboard.alert.dispatch_lag.title": "派車延遲",
@@ -1235,6 +1264,34 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.alert.eligibility_review_backlog.title": "Eligibility 審查積壓",
   "dashboard.alert.eligibility_review_backlog.summary":
     "{count} 筆合作夥伴案例仍待 ops 跟進",
+  "dashboard.alert.adapter_degradation.title": "Adapter 降級",
+  "dashboard.alert.adapter_degradation.summary":
+    "{count} 個 adapter 處於降級或停擺狀態",
+  "dashboard.platformOps.title": "平台營運",
+  "dashboard.platformOps.subtitle":
+    "彙整 {count} 筆 forwarded 訂單的 adapter 健康、sync error 與 reconciliation backlog",
+  "dashboard.platformOps.empty": "目前尚無 adapter 健康快照。",
+  "dashboard.platformOps.degradedBanner":
+    "{count} 個 adapter 需要關注。請先檢查 auth、webhook 與 rate-limit 訊號，避免鏡像派單積壓擴大。",
+  "dashboard.platformOps.openDispatch": "開啟 forwarded 派單處置台",
+  "dashboard.platformOps.notReported": "尚未回報",
+  "dashboard.platformOps.noLag": "目前沒有積壓",
+  "dashboard.platformOps.oldestLag": "最久已累積 {value}",
+  "dashboard.platformOps.noError": "目前沒有錯誤",
+  "dashboard.platformOps.metrics.adapters": "需關注的 adapter",
+  "dashboard.platformOps.metrics.adaptersSub":
+    "{healthy} 個健康 · {down} 個停擺 · 共 {total} 個",
+  "dashboard.platformOps.metrics.syncFailed": "Sync failed",
+  "dashboard.platformOps.metrics.acceptPending": "Accept pending",
+  "dashboard.platformOps.metrics.manualFallback": "Manual fallback",
+  "dashboard.platformOps.metrics.reconciliation": "Reconciliation 佇列",
+  "dashboard.platformOps.signal.credential": "Credential",
+  "dashboard.platformOps.signal.auth": "Auth",
+  "dashboard.platformOps.signal.webhook": "Webhook",
+  "dashboard.platformOps.signal.rateLimit": "Rate limit",
+  "dashboard.platformOps.signal.reason": "原因",
+  "dashboard.platformOps.signal.lastChecked": "最後檢查",
+  "dashboard.platformOps.signal.lastError": "最後錯誤",
 
   // ── Vehicles ──
   "vehicles.title": "車輛登記",
