@@ -26,48 +26,80 @@ export function AdminNav() {
   const pathname = rawPathname ?? "";
   const { t, locale, setLocale } = useTranslation();
 
+  const labels =
+    locale === "en"
+      ? {
+          home: "Governance Home",
+          health: "Platform Health",
+          tenants: "Tenants",
+          partners: "Partner Entry",
+          users: "Platform Staff",
+          fleet: "Fleet & Compliance",
+          switchboard: "Public Info & Placards",
+          pricing: "Pricing",
+          payments: "Settlement Governance",
+          notices: "Notices & Maintenance",
+          audit: "Audit & Evidence",
+          featureFlags: "Feature Flags",
+          adapterRegistry: "Adapter Registry",
+        }
+      : {
+          home: "工作首頁",
+          health: "平台健康",
+          tenants: "租戶",
+          partners: "合作夥伴 entry",
+          users: "平台人員",
+          fleet: "車隊與合規",
+          switchboard: "法定資訊與牌貼",
+          pricing: "計價",
+          payments: "結算治理",
+          notices: "公告與維護",
+          audit: "稽核與證據",
+          featureFlags: "功能旗標",
+          adapterRegistry: "介接登錄",
+        };
+
   const NAV_ITEMS = [
-    { href: "/", label: t("nav.home"), icon: <LayoutDashboard size={16} /> },
-    { href: "/tenants", label: t("nav.tenants"), icon: <Shield size={16} /> },
+    { href: "/", label: labels.home, icon: <LayoutDashboard size={16} /> },
+    { href: "/health", label: labels.health, icon: <Activity size={16} /> },
+    { href: "/tenants", label: labels.tenants, icon: <Shield size={16} /> },
     {
       href: "/partners",
-      label: t("nav.partners"),
+      label: labels.partners,
       icon: <Handshake size={16} />,
     },
-    { href: "/users", label: t("nav.users"), icon: <Users size={16} /> },
-    { href: "/fleet", label: t("nav.fleet"), icon: <Truck size={16} /> },
+    { href: "/users", label: labels.users, icon: <Users size={16} /> },
+    { href: "/fleet", label: labels.fleet, icon: <Truck size={16} /> },
     {
       href: "/switchboard",
-      label: t("nav.switchboard"),
+      label: labels.switchboard,
       icon: <Radio size={16} />,
     },
     {
       href: "/pricing",
-      label: t("nav.pricing"),
+      label: labels.pricing,
       icon: <DollarSign size={16} />,
     },
     {
       href: "/payments",
-      label: t("nav.payments"),
+      label: labels.payments,
       icon: <CreditCard size={16} />,
     },
-    { href: "/health", label: t("nav.health"), icon: <Activity size={16} /> },
-    { href: "/notices", label: t("nav.notices"), icon: <Bell size={16} /> },
+    { href: "/notices", label: labels.notices, icon: <Bell size={16} /> },
     {
       href: "/audit",
-      label: t("nav.audit"),
+      label: labels.audit,
       icon: <ClipboardList size={16} />,
     },
     {
       href: "/feature-flags",
-      label: t("nav.featureFlags"),
+      label: labels.featureFlags,
       icon: <Flag size={16} />,
     },
-    // New Navigation Item for Platform Adapter Registry
     {
       href: "/adapter-registry",
-      label: t("nav.adapterRegistry"),
-      icon: <ShieldCheck size={16} />, // Using ShieldCheck for adapter registry
+      label: labels.adapterRegistry,
+      icon: <ShieldCheck size={16} />,
     },
   ];
 
