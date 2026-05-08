@@ -114,6 +114,15 @@ export default async function DispatchPage({
           [] as ForwarderReconciliationIssue[],
         ),
       ]);
+    const manualFallbackCount = forwardedOrders.filter(
+      (order) => order.manualFallback.required,
+    ).length;
+    const acceptPendingCount = forwardedOrders.filter(
+      (order) => order.status === "accept_pending",
+    ).length;
+    const syncFailedCount = forwardedOrders.filter(
+      (order) => order.status === "sync_failed",
+    ).length;
 
     return (
       <>
@@ -122,6 +131,45 @@ export default async function DispatchPage({
           subtitle={t("dispatch.forwarded.subtitle", locale)}
           actions={actions}
         />
+        <Card style={{ marginBottom: "20px" }}>
+          <CardBody>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: "16px",
+              }}
+            >
+              <StatCard
+                label={t("dispatch.forwarded.kpi.awaitingPlatform", locale)}
+                value={formatCompactNumber(acceptPendingCount)}
+                sub={t("dispatch.forwarded.roleBoundaryText", locale)}
+                accent="#b45309"
+              />
+              <StatCard
+                label={t("dispatch.forwarded.kpi.syncFailed", locale)}
+                value={formatCompactNumber(syncFailedCount)}
+                sub={t("dispatch.forwarded.action.markSyncFailed", locale)}
+                accent="#dc2626"
+              />
+              <StatCard
+                label={t("dispatch.forwarded.kpi.manualFallback", locale)}
+                value={formatCompactNumber(manualFallbackCount)}
+                sub={t("dispatch.forwarded.action.manualFallback", locale)}
+                accent="#ea580c"
+              />
+              <StatCard
+                label={t("dispatch.forwarded.kpi.reconciliation", locale)}
+                value={formatCompactNumber(reconciliationIssues.length)}
+                sub={t(
+                  "dispatch.forwarded.action.completeReconciliation",
+                  locale,
+                )}
+                accent="#7c3aed"
+              />
+            </div>
+          </CardBody>
+        </Card>
         <ForwardedOrderBoard
           initialOrders={forwardedOrders}
           initialAdapterHealth={adapterHealthResponse.items ?? []}
@@ -205,6 +253,79 @@ export default async function DispatchPage({
 
       <Card style={{ marginBottom: "20px" }}>
         <CardBody>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: "16px",
+              marginBottom: "16px",
+            }}
+          >
+            <div
+              style={{
+                border: "1px solid #dbeafe",
+                borderRadius: "12px",
+                padding: "14px 16px",
+                background: "#f8fbff",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "11px",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#64748b",
+                  marginBottom: "6px",
+                }}
+              >
+                {t("dispatch.view.owned", locale)}
+              </div>
+              <div
+                style={{ fontSize: "14px", fontWeight: 600, color: "#0f172a" }}
+              >
+                {t("dispatch.page.ownedHeadline", locale)}
+              </div>
+              <div
+                style={{ marginTop: "6px", fontSize: "13px", color: "#475569" }}
+              >
+                {t("dispatch.page.ownedSummary", locale, {
+                  count: insights.exceptionOrders,
+                })}
+              </div>
+            </div>
+            <div
+              style={{
+                border: "1px solid #fde68a",
+                borderRadius: "12px",
+                padding: "14px 16px",
+                background: "#fffbeb",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "11px",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "#92400e",
+                  marginBottom: "6px",
+                }}
+              >
+                {t("dispatch.view.forwarded", locale)}
+              </div>
+              <div
+                style={{ fontSize: "14px", fontWeight: 600, color: "#0f172a" }}
+              >
+                {t("dispatch.page.forwardedHeadline", locale)}
+              </div>
+              <div
+                style={{ marginTop: "6px", fontSize: "13px", color: "#78350f" }}
+              >
+                {t("dispatch.page.forwardedSummary", locale, {
+                  count: forwarderSyncErrors.length,
+                })}
+              </div>
+            </div>
+          </div>
           <div
             style={{
               background: "#eff6ff",

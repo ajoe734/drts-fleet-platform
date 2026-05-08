@@ -149,6 +149,17 @@ const en = {
   "dashboard.platformOps.signal.reason": "Reason",
   "dashboard.platformOps.signal.lastChecked": "Last checked",
   "dashboard.platformOps.signal.lastError": "Last error",
+  "dashboard.dispatchBoards.title": "Dispatch Command",
+  "dashboard.dispatchBoards.subtitle":
+    "Split owned dispatch execution from forwarded mirror-order triage.",
+  "dashboard.dispatchBoards.queueDepth": "matching + queued jobs",
+  "dashboard.dispatchBoards.attentionQueue": "attention queue",
+  "dashboard.dispatchBoards.ownedSummary":
+    "{redispatch} redispatch / timeout · {exceptions} exception or no-supply",
+  "dashboard.dispatchBoards.forwardedSummary":
+    "{syncFailed} sync failed · {reconciliation} reconciliation pending",
+  "dashboard.dispatchBoards.openOwned": "Open owned workflow",
+  "dashboard.dispatchBoards.openForwarded": "Open forwarded board",
 
   // ── Vehicles ──
   "vehicles.title": "Vehicles Registry",
@@ -477,6 +488,39 @@ const en = {
     "{count} visible order(s) are still missing pickup coordinates.",
   "dispatch.workflow.map.autoLoadHint":
     "Candidate supply locations are auto-loaded for visible dispatch jobs when available.",
+  "dispatch.workflow.detail.title": "Dispatch detail workspace",
+  "dispatch.workflow.detail.selectedOrder": "{orderNo} workflow focus",
+  "dispatch.workflow.detail.emptyTitle": "No order selected",
+  "dispatch.workflow.detail.emptyBody":
+    "Pick an order from the map or table to review dispatch, compliance, and rider context together.",
+  "dispatch.workflow.detail.summary": "Workflow summary",
+  "dispatch.workflow.detail.orderStatus": "Order status",
+  "dispatch.workflow.detail.dispatchStatus": "Dispatch status",
+  "dispatch.workflow.detail.reservationWindow": "Service window",
+  "dispatch.workflow.detail.immediateQueue": "Immediate queue",
+  "dispatch.workflow.detail.passenger": "Passenger",
+  "dispatch.workflow.detail.contact": "Onsite contact",
+  "dispatch.workflow.detail.lastUpdated": "Last updated",
+  "dispatch.workflow.detail.route": "Route context",
+  "dispatch.workflow.detail.pickup": "Pickup",
+  "dispatch.workflow.detail.dropoff": "Dropoff",
+  "dispatch.workflow.detail.notes": "Ops notes",
+  "dispatch.workflow.detail.actionPanel": "Action panel",
+  "dispatch.workflow.detail.actionPanelHint":
+    "Use this workspace to record assignment, override, redispatch, and exception decisions with audit context.",
+  "dispatch.workflow.detail.compliance": "Compliance gates",
+  "dispatch.workflow.detail.noComplianceIssues":
+    "No active compliance blocker or review gate on this order.",
+  "dispatch.workflow.detail.candidates": "Candidate lane",
+  "dispatch.workflow.detail.timeline": "Dispatch timeline",
+  "dispatch.workflow.detail.timelineEvents": "Timeline events",
+  "dispatch.workflow.detail.timelineLatest": "Latest event",
+  "dispatch.workflow.detail.timelineEmpty":
+    "No dispatch trace entries are available for this order yet.",
+  "dispatch.workflow.detail.openWorkspace": "Open workspace",
+  "dispatch.workflow.detail.activeWorkspace": "Workspace active",
+  "dispatch.workflow.detail.selectCandidateHint":
+    "Pick a candidate in this row, then complete assignment from the detail workspace.",
   "dispatch.workflow.candidateLocation.live": "Live location",
   "dispatch.workflow.candidateLocation.stale": "Stale location",
   "dispatch.workflow.candidateLocation.no_location": "No location",
@@ -485,11 +529,20 @@ const en = {
   "dispatch.workflow.loadCandidatesFailed": "Failed to fetch candidates",
   "dispatch.workflow.refreshFailed": "Failed to refresh dispatch board",
   "dispatch.workflow.actionFailed": "Dispatch action failed",
+  "dispatch.workflow.traceLoadFailed": "Dispatch trace could not be loaded.",
   "dispatch.workflow.eventFailed": "Failed to process dispatch event",
   "dispatch.view.forwarded": "Forwarded Board",
   "dispatch.view.owned": "Owned Dispatch",
   "dispatch.view.revenue": "Revenue / Recon",
   "dispatch.view.contracts": "Manual Review",
+  "dispatch.page.ownedHeadline":
+    "Owned board stays inside local dispatch authority.",
+  "dispatch.page.ownedSummary":
+    "{count} exception-hold / no-supply orders need workflow review alongside live candidate context.",
+  "dispatch.page.forwardedHeadline":
+    "Forwarded work stays in mirror-order triage and reconciliation lanes.",
+  "dispatch.page.forwardedSummary":
+    "{count} forwarded sync failures are currently visible from the owned console.",
   "dispatch.forwarded.title": "External Platform Orders",
   "dispatch.forwarded.subtitle":
     "Mirror-order board for platform sync, manual fallback, and reconciliation",
@@ -1497,6 +1550,17 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.platformOps.subtitle":
     "彙整 {count} 筆 forwarded 訂單的 adapter 健康、sync error 與 reconciliation backlog",
   "dashboard.platformOps.empty": "目前尚無 adapter 健康快照。",
+  "dashboard.dispatchBoards.title": "派車指揮台",
+  "dashboard.dispatchBoards.subtitle":
+    "把本地派車執行與 forwarded 鏡像訂單分流處理。",
+  "dashboard.dispatchBoards.queueDepth": "matching + queued 任務",
+  "dashboard.dispatchBoards.attentionQueue": "注意佇列",
+  "dashboard.dispatchBoards.ownedSummary":
+    "{redispatch} 筆重派 / 逾時 · {exceptions} 筆例外或無供給",
+  "dashboard.dispatchBoards.forwardedSummary":
+    "{syncFailed} 筆同步失敗 · {reconciliation} 筆待對帳",
+  "dashboard.dispatchBoards.openOwned": "打開本地派車流程",
+  "dashboard.dispatchBoards.openForwarded": "打開 forwarded 看板",
   "dashboard.platformOps.degradedBanner":
     "{count} 個 adapter 需要關注。請先檢查 auth、webhook 與 rate-limit 訊號，避免鏡像派單積壓擴大。",
   "dashboard.platformOps.openDispatch": "開啟 forwarded 派單處置台",
@@ -1833,6 +1897,39 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.map.missingCoords": "{count} 筆可見訂單仍缺少上車座標。",
   "dispatch.workflow.map.autoLoadHint":
     "可見派車任務若提供候選供給位置，系統會自動載入。",
+  "dispatch.workflow.detail.title": "派車明細工作區",
+  "dispatch.workflow.detail.selectedOrder": "{orderNo} 工作流焦點",
+  "dispatch.workflow.detail.emptyTitle": "尚未選取訂單",
+  "dispatch.workflow.detail.emptyBody":
+    "請從地圖或表格選一筆訂單，把派車、compliance 與乘客資訊一起檢視。",
+  "dispatch.workflow.detail.summary": "工作流摘要",
+  "dispatch.workflow.detail.orderStatus": "訂單狀態",
+  "dispatch.workflow.detail.dispatchStatus": "派車狀態",
+  "dispatch.workflow.detail.reservationWindow": "服務時窗",
+  "dispatch.workflow.detail.immediateQueue": "即時派車佇列",
+  "dispatch.workflow.detail.passenger": "乘客",
+  "dispatch.workflow.detail.contact": "現場聯絡人",
+  "dispatch.workflow.detail.lastUpdated": "最後更新",
+  "dispatch.workflow.detail.route": "路線資訊",
+  "dispatch.workflow.detail.pickup": "上車",
+  "dispatch.workflow.detail.dropoff": "下車",
+  "dispatch.workflow.detail.notes": "營運備註",
+  "dispatch.workflow.detail.actionPanel": "操作面板",
+  "dispatch.workflow.detail.actionPanelHint":
+    "在此工作區完成指派、override、重派與例外決策，並留下稽核脈絡。",
+  "dispatch.workflow.detail.compliance": "Compliance gate",
+  "dispatch.workflow.detail.noComplianceIssues":
+    "這筆訂單目前沒有啟用中的 compliance blocker 或 review gate。",
+  "dispatch.workflow.detail.candidates": "候選供給",
+  "dispatch.workflow.detail.timeline": "派車時間軸",
+  "dispatch.workflow.detail.timelineEvents": "時間軸事件",
+  "dispatch.workflow.detail.timelineLatest": "最新事件",
+  "dispatch.workflow.detail.timelineEmpty":
+    "此訂單目前尚無可顯示的 dispatch trace。",
+  "dispatch.workflow.detail.openWorkspace": "開啟工作區",
+  "dispatch.workflow.detail.activeWorkspace": "工作區焦點",
+  "dispatch.workflow.detail.selectCandidateHint":
+    "先在列表挑選候選人，再回到明細工作區完成指派。",
   "dispatch.workflow.loadCandidatesFailed": "載入候選人失敗",
   "dispatch.workflow.refreshFailed": "重新整理派車看板失敗",
   "dispatch.workflow.candidateLocation.live": "即時位置",
@@ -1841,11 +1938,20 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.candidateLocationSummary":
     "目前有 {count} 位候選人屬於 {state}。",
   "dispatch.workflow.actionFailed": "派車操作失敗",
+  "dispatch.workflow.traceLoadFailed": "無法載入 dispatch trace。",
   "dispatch.workflow.eventFailed": "處理派車事件失敗",
   "dispatch.view.forwarded": "外部平台看板",
   "dispatch.view.owned": "本地派車",
   "dispatch.view.revenue": "收益 / 對帳",
   "dispatch.view.contracts": "人工審查",
+  "dispatch.page.ownedHeadline":
+    "本地派車看板維持在本地 dispatch authority 內處理。",
+  "dispatch.page.ownedSummary":
+    "{count} 筆例外保留 / 無供給訂單需要搭配即時候選供給一起檢查。",
+  "dispatch.page.forwardedHeadline":
+    "Forwarded 工作維持在鏡像訂單分流與 reconciliation 流程中。",
+  "dispatch.page.forwardedSummary":
+    "目前從本地 console 可見 {count} 筆 forwarded sync failure。",
   "dispatch.forwarded.title": "外部平台訂單",
   "dispatch.forwarded.subtitle": "鏡像訂單看板、人工 fallback 與對帳處理",
   "dispatch.forwarded.roleBoundaryText":
