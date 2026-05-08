@@ -1,4 +1,13 @@
-import type { PlatformCode } from "@drts/contracts";
+import type {
+  AdapterAuthStatus,
+  AdapterCredentialStatus,
+  AdapterHealthReason,
+  AdapterHealthStatus,
+  AdapterRateLimitStatus,
+  AdapterWebhookStatus,
+  ForwarderAdapterCapabilitySummary,
+  PlatformCode,
+} from "@drts/contracts";
 
 export const FORWARDER_ADAPTERS = Symbol("FORWARDER_ADAPTERS");
 
@@ -49,8 +58,33 @@ export interface ForwarderAdapterFetchEarningsInput {
   endedAt?: string;
 }
 
+export interface ForwarderAdapterWebhookVerificationInput {
+  headers: Record<string, string | string[] | undefined>;
+  payload: Record<string, unknown>;
+}
+
+export interface ForwarderAdapterWebhookVerificationResult {
+  accepted: boolean;
+  detail?: string;
+  credentialStatus?: AdapterCredentialStatus;
+  authStatus?: AdapterAuthStatus;
+  webhookStatus?: AdapterWebhookStatus;
+}
+
+export interface ForwarderAdapterHealthSnapshot {
+  status: AdapterHealthStatus;
+  reason: AdapterHealthReason;
+  credentialStatus: AdapterCredentialStatus;
+  authStatus: AdapterAuthStatus;
+  webhookStatus: AdapterWebhookStatus;
+  rateLimitStatus: AdapterRateLimitStatus;
+  message?: string | null;
+  checkedAt?: string;
+}
+
 export interface ForwarderAdapterInterface {
   readonly platformCode: PlatformCode;
+  readonly capabilitySummary: ForwarderAdapterCapabilitySummary;
   accept(
     input: ForwarderAdapterAcceptInput,
   ): Promise<ForwarderAdapterActionResult>;
@@ -66,4 +100,8 @@ export interface ForwarderAdapterInterface {
   fetchEarnings(
     input?: ForwarderAdapterFetchEarningsInput,
   ): Promise<ForwarderAdapterEarningsResult>;
+  verifyWebhook?(
+    input: ForwarderAdapterWebhookVerificationInput,
+  ): Promise<ForwarderAdapterWebhookVerificationResult>;
+  getHealthSnapshot?(): Promise<ForwarderAdapterHealthSnapshot>;
 }

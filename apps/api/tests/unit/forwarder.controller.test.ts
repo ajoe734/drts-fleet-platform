@@ -32,22 +32,30 @@ function opsIdentity(): BootstrapRequestIdentity {
 }
 
 describe("ForwarderController", () => {
-  it("wraps Grab Taiwan webhook ingestion in the standard success envelope", () => {
+  it("wraps Grab Taiwan webhook ingestion in the standard success envelope", async () => {
     const forwarderService = {
-      ingestGrabTaiwanWebhook: vi.fn(() => ({
+      ingestGrabTaiwanWebhook: vi.fn(async () => ({
         mirrorOrderId: "FWD-001",
         status: "received",
       })),
     };
     const controller = new ForwarderController(forwarderService as never);
 
-    const response = controller.ingestGrabTaiwanWebhook(
+    const response = await controller.ingestGrabTaiwanWebhook(
       { orderId: "grab-order-001" },
+      {
+        "x-grab-signature": "stub-signature",
+        "x-request-id": "req-grab-ctl-001",
+      },
       "req-grab-ctl-001",
     );
 
     expect(forwarderService.ingestGrabTaiwanWebhook).toHaveBeenCalledWith(
       { orderId: "grab-order-001" },
+      {
+        "x-grab-signature": "stub-signature",
+        "x-request-id": "req-grab-ctl-001",
+      },
       "req-grab-ctl-001",
     );
     expect(response).toEqual({

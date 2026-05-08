@@ -65,12 +65,17 @@ export class ForwarderController {
   }
 
   @Post("forwarder/webhooks/grab-taiwan")
-  ingestGrabTaiwanWebhook(
+  async ingestGrabTaiwanWebhook(
     @Body() payload: Record<string, unknown>,
+    @Headers() headers: Record<string, string | string[] | undefined>,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.forwarderService.ingestGrabTaiwanWebhook(payload, requestId),
+      await this.forwarderService.ingestGrabTaiwanWebhook(
+        payload,
+        headers,
+        requestId,
+      ),
       requestId,
     );
   }

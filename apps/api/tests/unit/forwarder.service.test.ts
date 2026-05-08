@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ForwarderService } from "../../src/modules/forwarder/forwarder.service";
-import { GRAB_TAIWAN_PLATFORM_CODE } from "../../src/modules/forwarder/grab-taiwan.adapter";
+import {
+  GRAB_TAIWAN_PLATFORM_CODE,
+  GrabTaiwanAdapter,
+} from "../../src/modules/forwarder/grab-taiwan.adapter";
 import type { ForwarderAdapterInterface } from "../../src/modules/forwarder/forwarder-adapter.interface";
 
 function createAdapter(
@@ -9,6 +12,14 @@ function createAdapter(
 ): ForwarderAdapterInterface {
   return {
     platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+    capabilitySummary: {
+      mode: "hybrid",
+      productionStatus: "production_ready",
+      supportsInboundWebhook: true,
+      supportsOutboundActions: true,
+      supportedWebhookEvents: ["forwarder.order.received"],
+      notes: [],
+    },
     accept: vi.fn(async ({ externalOrderId }) => ({
       acknowledged: true,
       platformCode: GRAB_TAIWAN_PLATFORM_CODE,
@@ -37,6 +48,21 @@ function createAdapter(
       currency: "TWD",
       totalAmount: 0,
       asOf: new Date().toISOString(),
+    })),
+    verifyWebhook: vi.fn(async () => ({
+      accepted: true,
+      credentialStatus: "valid",
+      authStatus: "authenticated",
+      webhookStatus: "healthy",
+    })),
+    getHealthSnapshot: vi.fn(async () => ({
+      status: "healthy",
+      reason: "none",
+      credentialStatus: "valid",
+      authStatus: "authenticated",
+      webhookStatus: "healthy",
+      rateLimitStatus: "ok",
+      checkedAt: new Date().toISOString(),
     })),
     ...overrides,
   };
@@ -108,7 +134,43 @@ describe("ForwarderService", () => {
       expect.objectContaining({
         platformCode: GRAB_TAIWAN_PLATFORM_CODE,
         status: "healthy",
+        reason: "none",
+        credentialStatus: "valid",
+        authStatus: "authenticated",
+        webhookStatus: "healthy",
+        rateLimitStatus: "ok",
         lastError: null,
+      }),
+    ]);
+  });
+
+  it("labels the checked-in Grab Taiwan adapter as stub-only on module init", async () => {
+    const regulatoryRegistryService = {
+      getEligibleCandidates: vi.fn(() => []),
+    };
+    const auditNotificationService = {
+      recordAuditLog: vi.fn(),
+    };
+    const service = new ForwarderService(
+      regulatoryRegistryService as never,
+      auditNotificationService as never,
+      [new GrabTaiwanAdapter()],
+    );
+
+    await service.onModuleInit();
+
+    expect(service.listAdapterHealth()).toEqual([
+      expect.objectContaining({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        status: "healthy",
+        reason: "stub",
+        credentialStatus: "stub",
+        authStatus: "stub",
+        webhookStatus: "stub",
+        rateLimitStatus: "stub",
+        capabilitySummary: expect.objectContaining({
+          productionStatus: "stub",
+        }),
       }),
     ]);
   });
@@ -169,13 +231,16 @@ describe("ForwarderService", () => {
     );
   });
 
-  it("ingests Grab Taiwan webhooks through the generic forwarder flow", () => {
+  it("ingests Grab Taiwan webhooks through the generic forwarder flow", async () => {
     const { service, auditNotificationService } = createService();
 
-    const record = service.ingestGrabTaiwanWebhook(
+    const record = await service.ingestGrabTaiwanWebhook(
       {
         orderId: "grab-order-001",
         passengerName: "Rider One",
+      },
+      {
+        "x-grab-signature": "stub-signature",
       },
       "req-grab-001",
     );
@@ -192,6 +257,67 @@ describe("ForwarderService", () => {
         actionName: "ingest_external_order",
       }),
     );
+  });
+
+  it("rejects Grab Taiwan webhooks when adapter verification fails", async () => {
+    const adapter = createAdapter({
+      verifyWebhook: vi.fn(async () => ({
+        accepted: false,
+        detail: "invalid signature",
+        webhookStatus: "failing",
+      })),
+    });
+    const { service } = createService({ adapter });
+
+    await expect(
+      service.ingestGrabTaiwanWebhook(
+        {
+          orderId: "grab-order-invalid-001",
+        },
+        {
+          "x-grab-signature": "bad-signature",
+        },
+        "req-grab-invalid-001",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "FORWARDER_WEBHOOK_VERIFICATION_FAILED",
+        },
+      },
+    });
+    expect(service.listOrders()).toEqual([]);
+    expect(service.listAdapterHealth()).toEqual([
+      expect.objectContaining({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        status: "degraded",
+        reason: "webhook",
+        webhookStatus: "failing",
+        lastError: "invalid signature",
+      }),
+    ]);
+  });
+
+  it("keeps inbound ingestion idempotent by platform and external order id", () => {
+    const { service } = createService();
+
+    const first = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-idempotent-001",
+      payload: { passengerName: "First payload" },
+    });
+    const second = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-idempotent-001",
+      payload: { passengerName: "Second payload should not duplicate" },
+    });
+
+    expect(second.mirrorOrderId).toBe(first.mirrorOrderId);
+    expect(service.listOrders()).toHaveLength(1);
+    expect(service.listOrders()[0]).toMatchObject({
+      mirrorOrderId: first.mirrorOrderId,
+      externalOrderId: "grab-order-idempotent-001",
+    });
   });
 
   it("relays driver accept through the platform adapter and keeps the order pending confirmation", async () => {
@@ -1097,5 +1223,14 @@ describe("ForwarderService", () => {
       blockingReason:
         "Dispatch must confirm platform acceptance manually before continuing.",
     });
+    expect(service.listAdapterHealth()).toEqual([
+      expect.objectContaining({
+        platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+        status: "degraded",
+        reason: "auth",
+        authStatus: "reauth_required",
+        credentialStatus: "expired",
+      }),
+    ]);
   });
 });

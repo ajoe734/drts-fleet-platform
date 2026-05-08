@@ -3305,6 +3305,82 @@ export type ForwardedOrderStatus = (typeof FORWARDED_ORDER_STATUSES)[number];
 export const ADAPTER_HEALTH_STATUSES = ["healthy", "degraded", "down"] as const;
 export type AdapterHealthStatus = (typeof ADAPTER_HEALTH_STATUSES)[number];
 
+export const ADAPTER_HEALTH_REASONS = [
+  "none",
+  "platform",
+  "auth",
+  "webhook",
+  "rate_limit",
+  "credential",
+  "stub",
+] as const;
+export type AdapterHealthReason = (typeof ADAPTER_HEALTH_REASONS)[number];
+
+export const ADAPTER_CREDENTIAL_STATUSES = [
+  "unknown",
+  "valid",
+  "invalid",
+  "expired",
+  "not_configured",
+  "stub",
+] as const;
+export type AdapterCredentialStatus =
+  (typeof ADAPTER_CREDENTIAL_STATUSES)[number];
+
+export const ADAPTER_AUTH_STATUSES = [
+  "unknown",
+  "authenticated",
+  "reauth_required",
+  "invalid",
+  "stub",
+] as const;
+export type AdapterAuthStatus = (typeof ADAPTER_AUTH_STATUSES)[number];
+
+export const ADAPTER_WEBHOOK_STATUSES = [
+  "not_applicable",
+  "unknown",
+  "healthy",
+  "failing",
+  "not_configured",
+  "stub",
+] as const;
+export type AdapterWebhookStatus = (typeof ADAPTER_WEBHOOK_STATUSES)[number];
+
+export const ADAPTER_RATE_LIMIT_STATUSES = [
+  "unknown",
+  "ok",
+  "limited",
+  "cooldown",
+  "stub",
+] as const;
+export type AdapterRateLimitStatus =
+  (typeof ADAPTER_RATE_LIMIT_STATUSES)[number];
+
+export const FORWARDER_ADAPTER_MODES = [
+  "stub",
+  "api",
+  "webhook",
+  "hybrid",
+] as const;
+export type ForwarderAdapterMode = (typeof FORWARDER_ADAPTER_MODES)[number];
+
+export const FORWARDER_ADAPTER_PRODUCTION_STATUSES = [
+  "stub",
+  "configuration_required",
+  "production_ready",
+] as const;
+export type ForwarderAdapterProductionStatus =
+  (typeof FORWARDER_ADAPTER_PRODUCTION_STATUSES)[number];
+
+export interface ForwarderAdapterCapabilitySummary {
+  mode: ForwarderAdapterMode;
+  productionStatus: ForwarderAdapterProductionStatus;
+  supportsInboundWebhook: boolean;
+  supportsOutboundActions: boolean;
+  supportedWebhookEvents: string[];
+  notes: string[];
+}
+
 export interface IngestExternalOrderCommand {
   platformCode: PlatformCode;
   externalOrderId: string;
@@ -3431,8 +3507,17 @@ export interface ForwardedDriverActionResponse {
 export interface AdapterHealthRecord {
   platformCode: PlatformCode;
   status: AdapterHealthStatus;
+  reason: AdapterHealthReason;
+  capabilitySummary: ForwarderAdapterCapabilitySummary;
+  credentialStatus: AdapterCredentialStatus;
+  authStatus: AdapterAuthStatus;
+  webhookStatus: AdapterWebhookStatus;
+  rateLimitStatus: AdapterRateLimitStatus;
   lastCheckedAt: string;
   lastError: string | null;
+  lastWebhookReceivedAt: string | null;
+  lastRateLimitAt: string | null;
+  lastAuthFailureAt: string | null;
 }
 
 export interface ReconciliationJobRecord {

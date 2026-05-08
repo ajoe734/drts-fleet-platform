@@ -42,6 +42,7 @@ import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import {
   FORWARDER_ADAPTERS,
+  type ForwarderAdapterHealthSnapshot,
   type ForwarderAdapterInterface,
 } from "./forwarder-adapter.interface";
 import {
@@ -105,7 +106,7 @@ export class ForwarderService implements OnModuleInit {
 
   async onModuleInit() {
     if (!this.forwarderRepository) {
-      this.seedRegisteredAdapters();
+      await this.seedRegisteredAdapters();
       return;
     }
 
@@ -120,14 +121,14 @@ export class ForwarderService implements OnModuleInit {
           order.platformCode,
         );
       }
-      this.adapterHealth = persistedState.adapterHealth.map((adapter) => ({
-        ...adapter,
-      }));
+      this.adapterHealth = persistedState.adapterHealth.map((adapter) =>
+        this.normalizeAdapterHealthRecord(adapter),
+      );
     } catch (error) {
       this.forwarderRepository.reportPersistenceFailure(error, "module init");
     }
 
-    this.seedRegisteredAdapters();
+    await this.seedRegisteredAdapters();
   }
 
   ingestExternalOrder(command: IngestExternalOrderCommand, requestId?: string) {
@@ -185,8 +186,7 @@ export class ForwarderService implements OnModuleInit {
     );
     const adapterHealth = this.updateAdapterHealth(
       command.platformCode,
-      "healthy",
-      null,
+      this.buildHealthyAdapterHealthPatch(command.platformCode),
     );
     this.persistChanges(
       {
@@ -216,15 +216,16 @@ export class ForwarderService implements OnModuleInit {
     return this.cloneOrder(forwardedOrder);
   }
 
-  ingestGrabTaiwanWebhook(
+  async ingestGrabTaiwanWebhook(
     payload: Record<string, unknown>,
+    headers: Record<string, string | string[] | undefined> = {},
     requestId?: string,
   ) {
     this.logger.log("Received stub Grab Taiwan webhook payload.");
 
     const adapter = this.findAdapter(GRAB_TAIWAN_PLATFORM_CODE);
     if (adapter) {
-      this.updateAdapterHealth(adapter.platformCode, "healthy", null);
+      await this.verifyIncomingWebhook(adapter, payload, headers);
     }
 
     return this.ingestExternalOrder(
@@ -477,8 +478,7 @@ export class ForwarderService implements OnModuleInit {
     forwardedOrder.updatedAt = new Date().toISOString();
     const adapterHealth = this.updateAdapterHealth(
       forwardedOrder.platformCode,
-      "healthy",
-      null,
+      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
     );
     this.persistChanges(
       {
@@ -621,8 +621,11 @@ export class ForwarderService implements OnModuleInit {
     forwardedOrder.updatedAt = new Date().toISOString();
     const adapterHealth = this.updateAdapterHealth(
       forwardedOrder.platformCode,
-      "healthy",
-      null,
+      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode, {
+        credentialStatus: "valid",
+        authStatus: "authenticated",
+        rateLimitStatus: "ok",
+      }),
     );
     this.persistChanges(
       {
@@ -763,8 +766,7 @@ export class ForwarderService implements OnModuleInit {
     }
     const adapterHealth = this.updateAdapterHealth(
       forwardedOrder.platformCode,
-      "healthy",
-      null,
+      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
     );
     this.persistChanges(
       {
@@ -841,8 +843,7 @@ export class ForwarderService implements OnModuleInit {
     forwardedOrder.updatedAt = completedAt;
     const adapterHealth = this.updateAdapterHealth(
       forwardedOrder.platformCode,
-      "healthy",
-      null,
+      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
     );
     this.persistChanges(
       {
@@ -922,7 +923,9 @@ export class ForwarderService implements OnModuleInit {
   }
 
   listAdapterHealth() {
-    return this.adapterHealth.map((adapter) => ({ ...adapter }));
+    return this.adapterHealth.map((adapter) =>
+      this.cloneAdapterHealth(adapter),
+    );
   }
 
   hasAdapter(platformCode: PlatformCode) {
@@ -993,17 +996,26 @@ export class ForwarderService implements OnModuleInit {
       : "standard_taxi";
   }
 
-  private seedRegisteredAdapters() {
-    const seededHealth = this.adapters
-      .filter(
-        (adapter) =>
-          !this.adapterHealth.some(
-            (record) => record.platformCode === adapter.platformCode,
-          ),
-      )
-      .map((adapter) =>
-        this.updateAdapterHealth(adapter.platformCode, "healthy", null),
+  private async seedRegisteredAdapters() {
+    const seededHealth: AdapterHealthRecord[] = [];
+
+    for (const adapter of this.adapters) {
+      if (
+        this.adapterHealth.some(
+          (record) => record.platformCode === adapter.platformCode,
+        )
+      ) {
+        continue;
+      }
+
+      const snapshot = await this.safeGetHealthSnapshot(adapter);
+      seededHealth.push(
+        this.updateAdapterHealth(adapter.platformCode, {
+          ...this.buildAdapterHealthBaseline(adapter.platformCode, adapter),
+          ...this.buildHealthSnapshotPatch(snapshot),
+        }),
       );
+    }
 
     if (seededHealth.length > 0) {
       this.persistChanges(
@@ -1099,8 +1111,11 @@ export class ForwarderService implements OnModuleInit {
     forwardedOrder.updatedAt = failedAt;
     const adapterHealth = this.updateAdapterHealth(
       forwardedOrder.platformCode,
-      command.retryable ? "degraded" : "down",
-      `${command.errorCode}: ${command.errorMessage}`,
+      this.buildFailureAdapterHealthPatch(
+        forwardedOrder.platformCode,
+        command,
+        failedAt,
+      ),
     );
     this.persistChanges(
       {
@@ -1132,28 +1147,396 @@ export class ForwarderService implements OnModuleInit {
 
   private updateAdapterHealth(
     platformCode: PlatformCode,
-    status: AdapterHealthRecord["status"],
-    lastError: string | null,
+    patch: Partial<AdapterHealthRecord> = {},
   ) {
+    const adapter = this.findAdapter(platformCode);
     const existing = this.adapterHealth.find(
       (adapter) => adapter.platformCode === platformCode,
     );
+    const baseline = existing
+      ? this.normalizeAdapterHealthRecord(existing)
+      : this.buildAdapterHealthBaseline(platformCode, adapter);
     const next: AdapterHealthRecord = {
+      ...baseline,
+      ...patch,
       platformCode,
-      status,
-      lastCheckedAt: new Date().toISOString(),
-      lastError,
+      capabilitySummary: this.cloneCapabilitySummary(
+        patch.capabilitySummary ?? baseline.capabilitySummary,
+      ),
+      lastCheckedAt: patch.lastCheckedAt ?? new Date().toISOString(),
     };
 
     if (!existing) {
       this.adapterHealth = [next, ...this.adapterHealth];
-      return next;
+      return this.cloneAdapterHealth(next);
     }
 
-    existing.status = next.status;
-    existing.lastCheckedAt = next.lastCheckedAt;
-    existing.lastError = next.lastError;
-    return { ...existing };
+    Object.assign(existing, next);
+    return this.cloneAdapterHealth(existing);
+  }
+
+  private buildAdapterHealthBaseline(
+    platformCode: PlatformCode,
+    adapter?: ForwarderAdapterInterface,
+  ): AdapterHealthRecord {
+    const capabilitySummary = this.cloneCapabilitySummary(
+      adapter?.capabilitySummary ??
+        this.buildFallbackCapabilitySummary(platformCode),
+    );
+    const isStub = capabilitySummary.productionStatus === "stub";
+    const configurationRequired =
+      capabilitySummary.productionStatus === "configuration_required";
+    const now = new Date().toISOString();
+
+    return {
+      platformCode,
+      status: isStub
+        ? "healthy"
+        : configurationRequired
+          ? "degraded"
+          : "healthy",
+      reason: isStub ? "stub" : configurationRequired ? "credential" : "none",
+      capabilitySummary,
+      credentialStatus: isStub
+        ? "stub"
+        : configurationRequired
+          ? "not_configured"
+          : "unknown",
+      authStatus: isStub ? "stub" : "unknown",
+      webhookStatus: isStub
+        ? "stub"
+        : capabilitySummary.supportsInboundWebhook
+          ? "not_configured"
+          : "not_applicable",
+      rateLimitStatus: isStub ? "stub" : "unknown",
+      lastCheckedAt: now,
+      lastError: null,
+      lastWebhookReceivedAt: null,
+      lastRateLimitAt: null,
+      lastAuthFailureAt: null,
+    };
+  }
+
+  private buildFallbackCapabilitySummary(platformCode: PlatformCode) {
+    const registryEntry = PLATFORM_CODE_REGISTRY[platformCode];
+    if (registryEntry?.status === "forwarder_stub") {
+      return {
+        mode: "stub" as const,
+        productionStatus: "stub" as const,
+        supportsInboundWebhook: true,
+        supportsOutboundActions: true,
+        supportedWebhookEvents: [],
+        notes: [
+          `${registryEntry.displayName} is currently a stub-only forwarder adapter.`,
+        ],
+      };
+    }
+
+    return {
+      mode: "api" as const,
+      productionStatus: "configuration_required" as const,
+      supportsInboundWebhook: false,
+      supportsOutboundActions: false,
+      supportedWebhookEvents: [],
+      notes: [
+        registryEntry
+          ? `No runtime forwarder adapter is registered for ${registryEntry.displayName}.`
+          : "No runtime forwarder adapter is registered for this platform.",
+      ],
+    };
+  }
+
+  private cloneCapabilitySummary(
+    capabilitySummary: AdapterHealthRecord["capabilitySummary"],
+  ) {
+    return {
+      ...capabilitySummary,
+      supportedWebhookEvents: [...capabilitySummary.supportedWebhookEvents],
+      notes: [...capabilitySummary.notes],
+    };
+  }
+
+  private cloneAdapterHealth(
+    adapter: AdapterHealthRecord,
+  ): AdapterHealthRecord {
+    return {
+      ...adapter,
+      capabilitySummary: this.cloneCapabilitySummary(adapter.capabilitySummary),
+    };
+  }
+
+  private normalizeAdapterHealthRecord(record: Partial<AdapterHealthRecord>) {
+    const baseline = this.buildAdapterHealthBaseline(
+      record.platformCode as PlatformCode,
+      this.findAdapter(record.platformCode as PlatformCode),
+    );
+
+    return {
+      ...baseline,
+      ...record,
+      platformCode: record.platformCode ?? baseline.platformCode,
+      capabilitySummary: this.cloneCapabilitySummary(
+        record.capabilitySummary ?? baseline.capabilitySummary,
+      ),
+      lastWebhookReceivedAt: record.lastWebhookReceivedAt ?? null,
+      lastRateLimitAt: record.lastRateLimitAt ?? null,
+      lastAuthFailureAt: record.lastAuthFailureAt ?? null,
+    };
+  }
+
+  private async safeGetHealthSnapshot(adapter: ForwarderAdapterInterface) {
+    if (!adapter.getHealthSnapshot) {
+      return null;
+    }
+
+    try {
+      return await adapter.getHealthSnapshot();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        status: "degraded",
+        reason: "platform",
+        credentialStatus: "unknown",
+        authStatus: "unknown",
+        webhookStatus: adapter.capabilitySummary.supportsInboundWebhook
+          ? "unknown"
+          : "not_applicable",
+        rateLimitStatus: "unknown",
+        message: `health snapshot failed: ${detail}`,
+      } satisfies ForwarderAdapterHealthSnapshot;
+    }
+  }
+
+  private buildHealthSnapshotPatch(
+    snapshot: ForwarderAdapterHealthSnapshot | null,
+  ): Partial<AdapterHealthRecord> {
+    if (!snapshot) {
+      return {};
+    }
+
+    return {
+      status: snapshot.status,
+      reason: snapshot.reason,
+      credentialStatus: snapshot.credentialStatus,
+      authStatus: snapshot.authStatus,
+      webhookStatus: snapshot.webhookStatus,
+      rateLimitStatus: snapshot.rateLimitStatus,
+      lastCheckedAt: snapshot.checkedAt ?? new Date().toISOString(),
+      lastError: snapshot.message ?? null,
+    };
+  }
+
+  private buildHealthyAdapterHealthPatch(
+    platformCode: PlatformCode,
+    patch: Partial<AdapterHealthRecord> = {},
+  ): Partial<AdapterHealthRecord> {
+    const baseline = this.buildAdapterHealthBaseline(
+      platformCode,
+      this.findAdapter(platformCode),
+    );
+
+    return {
+      status: "healthy",
+      reason: baseline.reason,
+      lastCheckedAt: new Date().toISOString(),
+      lastError: null,
+      ...patch,
+    };
+  }
+
+  private buildFailureAdapterHealthPatch(
+    platformCode: PlatformCode,
+    command: ReportForwarderSyncFailureCommand,
+    failedAt: string,
+  ): Partial<AdapterHealthRecord> {
+    const baseline = this.buildAdapterHealthBaseline(
+      platformCode,
+      this.findAdapter(platformCode),
+    );
+    const signals =
+      `${command.errorCode} ${command.errorMessage} ${command.nativeStatus ?? ""}`.toLowerCase();
+    const patch: Partial<AdapterHealthRecord> = {
+      status: command.retryable ? "degraded" : "down",
+      reason: "platform",
+      credentialStatus: baseline.credentialStatus,
+      authStatus: baseline.authStatus,
+      webhookStatus: baseline.webhookStatus,
+      rateLimitStatus: baseline.rateLimitStatus,
+      lastCheckedAt: failedAt,
+      lastError: `${command.errorCode}: ${command.errorMessage}`,
+    };
+
+    if (signals.includes("429") || signals.includes("rate limit")) {
+      patch.reason = "rate_limit";
+      if (baseline.rateLimitStatus !== "stub") {
+        patch.rateLimitStatus = "limited";
+        patch.lastRateLimitAt = failedAt;
+      }
+      return patch;
+    }
+
+    if (signals.includes("webhook") || signals.includes("signature")) {
+      patch.reason = "webhook";
+      if (baseline.webhookStatus !== "stub") {
+        patch.webhookStatus = "failing";
+      }
+      return patch;
+    }
+
+    if (signals.includes("credential") || signals.includes("secret")) {
+      patch.reason = "credential";
+      if (baseline.credentialStatus !== "stub") {
+        patch.credentialStatus = signals.includes("expired")
+          ? "expired"
+          : "invalid";
+      }
+      if (baseline.authStatus !== "stub") {
+        patch.authStatus = "invalid";
+        patch.lastAuthFailureAt = failedAt;
+      }
+      return patch;
+    }
+
+    if (
+      signals.includes("reauth") ||
+      signals.includes("token expired") ||
+      signals.includes("unauthor") ||
+      signals.includes("forbidden") ||
+      signals.includes("401") ||
+      signals.includes("403")
+    ) {
+      patch.reason = "auth";
+      if (baseline.authStatus !== "stub") {
+        patch.authStatus =
+          signals.includes("reauth") || signals.includes("expired")
+            ? "reauth_required"
+            : "invalid";
+        patch.lastAuthFailureAt = failedAt;
+      }
+      if (signals.includes("expired") && baseline.credentialStatus !== "stub") {
+        patch.credentialStatus = "expired";
+      }
+    }
+
+    return patch;
+  }
+
+  private async verifyIncomingWebhook(
+    adapter: ForwarderAdapterInterface,
+    payload: Record<string, unknown>,
+    headers: Record<string, string | string[] | undefined>,
+  ) {
+    const verifiedAt = new Date().toISOString();
+
+    if (!adapter.verifyWebhook) {
+      const adapterHealth = this.updateAdapterHealth(
+        adapter.platformCode,
+        this.buildHealthyAdapterHealthPatch(adapter.platformCode, {
+          webhookStatus: adapter.capabilitySummary.supportsInboundWebhook
+            ? "healthy"
+            : "not_applicable",
+          lastWebhookReceivedAt: verifiedAt,
+        }),
+      );
+      this.persistChanges(
+        {
+          adapterHealth: [adapterHealth],
+        },
+        "verify_forwarder_webhook",
+      );
+      return;
+    }
+
+    try {
+      const verification = await adapter.verifyWebhook({
+        headers,
+        payload,
+      });
+      if (!verification.accepted) {
+        const adapterHealth = this.updateAdapterHealth(adapter.platformCode, {
+          status: "degraded",
+          reason: "webhook",
+          credentialStatus:
+            verification.credentialStatus ??
+            this.buildAdapterHealthBaseline(adapter.platformCode, adapter)
+              .credentialStatus,
+          authStatus:
+            verification.authStatus ??
+            this.buildAdapterHealthBaseline(adapter.platformCode, adapter)
+              .authStatus,
+          webhookStatus: verification.webhookStatus ?? "failing",
+          lastCheckedAt: verifiedAt,
+          lastError:
+            verification.detail ?? "Webhook signature verification failed.",
+        });
+        this.persistChanges(
+          {
+            adapterHealth: [adapterHealth],
+          },
+          "verify_forwarder_webhook",
+        );
+        throw new ApiRequestError(
+          HttpStatus.UNAUTHORIZED,
+          "FORWARDER_WEBHOOK_VERIFICATION_FAILED",
+          "Forwarder webhook verification failed.",
+          {
+            platformCode: adapter.platformCode,
+          },
+        );
+      }
+
+      const verifiedHealthPatch: Partial<AdapterHealthRecord> = {
+        webhookStatus: verification.webhookStatus ?? "healthy",
+        lastWebhookReceivedAt: verifiedAt,
+      };
+      if (verification.credentialStatus) {
+        verifiedHealthPatch.credentialStatus = verification.credentialStatus;
+      }
+      if (verification.authStatus) {
+        verifiedHealthPatch.authStatus = verification.authStatus;
+      }
+
+      const adapterHealth = this.updateAdapterHealth(
+        adapter.platformCode,
+        this.buildHealthyAdapterHealthPatch(
+          adapter.platformCode,
+          verifiedHealthPatch,
+        ),
+      );
+      this.persistChanges(
+        {
+          adapterHealth: [adapterHealth],
+        },
+        "verify_forwarder_webhook",
+      );
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        throw error;
+      }
+
+      const detail = error instanceof Error ? error.message : String(error);
+      const adapterHealth = this.updateAdapterHealth(adapter.platformCode, {
+        status: "degraded",
+        reason: "webhook",
+        webhookStatus: "failing",
+        lastCheckedAt: verifiedAt,
+        lastError: detail,
+      });
+      this.persistChanges(
+        {
+          adapterHealth: [adapterHealth],
+        },
+        "verify_forwarder_webhook",
+      );
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "FORWARDER_WEBHOOK_VERIFICATION_FAILED",
+        "Forwarder webhook verification failed.",
+        {
+          platformCode: adapter.platformCode,
+        },
+      );
+    }
   }
 
   private requireOrder(orderId: string) {
