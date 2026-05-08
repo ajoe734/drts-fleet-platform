@@ -13,6 +13,10 @@
 `apps/tenant-portal-web` is **not** the production tenant portal and must not be treated as a
 production target in any active rollout, master plan, or topology record.
 
+This rule remains active after `TEN-UI-001` on 2026-05-08: any future in-repo
+tenant-console productization must land in planned `apps/tenant-console-web`,
+not by reactivating this sunset shell.
+
 This decision was fixed in the full-blueprint consensus packet
 (`docs/02-architecture/consensus/phase2-full-blueprint-planning-20260415/consensus-packet.md`
 §3.2 Tenant Portal Topology).
@@ -28,6 +32,19 @@ This decision was fixed in the full-blueprint consensus packet
 | BFF parity completed          | FBP-005 (commit `78cb874`)                                                                                                                                                                       |
 | Commute-hub cutover completed | FBP-006 (commit `ddfc087`)                                                                                                                                                                       |
 | Internal scaffold role        | `apps/tenant-portal-web` served as the Wave D implementation reference while the contracts, BFF endpoints, and UI patterns were being established. It is not the external-facing tenant product. |
+
+## Post-Sunset Productization Rule
+
+`TEN-UI-001` filed the follow-on topology decision on 2026-05-08:
+
+- keep `apps/tenant-portal-web` sunset and frozen
+- keep external `tenant-commute-hub` as the current production tenant UI
+- use planned `apps/tenant-console-web` as the only allowed in-repo landing
+  zone for new tenant-console product work
+
+This means the sunset record is not being rolled back. The repo may gain a new
+tenant-console target later, but `apps/tenant-portal-web` stays outside the
+active tenant-product topology.
 
 ---
 
@@ -64,6 +81,26 @@ drts-fleet-platform backend domains
 
 `apps/tenant-portal-web` is **outside** this topology. It is a frozen reference shell only.
 
+## Topology After TEN-UI-001
+
+```
+Tenant user
+    │
+    ├── current production UI: tenant-commute-hub  (external repo)
+    │
+    └── planned in-repo target: apps/tenant-console-web
+             │  pure UI consumer, no backend authority
+             ▼
+drts-fleet-platform  /api/tenant/*  (BFF + authority)
+    │
+    ▼
+drts-fleet-platform backend domains
+(tenant-partner, billing-settlement, audit-notification, reporting-filing, …)
+```
+
+`apps/tenant-portal-web` remains outside this post-decision topology as a
+frozen reference shell only.
+
 ---
 
 ## References
@@ -71,5 +108,6 @@ drts-fleet-platform backend domains
 - Consensus packet: `docs/02-architecture/consensus/phase2-full-blueprint-planning-20260415/consensus-packet.md` §3.2
 - BFF parity matrix: `docs/02-architecture/authority/fbp-005-tenant-bff-parity-matrix.md`
 - Commute-hub cutover spec: `docs/02-architecture/authority/fbp-006-tenant-commute-hub-cutover-spec.md`
+- Tenant-console topology decision: `docs/01-decisions/SD-DP-20260508-004-tenant-console-productization-topology.md`
 - Authority map: `docs/02-architecture/authority/rgp-002-authority-map.md`
 - Tenant boundary contract: `docs/02-architecture/tenant-commute-hub-boundary.md`
