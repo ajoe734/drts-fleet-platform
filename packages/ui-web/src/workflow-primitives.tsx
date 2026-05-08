@@ -236,47 +236,60 @@ export interface WorkflowSplitLayoutProps {
   main: ReactNode;
   side: ReactNode;
   density?: ManagementDensity;
+  mainMinWidth?: string;
   sideMinWidth?: string;
   sideMaxWidth?: string;
   ariaLabel?: string;
   style?: CSSProperties;
 }
 
+const GRID_FRACTION_PATTERN = /^\s*\d+(?:\.\d+)?fr\s*$/i;
+
 export function WorkflowSplitLayout({
   main,
   side,
   density = "comfortable",
+  mainMinWidth = "360px",
   sideMinWidth = "320px",
-  sideMaxWidth = "1fr",
+  sideMaxWidth,
   ariaLabel,
   style,
 }: WorkflowSplitLayoutProps) {
+  const innerGap = stackGap(density, "12px", "14px");
+  const sideMaxWidthValue =
+    sideMaxWidth && !GRID_FRACTION_PATTERN.test(sideMaxWidth)
+      ? sideMaxWidth
+      : undefined;
+
   return (
     <div
       role="group"
       aria-label={ariaLabel}
       style={{
-        display: "grid",
-        gridTemplateColumns: `minmax(0, 2fr) minmax(${sideMinWidth}, ${sideMaxWidth})`,
+        display: "flex",
+        flexWrap: "wrap",
         gap: stackGap(density, "14px", "16px"),
-        alignItems: "start",
+        alignItems: "flex-start",
         ...style,
       }}
     >
       <div
         style={{
+          flex: "2 1 0%",
+          minWidth: `min(100%, ${mainMinWidth})`,
           display: "grid",
-          gap: stackGap(density, "12px", "14px"),
-          minWidth: 0,
+          gap: innerGap,
         }}
       >
         {main}
       </div>
       <div
         style={{
+          flex: "1 1 0%",
+          minWidth: `min(100%, ${sideMinWidth})`,
+          ...(sideMaxWidthValue ? { maxWidth: sideMaxWidthValue } : {}),
           display: "grid",
-          gap: stackGap(density, "12px", "14px"),
-          minWidth: 0,
+          gap: innerGap,
         }}
       >
         {side}
