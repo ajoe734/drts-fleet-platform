@@ -8,6 +8,8 @@ import type { ManagementDensity, ManagementTone } from "./management-theme";
 
 export type StepState = "complete" | "current" | "upcoming" | "blocked";
 
+export type ManagementVariant = "card" | "embed";
+
 const TONE_STYLES = MANAGEMENT_SURFACE_TONES;
 
 const STEP_ACCENT: Record<StepState, string> = {
@@ -16,6 +18,8 @@ const STEP_ACCENT: Record<StepState, string> = {
   upcoming: "#94a3b8",
   blocked: "#b91c1c",
 };
+
+const RAIL_IDLE = "#dbe2ea";
 
 function toneForStepState(state: StepState): ManagementTone {
   switch (state) {
@@ -509,6 +513,7 @@ export interface WorkflowPanelProps {
   description?: ReactNode;
   tone?: ManagementTone;
   density?: ManagementDensity;
+  variant?: ManagementVariant;
   meta?: ReactNode;
   actions?: ReactNode;
   footer?: ReactNode;
@@ -521,18 +526,32 @@ export function WorkflowPanel({
   description,
   tone = "neutral",
   density = "comfortable",
+  variant = "card",
   meta,
   actions,
   footer,
   children,
 }: WorkflowPanelProps) {
   const toneStyles = TONE_STYLES[tone];
+  const isEmbed = variant === "embed";
+  const surfaceStyle = isEmbed
+    ? {
+        background: "transparent",
+        border: 0,
+        borderRadius: 0,
+        boxShadow: "none",
+      }
+    : managementSurfaceStyle(tone);
 
   return (
     <section
       style={{
-        ...managementSurfaceStyle(tone),
-        padding: density === "compact" ? "14px 16px" : "18px 20px",
+        ...surfaceStyle,
+        padding: isEmbed
+          ? 0
+          : density === "compact"
+            ? "14px 16px"
+            : "18px 20px",
         display: "grid",
         gap: stackGap(density, "14px", "16px"),
       }}
@@ -639,6 +658,7 @@ export interface WorkflowCalloutProps {
   description?: ReactNode;
   tone?: ManagementTone;
   density?: ManagementDensity;
+  variant?: ManagementVariant;
   icon?: ReactNode;
   meta?: ReactNode;
   actions?: ReactNode;
@@ -652,6 +672,7 @@ export function WorkflowCallout({
   description,
   tone = "info",
   density = "comfortable",
+  variant = "card",
   icon,
   meta,
   actions,
@@ -659,16 +680,21 @@ export function WorkflowCallout({
   footer,
 }: WorkflowCalloutProps) {
   const toneStyles = TONE_STYLES[tone];
+  const isEmbed = variant === "embed";
 
   return (
     <div
       style={{
         display: "grid",
         gap: stackGap(density, "12px", "14px"),
-        padding: density === "compact" ? "12px 14px" : "16px 18px",
-        borderRadius: "16px",
-        border: `1px solid ${toneStyles.border}`,
-        background: toneStyles.background,
+        padding: isEmbed
+          ? 0
+          : density === "compact"
+            ? "12px 14px"
+            : "16px 18px",
+        borderRadius: isEmbed ? 0 : "16px",
+        border: isEmbed ? 0 : `1px solid ${toneStyles.border}`,
+        background: isEmbed ? "transparent" : toneStyles.background,
       }}
     >
       <div
@@ -787,6 +813,7 @@ export function CalloutBanner({
   description,
   tone = "info",
   density = "comfortable",
+  variant = "card",
   icon,
   meta,
   actions,
@@ -797,6 +824,7 @@ export function CalloutBanner({
     title,
     tone,
     density,
+    variant,
     ...(eyebrow !== undefined ? { eyebrow } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(icon !== undefined ? { icon } : {}),
@@ -885,44 +913,180 @@ export interface StepperItem {
   indicator?: ReactNode;
 }
 
+export type StepperOrientation = "vertical" | "horizontal";
+
 export interface StepperProps {
   items: StepperItem[];
   density?: ManagementDensity;
   emptyState?: ReactNode;
+  orientation?: StepperOrientation;
 }
 
 export function Stepper({
   items,
   density = "comfortable",
   emptyState,
+  orientation = "vertical",
 }: StepperProps) {
   if (items.length === 0) {
     return emptyState ? renderEmptyState(emptyState, density) : null;
   }
 
+  const isHorizontal = orientation === "horizontal";
+
   return (
     <ol
-      style={{
-        listStyle: "none",
-        display: "grid",
-        gap: stackGap(density, "10px", "12px"),
-        margin: 0,
-        padding: 0,
-      }}
+      data-orientation={orientation}
+      style={
+        isHorizontal
+          ? {
+              listStyle: "none",
+              display: "grid",
+              gridAutoFlow: "column",
+              gridAutoColumns: "minmax(0, 1fr)",
+              gap: stackGap(density, "8px", "12px"),
+              margin: 0,
+              padding: 0,
+              alignItems: "start",
+            }
+          : {
+              listStyle: "none",
+              display: "grid",
+              gap: stackGap(density, "10px", "12px"),
+              margin: 0,
+              padding: 0,
+            }
+      }
     >
       {items.map((item, index) => {
         const tone = item.tone ?? toneForStepState(item.state);
         const accent = item.tone
           ? TONE_STYLES[item.tone].text
           : STEP_ACCENT[item.state];
+        const isComplete = item.state === "complete";
+        const isCurrent = item.state === "current";
+        const railColor = isComplete ? STEP_ACCENT.complete : RAIL_IDLE;
+        const isLast = index === items.length - 1;
+        const indicatorSize = density === "compact" ? "24px" : "28px";
+        if (isHorizontal) {
+          return (
+            <li
+              key={item.id}
+              aria-current={isCurrent ? "step" : undefined}
+              style={{
+                display: "grid",
+                gridTemplateRows: "auto minmax(0, 1fr)",
+                gap: stackGap(density, "8px", "10px"),
+                minWidth: 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: `${indicatorSize} minmax(0, 1fr)`,
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <span
+                  style={{
+                    width: indicatorSize,
+                    height: indicatorSize,
+                    borderRadius: "999px",
+                    border: `2px solid ${accent}`,
+                    background: isComplete || isCurrent ? accent : "#ffffff",
+                    color: isComplete || isCurrent ? "#ffffff" : accent,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: density === "compact" ? "11px" : "12px",
+                    fontWeight: 700,
+                    boxShadow: isCurrent
+                      ? `0 0 0 4px ${TONE_STYLES[tone].background}`
+                      : undefined,
+                  }}
+                >
+                  {item.indicator ?? index + 1}
+                </span>
+                {!isLast ? (
+                  <span
+                    aria-hidden
+                    style={{
+                      height: "2px",
+                      width: "100%",
+                      background: railColor,
+                    }}
+                  />
+                ) : null}
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gap: "4px",
+                  minWidth: 0,
+                }}
+              >
+                {item.eyebrow ? (
+                  <span
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      color: TONE_STYLES[tone].subtle,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                    }}
+                  >
+                    {item.eyebrow}
+                  </span>
+                ) : null}
+                <strong
+                  style={{
+                    color: "#0f172a",
+                    fontSize: density === "compact" ? "13px" : "13.5px",
+                  }}
+                >
+                  {item.title}
+                </strong>
+                {item.description ? (
+                  <span
+                    style={{
+                      color: "#64748b",
+                      fontSize: density === "compact" ? "12px" : "12.5px",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {item.description}
+                  </span>
+                ) : null}
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <StatusChip
+                    label={item.stateLabel ?? item.state}
+                    tone={tone}
+                  />
+                  {item.timestamp ? (
+                    <span style={{ color: "#64748b", fontSize: "12px" }}>
+                      {item.timestamp}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            </li>
+          );
+        }
         return (
           <li
             key={item.id}
+            aria-current={isCurrent ? "step" : undefined}
             style={{
               display: "grid",
-              gridTemplateColumns: `${
-                density === "compact" ? "24px" : "28px"
-              } minmax(0, 1fr)`,
+              gridTemplateColumns: `${indicatorSize} minmax(0, 1fr)`,
               gap: stackGap(density, "10px", "12px"),
               alignItems: "start",
             }}
@@ -936,34 +1100,31 @@ export function Stepper({
             >
               <span
                 style={{
-                  width: density === "compact" ? "24px" : "28px",
-                  height: density === "compact" ? "24px" : "28px",
+                  width: indicatorSize,
+                  height: indicatorSize,
                   borderRadius: "999px",
                   border: `2px solid ${accent}`,
-                  background:
-                    item.state === "complete" || item.state === "current"
-                      ? accent
-                      : "#ffffff",
-                  color:
-                    item.state === "complete" || item.state === "current"
-                      ? "#ffffff"
-                      : accent,
+                  background: isComplete || isCurrent ? accent : "#ffffff",
+                  color: isComplete || isCurrent ? "#ffffff" : accent,
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
                   fontSize: density === "compact" ? "11px" : "12px",
                   fontWeight: 700,
+                  boxShadow: isCurrent
+                    ? `0 0 0 4px ${TONE_STYLES[tone].background}`
+                    : undefined,
                 }}
               >
                 {item.indicator ?? index + 1}
               </span>
-              {index < items.length - 1 ? (
+              {!isLast ? (
                 <span
                   aria-hidden
                   style={{
                     width: "2px",
                     minHeight: density === "compact" ? "32px" : "40px",
-                    background: "#dbe2ea",
+                    background: railColor,
                   }}
                 />
               ) : null}
@@ -1119,7 +1280,14 @@ export function Timeline({
       }}
     >
       {items.map((item, index) => {
-        const toneStyles = TONE_STYLES[item.tone ?? "neutral"];
+        const itemTone = item.tone ?? "neutral";
+        const toneStyles = TONE_STYLES[itemTone];
+        const markerContent = item.marker ?? (
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            {index + 1}
+          </span>
+        );
+        const railColor = item.tone ? toneStyles.text : RAIL_IDLE;
         return (
           <li
             key={item.id}
@@ -1156,7 +1324,7 @@ export function Timeline({
                   fontWeight: 700,
                 }}
               >
-                {item.marker}
+                {markerContent}
               </span>
               {index < items.length - 1 ? (
                 <span
@@ -1164,7 +1332,7 @@ export function Timeline({
                   style={{
                     width: "2px",
                     minHeight: density === "compact" ? "34px" : "42px",
-                    background: "#dbe2ea",
+                    background: railColor,
                   }}
                 />
               ) : null}
@@ -1283,6 +1451,8 @@ export interface DetailListItem {
   hint?: ReactNode;
   tone?: ManagementTone;
   columnSpan?: number;
+  actions?: ReactNode;
+  align?: "start" | "end";
 }
 
 export interface DetailMetadataGridProps {
@@ -1317,60 +1487,89 @@ export function DetailMetadataGrid({
         gap: dense ? "12px 16px" : "16px 20px",
       }}
     >
-      {items.map((item) => (
-        <div
-          key={item.id}
-          style={{
-            minWidth: 0,
-            gridColumn: `span ${Math.min(
-              Math.max(item.columnSpan ?? 1, 1),
-              columns,
-            )}`,
-            ...(item.tone && item.tone !== "neutral"
-              ? {
-                  padding: dense ? "10px 12px" : "12px 14px",
-                  borderRadius: "14px",
-                  border: `1px solid ${TONE_STYLES[item.tone].border}`,
-                  background: TONE_STYLES[item.tone].background,
-                }
-              : {}),
-          }}
-        >
-          <dt
+      {items.map((item) => {
+        const isEndAligned = item.align === "end";
+        return (
+          <div
+            key={item.id}
             style={{
-              fontSize: "11px",
-              fontWeight: 700,
-              color: item.tone ? TONE_STYLES[item.tone].subtle : "#64748b",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              marginBottom: dense ? "4px" : "6px",
+              minWidth: 0,
+              gridColumn: `span ${Math.min(
+                Math.max(item.columnSpan ?? 1, 1),
+                columns,
+              )}`,
+              ...(item.tone && item.tone !== "neutral"
+                ? {
+                    padding: dense ? "10px 12px" : "12px 14px",
+                    borderRadius: "14px",
+                    border: `1px solid ${TONE_STYLES[item.tone].border}`,
+                    background: TONE_STYLES[item.tone].background,
+                  }
+                : {}),
             }}
           >
-            {item.label}
-          </dt>
-          <dd
-            style={{
-              margin: 0,
-              color: item.tone ? TONE_STYLES[item.tone].text : "#0f172a",
-              fontSize: "14px",
-            }}
-          >
-            {item.value}
-          </dd>
-          {item.hint ? (
-            <p
+            <div
               style={{
-                margin: "4px 0 0",
-                color: item.tone ? TONE_STYLES[item.tone].subtle : "#64748b",
-                fontSize: "12px",
-                lineHeight: 1.5,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                gap: "8px",
+                marginBottom: dense ? "4px" : "6px",
               }}
             >
-              {item.hint}
-            </p>
-          ) : null}
-        </div>
-      ))}
+              <dt
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  color: item.tone ? TONE_STYLES[item.tone].subtle : "#64748b",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  minWidth: 0,
+                }}
+              >
+                {item.label}
+              </dt>
+              {item.actions ? (
+                <div
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    flexShrink: 0,
+                  }}
+                >
+                  {item.actions}
+                </div>
+              ) : null}
+            </div>
+            <dd
+              style={{
+                margin: 0,
+                color: item.tone ? TONE_STYLES[item.tone].text : "#0f172a",
+                fontSize: "14px",
+                textAlign: isEndAligned ? "end" : "start",
+                fontVariantNumeric: isEndAligned ? "tabular-nums" : undefined,
+                wordBreak: "break-word",
+              }}
+            >
+              {item.value}
+            </dd>
+            {item.hint ? (
+              <p
+                style={{
+                  margin: "4px 0 0",
+                  color: item.tone ? TONE_STYLES[item.tone].subtle : "#64748b",
+                  fontSize: "12px",
+                  lineHeight: 1.5,
+                  textAlign: isEndAligned ? "end" : "start",
+                }}
+              >
+                {item.hint}
+              </p>
+            ) : null}
+          </div>
+        );
+      })}
     </dl>
   );
 }
