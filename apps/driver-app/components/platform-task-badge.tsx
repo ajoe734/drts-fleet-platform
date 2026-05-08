@@ -18,8 +18,20 @@ function humanizePlatformCode(platformCode: string) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function isOwnedPlatform(code: string) {
+export function normalizePlatformCode(platformCode: string | null | undefined) {
+  const normalizedCode = platformCode?.trim().toLowerCase() ?? "owned";
+  return normalizedCode.length > 0 ? normalizedCode : "owned";
+}
+
+export function isOwnedPlatformCode(code: string) {
   return code === "owned" || code === "direct";
+}
+
+export function getPlatformDisplayLabel(
+  platformCode: string | null | undefined,
+) {
+  const code = normalizePlatformCode(platformCode);
+  return PLATFORM_LABELS[code] ?? humanizePlatformCode(code);
 }
 
 export function PlatformTaskBadge({
@@ -27,15 +39,14 @@ export function PlatformTaskBadge({
 }: {
   platformCode: string | null;
 }) {
-  const normalizedCode = platformCode?.trim().toLowerCase() ?? "owned";
-  const code = normalizedCode.length > 0 ? normalizedCode : "owned";
-  const label = PLATFORM_LABELS[code] ?? humanizePlatformCode(code);
+  const code = normalizePlatformCode(platformCode);
+  const label = getPlatformDisplayLabel(code);
 
   return (
     <PlatformBadge
       code={code}
       name={label}
-      forwarded={!isOwnedPlatform(code)}
+      forwarded={!isOwnedPlatformCode(code)}
       size="sm"
     />
   );
@@ -48,11 +59,10 @@ export function PlatformAuthorityBanner({
   platformCode: string | null;
   description: string;
 }) {
-  const normalizedCode = platformCode?.trim().toLowerCase() ?? "owned";
-  const code = normalizedCode.length > 0 ? normalizedCode : "owned";
-  const label = PLATFORM_LABELS[code] ?? humanizePlatformCode(code);
+  const code = normalizePlatformCode(platformCode);
+  const label = getPlatformDisplayLabel(code);
 
-  if (isOwnedPlatform(code)) {
+  if (isOwnedPlatformCode(code)) {
     return (
       <AuthorityBanner
         title="自營派單 · DRTS"
