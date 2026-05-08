@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
@@ -14,8 +15,15 @@ import type {
 } from "@drts/contracts";
 import {
   PlatformStatusCard,
+  assessPlatformHealth,
+  getPlatformHealthSeverity,
   type PlatformStatusAction,
 } from "@/components/platform-status-card";
+import { ActionButton } from "@/components/ui/ActionButton";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { StatusChip } from "@/components/ui/StatusChip";
 import { Tokens } from "@/components/ui/tokens";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
 
@@ -27,6 +35,7 @@ function toErrorMessage(error: unknown): string {
 }
 
 export default function PlatformPresenceScreen() {
+  const router = useRouter();
   const [summary, setSummary] = useState<PlatformPresenceSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,12 +51,14 @@ export default function PlatformPresenceScreen() {
     }
 
     const client = getDriverClient();
+
     try {
-      const data = await client.getPlatformPresence();
-      setSummary(data);
+      const nextSummary = await client.getPlatformPresence();
+      setSummary(nextSummary);
       setError(null);
     } catch (loadError) {
-      setError(toErrorMessage(loadError));
+      setSummary(null);
+      setError(`平台健康中心資料載入失敗：${toErrorMessage(loadError)}`);
     } finally {
       setLoading(false);
     }
@@ -119,7 +130,7 @@ export default function PlatformPresenceScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" />
-        <Text style={styles.hintText}>載入平台狀態中…</Text>
+        <Text style={styles.hintText}>載入平台健康中心中…</Text>
       </View>
     );
   }
@@ -127,62 +138,153 @@ export default function PlatformPresenceScreen() {
   if (!isProvisioned) {
     return (
       <View style={styles.center}>
-        <Text style={styles.errorTitle}>裝置尚未配置</Text>
-        <Text style={styles.errorBody}>
-          此裝置尚未分配司機身份，無法顯示平台上線狀態。
-        </Text>
+        <EmptyState
+          title="裝置尚未配置"
+          description="此裝置尚未分配司機身份，無法顯示平台健康中心。"
+          icon="phone-portrait-outline"
+        />
       </View>
     );
   }
 
   const presences = summary?.presences ?? [];
+  const adapterStatusMap = new Map(
+    (summary?.adapterStatuses ?? []).map((item) => [item.platformCode, item]),
+  );
+  const enrichedPresences = [...presences]
+    .map((record) => {
+      const assessment = assessPlatformHealth(
+        record,
+        adapterStatusMap.get(record.platformCode),
+      );
+      return { record, assessment };
+    })
+    .sort((left, right) => {
+      const severityDelta =
+        getPlatformHealthSeverity(right.assessment) -
+        getPlatformHealthSeverity(left.assessment);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+      return left.record.platformCode.localeCompare(right.record.platformCode);
+    });
+
+  const readyCount = enrichedPresences.filter(
+    (item) => item.assessment.canReceiveOrders,
+  ).length;
+  const actionCount = enrichedPresences.filter(
+    (item) => item.assessment.statusTone === "warning",
+  ).length;
+  const blockedCount = enrichedPresences.filter(
+    (item) => item.assessment.statusTone === "danger",
+  ).length;
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>平台上線狀態</Text>
-      <Text style={styles.subtitle}>已連接 {presences.length} 個平台</Text>
+      <PageHeader
+        title="平台健康中心"
+        subtitle={`已連接 ${presences.length} 個平台`}
+      />
 
-      {error ? <Text style={styles.errorText}>載入失敗：{error}</Text> : null}
+      <FlatList
+        data={enrichedPresences}
+        keyExtractor={(item) => item.record.platformCode}
+        renderItem={({ item }) => {
+          const actions: PlatformStatusAction[] = [];
 
-      {presences.length === 0 ? (
-        <Text style={styles.emptyText}>尚未連接任何平台。</Text>
-      ) : (
-        <FlatList
-          data={presences}
-          keyExtractor={(item) => item.platformCode}
-          renderItem={({ item }) => {
-            const actions: PlatformStatusAction[] = [];
-
-            if (item.reauthRequired) {
-              actions.push({
-                key: "reauth",
-                icon: "refresh",
-                label: `重新驗證 ${item.platformCode}`,
-                onPress: () => handleReauth(item),
-                tone: "warning",
-                disabled: busyPlatform === item.platformCode,
-              });
-            }
-
+          if (item.record.reauthRequired) {
             actions.push({
-              key: "toggle",
-              icon: item.status === "online" ? "power" : "play",
-              label:
-                item.status === "online"
-                  ? `讓 ${item.platformCode} 下線`
-                  : `讓 ${item.platformCode} 上線`,
-              onPress: () => handleTogglePresence(item),
-              tone: item.status === "online" ? "danger" : "primary",
-              disabled: busyPlatform === item.platformCode,
+              key: "reauth",
+              icon: "refresh",
+              label: "重新驗證",
+              onPress: () => handleReauth(item.record),
+              tone: "warning",
+              disabled: busyPlatform === item.record.platformCode,
             });
-
-            return <PlatformStatusCard record={item} actions={actions} />;
-          }}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
-        />
-      )}
+
+          actions.push({
+            key: "toggle",
+            icon: item.record.status === "online" ? "power" : "play",
+            label: item.record.status === "online" ? "切換離線" : "切換上線",
+            onPress: () => handleTogglePresence(item.record),
+            tone: item.record.status === "online" ? "danger" : "primary",
+            disabled: busyPlatform === item.record.platformCode,
+          });
+
+          actions.push({
+            key: "binding",
+            icon: "settings-outline",
+            label: "查看綁定",
+            onPress: () => router.push("/settings"),
+            tone: "neutral",
+            disabled: busyPlatform === item.record.platformCode,
+          });
+
+          return (
+            <PlatformStatusCard
+              record={item.record}
+              actions={actions}
+              adapterStatus={adapterStatusMap.get(item.record.platformCode)}
+            />
+          );
+        }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        ListHeaderComponent={
+          <View style={styles.headerContent}>
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryTitle}>今日平台可用性</Text>
+              <Text style={styles.summaryBody}>
+                這裡集中顯示每個平台目前能否接單，以及是被離線、憑證、重新驗證、資格或轉接器問題卡住。
+              </Text>
+              <View style={styles.summaryChips}>
+                <StatusChip label={`可接單 ${readyCount}`} variant="success" />
+                <StatusChip label={`需處理 ${actionCount}`} variant="warning" />
+                <StatusChip label={`已阻塞 ${blockedCount}`} variant="danger" />
+              </View>
+              <ActionButton
+                title="前往設定管理綁定"
+                variant="secondary"
+                icon="settings-outline"
+                onPress={() => router.push("/settings")}
+                style={styles.summaryAction}
+              />
+            </View>
+
+            {error ? (
+              <ErrorBanner message={error} style={styles.errorBanner} />
+            ) : null}
+
+            {summary?.notes?.length ? (
+              <View style={styles.notesCard}>
+                <Text style={styles.notesTitle}>同步說明</Text>
+                {summary.notes.map((note) => (
+                  <Text key={note} style={styles.noteLine}>
+                    • {note}
+                  </Text>
+                ))}
+              </View>
+            ) : null}
+
+            {presences.length === 0 ? (
+              <EmptyState
+                title="尚未連接任何平台"
+                description="先到設定完成平台帳號綁定，再回來檢查每個平台的接單健康狀態。"
+                icon="link-outline"
+                actionTitle="前往設定"
+                onAction={() => router.push("/settings")}
+                style={styles.emptyState}
+              />
+            ) : (
+              <Text style={styles.listTitle}>逐平台健康狀態</Text>
+            )}
+          </View>
+        }
+        ListFooterComponent={<View style={styles.footerSpacing} />}
+        contentContainerStyle={styles.listContent}
+      />
     </View>
   );
 }
@@ -190,8 +292,15 @@ export default function PlatformPresenceScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: Tokens.layout.pagePadding,
     backgroundColor: Tokens.colors.appBg,
+  },
+  listContent: {
+    paddingHorizontal: Tokens.layout.pagePadding,
+    paddingTop: Tokens.spacing.md,
+  },
+  headerContent: {
+    gap: Tokens.spacing.md,
+    paddingBottom: Tokens.spacing.md,
   },
   center: {
     flex: 1,
@@ -200,41 +309,62 @@ const styles = StyleSheet.create({
     padding: Tokens.spacing.xxl,
     backgroundColor: Tokens.colors.appBg,
   },
-  title: {
-    ...Tokens.type.screenTitle,
-    color: Tokens.colors.textStrong,
-    marginBottom: Tokens.spacing.xs,
+  summaryCard: {
+    padding: Tokens.spacing.lg,
+    borderRadius: Tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.surface,
+    gap: Tokens.spacing.md,
   },
-  subtitle: {
+  summaryTitle: {
+    ...Tokens.type.sectionTitle,
+    color: Tokens.colors.textStrong,
+  },
+  summaryBody: {
     ...Tokens.type.body,
     color: Tokens.colors.textMuted,
-    marginBottom: Tokens.spacing.lg,
+  },
+  summaryChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
+  },
+  summaryAction: {
+    alignSelf: "flex-start",
+  },
+  notesCard: {
+    padding: Tokens.spacing.md,
+    borderRadius: Tokens.radius.md,
+    backgroundColor: Tokens.colors.bgRaised,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    gap: Tokens.spacing.xs,
+  },
+  notesTitle: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
+  },
+  noteLine: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+  },
+  listTitle: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textMuted,
+  },
+  errorBanner: {
+    marginBottom: 0,
+  },
+  emptyState: {
+    minHeight: 240,
   },
   hintText: {
     ...Tokens.type.body,
     color: Tokens.colors.textMuted,
     marginTop: Tokens.spacing.sm,
   },
-  errorText: {
-    ...Tokens.type.label,
-    color: Tokens.colors.danger,
-    marginBottom: Tokens.spacing.sm,
-  },
-  emptyText: {
-    ...Tokens.type.body,
-    textAlign: "center",
-    color: Tokens.colors.textMuted,
-    marginTop: Tokens.spacing.xxl,
-  },
-  errorTitle: {
-    ...Tokens.type.sectionTitle,
-    color: Tokens.colors.danger,
-    textAlign: "center",
-    marginBottom: Tokens.spacing.sm,
-  },
-  errorBody: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textBody,
-    textAlign: "center",
+  footerSpacing: {
+    height: Tokens.spacing.xl,
   },
 });
