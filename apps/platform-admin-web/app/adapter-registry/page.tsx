@@ -1,14 +1,29 @@
-// import { PageHeader } from '@/components/ui/page-header'; // Assuming a PageHeader component exists
-import { AdapterList } from "./components/AdapterList"; // Import the new AdapterList component
+"use client";
+
+import React from "react";
+import { AdapterList } from "./components/AdapterList";
+import { useTranslation } from "@/lib/i18n";
+import { PageHeader } from "@drts/ui-web";
 
 export default function AdapterRegistryPage() {
+  const { locale } = useTranslation();
+  const copy =
+    locale === "en"
+      ? {
+          title: "Adapter Registry",
+          subtitle:
+            "Review adapter readiness, ownership, and rollout posture across the platform.",
+        }
+      : {
+          title: "Adapter Registry",
+          subtitle: "檢視各 adapter 的 readiness、責任歸屬與 rollout 狀態。",
+        };
+
   return (
     <div>
-      <h1 className="text-2xl font-bold p-4">Platform Adapter Registry</h1>{" "}
-      {/* Replaced PageHeader with h1 */}
+      <PageHeader title={copy.title} subtitle={copy.subtitle} />
       <div className="p-4">
-        <p>Manage your platform adapters here.</p>
-        <AdapterList /> {/* Render the AdapterList component */}
+        <AdapterList />
       </div>
     </div>
   );

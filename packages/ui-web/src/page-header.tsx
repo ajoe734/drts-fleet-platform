@@ -1,44 +1,47 @@
 import type { ReactNode } from "react";
+import {
+  MANAGEMENT_SPACING,
+  densityValue,
+  type ManagementDensity,
+} from "./management-theme";
+import type { PageMetaItem, SectionHeaderProps } from "./management-primitives";
+import { SectionHeader } from "./management-primitives";
 
-interface PageHeaderProps {
+export interface PageHeaderProps {
   title: string;
   subtitle?: string;
+  eyebrow?: string;
   actions?: ReactNode;
+  meta?: PageMetaItem[];
+  density?: ManagementDensity;
 }
 
-export function PageHeader({ title, subtitle, actions }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  subtitle,
+  eyebrow,
+  actions,
+  meta,
+  density = "comfortable",
+}: PageHeaderProps) {
+  const headerProps = {
+    title,
+    ...(eyebrow !== undefined ? { eyebrow } : {}),
+    ...(subtitle !== undefined ? { subtitle } : {}),
+    ...(actions !== undefined ? { actions } : {}),
+    ...(meta !== undefined ? { meta } : {}),
+  } satisfies SectionHeaderProps;
+
   return (
     <div
       style={{
-        display: "flex",
-        alignItems: "flex-start",
-        justifyContent: "space-between",
-        marginBottom: "24px",
-        gap: "16px",
+        marginBottom: densityValue(
+          density,
+          MANAGEMENT_SPACING.pageHeaderMarginBottom,
+        ),
       }}
     >
-      <div>
-        <h1
-          style={{
-            margin: 0,
-            fontSize: "22px",
-            fontWeight: 700,
-            color: "#0f172a",
-          }}
-        >
-          {title}
-        </h1>
-        {subtitle && (
-          <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#64748b" }}>
-            {subtitle}
-          </p>
-        )}
-      </div>
-      {actions && (
-        <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-          {actions}
-        </div>
-      )}
+      <SectionHeader {...headerProps} />
     </div>
   );
 }
