@@ -3,6 +3,10 @@ import type { ReportJobRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { createReportJob, refreshReports } from "./actions";
+import {
+  getReportJobSourceSummary,
+  getSourceToneClassName,
+} from "@/lib/source-domain";
 
 export default async function ReportsPage() {
   const client = getTenantClient();
@@ -46,6 +50,7 @@ export default async function ReportsPage() {
             <option value="dispatch_recording_index">
               dispatch_recording_index
             </option>
+            <option value="revenue_summary">revenue_summary</option>
           </select>
           <label htmlFor="format" style={{ marginRight: 8 }}>
             Format
@@ -79,6 +84,7 @@ export default async function ReportsPage() {
                   <th>Job ID</th>
                   <th>Status</th>
                   <th>Job Type</th>
+                  <th>Source Domain</th>
                   <th>Format</th>
                   <th>Artifact</th>
                   <th>Expires</th>
@@ -86,33 +92,42 @@ export default async function ReportsPage() {
                 </tr>
               </thead>
               <tbody>
-                {jobs.map((job) => (
-                  <tr key={job.jobId}>
-                    <td>{job.jobId}</td>
-                    <td>{job.status}</td>
-                    <td>{job.jobType}</td>
-                    <td>{job.format}</td>
-                    <td>
-                      {job.artifact ? (
-                        <a
-                          href={job.artifact.downloadUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Download
-                        </a>
-                      ) : (
-                        <em>pending</em>
-                      )}
-                    </td>
-                    <td>
-                      {job.artifact
-                        ? new Date(job.artifact.expiresAt).toLocaleString()
-                        : "-"}
-                    </td>
-                    <td>{new Date(job.createdAt).toLocaleString()}</td>
-                  </tr>
-                ))}
+                {jobs.map((job) => {
+                  const source = getReportJobSourceSummary(job);
+                  return (
+                    <tr key={job.jobId}>
+                      <td>{job.jobId}</td>
+                      <td>{job.status}</td>
+                      <td>{job.jobType}</td>
+                      <td>
+                        <span className={getSourceToneClassName(source.tone)}>
+                          {source.badge}
+                        </span>
+                        <div className="source-detail">{source.detail}</div>
+                      </td>
+                      <td>{job.format}</td>
+                      <td>
+                        {job.artifact ? (
+                          <a
+                            href={job.artifact.downloadUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Download
+                          </a>
+                        ) : (
+                          <em>pending</em>
+                        )}
+                      </td>
+                      <td>
+                        {job.artifact
+                          ? new Date(job.artifact.expiresAt).toLocaleString()
+                          : "-"}
+                      </td>
+                      <td>{new Date(job.createdAt).toLocaleString()}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

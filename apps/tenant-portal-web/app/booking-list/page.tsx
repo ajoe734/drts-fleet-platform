@@ -4,6 +4,10 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { BookingFilterBar } from "@/components/booking-filter-bar";
 import { BookingActions } from "@/components/booking-actions";
+import {
+  getBookingSourceVisibility,
+  getSourceToneClassName,
+} from "@/lib/source-domain";
 
 const ORDER_STATUS_FILTER: OwnedOrderStatus[] = [
   "created",
@@ -78,6 +82,7 @@ export default async function BookingListPage({
                 <tr>
                   <th>Order No</th>
                   <th>Service</th>
+                  <th>Source</th>
                   <th>Status</th>
                   <th>Pickup</th>
                   <th>Dropoff</th>
@@ -94,6 +99,23 @@ export default async function BookingListPage({
                       </Link>
                     </td>
                     <td>{booking.serviceBucket}</td>
+                    <td>
+                      {(() => {
+                        const source = getBookingSourceVisibility(booking);
+                        return (
+                          <div>
+                            <span
+                              className={getSourceToneClassName(source.tone)}
+                            >
+                              {source.badge}
+                            </span>
+                            <div className="source-detail">
+                              {source.summary}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td>
                       <span
                         className={`status-badge status-${booking.orderStatus}`}
