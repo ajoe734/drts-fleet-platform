@@ -33,6 +33,10 @@ function formatCost(value: number | null): string {
   }).format(value);
 }
 
+function getEffectiveStatus(record: MaintenanceRecord): MaintenanceStatus {
+  return isMaintenanceOverdue(record) ? "overdue" : record.status;
+}
+
 export default function MaintenancePage() {
   const { t, locale } = useTranslation();
   const [records, setRecords] = useState<MaintenanceRecord[]>([]);
@@ -62,9 +66,7 @@ export default function MaintenancePage() {
   }
 
   const filteredRecords = records.filter((record) => {
-    const effectiveStatus = isMaintenanceOverdue(record)
-      ? "overdue"
-      : record.status;
+    const effectiveStatus = getEffectiveStatus(record);
     if (statusFilter !== "all" && effectiveStatus !== statusFilter) {
       return false;
     }
@@ -83,19 +85,29 @@ export default function MaintenancePage() {
     return haystack.includes(deferredQuery);
   });
 
-  const overdueCount = records.filter((record) =>
-    isMaintenanceOverdue(record),
-  ).length;
-  const scheduledCount = records.filter(
-    (record) => record.status === "scheduled",
-  ).length;
+  const effectiveStatusCounts = records.reduce<
+    Record<MaintenanceStatus, number>
+  >(
+    (counts, record) => {
+      const effectiveStatus = getEffectiveStatus(record);
+      counts[effectiveStatus] += 1;
+      return counts;
+    },
+    {
+      scheduled: 0,
+      in_progress: 0,
+      completed: 0,
+      cancelled: 0,
+      overdue: 0,
+    },
+  );
+  const overdueCount = effectiveStatusCounts.overdue;
+  const scheduledCount = effectiveStatusCounts.scheduled;
   const activeCount = records.filter(
     (record) =>
       record.status === "scheduled" || record.status === "in_progress",
   ).length;
-  const completedCount = records.filter(
-    (record) => record.status === "completed",
-  ).length;
+  const completedCount = effectiveStatusCounts.completed;
   const dispatchImpactCount = records.filter(
     (record) =>
       isMaintenanceOverdue(record) ||
@@ -158,7 +170,7 @@ export default function MaintenancePage() {
     {
       value: "in_progress",
       label: formatOpsCodeLabel(locale, "in_progress"),
-      count: records.filter((record) => record.status === "in_progress").length,
+      count: effectiveStatusCounts.in_progress,
     },
     {
       value: "overdue",
@@ -489,7 +501,7 @@ export default function MaintenancePage() {
                 {filteredRecords.length > 0 ? (
                   filteredRecords.map((record) => {
                     const overdue = isMaintenanceOverdue(record);
-                    const effectiveStatus = overdue ? "overdue" : record.status;
+                    const effectiveStatus = getEffectiveStatus(record);
                     const cue = impactCue(record);
                     return (
                       <tr
