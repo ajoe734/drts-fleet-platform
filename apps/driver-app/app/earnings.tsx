@@ -11,13 +11,17 @@ import type {
   DriverPayoutStatus,
   DriverStatementRecord,
   MoneyAmount,
-  PlatformEarningsItem,
   PlatformEarningsByPlatformResponse,
   PlatformEarningsSummary,
 } from "@drts/contracts";
-import { EarningsByPlatform } from "@/components/earnings-by-platform";
+import {
+  EarningsByPlatform,
+  isOwnedPlatformCode,
+  isShadowOnlyPlatformCode,
+} from "@/components/earnings-by-platform";
 import {
   ActionButton,
+  AuthorityBanner,
   EmptyState,
   ErrorBanner,
   IconButton,
@@ -29,7 +33,7 @@ import {
   Tokens,
 } from "@/components/ui";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
-import { formatMoney } from "@/lib/money";
+import { formatMoney, sumMoneyAmounts } from "@/lib/money";
 import { formatDriverPayoutStatusLabel } from "@/lib/operational-labels";
 
 type PeriodKey = "today" | "week" | "month";
@@ -49,56 +53,17 @@ function toErrorMessage(error: unknown): string {
   return "資料載入失敗，請稍後再試。";
 }
 
-function buildZeroMoney(currency = DEFAULT_CURRENCY): MoneyAmount {
-  return {
+function sumPlatformNet(
+  items: Array<{ netAmount: MoneyAmount; platformCode: string }>,
+  predicate: (item: {
+    netAmount: MoneyAmount;
+    platformCode: string;
+  }) => boolean,
+  currency = DEFAULT_CURRENCY,
+): MoneyAmount {
+  return sumMoneyAmounts(
+    items.filter(predicate).map((item) => item.netAmount),
     currency,
-    amountMinor: 0,
-  };
-}
-
-function buildEmptySummary(
-  currency = DEFAULT_CURRENCY,
-): PlatformEarningsSummary {
-  return {
-    driverId: "",
-    totalGross: buildZeroMoney(currency),
-    totalServiceFee: buildZeroMoney(currency),
-    totalSubsidy: buildZeroMoney(currency),
-    totalNet: buildZeroMoney(currency),
-    notes: [],
-  };
-}
-
-function buildSummaryFromItems(
-  items: PlatformEarningsItem[],
-  driverId = "",
-  currency = DEFAULT_CURRENCY,
-): PlatformEarningsSummary {
-  return items.reduce<PlatformEarningsSummary>(
-    (summary, item) => ({
-      driverId,
-      totalGross: {
-        currency: item.grossEarning.currency,
-        amountMinor:
-          summary.totalGross.amountMinor + item.grossEarning.amountMinor,
-      },
-      totalServiceFee: {
-        currency: item.serviceFee.currency,
-        amountMinor:
-          summary.totalServiceFee.amountMinor + item.serviceFee.amountMinor,
-      },
-      totalSubsidy: {
-        currency: item.subsidy.currency,
-        amountMinor:
-          summary.totalSubsidy.amountMinor + item.subsidy.amountMinor,
-      },
-      totalNet: {
-        currency: item.netAmount.currency,
-        amountMinor: summary.totalNet.amountMinor + item.netAmount.amountMinor,
-      },
-      notes: [],
-    }),
-    buildEmptySummary(currency),
   );
 }
 
@@ -110,12 +75,10 @@ function sumStatementNet(
     statements[0]?.netAmount.currency ??
     statements[0]?.grossEarning.currency ??
     DEFAULT_CURRENCY;
-  return {
+  return sumMoneyAmounts(
+    statements.filter(predicate).map((statement) => statement.netAmount),
     currency,
-    amountMinor: statements
-      .filter(predicate)
-      .reduce((sum, statement) => sum + statement.netAmount.amountMinor, 0),
-  };
+  );
 }
 
 function getStatementStatusVariant(status: DriverPayoutStatus) {
@@ -206,10 +169,9 @@ function StatementSectionEmpty({
 
 export default function EarningsScreen() {
   const [summary, setSummary] = useState<PlatformEarningsSummary | null>(null);
-  const [summaryCurrency, setSummaryCurrency] = useState(DEFAULT_CURRENCY);
-  const [platformItems, setPlatformItems] = useState<PlatformEarningsItem[]>(
-    [],
-  );
+  const [platformItems, setPlatformItems] = useState<
+    PlatformEarningsByPlatformResponse["items"]
+  >([]);
   const [statements, setStatements] = useState<DriverStatementRecord[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState<PeriodKey>("month");
   const [loading, setLoading] = useState(true);
@@ -236,7 +198,6 @@ export default function EarningsScreen() {
         await Promise.all(requests);
 
       setSummary(summaryResponse);
-      setSummaryCurrency(summaryResponse.totalNet.currency || DEFAULT_CURRENCY);
       setPlatformItems(byPlatformResponse.items);
       setStatements(
         [...statementRows].sort((left, right) =>
@@ -326,14 +287,29 @@ export default function EarningsScreen() {
   const displayedStatements =
     selectedPeriod === "month" ? monthlyStatements : [];
   const displayedPlatformItems = platformItems;
-  const displayedSummary =
-    selectedPeriod === "month"
-      ? (summary ?? buildSummaryFromItems(platformItems, "", summaryCurrency))
-      : buildSummaryFromItems(
-          platformItems,
-          "",
-          summaryCurrency || baseCurrency,
-        );
+  const drtsStatementAmount = sumStatementNet(displayedStatements, () => true);
+  const forwardedPlatformItems = displayedPlatformItems.filter(
+    (item) => !isOwnedPlatformCode(item.platformCode),
+  );
+  const shadowOnlyPlatformItems = displayedPlatformItems.filter((item) =>
+    isShadowOnlyPlatformCode(item.platformCode),
+  );
+  const externalPlatformAmount = sumPlatformNet(
+    displayedPlatformItems,
+    (item) =>
+      !isOwnedPlatformCode(item.platformCode) &&
+      !isShadowOnlyPlatformCode(item.platformCode),
+    baseCurrency,
+  );
+  const shadowOnlyAmount = sumPlatformNet(
+    displayedPlatformItems,
+    (item) => isShadowOnlyPlatformCode(item.platformCode),
+    baseCurrency,
+  );
+  const paidPayoutAmount = sumStatementNet(
+    displayedStatements,
+    (statement) => statement.payoutStatus === "paid",
+  );
   const pendingPayoutAmount = sumStatementNet(
     displayedStatements,
     (statement) => statement.payoutStatus !== "paid",
@@ -419,24 +395,55 @@ export default function EarningsScreen() {
             <View style={styles.summaryGrid}>
               <View style={styles.summaryRow}>
                 <InfoTile
-                  label="實拿"
-                  value={formatMoney(displayedSummary.totalNet)}
+                  label="DRTS 對帳金額"
+                  value={formatMoney(drtsStatementAmount)}
                 />
                 <InfoTile
-                  label="總收入"
-                  value={formatMoney(displayedSummary.totalGross)}
+                  label="外部平台結算"
+                  value={formatMoney(externalPlatformAmount)}
                 />
               </View>
               <View style={styles.summaryRow}>
                 <InfoTile
-                  label="平台數"
-                  value={String(displayedPlatformItems.length)}
+                  label="Shadow-only 鏡像"
+                  value={formatMoney(shadowOnlyAmount)}
                 />
+                <InfoTile
+                  label="已撥款"
+                  value={formatMoney(paidPayoutAmount)}
+                />
+              </View>
+              <View style={styles.summaryRow}>
                 <InfoTile
                   label="待撥款"
                   value={formatMoney(pendingPayoutAmount)}
                 />
               </View>
+            </View>
+
+            <View style={styles.authorityStack}>
+              <AuthorityBanner
+                title="DRTS 對帳與撥款"
+                authorityLabel={
+                  displayedStatements.length > 0
+                    ? `${displayedStatements.length} 筆 DRTS 對帳單`
+                    : "本期尚無 DRTS 對帳單"
+                }
+                description="只有進入 DRTS 對帳單的金額才會出現在待撥款與已撥款狀態追蹤。"
+                tone="owned"
+                icon="wallet"
+              />
+              <AuthorityBanner
+                title="外部平台 finance authority"
+                authorityLabel={
+                  shadowOnlyPlatformItems.length > 0
+                    ? `${shadowOnlyPlatformItems.length} 個 shadow-only 平台 / ${forwardedPlatformItems.length} 個 external-platform 平台`
+                    : `${forwardedPlatformItems.length} 個 external-platform 平台`
+                }
+                description="Platform earnings contract 內的已登錄平台項目視為 external-platform finance authority；其中 shadow-only 鏡像只供對帳檢視，不列入 DRTS 待撥款。"
+                tone="platform"
+                icon="swap-horizontal"
+              />
             </View>
 
             <View style={styles.section}>
@@ -544,6 +551,9 @@ const styles = StyleSheet.create({
   },
   summaryRow: {
     flexDirection: "row",
+    gap: Tokens.spacing.sm,
+  },
+  authorityStack: {
     gap: Tokens.spacing.sm,
   },
   section: {
