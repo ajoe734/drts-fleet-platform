@@ -12,7 +12,12 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
+import type {
+  DriverTaskRecord,
+  ForwardedDriverActionOutcome,
+  ForwardedDriverActionResponse,
+  OwnedOrderRecord,
+} from "@drts/contracts";
 
 import { PlatformTaskBadge } from "@/components/platform-task-badge";
 import RouteDisplay from "@/components/route-display";
@@ -31,9 +36,11 @@ import {
   type ProofPhoto,
 } from "@/lib/completion-proof";
 import {
+  acceptForwardedDriverOffer,
   getDriverClient,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
+  rejectForwardedDriverOffer,
   replayPendingDriverTaskCompletion,
   submitDriverTaskCompletion,
 } from "@/lib/api-client";
@@ -175,6 +182,53 @@ function shouldShowTripMetrics(task: DriverTaskRecord | null): boolean {
 
 type StatusTone = "success" | "warning" | "danger" | "neutral";
 
+function applyForwardedActionExperienceState(
+  baseState: TripExperienceState | null,
+  forwardedActionResult: ForwardedDriverActionResponse | null,
+): TripExperienceState | null {
+  if (!forwardedActionResult || baseState === "owned_active" || !baseState) {
+    return baseState;
+  }
+
+  switch (forwardedActionResult.outcome) {
+    case "accept_pending":
+      return "forwarded_pending";
+    case "confirmed_by_platform":
+      return "forwarded_confirmed";
+    case "lost_race":
+      return "forwarded_lost";
+    case "cancelled_by_platform":
+      return "forwarded_cancelled";
+    case "sync_failed":
+      return "sync_failed";
+    case "rejected":
+      return "forwarded_cancelled";
+  }
+}
+
+function describeForwardedActionOutcome(
+  outcome: ForwardedDriverActionOutcome,
+  action: ForwardedDriverActionResponse["action"],
+): { title: string; tone: StatusTone } {
+  switch (outcome) {
+    case "accept_pending":
+      return { title: "已送出接單，等待平台確認", tone: "warning" };
+    case "confirmed_by_platform":
+      return { title: "平台已確認接單", tone: "success" };
+    case "lost_race":
+      return { title: "其他司機已被平台確認", tone: "neutral" };
+    case "cancelled_by_platform":
+      return { title: "來源平台已取消此訂單", tone: "neutral" };
+    case "sync_failed":
+      return { title: "平台同步異常，需派車台處理", tone: "danger" };
+    case "rejected":
+      return {
+        title: action === "reject" ? "已婉拒此平台訂單" : "此訂單已不再可接單",
+        tone: "neutral",
+      };
+  }
+}
+
 function getTripStatusPresentation(
   state: TripExperienceState | null,
   task: DriverTaskRecord | null,
@@ -241,9 +295,7 @@ function getTripStatusPresentation(
   }
 }
 
-function getTripLockBody(
-  state: TripExperienceState | null,
-): {
+function getTripLockBody(state: TripExperienceState | null): {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   detail: string;
@@ -318,6 +370,8 @@ export default function TripScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
+  const [forwardedActionResult, setForwardedActionResult] =
+    useState<ForwardedDriverActionResponse | null>(null);
   const [liveDistanceKm, setLiveDistanceKm] = useState(0);
   const [liveDurationSec, setLiveDurationSec] = useState(0);
   const [locationTrackingState, setLocationTrackingState] =
@@ -369,7 +423,11 @@ export default function TripScreen() {
     proofPhotos.length > 0 ||
     Boolean(normalizeCompletionProofText(signoffReference)) ||
     Boolean(expenseItem);
-  const tripExperienceState = getTripExperienceState(taskDetail);
+  const baseTripExperienceState = getTripExperienceState(taskDetail);
+  const tripExperienceState = applyForwardedActionExperienceState(
+    baseTripExperienceState,
+    forwardedActionResult,
+  );
   const primaryTripAction = getPrimaryTripAction(taskDetail);
   const tripStatusPresentation = getTripStatusPresentation(
     tripExperienceState,
@@ -462,6 +520,7 @@ export default function TripScreen() {
 
   useEffect(() => {
     resetCompletionDraft();
+    setForwardedActionResult(null);
   }, [taskDetail?.taskId]);
 
   useEffect(() => {
@@ -781,19 +840,44 @@ export default function TripScreen() {
     }
   }
 
+  async function handleForwardedAccept() {
+    if (!taskDetail?.taskId) {
+      return;
+    }
+
+    try {
+      setSubmittingAction("forwarded_accept");
+      const result = await acceptForwardedDriverOffer(taskDetail.taskId);
+      setForwardedActionResult(result);
+      const summary = describeForwardedActionOutcome(result.outcome, "accept");
+      Alert.alert(summary.title, result.driverMessage);
+      await loadTrip(false);
+    } catch (acceptError) {
+      if (getDriverIdentityIssue()) {
+        await routeToOnboardingAfterSessionFailure();
+        return;
+      }
+
+      Alert.alert("錯誤", getErrorMessage(acceptError));
+    } finally {
+      setSubmittingAction(null);
+    }
+  }
+
   async function handleForwardedReject() {
     if (!taskDetail?.taskId) {
       return;
     }
 
     try {
-      setSubmittingAction("reject");
-      await getDriverClient().rejectTask(taskDetail.taskId, {
-        reasonCode: "driver_declined_forwarded_offer",
-        reasonNote:
-          "Driver declined forwarded platform offer from trip screen.",
-      });
-      Alert.alert("已拒絕", "已回覆不接受此平台訂單。");
+      setSubmittingAction("forwarded_reject");
+      const result = await rejectForwardedDriverOffer(
+        taskDetail.taskId,
+        "driver_declined_forwarded_offer",
+      );
+      setForwardedActionResult(result);
+      const summary = describeForwardedActionOutcome(result.outcome, "reject");
+      Alert.alert(summary.title, result.driverMessage);
       await loadTrip(false);
     } catch (rejectError) {
       if (getDriverIdentityIssue()) {
@@ -1184,19 +1268,101 @@ export default function TripScreen() {
       {taskDetail && isForwardedTask(taskDetail) && (
         <View style={styles.primaryActionCard}>
           <Text style={styles.primaryActionEyebrow}>主要動作</Text>
-          <Text style={styles.primaryActionTitle}>等待來源平台同步</Text>
+          <Text style={styles.primaryActionTitle}>
+            {tripExperienceState === "forwarded_offered"
+              ? "回覆來源平台派單"
+              : "等待來源平台同步"}
+          </Text>
           <Text style={styles.forwardedActionNote}>
             任務操作由 {taskDetail.sourcePlatform}{" "}
             管理，本地只顯示同步結果與路線資訊，不會變更任務狀態。
           </Text>
-          {taskDetail.status === "pending_acceptance" && (
-            <ActionButton
-              label={submittingAction === "reject" ? "拒絕中…" : "拒絕平台訂單"}
-              onPress={() => void handleForwardedReject()}
-              disabled={submittingAction !== null}
-              variant="secondary"
-            />
+          {forwardedActionResult && (
+            <View
+              style={[
+                styles.forwardedOutcomePanel,
+                {
+                  backgroundColor: getStatusToneStyles(
+                    describeForwardedActionOutcome(
+                      forwardedActionResult.outcome,
+                      forwardedActionResult.action,
+                    ).tone,
+                  ).background,
+                },
+              ]}
+            >
+              <View style={styles.forwardedOutcomeHeader}>
+                <View
+                  style={[
+                    styles.forwardedOutcomeDot,
+                    {
+                      backgroundColor: getStatusToneStyles(
+                        describeForwardedActionOutcome(
+                          forwardedActionResult.outcome,
+                          forwardedActionResult.action,
+                        ).tone,
+                      ).dot,
+                    },
+                  ]}
+                />
+                <Text
+                  style={[
+                    styles.forwardedOutcomeTitle,
+                    {
+                      color: getStatusToneStyles(
+                        describeForwardedActionOutcome(
+                          forwardedActionResult.outcome,
+                          forwardedActionResult.action,
+                        ).tone,
+                      ).text,
+                    },
+                  ]}
+                >
+                  {
+                    describeForwardedActionOutcome(
+                      forwardedActionResult.outcome,
+                      forwardedActionResult.action,
+                    ).title
+                  }
+                </Text>
+              </View>
+              <Text style={styles.forwardedOutcomeDetail}>
+                {forwardedActionResult.driverMessage}
+              </Text>
+              <Text style={styles.forwardedOutcomeMeta}>
+                平台訂單編號：
+                {forwardedActionResult.managementCorrelationIds.mirrorOrderId}
+                {forwardedActionResult.managementCorrelationIds
+                  .reconciliationJobId
+                  ? `／對帳工單 ${forwardedActionResult.managementCorrelationIds.reconciliationJobId}`
+                  : ""}
+              </Text>
+            </View>
           )}
+          {tripExperienceState === "forwarded_offered" &&
+            forwardedActionResult === null && (
+              <View style={styles.forwardedOfferActions}>
+                <ActionButton
+                  label={
+                    submittingAction === "forwarded_accept"
+                      ? "接單送出中…"
+                      : "接受平台訂單"
+                  }
+                  onPress={() => void handleForwardedAccept()}
+                  disabled={submittingAction !== null}
+                />
+                <ActionButton
+                  label={
+                    submittingAction === "forwarded_reject"
+                      ? "婉拒送出中…"
+                      : "婉拒平台訂單"
+                  }
+                  onPress={() => void handleForwardedReject()}
+                  disabled={submittingAction !== null}
+                  variant="secondary"
+                />
+              </View>
+            )}
         </View>
       )}
 
@@ -1522,6 +1688,40 @@ const styles = StyleSheet.create({
   forwardedActionNote: {
     fontSize: 13,
     color: "#45627d",
+  },
+  forwardedOfferActions: {
+    flexDirection: "row",
+    gap: 8,
+    flexWrap: "wrap",
+    marginTop: 4,
+  },
+  forwardedOutcomePanel: {
+    borderRadius: 12,
+    padding: 12,
+    gap: 6,
+  },
+  forwardedOutcomeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  forwardedOutcomeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  forwardedOutcomeTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  forwardedOutcomeDetail: {
+    fontSize: 13,
+    color: "#334155",
+    lineHeight: 18,
+  },
+  forwardedOutcomeMeta: {
+    fontSize: 11,
+    color: "#475569",
   },
   footer: { marginTop: 8 },
   sosCard: {

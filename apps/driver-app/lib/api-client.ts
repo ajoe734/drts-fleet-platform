@@ -17,6 +17,7 @@ import type {
   DriverCompleteTaskCommand,
   DriverDeviceProvisioningSession,
   DriverTaskRecord,
+  ForwardedDriverActionResponse,
 } from "@drts/contracts";
 
 type DriverExpoExtra = {
@@ -469,6 +470,32 @@ export async function replayPendingDriverTaskCompletion(): Promise<DriverTaskRec
       await clearPendingDriverTaskCompletion();
     }
 
+    throw error;
+  }
+}
+
+export async function acceptForwardedDriverOffer(
+  taskId: string,
+): Promise<ForwardedDriverActionResponse> {
+  try {
+    return await getDriverClient().acceptForwardedOrder(taskId);
+  } catch (error) {
+    await recoverDriverSessionFromApiError(error);
+    throw error;
+  }
+}
+
+export async function rejectForwardedDriverOffer(
+  taskId: string,
+  reason?: string | null,
+): Promise<ForwardedDriverActionResponse> {
+  const trimmedReason = reason?.trim() ? reason.trim() : null;
+  try {
+    return await getDriverClient().rejectForwardedOrder(taskId, {
+      reason: trimmedReason,
+    });
+  } catch (error) {
+    await recoverDriverSessionFromApiError(error);
     throw error;
   }
 }
