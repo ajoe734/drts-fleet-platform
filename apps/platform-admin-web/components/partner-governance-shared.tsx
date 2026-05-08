@@ -188,7 +188,16 @@ export function partnerStatusTone(
 export function buildPartnerReadinessItems(
   entry: PartnerChannelEntryRecord,
   t: TFn,
+  options?: {
+    activeCredentialCount?: number;
+  },
 ) {
+  const activeCredentialCount = options?.activeCredentialCount;
+  const requiresCredential = entry.authMode === "partner_api_key";
+  const requiresEligibilityContract = entry.eligibilityMode !== "none";
+  const credentialCoverageKnown =
+    !requiresCredential || activeCredentialCount !== undefined;
+
   return [
     {
       label: t("partners.readiness.audit"),
@@ -204,6 +213,13 @@ export function buildPartnerReadinessItems(
       label: t("partners.readiness.eligibility"),
       ready: true,
       value: entry.eligibilityMode,
+    },
+    {
+      label: t("partners.readiness.contract"),
+      ready:
+        !requiresEligibilityContract ||
+        isPartnerReady(entry.eligibilityContract?.contractId),
+      value: entry.eligibilityContract?.contractId ?? "—",
     },
     {
       label: t("partners.readiness.branding"),
@@ -223,6 +239,18 @@ export function buildPartnerReadinessItems(
         entry.entryHost && entry.entryPath
           ? `${entry.entryHost}${entry.entryPath}`
           : (entry.entryHost ?? entry.entryPath ?? "—"),
+    },
+    {
+      label: t("partners.readiness.credentials"),
+      ready:
+        !requiresCredential ||
+        activeCredentialCount === undefined ||
+        activeCredentialCount > 0,
+      value: !requiresCredential
+        ? "n/a"
+        : credentialCoverageKnown
+          ? `${activeCredentialCount}`
+          : "—",
     },
   ];
 }

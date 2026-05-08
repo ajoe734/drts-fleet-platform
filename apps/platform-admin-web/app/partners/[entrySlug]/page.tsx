@@ -67,15 +67,28 @@ export default function PartnerDetailPage() {
           overviewTitle: "Entry overview",
           overviewSubtitle:
             "Core identity, audit, and eligibility linkage for the selected entry.",
+          authTitle: "Auth authority",
+          authSubtitle:
+            "Keep partner entry auth decisions explicit so rollout authority does not drift into tenant-owned settings.",
+          eligibilityTitle: "Eligibility contract",
+          eligibilitySubtitle:
+            "Partner-side eligibility is governed by contract snapshots, fallback policy, and adapter posture.",
           readinessTitle: "Readiness checks",
           readinessSubtitle:
             "Do not enable the entry until every required routing, branding, and support dependency is present.",
+          readinessBlocked:
+            "This entry still has unresolved readiness gaps. Keep rollout authority on the platform side until every gate is green.",
+          readinessReady:
+            "Checklist is clear. The entry can be promoted without hiding platform authority boundaries.",
           lifecycleTitle: "Lifecycle controls",
           lifecycleSubtitle:
             "Lifecycle actions affect whether external traffic can reach this partner-facing entry.",
           credentialsTitle: "Active credentials",
           credentialsSubtitle:
             "Rotate ingress credentials here. Plaintext material is only shown once after issuance.",
+          auditTitle: "Audit lineage",
+          auditSubtitle:
+            "Creation, update, revoke, and credential activity must remain visible for platform review.",
           notFound: "Partner entry not found.",
           save: "Save entry",
           preview: "Preview route",
@@ -91,15 +104,28 @@ export default function PartnerDetailPage() {
           overviewTitle: "Entry 概況",
           overviewSubtitle:
             "此 entry 的核心識別、audit 與 eligibility linkage。",
+          authTitle: "Auth 治理權限",
+          authSubtitle:
+            "明確保留 partner entry 的 auth 決策在平台側，避免與 tenant 自主管理設定混淆。",
+          eligibilityTitle: "Eligibility 契約",
+          eligibilitySubtitle:
+            "partner eligibility 由契約快照、fallback policy 與 adapter 狀態共同治理。",
           readinessTitle: "Readiness 檢查",
           readinessSubtitle:
             "在 routing、branding、support 依賴補齊前，不應直接啟用此 entry。",
+          readinessBlocked:
+            "此 entry 仍有未解 readiness 缺口；在所有 gate 轉綠前，應維持平台側 rollout authority。",
+          readinessReady:
+            "Checklist 已補齊；可在不模糊平台治理邊界的前提下推進上線。",
           lifecycleTitle: "Lifecycle controls",
           lifecycleSubtitle:
             "生命週期動作會直接影響外部流量是否能進入這個 partner-facing entry。",
           credentialsTitle: "有效憑證",
           credentialsSubtitle:
             "在此輪替 ingress credential；明文只會在發出後顯示一次。",
+          auditTitle: "Audit 脈絡",
+          auditSubtitle:
+            "建立、更新、撤銷與 credential 活動都必須保留給平台稽核檢視。",
           notFound: "找不到此 partner entry。",
           save: "儲存 entry",
           preview: "預覽路由",
@@ -230,8 +256,15 @@ export default function PartnerDetailPage() {
   );
 
   const readinessItems = useMemo(
-    () => (entry ? buildPartnerReadinessItems(entry, t) : []),
-    [entry, t],
+    () =>
+      entry
+        ? buildPartnerReadinessItems(entry, t, {
+            activeCredentialCount: credentials.filter(
+              (credential) => !credential.revokedAt,
+            ).length,
+          })
+        : [],
+    [credentials, entry, t],
   );
 
   const detailItems = useMemo<DetailListItem[]>(() => {
@@ -283,10 +316,161 @@ export default function PartnerDetailPage() {
     ];
   }, [entry, locale]);
 
+  const authItems = useMemo<DetailListItem[]>(() => {
+    if (!entry) {
+      return [];
+    }
+
+    const activeCredentialCount = credentials.filter(
+      (credential) => !credential.revokedAt,
+    ).length;
+
+    return [
+      {
+        id: "auth-mode",
+        label: locale === "en" ? "Auth mode" : "驗證模式",
+        value: formatPlatformCodeLabel(locale, entry.authMode),
+        hint:
+          entry.authMode === "partner_api_key"
+            ? locale === "en"
+              ? "Platform-managed ingress secrets gate partner traffic."
+              : "由平台管理 ingress secret，作為 partner 流量入口 gate。"
+            : locale === "en"
+              ? "Tenant portal bearer identity governs session entry."
+              : "由 tenant portal bearer identity 管理進入流程。",
+      },
+      {
+        id: "dispatch-subtype",
+        label: locale === "en" ? "Dispatch subtype" : "派單子類型",
+        value: formatPlatformCodeLabel(locale, entry.businessDispatchSubtype),
+      },
+      {
+        id: "active-flag",
+        label: locale === "en" ? "Rollout flag" : "Rollout 旗標",
+        value: entry.activeFlag ? "active" : "inactive",
+        hint:
+          locale === "en"
+            ? "Keep lifecycle status and rollout flag aligned."
+            : "生命週期狀態與 rollout flag 應保持一致。",
+      },
+      {
+        id: "credential-coverage",
+        label: locale === "en" ? "Credential coverage" : "憑證覆蓋",
+        value:
+          entry.authMode === "partner_api_key"
+            ? `${activeCredentialCount} active`
+            : locale === "en"
+              ? "Not required"
+              : "不需要",
+        tone:
+          entry.authMode === "partner_api_key" && activeCredentialCount === 0
+            ? "warning"
+            : "success",
+      },
+    ];
+  }, [credentials, entry, locale]);
+
+  const eligibilityItems = useMemo<DetailListItem[]>(() => {
+    if (!entry) {
+      return [];
+    }
+
+    const contract = entry.eligibilityContract;
+
+    return [
+      {
+        id: "eligibility-mode",
+        label: locale === "en" ? "Eligibility mode" : "資格驗證模式",
+        value: formatPlatformCodeLabel(locale, entry.eligibilityMode),
+        hint:
+          entry.eligibilityMode === "none"
+            ? locale === "en"
+              ? "No partner-side verification required before fulfillment."
+              : "此流程在 fulfill 前不要求 partner-side verification。"
+            : locale === "en"
+              ? "Eligibility remains a platform-governed pre-dispatch gate."
+              : "Eligibility 仍屬平台治理的 pre-dispatch gate。",
+      },
+      {
+        id: "contract-id",
+        label: locale === "en" ? "Contract ID" : "契約 ID",
+        value: contract?.contractId ?? "—",
+        hint: contract
+          ? `${contract.adapterCode} · ${contract.adapterVersion}`
+          : undefined,
+      },
+      {
+        id: "adapter-kind",
+        label: locale === "en" ? "Adapter posture" : "Adapter 狀態",
+        value: contract?.adapterKind ?? "—",
+        hint: contract?.notes?.[0] ?? undefined,
+      },
+      {
+        id: "fallback",
+        label: locale === "en" ? "Manual fallback" : "人工 fallback",
+        value: contract?.manualFallbackPolicy?.requiredOnTimeout
+          ? locale === "en"
+            ? "Ops queue required"
+            : "需進 ops queue"
+          : locale === "en"
+            ? "No timeout fallback"
+            : "無 timeout fallback",
+        hint: contract?.manualFallbackPolicy
+          ? `${contract.manualFallbackPolicy.queue} · ${contract.manualFallbackPolicy.requiredAuditFields.join(", ")}`
+          : undefined,
+      },
+    ];
+  }, [entry, locale]);
+
+  const auditItems = useMemo<DetailListItem[]>(() => {
+    if (!entry) {
+      return [];
+    }
+
+    return [
+      {
+        id: "audit-source",
+        label: locale === "en" ? "Audit source" : "Audit 來源",
+        value: entry.auditMetadata.source ?? "—",
+      },
+      {
+        id: "request-id",
+        label: locale === "en" ? "Request ID" : "Request ID",
+        value: entry.auditMetadata.requestId ?? "—",
+      },
+      {
+        id: "created-by",
+        label: locale === "en" ? "Created by" : "建立者",
+        value: entry.auditMetadata.createdBy ?? "—",
+        hint: formatDateTime(entry.createdAt),
+      },
+      {
+        id: "updated-by",
+        label: locale === "en" ? "Updated by" : "更新者",
+        value: entry.auditMetadata.updatedBy ?? "—",
+        hint: formatDateTime(entry.updatedAt),
+      },
+      {
+        id: "revoked-at",
+        label: locale === "en" ? "Revoked at" : "撤銷時間",
+        value: entry.revokedAt ? formatDateTime(entry.revokedAt) : "—",
+        hint: entry.revokedBy ?? undefined,
+      },
+      {
+        id: "revoke-reason",
+        label: locale === "en" ? "Revoke reason" : "撤銷原因",
+        value: entry.revokeReason ?? "—",
+      },
+    ];
+  }, [entry, locale]);
+
   const credentialPreviewUrl =
     entry?.entryHost && entry?.entryPath
       ? `https://${entry.entryHost}${entry.entryPath}`
       : (entry?.entryPath ?? entry?.entryHost ?? null);
+
+  const readinessComplete =
+    readinessItems.length > 0 && readinessItems.every((item) => item.ready);
 
   if (loading) {
     return <div className="admin-empty">{t("partners.loading")}</div>;
@@ -369,6 +553,20 @@ export default function PartnerDetailPage() {
         />
       ) : null}
 
+      {!readinessComplete ? (
+        <CalloutBanner
+          tone={entry.status === "active" ? "danger" : "warning"}
+          title={copy.readinessTitle}
+          description={copy.readinessBlocked}
+        />
+      ) : (
+        <CalloutBanner
+          tone="success"
+          title={copy.readinessTitle}
+          description={copy.readinessReady}
+        />
+      )}
+
       <KpiRow minWidth="220px">
         <KpiCard
           label={locale === "en" ? "Lifecycle" : "生命週期"}
@@ -416,6 +614,23 @@ export default function PartnerDetailPage() {
               description={copy.overviewSubtitle}
             >
               <DetailMetadataGrid items={detailItems} minColumnWidth="220px" />
+            </WorkflowPanel>
+
+            <WorkflowPanel
+              title={copy.authTitle}
+              description={copy.authSubtitle}
+            >
+              <DetailMetadataGrid items={authItems} minColumnWidth="220px" />
+            </WorkflowPanel>
+
+            <WorkflowPanel
+              title={copy.eligibilityTitle}
+              description={copy.eligibilitySubtitle}
+            >
+              <DetailMetadataGrid
+                items={eligibilityItems}
+                minColumnWidth="220px"
+              />
             </WorkflowPanel>
 
             <form onSubmit={handleSave}>
@@ -487,6 +702,13 @@ export default function PartnerDetailPage() {
                   </div>
                 ))}
               </div>
+            </WorkflowPanel>
+
+            <WorkflowPanel
+              title={copy.auditTitle}
+              description={copy.auditSubtitle}
+            >
+              <DetailMetadataGrid items={auditItems} minColumnWidth="220px" />
             </WorkflowPanel>
 
             <WorkflowPanel
