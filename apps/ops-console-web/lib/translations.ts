@@ -165,6 +165,11 @@ const en = {
   "vehicles.col.lastChange": "Last Change",
   "vehicles.warningTitle": "Dispatchability warnings",
   "vehicles.debrandingPending": "Debranding still pending",
+  "vehicles.exclusivityApproved": "Exclusivity approved",
+  "vehicles.exclusivityPending": "Exclusivity review pending",
+  "vehicles.lifecycle": "Lifecycle Coverage",
+  "vehicles.registrySummary":
+    "{dispatchable} dispatchable · {blocked} blocked · {offboarding} offboarding · {debranding} debranding pending",
   "vehicles.noneBlocked": "Ready",
   "vehicles.lastChangeNone": "No lifecycle change recorded",
   "vehicles.empty": "No vehicles registered.",
@@ -189,6 +194,10 @@ const en = {
   "drivers.list.locationStale": "Stale",
   "drivers.list.locationMissing": "No sample",
   "drivers.list.locationUnknown": "Unknown",
+  "drivers.registrySummary":
+    "{eligible} dispatch eligible · {blocked} blocked · {live} live location · {stale} stale location",
+  "drivers.registryFooter":
+    "Platform eligibility actions stay in driver detail so list views remain read-first.",
 
   // ── Driver Detail (Eligibility Management) ──
   "driverDetail.title": "Driver Eligibility Management",
@@ -291,6 +300,10 @@ const en = {
   "contracts.reviewContext.cardLast4": "Card ••••{value}",
   "contracts.reviewContext.flightNo": "Flight {value}",
   "contracts.reviewContext.none": "No extra request context",
+  "contracts.reviewRegistrySummary":
+    "{total} cases in queue · {manual} still waiting manual review",
+  "contracts.registrySummary":
+    "{active} active · {draft} draft · {attention} partner eligibility cases need attention",
   "contracts.empty": "No contracts registered.",
 
   // ── Feature Flags ──
@@ -299,6 +312,9 @@ const en = {
   "flags.col.key": "Key",
   "flags.col.status": "Status",
   "flags.col.description": "Description",
+  "flags.registrySummary": "{enabled} enabled · {disabled} disabled",
+  "flags.registryFooter":
+    "Feature flags stay read-only here and mirror the shared management registry table pattern.",
   "flags.empty": "No flags found.",
 
   // ── Attendance ──
@@ -1518,6 +1534,11 @@ const zh: Record<keyof typeof en, string> = {
   "vehicles.col.lastChange": "最近變更",
   "vehicles.warningTitle": "派車風險警示",
   "vehicles.debrandingPending": "除標識尚未完成",
+  "vehicles.exclusivityApproved": "排他委託已核准",
+  "vehicles.exclusivityPending": "排他委託待審",
+  "vehicles.lifecycle": "Lifecycle 覆蓋",
+  "vehicles.registrySummary":
+    "{dispatchable} 輛可派遣 · {blocked} 輛受阻 · {offboarding} 輛退場中 · {debranding} 輛待除標識",
   "vehicles.noneBlocked": "可派",
   "vehicles.lastChangeNone": "尚無 lifecycle 變更紀錄",
   "vehicles.empty": "尚未登記車輛。",
@@ -1542,6 +1563,10 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.list.locationStale": "過期",
   "drivers.list.locationMissing": "無回傳",
   "drivers.list.locationUnknown": "未知",
+  "drivers.registrySummary":
+    "{eligible} 位可派遣 · {blocked} 位受阻 · {live} 位即時定位 · {stale} 位定位過期",
+  "drivers.registryFooter":
+    "平台 eligibility 操作保留在司機明細，列表頁維持以讀取與判斷為主。",
 
   // ── Driver Detail (Eligibility Management) ──
   "driverDetail.title": "司機平台 eligibility 管理",
@@ -1637,6 +1662,10 @@ const zh: Record<keyof typeof en, string> = {
   "contracts.reviewContext.cardLast4": "卡號末四碼 ••••{value}",
   "contracts.reviewContext.flightNo": "航班 {value}",
   "contracts.reviewContext.none": "無額外請求上下文",
+  "contracts.reviewRegistrySummary":
+    "{total} 筆佇列案例 · {manual} 筆仍待人工審查",
+  "contracts.registrySummary":
+    "{active} 份生效中 · {draft} 份草稿 · {attention} 筆合作夥伴 eligibility 案例待關注",
   "contracts.col.status": "狀態",
   "contracts.empty": "尚未登記合約。",
 
@@ -1646,6 +1675,9 @@ const zh: Record<keyof typeof en, string> = {
   "flags.col.key": "鍵名",
   "flags.col.status": "狀態",
   "flags.col.description": "說明",
+  "flags.registrySummary": "{enabled} 個已啟用 · {disabled} 個已停用",
+  "flags.registryFooter":
+    "此處維持唯讀檢視，並與共享 management registry table pattern 對齊。",
   "flags.empty": "未找到旗標。",
 
   // ── Attendance ──

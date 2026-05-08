@@ -1,10 +1,15 @@
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
-import { PageHeader } from "@drts/ui-web";
-import { Card } from "@drts/ui-web";
-import { DataTable, Tr, Td } from "@drts/ui-web";
-import { Badge } from "@drts/ui-web";
+import {
+  DataCellStack,
+  DataTable,
+  DataViewCard,
+  PageHeader,
+  StatusChip,
+  Td,
+  Tr,
+} from "@drts/ui-web";
 
 interface FlagRecord {
   key: string;
@@ -51,6 +56,7 @@ export default async function FeatureFlagsPage() {
   }
 
   const enabled = flags.filter((f) => f.enabled).length;
+  const disabled = flags.length - enabled;
 
   return (
     <>
@@ -75,8 +81,20 @@ export default async function FeatureFlagsPage() {
         </div>
       )}
 
-      <Card>
+      <DataViewCard
+        title={t("flags.title", locale)}
+        subtitle={t("flags.subtitle", locale, { total: flags.length, enabled })}
+        tone="info"
+        density="compact"
+        summary={t("flags.registrySummary", locale, {
+          enabled,
+          disabled,
+        })}
+        footer={t("flags.registryFooter", locale)}
+      >
         <DataTable
+          density="compact"
+          tone="info"
           columns={[
             { label: t("flags.col.key", locale) },
             { label: t("flags.col.status", locale), width: "100px" },
@@ -86,19 +104,30 @@ export default async function FeatureFlagsPage() {
         >
           {flags.map((f, i) => (
             <Tr key={i}>
-              <Td mono>{f.key}</Td>
-              <Td>
-                <Badge variant={f.enabled ? "green" : "gray"}>
-                  {f.enabled
-                    ? t("common.enabled", locale)
-                    : t("common.disabled", locale)}
-                </Badge>
+              <Td mono density="compact">
+                <DataCellStack
+                  primary={f.key}
+                  secondary={f.enabled ? "enabled" : "disabled"}
+                />
               </Td>
-              <Td muted>{featureFlagDescription(locale, f)}</Td>
+              <Td density="compact">
+                <StatusChip
+                  tone={f.enabled ? "success" : "neutral"}
+                  authorityLabel={locale === "zh" ? "狀態" : "state"}
+                  label={
+                    f.enabled
+                      ? t("common.enabled", locale)
+                      : t("common.disabled", locale)
+                  }
+                />
+              </Td>
+              <Td muted density="compact">
+                {featureFlagDescription(locale, f)}
+              </Td>
             </Tr>
           ))}
         </DataTable>
-      </Card>
+      </DataViewCard>
     </>
   );
 }
