@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
+import { PLATFORM_CODE_REGISTRY } from "@drts/contracts";
+import type { DriverTaskRecord, UnifiedDriverTaskView } from "@drts/contracts";
 
 import { ActionButton } from "@/components/ui/ActionButton";
 import { AppScreen } from "@/components/ui/AppScreen";
@@ -12,7 +14,21 @@ import { FormField } from "@/components/ui/FormField";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { StatusChip } from "@/components/ui/StatusChip";
 import { Tokens } from "@/components/ui/tokens";
+import {
+  buildFallbackUnifiedDriverTaskView,
+  isUnifiedTaskPlatformClosed,
+  summarizeWorkspaceTasks,
+} from "@/lib/driver-workspace-cockpit";
 import { getDriverClient } from "@/lib/api-client";
+import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
+
+type IncidentPlatformContext = {
+  platformCode: string;
+  platformLabel: string;
+  mirrorOrderId: string;
+  externalOrderId: string | null;
+  nativeStatus: string | null;
+};
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -20,6 +36,156 @@ function getErrorMessage(error: unknown): string {
   }
 
   return "SOS 送出失敗，請稍後再試。";
+}
+
+function humanizeCode(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function isOwnedPlatformCode(platformCode: string | null | undefined) {
+  const normalized = platformCode?.trim().toLowerCase() ?? "drts";
+  return (
+    normalized === "drts" || normalized === "owned" || normalized === "direct"
+  );
+}
+
+function getPlatformDisplayLabel(platformCode: string | null | undefined) {
+  const normalized = platformCode?.trim().toLowerCase();
+  if (!normalized || isOwnedPlatformCode(normalized)) {
+    return "DRTS";
+  }
+
+  if (normalized in PLATFORM_CODE_REGISTRY) {
+    return PLATFORM_CODE_REGISTRY[
+      normalized as keyof typeof PLATFORM_CODE_REGISTRY
+    ].displayName;
+  }
+
+  return humanizeCode(normalized);
+}
+
+function formatPlatformStatusLabel(status: string | null): string | null {
+  if (!status) {
+    return null;
+  }
+
+  const normalized = status.trim().toLowerCase();
+  const knownLabels: Record<string, string> = {
+    offered: "可接單",
+    broadcasted: "廣播中",
+    accept_pending: "等待平台確認",
+    confirmed: "平台已確認",
+    confirmed_by_platform: "平台已確認",
+    lost_race: "其他司機已接",
+    taken: "其他司機已接",
+    cancelled: "平台取消",
+    cancelled_by_platform: "平台取消",
+    sync_failed: "同步異常",
+  };
+
+  return knownLabels[normalized] ?? formatDriverTaskStatusLabel(status);
+}
+
+function buildIncidentDescription(
+  details: string,
+  platformContext: IncidentPlatformContext | null,
+) {
+  const baseDescription = details.trim() || "已由司機 App 送出 SOS 緊急通報。";
+  if (!platformContext) {
+    return baseDescription;
+  }
+
+  const lines = [
+    baseDescription,
+    "",
+    "[SOS 平台任務上下文]",
+    `來源平台：${platformContext.platformLabel}（${platformContext.platformCode}）`,
+    `本地鏡像訂單：${platformContext.mirrorOrderId}`,
+  ];
+
+  if (platformContext.externalOrderId) {
+    lines.push(`外部訂單：${platformContext.externalOrderId}`);
+  }
+
+  const nativeStatusLabel = formatPlatformStatusLabel(
+    platformContext.nativeStatus,
+  );
+  if (nativeStatusLabel) {
+    lines.push(`目前平台狀態：${nativeStatusLabel}`);
+  }
+
+  return lines.join("\n");
+}
+
+function buildIncidentPlatformContext(
+  task: UnifiedDriverTaskView | null,
+): IncidentPlatformContext | null {
+  if (!task || isOwnedPlatformCode(task.sourcePlatform)) {
+    return null;
+  }
+
+  return {
+    platformCode: task.sourcePlatform,
+    platformLabel:
+      task.platformDisplayName || getPlatformDisplayLabel(task.sourcePlatform),
+    mirrorOrderId: task.orderId,
+    externalOrderId: task.externalOrderId,
+    nativeStatus: task.nativeStatus,
+  };
+}
+
+function pickForwardedTaskContext(
+  tasks: ReadonlyArray<UnifiedDriverTaskView>,
+): IncidentPlatformContext | null {
+  if (tasks.length === 0) {
+    return null;
+  }
+
+  const summary = summarizeWorkspaceTasks(tasks);
+  const prioritizedTasks = [
+    summary.activeTripTask,
+    summary.actionRequiredTask,
+    summary.awaitingPlatformTask,
+    ...summary.orderedTasks,
+  ].filter(
+    (task, index, list): task is UnifiedDriverTaskView =>
+      task != null && list.indexOf(task) === index,
+  );
+
+  const preferredForwardedTask =
+    prioritizedTasks.find(
+      (task) =>
+        !isOwnedPlatformCode(task.sourcePlatform) &&
+        !isUnifiedTaskPlatformClosed(task),
+    ) ??
+    prioritizedTasks.find(
+      (task) => !isOwnedPlatformCode(task.sourcePlatform),
+    ) ??
+    null;
+
+  return buildIncidentPlatformContext(preferredForwardedTask);
+}
+
+async function resolveIncidentPlatformContext(): Promise<IncidentPlatformContext | null> {
+  const client = getDriverClient();
+
+  try {
+    const unifiedTasks = await client.listUnifiedDriverTasks();
+    return pickForwardedTaskContext(unifiedTasks);
+  } catch {
+    try {
+      const legacyTasks = await client.listDriverTasks();
+      return pickForwardedTaskContext(
+        legacyTasks.map((task: DriverTaskRecord) =>
+          buildFallbackUnifiedDriverTaskView(task),
+        ),
+      );
+    } catch {
+      return null;
+    }
+  }
 }
 
 export default function IncidentScreen() {
@@ -56,11 +222,15 @@ export default function IncidentScreen() {
     setSubmissionError(null);
     const client = getDriverClient();
     try {
+      const platformContext = await resolveIncidentPlatformContext();
       const created = await client.createIncident({
         title: "司機 SOS 緊急通報",
-        description: details.trim() || "已由司機 App 送出 SOS 緊急通報。",
+        description: buildIncidentDescription(details, platformContext),
         category: "safety",
         severity: "critical",
+        ...(platformContext
+          ? { relatedOrderId: platformContext.mirrorOrderId }
+          : {}),
         reportedBy: "driver",
       });
       if (created?.incidentId) {

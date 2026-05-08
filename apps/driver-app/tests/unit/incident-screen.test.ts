@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   replace: vi.fn(),
   confirmDangerAction: vi.fn(),
   isFeatureEnabled: vi.fn(),
+  listUnifiedDriverTasks: vi.fn(),
+  listDriverTasks: vi.fn(),
   createIncident: vi.fn(),
   updateIncident: vi.fn(),
 }));
@@ -70,6 +72,8 @@ vi.mock("@/components/ui/confirm-danger-action", () => ({
 vi.mock("@/lib/api-client", () => ({
   getDriverClient: () => ({
     isFeatureEnabled: mocks.isFeatureEnabled,
+    listUnifiedDriverTasks: mocks.listUnifiedDriverTasks,
+    listDriverTasks: mocks.listDriverTasks,
     createIncident: mocks.createIncident,
     updateIncident: mocks.updateIncident,
   }),
@@ -93,6 +97,8 @@ describe("IncidentScreen", () => {
     mocks.replace.mockReset();
     mocks.confirmDangerAction.mockReset();
     mocks.isFeatureEnabled.mockReset().mockResolvedValue(true);
+    mocks.listUnifiedDriverTasks.mockReset().mockResolvedValue([]);
+    mocks.listDriverTasks.mockReset().mockResolvedValue([]);
     mocks.createIncident
       .mockReset()
       .mockResolvedValue({ incidentId: "INC-001" });
@@ -147,5 +153,64 @@ describe("IncidentScreen", () => {
       escalationTarget: "safety_officer",
     });
     expect(mocks.replace).toHaveBeenCalledWith("/trip");
+  });
+
+  it("preserves forwarded task context in the SOS incident payload", async () => {
+    mocks.listUnifiedDriverTasks.mockResolvedValue([
+      {
+        taskId: "task-forwarded-001",
+        orderId: "mirror-001",
+        orderDomain: "forwarded",
+        sourcePlatform: "grab",
+        platformDisplayName: "Grab",
+        externalOrderId: "ext-777",
+        nativeStatus: "confirmed_by_platform",
+        localStatus: "accepted",
+        driverActionState: "in_progress",
+        allowedActions: ["depart"],
+        routeLocked: true,
+        fareAuthority: "external_platform",
+        settlementAuthority: "external_platform",
+        driverPayoutAuthority: "external_platform",
+        requiresManualFallback: false,
+        requiresReauth: false,
+        syncIssueSummary: null,
+        blockingReason: null,
+        pickupSummary: null,
+        dropoffSummary: null,
+        deadlineAt: null,
+        updatedAt: "2026-05-08T03:40:00.000Z",
+      },
+    ]);
+
+    let renderer: any;
+
+    await act(async () => {
+      renderer = create(React.createElement(IncidentScreen));
+      await flushEffects();
+    });
+
+    await act(async () => {
+      findActionButton(renderer, "送出 SOS").props.onPress();
+    });
+
+    const options = mocks.confirmDangerAction.mock.calls[0]?.[0] as {
+      onConfirm: () => void;
+    };
+
+    await act(async () => {
+      options.onConfirm();
+      await flushEffects();
+    });
+
+    expect(mocks.createIncident).toHaveBeenCalledWith({
+      title: "司機 SOS 緊急通報",
+      description:
+        "已由司機 App 送出 SOS 緊急通報。\n\n[SOS 平台任務上下文]\n來源平台：Grab（grab）\n本地鏡像訂單：mirror-001\n外部訂單：ext-777\n目前平台狀態：平台已確認",
+      category: "safety",
+      severity: "critical",
+      relatedOrderId: "mirror-001",
+      reportedBy: "driver",
+    });
   });
 });
