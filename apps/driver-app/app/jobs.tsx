@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import {
   View,
   Text,
-  FlatList,
+  SectionList,
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
@@ -10,8 +10,16 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
-import { PlatformTaskBadge } from "@/components/platform-task-badge";
+import type {
+  DriverTaskAction,
+  DriverTaskRecord,
+  OwnedOrderRecord,
+  UnifiedDriverTaskView,
+} from "@drts/contracts";
+import {
+  PlatformTaskBadge,
+  getPlatformDisplayLabel,
+} from "@/components/platform-task-badge";
 import { getDriverClient } from "@/lib/api-client";
 import {
   formatDriverTaskStatusLabel,
@@ -19,6 +27,7 @@ import {
 } from "@/lib/operational-labels";
 import {
   ActionButton,
+  AuthorityBanner,
   BottomActionBar,
   EmptyState,
   ErrorBanner,
@@ -34,71 +43,430 @@ type TaskFilterValue =
   | "all"
   | "needs_action"
   | "in_progress"
-  | "platform_closed";
+  | "platform_closed"
+  | "sync_issue";
+
+type TaskSection = {
+  key: "owned" | "forwarded";
+  title: string;
+  description: string;
+  data: UnifiedDriverTaskView[];
+};
 
 const FILTER_OPTIONS = [
   { label: "全部", value: "all" },
   { label: "待處理", value: "needs_action" },
   { label: "進行中", value: "in_progress" },
   { label: "平台結案", value: "platform_closed" },
+  { label: "需同步/異常", value: "sync_issue" },
 ] as const;
 
-function isForwardedTask(task: DriverTaskRecord): boolean {
-  return task.sourcePlatform != null;
+const ACTION_LABELS: Record<DriverTaskAction, string> = {
+  accept: "接受任務",
+  reject: "婉拒任務",
+  depart: "前往接送點",
+  arrived_pickup: "回報已抵達",
+  start: "開始行程",
+  complete: "完成行程",
+};
+
+function humanizeCode(value: string) {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function isForwarderTerminalTask(task: DriverTaskRecord): boolean {
-  return isForwardedTask(task) && task.status === "cancelled";
+function formatStatusLabel(status: string | null) {
+  if (!status) {
+    return "待同步";
+  }
+
+  const knownForwardedStatuses: Record<string, string> = {
+    offered: "可接單",
+    broadcasted: "廣播中",
+    accept_pending: "等待平台確認",
+    confirmed: "平台已確認",
+    confirmed_by_platform: "平台已確認",
+    lost_race: "其他司機已接",
+    taken: "其他司機已接",
+    cancelled: "平台取消",
+    cancelled_by_platform: "平台取消",
+    sync_failed: "同步異常",
+  };
+
+  return knownForwardedStatuses[status] ?? formatDriverTaskStatusLabel(status);
 }
 
-function matchesFilter(
-  task: DriverTaskRecord,
-  filter: TaskFilterValue,
-): boolean {
+function formatActionStateLabel(
+  actionState: UnifiedDriverTaskView["driverActionState"],
+) {
+  switch (actionState) {
+    case "action_required":
+      return "待司機處理";
+    case "awaiting_platform":
+      return "等待平台回覆";
+    case "in_progress":
+      return "進行中";
+    case "blocked":
+      return "需派車台處理";
+    case "completed":
+      return "已完成";
+    case "read_only":
+      return "唯讀鏡像";
+    default:
+      return humanizeCode(actionState);
+  }
+}
+
+function normalizeStateCode(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? null;
+}
+
+function isOwnedTask(task: UnifiedDriverTaskView) {
+  return task.sourcePlatform === "drts";
+}
+
+function hasSyncIssue(task: UnifiedDriverTaskView) {
+  return (
+    task.requiresManualFallback ||
+    task.requiresReauth ||
+    Boolean(task.syncIssueSummary) ||
+    normalizeStateCode(task.nativeStatus) === "sync_failed"
+  );
+}
+
+function isPlatformClosed(task: UnifiedDriverTaskView) {
+  if (isOwnedTask(task) || hasSyncIssue(task)) {
+    return false;
+  }
+
+  const nativeStatus = normalizeStateCode(task.nativeStatus);
+  const localStatus = normalizeStateCode(String(task.localStatus));
+  return (
+    nativeStatus === "lost_race" ||
+    nativeStatus === "taken" ||
+    nativeStatus === "cancelled" ||
+    nativeStatus === "cancelled_by_platform" ||
+    localStatus === "cancelled" ||
+    localStatus === "rejected" ||
+    task.driverActionState === "read_only"
+  );
+}
+
+function matchesFilter(task: UnifiedDriverTaskView, filter: TaskFilterValue) {
   if (filter === "all") {
     return true;
   }
 
+  if (filter === "sync_issue") {
+    return hasSyncIssue(task);
+  }
+
   if (filter === "platform_closed") {
-    return isForwarderTerminalTask(task);
+    return isPlatformClosed(task);
   }
 
   if (filter === "needs_action") {
-    return (
-      task.status === "pending_acceptance" || task.status === "proof_pending"
-    );
+    return task.driverActionState === "action_required";
   }
 
   return (
-    task.status === "accepted" ||
-    task.status === "enroute_pickup" ||
-    task.status === "arrived_pickup" ||
-    task.status === "on_trip"
+    task.driverActionState === "in_progress" ||
+    task.driverActionState === "awaiting_platform"
   );
 }
 
-function getStatusChipVariant(task: DriverTaskRecord) {
-  if (isForwarderTerminalTask(task)) {
+function getStatusChipVariant(task: UnifiedDriverTaskView) {
+  if (hasSyncIssue(task)) {
+    return "warning" as const;
+  }
+
+  if (isPlatformClosed(task)) {
     return "danger" as const;
   }
 
-  switch (task.status) {
-    case "pending_acceptance":
-    case "proof_pending":
+  switch (task.driverActionState) {
+    case "action_required":
       return "warning" as const;
-    case "accepted":
-    case "enroute_pickup":
-    case "arrived_pickup":
-    case "on_trip":
+    case "awaiting_platform":
+    case "in_progress":
       return "info" as const;
     case "completed":
       return "success" as const;
-    case "rejected":
-    case "cancelled":
+    case "blocked":
       return "danger" as const;
     default:
       return "default" as const;
   }
+}
+
+function getActionPriority(task: UnifiedDriverTaskView) {
+  if (hasSyncIssue(task)) {
+    return 0;
+  }
+
+  switch (task.driverActionState) {
+    case "action_required":
+      return 1;
+    case "awaiting_platform":
+      return 2;
+    case "in_progress":
+      return 3;
+    case "read_only":
+      return 4;
+    case "completed":
+      return 5;
+    default:
+      return 6;
+  }
+}
+
+function compareTasks(a: UnifiedDriverTaskView, b: UnifiedDriverTaskView) {
+  const priorityDelta = getActionPriority(a) - getActionPriority(b);
+  if (priorityDelta !== 0) {
+    return priorityDelta;
+  }
+
+  const deadlineA = a.deadlineAt
+    ? Date.parse(a.deadlineAt)
+    : Number.POSITIVE_INFINITY;
+  const deadlineB = b.deadlineAt
+    ? Date.parse(b.deadlineAt)
+    : Number.POSITIVE_INFINITY;
+  if (deadlineA !== deadlineB) {
+    return deadlineA - deadlineB;
+  }
+
+  return Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+}
+
+function formatTimestamp(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function buildAllowedActionSummary(task: UnifiedDriverTaskView) {
+  if (hasSyncIssue(task)) {
+    return task.requiresReauth
+      ? "需重新登入或補授權後再同步"
+      : "需派車台介入同步";
+  }
+
+  if (task.allowedActions.length > 0) {
+    return task.allowedActions
+      .map((action) => ACTION_LABELS[action])
+      .join(" / ");
+  }
+
+  if (isPlatformClosed(task)) {
+    return "來源平台已結案，僅供查閱";
+  }
+
+  if (task.driverActionState === "awaiting_platform") {
+    return "等待來源平台確認接單";
+  }
+
+  if (task.driverActionState === "in_progress") {
+    return "請前往行程作業查看下一步";
+  }
+
+  if (task.driverActionState === "completed") {
+    return "任務已完成";
+  }
+
+  return task.blockingReason?.trim() || "目前無可執行操作";
+}
+
+function buildOperationalNote(task: UnifiedDriverTaskView) {
+  if (hasSyncIssue(task)) {
+    return (
+      task.syncIssueSummary?.trim() ||
+      "來源平台同步異常，需派車台處理；請勿依賴此卡片內容直接變更行程。"
+    );
+  }
+
+  const nativeStatus = normalizeStateCode(task.nativeStatus);
+  if (nativeStatus === "lost_race" || nativeStatus === "taken") {
+    return "此派單已由其他司機接走，保留紀錄供查閱，無需再執行本地操作。";
+  }
+
+  if (
+    nativeStatus === "cancelled" ||
+    nativeStatus === "cancelled_by_platform"
+  ) {
+    return "來源平台已取消此任務；如車隊端資訊未更新，請聯繫派車台確認。";
+  }
+
+  if (!isOwnedTask(task) && task.driverActionState === "awaiting_platform") {
+    return "已送出接單結果，等待來源平台確認；確認前請勿自行前往接送點。";
+  }
+
+  if (!isOwnedTask(task)) {
+    return `${task.platformDisplayName} 控制派遣、路線與完單狀態；請依平台規則執行。`;
+  }
+
+  if (task.driverActionState === "action_required") {
+    return "請優先處理此任務，避免影響派遣時效或後續補件。";
+  }
+
+  return "點擊任務卡可進入行程作業，查看最新狀態與可執行操作。";
+}
+
+function buildAuthorityBanner(task: UnifiedDriverTaskView) {
+  if (hasSyncIssue(task)) {
+    return {
+      title: task.requiresReauth ? "同步需要重新授權" : "同步需人工處理",
+      authorityLabel: task.requiresReauth ? "需重新登入" : "需派車台處理",
+      description: buildAllowedActionSummary(task),
+      tone: "warning" as const,
+      icon: "alert-circle-outline" as const,
+    };
+  }
+
+  if (isPlatformClosed(task)) {
+    return {
+      title: `${task.platformDisplayName} 已結案`,
+      authorityLabel: "無本地修改權限",
+      description: buildAllowedActionSummary(task),
+      tone: "danger" as const,
+      icon: "close-circle-outline" as const,
+    };
+  }
+
+  if (isOwnedTask(task)) {
+    return {
+      title: "DRTS 自營任務",
+      authorityLabel: "本地可直接操作",
+      description: buildAllowedActionSummary(task),
+      tone: "owned" as const,
+      icon: "shield-checkmark-outline" as const,
+    };
+  }
+
+  return {
+    title: `${task.platformDisplayName} 平台任務`,
+    authorityLabel: "來源平台規則生效",
+    description: buildAllowedActionSummary(task),
+    tone: "platform" as const,
+    icon: "swap-horizontal-outline" as const,
+  };
+}
+
+function buildTaskMeta(task: UnifiedDriverTaskView) {
+  if (task.deadlineAt) {
+    return `期限 ${formatTimestamp(task.deadlineAt)}`;
+  }
+
+  return `更新 ${formatTimestamp(task.updatedAt) ?? "剛剛"}`;
+}
+
+function buildFilterDescription(
+  selectedFilter: TaskFilterValue,
+  filteredCount: number,
+) {
+  switch (selectedFilter) {
+    case "needs_action":
+      return `待處理任務 ${filteredCount} 筆，優先確認接單、補件或需立即回應的派單。`;
+    case "in_progress":
+      return `進行中任務 ${filteredCount} 筆，包含平台確認中與已進入行程作業的任務。`;
+    case "platform_closed":
+      return `平台已結案任務 ${filteredCount} 筆，保留查閱，不提供本地變更。`;
+    case "sync_issue":
+      return `同步/授權異常 ${filteredCount} 筆，請依卡片指示聯繫派車台或重新登入。`;
+    default:
+      return `全部任務 ${filteredCount} 筆，依 owned 與 forwarded 分區檢視。`;
+  }
+}
+
+function getAllowedActionsFromTask(
+  task: DriverTaskRecord,
+  forwarded: boolean,
+): DriverTaskAction[] {
+  if (forwarded) {
+    if (task.status === "pending_acceptance") {
+      return ["accept", "reject"];
+    }
+    return [];
+  }
+
+  switch (task.status) {
+    case "pending_acceptance":
+      return ["accept"];
+    case "accepted":
+      return ["depart"];
+    case "enroute_pickup":
+      return ["arrived_pickup"];
+    case "arrived_pickup":
+      return ["start"];
+    case "on_trip":
+    case "proof_pending":
+      return ["complete"];
+    default:
+      return [];
+  }
+}
+
+function buildFallbackUnifiedTaskView(
+  task: DriverTaskRecord,
+): UnifiedDriverTaskView {
+  const forwarded = task.sourcePlatform != null;
+  return {
+    taskId: task.taskId,
+    orderId: task.orderId,
+    orderDomain: forwarded ? "forwarded" : "owned",
+    sourcePlatform: forwarded
+      ? (task.sourcePlatform as UnifiedDriverTaskView["sourcePlatform"])
+      : "drts",
+    platformDisplayName: forwarded
+      ? getPlatformDisplayLabel(task.sourcePlatform)
+      : "DRTS",
+    externalOrderId: null,
+    nativeStatus: null,
+    localStatus: task.status,
+    driverActionState:
+      task.status === "pending_acceptance"
+        ? "action_required"
+        : task.status === "accepted" ||
+            task.status === "enroute_pickup" ||
+            task.status === "arrived_pickup" ||
+            task.status === "on_trip" ||
+            task.status === "proof_pending"
+          ? "in_progress"
+          : task.status === "completed"
+            ? "completed"
+            : forwarded
+              ? "read_only"
+              : "blocked",
+    allowedActions: getAllowedActionsFromTask(task, forwarded),
+    routeLocked: forwarded || !task.routeProvided,
+    fareAuthority: forwarded ? "external_platform" : "drts",
+    settlementAuthority: forwarded ? "external_platform" : "drts",
+    driverPayoutAuthority: forwarded ? "external_platform" : "drts",
+    requiresManualFallback: forwarded,
+    requiresReauth: false,
+    syncIssueSummary: forwarded
+      ? "來源平台原生狀態暫不可用，目前先以本地鏡像資料呈現；若內容異常請聯繫派車台。"
+      : null,
+    blockingReason: null,
+    pickupSummary: null,
+    dropoffSummary: null,
+    deadlineAt: null,
+    updatedAt:
+      task.completedAt ||
+      task.startedAt ||
+      task.arrivedPickupAt ||
+      task.departedAt ||
+      task.acceptedAt ||
+      new Date().toISOString(),
+  };
 }
 
 function RouteLockBadge() {
@@ -140,48 +508,8 @@ function TaskTypeBadge({
   );
 }
 
-function ForwarderTerminalBadge() {
-  return <StatusChip label="平台已結案" variant="danger" />;
-}
-
-function buildOperationalNote(task: DriverTaskRecord) {
-  if (isForwarderTerminalTask(task)) {
-    return "來源平台已結案，無需本地後續操作；若資訊有誤，請聯繫派車台。";
-  }
-
-  if (isForwardedTask(task)) {
-    return `由 ${task.sourcePlatform} 管理派遣、路線與完單狀態；若同步停滯，請聯繫派車台。`;
-  }
-
-  if (task.status === "pending_acceptance") {
-    return "請儘速確認是否接受此任務，避免錯過派遣時效。";
-  }
-
-  if (task.status === "proof_pending") {
-    return "此任務待補完單憑證，補件後才會進入後續結算流程。";
-  }
-
-  return "點擊任務卡進入行程作業，查看目前進度與下一步操作。";
-}
-
-function getFilterDescription(
-  selectedFilter: TaskFilterValue,
-  filteredCount: number,
-): string {
-  switch (selectedFilter) {
-    case "needs_action":
-      return `待處理任務 ${filteredCount} 筆，請優先確認接單與補件。`;
-    case "in_progress":
-      return `進行中任務 ${filteredCount} 筆，可直接進入行程作業。`;
-    case "platform_closed":
-      return `平台已結案任務 ${filteredCount} 筆，僅供查閱同步狀態。`;
-    default:
-      return `全部任務 ${filteredCount} 筆，包含自營與來源平台派遣。`;
-  }
-}
-
 export default function JobsScreen() {
-  const [tasks, setTasks] = useState<DriverTaskRecord[]>([]);
+  const [tasks, setTasks] = useState<UnifiedDriverTaskView[]>([]);
   const [orderMap, setOrderMap] = useState<Record<string, OwnedOrderRecord>>(
     {},
   );
@@ -190,32 +518,41 @@ export default function JobsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [tasksEnabled, setTasksEnabled] = useState(true);
   const [selectedFilter, setSelectedFilter] = useState<TaskFilterValue>("all");
+  const [fallbackMode, setFallbackMode] = useState(false);
   const router = useRouter();
 
   const loadTasks = async () => {
     const client = getDriverClient();
+
     try {
-      const fetchedTasks = await client.listDriverTasks();
+      let fetchedTasks: UnifiedDriverTaskView[] = [];
+      let degraded = false;
+
+      try {
+        fetchedTasks = await client.listUnifiedDriverTasks();
+      } catch {
+        const legacyTasks = await client.listDriverTasks();
+        fetchedTasks = legacyTasks.map(buildFallbackUnifiedTaskView);
+        degraded = true;
+      }
+
       setTasks(fetchedTasks);
+      setFallbackMode(degraded);
 
-      const orderPromises = fetchedTasks
-        .filter((task) => task.orderId)
-        .map(
-          async (
-            task,
-          ): Promise<{ orderId: string; order: OwnedOrderRecord | null }> => {
-            try {
-              const order = (await client.getOrder(
-                task.orderId,
-              )) as OwnedOrderRecord;
-              return { orderId: task.orderId, order };
-            } catch {
-              return { orderId: task.orderId, order: null };
-            }
-          },
-        );
+      const uniqueOrderIds = [
+        ...new Set(fetchedTasks.map((task) => task.orderId).filter(Boolean)),
+      ];
+      const orderResults = await Promise.all(
+        uniqueOrderIds.map(async (orderId) => {
+          try {
+            const order = (await client.getOrder(orderId)) as OwnedOrderRecord;
+            return { orderId, order };
+          } catch {
+            return { orderId, order: null };
+          }
+        }),
+      );
 
-      const orderResults = await Promise.all(orderPromises);
       const nextOrderMap: Record<string, OwnedOrderRecord> = {};
       orderResults.forEach(({ orderId, order }) => {
         if (order) {
@@ -226,6 +563,7 @@ export default function JobsScreen() {
       setOrderMap(nextOrderMap);
       setError(null);
     } catch (nextError: unknown) {
+      setFallbackMode(false);
       if (nextError instanceof Error && nextError.message.trim()) {
         setError(nextError.message.trim());
       } else {
@@ -257,17 +595,34 @@ export default function JobsScreen() {
   };
 
   const assignedCount = tasks.length;
-  const forwardedCount = tasks.filter(isForwardedTask).length;
+  const forwardedCount = tasks.filter((task) => !isOwnedTask(task)).length;
   const needsActionCount = tasks.filter((task) =>
     matchesFilter(task, "needs_action"),
   ).length;
-  const filteredTasks = tasks.filter((task) =>
-    matchesFilter(task, selectedFilter),
-  );
-  const filterDescription = getFilterDescription(
+  const syncIssueCount = tasks.filter(hasSyncIssue).length;
+  const filteredTasks = [
+    ...tasks.filter((task) => matchesFilter(task, selectedFilter)),
+  ].sort(compareTasks);
+  const filterDescription = buildFilterDescription(
     selectedFilter,
     filteredTasks.length,
   );
+
+  const sections = [
+    {
+      key: "owned" as const,
+      title: "自營任務",
+      description: "DRTS 可直接控制任務生命週期與本地操作。",
+      data: filteredTasks.filter(isOwnedTask),
+    },
+    {
+      key: "forwarded" as const,
+      title: "來源平台任務",
+      description: "第三方平台控制派遣與結案；卡片會顯示可執行操作與同步狀態。",
+      data: filteredTasks.filter((task) => !isOwnedTask(task)),
+    },
+  ] satisfies TaskSection[];
+  const visibleSections = sections.filter((section) => section.data.length > 0);
 
   if (loading) {
     return (
@@ -312,18 +667,35 @@ export default function JobsScreen() {
         }
       />
 
-      <FlatList
-        data={filteredTasks}
+      <SectionList
+        sections={visibleSections}
         keyExtractor={(item) => item.taskId}
+        stickySectionHeadersEnabled={false}
+        renderSectionHeader={({ section }) => (
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>{section.title}</Text>
+            <Text style={styles.sectionDescription}>
+              {section.description} 共 {section.data.length} 筆。
+            </Text>
+          </View>
+        )}
         renderItem={({ item }) => {
-          const forwarded = isForwardedTask(item);
-          const forwarderTerminal = isForwarderTerminalTask(item);
-          const order = item.orderId ? orderMap[item.orderId] : null;
+          const order = orderMap[item.orderId] ?? null;
           const fixedPrice = order?.fixedPrice ?? false;
           const serviceBucket = order?.serviceBucket ?? null;
           const businessDispatchSubtype =
             order?.businessDispatchSubtype ?? null;
           const dispatchSemantics = order?.dispatchSemantics ?? null;
+          const authorityBanner = buildAuthorityBanner(item);
+          const syncIssue = hasSyncIssue(item);
+          const platformClosed = isPlatformClosed(item);
+          const nativeStatus = !isOwnedTask(item)
+            ? formatStatusLabel(item.nativeStatus)
+            : null;
+          const pickupDropoffSummary =
+            item.pickupSummary && item.dropoffSummary
+              ? `${item.pickupSummary} → ${item.dropoffSummary}`
+              : item.pickupSummary || item.dropoffSummary;
 
           return (
             <Pressable
@@ -332,8 +704,10 @@ export default function JobsScreen() {
               onPress={() => router.push("/trip")}
               style={({ pressed }) => [
                 styles.taskCard,
+                !isOwnedTask(item) && styles.forwardedTaskCard,
+                platformClosed && styles.forwarderTerminalCard,
+                syncIssue && styles.syncIssueCard,
                 pressed && styles.taskCardPressed,
-                forwarderTerminal && styles.forwarderTerminalCard,
               ]}
             >
               <View style={styles.taskCardHeader}>
@@ -345,7 +719,7 @@ export default function JobsScreen() {
                 </View>
                 <View style={styles.taskHeaderStatus}>
                   <StatusChip
-                    label={formatDriverTaskStatusLabel(item.status)}
+                    label={formatStatusLabel(String(item.localStatus))}
                     variant={getStatusChipVariant(item)}
                   />
                 </View>
@@ -358,16 +732,57 @@ export default function JobsScreen() {
                 </Text>
               </View>
 
+              {pickupDropoffSummary ? (
+                <Text style={styles.routeSummary} numberOfLines={2}>
+                  {pickupDropoffSummary}
+                </Text>
+              ) : null}
+
               <View style={styles.badgeRow}>
-                {forwarded ? <RouteLockBadge /> : null}
-                <PlatformTaskBadge platformCode={item.sourcePlatform} />
+                {item.routeLocked ? <RouteLockBadge /> : null}
+                <PlatformTaskBadge
+                  platformCode={
+                    isOwnedTask(item) ? "owned" : item.sourcePlatform
+                  }
+                />
                 <TaskTypeBadge
                   serviceBucket={serviceBucket}
                   businessDispatchSubtype={businessDispatchSubtype}
                   dispatchSemantics={dispatchSemantics}
                 />
                 {fixedPrice ? <FixedPriceBadge /> : null}
-                {forwarderTerminal ? <ForwarderTerminalBadge /> : null}
+                {!isOwnedTask(item) && nativeStatus ? (
+                  <StatusChip
+                    label={`平台：${nativeStatus}`}
+                    variant={
+                      syncIssue
+                        ? "warning"
+                        : platformClosed
+                          ? "danger"
+                          : "default"
+                    }
+                  />
+                ) : null}
+                <StatusChip
+                  label={formatActionStateLabel(item.driverActionState)}
+                  variant={getStatusChipVariant(item)}
+                />
+              </View>
+
+              <AuthorityBanner
+                title={authorityBanner.title}
+                authorityLabel={authorityBanner.authorityLabel}
+                description={authorityBanner.description}
+                tone={authorityBanner.tone}
+                icon={authorityBanner.icon}
+                style={styles.authorityBanner}
+              />
+
+              <View style={styles.metaRow}>
+                <Text style={styles.metaText}>
+                  可執行操作：{buildAllowedActionSummary(item)}
+                </Text>
+                <Text style={styles.metaText}>{buildTaskMeta(item)}</Text>
               </View>
 
               <Text style={styles.operationalNote}>
@@ -378,7 +793,7 @@ export default function JobsScreen() {
                 <View>
                   <Text style={styles.affordanceLabel}>開啟行程作業</Text>
                   <Text style={styles.affordanceMeta}>
-                    查看目前進度與可執行操作
+                    查看目前進度、權限與下一步操作
                   </Text>
                 </View>
                 <View style={styles.affordanceIcon}>
@@ -392,7 +807,6 @@ export default function JobsScreen() {
             </Pressable>
           );
         }}
-        contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View style={styles.listHeader}>
             {error ? (
@@ -410,6 +824,16 @@ export default function JobsScreen() {
               </View>
             ) : null}
 
+            {fallbackMode ? (
+              <AuthorityBanner
+                title="目前使用本地鏡像備援"
+                authorityLabel="來源平台原生欄位暫不可用"
+                description="已退回舊任務 API；forwarded 任務仍會顯示，但平台原生狀態與同步摘要可能延後。"
+                tone="warning"
+                icon="cloud-offline-outline"
+              />
+            ) : null}
+
             <SegmentedControl
               options={FILTER_OPTIONS.map((option) => ({
                 label: option.label,
@@ -421,10 +845,11 @@ export default function JobsScreen() {
               }
             />
 
-            <View style={styles.summaryRow}>
-              <InfoTile label="指派任務" value={String(assignedCount)} />
-              <InfoTile label="來源平台任務" value={String(forwardedCount)} />
+            <View style={styles.summaryGrid}>
+              <InfoTile label="全部任務" value={String(assignedCount)} />
               <InfoTile label="待處理" value={String(needsActionCount)} />
+              <InfoTile label="來源平台" value={String(forwardedCount)} />
+              <InfoTile label="同步/異常" value={String(syncIssueCount)} />
             </View>
 
             <View style={styles.filterSummaryCard}>
@@ -451,6 +876,7 @@ export default function JobsScreen() {
             style={styles.emptyState}
           />
         }
+        contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -501,10 +927,6 @@ const styles = StyleSheet.create({
     marginBottom: Tokens.spacing.md,
     gap: Tokens.spacing.md,
   },
-  summaryRow: {
-    flexDirection: "row",
-    gap: Tokens.spacing.sm,
-  },
   errorPanel: {
     gap: Tokens.spacing.sm,
   },
@@ -513,6 +935,11 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     alignSelf: "flex-start",
+  },
+  summaryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
   },
   filterSummaryCard: {
     backgroundColor: Tokens.colors.surface,
@@ -530,6 +957,20 @@ const styles = StyleSheet.create({
     ...Tokens.type.label,
     color: Tokens.colors.textStrong,
   },
+  sectionHeader: {
+    marginBottom: Tokens.spacing.sm,
+    marginTop: Tokens.spacing.sm,
+  },
+  sectionTitle: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
+    fontWeight: "700",
+  },
+  sectionDescription: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginTop: 2,
+  },
   emptyState: {
     paddingHorizontal: 0,
   },
@@ -540,7 +981,17 @@ const styles = StyleSheet.create({
     borderColor: Tokens.colors.border,
     padding: Tokens.spacing.md,
     marginBottom: Tokens.spacing.sm,
-    minHeight: 148,
+    minHeight: 220,
+  },
+  forwardedTaskCard: {
+    borderColor: Tokens.colors.forwardedBorder,
+    borderLeftWidth: 4,
+    borderLeftColor: Tokens.colors.forwarded,
+    backgroundColor: Tokens.colors.forwardedBg,
+  },
+  syncIssueCard: {
+    borderColor: `${Tokens.colors.warning}55`,
+    backgroundColor: Tokens.colors.warningBg,
   },
   taskCardPressed: {
     backgroundColor: "#F9FBFF",
@@ -584,11 +1035,27 @@ const styles = StyleSheet.create({
     color: Tokens.colors.textBody,
     flex: 1,
   },
+  routeSummary: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textBody,
+    marginTop: Tokens.spacing.xs,
+  },
   badgeRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: Tokens.spacing.xs,
     marginTop: Tokens.spacing.md,
+  },
+  authorityBanner: {
+    marginTop: Tokens.spacing.md,
+  },
+  metaRow: {
+    marginTop: Tokens.spacing.md,
+    gap: Tokens.spacing.xs,
+  },
+  metaText: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
   },
   operationalNote: {
     ...Tokens.type.micro,
