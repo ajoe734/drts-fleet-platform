@@ -4,6 +4,10 @@ import type { BookingRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 import { BookingDetailActions } from "@/components/booking-detail-actions";
+import {
+  getBookingSourceVisibility,
+  getSourceToneClassName,
+} from "@/lib/source-domain";
 
 export default async function BookingDetailPage({
   params,
@@ -22,6 +26,8 @@ export default async function BookingDetailPage({
     error = e instanceof Error ? e.message : "Unknown error";
     notFound();
   }
+
+  const source = getBookingSourceVisibility(booking);
 
   return (
     <main className="app-grid">
@@ -57,6 +63,12 @@ export default async function BookingDetailPage({
             >
               {booking.orderStatus}
             </span>
+            <div style={{ marginTop: "0.75rem" }}>
+              <span className={getSourceToneClassName(source.tone)}>
+                {source.badge}
+              </span>
+              <p className="source-note">{source.detail}</p>
+            </div>
           </section>
 
           <section style={{ marginBottom: "1.5rem" }}>
@@ -80,6 +92,12 @@ export default async function BookingDetailPage({
                     Service Bucket
                   </td>
                   <td>{booking.serviceBucket}</td>
+                </tr>
+                <tr>
+                  <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>
+                    Fulfillment Source
+                  </td>
+                  <td>{source.summary}</td>
                 </tr>
                 <tr>
                   <td style={{ fontWeight: "bold", paddingRight: "1rem" }}>

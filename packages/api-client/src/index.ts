@@ -159,6 +159,7 @@ import type {
   TenantAddressRecord,
   TenantAddressExportViewRecord,
   TenantApiKeyRecord,
+  TenantBillingProfile,
   TenantBootstrapSession,
   TenantIntegrationGovernancePackage,
   TenantInvoiceRecord,
@@ -956,8 +957,8 @@ export class ApiClient {
 
   // ── Billing ──
 
-  async getBillingProfile() {
-    return this.get("/api/tenant/billing/profile");
+  async getBillingProfile(): Promise<TenantBillingProfile> {
+    return this.get<TenantBillingProfile>("/api/tenant/billing/profile");
   }
 
   async listInvoices(): Promise<TenantInvoiceRecord[]> {
