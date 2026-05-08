@@ -56,6 +56,7 @@ export type {
   SectionHeaderProps,
   StatusChipProps,
   StepState,
+  StepperOrientation,
   StepperProps,
   StepperItem,
   TimelineProps,
@@ -63,3 +64,15 @@ export type {
   WorkflowCalloutProps,
   WorkflowPanelProps,
 } from "./management-primitives";
+export {
+  ArtifactChipList,
+  WorkflowDetailDrawer,
+  WorkflowEmptyState,
+  WorkflowSplitLayout,
+} from "./workflow-primitives";
+export type {
+  ArtifactChipListProps,
+  WorkflowDetailDrawerProps,
+  WorkflowEmptyStateProps,
+  WorkflowSplitLayoutProps,
+} from "./workflow-primitives";
