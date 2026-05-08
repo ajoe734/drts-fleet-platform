@@ -4151,6 +4151,7 @@ export const OPERATIONAL_ALERT_KEYS = [
   "driver_state_lag",
   "webhook_failure_burst",
   "eligibility_review_backlog",
+  "adapter_degradation",
 ] as const;
 export type OperationalAlertKey = (typeof OPERATIONAL_ALERT_KEYS)[number];
 
@@ -4242,6 +4243,34 @@ export interface OperationalAdapterMetrics {
   downAdapters: number;
 }
 
+export interface OperationalForwarderOpsMetrics {
+  totalForwardedOrders: number;
+  syncFailedOrders: number;
+  acceptPendingOrders: number;
+  manualFallbackQueue: number;
+  reconciliationQueue: number;
+  oldestSyncFailedLagMinutes: number | null;
+  oldestAcceptPendingLagMinutes: number | null;
+  oldestManualFallbackLagMinutes: number | null;
+  oldestReconciliationLagMinutes: number | null;
+}
+
+export interface OperationalAdapterDetailRecord {
+  platformCode: PlatformCode;
+  status: AdapterHealthStatus;
+  reason: AdapterHealthReason;
+  credentialStatus: AdapterCredentialStatus;
+  authStatus: AdapterAuthStatus;
+  webhookStatus: AdapterWebhookStatus;
+  rateLimitStatus: AdapterRateLimitStatus;
+  capabilitySummary: ForwarderAdapterCapabilitySummary;
+  lastCheckedAt: string;
+  lastError: string | null;
+  lastWebhookReceivedAt: string | null;
+  lastRateLimitAt: string | null;
+  lastAuthFailureAt: string | null;
+}
+
 export interface OperationalRoleView {
   route: OperationalAlertRoute;
   alertKeys: OperationalAlertKey[];
@@ -4253,6 +4282,7 @@ export interface OperationalRoleView {
     | "eligibility"
     | "reporting"
     | "adapters"
+    | "forwarder_ops"
   >;
 }
 
@@ -4266,6 +4296,8 @@ export interface OperationalObservabilitySnapshot {
   eligibility: OperationalEligibilityMetrics;
   reporting: OperationalReportingMetrics;
   adapters: OperationalAdapterMetrics;
+  forwarderOps: OperationalForwarderOpsMetrics;
+  adapterDetails: OperationalAdapterDetailRecord[];
   roleViews: OperationalRoleView[];
 }
 

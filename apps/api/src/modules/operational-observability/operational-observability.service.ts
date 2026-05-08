@@ -7,6 +7,7 @@ import type {
   DriverLocationSnapshot,
   DriverRegistryRecord,
   IdentityContext,
+  OperationalAdapterDetailRecord,
   OperationalAlertKey,
   OperationalAlertRecord,
   OperationalAlertState,
@@ -15,6 +16,8 @@ import type {
   OwnedOrderRecord,
   PartnerEligibilityReviewQueueItem,
   ReportJobRecord,
+  ForwardedOrderRecord,
+  ForwarderReconciliationIssue,
 } from "@drts/contracts";
 
 import { CallcenterService } from "../callcenter/callcenter.service";
@@ -93,6 +96,12 @@ const ELIGIBILITY_REVIEW_THRESHOLDS: OperationalAlertThresholds = {
   unit: "count",
 };
 
+const ADAPTER_DEGRADATION_THRESHOLDS: OperationalAlertThresholds = {
+  warning: 1,
+  critical: 2,
+  unit: "count",
+};
+
 @Injectable()
 export class OperationalObservabilityService {
   constructor(
@@ -116,6 +125,9 @@ export class OperationalObservabilityService {
     const latestDriverLocations =
       this.regulatoryRegistryService.listLatestDriverLocations();
     const adapterHealth = this.forwarderService.listAdapterHealth();
+    const forwardedOrders = this.forwarderService.listOrders();
+    const reconciliationIssues =
+      this.forwarderService.listReconciliationIssues();
     const reportJobs = this.reportingFilingService.listReportJobs(
       undefined,
       SYSTEM_IDENTITY,
@@ -149,6 +161,15 @@ export class OperationalObservabilityService {
     );
     const reporting = this.buildReportingMetrics(reportJobs);
     const adapters = this.buildAdapterMetrics(adapterHealth);
+    const forwarderOps = this.buildForwarderOpsMetrics(
+      forwardedOrders,
+      reconciliationIssues,
+      referenceDate,
+    );
+    const adapterDetails = this.buildAdapterDetails(adapterHealth);
+    const degradedAdapterCount = adapterHealth.filter(
+      (adapter) => adapter.status !== "healthy",
+    ).length;
 
     return {
       generatedAt,
@@ -188,6 +209,13 @@ export class OperationalObservabilityService {
           ["ops", "platform"],
           generatedAt,
         ),
+        this.buildAlert(
+          "adapter_degradation",
+          degradedAdapterCount,
+          ADAPTER_DEGRADATION_THRESHOLDS,
+          ["ops", "platform"],
+          generatedAt,
+        ),
       ],
       dispatch,
       recording,
@@ -196,6 +224,8 @@ export class OperationalObservabilityService {
       eligibility,
       reporting,
       adapters,
+      forwarderOps,
+      adapterDetails,
       roleViews: [
         {
           route: "ops",
@@ -204,8 +234,16 @@ export class OperationalObservabilityService {
             "recording_backlog",
             "driver_state_lag",
             "eligibility_review_backlog",
+            "adapter_degradation",
           ],
-          focusAreas: ["dispatch", "recording", "driver_state", "reporting"],
+          focusAreas: [
+            "dispatch",
+            "recording",
+            "driver_state",
+            "reporting",
+            "adapters",
+            "forwarder_ops",
+          ],
         },
         {
           route: "platform",
@@ -213,6 +251,7 @@ export class OperationalObservabilityService {
             "dispatch_lag",
             "webhook_failure_burst",
             "eligibility_review_backlog",
+            "adapter_degradation",
           ],
           focusAreas: [
             "dispatch",
@@ -220,6 +259,7 @@ export class OperationalObservabilityService {
             "eligibility",
             "reporting",
             "adapters",
+            "forwarder_ops",
           ],
         },
       ],
@@ -396,6 +436,98 @@ export class OperationalObservabilityService {
       downAdapters: adapterHealth.filter((adapter) => adapter.status === "down")
         .length,
     };
+  }
+
+  private buildForwarderOpsMetrics(
+    forwardedOrders: ForwardedOrderRecord[],
+    reconciliationIssues: ForwarderReconciliationIssue[],
+    referenceDate: Date,
+  ) {
+    const syncFailedLagMinutes = forwardedOrders
+      .filter((order) => order.status === "sync_failed")
+      .map((order) =>
+        this.diffMinutes(
+          referenceDate,
+          order.lastSyncError?.failedAt ?? order.updatedAt,
+        ),
+      )
+      .filter((value): value is number => value !== null);
+    const acceptPendingLagMinutes = forwardedOrders
+      .filter((order) => order.status === "accept_pending")
+      .map((order) => this.diffMinutes(referenceDate, order.updatedAt))
+      .filter((value): value is number => value !== null);
+    const manualFallbackLagMinutes = forwardedOrders
+      .filter((order) => order.manualFallback.required)
+      .map((order) =>
+        this.diffMinutes(
+          referenceDate,
+          order.manualFallback.requestedAt ?? order.updatedAt,
+        ),
+      )
+      .filter((value): value is number => value !== null);
+    const reconciliationLagMinutes = reconciliationIssues
+      .map((issue) =>
+        this.diffMinutes(referenceDate, issue.reconciliationJob.createdAt),
+      )
+      .filter((value): value is number => value !== null);
+
+    return {
+      totalForwardedOrders: forwardedOrders.length,
+      syncFailedOrders: forwardedOrders.filter(
+        (order) => order.status === "sync_failed",
+      ).length,
+      acceptPendingOrders: forwardedOrders.filter(
+        (order) => order.status === "accept_pending",
+      ).length,
+      manualFallbackQueue: forwardedOrders.filter(
+        (order) => order.manualFallback.required,
+      ).length,
+      reconciliationQueue: reconciliationIssues.length,
+      oldestSyncFailedLagMinutes: this.maxOrNull(syncFailedLagMinutes),
+      oldestAcceptPendingLagMinutes: this.maxOrNull(acceptPendingLagMinutes),
+      oldestManualFallbackLagMinutes: this.maxOrNull(manualFallbackLagMinutes),
+      oldestReconciliationLagMinutes: this.maxOrNull(reconciliationLagMinutes),
+    };
+  }
+
+  private buildAdapterDetails(
+    adapterHealth: AdapterHealthRecord[],
+  ): OperationalAdapterDetailRecord[] {
+    const severityRank = {
+      down: 0,
+      degraded: 1,
+      healthy: 2,
+    } as const;
+
+    return [...adapterHealth]
+      .sort((left, right) => {
+        const severityDelta =
+          severityRank[left.status] - severityRank[right.status];
+        return severityDelta !== 0
+          ? severityDelta
+          : left.platformCode.localeCompare(right.platformCode);
+      })
+      .map((adapter) => ({
+        platformCode: adapter.platformCode,
+        status: adapter.status,
+        reason: adapter.reason,
+        credentialStatus: adapter.credentialStatus,
+        authStatus: adapter.authStatus,
+        webhookStatus: adapter.webhookStatus,
+        rateLimitStatus: adapter.rateLimitStatus,
+        capabilitySummary: {
+          ...adapter.capabilitySummary,
+          supportedWebhookEvents: [
+            ...adapter.capabilitySummary.supportedWebhookEvents,
+          ],
+          notes: [...adapter.capabilitySummary.notes],
+        },
+        lastCheckedAt: adapter.lastCheckedAt,
+        lastError: adapter.lastError,
+        lastWebhookReceivedAt: adapter.lastWebhookReceivedAt,
+        lastRateLimitAt: adapter.lastRateLimitAt,
+        lastAuthFailureAt: adapter.lastAuthFailureAt,
+      }));
   }
 
   private buildAlert(

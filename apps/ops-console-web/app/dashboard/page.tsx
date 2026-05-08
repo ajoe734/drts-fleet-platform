@@ -6,6 +6,7 @@ import type {
   DriverTaskRecord,
   IncidentRecord,
   MaintenanceRecord,
+  OperationalAdapterDetailRecord,
   OperationalObservabilitySnapshot,
   OwnedOrderRecord,
   ReportJobRecord,
@@ -51,6 +52,24 @@ const ALERT_STATE_STYLES = {
   critical: {
     background: "#fef2f2",
     border: "#fecaca",
+    color: "#b91c1c",
+  },
+} as const;
+
+const ADAPTER_STATUS_STYLES = {
+  healthy: {
+    background: "#dcfce7",
+    border: "#86efac",
+    color: "#166534",
+  },
+  degraded: {
+    background: "#fef3c7",
+    border: "#fcd34d",
+    color: "#92400e",
+  },
+  down: {
+    background: "#fee2e2",
+    border: "#fca5a5",
     color: "#b91c1c",
   },
 } as const;
@@ -114,6 +133,18 @@ function createFallbackObservabilitySnapshot(
       degradedAdapters: 0,
       downAdapters: 0,
     },
+    forwarderOps: {
+      totalForwardedOrders: 0,
+      syncFailedOrders: 0,
+      acceptPendingOrders: 0,
+      manualFallbackQueue: 0,
+      reconciliationQueue: 0,
+      oldestSyncFailedLagMinutes: null,
+      oldestAcceptPendingLagMinutes: null,
+      oldestManualFallbackLagMinutes: null,
+      oldestReconciliationLagMinutes: null,
+    },
+    adapterDetails: [],
     roleViews: [],
   };
 }
@@ -154,9 +185,64 @@ function getAlertSummary(
       return t("dashboard.alert.eligibility_review_backlog.summary", locale, {
         count: observability.eligibility.totalReviewQueue,
       });
+    case "adapter_degradation":
+      return t("dashboard.alert.adapter_degradation.summary", locale, {
+        count:
+          observability.adapters.degradedAdapters +
+          observability.adapters.downAdapters,
+      });
     default:
       return "";
   }
+}
+
+function formatTimestamp(value: string | null, locale: "en" | "zh") {
+  if (!value) {
+    return t("dashboard.platformOps.notReported", locale);
+  }
+
+  return `${new Intl.DateTimeFormat(locale === "en" ? "en-US" : "zh-TW", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  }).format(new Date(value))} UTC`;
+}
+
+function formatBacklogSummary(value: number | null, locale: "en" | "zh") {
+  if (value === null) {
+    return t("dashboard.platformOps.noLag", locale);
+  }
+
+  return t("dashboard.platformOps.oldestLag", locale, {
+    value: formatAlertValue(value, "minutes", locale),
+  });
+}
+
+function buildAdapterSignalItems(
+  adapter: OperationalAdapterDetailRecord,
+  locale: "en" | "zh",
+) {
+  return [
+    {
+      label: t("dashboard.platformOps.signal.credential", locale),
+      value: formatOpsCodeLabel(locale, adapter.credentialStatus),
+    },
+    {
+      label: t("dashboard.platformOps.signal.auth", locale),
+      value: formatOpsCodeLabel(locale, adapter.authStatus),
+    },
+    {
+      label: t("dashboard.platformOps.signal.webhook", locale),
+      value: formatOpsCodeLabel(locale, adapter.webhookStatus),
+    },
+    {
+      label: t("dashboard.platformOps.signal.rateLimit", locale),
+      value: formatOpsCodeLabel(locale, adapter.rateLimitStatus),
+    },
+  ] as const;
 }
 
 async function resolveOrFallback<T>(
@@ -303,6 +389,63 @@ export default async function DashboardPage() {
       const severityRank = { critical: 0, warning: 1, healthy: 2 } as const;
       return severityRank[left.state] - severityRank[right.state];
     });
+  const adapterAttentionCount =
+    observability.adapters.degradedAdapters +
+    observability.adapters.downAdapters;
+  const platformOpsCards = [
+    {
+      label: t("dashboard.platformOps.metrics.adapters", locale),
+      value: formatCompactNumber(adapterAttentionCount),
+      sub: t("dashboard.platformOps.metrics.adaptersSub", locale, {
+        healthy: observability.adapters.healthyAdapters,
+        down: observability.adapters.downAdapters,
+        total: observability.adapters.totalAdapters,
+      }),
+      accent: "#0f766e",
+    },
+    {
+      label: t("dashboard.platformOps.metrics.syncFailed", locale),
+      value: formatCompactNumber(observability.forwarderOps.syncFailedOrders),
+      sub: formatBacklogSummary(
+        observability.forwarderOps.oldestSyncFailedLagMinutes,
+        locale,
+      ),
+      accent: "#dc2626",
+    },
+    {
+      label: t("dashboard.platformOps.metrics.acceptPending", locale),
+      value: formatCompactNumber(
+        observability.forwarderOps.acceptPendingOrders,
+      ),
+      sub: formatBacklogSummary(
+        observability.forwarderOps.oldestAcceptPendingLagMinutes,
+        locale,
+      ),
+      accent: "#d97706",
+    },
+    {
+      label: t("dashboard.platformOps.metrics.manualFallback", locale),
+      value: formatCompactNumber(
+        observability.forwarderOps.manualFallbackQueue,
+      ),
+      sub: formatBacklogSummary(
+        observability.forwarderOps.oldestManualFallbackLagMinutes,
+        locale,
+      ),
+      accent: "#7c3aed",
+    },
+    {
+      label: t("dashboard.platformOps.metrics.reconciliation", locale),
+      value: formatCompactNumber(
+        observability.forwarderOps.reconciliationQueue,
+      ),
+      sub: formatBacklogSummary(
+        observability.forwarderOps.oldestReconciliationLagMinutes,
+        locale,
+      ),
+      accent: "#0284c7",
+    },
+  ] as const;
 
   return (
     <>
@@ -483,6 +626,248 @@ export default async function DashboardPage() {
               })}
             </div>
           )}
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div
+            style={{
+              fontSize: "11px",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "#64748b",
+              marginBottom: "2px",
+            }}
+          >
+            {t("dashboard.platformOps.title", locale)}
+          </div>
+          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
+            {t("dashboard.platformOps.subtitle", locale, {
+              count: observability.forwarderOps.totalForwardedOrders,
+            })}
+          </div>
+        </CardHeader>
+        <CardBody>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+              gap: "14px",
+              marginBottom: "18px",
+            }}
+          >
+            {platformOpsCards.map((card) => (
+              <div
+                key={card.label}
+                style={{
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "14px",
+                  padding: "14px",
+                  background: "#f8fafc",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "11px",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    color: "#64748b",
+                    marginBottom: "8px",
+                  }}
+                >
+                  {card.label}
+                </div>
+                <div
+                  style={{
+                    fontSize: "26px",
+                    fontWeight: 700,
+                    color: card.accent,
+                    marginBottom: "4px",
+                  }}
+                >
+                  {card.value}
+                </div>
+                <div style={{ fontSize: "12px", color: "#475569" }}>
+                  {card.sub}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {adapterAttentionCount > 0 && (
+            <div
+              style={{
+                marginBottom: "18px",
+                border: "1px solid #fcd34d",
+                background: "#fffbeb",
+                color: "#92400e",
+                borderRadius: "12px",
+                padding: "12px 14px",
+                fontSize: "13px",
+              }}
+            >
+              {t("dashboard.platformOps.degradedBanner", locale, {
+                count: adapterAttentionCount,
+              })}
+            </div>
+          )}
+
+          {observability.adapterDetails.length > 0 ? (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                gap: "14px",
+              }}
+            >
+              {observability.adapterDetails.map((adapter) => {
+                const signalItems = buildAdapterSignalItems(adapter, locale);
+                const statusStyle = ADAPTER_STATUS_STYLES[adapter.status];
+
+                return (
+                  <div
+                    key={adapter.platformCode}
+                    style={{
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "16px",
+                      padding: "16px",
+                      background: "#fff",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: "12px",
+                        marginBottom: "10px",
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontSize: "15px",
+                            fontWeight: 600,
+                            color: "#0f172a",
+                          }}
+                        >
+                          {formatOpsCodeLabel(locale, adapter.platformCode)}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#64748b" }}>
+                          {t("dashboard.platformOps.signal.reason", locale)}:{" "}
+                          {formatOpsCodeLabel(locale, adapter.reason)}
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          border: `1px solid ${statusStyle.border}`,
+                          background: statusStyle.background,
+                          color: statusStyle.color,
+                          borderRadius: "999px",
+                          padding: "4px 10px",
+                          fontSize: "11px",
+                          fontWeight: 700,
+                          letterSpacing: "0.04em",
+                          textTransform: "uppercase",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {t(
+                          `dispatch.forwarded.health.status.${adapter.status}`,
+                          locale,
+                        )}
+                      </span>
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gap: "10px",
+                        marginBottom: "12px",
+                      }}
+                    >
+                      {signalItems.map((item) => (
+                        <div
+                          key={item.label}
+                          style={{
+                            border: "1px solid #e2e8f0",
+                            borderRadius: "12px",
+                            padding: "10px",
+                            background: "#f8fafc",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.05em",
+                              color: "#64748b",
+                              marginBottom: "4px",
+                            }}
+                          >
+                            {item.label}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "13px",
+                              fontWeight: 600,
+                              color: "#0f172a",
+                            }}
+                          >
+                            {item.value}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "grid",
+                        gap: "6px",
+                        fontSize: "12px",
+                        color: "#475569",
+                      }}
+                    >
+                      <div>
+                        {t("dashboard.platformOps.signal.lastChecked", locale)}:{" "}
+                        {formatTimestamp(adapter.lastCheckedAt, locale)}
+                      </div>
+                      <div>
+                        {t("dashboard.platformOps.signal.lastError", locale)}:{" "}
+                        {adapter.lastError ??
+                          t("dashboard.platformOps.noError", locale)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p style={{ margin: 0, fontSize: "13.5px", color: "#94a3b8" }}>
+              {t("dashboard.platformOps.empty", locale)}
+            </p>
+          )}
+
+          <div style={{ marginTop: "18px" }}>
+            <Link
+              href="/dispatch"
+              style={{
+                display: "inline-block",
+                padding: "10px 14px",
+                borderRadius: "10px",
+                background: "#eff6ff",
+                border: "1px solid #bfdbfe",
+                color: "#1d4ed8",
+                textDecoration: "none",
+                fontSize: "13px",
+                fontWeight: 600,
+              }}
+            >
+              {t("dashboard.platformOps.openDispatch", locale)} →
+            </Link>
+          </div>
         </CardBody>
       </Card>
 
