@@ -309,6 +309,113 @@ export default function CallcenterPage() {
   const overdueCallbacks = pendingCallbacks.filter(
     (callback) => new Date(callback.dueAt).getTime() < Date.now(),
   ).length;
+  const selectedCallback = selectedSession?.callbackTask ?? null;
+  const selectedCallbackIsPending = selectedCallback?.status === "pending";
+  const selectedCallbackIsOverdue =
+    selectedCallbackIsPending &&
+    new Date(selectedCallback.dueAt).getTime() < Date.now();
+  const selectedSessionHasOrder = Boolean(selectedSession?.linkedOrderId);
+  const selectedSessionHasComplaint = Boolean(selectedSession?.linkedCaseNo);
+  const selectedSessionNeedsRecordingGate =
+    selectedSession?.recordingState === "pending" ||
+    selectedSession?.recordingState === "missing";
+  const bookingLaneLocked =
+    !selectedSession || selectedSessionHasOrder || selectedSessionHasComplaint;
+  const bookingLaneNote = !selectedSession
+    ? locale === "en"
+      ? "Select a live session before creating or linking a booking."
+      : "請先選擇一筆進線，再建立或連結 booking。"
+    : selectedSessionHasOrder
+      ? locale === "en"
+        ? `Booking lane locked. ${selectedSession.linkedOrderId} is already linked to this session.`
+        : `Booking 流程已鎖定，這筆 session 已連結 ${selectedSession.linkedOrderId}。`
+      : selectedSessionHasComplaint
+        ? locale === "en"
+          ? `Complaint handoff is already active under ${selectedSession.linkedCaseNo}. Avoid creating a second booking from the same call.`
+          : `客訴 handoff 已進入 ${selectedSession.linkedCaseNo}，請勿從同一通電話再建立第二筆 booking。`
+        : locale === "en"
+          ? "Create one new phone booking or link one existing order, then continue dispatch or callback work from the same session."
+          : "建立一筆新的電話訂單，或連結一筆既有訂單，之後再從同一個 session 繼續 dispatch / callback。";
+  const callbackLaneStatus = !selectedSession
+    ? locale === "en"
+      ? "No session selected"
+      : "尚未選擇 session"
+    : !selectedCallback
+      ? locale === "en"
+        ? "No callback task yet"
+        : "尚無 callback 任務"
+      : selectedCallback.status === "completed"
+        ? locale === "en"
+          ? "Callback completed"
+          : "Callback 已完成"
+        : selectedCallbackIsOverdue
+          ? locale === "en"
+            ? "Callback overdue"
+            : "Callback 已逾期"
+          : locale === "en"
+            ? "Callback queued"
+            : "Callback 已排程";
+  const complaintLaneStatus = !selectedSession
+    ? locale === "en"
+      ? "No session selected"
+      : "尚未選擇 session"
+    : selectedSessionHasComplaint
+      ? locale === "en"
+        ? `Complaint ${selectedSession.linkedCaseNo} linked`
+        : `已連結客訴 ${selectedSession.linkedCaseNo}`
+      : locale === "en"
+        ? "Ready for complaint handoff if passenger remediation is required"
+        : "如需乘客補救，可從此處轉交客訴";
+  const workspaceStages = [
+    {
+      title: locale === "en" ? "Booking lane" : "Booking 流程",
+      state: bookingLaneLocked
+        ? locale === "en"
+          ? "locked"
+          : "已鎖定"
+        : locale === "en"
+          ? "ready"
+          : "可執行",
+      tone: bookingLaneLocked ? "stage-card stage-locked" : "stage-card",
+      note: bookingLaneNote,
+    },
+    {
+      title: locale === "en" ? "Callback lane" : "Callback 流程",
+      state: callbackLaneStatus,
+      tone:
+        selectedCallbackIsPending && selectedCallbackIsOverdue
+          ? "stage-card stage-danger"
+          : "stage-card",
+      note: !selectedSession
+        ? locale === "en"
+          ? "Callback tasks stay visible from the same workspace while recording evidence is pending."
+          : "錄音證據待補期間，callback 任務必須持續留在同一個 workspace。"
+        : selectedCallback
+          ? `${formatDateTime(selectedCallback.dueAt)} · ${getCallbackSummary(
+              selectedCallback,
+              locale,
+            )}`
+          : locale === "en"
+            ? "Queue a callback here when the passenger needs follow-up outside the active call."
+            : "若乘客需要稍後跟進，可直接從這裡建立 callback。",
+    },
+    {
+      title: locale === "en" ? "Complaint lane" : "客訴流程",
+      state: complaintLaneStatus,
+      tone:
+        selectedSessionHasComplaint ||
+        selectedSession?.recordingState === "missing"
+          ? "stage-card stage-warning"
+          : "stage-card",
+      note: selectedSessionHasComplaint
+        ? locale === "en"
+          ? "Complaint escalation stays separate from booking creation and remains traceable from this call session."
+          : "客訴升級與 booking 建立必須分流，但仍需保留這筆 call session 的追蹤。"
+        : locale === "en"
+          ? "Use complaint handoff when the outcome becomes remediation instead of transport fulfillment."
+          : "當處理結果轉為補救而非履約時，請走 complaint handoff。",
+    },
+  ];
   const workspaceHeadline = selectedSession
     ? locale === "en"
       ? `${selectedSession.callId} is active in the session workspace.`
@@ -400,6 +507,16 @@ export default function CallcenterPage() {
               <strong>{card.value}</strong>
               <small>{card.note}</small>
             </div>
+          ))}
+        </section>
+
+        <section className="workspace-stage-grid">
+          {workspaceStages.map((stage) => (
+            <article key={stage.title} className={stage.tone}>
+              <span className="stage-eyebrow">{stage.title}</span>
+              <strong>{stage.state}</strong>
+              <p>{stage.note}</p>
+            </article>
           ))}
         </section>
 
@@ -625,6 +742,13 @@ export default function CallcenterPage() {
                     <div className="detail-grid">
                       <div>
                         <span className="label">
+                          {locale === "en" ? "Caller / agent" : "來電者 / 客服"}
+                        </span>
+                        <strong>{selectedSession.callerPhone}</strong>
+                        <small>{selectedSession.agentId ?? "-"}</small>
+                      </div>
+                      <div>
+                        <span className="label">
                           {t("callcenter.detail.identityAnnounced")}
                         </span>
                         <strong>
@@ -686,6 +810,36 @@ export default function CallcenterPage() {
                             : "-"}
                         </strong>
                         <small>{formatDateTime(selectedSession.endedAt)}</small>
+                      </div>
+                      <div>
+                        <span className="label">
+                          {locale === "en"
+                            ? "Order / complaint linkage"
+                            : "訂單 / 客訴連結"}
+                        </span>
+                        <strong>
+                          {selectedSession.linkedOrderId ??
+                            selectedSession.linkedCaseNo ??
+                            "-"}
+                        </strong>
+                        <small>
+                          {selectedSession.linkedOrderId &&
+                          selectedSession.linkedCaseNo
+                            ? locale === "en"
+                              ? `${selectedSession.linkedOrderId} + ${selectedSession.linkedCaseNo}`
+                              : `${selectedSession.linkedOrderId} + ${selectedSession.linkedCaseNo}`
+                            : selectedSession.linkedOrderId
+                              ? locale === "en"
+                                ? "Order linked"
+                                : "已連結訂單"
+                              : selectedSession.linkedCaseNo
+                                ? locale === "en"
+                                  ? "Complaint linked"
+                                  : "已連結客訴"
+                                : locale === "en"
+                                  ? "No downstream record linked yet"
+                                  : "尚未連結下游紀錄"}
+                        </small>
                       </div>
                     </div>
                     <div className="action-row">
@@ -758,6 +912,7 @@ export default function CallcenterPage() {
                         <input
                           type="text"
                           placeholder={t("callcenter.recordingIdPlaceholder")}
+                          required
                           value={recordingForm.recordingId}
                           onChange={(event) =>
                             setRecordingForm((current) => ({
@@ -816,6 +971,7 @@ export default function CallcenterPage() {
                         <input
                           type="number"
                           min={1}
+                          required
                           value={quotedEtaMinutes}
                           onChange={(event) =>
                             setQuotedEtaMinutes(event.target.value)
@@ -851,6 +1007,7 @@ export default function CallcenterPage() {
                         <h4>{t("callcenter.callbackQueueForm")}</h4>
                         <input
                           type="datetime-local"
+                          required
                           value={callbackDueAt}
                           onChange={(event) =>
                             setCallbackDueAt(event.target.value)
@@ -948,9 +1105,11 @@ export default function CallcenterPage() {
                         }}
                       >
                         <h4>{t("callcenter.createPhoneBooking")}</h4>
+                        <p className="panel-note">{bookingLaneNote}</p>
                         <input
                           type="text"
                           placeholder={t("callcenter.passengerNamePlaceholder")}
+                          required
                           value={orderForm.passengerName}
                           onChange={(event) =>
                             setOrderForm((current) => ({
@@ -975,6 +1134,7 @@ export default function CallcenterPage() {
                         <input
                           type="text"
                           placeholder={t("callcenter.pickupAddressPlaceholder")}
+                          required
                           value={orderForm.pickupAddress}
                           onChange={(event) =>
                             setOrderForm((current) => ({
@@ -988,6 +1148,7 @@ export default function CallcenterPage() {
                           placeholder={t(
                             "callcenter.dropoffAddressPlaceholder",
                           )}
+                          required
                           value={orderForm.dropoffAddress}
                           onChange={(event) =>
                             setOrderForm((current) => ({
@@ -1010,7 +1171,10 @@ export default function CallcenterPage() {
                         <button
                           className="btn"
                           type="submit"
-                          disabled={busyKey === "create-phone-order"}
+                          disabled={
+                            busyKey === "create-phone-order" ||
+                            bookingLaneLocked
+                          }
                         >
                           {t("callcenter.createOrderFromCall")}
                         </button>
@@ -1033,11 +1197,25 @@ export default function CallcenterPage() {
                         }}
                       >
                         <h4>{t("callcenter.bindExistingOrder")}</h4>
+                        <p className="panel-note">
+                          {selectedSessionHasOrder
+                            ? locale === "en"
+                              ? "Use dispatch for the linked order instead of re-binding this call."
+                              : "這筆通話已綁定訂單，請改到 dispatch workspace 處理。"
+                            : selectedSessionHasComplaint
+                              ? locale === "en"
+                                ? "Complaint handoff is already active for this session."
+                                : "這筆 session 已進入客訴 handoff。"
+                              : locale === "en"
+                                ? "Use this only when the passenger already has an order ID."
+                                : "僅在乘客已持有既有訂單編號時使用。"}
+                        </p>
                         <input
                           type="text"
                           placeholder={t(
                             "callcenter.existingOrderIdPlaceholder",
                           )}
+                          required
                           value={existingOrderId}
                           onChange={(event) =>
                             setExistingOrderId(event.target.value)
@@ -1046,7 +1224,9 @@ export default function CallcenterPage() {
                         <button
                           className="btn"
                           type="submit"
-                          disabled={busyKey === "link-order"}
+                          disabled={
+                            busyKey === "link-order" || bookingLaneLocked
+                          }
                         >
                           {t("callcenter.linkOrderToCall")}
                         </button>
@@ -1078,6 +1258,19 @@ export default function CallcenterPage() {
                         }}
                       >
                         <h4>{t("callcenter.transferComplaintForm")}</h4>
+                        <p className="panel-note">
+                          {selectedSessionHasComplaint
+                            ? locale === "en"
+                              ? `Complaint ${selectedSession.linkedCaseNo} is already linked to this call.`
+                              : `這筆通話已連結客訴 ${selectedSession.linkedCaseNo}。`
+                            : selectedSessionNeedsRecordingGate
+                              ? locale === "en"
+                                ? "Keep the recording evidence gap explicit while escalating to complaint."
+                                : "升級客訴時，仍需明確保留錄音證據缺口。"
+                              : locale === "en"
+                                ? "Use complaint handoff when follow-up becomes remediation instead of dispatch fulfillment."
+                                : "若處理結果改為補救而非履約，請從這裡交給客訴。"}
+                        </p>
                         <select
                           value={transferForm.category}
                           onChange={(event) =>
@@ -1115,6 +1308,7 @@ export default function CallcenterPage() {
                           placeholder={t(
                             "callcenter.complaintDescriptionPlaceholder",
                           )}
+                          required
                           value={transferForm.description}
                           onChange={(event) =>
                             setTransferForm((current) => ({
@@ -1126,10 +1320,25 @@ export default function CallcenterPage() {
                         <button
                           className="btn"
                           type="submit"
-                          disabled={busyKey === "transfer-complaint"}
+                          disabled={
+                            busyKey === "transfer-complaint" ||
+                            selectedSessionHasComplaint
+                          }
                         >
                           {t("callcenter.createComplaintCase")}
                         </button>
+                        {selectedSession.linkedCaseNo && (
+                          <Link
+                            className="btn"
+                            href={`/complaints?caseNo=${encodeURIComponent(
+                              selectedSession.linkedCaseNo,
+                            )}`}
+                          >
+                            {locale === "en"
+                              ? "Open linked complaint"
+                              : "開啟已連結客訴"}
+                          </Link>
+                        )}
                       </form>
                     </div>
                   </section>
@@ -1408,7 +1617,13 @@ export default function CallcenterPage() {
                 </thead>
                 <tbody>
                   {callbackQueue.map((callback) => (
-                    <tr key={callback.callbackTaskId}>
+                    <tr
+                      key={callback.callbackTaskId}
+                      className={
+                        callback.callId === selectedCallId ? "selected-row" : ""
+                      }
+                      onClick={() => setSelectedCallId(callback.callId)}
+                    >
                       <td>{callback.callbackTaskId}</td>
                       <td>{callback.callId}</td>
                       <td>
@@ -1426,7 +1641,21 @@ export default function CallcenterPage() {
                         </div>
                       </td>
                       <td>{callback.linkedOrderId ?? "-"}</td>
-                      <td>{callback.linkedCaseNo ?? "-"}</td>
+                      <td>
+                        {callback.linkedCaseNo ? (
+                          <Link
+                            className="inline-link"
+                            href={`/complaints?caseNo=${encodeURIComponent(
+                              callback.linkedCaseNo,
+                            )}`}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            {callback.linkedCaseNo}
+                          </Link>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1444,6 +1673,7 @@ export default function CallcenterPage() {
 
         <style jsx>{`
           .summary-grid,
+          .workspace-stage-grid,
           .content-grid,
           .detail-subgrid,
           .detail-grid,
@@ -1455,9 +1685,14 @@ export default function CallcenterPage() {
             grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
             margin-bottom: 1rem;
           }
+          .workspace-stage-grid {
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            margin-bottom: 1rem;
+          }
           .summary-card,
           .panel,
-          .detail-card {
+          .detail-card,
+          .stage-card {
             border: 1px solid #dbe4f0;
             border-radius: 1rem;
             background: #fff;
@@ -1469,6 +1704,37 @@ export default function CallcenterPage() {
             display: block;
             font-size: 1.35rem;
             margin: 0.2rem 0;
+          }
+          .stage-card {
+            padding: 1rem;
+            background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+          }
+          .stage-card strong {
+            display: block;
+            margin: 0.3rem 0 0.35rem;
+            font-size: 1rem;
+          }
+          .stage-card p {
+            margin: 0;
+            color: #475569;
+            font-size: 0.92rem;
+          }
+          .stage-locked {
+            border-color: #f59e0b;
+            background: linear-gradient(180deg, #fff7ed 0%, #ffffff 100%);
+          }
+          .stage-warning {
+            border-color: #fbbf24;
+          }
+          .stage-danger {
+            border-color: #f87171;
+            background: linear-gradient(180deg, #fef2f2 0%, #ffffff 100%);
+          }
+          .stage-eyebrow {
+            color: #64748b;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
           }
           .toolbar,
           .action-row {
@@ -1585,6 +1851,11 @@ export default function CallcenterPage() {
             color: #64748b;
             font-size: 0.82rem;
             margin-top: 0.2rem;
+          }
+          .inline-link {
+            color: #0f766e;
+            text-decoration: none;
+            font-weight: 600;
           }
           .table-wrap {
             overflow-x: auto;
