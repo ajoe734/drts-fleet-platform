@@ -63,6 +63,7 @@ import type {
   DriverArrivedPickupCommand,
   DriverDeviceProvisioningSession,
   DriverEtaResponse,
+  DriverLocationSnapshot,
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
   DriverLocationHeartbeatCommand,
@@ -172,6 +173,7 @@ import type {
   SubmitExclusivityReviewCommand,
   ApproveExclusivityCommand,
   UpdateDriverMasterLifecycleCommand,
+  UpdateDriverWorkStateCommand,
   UpdateDriverProfileCommand,
   UpdateIncidentCommand,
   UpdateMaintenanceRecordCommand,
@@ -1099,22 +1101,44 @@ export class ApiClient {
 
   // ── Platform Presence ──
 
-  async getPlatformPresence(): Promise<PlatformPresenceSummary> {
-    return this.get<PlatformPresenceSummary>("/api/platform-presence");
+  async getPlatformPresence(filters?: {
+    driverId?: string;
+  }): Promise<PlatformPresenceSummary> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/platform-presence?${query}`
+      : "/api/platform-presence";
+    return this.get<PlatformPresenceSummary>(url);
   }
 
   async setPlatformOnline(
     command: SetPlatformOnlineCommand,
+    filters?: { driverId?: string },
   ): Promise<PlatformPresenceRecord> {
-    return this.post<PlatformPresenceRecord>("/api/platform-presence/online", {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/platform-presence/online?${query}`
+      : "/api/platform-presence/online";
+    return this.post<PlatformPresenceRecord>(url, {
       body: command,
     });
   }
 
   async setPlatformOffline(
     command: SetPlatformOfflineCommand,
+    filters?: { driverId?: string },
   ): Promise<PlatformPresenceRecord> {
-    return this.post<PlatformPresenceRecord>("/api/platform-presence/offline", {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/platform-presence/offline?${query}`
+      : "/api/platform-presence/offline";
+    return this.post<PlatformPresenceRecord>(url, {
       body: command,
     });
   }
@@ -1778,6 +1802,12 @@ export class ApiClient {
     );
   }
 
+  async listDriverLocations(): Promise<DriverLocationSnapshot[]> {
+    return this.getList<DriverLocationSnapshot>(
+      "/api/regulatory-registry/driver-locations",
+    );
+  }
+
   async createDriverMaster(
     command: CreateDriverMasterCommand,
   ): Promise<DriverRegistryRecord> {
@@ -1792,6 +1822,18 @@ export class ApiClient {
   ): Promise<DriverRegistryRecord> {
     return this.post<DriverRegistryRecord>(
       `/api/regulatory-registry/drivers/${driverId}/lifecycle`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async updateDriverWorkState(
+    driverId: string,
+    command: UpdateDriverWorkStateCommand,
+  ): Promise<DriverRegistryRecord> {
+    return this.post<DriverRegistryRecord>(
+      `/api/regulatory-registry/drivers/${driverId}/work-state`,
       {
         body: command,
       },

@@ -127,6 +127,16 @@ export class RegulatoryRegistryController {
     );
   }
 
+  @Get("driver-locations")
+  listDriverLocations(@Headers("x-request-id") requestId?: string) {
+    return toApiSuccessEnvelope(
+      {
+        items: this.regulatoryRegistryService.listLatestDriverLocations(),
+      },
+      requestId,
+    );
+  }
+
   @Post("drivers")
   createDriver(
     @Body() command: CreateDriverMasterCommand,
