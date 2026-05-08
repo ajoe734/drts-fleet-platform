@@ -21,6 +21,8 @@ import type {
   DriverTaskRecord,
   CompleteForwarderReconciliationCommand,
   EngageForwarderManualFallbackCommand,
+  ForwardedDriverActionOutcome,
+  ForwardedDriverActionResponse,
   ForwardedOrderRecord,
   ForwardedOrderFinanceContext,
   ForwarderSyncErrorRecord,
@@ -325,6 +327,116 @@ export class ForwarderService implements OnModuleInit {
       default:
         return false;
     }
+  }
+
+  async acceptForwardedOrder(
+    taskId: string,
+    driverId: string,
+    requestId?: string,
+  ): Promise<ForwardedDriverActionResponse> {
+    this.assertNonBlank(driverId, "driverId");
+
+    let forwardedOrder = this.requireOrder(taskId);
+    if (!this.isForwardedOrderVisibleToDriver(forwardedOrder, driverId)) {
+      throw this.driverTaskViewNotFound(taskId);
+    }
+
+    if (forwardedOrder.status === "broadcasted") {
+      try {
+        await this.relayDriverAccept(taskId, { driverId }, requestId);
+      } catch (error) {
+        forwardedOrder = this.requireOrder(taskId);
+        if (
+          forwardedOrder.status === "sync_failed" &&
+          forwardedOrder.acceptedDriverId === driverId
+        ) {
+          return this.buildForwardedDriverActionResponse(
+            "accept",
+            "sync_failed",
+            forwardedOrder,
+          );
+        }
+        throw error;
+      }
+
+      return this.buildForwardedDriverActionResponse(
+        "accept",
+        "accept_pending",
+        this.requireOrder(taskId),
+      );
+    }
+
+    if (forwardedOrder.acceptedDriverId !== driverId) {
+      throw this.driverTaskViewNotFound(taskId);
+    }
+
+    return this.buildForwardedDriverActionResponse(
+      "accept",
+      this.resolveForwardedOutcomeFromStatus(forwardedOrder.status),
+      forwardedOrder,
+    );
+  }
+
+  rejectForwardedOrder(
+    taskId: string,
+    driverId: string,
+    reason?: string | null,
+    requestId?: string,
+  ): ForwardedDriverActionResponse {
+    this.assertNonBlank(driverId, "driverId");
+
+    const forwardedOrder = this.requireOrder(taskId);
+    if (forwardedOrder.status !== "broadcasted") {
+      if (!this.isForwardedOrderVisibleToDriver(forwardedOrder, driverId)) {
+        throw this.driverTaskViewNotFound(taskId);
+      }
+      return this.buildForwardedDriverActionResponse(
+        "reject",
+        this.resolveForwardedOutcomeFromStatus(forwardedOrder.status),
+        forwardedOrder,
+      );
+    }
+
+    if (!forwardedOrder.candidateDriverIds.includes(driverId)) {
+      throw this.driverTaskViewNotFound(taskId);
+    }
+
+    forwardedOrder.candidateDriverIds =
+      forwardedOrder.candidateDriverIds.filter(
+        (candidateDriverId) => candidateDriverId !== driverId,
+      );
+    forwardedOrder.updatedAt = new Date().toISOString();
+    this.persistChanges(
+      {
+        forwardedOrders: [this.cloneOrder(forwardedOrder)],
+      },
+      "reject_forwarded_order",
+    );
+    this.recordAudit(
+      {
+        actorId: driverId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "forwarder",
+        actionName: "reject_forwarded_order",
+        resourceType: "forwarded_order",
+        resourceId: forwardedOrder.mirrorOrderId,
+        ...(reason?.trim()
+          ? { oldValuesSummary: { reason: reason.trim() } }
+          : {}),
+        newValuesSummary: {
+          status: forwardedOrder.status,
+          candidateDriverIds: forwardedOrder.candidateDriverIds,
+        },
+      },
+      requestId,
+    );
+
+    return this.buildForwardedDriverActionResponse(
+      "reject",
+      "rejected",
+      forwardedOrder,
+    );
   }
 
   broadcastOrder(
@@ -1296,10 +1408,69 @@ export class ForwarderService implements OnModuleInit {
     order: ForwardedOrderRecord,
   ): DriverTaskAction[] {
     if (order.status === "broadcasted") {
-      return ["accept"];
+      return ["accept", "reject"];
     }
 
     return [];
+  }
+
+  private resolveForwardedOutcomeFromStatus(
+    status: ForwardedOrderRecord["status"],
+  ): Exclude<ForwardedDriverActionOutcome, "rejected"> {
+    switch (status) {
+      case "accept_pending":
+      case "confirmed_by_platform":
+      case "lost_race":
+      case "cancelled_by_platform":
+      case "sync_failed":
+        return status;
+      case "broadcasted":
+        return "accept_pending";
+      case "received":
+        return "sync_failed";
+    }
+  }
+
+  private buildForwardedDriverActionResponse(
+    action: Extract<DriverTaskAction, "accept" | "reject">,
+    outcome: ForwardedDriverActionOutcome,
+    order: ForwardedOrderRecord,
+  ): ForwardedDriverActionResponse {
+    return {
+      action,
+      outcome,
+      driverMessage: this.resolveForwardedDriverActionMessage(outcome, order),
+      taskView:
+        outcome === "rejected" ? null : this.mapForwardedOrderToView(order),
+      managementCorrelationIds: {
+        mirrorOrderId: order.mirrorOrderId,
+        reconciliationJobId:
+          order.reconciliationJob?.reconciliationJobId ?? null,
+      },
+    };
+  }
+
+  private resolveForwardedDriverActionMessage(
+    outcome: ForwardedDriverActionOutcome,
+    order: ForwardedOrderRecord,
+  ) {
+    switch (outcome) {
+      case "accept_pending":
+        return "Waiting for platform confirmation.";
+      case "confirmed_by_platform":
+        return "Platform confirmed this order.";
+      case "lost_race":
+        return "Another driver was confirmed by the platform.";
+      case "cancelled_by_platform":
+        return "The external platform cancelled this order.";
+      case "sync_failed":
+        return (
+          order.manualFallback.reason ??
+          "Dispatch is verifying the platform result before more driver actions."
+        );
+      case "rejected":
+        return "Offer declined.";
+    }
   }
 
   private resolveForwardedSyncIssueSummary(order: ForwardedOrderRecord) {

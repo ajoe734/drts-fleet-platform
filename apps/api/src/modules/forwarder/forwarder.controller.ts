@@ -12,6 +12,8 @@ import {
 import type {
   BroadcastForwardedOrderCommand,
   CompleteForwarderReconciliationCommand,
+  DriverForwardedOrderAcceptCommand,
+  DriverForwardedOrderRejectCommand,
   EngageForwarderManualFallbackCommand,
   IngestExternalOrderCommand,
   ReportForwarderSyncFailureCommand,
@@ -31,7 +33,7 @@ import { ForwarderService } from "./forwarder.service";
 export class ForwarderController {
   constructor(private readonly forwarderService: ForwarderService) {}
 
-  private resolveDriverTaskViewDriverId(
+  private resolveDriverId(
     identity: BootstrapRequestIdentity | null,
     requestedDriverId?: string,
   ) {
@@ -89,10 +91,7 @@ export class ForwarderController {
     @Query("driverId") requestedDriverId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const driverId = this.resolveDriverTaskViewDriverId(
-      identity,
-      requestedDriverId,
-    );
+    const driverId = this.resolveDriverId(identity, requestedDriverId);
     return toApiSuccessEnvelope(
       {
         items: this.forwarderService.listDriverTaskViews(driverId),
@@ -108,12 +107,46 @@ export class ForwarderController {
     @Query("driverId") requestedDriverId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const driverId = this.resolveDriverTaskViewDriverId(
-      identity,
-      requestedDriverId,
-    );
+    const driverId = this.resolveDriverId(identity, requestedDriverId);
     return toApiSuccessEnvelope(
       this.forwarderService.getDriverTaskView(driverId, taskId),
+      requestId,
+    );
+  }
+
+  @Post("driver/forwarded-orders/:taskId/accept")
+  async acceptForwardedOrder(
+    @Param("taskId") taskId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: DriverForwardedOrderAcceptCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverId(identity, command.driverId);
+    return toApiSuccessEnvelope(
+      await this.forwarderService.acceptForwardedOrder(
+        taskId,
+        driverId,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("driver/forwarded-orders/:taskId/reject")
+  rejectForwardedOrder(
+    @Param("taskId") taskId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: DriverForwardedOrderRejectCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverId(identity, command.driverId);
+    return toApiSuccessEnvelope(
+      this.forwarderService.rejectForwardedOrder(
+        taskId,
+        driverId,
+        command.reason,
+        requestId,
+      ),
       requestId,
     );
   }

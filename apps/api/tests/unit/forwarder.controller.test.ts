@@ -183,4 +183,106 @@ describe("ForwarderController", () => {
     );
     expect(forwarderService.getDriverTaskView).not.toHaveBeenCalled();
   });
+
+  it("wraps driver-safe forwarded accept responses and scopes them to the bootstrap driver identity", async () => {
+    const forwarderService = {
+      acceptForwardedOrder: vi.fn(async () => ({
+        action: "accept",
+        outcome: "accept_pending",
+        driverMessage: "Waiting for platform confirmation.",
+        taskView: {
+          taskId: "FWD-accept-001",
+          orderDomain: "forwarded",
+          allowedActions: [],
+        },
+        managementCorrelationIds: {
+          mirrorOrderId: "FWD-accept-001",
+          reconciliationJobId: null,
+        },
+      })),
+    };
+    const controller = new ForwarderController(forwarderService as never);
+
+    const response = await controller.acceptForwardedOrder(
+      "FWD-accept-001",
+      driverIdentity("driver-accept-001"),
+      { driverId: "driver-spoofed-999" },
+      "req-driver-accept-001",
+    );
+
+    expect(forwarderService.acceptForwardedOrder).toHaveBeenCalledWith(
+      "FWD-accept-001",
+      "driver-accept-001",
+      "req-driver-accept-001",
+    );
+    expect(response).toEqual({
+      data: {
+        action: "accept",
+        outcome: "accept_pending",
+        driverMessage: "Waiting for platform confirmation.",
+        taskView: {
+          taskId: "FWD-accept-001",
+          orderDomain: "forwarded",
+          allowedActions: [],
+        },
+        managementCorrelationIds: {
+          mirrorOrderId: "FWD-accept-001",
+          reconciliationJobId: null,
+        },
+      },
+      meta: {
+        requestId: "req-driver-accept-001",
+        timestamp: expect.any(String),
+      },
+    });
+  });
+
+  it("wraps driver-safe forwarded reject responses using the explicit driverId for non-driver callers", () => {
+    const forwarderService = {
+      rejectForwardedOrder: vi.fn(() => ({
+        action: "reject",
+        outcome: "rejected",
+        driverMessage: "Offer declined.",
+        taskView: null,
+        managementCorrelationIds: {
+          mirrorOrderId: "FWD-reject-001",
+          reconciliationJobId: null,
+        },
+      })),
+    };
+    const controller = new ForwarderController(forwarderService as never);
+
+    const response = controller.rejectForwardedOrder(
+      "FWD-reject-001",
+      opsIdentity(),
+      {
+        driverId: "driver-reject-001",
+        reason: "Too far away",
+      },
+      "req-driver-reject-001",
+    );
+
+    expect(forwarderService.rejectForwardedOrder).toHaveBeenCalledWith(
+      "FWD-reject-001",
+      "driver-reject-001",
+      "Too far away",
+      "req-driver-reject-001",
+    );
+    expect(response).toEqual({
+      data: {
+        action: "reject",
+        outcome: "rejected",
+        driverMessage: "Offer declined.",
+        taskView: null,
+        managementCorrelationIds: {
+          mirrorOrderId: "FWD-reject-001",
+          reconciliationJobId: null,
+        },
+      },
+      meta: {
+        requestId: "req-driver-reject-001",
+        timestamp: expect.any(String),
+      },
+    });
+  });
 });

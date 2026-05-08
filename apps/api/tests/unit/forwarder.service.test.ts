@@ -248,6 +248,45 @@ describe("ForwarderService", () => {
     ]);
   });
 
+  it("returns a driver-safe accept-pending response for mobile forwarded accept", async () => {
+    const adapter = createAdapter();
+    const { service } = createService({
+      adapter,
+      eligibleDriverIds: ["driver-safe-accept-001"],
+    });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-mobile-accept-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+    service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: ["driver-safe-accept-001"],
+    });
+
+    await expect(
+      service.acceptForwardedOrder(
+        order.mirrorOrderId,
+        "driver-safe-accept-001",
+        "req-mobile-accept-001",
+      ),
+    ).resolves.toEqual({
+      action: "accept",
+      outcome: "accept_pending",
+      driverMessage: "Waiting for platform confirmation.",
+      taskView: expect.objectContaining({
+        taskId: order.mirrorOrderId,
+        localStatus: "accept_pending",
+        driverActionState: "awaiting_platform",
+        allowedActions: [],
+      }),
+      managementCorrelationIds: {
+        mirrorOrderId: order.mirrorOrderId,
+        reconciliationJobId: null,
+      },
+    });
+  });
+
   it("marks sync_failed and queues reconciliation when adapter accept relay fails", async () => {
     const adapter = createAdapter({
       accept: vi.fn(async () => {
@@ -325,6 +364,50 @@ describe("ForwarderService", () => {
         actionName: "mark_forwarder_sync_failed",
       }),
     );
+  });
+
+  it("returns driver-safe sync-failed copy and correlation ids when forwarded accept relay fails", async () => {
+    const adapter = createAdapter({
+      accept: vi.fn(async () => {
+        throw new Error("platform timeout");
+      }),
+    });
+    const { service } = createService({
+      adapter,
+      eligibleDriverIds: ["driver-safe-sync-001"],
+    });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-mobile-sync-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+    service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: ["driver-safe-sync-001"],
+    });
+
+    await expect(
+      service.acceptForwardedOrder(
+        order.mirrorOrderId,
+        "driver-safe-sync-001",
+        "req-mobile-sync-001",
+      ),
+    ).resolves.toEqual({
+      action: "accept",
+      outcome: "sync_failed",
+      driverMessage:
+        "Dispatch must confirm platform acceptance manually before continuing.",
+      taskView: expect.objectContaining({
+        taskId: order.mirrorOrderId,
+        localStatus: "sync_failed",
+        driverActionState: "blocked",
+        requiresManualFallback: true,
+      }),
+      managementCorrelationIds: {
+        mirrorOrderId: order.mirrorOrderId,
+        reconciliationJobId: expect.any(String),
+      },
+    });
   });
 
   it("auto-completes queued reconciliation once a native status sync arrives", async () => {
@@ -755,7 +838,7 @@ describe("ForwarderService", () => {
         externalOrderId: "grab-order-view-001",
         localStatus: "broadcasted",
         driverActionState: "action_required",
-        allowedActions: ["accept"],
+        allowedActions: ["accept", "reject"],
         routeLocked: true,
         fareAuthority: "external_platform",
         syncIssueSummary: null,
@@ -773,6 +856,53 @@ describe("ForwarderService", () => {
         dropoffSummary: "Owned dropoff",
       }),
     ]);
+  });
+
+  it("lets a driver reject a broadcasted forwarded offer and removes it from their visible inbox", () => {
+    const { service, auditNotificationService } = createService({
+      eligibleDriverIds: ["driver-reject-001", "driver-other-002"],
+    });
+
+    const order = service.ingestExternalOrder({
+      platformCode: GRAB_TAIWAN_PLATFORM_CODE,
+      externalOrderId: "grab-order-reject-001",
+      payload: { serviceBucket: "standard_taxi" },
+    });
+    service.broadcastOrder(order.mirrorOrderId, {
+      candidateDriverIds: ["driver-reject-001", "driver-other-002"],
+    });
+
+    expect(
+      service.rejectForwardedOrder(
+        order.mirrorOrderId,
+        "driver-reject-001",
+        "Too far away",
+        "req-driver-reject-001",
+      ),
+    ).toEqual({
+      action: "reject",
+      outcome: "rejected",
+      driverMessage: "Offer declined.",
+      taskView: null,
+      managementCorrelationIds: {
+        mirrorOrderId: order.mirrorOrderId,
+        reconciliationJobId: null,
+      },
+    });
+    expect(service.listDriverTaskViews("driver-reject-001")).toEqual([]);
+    expect(service.listDriverTaskViews("driver-other-002")).toEqual([
+      expect.objectContaining({
+        taskId: order.mirrorOrderId,
+        allowedActions: ["accept", "reject"],
+      }),
+    ]);
+    expect(auditNotificationService.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        moduleName: "forwarder",
+        actionName: "reject_forwarded_order",
+        actorId: "driver-reject-001",
+      }),
+    );
   });
 
   it("hides forwarded orders from drivers who are not in the candidate set", () => {

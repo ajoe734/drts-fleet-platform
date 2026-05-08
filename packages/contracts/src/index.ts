@@ -3040,6 +3040,16 @@ export interface ReopenReconciliationIssueCommand {
   artifactIds?: string[];
 }
 
+export interface ReconciliationIssueForwardedFinanceContext {
+  platformCode: PlatformCode;
+  reconciliationReason: "sync_failed" | "manual_fallback";
+  fareAuthority: DriverTaskAuthorityMode;
+  settlementAuthority: DriverTaskAuthorityMode;
+  driverPayoutAuthority: DriverTaskAuthorityMode;
+  localLedgerMode: "shadow_only";
+  note: string | null;
+}
+
 export interface ReconciliationIssueRecord {
   issueId: string;
   issueType: ReconciliationIssueType;
@@ -3059,6 +3069,7 @@ export interface ReconciliationIssueRecord {
   linkedReconciliationJobId: string | null;
   linkedInvoiceId: string | null;
   linkedReimbursementBatchId: string | null;
+  forwardedFinanceContext: ReconciliationIssueForwardedFinanceContext | null;
   resolutionCode: ReconciliationIssueResolutionCode | null;
   resolutionSummary: string | null;
   resolvedAt: string | null;
@@ -3308,6 +3319,20 @@ export interface RelayDriverAcceptCommand {
   driverId: string;
 }
 
+export interface DriverForwardedOrderAcceptCommand {
+  driverId?: string;
+}
+
+export interface RelayDriverRejectCommand {
+  driverId: string;
+  reason?: string | null;
+}
+
+export interface DriverForwardedOrderRejectCommand {
+  driverId?: string;
+  reason?: string | null;
+}
+
 export interface SyncForwardedOrderStatusCommand {
   nativeStatus: string;
   payload?: Record<string, unknown>;
@@ -3379,6 +3404,30 @@ export interface ForwardedOrderRecord {
   updatedAt: string;
 }
 
+export const FORWARDED_DRIVER_ACTION_OUTCOMES = [
+  "accept_pending",
+  "confirmed_by_platform",
+  "lost_race",
+  "cancelled_by_platform",
+  "sync_failed",
+  "rejected",
+] as const;
+export type ForwardedDriverActionOutcome =
+  (typeof FORWARDED_DRIVER_ACTION_OUTCOMES)[number];
+
+export interface ForwardedDriverActionCorrelationIds {
+  mirrorOrderId: string;
+  reconciliationJobId: string | null;
+}
+
+export interface ForwardedDriverActionResponse {
+  action: Extract<DriverTaskAction, "accept" | "reject">;
+  outcome: ForwardedDriverActionOutcome;
+  driverMessage: string;
+  taskView: UnifiedDriverTaskView | null;
+  managementCorrelationIds: ForwardedDriverActionCorrelationIds;
+}
+
 export interface AdapterHealthRecord {
   platformCode: PlatformCode;
   status: AdapterHealthStatus;
@@ -3420,8 +3469,6 @@ export interface ForwarderReconciliationIssue {
 // trigger background / async jobs. The HTTP response body carries only the
 // allocated job identifier and the initial status ("queued"), allowing the
 // caller to poll the GET endpoint for completion.
-//
-// Wire format (after SnakeCaseInterceptor): job_id / package_id / status
 // ---------------------------------------------------------------------------
 
 export interface ReportJobAccepted {

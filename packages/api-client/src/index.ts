@@ -30,6 +30,8 @@ import type {
   CreateDriverMasterCommand,
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
+  DriverForwardedOrderAcceptCommand,
+  DriverForwardedOrderRejectCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
   IssuePartnerIngressCredentialCommand,
@@ -71,6 +73,7 @@ import type {
   DriverStatementRecord,
   DriverTaskRecord,
   UnifiedDriverTaskView,
+  ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
   EvidenceGovernanceCatalog,
   EvidenceLegalHoldRecord,
@@ -695,6 +698,26 @@ export class ApiClient {
       ? `/api/driver/task-views/${taskId}?${query}`
       : `/api/driver/task-views/${taskId}`;
     return this.get<UnifiedDriverTaskView>(url);
+  }
+
+  async acceptForwardedOrder(
+    taskId: string,
+    command: DriverForwardedOrderAcceptCommand = {},
+  ): Promise<ForwardedDriverActionResponse> {
+    return this.post<ForwardedDriverActionResponse>(
+      `/api/driver/forwarded-orders/${taskId}/accept`,
+      { body: command },
+    );
+  }
+
+  async rejectForwardedOrder(
+    taskId: string,
+    command: DriverForwardedOrderRejectCommand = {},
+  ): Promise<ForwardedDriverActionResponse> {
+    return this.post<ForwardedDriverActionResponse>(
+      `/api/driver/forwarded-orders/${taskId}/reject`,
+      { body: command },
+    );
   }
 
   async acceptTask(taskId: string, command: DriverAcceptTaskCommand) {
