@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { AppSidebar } from "@drts/ui-web";
+import { AppSidebar, MANAGEMENT_COLORS } from "@drts/ui-web";
 import { useTranslation } from "@/lib/i18n";
 import { getOpsLabel } from "@/lib/localized-labels";
 import {
@@ -104,7 +104,7 @@ export function Sidebar() {
               justifyContent: "center",
               gap: "6px",
               width: "100%",
-              background: "#1d4ed8",
+              background: MANAGEMENT_COLORS.sidebarActive,
               border: "none",
               borderRadius: "8px",
               color: "#ffffff",

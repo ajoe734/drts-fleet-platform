@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { managementMainShellStyle } from "@drts/ui-web";
 import { AdminNav } from "@/components/admin-nav";
 import { LanguageProvider } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/server-locale";
@@ -20,17 +21,7 @@ export default async function RootLayout({
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
           <AdminNav />
-          <main
-            style={{
-              flex: 1,
-              minWidth: 0,
-              padding: "32px",
-              background: "#f8fafc",
-              minHeight: "100vh",
-            }}
-          >
-            {children}
-          </main>
+          <main style={managementMainShellStyle()}>{children}</main>
         </LanguageProvider>
       </body>
     </html>
