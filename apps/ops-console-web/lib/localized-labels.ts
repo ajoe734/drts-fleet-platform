@@ -44,9 +44,32 @@ const UI_LABELS: Record<string, LocalizedText> = {
     en: "Unable to load driver registry data for {driverId}.",
     zh: "無法載入司機名冊資料：{driverId}。",
   },
+  openDriverDetail: {
+    en: "Open detail for driver {driverId}",
+    zh: "開啟司機 {driverId} 的明細",
+  },
 };
 
 const CODE_LABELS: Record<string, LocalizedText> = {
+  available: { en: "Available", zh: "可派遣" },
+  eligible: { en: "Eligible", zh: "符合資格" },
+  ineligible: { en: "Ineligible", zh: "不符合資格" },
+  online: { en: "Online", zh: "上線" },
+  lifecycle_draft: { en: "Lifecycle: Draft", zh: "Lifecycle：草稿" },
+  lifecycle_suspended: { en: "Lifecycle: Suspended", zh: "Lifecycle：停用" },
+  lifecycle_retired: { en: "Lifecycle: Retired", zh: "Lifecycle：退場" },
+  licenses_invalid: { en: "Licenses Invalid", zh: "駕照失效" },
+  work_state_reserved: { en: "Work State: Reserved", zh: "工作狀態：已預約" },
+  work_state_enroute: { en: "Work State: En Route", zh: "工作狀態：前往中" },
+  work_state_arrived: { en: "Work State: Arrived", zh: "工作狀態：已到達" },
+  work_state_on_trip: { en: "Work State: On Trip", zh: "工作狀態：行程中" },
+  work_state_paused: { en: "Work State: Paused", zh: "工作狀態：暫停" },
+  work_state_suspended: { en: "Work State: Suspended", zh: "工作狀態：停用" },
+  work_state_incident_hold: {
+    en: "Work State: Incident Hold",
+    zh: "工作狀態：事故暫停",
+  },
+  work_state_offline: { en: "Work State: Offline", zh: "工作狀態：離線" },
   active: { en: "Active", zh: "啟用中" },
   api: { en: "API", zh: "API" },
   absent: { en: "Absent", zh: "缺勤" },

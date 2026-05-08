@@ -183,8 +183,8 @@ export class PlatformPresenceService {
         this.mapAdapterStatus(presence.platformCode, adapterHealth),
       ),
       notes: [
-        "Presence data uses DB when available; otherwise in-memory runtime.",
-        "Use POST /api/platform-presence/online|offline to update per platform.",
+        "平台狀態會優先使用資料庫同步；若目前環境未啟用資料庫，會改用目前執行個體的暫存資料。",
+        "可使用 POST /api/platform-presence/online 或 /api/platform-presence/offline 更新單一平台的綁定、上下線與重新驗證狀態。",
       ],
     };
   }
