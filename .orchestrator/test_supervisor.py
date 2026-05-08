@@ -3135,6 +3135,106 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertFalse(queued)
         choose_chair_reviewer.assert_not_called()
 
+    def test_urgent_chair_review_can_use_lane_with_primary_work(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config = {
+                "agents": {
+                    "codex": {"id": "codex", "display_name": "Codex", "provider": "codex"},
+                },
+                "chair_review": {"enabled": True},
+                "schema": {
+                    "tasks_path": "tasks",
+                    "task_id_field": "id",
+                    "status_field": "status",
+                    "assignee_field": "owner",
+                    "reviewer_field": "reviewer",
+                },
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+            }
+            state = {
+                "queue": {"events": {}},
+                "workers": {},
+                "seen_event_keys": {},
+                "provider_pauses": {
+                    "claude": {
+                        "kind": "auth",
+                        "reason": "Invalid authentication credentials",
+                        "paused_at": "2026-04-30T12:51:53Z",
+                    }
+                },
+                "chair_review": {},
+            }
+            status = {
+                "tasks": [
+                    {
+                        "id": "DRV-UI-002",
+                        "status": "backlog",
+                        "owner": "Codex",
+                        "reviewer": "Claude",
+                        "depends_on": [],
+                    }
+                ]
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+                mock.patch.object(supervisor, "enqueue_event") as enqueue_event,
+                mock.patch.object(supervisor, "write_activity_log"),
+            ):
+                queued = supervisor.queue_chair_review(config, state, status, provider_report={})
+
+        self.assertTrue(queued)
+        self.assertEqual(state["chair_review"]["active_review"]["agent"], "Codex")
+        self.assertEqual(state["chair_review"]["active_review"]["reason"], "provider_health_triage")
+        enqueue_event.assert_called_once()
+
+    def test_urgent_chair_review_records_blocked_when_no_lane_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config = {
+                "agents": {
+                    "claude": {"id": "claude", "display_name": "Claude", "provider": "claude"},
+                },
+                "chair_review": {"enabled": True},
+                "paths": {
+                    "status_file": str(root / "ai-status.json"),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+            }
+            state = {
+                "queue": {"events": {}},
+                "workers": {},
+                "provider_pauses": {
+                    "claude": {
+                        "kind": "auth",
+                        "reason": "Invalid authentication credentials",
+                        "paused_at": "2026-04-30T12:51:53Z",
+                    }
+                },
+                "chair_review": {},
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": []}),
+                mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+            ):
+                queued = supervisor.queue_chair_review(config, state, {"tasks": []}, provider_report={})
+
+        self.assertTrue(queued)
+        self.assertEqual(state["chair_review"]["blocked"]["reason"], "provider_health_triage")
+        self.assertIsNone(state["chair_review"].get("active_review"))
+        write_activity_log.assert_called_once()
+
     def test_duplicate_chair_provider_pause_is_noop(self) -> None:
         state = {
             "provider_pauses": {
