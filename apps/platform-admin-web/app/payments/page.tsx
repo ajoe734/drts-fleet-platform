@@ -150,6 +150,24 @@ function summarizeChannelMix(
     .join(", ");
 }
 
+function isShadowChannel(channelKey?: string | null) {
+  return channelKey === "forwarded_shadow";
+}
+
+function hasShadowLines(
+  lines: readonly { channelKey?: string | null }[] | undefined,
+) {
+  return (lines ?? []).some((line) => isShadowChannel(line.channelKey));
+}
+
+function hasOnlyShadowLines(
+  lines: readonly { channelKey?: string | null }[] | undefined,
+) {
+  const list = lines ?? [];
+  if (list.length === 0) return false;
+  return list.every((line) => isShadowChannel(line.channelKey));
+}
+
 function parseArtifactIds(value: string) {
   return value
     .split(",")
@@ -579,6 +597,23 @@ export default function PaymentsPage() {
     (issue) => issue.status !== "resolved",
   ).length;
 
+  const allLineChannelKeys: (string | null | undefined)[] = [
+    ...invoices.flatMap((invoice) =>
+      invoice.lines.map((line) => line.channelKey),
+    ),
+    ...statements.flatMap((statement) =>
+      statement.lines.map((line) => line.channelKey),
+    ),
+  ];
+  const shadowLineCount = allLineChannelKeys.filter((key) =>
+    isShadowChannel(key),
+  ).length;
+  const drtsPayableLineCount = allLineChannelKeys.length - shadowLineCount;
+
+  const forwardedShadowIssues = reconciliationIssues.filter(
+    (issue) => issue.forwardedFinanceContext != null,
+  );
+
   const describeLedgerMode = (
     mode: SettlementMatrixRecord["localLedgerMode"],
   ) =>
@@ -653,6 +688,16 @@ export default function PaymentsPage() {
             label: t("payments.reconciliation.openCount"),
             value: String(openReconciliationCount),
             note: `${reconciliationIssues.length} ${t("payments.reconciliation.totalIssues")}`,
+          },
+          {
+            label: t("payments.payable.summaryTitle"),
+            value: String(drtsPayableLineCount),
+            note: t("payments.payable.summaryNote"),
+          },
+          {
+            label: t("payments.shadow.summaryTitle"),
+            value: String(shadowLineCount),
+            note: t("payments.shadow.summaryNote"),
           },
         ].map((card) => (
           <div key={card.label} className="admin-card">
@@ -1028,6 +1073,34 @@ export default function PaymentsPage() {
                       <div style={{ color: "#6b7280", fontSize: 12 }}>
                         {formatDateTime(issue.updatedAt)}
                       </div>
+                      {issue.forwardedFinanceContext && (
+                        <div
+                          style={{
+                            marginTop: 6,
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: 4,
+                          }}
+                        >
+                          <span className="admin-badge admin-badge--neutral">
+                            {formatPlatformCodeLabel(
+                              locale,
+                              issue.forwardedFinanceContext.platformCode,
+                            )}
+                          </span>
+                          <span className="admin-badge admin-badge--neutral">
+                            {t(
+                              `payments.matrix.ledger.${issue.forwardedFinanceContext.localLedgerMode}`,
+                            )}
+                          </span>
+                          <span className="admin-badge admin-badge--warning">
+                            {t("payments.shadow.payoutAuthority")}:{" "}
+                            {t(
+                              `payments.shadow.authority.${issue.forwardedFinanceContext.driverPayoutAuthority}`,
+                            )}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td style={{ minWidth: 180 }}>
                       <div>{issue.ownerId ?? "—"}</div>
@@ -1235,6 +1308,123 @@ export default function PaymentsPage() {
 
       <div
         className="admin-card"
+        style={{
+          overflowX: "auto",
+          marginBottom: 16,
+          borderColor: "rgba(245,158,11,0.35)",
+        }}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: "0 0 4px" }}>{t("payments.shadow.title")}</h3>
+          <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
+            {t("payments.shadow.subtitle")}
+          </p>
+        </div>
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>{t("payments.shadow.col.platform")}</th>
+              <th>{t("payments.shadow.col.mirrorOrder")}</th>
+              <th>{t("payments.shadow.col.reason")}</th>
+              <th>{t("payments.shadow.col.authority")}</th>
+              <th>{t("payments.shadow.col.ledger")}</th>
+              <th>{t("payments.shadow.col.owner")}</th>
+              <th>{t("payments.shadow.col.note")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {forwardedShadowIssues.length > 0 ? (
+              forwardedShadowIssues.map((issue) => {
+                const context = issue.forwardedFinanceContext;
+                if (!context) {
+                  return null;
+                }
+                const reasonKey = `payments.shadow.reconciliationReason.${context.reconciliationReason}`;
+                const reasonLabel = t(reasonKey);
+                return (
+                  <tr key={issue.issueId}>
+                    <td style={{ minWidth: 160 }}>
+                      <div style={{ fontWeight: 600 }}>
+                        {formatPlatformCodeLabel(locale, context.platformCode)}
+                      </div>
+                      <div style={{ color: "#6b7280", fontSize: 12 }}>
+                        {context.platformCode}
+                      </div>
+                    </td>
+                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
+                      <div>{issue.mirrorOrderId ?? "—"}</div>
+                      <div style={{ color: "#6b7280" }}>
+                        {issue.externalOrderId ?? "—"}
+                      </div>
+                    </td>
+                    <td style={{ minWidth: 220, fontSize: 13 }}>
+                      <div>
+                        {reasonLabel === reasonKey
+                          ? context.reconciliationReason
+                          : reasonLabel}
+                      </div>
+                      <div style={{ color: "#6b7280", fontSize: 12 }}>
+                        {issue.linkedReconciliationJobId ?? "—"}
+                      </div>
+                    </td>
+                    <td style={{ fontSize: 12, minWidth: 220 }}>
+                      <div>
+                        {t("payments.shadow.fareAuthority")}:{" "}
+                        {t(
+                          `payments.shadow.authority.${context.fareAuthority}`,
+                        )}
+                      </div>
+                      <div>
+                        {t("payments.shadow.settlementAuthority")}:{" "}
+                        {t(
+                          `payments.shadow.authority.${context.settlementAuthority}`,
+                        )}
+                      </div>
+                      <div style={{ fontWeight: 600 }}>
+                        {t("payments.shadow.payoutAuthority")}:{" "}
+                        {t(
+                          `payments.shadow.authority.${context.driverPayoutAuthority}`,
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <span className="admin-badge admin-badge--neutral">
+                        {t(`payments.matrix.ledger.${context.localLedgerMode}`)}
+                      </span>
+                    </td>
+                    <td style={{ minWidth: 160 }}>
+                      <div>{issue.ownerId ?? "—"}</div>
+                      <div style={{ marginTop: 6 }}>
+                        <span
+                          className={`admin-badge ${
+                            issue.status === "resolved"
+                              ? "admin-badge--success"
+                              : issue.status === "assigned"
+                                ? "admin-badge--warning"
+                                : "admin-badge--neutral"
+                          }`}
+                        >
+                          {formatPlatformCodeLabel(locale, issue.status)}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ fontSize: 12, minWidth: 220 }}>
+                      {context.note ?? issue.summary}
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td colSpan={7}>{t("payments.shadow.empty")}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div
+        className="admin-card"
         style={{ overflowX: "auto", marginBottom: 16 }}
       >
         <div style={{ marginBottom: 12 }}>
@@ -1404,7 +1594,27 @@ export default function PaymentsPage() {
                     {invoice.tenantId}
                   </td>
                   <td style={{ fontSize: 12 }}>
-                    {describeInvoiceChannelMix(invoice)}
+                    <div>{describeInvoiceChannelMix(invoice)}</div>
+                    <div style={{ marginTop: 6, display: "flex", gap: 4 }}>
+                      {hasOnlyShadowLines(invoice.lines) ? (
+                        <span className="admin-badge admin-badge--neutral">
+                          {t("payments.shadow.badge")}
+                        </span>
+                      ) : hasShadowLines(invoice.lines) ? (
+                        <>
+                          <span className="admin-badge admin-badge--success">
+                            {t("payments.payable.badge")}
+                          </span>
+                          <span className="admin-badge admin-badge--neutral">
+                            {t("payments.shadow.badge")}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="admin-badge admin-badge--success">
+                          {t("payments.payable.badge")}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td>{formatMoney(invoice.amount)}</td>
                   <td>
@@ -1495,7 +1705,27 @@ export default function PaymentsPage() {
                   </td>
                   <td>{statement.driverId}</td>
                   <td style={{ fontSize: 12 }}>
-                    {describeStatementChannelMix(statement)}
+                    <div>{describeStatementChannelMix(statement)}</div>
+                    <div style={{ marginTop: 6, display: "flex", gap: 4 }}>
+                      {hasOnlyShadowLines(statement.lines) ? (
+                        <span className="admin-badge admin-badge--neutral">
+                          {t("payments.shadow.badge")}
+                        </span>
+                      ) : hasShadowLines(statement.lines) ? (
+                        <>
+                          <span className="admin-badge admin-badge--success">
+                            {t("payments.payable.badge")}
+                          </span>
+                          <span className="admin-badge admin-badge--neutral">
+                            {t("payments.shadow.badge")}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="admin-badge admin-badge--success">
+                          {t("payments.payable.badge")}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td>{statement.periodMonth}</td>
                   <td>
@@ -1541,6 +1771,18 @@ export default function PaymentsPage() {
             {reimbursements.length}
           </span>
         </div>
+        <p
+          style={{
+            margin: "0 0 12px",
+            padding: "8px 12px",
+            background: "rgba(245,158,11,0.08)",
+            borderLeft: "3px solid rgba(245,158,11,0.6)",
+            color: "#6b7280",
+            fontSize: 12,
+          }}
+        >
+          {t("payments.shadow.reimbursementGuardrail")}
+        </p>
         <table className="admin-table">
           <thead>
             <tr>

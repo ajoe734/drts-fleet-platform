@@ -714,6 +714,37 @@ const en = {
   "payments.reimbursementsTitle": "Driver reimbursements",
   "payments.generateInvoiceTitle": "Generate tenant invoice",
   "payments.generateStatementsTitle": "Generate driver statements",
+  "payments.payable.badge": "DRTS payable",
+  "payments.shadow.badge": "Shadow-only",
+  "payments.payable.summaryTitle": "DRTS payable lines",
+  "payments.payable.summaryNote":
+    "Owned channels — platform settles and pays driver",
+  "payments.shadow.summaryTitle": "Shadow-only lines",
+  "payments.shadow.summaryNote":
+    "Forwarded mirror — external platform pays driver",
+  "payments.shadow.title": "Forwarded shadow ledger",
+  "payments.shadow.subtitle":
+    "Forwarded external-platform mirror records. The external platform owns receipt issuance, settlement, and driver payout — these entries are not DRTS payable.",
+  "payments.shadow.empty":
+    "No forwarded shadow ledger entries with finance context.",
+  "payments.shadow.col.platform": "Platform",
+  "payments.shadow.col.mirrorOrder": "Mirror / external order",
+  "payments.shadow.col.reason": "Reason",
+  "payments.shadow.col.authority": "Finance authority",
+  "payments.shadow.col.ledger": "Ledger mode",
+  "payments.shadow.col.owner": "Owner / status",
+  "payments.shadow.col.note": "Finance note",
+  "payments.shadow.fareAuthority": "Fare",
+  "payments.shadow.settlementAuthority": "Settlement",
+  "payments.shadow.payoutAuthority": "Driver payout",
+  "payments.shadow.authority.drts": "DRTS",
+  "payments.shadow.authority.external_platform": "External platform",
+  "payments.shadow.reconciliationReason.sync_failed":
+    "Forwarder sync failed — manual finance review required",
+  "payments.shadow.reconciliationReason.manual_fallback":
+    "Manual fallback — finance reviewing forwarded settlement",
+  "payments.shadow.reimbursementGuardrail":
+    "Forwarded shadow records are excluded from local reimbursement batches; the external platform pays the driver directly.",
 
   // ── Pricing (additional) ──
   "pricing.platformFunded": "Platform funded",
@@ -1460,6 +1491,34 @@ const zh: typeof en = {
   "payments.reimbursementsTitle": "司機報銷",
   "payments.generateInvoiceTitle": "產生租戶發票",
   "payments.generateStatementsTitle": "產生司機結算單",
+  "payments.payable.badge": "DRTS 應付",
+  "payments.shadow.badge": "僅鏡像",
+  "payments.payable.summaryTitle": "DRTS 應付筆數",
+  "payments.payable.summaryNote": "自有渠道—平台結算並支付司機",
+  "payments.shadow.summaryTitle": "僅鏡像筆數",
+  "payments.shadow.summaryNote": "轉送鏡像—外部平台支付司機",
+  "payments.shadow.title": "轉送鏡像帳本",
+  "payments.shadow.subtitle":
+    "轉送外部平台的鏡像紀錄。外部平台負責收據開立、結算與司機付款；以下記錄非 DRTS 應付。",
+  "payments.shadow.empty": "目前沒有附帶財務權責資訊的轉送鏡像紀錄。",
+  "payments.shadow.col.platform": "平台",
+  "payments.shadow.col.mirrorOrder": "鏡像／外部訂單",
+  "payments.shadow.col.reason": "原因",
+  "payments.shadow.col.authority": "財務權責",
+  "payments.shadow.col.ledger": "帳本模式",
+  "payments.shadow.col.owner": "負責人／狀態",
+  "payments.shadow.col.note": "財務備註",
+  "payments.shadow.fareAuthority": "車資",
+  "payments.shadow.settlementAuthority": "結算",
+  "payments.shadow.payoutAuthority": "司機付款",
+  "payments.shadow.authority.drts": "DRTS",
+  "payments.shadow.authority.external_platform": "外部平台",
+  "payments.shadow.reconciliationReason.sync_failed":
+    "轉送同步失敗—需財務人工複核",
+  "payments.shadow.reconciliationReason.manual_fallback":
+    "手動接管—財務正在複核轉送結算",
+  "payments.shadow.reimbursementGuardrail":
+    "依結算矩陣規則，轉送鏡像紀錄不會建立本地報銷批次；外部平台直接支付司機。",
 
   // ── Pricing (additional) ──
   "pricing.platformFunded": "平台資助",
