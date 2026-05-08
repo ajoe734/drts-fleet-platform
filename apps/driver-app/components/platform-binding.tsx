@@ -5,9 +5,12 @@ import {
   PLATFORM_CODES,
   type PlatformCode,
   type PlatformPresenceRecord,
+  type PlatformPresenceSummary,
 } from "@drts/contracts";
 import {
   PlatformStatusCard,
+  assessPlatformHealth,
+  getPlatformHealthSeverity,
   type PlatformStatusAction,
 } from "@/components/platform-status-card";
 import { ActionButton } from "@/components/ui/ActionButton";
@@ -63,6 +66,9 @@ export function PlatformBinding({
   showSectionTitle = true,
 }: PlatformBindingProps) {
   const [presences, setPresences] = useState<PlatformPresenceRecord[]>([]);
+  const [adapterStatuses, setAdapterStatuses] = useState<
+    PlatformPresenceSummary["adapterStatuses"]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<BindForm | null>(null);
@@ -76,6 +82,7 @@ export function PlatformBinding({
       const client = getDriverClient();
       const summary = await client.getPlatformPresence();
       setPresences(summary.presences);
+      setAdapterStatuses(summary.adapterStatuses ?? []);
       setLoadError(null);
     } catch (loadError) {
       const message = toErrorMessage(loadError);
@@ -176,22 +183,20 @@ export function PlatformBinding({
     const actions: PlatformStatusAction[] = [];
 
     if (record.reauthRequired) {
-      const platformName = getPlatformDisplayName(record.platformCode);
       actions.push({
         key: "reauth",
         icon: "refresh",
-        label: `重新驗證 ${platformName}`,
+        label: "重新驗證",
         onPress: () => handleOpenReauth(record.platformCode),
         tone: "warning",
         disabled: busyPlatform === record.platformCode,
       });
     }
 
-    const platformName = getPlatformDisplayName(record.platformCode);
     actions.push({
       key: "unbind",
       icon: "unlink",
-      label: `解除 ${platformName} 綁定`,
+      label: "解除綁定",
       onPress: () => handleUnbind(record.platformCode),
       tone: "danger",
       disabled: busyPlatform === record.platformCode,
@@ -209,27 +214,53 @@ export function PlatformBinding({
     );
   }
 
+  const adapterStatusMap = new Map(
+    (adapterStatuses ?? []).map((item) => [item.platformCode, item]),
+  );
+  const enrichedPresences = [...presences]
+    .map((record) => ({
+      record,
+      assessment: assessPlatformHealth(
+        record,
+        adapterStatusMap.get(record.platformCode),
+      ),
+    }))
+    .sort((left, right) => {
+      const severityDelta =
+        getPlatformHealthSeverity(right.assessment) -
+        getPlatformHealthSeverity(left.assessment);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+      return left.record.platformCode.localeCompare(right.record.platformCode);
+    });
+  const readyCount = enrichedPresences.filter(
+    (item) => item.assessment.canReceiveOrders,
+  ).length;
+
   return (
     <View>
       {showSectionTitle ? (
         <Text style={styles.sectionTitle}>平台帳號綁定</Text>
       ) : null}
       <Text style={styles.sectionDescription}>
-        已綁定 {presences.length} 個平台，可隨時新增、解除綁定或重新驗證。
+        已綁定 {presences.length} 個平台，其中 {readyCount}{" "}
+        個目前可接單，可隨時新增、解除綁定或重新驗證。
       </Text>
 
       {loadError ? (
         <ErrorBanner message={loadError} style={styles.errorBanner} />
       ) : null}
 
-      {presences.length === 0 ? (
+      {enrichedPresences.length === 0 ? (
         <Text style={styles.emptyText}>目前尚未綁定任何平台帳號。</Text>
       ) : (
-        presences.map((record) => (
+        enrichedPresences.map(({ record }) => (
           <PlatformStatusCard
             key={record.platformCode}
             record={record}
             actions={buildActions(record)}
+            adapterStatus={adapterStatusMap.get(record.platformCode)}
           />
         ))
       )}
