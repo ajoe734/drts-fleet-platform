@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useDeferredValue, useEffect, useState, useTransition } from "react";
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
 import { PageHeader } from "@drts/ui-web";
 import type {
   CreateIncidentCommand,
@@ -48,6 +54,7 @@ type IncidentFormInitialValues = {
   description?: string;
   category?: IncidentCategory;
   severity?: IncidentSeverity;
+  complaintCaseNo?: string;
   relatedOrderId?: string;
   relatedVehicleId?: string;
   relatedDriverId?: string;
@@ -55,6 +62,31 @@ type IncidentFormInitialValues = {
   occurredAt?: string;
   location?: string;
 };
+
+function formatDateTime(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleString() : "—";
+}
+
+function formatIncidentAge(
+  value: string | null | undefined,
+  locale: "en" | "zh",
+) {
+  if (!value) {
+    return locale === "en" ? "Time not recorded" : "尚未記錄時間";
+  }
+
+  const deltaMinutes = Math.round(
+    (Date.now() - new Date(value).getTime()) / (1000 * 60),
+  );
+  if (deltaMinutes < 60) {
+    return locale === "en"
+      ? `${deltaMinutes} min ago`
+      : `${deltaMinutes} 分鐘前`;
+  }
+
+  const deltaHours = Math.round(deltaMinutes / 60);
+  return locale === "en" ? `${deltaHours} hr ago` : `${deltaHours} 小時前`;
+}
 
 export default function IncidentsPage() {
   const { t, locale } = useTranslation();
@@ -84,6 +116,9 @@ export default function IncidentsPage() {
   >("all");
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const createFromQuery = searchParams.get("create") === "1";
+  const incidentIdFromQuery = searchParams.get("incidentId");
+  const complaintCaseNoFromQuery =
+    searchParams.get("complaintCaseNo")?.trim() ?? "";
   const createDefaults: IncidentFormInitialValues = {
     title: searchParams.get("title") ?? "",
     description: searchParams.get("description") ?? "",
@@ -97,12 +132,19 @@ export default function IncidentsPage() {
     )
       ? (searchParams.get("severity") as IncidentSeverity)
       : "medium",
+    complaintCaseNo: complaintCaseNoFromQuery,
     relatedOrderId: searchParams.get("relatedOrderId") ?? "",
     relatedVehicleId: searchParams.get("relatedVehicleId") ?? "",
     relatedDriverId: searchParams.get("relatedDriverId") ?? "",
     reportedBy: searchParams.get("reportedBy") ?? "ops-user-001",
     location: searchParams.get("location") ?? "",
   };
+  const selectedIncident = useMemo(
+    () =>
+      records.find((record) => record.incidentId === selectedIncidentId) ??
+      null,
+    [records, selectedIncidentId],
+  );
 
   useEffect(() => {
     void loadRecords();
@@ -115,6 +157,15 @@ export default function IncidentsPage() {
     setShowCreate(true);
     setEditingId(null);
   }, [createFromQuery]);
+
+  useEffect(() => {
+    if (!incidentIdFromQuery) {
+      return;
+    }
+
+    setSelectedIncidentId(incidentIdFromQuery);
+    void loadTimeline(incidentIdFromQuery);
+  }, [incidentIdFromQuery]);
 
   async function loadRecords() {
     setLoading(true);
@@ -196,6 +247,22 @@ export default function IncidentsPage() {
       record.relatedVehicleId ||
       record.relatedComplaintCaseNo,
   ).length;
+  const recoveryPendingCount = records.filter(
+    (record) =>
+      (record.status === "open" || record.status === "investigating") &&
+      record.serviceRecoveryActions.length === 0,
+  ).length;
+  const incidentGuardrails = [
+    locale === "en"
+      ? "Driver SOS and dispatch-exception incidents remain ops-owned even when linked orders or complaints exist."
+      : "即使已連結訂單或客訴，driver SOS 與 dispatch-exception incident 仍由 ops 持有。",
+    locale === "en"
+      ? "Service recovery actions document passenger remediation; they do not replace timeline updates or formal resolution notes."
+      : "Service recovery action 用於記錄乘客補救，不能取代 timeline 更新或正式 resolution note。",
+    locale === "en"
+      ? "Escalation target signals who must join the response, not who may silently assume ownership."
+      : "Escalation target 代表必須加入處理的人，不代表可默默接手 owner。",
+  ];
 
   function focusCriticalQueue() {
     const section = document.getElementById("critical-sos-queue");
@@ -214,6 +281,45 @@ export default function IncidentsPage() {
             <strong>{getOpsLabel(locale, "error")}:</strong> {error}
           </div>
         )}
+
+        <section className="workspace-hero">
+          <div>
+            <p className="eyebrow">
+              {locale === "en" ? "Incident workspace" : "Incident Workspace"}
+            </p>
+            <h3>
+              {selectedIncident
+                ? `${selectedIncident.incidentId} · ${selectedIncident.title}`
+                : t("incidents.selectIncident")}
+            </h3>
+            <p>
+              {selectedIncident
+                ? locale === "en"
+                  ? `${selectedIncident.incidentId} is active in the service recovery workspace.`
+                  : `${selectedIncident.incidentId} 已進入 service recovery workspace。`
+                : locale === "en"
+                  ? "Select an incident to coordinate SOS response, escalation, and service recovery."
+                  : "選擇事故以協調 SOS 回應、升級與 service recovery。"}
+            </p>
+          </div>
+          <div className="hero-chip-row">
+            <span className="hero-chip hero-chip-critical">
+              {locale === "en"
+                ? `${criticalQueue.length} critical in queue`
+                : `${criticalQueue.length} 筆重大事故待處理`}
+            </span>
+            <span className="hero-chip">
+              {locale === "en"
+                ? `${recoveryPendingCount} without recovery actions`
+                : `${recoveryPendingCount} 筆尚未記錄 recovery`}
+            </span>
+            <span className="hero-chip">
+              {locale === "en"
+                ? `${linkedCount} linked entities`
+                : `${linkedCount} 筆已連結實體`}
+            </span>
+          </div>
+        </section>
 
         <section className="summary-grid">
           {[
@@ -247,6 +353,19 @@ export default function IncidentsPage() {
               <small>{card.note}</small>
             </button>
           ))}
+        </section>
+
+        <section className="assumption-panel">
+          <strong>
+            {locale === "en"
+              ? "Authority and service recovery guardrails"
+              : "權限與 service recovery guardrails"}
+          </strong>
+          <ul className="assumption-list">
+            {incidentGuardrails.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
         </section>
 
         <section id="critical-sos-queue" className="sos-queue">
@@ -391,7 +510,17 @@ export default function IncidentsPage() {
                     command as UpdateIncidentCommand,
                   );
                 } else {
-                  await client.createIncident(command as CreateIncidentCommand);
+                  const created = await client.createIncident(
+                    command as CreateIncidentCommand,
+                  );
+                  if (complaintCaseNoFromQuery) {
+                    await client.linkIncidentToComplaint(
+                      created.incidentId,
+                      complaintCaseNoFromQuery,
+                    );
+                    setSelectedIncidentId(created.incidentId);
+                    await loadTimeline(created.incidentId);
+                  }
                 }
                 setShowCreate(false);
                 setEditingId(null);
@@ -489,7 +618,12 @@ export default function IncidentsPage() {
                               </Link>
                             )}
                             {record.relatedComplaintCaseNo && (
-                              <Link className="inline-link" href="/complaints">
+                              <Link
+                                className="inline-link"
+                                href={`/complaints?caseNo=${encodeURIComponent(
+                                  record.relatedComplaintCaseNo,
+                                )}`}
+                              >
                                 {getOpsLabel(locale, "complaint")}{" "}
                                 {record.relatedComplaintCaseNo}
                               </Link>
@@ -576,6 +710,97 @@ export default function IncidentsPage() {
                   <h3>{selectedIncidentId ?? t("incidents.selectIncident")}</h3>
                 </div>
               </div>
+              {selectedIncident && (
+                <section className="incident-brief">
+                  <div className="detail-grid">
+                    <div>
+                      <span className="label">{t("common.status")}</span>
+                      <strong>
+                        {formatOpsCodeLabel(locale, selectedIncident.status)}
+                      </strong>
+                      <small>
+                        {formatIncidentAge(
+                          selectedIncident.occurredAt ??
+                            selectedIncident.createdAt,
+                          locale,
+                        )}
+                      </small>
+                    </div>
+                    <div>
+                      <span className="label">
+                        {t("incidents.col.severity")}
+                      </span>
+                      <strong>
+                        {formatOpsCodeLabel(locale, selectedIncident.severity)}
+                      </strong>
+                      <small>
+                        {selectedIncident.assignedTo ??
+                          (locale === "en" ? "Unassigned" : "未指派")}
+                      </small>
+                    </div>
+                    <div>
+                      <span className="label">
+                        {t("incidents.col.escalation")}
+                      </span>
+                      <strong>
+                        {selectedIncident.escalationTarget
+                          ? t(
+                              `incidents.escalationBadge.${selectedIncident.escalationTarget}` as any,
+                            )
+                          : t("incidents.form.escalationNone")}
+                      </strong>
+                      <small>
+                        {formatDateTime(selectedIncident.updatedAt)}
+                      </small>
+                    </div>
+                    <div>
+                      <span className="label">
+                        {t("incidents.serviceRecovery")}
+                      </span>
+                      <strong>
+                        {selectedIncident.serviceRecoveryActions.length}
+                      </strong>
+                      <small>
+                        {locale === "en"
+                          ? "recovery action(s) recorded"
+                          : "筆 recovery action 已記錄"}
+                      </small>
+                    </div>
+                  </div>
+                  <p className="brief-description">
+                    {selectedIncident.description}
+                  </p>
+                  <div className="link-stack">
+                    {selectedIncident.relatedOrderId && (
+                      <Link
+                        className="inline-link"
+                        href={`/dispatch?orderId=${encodeURIComponent(selectedIncident.relatedOrderId)}`}
+                      >
+                        {locale === "en"
+                          ? `Open dispatch order ${selectedIncident.relatedOrderId}`
+                          : `開啟派車訂單 ${selectedIncident.relatedOrderId}`}
+                      </Link>
+                    )}
+                    {selectedIncident.relatedComplaintCaseNo && (
+                      <Link
+                        className="inline-link"
+                        href={`/complaints?caseNo=${encodeURIComponent(selectedIncident.relatedComplaintCaseNo)}`}
+                      >
+                        {locale === "en"
+                          ? `Open complaint ${selectedIncident.relatedComplaintCaseNo}`
+                          : `開啟客訴 ${selectedIncident.relatedComplaintCaseNo}`}
+                      </Link>
+                    )}
+                    {selectedIncident.location && (
+                      <span className="cell-subcopy">
+                        {locale === "en"
+                          ? `Location: ${selectedIncident.location}`
+                          : `地點：${selectedIncident.location}`}
+                      </span>
+                    )}
+                  </div>
+                </section>
+              )}
               {selectedIncidentId ? (
                 timeline.length > 0 ? (
                   <ul className="timeline-list">
@@ -679,14 +904,13 @@ export default function IncidentsPage() {
           .sos-list,
           .toolbar,
           .content-grid,
-          .link-stack {
+          .link-stack,
+          .detail-grid {
             display: grid;
             gap: 0.75rem;
           }
-          .summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            margin-bottom: 1rem;
-          }
+          .workspace-hero,
+          .assumption-panel,
           .summary-card,
           .sos-queue,
           .panel {
@@ -694,6 +918,52 @@ export default function IncidentsPage() {
             border-radius: 1rem;
             border: 1px solid #e2e8f0;
             background: #fff;
+          }
+          .workspace-hero,
+          .assumption-panel {
+            margin-bottom: 1rem;
+          }
+          .workspace-hero {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: start;
+            background: linear-gradient(135deg, #eff6ff, #fff7ed 70%, #ffffff);
+          }
+          .hero-chip-row {
+            display: flex;
+            gap: 0.65rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+          }
+          .hero-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.22rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            background: rgba(255, 255, 255, 0.86);
+            border: 1px solid #93c5fd;
+            color: #1d4ed8;
+          }
+          .hero-chip-critical {
+            border-color: #fca5a5;
+            background: #fee2e2;
+            color: #b91c1c;
+          }
+          .assumption-panel strong {
+            display: block;
+            margin-bottom: 0.55rem;
+          }
+          .assumption-list {
+            margin: 0;
+            padding-left: 1.1rem;
+            color: #475569;
+          }
+          .summary-grid {
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            margin-bottom: 1rem;
           }
           .summary-card {
             background: #f8fafc;
@@ -804,6 +1074,9 @@ export default function IncidentsPage() {
           .content-grid {
             grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
           }
+          .detail-grid {
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          }
           .panel-head {
             display: flex;
             justify-content: space-between;
@@ -842,6 +1115,27 @@ export default function IncidentsPage() {
           .route-link {
             color: #0f172a;
             text-decoration: none;
+          }
+          .incident-brief {
+            display: grid;
+            gap: 0.8rem;
+            margin-bottom: 1rem;
+            padding: 0.9rem 1rem;
+            border-radius: 0.9rem;
+            border: 1px solid #dbeafe;
+            background: #f8fbff;
+          }
+          .label {
+            display: block;
+            margin-bottom: 0.2rem;
+            color: #64748b;
+            font-size: 0.74rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+          }
+          .brief-description {
+            margin: 0;
+            color: #334155;
           }
           .timeline-list {
             margin: 0;
@@ -886,6 +1180,7 @@ export default function IncidentsPage() {
             border-top: 1px solid #e2e8f0;
           }
           @media (max-width: 900px) {
+            .workspace-hero,
             .toolbar,
             .content-grid,
             .sos-card {

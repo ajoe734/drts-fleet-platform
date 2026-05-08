@@ -95,6 +95,67 @@ function getOverrideStatusTone(status: string) {
   }
 }
 
+function compareCallSessionPriority(
+  a: CallSessionRecord,
+  b: CallSessionRecord,
+) {
+  if (a.status !== b.status) {
+    return a.status === "active" ? -1 : 1;
+  }
+
+  const aHasCallback = a.callbackTask?.status === "pending";
+  const bHasCallback = b.callbackTask?.status === "pending";
+  if (aHasCallback !== bHasCallback) {
+    return aHasCallback ? -1 : 1;
+  }
+
+  if (a.recordingState !== b.recordingState) {
+    const priority: Record<CallRecordingState, number> = {
+      missing: 3,
+      pending: 2,
+      ready: 1,
+    };
+    return priority[b.recordingState] - priority[a.recordingState];
+  }
+
+  return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
+}
+
+function getCallbackTone(callback: CallbackTaskRecord) {
+  if (callback.status === "completed") {
+    return "queue-badge badge-positive";
+  }
+  if (new Date(callback.dueAt).getTime() < Date.now()) {
+    return "queue-badge badge-danger";
+  }
+  return "queue-badge badge-warning";
+}
+
+function formatRelativeDeadline(value: string, locale: "en" | "zh") {
+  const deltaMinutes = Math.round(
+    (new Date(value).getTime() - Date.now()) / (1000 * 60),
+  );
+
+  if (deltaMinutes >= 0) {
+    return locale === "en"
+      ? `Due in ${deltaMinutes} min`
+      : `${deltaMinutes} 分鐘後到期`;
+  }
+
+  return locale === "en"
+    ? `Overdue by ${Math.abs(deltaMinutes)} min`
+    : `已逾期 ${Math.abs(deltaMinutes)} 分鐘`;
+}
+
+function getCallbackSummary(callback: CallbackTaskRecord, locale: "en" | "zh") {
+  const parts = [
+    callback.agentId ?? (locale === "en" ? "Unassigned" : "未指派"),
+    callback.note ?? (locale === "en" ? "No note" : "無備註"),
+  ];
+
+  return parts.join(" · ");
+}
+
 export default function CallcenterPage() {
   const { t, locale } = useTranslation();
   const resolveErrorMessage = (error: unknown) =>
@@ -238,6 +299,31 @@ export default function CallcenterPage() {
   const hotlineTransfers = sessions.filter(
     (session) => session.linkedCaseNo,
   ).length;
+  const sortedSessions = [...filteredSessions].sort(compareCallSessionPriority);
+  const callbackQueue = [...callbacks].sort(
+    (a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime(),
+  );
+  const pendingCallbacks = callbackQueue.filter(
+    (callback) => callback.status === "pending",
+  );
+  const overdueCallbacks = pendingCallbacks.filter(
+    (callback) => new Date(callback.dueAt).getTime() < Date.now(),
+  ).length;
+  const workspaceHeadline = selectedSession
+    ? locale === "en"
+      ? `${selectedSession.callId} is active in the session workspace.`
+      : `${selectedSession.callId} 已進入 session workspace。`
+    : locale === "en"
+      ? "Pick a live session to continue booking, callback, or complaint handoff."
+      : "選擇一筆進線，接續 booking、callback 或 complaint handoff。";
+  const sessionGuardrails = [
+    t("callcenter.integrationAssumption.screenPop"),
+    t("callcenter.integrationAssumption.recording"),
+    t("callcenter.integrationAssumption.storage"),
+    locale === "en"
+      ? "Complaint handoff stays separate from phone-order creation and should only occur when the case context is captured."
+      : "客訴 handoff 與電話訂車必須分流，只有在案件脈絡已記錄後才應升級。",
+  ];
 
   return (
     <>
@@ -251,6 +337,40 @@ export default function CallcenterPage() {
             <strong>{getOpsLabel(locale, "error")}:</strong> {error}
           </div>
         )}
+
+        <section className="workspace-hero">
+          <div>
+            <p className="eyebrow">
+              {locale === "en" ? "Session workspace" : "Session Workspace"}
+            </p>
+            <h3>
+              {selectedSession
+                ? `${selectedSession.callId} · ${formatOpsCodeLabel(
+                    locale,
+                    selectedSession.callType,
+                  )}`
+                : t("callcenter.sessionDetail")}
+            </h3>
+            <p>{workspaceHeadline}</p>
+          </div>
+          <div className="hero-chip-row">
+            <span className="hero-chip hero-chip-critical">
+              {locale === "en"
+                ? `${overdueCallbacks} overdue callback(s)`
+                : `${overdueCallbacks} 筆 callback 已逾期`}
+            </span>
+            <span className="hero-chip">
+              {locale === "en"
+                ? `${pendingCallbacks.length} pending callback(s)`
+                : `${pendingCallbacks.length} 筆 callback 待回應`}
+            </span>
+            <span className="hero-chip">
+              {locale === "en"
+                ? `${recordingPending} recording gate item(s)`
+                : `${recordingPending} 筆錄音門檻待補`}
+            </span>
+          </div>
+        </section>
 
         <section className="summary-grid">
           {[
@@ -310,11 +430,15 @@ export default function CallcenterPage() {
         </div>
 
         <section className="assumption-panel">
-          <strong>{t("callcenter.integrationAssumptionsTitle")}</strong>
+          <strong>
+            {locale === "en"
+              ? "Authority and integration guardrails"
+              : "權限與整合 guardrails"}
+          </strong>
           <ul className="assumption-list">
-            <li>{t("callcenter.integrationAssumption.screenPop")}</li>
-            <li>{t("callcenter.integrationAssumption.recording")}</li>
-            <li>{t("callcenter.integrationAssumption.storage")}</li>
+            {sessionGuardrails.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
           </ul>
         </section>
 
@@ -446,7 +570,7 @@ export default function CallcenterPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredSessions.map((session) => (
+                    {sortedSessions.map((session) => (
                       <tr
                         key={session.callId}
                         className={
@@ -1283,12 +1407,24 @@ export default function CallcenterPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {callbacks.map((callback) => (
+                  {callbackQueue.map((callback) => (
                     <tr key={callback.callbackTaskId}>
                       <td>{callback.callbackTaskId}</td>
                       <td>{callback.callId}</td>
-                      <td>{formatOpsCodeLabel(locale, callback.status)}</td>
-                      <td>{formatDateTime(callback.dueAt)}</td>
+                      <td>
+                        <span className={getCallbackTone(callback)}>
+                          {formatOpsCodeLabel(locale, callback.status)}
+                        </span>
+                        <div className="cell-subcopy">
+                          {getCallbackSummary(callback, locale)}
+                        </div>
+                      </td>
+                      <td>
+                        <div>{formatDateTime(callback.dueAt)}</div>
+                        <div className="cell-subcopy">
+                          {formatRelativeDeadline(callback.dueAt, locale)}
+                        </div>
+                      </td>
                       <td>{callback.linkedOrderId ?? "-"}</td>
                       <td>{callback.linkedCaseNo ?? "-"}</td>
                     </tr>
@@ -1444,6 +1580,11 @@ export default function CallcenterPage() {
             margin: 0.2rem 0 0;
             color: #64748b;
             font-size: 0.92rem;
+          }
+          .cell-subcopy {
+            color: #64748b;
+            font-size: 0.82rem;
+            margin-top: 0.2rem;
           }
           .table-wrap {
             overflow-x: auto;
