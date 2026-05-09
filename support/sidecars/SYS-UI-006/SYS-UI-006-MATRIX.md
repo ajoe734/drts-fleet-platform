@@ -2,7 +2,7 @@
 
 - Parent Task: `SYS-UI-006`
 - Owner / Reviewer: `Codex2` / `Codex`
-- Snapshot note: current machine truth is `review_approved` with owner `Codex2` and reviewer `Codex` in `ai-status.json`; this document preserves the drafting history below as context only.
+- Snapshot note: an earlier closeout draft captured a `review_approved` snapshot for `SYS-UI-006`, but that state is historical context only. Current machine truth lives in `ai-status.json`, and this document preserves the drafting history below without asserting the live task status.
 - Original drafting lane: `Claude2` (chairman first reassigned closeout ownership to `Claude` on `2026-05-09T18:59:59Z` after `Claude2` entered a degraded 429-retry / file-inbox-fallback state, then reassigned to `Codex2` for final owner closeout recorded in machine truth at `2026-05-09T20:13:26Z`)
 - Date: `2026-05-09`
 - Class: additive cross-surface matrix; classification + handoff, not new contract design
