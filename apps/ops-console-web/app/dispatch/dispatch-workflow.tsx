@@ -24,6 +24,7 @@ import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import { AuthorityBadge } from "@drts/ui-web";
 import {
   getCandidateLocationState,
   getCandidateLocationTone,
@@ -41,6 +42,7 @@ type QueueState =
   | "exception"
   | "timeout"
   | "no_supply";
+type BoardStateTone = QueueState | "active" | "closed" | "intake";
 type FilterMode = "all" | "attention" | "queued";
 type ActionMode =
   | "release"
@@ -60,7 +62,7 @@ interface SpatialPoint {
   label: string;
   lat: number;
   lng: number;
-  tone: QueueState;
+  tone: BoardStateTone;
   orderId?: string;
   jobId?: string;
   etaMinutes?: number | null;
@@ -91,6 +93,22 @@ interface DispatchTimelineEntry {
 }
 
 const AUTO_LOAD_CANDIDATE_LIMIT = 6;
+const ACTIVE_ASSIGNMENT_JOB_STATUSES = new Set<DispatchJobRecord["status"]>([
+  "reserved",
+  "assigned",
+]);
+const ACTIVE_TRIP_ORDER_STATUSES = new Set<OwnedOrderRecord["status"]>([
+  "assigned",
+  "driver_accepted",
+  "enroute_pickup",
+  "arrived_pickup",
+  "on_trip",
+  "proof_pending",
+]);
+const TERMINAL_ORDER_STATUSES = new Set<OwnedOrderRecord["status"]>([
+  "completed",
+  "cancelled",
+]);
 
 function buildDispatchTraceSyncKey(
   order: OwnedOrderRecord | null,
@@ -120,13 +138,29 @@ function buildDispatchTraceSyncKey(
 function getQueueState(
   order: OwnedOrderRecord,
   job?: DispatchJobRecord,
-): QueueState {
+): QueueState | null {
   if (order.status === "exception_hold") return "exception";
   if (order.status === "dispatch_timeout") return "timeout";
   if (order.status === "no_supply" || order.status === "delayed_queue")
     return "no_supply";
+  if (order.queueFamily === "manual_review_queue") return "exception";
+  if (
+    order.queueFamily === "recording_gate_queue" ||
+    order.queueFamily === "redispatch_priority_queue" ||
+    order.queueFamily === "reservation_confirmation_queue" ||
+    order.queueFamily === "realtime_ready_queue"
+  ) {
+    return "pending";
+  }
   if (job?.status === "reserved") return "reserved";
-  return "pending";
+  if (
+    job?.status === "matching" ||
+    job?.status === "queued" ||
+    job?.status === "redispatch_required"
+  ) {
+    return "pending";
+  }
+  return null;
 }
 
 function getQueueStateKey(state: QueueState): string {
@@ -157,6 +191,100 @@ function getQueueStateColor(state: QueueState): string {
     case "no_supply":
       return "bg-orange-100 text-orange-800";
   }
+}
+
+function getBoardStateBadge(
+  order: OwnedOrderRecord,
+  job?: DispatchJobRecord,
+): { label: string; tone: BoardStateTone } {
+  const queueState = getQueueState(order, job);
+  if (queueState) {
+    return {
+      label: getQueueStateKey(queueState),
+      tone: queueState,
+    };
+  }
+
+  if (
+    ACTIVE_TRIP_ORDER_STATUSES.has(order.status) ||
+    job?.status === "assigned"
+  ) {
+    return {
+      label: "dispatch.workflow.boardState.active",
+      tone: "active",
+    };
+  }
+
+  if (TERMINAL_ORDER_STATUSES.has(order.status)) {
+    return {
+      label: "dispatch.workflow.boardState.closed",
+      tone: "closed",
+    };
+  }
+
+  return {
+    label: "dispatch.workflow.boardState.intake",
+    tone: "intake",
+  };
+}
+
+function getBoardStateColor(state: BoardStateTone): string {
+  switch (state) {
+    case "pending":
+    case "reserved":
+    case "exception":
+    case "timeout":
+    case "no_supply":
+      return getQueueStateColor(state);
+    case "active":
+      return "bg-sky-100 text-sky-800";
+    case "closed":
+      return "bg-slate-200 text-slate-700";
+    case "intake":
+      return "bg-violet-100 text-violet-800";
+  }
+}
+
+function getOwnedAuthorityLabelKey(
+  order: OwnedOrderRecord,
+  job?: DispatchJobRecord,
+): string {
+  if (
+    order.status === "exception_hold" ||
+    order.status === "dispatch_timeout" ||
+    order.status === "no_supply" ||
+    order.status === "delayed_queue"
+  ) {
+    return "dispatch.workflow.authority.exception";
+  }
+  if (job?.status === "assigned") {
+    return "dispatch.workflow.authority.assignment";
+  }
+  if (order.reservationWindowStart || order.reservationWindowEnd) {
+    return "dispatch.workflow.authority.reservation";
+  }
+  return "dispatch.workflow.authority.local";
+}
+
+function getOwnedAuthorityTone(
+  order: OwnedOrderRecord,
+  job?: DispatchJobRecord,
+): "danger" | "success" | "warning" | "info" {
+  if (
+    order.status === "exception_hold" ||
+    order.status === "dispatch_timeout" ||
+    order.status === "no_supply" ||
+    order.status === "delayed_queue"
+  ) {
+    return "warning";
+  }
+  if (job?.status === "assigned") {
+    return "success";
+  }
+  if (order.reservationWindowStart || order.reservationWindowEnd) {
+    return "info";
+  }
+  return "info";
 }
 
 function formatEta(
@@ -1118,7 +1246,9 @@ export function DispatchWorkflow({
   const queueCounts = filteredOrders.reduce(
     (acc, order) => {
       const state = getQueueState(order, orderJobMap[order.orderId]);
-      acc[state] += 1;
+      if (state) {
+        acc[state] += 1;
+      }
       return acc;
     },
     {
@@ -1129,6 +1259,16 @@ export function DispatchWorkflow({
       no_supply: 0,
     } as Record<QueueState, number>,
   );
+  const localQueueCount = filteredOrders.filter((order) => {
+    const job = orderJobMap[order.orderId];
+    return getQueueState(order, job) === "pending";
+  }).length;
+  const activeAssignmentCount = filteredOrders.filter((order) => {
+    const job = orderJobMap[order.orderId];
+    return job ? ACTIVE_ASSIGNMENT_JOB_STATUSES.has(job.status) : false;
+  }).length;
+  const exceptionDeskCount =
+    queueCounts.exception + queueCounts.timeout + queueCounts.no_supply;
 
   const visibleOrdersForMap = filteredOrders.slice(0, 10);
   const spatialPoints: SpatialPoint[] = [];
@@ -1141,7 +1281,7 @@ export function DispatchWorkflow({
 
   visibleOrdersForMap.forEach((order) => {
     const job = orderJobMap[order.orderId];
-    const tone = getQueueState(order, job);
+    const tone = getBoardStateBadge(order, job).tone;
 
     if (hasCoordinates(order.pickup)) {
       spatialPoints.push({
@@ -1210,7 +1350,7 @@ export function DispatchWorkflow({
   const ordersWithoutCoordinates =
     filteredOrders.length - ordersWithCoordinates;
   const selectedQueueState = selectedOrder
-    ? getQueueState(selectedOrder, selectedJob)
+    ? getBoardStateBadge(selectedOrder, selectedJob)
     : null;
   const selectedCandidates = selectedJob
     ? candidates[selectedJob.dispatchJobId] || []
@@ -1648,6 +1788,63 @@ export function DispatchWorkflow({
         </div>
       )}
 
+      <section className="board-intro">
+        <div className="board-intro-copy">
+          <div className="detail-kicker">
+            {t("dispatch.workflow.boardTitle")}
+          </div>
+          <div className="board-intro-body">
+            {t("dispatch.workflow.boardSubtitle")}
+          </div>
+        </div>
+        <div className="board-intro-badges">
+          <AuthorityBadge
+            category="owned"
+            label={t("dispatch.workflow.authority.local")}
+            tone="info"
+          />
+          <AuthorityBadge
+            category="queue"
+            label={t("dispatch.workflow.schema.activeAssignment")}
+            tone="success"
+          />
+          <AuthorityBadge
+            category="ops"
+            label={t("dispatch.workflow.schema.exceptionDesk")}
+            tone="warning"
+          />
+        </div>
+        <div className="board-schema-grid">
+          <div className="board-schema-card">
+            <strong>{localQueueCount}</strong>
+            <span>{t("dispatch.workflow.schema.localQueue")}</span>
+            <div className="cell-subcopy">
+              {t("dispatch.workflow.schema.localQueueHint", {
+                count: localQueueCount,
+              })}
+            </div>
+          </div>
+          <div className="board-schema-card">
+            <strong>{activeAssignmentCount}</strong>
+            <span>{t("dispatch.workflow.schema.activeAssignment")}</span>
+            <div className="cell-subcopy">
+              {t("dispatch.workflow.schema.activeAssignmentHint", {
+                count: activeAssignmentCount,
+              })}
+            </div>
+          </div>
+          <div className="board-schema-card">
+            <strong>{exceptionDeskCount}</strong>
+            <span>{t("dispatch.workflow.schema.exceptionDesk")}</span>
+            <div className="cell-subcopy">
+              {t("dispatch.workflow.schema.exceptionDeskHint", {
+                count: exceptionDeskCount,
+              })}
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div className="toolbar">
         <input
           className="search-input"
@@ -1855,7 +2052,7 @@ export function DispatchWorkflow({
                     >
                       <div className="cell-title">{order.orderNo}</div>
                       <div className="cell-subcopy">
-                        {t(getQueueStateKey(getQueueState(order, job)))}
+                        {t(getBoardStateBadge(order, job).label)}
                       </div>
                       <div className="cell-subcopy">
                         {hasCoordinates(order.pickup)
@@ -1908,9 +2105,9 @@ export function DispatchWorkflow({
           </div>
           {selectedQueueState && (
             <span
-              className={`queue-badge ${getQueueStateColor(selectedQueueState)}`}
+              className={`queue-badge ${getBoardStateColor(selectedQueueState.tone)}`}
             >
-              {t(getQueueStateKey(selectedQueueState))}
+              {t(selectedQueueState.label)}
             </span>
           )}
         </div>
@@ -2235,6 +2432,7 @@ export function DispatchWorkflow({
               <th>{t("dispatch.workflow.col.product")}</th>
               <th>{t("dispatch.workflow.col.queue")}</th>
               <th>{t("dispatch.workflow.col.dispatch")}</th>
+              <th>{t("dispatch.workflow.col.authority")}</th>
               <th>{t("dispatch.workflow.col.compliance")}</th>
               <th>{t("dispatch.workflow.col.revenue")}</th>
               <th>{t("dispatch.workflow.col.eta")}</th>
@@ -2246,7 +2444,7 @@ export function DispatchWorkflow({
             {filteredOrders.length > 0 ? (
               filteredOrders.map((order) => {
                 const job = orderJobMap[order.orderId];
-                const queueState = getQueueState(order, job);
+                const boardState = getBoardStateBadge(order, job);
                 const jobCandidates = job
                   ? candidates[job.dispatchJobId] || []
                   : [];
@@ -2313,10 +2511,10 @@ export function DispatchWorkflow({
                     </td>
                     <td>
                       <span
-                        className={`queue-badge ${getQueueStateColor(queueState)}`}
-                        title={t(getQueueStateKey(queueState))}
+                        className={`queue-badge ${getBoardStateColor(boardState.tone)}`}
+                        title={t(boardState.label)}
                       >
-                        {t(getQueueStateKey(queueState))}
+                        {t(boardState.label)}
                       </span>
                       {queueFamily && (
                         <div className="cell-title queue-family-copy">
@@ -2447,6 +2645,26 @@ export function DispatchWorkflow({
                           {t("dispatch.workflow.noJob")}
                         </span>
                       )}
+                    </td>
+                    <td>
+                      <div className="dispatch-block">
+                        <AuthorityBadge
+                          category="owned"
+                          label={t(getOwnedAuthorityLabelKey(order, job))}
+                          tone={getOwnedAuthorityTone(order, job)}
+                        />
+                        <div className="cell-subcopy">
+                          {getOpsLabel(locale, "dispatchSource", {
+                            value: formatOpsCodeLabel(
+                              locale,
+                              order.orderSource,
+                            ),
+                          })}
+                        </div>
+                        <div className="cell-subcopy">
+                          {formatOpsCodeLabel(locale, order.dispatchSemantics)}
+                        </div>
+                      </div>
                     </td>
                     <td>
                       {complianceFocus ? (
@@ -2655,7 +2873,7 @@ export function DispatchWorkflow({
               })
             ) : (
               <tr>
-                <td colSpan={9}>{t("dispatch.workflow.noOrders")}</td>
+                <td colSpan={10}>{t("dispatch.workflow.noOrders")}</td>
               </tr>
             )}
           </tbody>
@@ -2673,9 +2891,58 @@ export function DispatchWorkflow({
         .spatial-order-list,
         .actions,
         .detail-list,
-        .action-sheet {
+        .action-sheet,
+        .board-intro,
+        .board-intro-badges,
+        .board-schema-grid {
           display: grid;
           gap: 0.75rem;
+        }
+        .board-intro {
+          margin-bottom: 1rem;
+          padding: 1rem;
+          border-radius: 1rem;
+          border: 1px solid #dbeafe;
+          background:
+            radial-gradient(
+              circle at top left,
+              rgba(37, 99, 235, 0.08),
+              transparent 28%
+            ),
+            #f8fbff;
+        }
+        .board-intro-copy {
+          display: grid;
+          gap: 0.35rem;
+        }
+        .board-intro-body {
+          color: #475569;
+          font-size: 0.92rem;
+          line-height: 1.5;
+        }
+        .board-intro-badges {
+          grid-auto-flow: column;
+          grid-auto-columns: max-content;
+          overflow-x: auto;
+        }
+        .board-schema-grid {
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        }
+        .board-schema-card {
+          padding: 0.85rem;
+          border-radius: 0.9rem;
+          background: rgba(255, 255, 255, 0.85);
+          border: 1px solid rgba(148, 163, 184, 0.24);
+          display: grid;
+          gap: 0.25rem;
+        }
+        .board-schema-card strong {
+          font-size: 1.35rem;
+          color: #0f172a;
+        }
+        .board-schema-card span {
+          font-weight: 600;
+          color: #0f172a;
         }
         .stream-banner {
           margin-bottom: 0.75rem;
