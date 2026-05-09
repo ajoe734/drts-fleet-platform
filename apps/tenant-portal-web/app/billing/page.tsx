@@ -33,6 +33,13 @@ export default async function BillingPage() {
     error = e instanceof Error ? e.message : "Unknown error";
   }
 
+  const invoiceSummary =
+    invoices.length > 0
+      ? summarizeInvoiceSourceDomains({
+          lines: invoices.flatMap((invoice) => invoice.lines),
+        })
+      : null;
+
   return (
     <main className="app-grid">
       <AppShellCard
@@ -88,6 +95,18 @@ export default async function BillingPage() {
             </table>
           </div>
         )}
+
+        {invoiceSummary?.badge === "External finance authority present" ? (
+          <article className="callout-panel is-warning">
+            <strong>Forwarded finance authority remains external</strong>
+            <p>{invoiceSummary.detail}</p>
+            <p>
+              Tenant billing can mirror audit-safe amounts, but settlement,
+              receipt ownership, payout, and reconciliation remain on the
+              external-platform or ops authority lanes.
+            </p>
+          </article>
+        ) : null}
 
         {invoices.length > 0 ? (
           <div className="data-table">
