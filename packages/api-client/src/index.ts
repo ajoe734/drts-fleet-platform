@@ -160,6 +160,7 @@ import type {
   TenantAddressRecord,
   TenantAddressExportViewRecord,
   TenantApiKeyRecord,
+  TenantApiKeyIssued,
   TenantBillingProfile,
   TenantBootstrapSession,
   TenantIntegrationGovernancePackage,
@@ -1251,12 +1252,19 @@ export class ApiClient {
     return this.getList<TenantApiKeyRecord>("/api/tenant/api-keys");
   }
 
-  async issueApiKey(command: IssueTenantApiKeyCommand) {
-    return this.post("/api/tenant/api-keys", { body: command });
+  async issueApiKey(
+    command: IssueTenantApiKeyCommand,
+  ): Promise<TenantApiKeyIssued> {
+    return this.post<TenantApiKeyIssued>("/api/tenant/api-keys", {
+      body: command,
+    });
   }
 
-  async rotateApiKey(apiKeyId: string, command: RotateTenantApiKeyCommand) {
-    return this.post(
+  async rotateApiKey(
+    apiKeyId: string,
+    command: RotateTenantApiKeyCommand,
+  ): Promise<TenantApiKeyIssued> {
+    return this.post<TenantApiKeyIssued>(
       `/api/tenant/api-keys/${encodeURIComponent(apiKeyId)}/rotate`,
       { body: command },
     );
