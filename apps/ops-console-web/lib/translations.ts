@@ -528,15 +528,34 @@ const en = {
   "dispatch.workflow.detail.actionPanel": "Action panel",
   "dispatch.workflow.detail.actionPanelHint":
     "Use this workspace to record assignment, override, redispatch, and exception decisions with audit context.",
+  "dispatch.workflow.detail.ownedAuthorityHint":
+    "Assignment authority stays in the owned dispatch console for this order.",
+  "dispatch.workflow.detail.forwardedAuthorityHint":
+    "This order keeps owned queue visibility, but forwarded follow-up must stay authority-safe and continue on the external platform board.",
   "dispatch.workflow.detail.compliance": "Compliance gates",
   "dispatch.workflow.detail.noComplianceIssues":
     "No active compliance blocker or review gate on this order.",
+  "dispatch.workflow.detail.nextStep": "Next step",
   "dispatch.workflow.detail.candidates": "Candidate lane",
+  "dispatch.workflow.detail.candidateHint":
+    "Choose a candidate here to unlock assignment and reassignment actions in the action panel.",
+  "dispatch.workflow.detail.chooseCandidate": "Choose",
+  "dispatch.workflow.detail.selectedCandidate": "Selected",
+  "dispatch.workflow.detail.selectedCandidateReady":
+    "Selected candidate is ready for assignment from the action panel.",
+  "dispatch.workflow.detail.locationStatus": "Location status",
   "dispatch.workflow.detail.timeline": "Dispatch timeline",
   "dispatch.workflow.detail.timelineEvents": "Timeline events",
   "dispatch.workflow.detail.timelineLatest": "Latest event",
+  "dispatch.workflow.detail.timelineHint":
+    "The timeline keeps the operator-facing audit trail in the same workspace as actions and gate decisions.",
   "dispatch.workflow.detail.timelineEmpty":
     "No dispatch trace entries are available for this order yet.",
+  "dispatch.workflow.detail.workflowCues": "Workflow cues",
+  "dispatch.workflow.detail.workflowCuesHint":
+    "Keep queue authority, dispatch semantics, and compliance ownership visible before taking action.",
+  "dispatch.workflow.detail.dispatchSemantic": "Dispatch semantic",
+  "dispatch.workflow.detail.queueState": "Queue state",
   "dispatch.workflow.detail.openWorkspace": "Open workspace",
   "dispatch.workflow.detail.activeWorkspace": "Workspace active",
   "dispatch.workflow.detail.selectCandidateHint":
@@ -1959,15 +1978,34 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.detail.actionPanel": "操作面板",
   "dispatch.workflow.detail.actionPanelHint":
     "在此工作區完成指派、override、重派與例外決策，並留下稽核脈絡。",
+  "dispatch.workflow.detail.ownedAuthorityHint":
+    "這筆訂單的指派權責維持在本地派車工作區內處理。",
+  "dispatch.workflow.detail.forwardedAuthorityHint":
+    "此單仍保留本地佇列可視性，但若進入 forwarded follow-up，後續操作必須維持權責安全並回到外部平台看板。",
   "dispatch.workflow.detail.compliance": "Compliance gate",
   "dispatch.workflow.detail.noComplianceIssues":
     "這筆訂單目前沒有啟用中的 compliance blocker 或 review gate。",
+  "dispatch.workflow.detail.nextStep": "下一步",
   "dispatch.workflow.detail.candidates": "候選供給",
+  "dispatch.workflow.detail.candidateHint":
+    "先在這裡選定候選人，再到操作面板完成指派或重派。",
+  "dispatch.workflow.detail.chooseCandidate": "選取",
+  "dispatch.workflow.detail.selectedCandidate": "已選取",
+  "dispatch.workflow.detail.selectedCandidateReady":
+    "已選定候選人，可直接在操作面板完成指派。",
+  "dispatch.workflow.detail.locationStatus": "位置狀態",
   "dispatch.workflow.detail.timeline": "派車時間軸",
   "dispatch.workflow.detail.timelineEvents": "時間軸事件",
   "dispatch.workflow.detail.timelineLatest": "最新事件",
+  "dispatch.workflow.detail.timelineHint":
+    "時間軸把操作、gate 決策與稽核紀錄維持在同一個工作區內。",
   "dispatch.workflow.detail.timelineEmpty":
     "此訂單目前尚無可顯示的 dispatch trace。",
+  "dispatch.workflow.detail.workflowCues": "工作流提示",
+  "dispatch.workflow.detail.workflowCuesHint":
+    "執行操作前，持續看見佇列權責、派車語意與 compliance ownership。",
+  "dispatch.workflow.detail.dispatchSemantic": "派車語意",
+  "dispatch.workflow.detail.queueState": "佇列狀態",
   "dispatch.workflow.detail.openWorkspace": "開啟工作區",
   "dispatch.workflow.detail.activeWorkspace": "工作區焦點",
   "dispatch.workflow.detail.selectCandidateHint":
