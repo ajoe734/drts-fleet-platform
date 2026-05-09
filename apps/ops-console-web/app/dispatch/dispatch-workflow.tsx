@@ -24,7 +24,14 @@ import { createOpsDispatchEventSource, getOpsClient } from "@/lib/api-client";
 import { formatMinorCurrency } from "@/lib/ops-analytics";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
-import { AuthorityBadge } from "@drts/ui-web";
+import {
+  AuthorityBadge,
+  DetailMetadataGrid,
+  Timeline,
+  WorkflowEmptyState,
+  WorkflowPanel,
+  WorkflowSplitLayout,
+} from "@drts/ui-web";
 import {
   getCandidateLocationState,
   getCandidateLocationTone,
@@ -423,6 +430,19 @@ function getTimelineTone(eventType: string): DispatchTimelineEntry["tone"] {
     return "warning";
   }
   return "default";
+}
+
+function getTimelineManagementTone(
+  tone: DispatchTimelineEntry["tone"],
+): "info" | "warning" | "danger" {
+  switch (tone) {
+    case "critical":
+      return "danger";
+    case "warning":
+      return "warning";
+    default:
+      return "info";
+  }
 }
 
 function buildFallbackTimelineEntries(
@@ -1370,6 +1390,20 @@ export function DispatchWorkflow({
   const selectedPrimaryGate =
     selectedActiveGates[0] ??
     selectedComplianceGates.find((gate) => gate.required);
+  const selectedAuthorityLabelKey = selectedOrder
+    ? getOwnedAuthorityLabelKey(selectedOrder, selectedJob)
+    : "dispatch.workflow.authority.local";
+  const selectedAuthorityTone = selectedOrder
+    ? getOwnedAuthorityTone(selectedOrder, selectedJob)
+    : "info";
+  const selectedCandidateValue = selectedJob
+    ? selectedCandidate[selectedJob.dispatchJobId] || ""
+    : "";
+  const selectedWorkflowHint = selectedOrder
+    ? selectedOrder.dispatchSemantics === "forwarder_broadcast"
+      ? t("dispatch.workflow.detail.forwardedAuthorityHint")
+      : t("dispatch.workflow.detail.ownedAuthorityHint")
+    : "";
   const selectedReservationWindow = selectedOrder
     ? selectedOrder.reservationWindowStart && selectedOrder.reservationWindowEnd
       ? `${formatDateTime(locale, selectedOrder.reservationWindowStart)} - ${formatDateTime(locale, selectedOrder.reservationWindowEnd)}`
@@ -1393,6 +1427,13 @@ export function DispatchWorkflow({
           )
       : buildFallbackTimelineEntries(selectedOrder, selectedJob)
     : [];
+  const selectedTimelineItems = selectedTimelineEntries.map((entry) => ({
+    id: entry.id,
+    title: entry.title,
+    detail: entry.body,
+    timestamp: formatDateTime(locale, entry.at),
+    tone: getTimelineManagementTone(entry.tone),
+  }));
 
   const renderActionDraftForm = (
     order: OwnedOrderRecord,
@@ -2113,314 +2154,562 @@ export function DispatchWorkflow({
         </div>
 
         {selectedOrder ? (
-          <div className="detail-workspace-grid">
-            <div className="detail-card">
-              <div className="detail-card-title">
-                {t("dispatch.workflow.detail.summary")}
-              </div>
-              <div className="detail-stat-grid">
-                <div className="detail-stat-card">
-                  <span>{t("dispatch.workflow.detail.orderStatus")}</span>
-                  <strong>
-                    {formatOpsCodeLabel(locale, selectedOrder.status)}
-                  </strong>
-                </div>
-                <div className="detail-stat-card">
-                  <span>{t("dispatch.workflow.detail.dispatchStatus")}</span>
-                  <strong>
-                    {selectedJob
-                      ? formatOpsCodeLabel(locale, selectedJob.status)
-                      : t("dispatch.workflow.noJob")}
-                  </strong>
-                </div>
-                <div className="detail-stat-card">
-                  <span>{t("dispatch.workflow.detail.reservationWindow")}</span>
-                  <strong>{selectedReservationWindow}</strong>
-                </div>
-                <div className="detail-stat-card">
-                  <span>{t("dispatch.workflow.col.eta")}</span>
-                  <strong title={selectedEta.tooltip}>
-                    {selectedEta.display}
-                  </strong>
-                </div>
-              </div>
-              <div className="detail-meta-grid">
-                <div>
-                  <div className="detail-meta-label">
-                    {t("dispatch.workflow.detail.passenger")}
-                  </div>
-                  <div className="cell-title">
-                    {selectedOrder.passenger.name}
-                  </div>
-                  <div className="cell-subcopy">
-                    {selectedOrder.passenger.phone}
-                  </div>
-                </div>
-                <div>
-                  <div className="detail-meta-label">
-                    {t("dispatch.workflow.detail.contact")}
-                  </div>
-                  <div className="cell-title">
-                    {selectedOrder.onsiteContact?.name ?? "-"}
-                  </div>
-                  <div className="cell-subcopy">
-                    {selectedOrder.onsiteContact?.phone ?? "-"}
-                  </div>
-                </div>
-                <div>
-                  <div className="detail-meta-label">
-                    {t("dispatch.workflow.col.revenue")}
-                  </div>
-                  <div className="cell-title">
-                    {formatMinorCurrency(
-                      selectedOrder.quotedFare?.amountMinor ?? 0,
-                    )}
-                  </div>
-                  <div className="cell-subcopy">
-                    {selectedOrder.fixedPrice
-                      ? t("dispatch.workflow.fixedPrice")
-                      : t("dispatch.workflow.metered")}
-                  </div>
-                </div>
-                <div>
-                  <div className="detail-meta-label">
-                    {t("dispatch.workflow.detail.lastUpdated")}
-                  </div>
-                  <div className="cell-title">
-                    {formatDateTime(locale, selectedOrder.updatedAt)}
-                  </div>
-                  <div className="cell-subcopy">
-                    {selectedJob
-                      ? formatDateTime(locale, selectedJob.updatedAt)
-                      : "-"}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="detail-card">
-              <div className="detail-card-title">
-                {t("dispatch.workflow.detail.actionPanel")}
-              </div>
-              {renderDetailActionPanel(selectedOrder, selectedJob)}
-            </div>
-
-            <div className="detail-card">
-              <div className="detail-card-title">
-                {t("dispatch.workflow.detail.route")}
-              </div>
-              <div className="route-grid">
-                <div className="route-stop">
-                  <span className="route-stop-chip route-stop-pickup">P</span>
-                  <div>
-                    <div className="detail-meta-label">
-                      {t("dispatch.workflow.detail.pickup")}
-                    </div>
-                    <div className="cell-title">
-                      {selectedOrder.pickup.addressName ??
-                        selectedOrder.pickup.address}
-                    </div>
-                    <div className="cell-subcopy">
-                      {selectedOrder.pickup.address}
-                    </div>
-                  </div>
-                </div>
-                <div className="route-stop">
-                  <span className="route-stop-chip route-stop-dropoff">D</span>
-                  <div>
-                    <div className="detail-meta-label">
-                      {t("dispatch.workflow.detail.dropoff")}
-                    </div>
-                    <div className="cell-title">
-                      {selectedOrder.dropoff.addressName ??
-                        selectedOrder.dropoff.address}
-                    </div>
-                    <div className="cell-subcopy">
-                      {selectedOrder.dropoff.address}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              {selectedOrder.notes && (
-                <div className="detail-notes">
-                  <div className="detail-meta-label">
-                    {t("dispatch.workflow.detail.notes")}
-                  </div>
-                  <div className="cell-subcopy">{selectedOrder.notes}</div>
-                </div>
-              )}
-            </div>
-
-            <div className="detail-card">
-              <div className="detail-card-title">
-                {t("dispatch.workflow.detail.compliance")}
-              </div>
-              {selectedPrimaryGate ? (
-                <div className="detail-gate-grid">
-                  {selectedComplianceGates.map((gate) => (
-                    <div key={gate.gateType} className="detail-gate-card">
-                      <span
-                        className={`queue-badge ${getComplianceTone(gate.state)}`}
-                      >
-                        {t(`dispatch.workflow.gate.${gate.gateType}`)}
-                      </span>
-                      <div className="cell-title">{gate.nextAction}</div>
-                      <div className="cell-subcopy">
-                        {t(`dispatch.workflow.gateState.${gate.state}`)}
-                      </div>
-                    </div>
-                  ))}
-                  {selectedDownstreamReviewDuties.length > 0 && (
-                    <div className="detail-gate-card detail-gate-card-wide">
-                      <div className="detail-meta-label">
-                        {t("dispatch.workflow.downstreamReview")}
-                      </div>
-                      <div className="detail-list">
-                        {selectedDownstreamReviewDuties.map((duty) => (
-                          <div
-                            key={duty.key}
-                            className="cell-subcopy detail-line"
-                          >
-                            {formatOpsCodeLabel(locale, duty.stage)}
-                            {duty.reviewerLabel
-                              ? ` · ${duty.reviewerLabel}`
-                              : ""}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="cell-subcopy">
-                  {t("dispatch.workflow.detail.noComplianceIssues")}
-                </div>
-              )}
-            </div>
-
-            <div className="detail-card">
-              <div className="detail-card-title">
-                {t("dispatch.workflow.detail.candidates")}
-              </div>
-              {selectedJob ? (
-                <div className="detail-list">
-                  {selectedCandidates.length > 0 ? (
-                    <>
-                      <select
-                        className="candidate-select"
-                        value={
-                          selectedCandidate[selectedJob.dispatchJobId] || ""
-                        }
-                        onChange={(event) =>
-                          setSelectedCandidate((prev) => ({
-                            ...prev,
-                            [selectedJob.dispatchJobId]: event.target.value,
-                          }))
-                        }
-                      >
-                        <option value="">
-                          {t("dispatch.workflow.selectCandidate")}
-                        </option>
-                        {selectedCandidates.map((candidate) => (
-                          <option
-                            key={`${candidate.vehicleId}|${candidate.driverId}`}
-                            value={`${candidate.vehicleId}|${candidate.driverId}`}
-                          >
-                            {candidate.vehicleId} / {candidate.driverId} ·{" "}
-                            {candidate.etaMinutes}m
-                          </option>
-                        ))}
-                      </select>
-                      {selectedCandidates.map((candidate) => (
-                        <div
-                          key={`${candidate.vehicleId}:${candidate.driverId}`}
-                          className="candidate-detail-card"
+          <WorkflowSplitLayout
+            ariaLabel={t("dispatch.workflow.detail.title")}
+            sideMaxWidth="440px"
+            main={
+              <>
+                <WorkflowPanel
+                  eyebrow={t("dispatch.workflow.detail.summary")}
+                  title={t("dispatch.workflow.detail.selectedOrder", {
+                    orderNo: selectedOrder.orderNo,
+                  })}
+                  description={selectedWorkflowHint}
+                  tone={selectedPrimaryGate ? "warning" : "neutral"}
+                  meta={
+                    <div className="detail-workflow-meta">
+                      <AuthorityBadge
+                        category="owned"
+                        label={t(selectedAuthorityLabelKey)}
+                        tone={selectedAuthorityTone}
+                      />
+                      {selectedQueueState ? (
+                        <span
+                          className={`queue-badge ${getBoardStateColor(selectedQueueState.tone)}`}
                         >
-                          <div className="cell-title">
-                            {candidate.vehicleId} · {candidate.driverId}
-                          </div>
-                          <div className="cell-subcopy">
-                            {candidate.operatingArea} · {candidate.etaMinutes}m
-                          </div>
+                          {t(selectedQueueState.label)}
+                        </span>
+                      ) : null}
+                      {selectedPrimaryGate ? (
+                        <span
+                          className={`queue-badge ${getComplianceTone(selectedPrimaryGate.state)}`}
+                        >
+                          {t(
+                            `dispatch.workflow.gate.${selectedPrimaryGate.gateType}`,
+                          )}
+                        </span>
+                      ) : null}
+                    </div>
+                  }
+                >
+                  <DetailMetadataGrid
+                    minColumnWidth="220px"
+                    items={[
+                      {
+                        id: "passenger",
+                        label: t("dispatch.workflow.detail.passenger"),
+                        value: selectedOrder.passenger.name,
+                        hint: selectedOrder.passenger.phone,
+                      },
+                      {
+                        id: "contact",
+                        label: t("dispatch.workflow.detail.contact"),
+                        value: selectedOrder.onsiteContact?.name ?? "-",
+                        hint: selectedOrder.onsiteContact?.phone ?? "-",
+                      },
+                      {
+                        id: "revenue",
+                        label: t("dispatch.workflow.col.revenue"),
+                        value: formatMinorCurrency(
+                          selectedOrder.quotedFare?.amountMinor ?? 0,
+                        ),
+                        hint: selectedOrder.fixedPrice
+                          ? t("dispatch.workflow.fixedPrice")
+                          : t("dispatch.workflow.metered"),
+                      },
+                      {
+                        id: "updated",
+                        label: t("dispatch.workflow.detail.lastUpdated"),
+                        value: formatDateTime(locale, selectedOrder.updatedAt),
+                        hint: selectedJob
+                          ? formatDateTime(locale, selectedJob.updatedAt)
+                          : "-",
+                      },
+                      {
+                        id: "order-status",
+                        label: t("dispatch.workflow.detail.orderStatus"),
+                        value: formatOpsCodeLabel(locale, selectedOrder.status),
+                        hint: selectedOrder.orderId,
+                      },
+                      {
+                        id: "dispatch-status",
+                        label: t("dispatch.workflow.detail.dispatchStatus"),
+                        value: selectedJob
+                          ? formatOpsCodeLabel(locale, selectedJob.status)
+                          : t("dispatch.workflow.noJob"),
+                        hint: selectedJob?.dispatchJobId ?? "-",
+                      },
+                      {
+                        id: "service-window",
+                        label: t("dispatch.workflow.detail.reservationWindow"),
+                        value: selectedReservationWindow,
+                        hint: `${t("dispatch.workflow.col.eta")}: ${selectedEta.display}`,
+                      },
+                      {
+                        id: "queue",
+                        label: t("dispatch.workflow.col.queue"),
+                        value: selectedQueueState ? (
+                          <span
+                            className={`queue-badge ${getBoardStateColor(selectedQueueState.tone)}`}
+                          >
+                            {t(selectedQueueState.label)}
+                          </span>
+                        ) : (
+                          formatOpsCodeLabel(locale, selectedOrder.status)
+                        ),
+                        hint: selectedOrder.queueFamily
+                          ? formatOpsCodeLabel(
+                              locale,
+                              selectedOrder.queueFamily,
+                            )
+                          : formatOpsCodeLabel(locale, selectedOrder.status),
+                      },
+                    ]}
+                  />
+                </WorkflowPanel>
+
+                <WorkflowPanel
+                  title={t("dispatch.workflow.detail.route")}
+                  description={selectedOrder.notes || undefined}
+                >
+                  <div className="route-grid">
+                    <div className="route-stop">
+                      <span className="route-stop-chip route-stop-pickup">
+                        P
+                      </span>
+                      <div>
+                        <div className="detail-meta-label">
+                          {t("dispatch.workflow.detail.pickup")}
                         </div>
-                      ))}
+                        <div className="cell-title">
+                          {selectedOrder.pickup.addressName ??
+                            selectedOrder.pickup.address}
+                        </div>
+                        <div className="cell-subcopy">
+                          {selectedOrder.pickup.address}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="route-stop">
+                      <span className="route-stop-chip route-stop-dropoff">
+                        D
+                      </span>
+                      <div>
+                        <div className="detail-meta-label">
+                          {t("dispatch.workflow.detail.dropoff")}
+                        </div>
+                        <div className="cell-title">
+                          {selectedOrder.dropoff.addressName ??
+                            selectedOrder.dropoff.address}
+                        </div>
+                        <div className="cell-subcopy">
+                          {selectedOrder.dropoff.address}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {selectedOrder.notes ? (
+                    <div className="detail-notes">
+                      <div className="detail-meta-label">
+                        {t("dispatch.workflow.detail.notes")}
+                      </div>
+                      <div className="cell-subcopy">{selectedOrder.notes}</div>
+                    </div>
+                  ) : null}
+                </WorkflowPanel>
+
+                <WorkflowPanel
+                  title={t("dispatch.workflow.detail.compliance")}
+                  description={
+                    selectedPrimaryGate
+                      ? selectedPrimaryGate.nextAction
+                      : t("dispatch.workflow.detail.noComplianceIssues")
+                  }
+                  tone={
+                    selectedPrimaryGate?.state === "blocked"
+                      ? "danger"
+                      : selectedPrimaryGate
+                        ? "warning"
+                        : "neutral"
+                  }
+                >
+                  {selectedPrimaryGate ? (
+                    <>
+                      <div className="badge-stack">
+                        {selectedComplianceGates.map((gate) => (
+                          <span
+                            key={gate.gateType}
+                            className={`queue-badge ${getComplianceTone(gate.state)}`}
+                          >
+                            {t(`dispatch.workflow.gate.${gate.gateType}`)}
+                          </span>
+                        ))}
+                      </div>
+                      <DetailMetadataGrid
+                        minColumnWidth="220px"
+                        items={[
+                          {
+                            id: "compliance-status",
+                            label: t("common.status"),
+                            value: t(
+                              `dispatch.workflow.gateState.${selectedPrimaryGate.state}`,
+                            ),
+                          },
+                          {
+                            id: "next-step",
+                            label: t("dispatch.workflow.detail.nextStep"),
+                            value: selectedPrimaryGate.nextAction,
+                            ...(selectedPrimaryGate.state === "blocked"
+                              ? { tone: "danger" as const }
+                              : selectedPrimaryGate.state === "review_required"
+                                ? { tone: "warning" as const }
+                                : {}),
+                          },
+                          {
+                            id: "downstream-review",
+                            label: t("dispatch.workflow.downstreamReview"),
+                            value:
+                              selectedDownstreamReviewDuties.length > 0 ? (
+                                <div className="detail-list">
+                                  {selectedDownstreamReviewDuties.map(
+                                    (duty) => (
+                                      <div
+                                        key={duty.key}
+                                        className="cell-subcopy detail-line"
+                                      >
+                                        {formatOpsCodeLabel(locale, duty.stage)}
+                                        {duty.reviewerLabel
+                                          ? ` · ${duty.reviewerLabel}`
+                                          : ""}
+                                      </div>
+                                    ),
+                                  )}
+                                </div>
+                              ) : (
+                                "-"
+                              ),
+                            hint:
+                              selectedDownstreamReviewDuties.length > 0
+                                ? undefined
+                                : t(
+                                    "dispatch.workflow.detail.noComplianceIssues",
+                                  ),
+                            columnSpan: 2,
+                          },
+                        ]}
+                      />
                     </>
                   ) : (
-                    <button
-                      className="btn btn-primary"
-                      type="button"
-                      onClick={() => fetchCandidates(selectedJob.dispatchJobId)}
-                      disabled={loading === selectedJob.dispatchJobId}
-                    >
-                      {loading === selectedJob.dispatchJobId
-                        ? t("common.loading")
-                        : t("dispatch.workflow.viewCandidates")}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="cell-subcopy">
-                  {t("dispatch.workflow.awaitingJob")}
-                </div>
-              )}
-            </div>
-
-            <div className="detail-card detail-card-wide">
-              <div className="detail-card-title">
-                {t("dispatch.workflow.detail.timeline")}
-              </div>
-              <div className="detail-meta-grid detail-meta-grid-compact">
-                <div>
-                  <div className="detail-meta-label">
-                    {t("dispatch.workflow.detail.timelineEvents")}
-                  </div>
-                  <div className="cell-title">
-                    {selectedTimelineEntries.length}
-                  </div>
-                </div>
-                <div>
-                  <div className="detail-meta-label">
-                    {t("dispatch.workflow.detail.timelineLatest")}
-                  </div>
-                  <div className="cell-title">
-                    {selectedTimelineEntries[0]
-                      ? formatDateTime(locale, selectedTimelineEntries[0].at)
-                      : "-"}
-                  </div>
-                </div>
-              </div>
-              {traceLoadingOrderId === selectedOrder.orderId ? (
-                <div className="cell-subcopy">{t("common.loading")}</div>
-              ) : selectedTimelineEntries.length > 0 ? (
-                <div className="timeline-list">
-                  {selectedTimelineEntries.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className={`timeline-item timeline-item-${entry.tone}`}
-                    >
-                      <div className="timeline-marker" />
-                      <div className="timeline-content">
-                        <div className="timeline-row">
-                          <strong>{entry.title}</strong>
-                          <span>{formatDateTime(locale, entry.at)}</span>
-                        </div>
-                        <div className="cell-subcopy">{entry.body}</div>
-                      </div>
+                    <div className="cell-subcopy">
+                      {t("dispatch.workflow.detail.noComplianceIssues")}
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="cell-subcopy">
-                  {t("dispatch.workflow.detail.timelineEmpty")}
-                </div>
-              )}
-            </div>
-          </div>
+                  )}
+                </WorkflowPanel>
+
+                <WorkflowPanel
+                  title={t("dispatch.workflow.detail.candidates")}
+                  description={
+                    selectedJob
+                      ? t("dispatch.workflow.detail.candidateHint")
+                      : t("dispatch.workflow.awaitingJob")
+                  }
+                >
+                  {selectedJob ? (
+                    selectedCandidates.length > 0 ? (
+                      <>
+                        <div className="detail-inline-summary">
+                          <span className="cell-title">
+                            {t("dispatch.workflow.candidateCount", {
+                              count: selectedCandidates.length,
+                            })}
+                          </span>
+                          <span className="cell-subcopy">
+                            {selectedCandidateValue
+                              ? t(
+                                  "dispatch.workflow.detail.selectedCandidateReady",
+                                )
+                              : t(
+                                  "dispatch.workflow.detail.selectCandidateHint",
+                                )}
+                          </span>
+                        </div>
+                        {(
+                          [
+                            "stale",
+                            "no_location",
+                          ] as DispatchCandidateLocationState[]
+                        ).map((locationState) => {
+                          const count = selectedCandidates.filter(
+                            (candidate) =>
+                              getCandidateLocationState(candidate) ===
+                              locationState,
+                          ).length;
+                          if (count === 0) {
+                            return null;
+                          }
+                          return (
+                            <div
+                              key={locationState}
+                              className={`candidate-location-note ${getCandidateLocationTone(
+                                locationState,
+                              )}`}
+                            >
+                              {t("dispatch.workflow.candidateLocationSummary", {
+                                count,
+                                state: t(
+                                  `dispatch.workflow.candidateLocation.${locationState}`,
+                                ).toLowerCase(),
+                              })}
+                            </div>
+                          );
+                        })}
+                        <div className="candidate-table-shell">
+                          <table className="candidate-table">
+                            <thead>
+                              <tr>
+                                <th>{t("dispatch.workflow.col.candidates")}</th>
+                                <th>{t("dispatch.workflow.col.eta")}</th>
+                                <th>
+                                  {t("dispatch.workflow.detail.locationStatus")}
+                                </th>
+                                <th>{t("dispatch.workflow.col.actions")}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedCandidates.map((candidate) => {
+                                const candidateValue = `${candidate.vehicleId}|${candidate.driverId}`;
+                                const locationState =
+                                  getCandidateLocationState(candidate);
+                                const isCandidateSelected =
+                                  selectedCandidateValue === candidateValue;
+                                return (
+                                  <tr
+                                    key={`${candidate.vehicleId}:${candidate.driverId}`}
+                                    className={
+                                      isCandidateSelected
+                                        ? "candidate-row-selected"
+                                        : undefined
+                                    }
+                                  >
+                                    <td>
+                                      <div className="candidate-cell-stack">
+                                        <div className="cell-title">
+                                          {candidate.vehicleId} ·{" "}
+                                          {candidate.driverId}
+                                        </div>
+                                        <div className="cell-subcopy">
+                                          {candidate.operatingArea}
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td>
+                                      <span className="cell-title">
+                                        {candidate.etaMinutes}m
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <span
+                                        className={`candidate-location-note ${getCandidateLocationTone(
+                                          locationState,
+                                        )}`}
+                                      >
+                                        {t(
+                                          `dispatch.workflow.candidateLocation.${locationState}`,
+                                        )}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <button
+                                        className={
+                                          isCandidateSelected
+                                            ? "btn btn-primary"
+                                            : "btn"
+                                        }
+                                        type="button"
+                                        onClick={() =>
+                                          setSelectedCandidate((prev) => ({
+                                            ...prev,
+                                            [selectedJob.dispatchJobId]:
+                                              candidateValue,
+                                          }))
+                                        }
+                                      >
+                                        {isCandidateSelected
+                                          ? t(
+                                              "dispatch.workflow.detail.selectedCandidate",
+                                            )
+                                          : t(
+                                              "dispatch.workflow.detail.chooseCandidate",
+                                            )}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    ) : (
+                      <button
+                        className="btn btn-primary"
+                        type="button"
+                        onClick={() =>
+                          fetchCandidates(selectedJob.dispatchJobId)
+                        }
+                        disabled={loading === selectedJob.dispatchJobId}
+                      >
+                        {loading === selectedJob.dispatchJobId
+                          ? t("common.loading")
+                          : t("dispatch.workflow.viewCandidates")}
+                      </button>
+                    )
+                  ) : (
+                    <div className="cell-subcopy">
+                      {t("dispatch.workflow.awaitingJob")}
+                    </div>
+                  )}
+                </WorkflowPanel>
+
+                <WorkflowPanel
+                  title={t("dispatch.workflow.detail.timeline")}
+                  description={t("dispatch.workflow.detail.timelineHint")}
+                >
+                  <DetailMetadataGrid
+                    minColumnWidth="180px"
+                    items={[
+                      {
+                        id: "timeline-events",
+                        label: t("dispatch.workflow.detail.timelineEvents"),
+                        value: selectedTimelineEntries.length,
+                      },
+                      {
+                        id: "timeline-latest",
+                        label: t("dispatch.workflow.detail.timelineLatest"),
+                        value: selectedTimelineEntries[0]
+                          ? formatDateTime(
+                              locale,
+                              selectedTimelineEntries[0].at,
+                            )
+                          : "-",
+                      },
+                    ]}
+                  />
+                  {traceLoadingOrderId === selectedOrder.orderId ? (
+                    <div className="cell-subcopy">{t("common.loading")}</div>
+                  ) : (
+                    <Timeline
+                      items={selectedTimelineItems}
+                      emptyState={t("dispatch.workflow.detail.timelineEmpty")}
+                    />
+                  )}
+                </WorkflowPanel>
+              </>
+            }
+            side={
+              <>
+                <WorkflowPanel
+                  eyebrow={t("dispatch.workflow.detail.actionPanel")}
+                  title={t("dispatch.workflow.detail.actionPanel")}
+                  description={t("dispatch.workflow.detail.actionPanelHint")}
+                  tone={selectedPrimaryGate ? "warning" : "info"}
+                  meta={
+                    <div className="detail-workflow-meta">
+                      <AuthorityBadge
+                        category="owned"
+                        label={t(selectedAuthorityLabelKey)}
+                        tone={selectedAuthorityTone}
+                      />
+                      {selectedQueueState ? (
+                        <span
+                          className={`queue-badge ${getBoardStateColor(selectedQueueState.tone)}`}
+                        >
+                          {t(selectedQueueState.label)}
+                        </span>
+                      ) : null}
+                    </div>
+                  }
+                >
+                  {renderDetailActionPanel(selectedOrder, selectedJob)}
+                </WorkflowPanel>
+
+                <WorkflowPanel
+                  title={t("dispatch.workflow.detail.workflowCues")}
+                  description={t("dispatch.workflow.detail.workflowCuesHint")}
+                >
+                  <DetailMetadataGrid
+                    columns={1}
+                    items={[
+                      {
+                        id: "authority-mode",
+                        label: t("dispatch.workflow.col.authority"),
+                        value: (
+                          <AuthorityBadge
+                            category="owned"
+                            label={t(selectedAuthorityLabelKey)}
+                            tone={selectedAuthorityTone}
+                          />
+                        ),
+                        hint: selectedWorkflowHint,
+                        ...(selectedOrder.dispatchSemantics ===
+                        "forwarder_broadcast"
+                          ? { tone: "warning" as const }
+                          : {}),
+                      },
+                      {
+                        id: "dispatch-semantic",
+                        label: t("dispatch.workflow.detail.dispatchSemantic"),
+                        value: formatOpsCodeLabel(
+                          locale,
+                          selectedOrder.dispatchSemantics,
+                        ),
+                        hint: getOpsLabel(locale, "dispatchSource", {
+                          value: formatOpsCodeLabel(
+                            locale,
+                            selectedOrder.orderSource,
+                          ),
+                        }),
+                      },
+                      {
+                        id: "workflow-queue",
+                        label: t("dispatch.workflow.detail.queueState"),
+                        value: selectedQueueState ? (
+                          <span
+                            className={`queue-badge ${getBoardStateColor(selectedQueueState.tone)}`}
+                          >
+                            {t(selectedQueueState.label)}
+                          </span>
+                        ) : (
+                          formatOpsCodeLabel(locale, selectedOrder.status)
+                        ),
+                        hint:
+                          selectedOrder.queueEntryReason &&
+                          formatOpsCodeLabel(
+                            locale,
+                            selectedOrder.queueEntryReason,
+                          ),
+                      },
+                      {
+                        id: "workflow-gate",
+                        label: t("dispatch.workflow.detail.compliance"),
+                        value: selectedPrimaryGate
+                          ? t(
+                              `dispatch.workflow.gateState.${selectedPrimaryGate.state}`,
+                            )
+                          : t("dispatch.workflow.detail.noComplianceIssues"),
+                        hint: selectedPrimaryGate?.nextAction,
+                      },
+                    ]}
+                  />
+                </WorkflowPanel>
+              </>
+            }
+          />
         ) : (
-          <div className="detail-empty">
-            <strong>{t("dispatch.workflow.detail.emptyTitle")}</strong>
-            <span>{t("dispatch.workflow.detail.emptyBody")}</span>
-          </div>
+          <WorkflowEmptyState
+            title={t("dispatch.workflow.detail.emptyTitle")}
+            description={t("dispatch.workflow.detail.emptyBody")}
+          />
         )}
       </section>
 
@@ -3283,6 +3572,12 @@ export function DispatchWorkflow({
           padding-top: 0.35rem;
           border-top: 1px dashed #cbd5e1;
         }
+        .detail-workflow-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+          align-items: center;
+        }
         .detail-action-toolbar {
           display: flex;
           flex-wrap: wrap;
@@ -3298,6 +3593,10 @@ export function DispatchWorkflow({
           background: #ffffff;
           color: #475569;
           font-size: 0.84rem;
+        }
+        .detail-inline-summary {
+          display: grid;
+          gap: 0.25rem;
         }
         .detail-empty {
           padding: 1rem;
@@ -3353,6 +3652,40 @@ export function DispatchWorkflow({
           padding: 0.45rem 0.55rem;
           border-radius: 0.7rem;
           font-size: 0.8rem;
+        }
+        .candidate-table-shell {
+          overflow-x: auto;
+          border: 1px solid #dbe3ef;
+          border-radius: 0.9rem;
+          background: #ffffff;
+        }
+        .candidate-table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        .candidate-table th,
+        .candidate-table td {
+          padding: 0.75rem;
+          border-bottom: 1px solid #e2e8f0;
+          text-align: left;
+          vertical-align: top;
+        }
+        .candidate-table th {
+          font-size: 0.76rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          color: #64748b;
+          background: #f8fafc;
+        }
+        .candidate-table tbody tr:last-child td {
+          border-bottom: 0;
+        }
+        .candidate-row-selected {
+          background: #eff6ff;
+        }
+        .candidate-cell-stack {
+          display: grid;
+          gap: 0.25rem;
         }
         .candidate-location-live {
           background: #dcfce7;
