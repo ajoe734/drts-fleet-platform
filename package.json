@@ -27,7 +27,7 @@
     "dev:driver:web": "pnpm --filter @drts/driver-app web",
     "dev:ops": "pnpm --filter @drts/ops-console-web dev",
     "dev:platform-admin": "pnpm --filter @drts/platform-admin-web dev",
-    "dev:tenant": "pnpm --filter @drts/tenant-portal-web dev",
+    "dev:tenant": "pnpm --filter @drts/tenant-console-web dev",
     "dev:up": "./scripts/dev-up.sh",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
