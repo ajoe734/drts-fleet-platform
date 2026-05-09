@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type {
@@ -16,8 +17,14 @@ import { API_URL } from "@/lib/api-client";
 export const PARTNER_LOGIN_PATH = "/partner/login";
 export const PARTNER_START_PATH = "/partner/start";
 
-const PARTNER_SESSION_COOKIE = "drts_partner_session_v1";
+const PARTNER_SESSION_COOKIE = "drts_partner_session_v2";
 const DEFAULT_SESSION_TTL_SECONDS = 8 * 60 * 60;
+const SESSION_SIGNATURE_VERSION = "v2";
+
+const LEGACY_PARTNER_SESSION_COOKIES = ["drts_partner_session_v1"];
+
+const DEV_FALLBACK_SECRET =
+  "drts-partner-session-dev-fallback-secret-do-not-use-in-prod";
 
 export type PartnerSessionRecord = {
   accessToken: string;
@@ -26,6 +33,38 @@ export type PartnerSessionRecord = {
   partnerEntry: PartnerChannelEntryRecord;
   identity: IdentityContext;
 };
+
+function getSessionSecret(): Buffer {
+  const configured = process.env.DRTS_PARTNER_SESSION_SECRET;
+  if (configured && configured.length >= 32) {
+    return Buffer.from(configured, "utf8");
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "DRTS_PARTNER_SESSION_SECRET must be set (>=32 chars) in production for partner session signing.",
+    );
+  }
+  return Buffer.from(DEV_FALLBACK_SECRET, "utf8");
+}
+
+function signPayload(payload: string): string {
+  return createHmac("sha256", getSessionSecret())
+    .update(`${SESSION_SIGNATURE_VERSION}.${payload}`)
+    .digest("base64url");
+}
+
+function safeEqualBase64url(a: string, b: string): boolean {
+  try {
+    const left = Buffer.from(a, "base64url");
+    const right = Buffer.from(b, "base64url");
+    if (left.length !== right.length || left.length === 0) {
+      return false;
+    }
+    return timingSafeEqual(left, right);
+  } catch {
+    return false;
+  }
+}
 
 function parseExpiresInToSeconds(expiresIn: string): number {
   const numeric = Number.parseInt(expiresIn, 10);
@@ -48,13 +87,29 @@ function parseExpiresInToSeconds(expiresIn: string): number {
 }
 
 function encodeSession(session: PartnerSessionRecord): string {
-  return Buffer.from(JSON.stringify(session), "utf8").toString("base64url");
+  const payload = Buffer.from(JSON.stringify(session), "utf8").toString(
+    "base64url",
+  );
+  const signature = signPayload(payload);
+  return `${SESSION_SIGNATURE_VERSION}.${payload}.${signature}`;
 }
 
 function decodeSession(value: string): PartnerSessionRecord | null {
+  const parts = value.split(".");
+  if (parts.length !== 3) {
+    return null;
+  }
+  const [version, payload, signature] = parts;
+  if (version !== SESSION_SIGNATURE_VERSION || !payload || !signature) {
+    return null;
+  }
+  const expected = signPayload(payload);
+  if (!safeEqualBase64url(signature, expected)) {
+    return null;
+  }
   try {
     const parsed = JSON.parse(
-      Buffer.from(value, "base64url").toString("utf8"),
+      Buffer.from(payload, "base64url").toString("utf8"),
     ) as Partial<PartnerSessionRecord>;
     if (
       !parsed.accessToken ||
@@ -129,4 +184,7 @@ export async function createPartnerSession(
 export async function clearPartnerSession(): Promise<void> {
   const cookieStore = await cookies();
   cookieStore.delete(PARTNER_SESSION_COOKIE);
+  for (const legacy of LEGACY_PARTNER_SESSION_COOKIES) {
+    cookieStore.delete(legacy);
+  }
 }
