@@ -271,9 +271,13 @@ export default async function ApiKeysPage({
   const rotatingKey = rotateKeyId
     ? (apiKeys.find((key) => key.apiKeyId === rotateKeyId) ?? null)
     : null;
-  const activeKeyCount = apiKeys.filter((key) => !key.revokedAt).length;
+  const isApiKeyUsable = (key: TenantApiKeyRecord) => {
+    const status = resolveApiKeyStatus(key);
+    return status.label !== "Revoked" && status.label !== "Expired";
+  };
+  const activeKeyCount = apiKeys.filter(isApiKeyUsable).length;
   const unusedKeyCount = apiKeys.filter(
-    (key) => !key.lastUsedAt && !key.revokedAt,
+    (key) => !key.lastUsedAt && isApiKeyUsable(key),
   ).length;
 
   return (
