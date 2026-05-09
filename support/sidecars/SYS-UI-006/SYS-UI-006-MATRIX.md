@@ -1,8 +1,9 @@
 # SYS-UI-006 Cross-Surface Auth, Registration, Invite, Revoke, And Failure Matrix
 
 - Parent Task: `SYS-UI-006`
-- Owner / Reviewer: `Claude` / `Codex`
-- Original drafting lane: `Claude2` (chairman reassigned ownership to `Claude` on `2026-05-09T18:59:59Z` after `Claude2` entered a degraded 429-retry / file-inbox-fallback state)
+- Owner / Reviewer: `Codex2` / `Codex`
+- Snapshot note: current machine truth is `review_approved` with owner `Codex2` and reviewer `Codex` in `ai-status.json`; this document preserves the drafting history below as context only.
+- Original drafting lane: `Claude2` (chairman first reassigned closeout ownership to `Claude` on `2026-05-09T18:59:59Z` after `Claude2` entered a degraded 429-retry / file-inbox-fallback state, then reassigned to `Codex2` for final owner closeout recorded in machine truth at `2026-05-09T20:13:26Z`)
 - Date: `2026-05-09`
 - Class: additive cross-surface matrix; classification + handoff, not new contract design
 
@@ -97,14 +98,14 @@ References:
 
 ## C. Invite / Suspend / Role Change
 
-| #   | Flow                                                                           | Route group                         | Status                | Evidence                                                                                                                                                                                      | Notes                                                                                                                        |
-| --- | ------------------------------------------------------------------------------ | ----------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| C1  | Tenant role invite                                                             | Tenant Portal                       | `implemented`         | `apps/tenant-portal-web/app/users/actions.ts:36-76`, `packages/api-client/src/index.ts:1338-1352`                                                                                             | Authority-backed; capability-gated.                                                                                          |
-| C2  | Tenant user role / status update                                               | Tenant Portal                       | `implemented`         | `apps/tenant-portal-web/app/users/page.tsx:80-243`, `apps/tenant-portal-web/app/users/actions.ts:36-76`                                                                                       | Suspend / reactivate happen here.                                                                                            |
-| C3  | Tenant-admin selected-shell invite/suspend/role-change                         | Tenant Console (Tenant-Admin Shell) | `selected-shell stub` | `apps/tenant-console-web/app/users/page.tsx:134-137`                                                                                                                                          | The shell explicitly states these mutations belong to the command matrix; deferred from `SYS-UI-006`.                        |
-| C4  | Tenant-side invite from platform admin (force-set role + acknowledgement loop) | Platform Admin                      | `implemented`         | `apps/platform-admin-web/app/tenants/[tenantId]/page.tsx:393-445`, `packages/api-client/src/index.ts:1663-1800` (`inviteTenantRole()`, `acknowledgeTenantRole()`)                             | Cross-tenant governance lever.                                                                                               |
-| C5  | Internal staff invite / suspend / role change                                  | Platform Admin                      | `implemented`         | `apps/platform-admin-web/app/users/page.tsx:36-460`                                                                                                                                           | Covers full lifecycle.                                                                                                       |
-| C6  | Partner-mode user invite                                                       | Tenant Console (Partner Mode)       | `delegated`           | partner-safe nav scope at `apps/tenant-console-web/app/partner/(authenticated)/layout.tsx:10-53` and start page at `apps/tenant-console-web/app/partner/(authenticated)/start/page.tsx:25-31` | Partner mode never carries tenant-admin authority; user mutation lives in Platform Admin partner credential governance (E5). |
+| #   | Flow                                                                           | Route group                         | Status                | Evidence                                                                                                                                                                                      | Notes                                                                                                                                                 |
+| --- | ------------------------------------------------------------------------------ | ----------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | Tenant role invite                                                             | Tenant Portal                       | `implemented`         | `apps/tenant-portal-web/app/users/actions.ts:36-76`, `packages/api-client/src/index.ts:1338-1352`                                                                                             | Authority-backed; capability-gated.                                                                                                                   |
+| C2  | Tenant user role / status update                                               | Tenant Portal                       | `implemented`         | `apps/tenant-portal-web/app/users/page.tsx:80-243`, `apps/tenant-portal-web/app/users/actions.ts:36-76`                                                                                       | Suspend / reactivate happen here.                                                                                                                     |
+| C3  | Tenant-admin selected-shell invite/suspend/role-change                         | Tenant Console (Tenant-Admin Shell) | `selected-shell stub` | `apps/tenant-console-web/app/users/page.tsx:134-137`                                                                                                                                          | The shell explicitly states these mutations belong to the command matrix; deferred from `SYS-UI-006`.                                                 |
+| C4  | Tenant-side invite from platform admin (force-set role + acknowledgement loop) | Platform Admin                      | `implemented`         | `apps/platform-admin-web/app/tenants/[tenantId]/page.tsx:393-445`, `packages/api-client/src/index.ts:1663-1800` (`inviteTenantRole()`, `acknowledgeTenantRole()`)                             | Cross-tenant governance lever.                                                                                                                        |
+| C5  | Internal staff invite / suspend / role change                                  | Platform Admin                      | `implemented`         | `apps/platform-admin-web/app/users/page.tsx:36-460`                                                                                                                                           | Covers full lifecycle.                                                                                                                                |
+| C6  | Partner-mode user invite                                                       | Tenant Console (Partner Mode)       | `delegated`           | partner-safe nav scope at `apps/tenant-console-web/app/partner/(authenticated)/layout.tsx:10-53` and start page at `apps/tenant-console-web/app/partner/(authenticated)/start/page.tsx:25-31` | Partner mode never carries tenant-admin authority; partner identity lifecycle lives in Platform Admin partner entry / credential governance (B5, D3). |
 
 ## D. Rotate / Revoke / Disable / Retry
 
@@ -180,13 +181,13 @@ References:
 
 ## I. Rows That Are Explicitly Delegated Elsewhere
 
-| Flow                                                            | Delegated to                                                                               | Why                                                                                              |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| Partner-mode user invite / role change                          | Platform Admin (D3, E5)                                                                    | Partner mode never carries tenant-admin authority; partner-side secrets are platform-controlled. |
-| Driver fleet device revoke (control-plane action)               | Platform Admin (D5)                                                                        | Revoke command is platform-controlled; driver app reacts to the resulting state.                 |
-| Recording-callback attach (canonical)                           | Ops Console callcenter (F15, G10)                                                          | Concierge portal does not pretend to own CTI binding.                                            |
-| Real receipt delivery                                           | upstream settlement / source-channel rules                                                 | Passenger receipt center (G4) only mirrors ownership; it does not invent email/SMS delivery.     |
-| Tenant-admin invite / suspend / role mutation in selected shell | Tenant Portal today (C1–C2); Tenant Console productionization is downstream (`TEN-UI-008`) | Selected shell is read-oriented; deferred from `SYS-UI-006`.                                     |
+| Flow                                                            | Delegated to                                                                               | Why                                                                                                                                                                      |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Partner-mode user invite / role change                          | Platform Admin (B5, D3)                                                                    | Partner mode never carries tenant-admin authority; partner-side entries and secrets are platform-controlled (B5 entry lifecycle, D3 ingress credential rotate / revoke). |
+| Driver fleet device revoke (control-plane action)               | Platform Admin (D5)                                                                        | Revoke command is platform-controlled; driver app reacts to the resulting state.                                                                                         |
+| Recording-callback attach (canonical)                           | Ops Console callcenter (F15, G10)                                                          | Concierge portal does not pretend to own CTI binding.                                                                                                                    |
+| Real receipt delivery                                           | upstream settlement / source-channel rules                                                 | Passenger receipt center (G4) only mirrors ownership; it does not invent email/SMS delivery.                                                                             |
+| Tenant-admin invite / suspend / role mutation in selected shell | Tenant Portal today (C1–C2); Tenant Console productionization is downstream (`TEN-UI-008`) | Selected shell is read-oriented; deferred from `SYS-UI-006`.                                                                                                             |
 
 ## J. Closeout Posture
 
@@ -204,8 +205,21 @@ is now classified above. Specifically:
 
 Targeted UI fixes were considered. The matrix audit found no surface where a
 new mutation needs to be invented inside `SYS-UI-006`'s scope. The remaining
-work in this slice is classification + handoff — every blocker row in section
-H names a downstream task, not a `SYS-UI-006` self-extension. That matches the
+work in this slice is classification + handoff. Every blocker row in section
+H is one of:
+
+- resolved by a named downstream task (`TEN-UI-008`, `P1PX-BE-002`,
+  `SYS-UI-005` follow-up), or
+- explicitly classified as an open / non-blocking item with the responsible
+  wave called out instead of falsely attributed to a named task. Specifically:
+  the passenger complaint / support escalation row is parked as
+  "open / human decision on which wave owns it" (PRD requires the flow but
+  no SYS-UI task owns it yet), and the `apps/assisted-entry-web`
+  documentation-bridge row is parked as "future control-plane update; not
+  blocking `SYS-UI-006` matrix completeness" because it is a naming-seam
+  decision rather than a missing UI surface.
+
+In all cases the row is _not_ a `SYS-UI-006` self-extension. That matches the
 parent-handoff note in `support/sidecars/SYS-UI-006/SYS-UI-006-SIDECAR-BFF-HANDOFF.md`
 ("Only after the matrix exists should the parent task decide whether any
 targeted UI fix is truly needed. The packet already shows several areas where
