@@ -67,6 +67,12 @@ reference shell 的 demo 型態。
 - AV / ODD / live-board 未來範圍
 - 外部真實銀行、發卡機構、第三方平台的商務接線細節
 
+這些相鄰 surface 仍然需要 machine-truth 可見性。自 `SYS-UI-001` 起，它們的 landing zone
+與 execution mapping 由
+`docs/01-decisions/SD-DP-20260509-005-full-system-ui-surface-topology.md`
+與 `docs/02-architecture/roadmap/fbp-015-deferred-scope-packet.md` 管理；本文件只定義
+`Platform Admin`、`Ops Console`、`Tenant Console` 三套管理系統自身的功能邊界。
+
 ## 3. Product Principles And Hard Rules
 
 這三套系統都必須遵守相同的產品原則。
@@ -1041,6 +1047,9 @@ reference shell 的 demo 型態。
   - `Partner Booking Mode`
 - partner booking mode 若落在同一 app，必須使用獨立 route group / nav 邊界，不得
   洩漏 tenant-admin 導覽與治理功能
+- Passenger 與 assisted-entry (`Call Point` / `Concierge`) surface 不落在本 app；
+  它們由 `SYS-UI-001` 另行決定到 `apps/passenger-web` 與 `apps/assisted-entry-web`
+  的相鄰 landing zone
 
 ### 9.3 Primary personas
 
@@ -1565,16 +1574,29 @@ reference shell 的 demo 型態。
 - shift punch-in / punch-out
 - driver settings and earnings visibility
 
+### 12.5 Adjacent reopened surfaces
+
+- `apps/tenant-console-web` only owns `Partner Booking Mode` as a constrained business-plane
+  sub-surface.
+- `apps/passenger-web` owns first-party passenger booking / status / receipt / trip-history
+  journeys when that channel is present.
+- `apps/assisted-entry-web` owns `Call Point Mode` and `Concierge Mode`; `Ops Console` keeps the
+  internal callcenter / complaint / callback control-plane workspace.
+- `Platform Admin /switchboard` owns public-info and placard governance, but it does not become
+  the passenger status or ROC live-board surface.
+
 ## 13. Source References
 
 - `apps/platform-admin-web/app/*`
 - `apps/ops-console-web/app/*`
 - `apps/driver-app/app/*`
+- `apps/tenant-console-web/app/*`
 - `apps/tenant-portal-web/app/*`
 - `apps/api/src/modules/*`
 - `packages/api-client/src/index.ts`
 - `packages/contracts/src/index.ts`
 - `docs/01-decisions/SD-DP-20260508-004-tenant-console-productization-topology.md`
+- `docs/01-decisions/SD-DP-20260509-005-full-system-ui-surface-topology.md`
 - `docs/00-context/current-system-blueprint-alignment-audit-20260421.md`
 - `docs/02-architecture/tenant-commute-hub-boundary.md`
 - `docs/02-architecture/authority/rgp-002-authority-map.md`
