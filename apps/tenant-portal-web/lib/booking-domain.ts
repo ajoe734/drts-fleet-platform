@@ -15,8 +15,6 @@ const TERMINAL_ORDER_STATUSES: ReadonlySet<OwnedOrderStatus> = new Set([
 ]);
 
 const ON_TRIP_ORDER_STATUSES: ReadonlySet<OwnedOrderStatus> = new Set([
-  "enroute_pickup",
-  "arrived_pickup",
   "on_trip",
 ]);
 
