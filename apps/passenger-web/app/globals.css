@@ -1,0 +1,332 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f4ef;
+  --shell: #11243b;
+  --shell-border: rgba(255, 255, 255, 0.1);
+  --panel: rgba(255, 255, 255, 0.82);
+  --panel-strong: rgba(255, 255, 255, 0.94);
+  --panel-border: rgba(17, 36, 59, 0.08);
+  --text: #102033;
+  --muted: #53657b;
+  --accent: #0e7490;
+  --accent-soft: rgba(14, 116, 144, 0.14);
+  --secondary: #c2410c;
+  --secondary-soft: rgba(194, 65, 12, 0.13);
+  --shadow: 0 22px 64px rgba(17, 36, 59, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgba(14, 116, 144, 0.12), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(194, 65, 12, 0.12), transparent 22%),
+    linear-gradient(180deg, #fcfbf8 0%, #eef4f7 100%);
+  color: var(--text);
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.passenger-shell {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.passenger-sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+  gap: 1.4rem;
+  padding: 2rem 1.3rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 24%),
+    linear-gradient(180deg, #10233b 0%, #173454 100%);
+  color: #eef5fb;
+}
+
+.passenger-brand,
+.sidebar-callout {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.passenger-badge,
+.eyebrow,
+.meta-pill,
+.metric-label {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 999px;
+  padding: 0.38rem 0.7rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.passenger-badge {
+  background: rgba(255, 255, 255, 0.1);
+  color: #bfe5f2;
+}
+
+.passenger-brand h1,
+.topbar-copy h2,
+.hero-card h1,
+.surface-card h3,
+.callout-card strong {
+  margin: 0;
+}
+
+.passenger-brand p,
+.topbar-copy p,
+.hero-card p,
+.surface-card p,
+.callout-card p,
+.sidebar-callout p,
+.sidebar-footnote {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.passenger-nav {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.passenger-nav-link {
+  display: grid;
+  gap: 0.28rem;
+  border-radius: 18px;
+  border: 1px solid transparent;
+  padding: 0.85rem 0.95rem;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+
+.passenger-nav-link strong {
+  font-size: 0.96rem;
+}
+
+.passenger-nav-link span {
+  color: rgba(238, 245, 251, 0.7);
+  font-size: 0.84rem;
+}
+
+.passenger-nav-link:hover {
+  transform: translateX(2px);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--shell-border);
+}
+
+.passenger-nav-link.is-active {
+  background: rgba(14, 116, 144, 0.2);
+  border-color: rgba(191, 229, 242, 0.18);
+}
+
+.sidebar-callout {
+  margin-top: auto;
+  border-radius: 20px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--shell-border);
+}
+
+.sidebar-footnote {
+  color: rgba(238, 245, 251, 0.72);
+  font-size: 0.83rem;
+}
+
+.passenger-main {
+  min-width: 0;
+  padding: 2rem 2rem 3rem;
+}
+
+.passenger-frame,
+.page-shell,
+.hero-card,
+.surface-card,
+.callout-card {
+  display: grid;
+}
+
+.passenger-frame,
+.page-shell {
+  gap: 1.25rem;
+}
+
+.passenger-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-radius: 28px;
+  padding: 1.15rem 1.25rem;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 12px 30px rgba(17, 36, 59, 0.06);
+  backdrop-filter: blur(14px);
+}
+
+.topbar-copy {
+  display: grid;
+  gap: 0.26rem;
+}
+
+.eyebrow,
+.meta-pill {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.topbar-meta,
+.hero-actions,
+.callout-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.hero-card {
+  gap: 0.8rem;
+  border-radius: 32px;
+  padding: 2rem;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(246, 250, 252, 0.96)),
+    var(--panel-strong);
+  border: 1px solid rgba(14, 116, 144, 0.12);
+  box-shadow: var(--shadow);
+}
+
+.hero-gradient {
+  background:
+    radial-gradient(circle at top right, rgba(14, 116, 144, 0.12), transparent 28%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(245, 249, 250, 0.98));
+}
+
+.hero-card h1 {
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  line-height: 0.98;
+  max-width: 14ch;
+}
+
+.hero-card p {
+  max-width: 68ch;
+  color: var(--muted);
+}
+
+.primary-link,
+.secondary-link,
+.text-link {
+  border-radius: 999px;
+  padding: 0.75rem 1rem;
+  font-weight: 700;
+}
+
+.primary-link {
+  background: var(--accent);
+  color: #f4fcff;
+}
+
+.secondary-link,
+.text-link {
+  background: rgba(17, 36, 59, 0.06);
+  color: var(--text);
+}
+
+.metric-grid,
+.content-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.metric-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.content-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.metric-card,
+.surface-card,
+.callout-card {
+  border-radius: 22px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel);
+  box-shadow: 0 10px 22px rgba(17, 36, 59, 0.05);
+}
+
+.metric-card,
+.surface-card {
+  gap: 0.65rem;
+  padding: 1.2rem;
+}
+
+.metric-card strong {
+  font-size: 1.9rem;
+  line-height: 1;
+}
+
+.metric-label {
+  background: rgba(17, 36, 59, 0.06);
+  color: var(--text);
+}
+
+.surface-kicker {
+  color: var(--secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.surface-card p,
+.metric-card p,
+.callout-card p {
+  color: var(--muted);
+}
+
+.callout-card {
+  flex: 1 1 280px;
+  gap: 0.55rem;
+  padding: 1.15rem 1.2rem;
+}
+
+.callout-card.warning {
+  background: rgba(255, 247, 237, 0.95);
+  border-color: rgba(194, 65, 12, 0.16);
+}
+
+@media (max-width: 920px) {
+  .passenger-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .passenger-sidebar {
+    position: static;
+    min-height: auto;
+  }
+
+  .passenger-main {
+    padding-top: 1rem;
+  }
+}

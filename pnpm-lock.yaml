@@ -244,6 +244,18 @@ importers:
         specifier: ^4.2.4
         version: 4.2.4
 
+  apps/passenger-web:
+    dependencies:
+      next:
+        specifier: ^16.2.3
+        version: 16.2.3(@playwright/test@1.59.1)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      react:
+        specifier: ^19.2.5
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.2.5
+        version: 19.2.5(react@19.2.5)
+
   apps/platform-admin-web:
     dependencies:
       "@drts/api-client":
