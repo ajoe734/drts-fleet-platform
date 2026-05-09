@@ -439,6 +439,9 @@ export default async function HomePage() {
               Audit trail
             </Link>
           ) : null}
+          <Link className="text-link" href="/settings">
+            Settings
+          </Link>
           <Link className="text-link" href="/sla">
             SLA profile
           </Link>
