@@ -3,6 +3,7 @@ import type { BookingRecord } from "@drts/contracts";
 import { OWNED_ORDER_STATUSES } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getTenantRoleSnapshot } from "@/lib/rbac";
 import {
   applyBookingListQuery,
   buildBookingListQueryString,
@@ -23,7 +24,8 @@ export default async function BookingListPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const client = getTenantClient();
+  const client = await getTenantClient();
+  const roleSnapshot = await getTenantRoleSnapshot();
   const rawParams = await searchParams;
   const query = parseBookingListQuery(rawParams);
 
@@ -147,11 +149,17 @@ export default async function BookingListPage({
                 );
               })}
             </div>
-            <div className="link-row">
-              <Link className="text-link" href="/bookings/new">
-                Start new booking intake
-              </Link>
-            </div>
+            {roleSnapshot.capabilities.canWriteTenant ? (
+              <div className="link-row">
+                <Link className="text-link" href="/bookings/new">
+                  Start new booking intake
+                </Link>
+              </div>
+            ) : (
+              <p className="muted-copy">
+                Current role can review bookings but cannot create new ones.
+              </p>
+            )}
           </article>
         </section>
 

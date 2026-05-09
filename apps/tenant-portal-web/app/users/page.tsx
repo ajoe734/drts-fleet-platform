@@ -11,9 +11,9 @@ import { getTenantClient } from "@/lib/api-client";
 
 export default async function UsersPage() {
   const { users, error } = await getUsers();
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
-  const adminAccess = roleSnapshot.canManageUsers;
+  const adminAccess = roleSnapshot.capabilities.canManageUsers;
   let roleCatalog: TenantRoleCatalogRecord[] = [];
   let roleCatalogError: string | null = null;
 

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getTenantClient } from "@/lib/api-client";
+import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import type {
   UpdateTenantSlaProfileCommand,
   TenantSlaProfile,
@@ -11,7 +12,7 @@ export async function getSlaProfile(): Promise<{
   profile: TenantSlaProfile | null;
   error: string | null;
 }> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   try {
     const profile = (await client.getSlaProfile()) as TenantSlaProfile;
     return { profile, error: null };
@@ -24,7 +25,12 @@ export async function getSlaProfile(): Promise<{
 }
 
 export async function updateSlaProfile(formData: FormData): Promise<void> {
-  const client = getTenantClient();
+  const snapshot = await getTenantRoleSnapshot();
+  requireCapability(
+    snapshot.capabilities.canWriteSla,
+    "Tenant SLA write authority required.",
+  );
+  const client = await getTenantClient();
 
   const waitThresholdMin = parseInt(
     formData.get("waitThresholdMin") as string,

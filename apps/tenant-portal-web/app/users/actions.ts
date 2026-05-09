@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getTenantClient } from "@/lib/api-client";
-import { getCurrentRole, isAdmin } from "@/lib/rbac";
+import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import type {
   CreateTenantUserCommand,
   UpdateTenantRoleCommand,
@@ -10,17 +10,18 @@ import type {
 } from "@drts/contracts";
 
 async function requireAdmin(): Promise<void> {
-  const role = await getCurrentRole();
-  if (!isAdmin(role)) {
-    throw new Error("Admin access required.");
-  }
+  const snapshot = await getTenantRoleSnapshot();
+  requireCapability(
+    snapshot.capabilities.canManageUsers,
+    "Tenant admin authority required.",
+  );
 }
 
 export async function getUsers(): Promise<{
   users: TenantUserRoleRecord[];
   error: string | null;
 }> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   try {
     const users = await client.listTenantUsers();
     return { users, error: null };
@@ -34,7 +35,7 @@ export async function getUsers(): Promise<{
 
 export async function inviteUser(formData: FormData): Promise<void> {
   await requireAdmin();
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   const email = formData.get("email") as string;
   const displayName = formData.get("displayName") as string;
@@ -56,7 +57,7 @@ export async function inviteUser(formData: FormData): Promise<void> {
 
 export async function updateUserRole(formData: FormData): Promise<void> {
   await requireAdmin();
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   const userId = formData.get("userId") as string;
   const roleCode = formData.get("roleCode") as string;

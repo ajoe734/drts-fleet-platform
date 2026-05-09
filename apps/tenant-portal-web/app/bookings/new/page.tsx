@@ -12,6 +12,7 @@ import {
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 
 const MANUAL_ENTRY = "__manual__";
 const SUBTYPE_LABELS: Record<
@@ -287,7 +288,8 @@ export default async function NewBookingPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const client = getTenantClient();
+  const client = await getTenantClient();
+  const roleSnapshot = await getTenantRoleSnapshot();
   const params = await searchParams;
   const formError = params.error ?? null;
 
@@ -314,7 +316,7 @@ export default async function NewBookingPage({
 
   const warnings = [
     identityResult.status === "rejected"
-      ? "Identity context unavailable. Submit still uses tenant bootstrap headers, but this page cannot confirm live roles/scopes."
+      ? "Identity context unavailable. This page now depends on a backend-issued tenant bearer session, so create authority cannot be confirmed."
       : null,
     passengersResult.status === "rejected"
       ? "Passenger directory unavailable. Manual passenger entry remains available."
@@ -351,7 +353,12 @@ export default async function NewBookingPage({
   async function createBooking(formData: FormData) {
     "use server";
 
-    const client = getTenantClient();
+    const actionRoleSnapshot = await getTenantRoleSnapshot();
+    requireCapability(
+      actionRoleSnapshot.capabilities.canWriteTenant,
+      "Tenant write authority required to create bookings.",
+    );
+    const client = await getTenantClient();
     const businessDispatchSubtype = trimFormValue(
       formData.get("businessDispatchSubtype"),
     ) as BusinessDispatchSubtype;
@@ -532,6 +539,13 @@ export default async function NewBookingPage({
                 <li key={warning}>{warning}</li>
               ))}
             </ul>
+          </div>
+        ) : null}
+
+        {!roleSnapshot.capabilities.canWriteTenant ? (
+          <div style={alertStyle}>
+            <strong>Read-only identity:</strong> Current backend-issued role can
+            review booking inputs but cannot submit new tenant bookings.
           </div>
         ) : null}
 
@@ -1008,7 +1022,11 @@ export default async function NewBookingPage({
             </div>
 
             <div style={footerStyle}>
-              <button type="submit" style={primaryButtonStyle}>
+              <button
+                type="submit"
+                style={primaryButtonStyle}
+                disabled={!roleSnapshot.capabilities.canWriteTenant}
+              >
                 Submit Booking
               </button>
               <Link className="route-link" href="/booking-list">

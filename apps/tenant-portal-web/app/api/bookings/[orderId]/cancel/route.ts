@@ -5,23 +5,25 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createTenantClient } from "@drts/api-client";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-const DEMO_TENANT_ID = "tenant-demo-001";
-const DEMO_ACTOR_ID = "demo-tenant-user";
+import { getTenantClientForRouteHandler } from "@/lib/api-client";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ orderId: string }> },
 ) {
   const { orderId: bookingId } = await params;
+  const client = await getTenantClientForRouteHandler();
+
+  if (!client) {
+    return NextResponse.json(
+      { error: "Tenant portal session required." },
+      { status: 401 },
+    );
+  }
 
   try {
     const body = await request.json();
     const reason = body?.reason;
-
-    const client = createTenantClient(API_URL, DEMO_TENANT_ID, DEMO_ACTOR_ID);
     await client.cancelTenantBooking(bookingId, { reason });
 
     return NextResponse.json({ success: true, bookingId });

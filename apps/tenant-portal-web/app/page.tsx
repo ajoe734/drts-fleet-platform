@@ -55,7 +55,7 @@ type DashboardData = {
 };
 
 async function loadDashboardData(): Promise<DashboardData> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const [
     identityResult,
     flagsResult,

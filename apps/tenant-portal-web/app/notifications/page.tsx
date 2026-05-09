@@ -5,15 +5,21 @@ import {
   updateNotificationPreferences,
 } from "./actions";
 import type { PreferenceRow } from "./actions";
+import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
 
 export default async function NotificationsPage() {
   const { preferences, error: fetchError } = await getNotificationPreferences();
+  const roleSnapshot = await getTenantRoleSnapshot();
 
   return (
     <main className="app-grid">
       <AppShellCard
         title="Notification Preferences"
-        description="Configure which events are sent to which channels."
+        description={
+          roleSnapshot.capabilities.canWriteNotifications
+            ? "Configure which events are sent to which channels."
+            : `Viewing as ${describeRoleSnapshot(roleSnapshot)}. This role can review notification posture but cannot change it.`
+        }
       >
         {fetchError && (
           <div className="error-banner">
@@ -47,8 +53,14 @@ export default async function NotificationsPage() {
           </div>
 
           <div style={{ marginTop: "1rem" }}>
-            <button type="submit" className="btn-primary">
-              Save Preferences
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={!roleSnapshot.capabilities.canWriteNotifications}
+            >
+              {roleSnapshot.capabilities.canWriteNotifications
+                ? "Save Preferences"
+                : "Read-only"}
             </button>
           </div>
         </form>

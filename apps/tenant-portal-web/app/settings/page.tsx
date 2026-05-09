@@ -27,7 +27,7 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 export default async function SettingsPage() {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   const roleSnapshot = await getTenantRoleSnapshot();
   const [preferencesResult, slaResult, governanceResult, flagsResult] =
     await Promise.allSettled([

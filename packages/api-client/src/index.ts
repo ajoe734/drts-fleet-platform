@@ -2530,6 +2530,31 @@ export function createDriverBearerClient(
   });
 }
 
+export function createBearerClient(
+  baseUrl: string,
+  accessToken: string,
+  defaultHeaders?: Record<string, string>,
+): ApiClient {
+  return new ApiClient({
+    baseUrl,
+    defaultHeaders: {
+      Authorization: `Bearer ${accessToken}`,
+      ...defaultHeaders,
+    },
+  });
+}
+
+export function createTenantBearerClient(
+  baseUrl: string,
+  accessToken: string,
+  tenantId: string,
+): ApiClient {
+  return createBearerClient(baseUrl, accessToken, {
+    "x-tenant-id": tenantId,
+    "x-realm": "tenant",
+  });
+}
+
 export function createPublicClient(baseUrl: string): ApiClient {
   return new ApiClient({ baseUrl });
 }

@@ -3,7 +3,7 @@ import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 
 export default async function FeatureFlagsPage() {
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   let flags: unknown[] = [];
   let error: string | null = null;

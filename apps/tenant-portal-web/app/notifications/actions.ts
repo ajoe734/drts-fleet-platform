@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getTenantClient } from "@/lib/api-client";
+import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import type {
   TenantNotificationPreferences,
   TenantNotificationSubscription,
@@ -59,7 +60,7 @@ export async function getNotificationPreferences(): Promise<{
   preferences: PreferenceRow[];
   error: string | null;
 }> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   try {
     const prefs = (await client.getNotificationPreferences()) as
       | TenantNotificationPreferences
@@ -80,7 +81,12 @@ export async function getNotificationPreferences(): Promise<{
 export async function updateNotificationPreferences(
   formData: FormData,
 ): Promise<void> {
-  const client = getTenantClient();
+  const snapshot = await getTenantRoleSnapshot();
+  requireCapability(
+    snapshot.capabilities.canWriteNotifications,
+    "Tenant write authority required to update notification preferences.",
+  );
+  const client = await getTenantClient();
   const subscriptions: TenantNotificationSubscription[] = [];
 
   for (const eventType of EVENT_TYPES) {
