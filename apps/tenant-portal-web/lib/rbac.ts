@@ -1,39 +1,127 @@
-/**
- * Simple RBAC scope helper for the tenant portal.
- *
- * In Phase 1 demo mode, the current user's role is resolved from a cookie
- * (defaulting to "viewer"). In production this would be replaced by proper
- * session/auth middleware.
- *
- * Admin operations:
- * - Invite users
- * - Change user roles
- * - Suspend/activate users
- */
+import type { IdentityContext } from "@drts/contracts";
+import { getTenantClient } from "@/lib/api-client";
 
-import { cookies } from "next/headers";
+export const FORMAL_TENANT_ROLE_FRAMING = [
+  {
+    key: "tenant_admin",
+    label: "Tenant admin",
+    authorityRoles: ["tenant_admin"],
+    summary:
+      "Owns tenant-wide administration across users, booking policy, billing, reports, and integration governance.",
+  },
+  {
+    key: "operator",
+    label: "Operator",
+    authorityRoles: ["tenant_ops_admin"],
+    summary:
+      "Runs booking, passenger, address, and day-to-day operational workflows.",
+  },
+  {
+    key: "finance_analyst",
+    label: "Finance / analyst",
+    authorityRoles: ["tenant_finance_admin"],
+    summary:
+      "Reviews invoice, reporting, and audit follow-up authority for the tenant.",
+  },
+  {
+    key: "integration_manager",
+    label: "Integration manager",
+    authorityRoles: ["tenant_admin"],
+    summary:
+      "Prototype framing for API key, webhook, and integration-governance ownership. Current backend authority is carried by tenant admin until a distinct role code exists.",
+  },
+  {
+    key: "viewer",
+    label: "Viewer",
+    authorityRoles: ["tenant_viewer"],
+    summary:
+      "Read-only access to tenant-visible surfaces without mutation authority.",
+  },
+] as const;
 
-export type RbacScope = "admin" | "operator" | "viewer";
+export type FormalTenantRoleKey =
+  (typeof FORMAL_TENANT_ROLE_FRAMING)[number]["key"];
 
-const ADMIN_ACTIONS = new Set([
-  "invite_user",
-  "update_user_role",
-  "suspend_user",
-  "activate_user",
-]);
+export type TenantRoleSnapshot = {
+  identity: IdentityContext | null;
+  roles: string[];
+  scopes: string[];
+  activeFormalRoles: FormalTenantRoleKey[];
+  activeFormalLabels: string[];
+  roleCatalogBackedLabels: string[];
+  canManageUsers: boolean;
+  canManageIntegrations: boolean;
+  canReviewFinance: boolean;
+  identityError: string | null;
+};
 
-export async function getCurrentRole(): Promise<RbacScope> {
-  const cookieStore = await cookies();
-  const role = cookieStore.get("tenant_role")?.value as RbacScope | undefined;
-  return role ?? "viewer";
+export async function getTenantRoleSnapshot(): Promise<TenantRoleSnapshot> {
+  const client = getTenantClient();
+
+  try {
+    const identity = (await client.getIdentityContext()) as IdentityContext;
+    const roles = identity.roles ?? [];
+    const activeFormalRoles = FORMAL_TENANT_ROLE_FRAMING.filter((role) =>
+      role.authorityRoles.some((authorityRole) =>
+        roles.includes(authorityRole),
+      ),
+    ).map((role) => role.key);
+
+    return {
+      identity,
+      roles,
+      scopes: identity.scopes ?? [],
+      activeFormalRoles,
+      activeFormalLabels: FORMAL_TENANT_ROLE_FRAMING.filter((role) =>
+        activeFormalRoles.includes(role.key),
+      ).map((role) => role.label),
+      roleCatalogBackedLabels: roles.map(formatAuthorityRoleCode),
+      canManageUsers: roles.includes("tenant_admin"),
+      canManageIntegrations: roles.includes("tenant_admin"),
+      canReviewFinance:
+        roles.includes("tenant_admin") ||
+        roles.includes("tenant_finance_admin"),
+      identityError: null,
+    };
+  } catch (error) {
+    return {
+      identity: null,
+      roles: [],
+      scopes: [],
+      activeFormalRoles: [],
+      activeFormalLabels: [],
+      roleCatalogBackedLabels: [],
+      canManageUsers: false,
+      canManageIntegrations: false,
+      canReviewFinance: false,
+      identityError: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
 }
 
-export function canPerformAction(role: RbacScope, action: string): boolean {
-  if (role === "admin") return true;
-  if (role === "operator") return !ADMIN_ACTIONS.has(action);
-  return false; // viewer: read-only
+export function formatAuthorityRoleCode(roleCode: string): string {
+  switch (roleCode) {
+    case "tenant_admin":
+      return "Tenant Admin";
+    case "tenant_ops_admin":
+      return "Tenant Ops Admin";
+    case "tenant_finance_admin":
+      return "Tenant Finance Admin";
+    case "tenant_viewer":
+      return "Tenant Viewer";
+    default:
+      return roleCode;
+  }
 }
 
-export function isAdmin(role: RbacScope): boolean {
-  return role === "admin";
+export function describeRoleSnapshot(snapshot: TenantRoleSnapshot): string {
+  if (snapshot.activeFormalLabels.length > 0) {
+    return snapshot.activeFormalLabels.join(" / ");
+  }
+
+  if (snapshot.roleCatalogBackedLabels.length > 0) {
+    return snapshot.roleCatalogBackedLabels.join(" / ");
+  }
+
+  return "Role context unavailable";
 }
