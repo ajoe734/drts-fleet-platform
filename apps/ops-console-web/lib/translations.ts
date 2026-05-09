@@ -379,13 +379,33 @@ const en = {
   "dispatch.workflow.showing": "Showing {visible} order(s) from {total} total.",
   "dispatch.workflow.col.order": "Order",
   "dispatch.workflow.col.product": "Product",
-  "dispatch.workflow.col.queue": "Queue",
+  "dispatch.workflow.col.queue": "Queue / state",
   "dispatch.workflow.col.dispatch": "Dispatch",
+  "dispatch.workflow.col.authority": "Authority",
   "dispatch.workflow.col.compliance": "Compliance",
   "dispatch.workflow.col.revenue": "Revenue",
   "dispatch.workflow.col.eta": "ETA",
   "dispatch.workflow.col.candidates": "Candidates",
   "dispatch.workflow.col.actions": "Actions",
+  "dispatch.workflow.boardTitle": "Owned dispatch board",
+  "dispatch.workflow.boardSubtitle":
+    "Local queue authority, candidate assignment, and exception workflow remain inside the fleet dispatch lane.",
+  "dispatch.workflow.schema.localQueue": "Local queue",
+  "dispatch.workflow.schema.localQueueHint":
+    "{count} orders are actively waiting for owned dispatch handling.",
+  "dispatch.workflow.schema.activeAssignment": "Assignment lane",
+  "dispatch.workflow.schema.activeAssignmentHint":
+    "{count} owned dispatch jobs currently carry active candidate or assignment work.",
+  "dispatch.workflow.schema.exceptionDesk": "Exception desk",
+  "dispatch.workflow.schema.exceptionDeskHint":
+    "{count} owned orders require timeout, no-supply, or exception review.",
+  "dispatch.workflow.authority.local": "Local dispatch authority",
+  "dispatch.workflow.authority.assignment": "Assignment in progress",
+  "dispatch.workflow.authority.reservation": "Reservation queue",
+  "dispatch.workflow.authority.exception": "Ops review required",
+  "dispatch.workflow.boardState.active": "Active trip",
+  "dispatch.workflow.boardState.closed": "Closed history",
+  "dispatch.workflow.boardState.intake": "Pre-dispatch intake",
   "dispatch.workflow.noComplianceGate": "No active gate",
   "dispatch.workflow.gate.recording": "Recording",
   "dispatch.workflow.gate.proof": "Proof",
@@ -539,10 +559,12 @@ const en = {
     "Owned board stays inside local dispatch authority.",
   "dispatch.page.ownedSummary":
     "{count} exception-hold / no-supply orders need workflow review alongside live candidate context.",
+  "dispatch.page.ownedAuthority": "Ops-owned dispatch lane",
   "dispatch.page.forwardedHeadline":
     "Forwarded work stays in mirror-order triage and reconciliation lanes.",
   "dispatch.page.forwardedSummary":
     "{count} forwarded sync failures are currently visible from the owned console.",
+  "dispatch.page.forwardedAuthority": "Platform-owned mirror lane",
   "dispatch.forwarded.title": "External Platform Orders",
   "dispatch.forwarded.subtitle":
     "Mirror-order board for platform sync, manual fallback, and reconciliation",
@@ -1793,13 +1815,33 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.showing": "顯示 {visible} 筆，共 {total} 筆訂單。",
   "dispatch.workflow.col.order": "訂單",
   "dispatch.workflow.col.product": "產品",
-  "dispatch.workflow.col.queue": "排隊",
+  "dispatch.workflow.col.queue": "佇列 / 狀態",
   "dispatch.workflow.col.dispatch": "派車",
+  "dispatch.workflow.col.authority": "權責",
   "dispatch.workflow.col.compliance": "合規",
   "dispatch.workflow.col.revenue": "收益",
   "dispatch.workflow.col.eta": "ETA",
   "dispatch.workflow.col.candidates": "候選人",
   "dispatch.workflow.col.actions": "操作",
+  "dispatch.workflow.boardTitle": "本地派車看板",
+  "dispatch.workflow.boardSubtitle":
+    "本地佇列權責、候選供給指派與例外流程都維持在 fleet dispatch lane 內處理。",
+  "dispatch.workflow.schema.localQueue": "本地佇列",
+  "dispatch.workflow.schema.localQueueHint":
+    "目前有 {count} 筆訂單正在等待本地派車處理。",
+  "dispatch.workflow.schema.activeAssignment": "指派處理",
+  "dispatch.workflow.schema.activeAssignmentHint":
+    "目前有 {count} 筆本地 dispatch job 正在進行候選人或指派作業。",
+  "dispatch.workflow.schema.exceptionDesk": "例外處理桌",
+  "dispatch.workflow.schema.exceptionDeskHint":
+    "目前有 {count} 筆本地訂單需要 timeout、無供給或例外審查。",
+  "dispatch.workflow.authority.local": "本地派車權責",
+  "dispatch.workflow.authority.assignment": "指派進行中",
+  "dispatch.workflow.authority.reservation": "預約佇列",
+  "dispatch.workflow.authority.exception": "需營運審查",
+  "dispatch.workflow.boardState.active": "進行中行程",
+  "dispatch.workflow.boardState.closed": "已結束歷史",
+  "dispatch.workflow.boardState.intake": "派車前受理",
   "dispatch.workflow.noComplianceGate": "目前無啟用 gate",
   "dispatch.workflow.gate.recording": "錄音",
   "dispatch.workflow.gate.proof": "存證",
@@ -1948,10 +1990,12 @@ const zh: Record<keyof typeof en, string> = {
     "本地派車看板維持在本地 dispatch authority 內處理。",
   "dispatch.page.ownedSummary":
     "{count} 筆例外保留 / 無供給訂單需要搭配即時候選供給一起檢查。",
+  "dispatch.page.ownedAuthority": "營運自有派車 lane",
   "dispatch.page.forwardedHeadline":
     "Forwarded 工作維持在鏡像訂單分流與 reconciliation 流程中。",
   "dispatch.page.forwardedSummary":
     "目前從本地 console 可見 {count} 筆 forwarded sync failure。",
+  "dispatch.page.forwardedAuthority": "平台鏡像派單 lane",
   "dispatch.forwarded.title": "外部平台訂單",
   "dispatch.forwarded.subtitle": "鏡像訂單看板、人工 fallback 與對帳處理",
   "dispatch.forwarded.roleBoundaryText":

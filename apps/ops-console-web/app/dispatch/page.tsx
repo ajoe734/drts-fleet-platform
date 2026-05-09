@@ -16,7 +16,7 @@ import {
 } from "@/lib/ops-analytics";
 import { PageHeader } from "@drts/ui-web";
 import { StatCard } from "@drts/ui-web";
-import { Card, CardBody } from "@drts/ui-web";
+import { AuthorityBadge, Card, CardBody } from "@drts/ui-web";
 import { DispatchWorkflow } from "./dispatch-workflow";
 import { ForwardedOrderBoard } from "./forwarded-order-board";
 
@@ -271,14 +271,20 @@ export default async function DispatchPage({
             >
               <div
                 style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
                   fontSize: "11px",
                   letterSpacing: "0.06em",
-                  textTransform: "uppercase",
                   color: "#64748b",
                   marginBottom: "6px",
                 }}
               >
-                {t("dispatch.view.owned", locale)}
+                <AuthorityBadge
+                  category="owned"
+                  label={t("dispatch.page.ownedAuthority", locale)}
+                  tone="info"
+                />
               </div>
               <div
                 style={{ fontSize: "14px", fontWeight: 600, color: "#0f172a" }}
@@ -303,14 +309,20 @@ export default async function DispatchPage({
             >
               <div
                 style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
                   fontSize: "11px",
                   letterSpacing: "0.06em",
-                  textTransform: "uppercase",
                   color: "#92400e",
                   marginBottom: "6px",
                 }}
               >
-                {t("dispatch.view.forwarded", locale)}
+                <AuthorityBadge
+                  category="forwarded"
+                  label={t("dispatch.page.forwardedAuthority", locale)}
+                  tone="warning"
+                />
               </div>
               <div
                 style={{ fontSize: "14px", fontWeight: 600, color: "#0f172a" }}
