@@ -2,15 +2,21 @@ import Link from "next/link";
 import { AppShellCard } from "@drts/ui-web";
 import { getSlaProfile, updateSlaProfile } from "./actions";
 import type { TenantSlaProfile } from "@drts/contracts";
+import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
 
 export default async function SlaPage() {
   const { profile, error: fetchError } = await getSlaProfile();
+  const roleSnapshot = await getTenantRoleSnapshot();
 
   return (
     <main className="app-grid">
       <AppShellCard
         title="SLA Profile"
-        description="View and update SLA thresholds for wait, arrival, and completion times across DRTS-operated and externally fulfilled bookings."
+        description={
+          roleSnapshot.capabilities.canWriteSla
+            ? "View and update SLA thresholds for wait, arrival, and completion times across DRTS-operated and externally fulfilled bookings."
+            : `Viewing as ${describeRoleSnapshot(roleSnapshot)}. SLA thresholds are readable but not writable for this role.`
+        }
       >
         {fetchError && (
           <div className="error-banner">
@@ -28,7 +34,10 @@ export default async function SlaPage() {
 
         {profile && <SlaProfileTable profile={profile} />}
 
-        <UpdateSlaForm profile={profile} />
+        <UpdateSlaForm
+          profile={profile}
+          canWrite={roleSnapshot.capabilities.canWriteSla}
+        />
 
         <Link className="route-link" href="/" style={{ marginTop: "1rem" }}>
           <strong>Back to home</strong>
@@ -76,7 +85,13 @@ function SlaProfileTable({ profile }: { profile: TenantSlaProfile }) {
   );
 }
 
-function UpdateSlaForm({ profile }: { profile: TenantSlaProfile | null }) {
+function UpdateSlaForm({
+  profile,
+  canWrite,
+}: {
+  profile: TenantSlaProfile | null;
+  canWrite: boolean;
+}) {
   return (
     <form action={updateSlaProfile}>
       <div className="data-table">
@@ -138,8 +153,8 @@ function UpdateSlaForm({ profile }: { profile: TenantSlaProfile | null }) {
       </div>
 
       <div style={{ marginTop: "1rem" }}>
-        <button type="submit" className="btn-primary">
-          Update SLA Profile
+        <button type="submit" className="btn-primary" disabled={!canWrite}>
+          {canWrite ? "Update SLA Profile" : "Read-only"}
         </button>
       </div>
     </form>

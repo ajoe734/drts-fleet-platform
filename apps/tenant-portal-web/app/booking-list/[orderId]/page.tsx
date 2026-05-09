@@ -4,6 +4,7 @@ import type { BookingRecord, TenantInvoiceRecord } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { BookingCommandPanel } from "@/components/booking-command-panel";
 import { getTenantClient } from "@/lib/api-client";
+import { getTenantRoleSnapshot } from "@/lib/rbac";
 import {
   buildBookingTimeline,
   describeManualFareOverride,
@@ -24,7 +25,8 @@ export default async function BookingDetailPage({
 }: {
   params: Promise<{ orderId: string }>;
 }) {
-  const client = getTenantClient();
+  const client = await getTenantClient();
+  const roleSnapshot = await getTenantRoleSnapshot();
   const { orderId: bookingId } = await params;
 
   const [bookingResult, invoicesResult] = await Promise.allSettled([
@@ -337,7 +339,10 @@ export default async function BookingDetailPage({
             through <code> POST /api/tenant/bookings/:bookingId/cancel </code>
             via the canonical api-client.
           </p>
-          <BookingCommandPanel booking={booking} />
+          <BookingCommandPanel
+            booking={booking}
+            allowMutations={roleSnapshot.capabilities.canWriteTenant}
+          />
         </article>
 
         <section className="callout-panel">

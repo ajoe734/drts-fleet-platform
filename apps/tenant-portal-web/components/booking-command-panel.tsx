@@ -13,9 +13,25 @@ import {
 
 type Mode = "update" | "cancel" | null;
 
-export function BookingCommandPanel({ booking }: { booking: BookingRecord }) {
+export function BookingCommandPanel({
+  booking,
+  allowMutations,
+}: {
+  booking: BookingRecord;
+  allowMutations: boolean;
+}) {
   const router = useRouter();
-  const capabilities = getBookingActionCapabilities(booking);
+  const baseCapabilities = getBookingActionCapabilities(booking);
+  const capabilities = {
+    canUpdate: allowMutations && baseCapabilities.canUpdate,
+    canCancel: allowMutations && baseCapabilities.canCancel,
+    updateReason: allowMutations
+      ? baseCapabilities.updateReason
+      : "Current tenant role cannot update bookings.",
+    cancelReason: allowMutations
+      ? baseCapabilities.cancelReason
+      : "Current tenant role cannot cancel bookings.",
+  };
   const [mode, setMode] = useState<Mode>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

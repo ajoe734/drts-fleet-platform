@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import type {
   TenantAddressRecord,
   UpsertTenantAddressCommand,
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export default async function AddressesPage({
@@ -13,7 +15,7 @@ export default async function AddressesPage({
 }: {
   searchParams?: { edit?: string; error?: string };
 }) {
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   let addresses: TenantAddressRecord[] = [];
   let error: string | null = null;
@@ -245,7 +247,12 @@ function AddressList({ addresses }: { addresses: TenantAddressRecord[] }) {
 
 async function createAddress(formData: FormData) {
   "use server";
-  const client = getTenantClient();
+  const snapshot = await getTenantRoleSnapshot();
+  requireCapability(
+    snapshot.capabilities.canWriteTenant,
+    "Tenant write authority required to manage addresses.",
+  );
+  const client = await getTenantClient();
 
   const tagsRaw = formData.get("tags") as string;
   const tags = tagsRaw
@@ -279,7 +286,12 @@ async function createAddress(formData: FormData) {
 
 async function updateAddress(formData: FormData) {
   "use server";
-  const client = getTenantClient();
+  const snapshot = await getTenantRoleSnapshot();
+  requireCapability(
+    snapshot.capabilities.canWriteTenant,
+    "Tenant write authority required to manage addresses.",
+  );
+  const client = await getTenantClient();
 
   const tagsRaw = formData.get("tags") as string;
   const tags = tagsRaw
@@ -316,7 +328,12 @@ async function updateAddress(formData: FormData) {
 
 async function deleteAddress(formData: FormData) {
   "use server";
-  const client = getTenantClient();
+  const snapshot = await getTenantRoleSnapshot();
+  requireCapability(
+    snapshot.capabilities.canWriteTenant,
+    "Tenant write authority required to manage addresses.",
+  );
+  const client = await getTenantClient();
 
   const addressId = formData.get("addressId") as string;
 
@@ -335,9 +352,4 @@ async function deleteAddress(formData: FormData) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     redirect(`/addresses?error=${encodeURIComponent(msg)}`);
   }
-}
-
-function redirect(path: string) {
-  // Dynamic import to avoid bundling in client code
-  import("next/navigation").then(({ redirect }) => redirect(path));
 }

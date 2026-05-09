@@ -7,7 +7,7 @@ export async function getAuditLogs(): Promise<{
   logs: AuditLogRecord[];
   error: string | null;
 }> {
-  const client = getTenantClient();
+  const client = await getTenantClient();
   try {
     const logs = (await client.listTenantAuditLogs()) as AuditLogRecord[];
     return { logs, error: null };

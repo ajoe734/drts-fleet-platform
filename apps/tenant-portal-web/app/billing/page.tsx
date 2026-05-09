@@ -16,7 +16,7 @@ function formatMoney(amount: MoneyAmount | null | undefined): string {
 }
 
 export default async function BillingPage() {
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   let profile: TenantBillingProfile | null = null;
   let invoices: TenantInvoiceRecord[] = [];
