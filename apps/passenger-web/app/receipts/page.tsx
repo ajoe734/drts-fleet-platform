@@ -1,18 +1,26 @@
+import Link from "next/link";
+
 const receiptStates = [
   {
     title: "DRTS-issued receipt",
     status: "Supported",
     body: "Direct passenger trips can expose a platform-owned receipt artifact and trace metadata from this lane.",
+    href: "/trip/completed",
+    cta: "Preview completed-trip receipt",
   },
   {
     title: "External receipt reference",
     status: "Supported with ownership handoff",
     body: "When the source channel owns billing, the rider sees who owns the receipt and where to continue instead of a fake download button.",
+    href: "/trip/read-only",
+    cta: "See read-only trip ownership",
   },
   {
     title: "Receipt unavailable or unsupported",
     status: "Explicitly handled",
     body: "Phone-assisted, partner, or otherwise unsupported cases remain visible with a concrete explanation and support direction.",
+    href: "/unsupported",
+    cta: "Open unsupported fallback",
   },
 ];
 
@@ -22,14 +30,13 @@ export default function ReceiptCenterPage() {
       <section className="hero-card hero-gradient">
         <span className="eyebrow">Receipt center</span>
         <h1>
-          The passenger receipt surface is now a real route, not only a roadmap
-          note.
+          The passenger receipt surface is now wired to concrete trip outcomes.
         </h1>
         <p>
           This landing page establishes the receipt topology required by
-          `SYS-UI-003`: supported DRTS receipts, external-reference handoff, and
-          unsupported cases are separated on purpose so the UI stays honest
-          about source ownership.
+          `SYS-UI-003` and links each ownership class to the matching trip
+          outcome route from `SYS-UI-004`. Source-channel ownership stays
+          authoritative; this surface only mirrors it.
         </p>
       </section>
 
@@ -39,6 +46,9 @@ export default function ReceiptCenterPage() {
             <span className="surface-kicker">{state.status}</span>
             <h3>{state.title}</h3>
             <p>{state.body}</p>
+            <Link className="text-link" href={state.href}>
+              {state.cta}
+            </Link>
           </article>
         ))}
       </section>

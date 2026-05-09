@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { FlowRouteCards } from "@/components/flow-route-cards";
+import { bookingFlowRoutes, tripFlowRoutes } from "@/lib/navigation";
 
 const activeTrip = {
   rideLabel: "Airport return to downtown",
@@ -17,8 +19,8 @@ const statusLanes = [
     body: "Past trips and receipt ownership are reachable from the same shell so riders do not need a separate product surface.",
   },
   {
-    title: "Unsupported channels",
-    body: "Orders owned by partner, tenant, or third-party receipt channels stay explicit instead of pretending every trip can download a DRTS PDF.",
+    title: "Negative-flow visibility",
+    body: "Booking denial, ineligible, no-supply, degraded, cancelled, and reauth states are dedicated routes — not silent toasts.",
   },
 ];
 
@@ -32,17 +34,20 @@ export default function HomePage() {
           clarity.
         </h1>
         <p>
-          `SYS-UI-003` reopens the first-party passenger surface with a real app
-          shell. This home route anchors status visibility, auth entry, receipt
-          landing, and explicit fallback states without inventing the downstream
-          booking workflow yet.
+          `SYS-UI-003` opened the passenger shell with auth, trip-history, and
+          receipt landing zones. `SYS-UI-004` now materializes the booking
+          request, active trip status, completion / cancellation, and the named
+          negative-flow routes that go with them.
         </p>
         <div className="hero-actions">
-          <Link className="primary-link" href="/auth">
-            Open auth entry
+          <Link className="primary-link" href="/book">
+            Request a ride
           </Link>
-          <Link className="secondary-link" href="/trips">
-            Review trip history
+          <Link className="secondary-link" href="/trip">
+            View active trip
+          </Link>
+          <Link className="text-link" href="/trips">
+            Trip history
           </Link>
         </div>
       </section>
@@ -75,20 +80,44 @@ export default function HomePage() {
         ))}
       </section>
 
+      <section className="page-shell-block">
+        <header className="block-header">
+          <span className="eyebrow">Booking flow inventory</span>
+          <h2>Every booking-request outcome has its own route</h2>
+          <p>
+            The request entry, denial, ineligible, no-supply, and degraded
+            states are reachable directly from this map for review and demos.
+          </p>
+        </header>
+        <FlowRouteCards routes={bookingFlowRoutes} />
+      </section>
+
+      <section className="page-shell-block">
+        <header className="block-header">
+          <span className="eyebrow">Trip flow inventory</span>
+          <h2>Every active-trip outcome has its own route</h2>
+          <p>
+            Active status, cancel, completion, read-only authority, cancelled,
+            and reauth-required all live on dedicated subroutes.
+          </p>
+        </header>
+        <FlowRouteCards routes={tripFlowRoutes} />
+      </section>
+
       <section className="callout-row">
         <article className="callout-card">
           <strong>Empty-state contract</strong>
           <p>
-            If no active trip exists, this surface should degrade to history,
-            receipt lookup, and support-safe entry points instead of a blank
-            shell.
+            If no active trip exists, the surface degrades to history, receipt
+            lookup, and support-safe entry points instead of a blank shell.
           </p>
         </article>
         <article className="callout-card warning">
-          <strong>Downstream scope stays downstream</strong>
+          <strong>Backend wiring stays downstream</strong>
           <p>
-            Booking create, cancel, denial, no-supply, and degraded negative
-            flows remain the `SYS-UI-004` materialization task.
+            This slice materializes route topology and authority framing. Live
+            booking create, cancel, and status integration is the next wave;
+            nothing here invents a fake mutation.
           </p>
         </article>
       </section>

@@ -52,9 +52,9 @@ export function PassengerShell({ children }: { children: ReactNode }) {
         </div>
 
         <p className="sidebar-footnote">
-          Current routes are the baseline landing zone for `SYS-UI-003`. Booking
-          create, cancel, and complaint completion stay downstream in
-          `SYS-UI-004`.
+          Baseline routes come from `SYS-UI-003`. Booking request, active trip,
+          cancel, completion, and the named negative-flow routes are
+          materialized by `SYS-UI-004`.
         </p>
       </aside>
 
@@ -71,7 +71,9 @@ export function PassengerShell({ children }: { children: ReactNode }) {
             </div>
             <div className="topbar-meta">
               <span className="meta-pill">Topology: `apps/passenger-web`</span>
-              <span className="meta-pill">Scope: shell + baseline routes</span>
+              <span className="meta-pill">
+                Scope: booking + trip + negative routes
+              </span>
             </div>
           </header>
           {children}
