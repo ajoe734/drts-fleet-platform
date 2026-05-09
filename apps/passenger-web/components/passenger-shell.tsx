@@ -27,7 +27,7 @@ export function PassengerShell({ children }: { children: ReactNode }) {
           aria-label="Passenger surface navigation"
         >
           {passengerNavItems.map((item) => {
-            const isActive = item.href === pathname;
+            const isActive = activeItem?.href === item.href;
 
             return (
               <Link

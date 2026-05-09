@@ -149,9 +149,13 @@ export const tripFlowRoutes: FlowRoute[] = [
 
 export function findPassengerNavItem(pathname: string) {
   if (pathname === "/") return passengerNavItems[0] ?? null;
-  return (
-    passengerNavItems.find(
-      (item) => item.href !== "/" && pathname.startsWith(item.href),
-    ) ?? null
+  const candidates = passengerNavItems.filter(
+    (item) =>
+      item.href !== "/" &&
+      (pathname === item.href || pathname.startsWith(`${item.href}/`)),
+  );
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, item) =>
+    item.href.length > best.href.length ? item : best,
   );
 }
