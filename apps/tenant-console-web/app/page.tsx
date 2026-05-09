@@ -280,10 +280,16 @@ export default async function HomePage() {
       </CalloutPanel>
 
       <CalloutPanel
-        title="Partner-mode restriction"
-        description="This app keeps partner entry separate from tenant-admin mode. If partner booking later lives in the same app, it must be routed under an isolated entry group with no tenant governance modules visible by default."
+        title="Partner mode runs in a constrained shell"
+        description="Partner booking lives at `/partner/*` with its own bootstrap session, partner-only navigation, and no tenant-admin governance exposure. Booking creation requires entry-scoped eligibility verification when the entry is not configured with `eligibility_mode = none`."
         tone="warning"
-      />
+      >
+        <div className="link-row">
+          <Link className="text-link" href="/partner/login">
+            Open partner sign-in
+          </Link>
+        </div>
+      </CalloutPanel>
 
       {data.errors.length > 0 ? (
         <CalloutPanel

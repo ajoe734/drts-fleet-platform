@@ -13,6 +13,10 @@ export function TenantShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const activeItem = findNavItem(pathname);
 
+  if (pathname.startsWith("/partner")) {
+    return <>{children}</>;
+  }
+
   return (
     <div className="tenant-shell">
       <aside className="tenant-sidebar">
