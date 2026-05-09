@@ -61,13 +61,42 @@ This slice satisfies all three:
 
 - New cookie-backed partner session helper:
   `apps/tenant-console-web/lib/partner-session.ts`
-  - cookie name `drts_partner_session_v1`, base64url JSON, HTTP-only,
+  - cookie name `drts_partner_session_v2`, HMAC-SHA256-signed payload
+    (format `<v2>.<base64url(json)>.<base64url(hmac)>`), HTTP-only,
     `sameSite=lax`, `secure` in production
   - parses ISO-8601 (`PTxHyMzS`) and numeric `expiresIn` from
     `PartnerBootstrapSession`
   - `requirePartnerSession()` redirects to `/partner/login` when missing
   - `buildPartnerClient(session)` returns a bearer-auth `ApiClient` stamped
     with `x-realm: partner` (and `x-tenant-id` when available)
+
+#### Cookie tamper hardening (Round 2 fix)
+
+The reviewer flagged that the v1 partner cookie stored the full
+`PartnerSessionRecord` as unsigned base64url JSON, so a caller could mutate
+`partnerEntry.status`, `partnerEntry.eligibilityMode`, `partnerEntry.entrySlug`,
+`identity.tenantId`, or `expiresAt` client-side and bypass the local active-entry
+or eligibility gate before the backend ever saw the request. The fix:
+
+- Signing — `encodeSession` HMAC-SHA256s the payload with a server secret
+  (`DRTS_PARTNER_SESSION_SECRET`), prepended with the version tag, and emits
+  `<v2>.<payload>.<sig>`. `decodeSession` recomputes the HMAC and rejects on
+  any mismatch via `crypto.timingSafeEqual`.
+- Versioned cookie name — bumped to `drts_partner_session_v2`, so any
+  in-flight unsigned `_v1` cookie from prior dev sessions is treated as
+  absent (forced re-login). `clearPartnerSession` deletes both the active
+  cookie and the legacy `_v1` cookie.
+- Production hard-fail — `getSessionSecret()` requires
+  `DRTS_PARTNER_SESSION_SECRET` (>=32 chars) when `NODE_ENV === "production"`
+  and throws otherwise. In non-production, a deterministic dev fallback secret
+  keeps local development unblocked.
+- Threat coverage — any tampered payload (e.g. flipping `status` to
+  `"active"` or replacing `entrySlug`/`tenantId`) yields a different HMAC and
+  fails verification, so `getPartnerSession()` returns `null` and the route
+  layer responds 401 / redirects to `/partner/login`. The bearer access token
+  itself is still backend-issued and unmodified by the client; the cookie
+  signature now binds the cached `partnerEntry` / `identity` snapshot to the
+  same trust root.
 
 - New session API:
   `apps/tenant-console-web/app/api/partner/session/route.ts`
@@ -228,9 +257,11 @@ Reviewer `Codex2` should focus on:
    tenant-admin navigation or surfaces tenant-admin authority. The grep
    surface is `apps/tenant-console-web/app/partner/**`.
 2. **Cookie / session safety** — confirm the partner session cookie is
-   `httpOnly`, `sameSite=lax`, base64url-encoded JSON, and that
-   `requirePartnerSession` always redirects when the cookie is absent or
-   expired.
+   `httpOnly`, `sameSite=lax`, HMAC-signed (`v2.<payload>.<sig>`), that
+   tampered payloads are rejected via `timingSafeEqual` in `decodeSession`,
+   that `requirePartnerSession` always redirects when the cookie is absent,
+   tampered, or expired, and that `DRTS_PARTNER_SESSION_SECRET` is enforced
+   in production.
 3. **Negative-path completeness** — verify the matrix in this packet
    matches the actual route handlers and form components. In particular,
    confirm that booking creation cannot succeed with `eligibilityMode !==
@@ -267,3 +298,112 @@ apps/tenant-console-web/components/tenant-shell.tsx                   (edited)
 apps/tenant-console-web/lib/partner-session.ts                        (new)
 support/sidecars/SYS-UI-002/SYS-UI-002-SIDECAR-ACCEPTANCE.md          (this file)
 ```
+
+---
+
+## Sidecar Addendum (SYS-UI-002-SIDECAR-ACCEPTANCE)
+
+- Sidecar Task: `SYS-UI-002-SIDECAR-ACCEPTANCE`
+- Parent Task: `SYS-UI-002`
+- Helper Kind: `acceptance_packet`
+- Sidecar Owner / Reviewer: `Claude` / `Claude2`
+- Parent Owner / Reviewer: `Claude2` / `Codex2`
+- Class: support-only; no canonical-truth mutation
+
+This addendum is appended by the sidecar owner. It does not rewrite the parent
+acceptance content above; it adds the explicit acceptance checklist and the
+dependency map that the sidecar brief is responsible for.
+
+### Acceptance Checklist (parent SYS-UI-002)
+
+The parent execution packet acceptance lines decompose into the following
+explicit, individually verifiable items. Each item maps to a section above.
+
+- [x] Chosen target app typecheck passes —
+      `pnpm --filter @drts/tenant-console-web typecheck`
+      (Acceptance Mapping; Verification).
+- [x] Chosen target app lint passes (`--max-warnings=0`) —
+      `pnpm --filter @drts/tenant-console-web lint` (Verification).
+- [x] Chosen target app test passes (`vitest run --passWithNoTests`) —
+      `pnpm --filter @drts/tenant-console-web test` (Verification).
+- [x] Chosen target app production build passes (Turbopack); 9 partner routes
+      registered (Verification, Files Changed / Added).
+- [x] Partner positive flow: login → start → eligibility (eligible) → booking
+      create → confirmation (Positive Path Coverage).
+- [x] Partner negative flow: bad credentials, missing/expired session,
+      ineligible, manual_review, missing eligibility verification id, inactive
+      entry, backend rejection, sign-out, attempted tenant-admin command
+      (Negative Path Coverage).
+- [x] Boundary discipline: partner subtree carries no tenant-admin nav; the
+      tenant shell short-circuits inside `/partner/*` (Landing-Zone Conformance;
+      `apps/tenant-console-web/components/tenant-shell.tsx`).
+- [x] Cookie / session safety: `httpOnly`, `sameSite=lax`, HMAC-SHA256-signed
+      payload (`v2.<payload>.<sig>`), `timingSafeEqual` rejection, legacy v1
+      cookies wiped, production hard-fails without
+      `DRTS_PARTNER_SESSION_SECRET` (Cookie tamper hardening — Round 2 fix).
+- [x] Contract conformance: `CreateTenantBookingCommand` is stamped with
+      `partnerEntrySlug` and (when present) `eligibilityVerificationId`;
+      `businessDispatchSubtype` is sourced from the entry record only
+      (Authenticated partner surface; What Is Intentionally Out Of Scope).
+- [x] No drift into sunset surfaces: `apps/tenant-portal-web` is not
+      modified (Landing-Zone Conformance).
+- [x] Out-of-scope authority is explicitly disclaimed on the confirmation
+      surface (no edit / cancel / override) (Authenticated partner surface;
+      What Is Intentionally Out Of Scope).
+
+### Acceptance Checklist (sidecar SYS-UI-002-SIDECAR-ACCEPTANCE)
+
+- [x] Create support artifacts only — this addendum lives entirely under
+      `support/sidecars/SYS-UI-002/`.
+- [x] Do not edit canonical truth — no L1 product truth, contract truth,
+      runtime/registry/governance code, or parent acceptance content above this
+      divider was modified by the sidecar owner.
+- [ ] Hand off the packet to the assigned reviewer (`Claude2`) — to be
+      performed via `scripts/ai-status.sh handoff` after this content lands.
+
+### Dependency Map
+
+The parent task `SYS-UI-002` lists three upstream dependencies. This map
+records what each upstream actually contributed to the SYS-UI-002 slice and
+where the seam between them is enforced.
+
+| Upstream                                         | Status | What it contributed to SYS-UI-002                                                                                                                                                                                                                                                                                                                                   | Seam in this slice                                                                                                                                                                               |
+| ------------------------------------------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SYS-UI-001` (this repo)                         | done   | Topology decision (`SD-DP-20260509-005`): partner mode lives inside `apps/tenant-console-web` under a constrained route group; `apps/tenant-portal-web` is sunset; partner shell must not leak tenant-admin nav. Execution packet `docs/03-runbooks/full-system-ui-completion-execution-packet-20260509.md` defines the acceptance lines that this slice satisfies. | Implemented as `apps/tenant-console-web/app/partner/*` route group plus `pathname.startsWith("/partner")` short-circuit in `components/tenant-shell.tsx`. `apps/tenant-portal-web` is untouched. |
+| `P1PX-FE-001` (sister repo `tenant-commute-hub`) | done   | Branded partner booking funnel pattern: entry-slug-driven login, partner-only chrome, eligibility / branding carried through auth → layout → booking. Reference for partner shell composition and entry-driven theming. The sister repo is not consumed at runtime by SYS-UI-002.                                                                                   | Materialized in repo-local form via `components/partner-shell.tsx` (`PartnerAuthenticatedShell` / `PartnerPublicShell`) and entry-driven `--partner-accent` CSS variable in `app/globals.css`.   |
+| `TEN-UI-008` (this repo)                         | done   | Real tenant identity / RBAC cutover (`apps/tenant-portal-web`, `packages/api-client`). Confirms the bearer-auth + `x-tenant-id` transport contract and the `ApiClient` surface that the partner client wraps.                                                                                                                                                       | Reused via `buildPartnerClient(session)` in `lib/partner-session.ts` returning a bearer-auth `ApiClient` stamped with `x-realm: partner` and `x-tenant-id` when available.                       |
+
+Notes:
+
+- All three upstream tasks are recorded `done` in `ai-status.json` at the
+  time this addendum lands, so the sidecar publishes against a settled
+  dependency baseline.
+- `P1PX-FE-001` shipped its commit in a sister repo (`tenant-commute-hub`).
+  SYS-UI-002 does not depend on that artifact at build or runtime; it only
+  inherits the design pattern. Recording this explicitly so the reviewer
+  does not look for a cross-repo wiring step that does not exist.
+
+### Reviewer Pointers (sidecar)
+
+For sidecar reviewer `Claude2`, the verification surface is small:
+
+1. Open `support/sidecars/SYS-UI-002/SYS-UI-002-SIDECAR-ACCEPTANCE.md` and
+   confirm only this addendum was added by the sidecar owner; the parent
+   acceptance body above the divider is unchanged.
+2. Spot-check that the Acceptance Checklist items map to existing sections
+   (Acceptance Mapping, Negative/Positive Path Coverage, Cookie tamper
+   hardening, Files Changed / Added, Verification).
+3. Spot-check that the Dependency Map matches `ai-status.json` (`SYS-UI-001`,
+   `P1PX-FE-001`, `TEN-UI-008` all `done`).
+4. Confirm no canonical truth (L1 product specs, service contracts,
+   migration plan, or implementation code outside the parent slice) was
+   modified by the sidecar.
+
+### Out Of Scope For The Sidecar
+
+- Re-verifying parent typecheck / lint / test / build. The parent acceptance
+  packet records those runs; rerunning is the parent reviewer (`Codex2`)'s
+  authority, not the sidecar reviewer's.
+- Approving or rejecting the parent SYS-UI-002 task. The sidecar approves
+  only the support packet itself.
+- Mutating any path outside `support/sidecars/SYS-UI-002/`.
