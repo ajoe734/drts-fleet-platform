@@ -98,11 +98,22 @@ export default async function BookingDetailPage({
                 <dd>{source.summary}</dd>
               </div>
               <div>
+                <dt>Authority owner</dt>
+                <dd>{source.badge}</dd>
+              </div>
+              <div>
                 <dt>Created</dt>
                 <dd>{formatDateTime(booking.createdAt)}</dd>
               </div>
             </dl>
             <p className="source-note">{source.detail}</p>
+            {source.domain === "forwarded_authority" ? (
+              <article className="callout-panel is-warning">
+                <strong>Forwarded-authority boundary</strong>
+                <p>{source.statusBoundary}</p>
+                <p>{source.escalationHint}</p>
+              </article>
+            ) : null}
           </article>
 
           <article className="surface-card">
@@ -206,6 +217,10 @@ export default async function BookingDetailPage({
               <div>
                 <dt>Compliance</dt>
                 <dd>{summarizeComplianceGates(booking.complianceGates)}</dd>
+              </div>
+              <div>
+                <dt>Finance authority</dt>
+                <dd>{source.financeAuthority}</dd>
               </div>
             </dl>
             <p className="muted-copy">

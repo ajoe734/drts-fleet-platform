@@ -40,6 +40,10 @@ export default async function BookingListPage({
   }
 
   const result = applyBookingListQuery(bookings, query);
+  const hasForwardedAuthority = result.items.some(
+    (booking) =>
+      getBookingSourceVisibility(booking).domain === "forwarded_authority",
+  );
 
   return (
     <main className="app-grid">
@@ -172,6 +176,24 @@ export default async function BookingListPage({
             fare/invoice linkage, and timeline context belong on the booking
             detail page.
           </p>
+          {hasForwardedAuthority ? (
+            <article className="callout-panel is-warning">
+              <strong>
+                Forwarded bookings keep external-platform authority
+              </strong>
+              <p>
+                Tenant booking oversight keeps the business record readable, but
+                adapter-native lifecycle states and platform recovery still
+                belong to ops and driver routes.
+              </p>
+              <p>
+                <code>accept_pending</code>, <code>confirmed_by_platform</code>,
+                <code>lost_race</code>, <code>cancelled_by_platform</code>, and
+                <code>sync_failed</code> never become tenant workflow actions on
+                this surface.
+              </p>
+            </article>
+          ) : null}
 
           {result.items.length > 0 ? (
             <div className="data-table">
