@@ -31,6 +31,7 @@ import {
   Td,
   Tr,
   WorkflowPanel,
+  WorkflowSplitLayout,
 } from "@drts/ui-web";
 
 type AdapterPreviewRecord = {
@@ -265,10 +266,25 @@ export default function HealthPage() {
       ? {
           eyebrow: "Control-plane governance",
           subtitle:
-            "Platform-scoped alert inventory, queue pressure, and adapter drill-through in one operator-facing view.",
+            "alert list · dispatch lag · webhook queue · eligibility queue · reporting · adapters",
           focusAreas: "Focus areas",
           snapshot: "Snapshot",
           registryLink: "Open adapter registry",
+          activeAlertsTitle: "Active alerts",
+          activeAlertsSubtitle:
+            "Cross-module alert posture kept in a compact operator triage lane.",
+          activeAlertsSummary:
+            "This list mirrors the PA_Health canvas by keeping route, issue text, and count visible before drill-through.",
+          adapterInventoryTitle: "Adapter inventory",
+          adapterInventorySubtitle:
+            "Global adapter posture with live controls state and last-check context.",
+          adapterInventorySummary:
+            "Registry remains the editable source of truth; this table stays optimized for live triage.",
+          postureTitle: "Health posture",
+          postureSubtitle:
+            "Compact read of platform-scoped thresholds, queues, and focus areas.",
+          postureSummary:
+            "Use this panel as the right-hand snapshot while the main column stays on alerts and adapter drill-through.",
           stableBannerTitle:
             "No platform-scoped alert is breaching thresholds.",
           stableBannerDescription:
@@ -284,30 +300,36 @@ export default function HealthPage() {
           pressureSyncFailures: "Sync failures",
           pressureAcceptPending: "Accept pending",
           pressureReconciliation: "Reconciliation queue",
-          alertsTitle: "Alert inventory",
-          alertsSubtitle:
-            "Threshold-based signals are filtered to the platform role-view and retain measured versus warning/critical context.",
-          alertsSummary:
-            "Each row preserves backend-issued thresholds and route scope rather than collapsing them into a single summary status.",
-          adaptersTitle: "Adapter live preview",
-          adaptersSubtitle:
-            "Registry drill-through stays global; this preview only surfaces live health, credential, auth, and webhook posture.",
-          adaptersSummary:
-            "Use this table to spot degraded adapters, then switch to the registry for rollout, credentials, and edit actions.",
           drillThrough: "View registry",
           drillThroughNote: "Registry remains the editable inventory surface.",
           lastRefresh: "Last refresh",
           noAdapterDetail:
             "No adapter detail returned in snapshot; falling back to forwarder health records.",
           noIssues: "No active error reported",
+          noPlatformAlert: "No platform-scoped alert is active right now.",
         }
       : {
           eyebrow: "治理控制面",
           subtitle:
-            "把平台層 alert inventory、queue pressure 與 adapter drill-through 放在同一個 operator 視圖。",
+            "alert list · dispatch lag · webhook queue · eligibility queue · reporting · adapters",
           focusAreas: "重點面向",
           snapshot: "快照時間",
           registryLink: "前往 adapter registry",
+          activeAlertsTitle: "Active alerts",
+          activeAlertsSubtitle:
+            "把跨模組告警濃縮成同一條 operator triage 路徑。",
+          activeAlertsSummary:
+            "這個清單對齊 PA_Health 設計稿，先保留 route、問題描述與 count，再決定 drill-through。",
+          adapterInventoryTitle: "Adapter inventory",
+          adapterInventorySubtitle:
+            "以 live controls 與 last check 為主的全域 adapter 姿態。",
+          adapterInventorySummary:
+            "可編輯設定仍在 registry；這張表只負責即時 triage。",
+          postureTitle: "健康姿態",
+          postureSubtitle:
+            "把平台層 threshold、queue 壓力與 focus areas 濃縮成側欄摘要。",
+          postureSummary:
+            "主欄維持 alerts 與 adapter drill-through；這裡則提供右側快照。",
           stableBannerTitle: "目前沒有平台範圍 alert 超出門檻。",
           stableBannerDescription:
             "下方仍保留 queue pressure 與 adapter readiness 監看；registry 繼續作為 inventory 真實來源，本頁只負責 live health。",
@@ -321,22 +343,13 @@ export default function HealthPage() {
           pressureSyncFailures: "同步失敗",
           pressureAcceptPending: "待接受",
           pressureReconciliation: "對帳佇列",
-          alertsTitle: "告警清單",
-          alertsSubtitle:
-            "所有 threshold signal 只保留 platform role-view 範圍，並顯示 measured 與 warning/critical context。",
-          alertsSummary:
-            "每列都保留 backend 發出的 threshold 與 route scope，不把多個語意壓平成單一健康值。",
-          adaptersTitle: "Adapter 即時預覽",
-          adaptersSubtitle:
-            "這裡只看 live health、credential、auth 與 webhook posture；inventory 與 rollout 仍以 registry 為主。",
-          adaptersSummary:
-            "先在這裡找出 degraded adapter，再切到 registry 檢查 rollout、credentials 與可編輯設定。",
           drillThrough: "查看 registry",
           drillThroughNote: "可編輯的 inventory 真實面仍在 registry。",
           lastRefresh: "上次刷新",
           noAdapterDetail:
             "快照未回傳 adapter detail，改用 forwarder health 記錄補足。",
           noIssues: "目前沒有回報錯誤",
+          noPlatformAlert: "目前沒有平台範圍的 active alert。",
         };
 
   const platformView = observability.roleViews.find(
@@ -442,28 +455,18 @@ export default function HealthPage() {
         observability.eligibility.totalReviewQueue > 0 ? "warning" : "success",
     },
     {
-      id: "forwarder",
-      label: locale === "en" ? "Forwarder sync backlog" : "轉派同步積壓",
+      id: "reporting",
+      label: locale === "en" ? "Reporting failures 24h" : "24h 報表失敗",
       value: formatAlertValue(
-        observability.forwarderOps.syncFailedOrders,
+        observability.reporting.failedJobs,
         "count",
         locale,
       ),
       detail:
         locale === "en"
-          ? `${observability.forwarderOps.reconciliationQueue} queued for reconciliation`
-          : `${observability.forwarderOps.reconciliationQueue} 筆待對帳`,
-      tone:
-        observability.forwarderOps.syncFailedOrders > 0 ? "danger" : "success",
-    },
-    {
-      id: "adapters",
-      label: t("health.metric.adapters.title"),
-      value: formatAlertValue(unhealthyAdapters, "count", locale),
-      detail: t("health.metric.adapters.note", {
-        count: observability.adapters.totalAdapters,
-      }),
-      tone: unhealthyAdapters > 0 ? "warning" : "success",
+          ? `${observability.reporting.queuedJobs} jobs still queued`
+          : `${observability.reporting.queuedJobs} 筆工作仍在佇列`,
+      tone: observability.reporting.failedJobs > 0 ? "danger" : "success",
     },
   ] as const;
 
@@ -628,185 +631,323 @@ export default function HealthPage() {
         />
       </WorkflowPanel>
 
-      <DataViewCard
-        title={copy.alertsTitle}
-        subtitle={copy.alertsSubtitle}
-        tone="warning"
-        summary={copy.alertsSummary}
-        footer={`${platformAlerts.length} ${locale === "en" ? "platform-scoped alerts" : "筆平台範圍告警"}`}
-      >
-        <DataTable
-          tone="warning"
-          minWidth={860}
-          empty={t("health.noAlerts")}
-          columns={[
-            { label: t("health.col.alert"), width: "28%" },
-            { label: t("health.col.status"), width: "12%" },
-            { label: t("health.col.measured"), width: "14%" },
-            { label: t("health.col.threshold"), width: "22%" },
-            { label: t("health.col.route"), width: "24%" },
-          ]}
-        >
-          {platformAlerts.map((alert) => (
-            <Tr key={alert.key} highlighted={alert.state !== "healthy"}>
-              <Td>
-                <DataCellStack
-                  primary={
-                    <strong>{t(`health.alert.${alert.key}.title`)}</strong>
-                  }
-                  secondary={formatPlatformCodeLabel(locale, alert.key)}
-                />
-              </Td>
-              <Td>
-                <StatusChip
-                  tone={toneForAlertState(alert.state)}
-                  label={formatPlatformCodeLabel(locale, alert.state)}
-                />
-              </Td>
-              <Td>
-                {formatAlertValue(
-                  alert.measuredValue,
-                  alert.thresholds.unit,
-                  locale,
-                )}
-              </Td>
-              <Td muted>
-                {t("health.thresholds", {
-                  warning: formatAlertValue(
-                    alert.thresholds.warning,
-                    alert.thresholds.unit,
-                    locale,
-                  ),
-                  critical: formatAlertValue(
-                    alert.thresholds.critical,
-                    alert.thresholds.unit,
-                    locale,
-                  ),
-                })}
-              </Td>
-              <Td>
-                <DataCellStack
-                  primary={alert.routes
-                    .map((route) =>
-                      route === "platform"
-                        ? t("health.route.platform")
-                        : t("health.route.ops"),
-                    )
-                    .join(" / ")}
-                  secondary={
-                    platformView?.focusAreas
-                      .map((area) => formatPlatformCodeLabel(locale, area))
-                      .join(" / ") || emptyLabel(locale)
-                  }
-                />
-              </Td>
-            </Tr>
-          ))}
-        </DataTable>
-      </DataViewCard>
-
-      <DataViewCard
-        title={copy.adaptersTitle}
-        subtitle={copy.adaptersSubtitle}
-        tone="info"
-        summary={copy.adaptersSummary}
-        actions={
-          <Link
-            href="/adapter-registry"
-            style={actionButtonStyle({ tone: "secondary" })}
-          >
-            {copy.registryLink}
-          </Link>
-        }
-        footer={`${adapterPreview.length} ${locale === "en" ? "adapter records" : "筆 adapter 記錄"}`}
-      >
-        <DataTable
-          tone="info"
-          minWidth={980}
-          empty={t("health.noAdapters")}
-          columns={[
-            { label: t("health.col.adapter"), width: "24%" },
-            { label: t("health.col.status"), width: "16%" },
-            {
-              label: locale === "en" ? "Controls" : "控制狀態",
-              width: "28%",
-            },
-            { label: t("health.col.lastCheck"), width: "18%" },
-            {
-              label: locale === "en" ? "Drill-through" : "延伸檢視",
-              width: "14%",
-            },
-          ]}
-        >
-          {adapterPreview.map((adapter) => (
-            <Tr
-              key={adapter.platformCode}
-              highlighted={hasAdapterControlAttention(adapter)}
+      <WorkflowSplitLayout
+        main={
+          <>
+            <DataViewCard
+              title={copy.activeAlertsTitle}
+              subtitle={copy.activeAlertsSubtitle}
+              tone="warning"
+              summary={copy.activeAlertsSummary}
+              footer={`${platformAlerts.length} ${locale === "en" ? "platform-scoped alerts" : "筆平台範圍告警"}`}
             >
-              <Td mono>
-                <DataCellStack
-                  primary={<strong>{adapter.platformCode}</strong>}
-                  secondary={copy.drillThroughNote}
-                />
-              </Td>
-              <Td>
-                <DataCellStack
-                  primary={
-                    <StatusChip
-                      tone={toneForAdapterSeverity(adapter.status)}
-                      label={formatPlatformCodeLabel(locale, adapter.status)}
-                    />
-                  }
-                  secondary={adapter.lastError || copy.noIssues}
-                />
-              </Td>
-              <Td>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  <StatusChip
-                    tone={toneForCredentialStatus(adapter.credentialStatus)}
-                    label={
-                      adapter.credentialStatus
-                        ? formatPlatformCodeLabel(
-                            locale,
-                            adapter.credentialStatus,
+              {platformAlerts.length > 0 ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  {platformAlerts.map((alert) => (
+                    <div
+                      key={alert.key}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "auto minmax(0, 1fr) auto auto",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: "12px 0",
+                        borderBottom: "1px solid rgba(148,163,184,0.18)",
+                      }}
+                    >
+                      <StatusChip
+                        tone={toneForAlertState(alert.state)}
+                        label={alert.routes
+                          .map((route) =>
+                            route === "platform"
+                              ? t("health.route.platform")
+                              : t("health.route.ops"),
                           )
-                        : emptyLabel(locale)
-                    }
-                    authorityLabel={locale === "en" ? "credential" : "憑證"}
-                  />
-                  <StatusChip
-                    tone={toneForAuthStatus(adapter.authStatus)}
-                    label={
-                      adapter.authStatus
-                        ? formatPlatformCodeLabel(locale, adapter.authStatus)
-                        : emptyLabel(locale)
-                    }
-                    authorityLabel="auth"
-                  />
-                  <StatusChip
-                    tone={toneForWebhookStatus(adapter.webhookStatus)}
-                    label={
-                      adapter.webhookStatus
-                        ? formatPlatformCodeLabel(locale, adapter.webhookStatus)
-                        : emptyLabel(locale)
-                    }
-                    authorityLabel="webhook"
-                  />
+                          .join(" / ")}
+                      />
+                      <DataCellStack
+                        primary={
+                          <strong>
+                            {t(`health.alert.${alert.key}.title`)}
+                          </strong>
+                        }
+                        secondary={t("health.thresholds", {
+                          warning: formatAlertValue(
+                            alert.thresholds.warning,
+                            alert.thresholds.unit,
+                            locale,
+                          ),
+                          critical: formatAlertValue(
+                            alert.thresholds.critical,
+                            alert.thresholds.unit,
+                            locale,
+                          ),
+                        })}
+                        tertiary={formatPlatformCodeLabel(locale, alert.key)}
+                      />
+                      <span
+                        style={{
+                          color: "#0f172a",
+                          fontSize: 12.5,
+                          fontWeight: 700,
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {formatAlertValue(
+                          alert.measuredValue,
+                          alert.thresholds.unit,
+                          locale,
+                        )}
+                      </span>
+                      <Link
+                        href="/adapter-registry"
+                        style={actionButtonStyle({
+                          tone: "secondary",
+                          size: "sm",
+                        })}
+                      >
+                        {copy.drillThrough}
+                      </Link>
+                    </div>
+                  ))}
                 </div>
-              </Td>
-              <Td muted>{formatDateTime(adapter.lastCheckedAt)}</Td>
-              <Td align="right">
+              ) : (
+                <div style={{ padding: "4px 0" }}>{copy.noPlatformAlert}</div>
+              )}
+            </DataViewCard>
+
+            <DataViewCard
+              title={copy.adapterInventoryTitle}
+              subtitle={copy.adapterInventorySubtitle}
+              tone="info"
+              summary={copy.adapterInventorySummary}
+              actions={
                 <Link
                   href="/adapter-registry"
-                  style={actionButtonStyle({ tone: "secondary", size: "sm" })}
+                  style={actionButtonStyle({ tone: "secondary" })}
                 >
-                  {copy.drillThrough}
+                  {copy.registryLink}
                 </Link>
-              </Td>
-            </Tr>
-          ))}
-        </DataTable>
-      </DataViewCard>
+              }
+              footer={`${adapterPreview.length} ${locale === "en" ? "adapter records" : "筆 adapter 記錄"}`}
+            >
+              <DataTable
+                tone="info"
+                minWidth={980}
+                empty={t("health.noAdapters")}
+                columns={[
+                  { label: t("health.col.adapter"), width: "24%" },
+                  { label: t("health.col.status"), width: "16%" },
+                  {
+                    label: locale === "en" ? "Controls" : "控制狀態",
+                    width: "28%",
+                  },
+                  { label: t("health.col.lastCheck"), width: "18%" },
+                  {
+                    label: locale === "en" ? "Drill-through" : "延伸檢視",
+                    width: "14%",
+                  },
+                ]}
+              >
+                {adapterPreview.map((adapter) => (
+                  <Tr
+                    key={adapter.platformCode}
+                    highlighted={hasAdapterControlAttention(adapter)}
+                  >
+                    <Td mono>
+                      <DataCellStack
+                        primary={<strong>{adapter.platformCode}</strong>}
+                        secondary={copy.drillThroughNote}
+                      />
+                    </Td>
+                    <Td>
+                      <DataCellStack
+                        primary={
+                          <StatusChip
+                            tone={toneForAdapterSeverity(adapter.status)}
+                            label={formatPlatformCodeLabel(
+                              locale,
+                              adapter.status,
+                            )}
+                          />
+                        }
+                        secondary={adapter.lastError || copy.noIssues}
+                      />
+                    </Td>
+                    <Td>
+                      <div
+                        style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
+                      >
+                        <StatusChip
+                          tone={toneForCredentialStatus(
+                            adapter.credentialStatus,
+                          )}
+                          label={
+                            adapter.credentialStatus
+                              ? formatPlatformCodeLabel(
+                                  locale,
+                                  adapter.credentialStatus,
+                                )
+                              : emptyLabel(locale)
+                          }
+                          authorityLabel={
+                            locale === "en" ? "credential" : "憑證"
+                          }
+                        />
+                        <StatusChip
+                          tone={toneForAuthStatus(adapter.authStatus)}
+                          label={
+                            adapter.authStatus
+                              ? formatPlatformCodeLabel(
+                                  locale,
+                                  adapter.authStatus,
+                                )
+                              : emptyLabel(locale)
+                          }
+                          authorityLabel="auth"
+                        />
+                        <StatusChip
+                          tone={toneForWebhookStatus(adapter.webhookStatus)}
+                          label={
+                            adapter.webhookStatus
+                              ? formatPlatformCodeLabel(
+                                  locale,
+                                  adapter.webhookStatus,
+                                )
+                              : emptyLabel(locale)
+                          }
+                          authorityLabel="webhook"
+                        />
+                      </div>
+                    </Td>
+                    <Td muted>{formatDateTime(adapter.lastCheckedAt)}</Td>
+                    <Td align="right">
+                      <Link
+                        href="/adapter-registry"
+                        style={actionButtonStyle({
+                          tone: "secondary",
+                          size: "sm",
+                        })}
+                      >
+                        {copy.drillThrough}
+                      </Link>
+                    </Td>
+                  </Tr>
+                ))}
+              </DataTable>
+            </DataViewCard>
+          </>
+        }
+        side={
+          <>
+            <DataViewCard
+              title={copy.postureTitle}
+              subtitle={copy.postureSubtitle}
+              tone="info"
+              summary={copy.postureSummary}
+            >
+              <DetailMetadataGrid
+                columns={1}
+                minColumnWidth="100%"
+                items={[
+                  {
+                    id: "critical-alerts",
+                    label: t("health.summary.critical"),
+                    value: criticalAlerts.toLocaleString(
+                      locale === "en" ? "en-US" : "zh-TW",
+                    ),
+                    tone: criticalAlerts > 0 ? "danger" : "success",
+                  },
+                  {
+                    id: "warning-alerts",
+                    label: t("health.summary.warning"),
+                    value: warningAlerts.toLocaleString(
+                      locale === "en" ? "en-US" : "zh-TW",
+                    ),
+                    tone: warningAlerts > 0 ? "warning" : "neutral",
+                  },
+                  {
+                    id: "unhealthy-adapters",
+                    label: t("health.metric.adapters.title"),
+                    value: unhealthyAdapters.toLocaleString(
+                      locale === "en" ? "en-US" : "zh-TW",
+                    ),
+                    tone: unhealthyAdapters > 0 ? "warning" : "success",
+                  },
+                  {
+                    id: "focus-areas",
+                    label: copy.focusAreas,
+                    value: focusAreas,
+                  },
+                ]}
+              />
+            </DataViewCard>
+
+            <WorkflowPanel
+              tone="warning"
+              eyebrow={copy.eyebrow}
+              title={copy.pressureTitle}
+              description={copy.pressureDescription}
+              footer={
+                observability.adapterDetails.length === 0
+                  ? copy.noAdapterDetail
+                  : undefined
+              }
+            >
+              <DetailMetadataGrid
+                columns={1}
+                minColumnWidth="100%"
+                items={[
+                  {
+                    id: "forwarded-orders",
+                    label: copy.pressureForwarded,
+                    value:
+                      observability.forwarderOps.totalForwardedOrders.toLocaleString(
+                        locale === "en" ? "en-US" : "zh-TW",
+                      ),
+                  },
+                  {
+                    id: "sync-failures",
+                    label: copy.pressureSyncFailures,
+                    value:
+                      observability.forwarderOps.syncFailedOrders.toLocaleString(
+                        locale === "en" ? "en-US" : "zh-TW",
+                      ),
+                    tone:
+                      observability.forwarderOps.syncFailedOrders > 0
+                        ? "danger"
+                        : "neutral",
+                  },
+                  {
+                    id: "accept-pending",
+                    label: copy.pressureAcceptPending,
+                    value:
+                      observability.forwarderOps.acceptPendingOrders.toLocaleString(
+                        locale === "en" ? "en-US" : "zh-TW",
+                      ),
+                    tone:
+                      observability.forwarderOps.acceptPendingOrders > 0
+                        ? "warning"
+                        : "neutral",
+                  },
+                  {
+                    id: "reconciliation",
+                    label: copy.pressureReconciliation,
+                    value:
+                      observability.forwarderOps.reconciliationQueue.toLocaleString(
+                        locale === "en" ? "en-US" : "zh-TW",
+                      ),
+                    tone:
+                      observability.forwarderOps.reconciliationQueue > 0
+                        ? "warning"
+                        : "neutral",
+                  },
+                ]}
+              />
+            </WorkflowPanel>
+          </>
+        }
+      />
     </div>
   );
 }

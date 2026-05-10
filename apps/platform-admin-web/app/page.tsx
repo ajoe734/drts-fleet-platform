@@ -19,9 +19,11 @@ import {
   DataCellStack,
   DataTable,
   DataViewCard,
+  DetailMetadataGrid,
   KpiCard,
   KpiRow,
   PageHeader,
+  StatusChip,
   Td,
   Tr,
   WorkflowPanel,
@@ -55,6 +57,37 @@ function alertTone(
     default:
       return "info";
   }
+}
+
+function quickLinkCardStyle(tone: "neutral" | "warning" | "danger") {
+  const toneMap = {
+    neutral: {
+      border: "#dbe4ee",
+      background: "#f8fafc",
+      accentBackground: "#dbeafe",
+      accentColor: "#1d4ed8",
+      badgeBackground: "#e2e8f0",
+      badgeColor: "#334155",
+    },
+    warning: {
+      border: "#fde68a",
+      background: "#fffbeb",
+      accentBackground: "#fef3c7",
+      accentColor: "#b45309",
+      badgeBackground: "#fef3c7",
+      badgeColor: "#92400e",
+    },
+    danger: {
+      border: "#fecaca",
+      background: "#fef2f2",
+      accentBackground: "#fee2e2",
+      accentColor: "#b91c1c",
+      badgeBackground: "#fee2e2",
+      badgeColor: "#991b1b",
+    },
+  } as const;
+
+  return toneMap[tone];
 }
 
 export default function HomePage() {
@@ -312,6 +345,26 @@ export default function HomePage() {
   const recentAudit = snapshot?.audit.slice(0, 5) ?? [];
   const governanceItemCount =
     governanceQueue.length + metrics.rollbackTenants + metrics.criticalAlerts;
+  const quickLinkCards = copy.routes.map((route) => {
+    let badge: string | null = null;
+    let tone: "neutral" | "warning" | "danger" = "neutral";
+
+    if (route.href === "/health" && metrics.criticalAlerts > 0) {
+      badge = String(metrics.criticalAlerts);
+      tone = "danger";
+    } else if (route.href === "/partners" && metrics.partnerAttention > 0) {
+      badge = String(metrics.partnerAttention);
+      tone = "warning";
+    } else if (route.href === "/payments" && metrics.openIssues > 0) {
+      badge = String(metrics.openIssues);
+      tone = "danger";
+    } else if (route.href === "/tenants" && metrics.rollbackTenants > 0) {
+      badge = String(metrics.rollbackTenants);
+      tone = "warning";
+    }
+
+    return { ...route, badge, tone };
+  });
 
   if (loading) {
     return (
@@ -400,6 +453,48 @@ export default function HomePage() {
         />
       </KpiRow>
 
+      <CalloutBanner
+        tone={governanceItemCount > 0 ? "warning" : "success"}
+        eyebrow={locale === "en" ? "Home posture" : "首頁姿態"}
+        title={
+          locale === "en"
+            ? "Today mirrors the PA_Home canvas: operator queue first, drill-through second."
+            : "本頁對齊 PA_Home：先看治理佇列，再做模組 drill-through。"
+        }
+        description={
+          locale === "en"
+            ? "The queue below keeps platform-routed alerts, rollback holds, partner readiness, and settlement exceptions in the same triage lane."
+            : "下方把平台路由告警、rollback hold、partner readiness 與結算例外放在同一條 triage 路徑。"
+        }
+      >
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <StatusChip
+            tone={metrics.rollbackTenants > 0 ? "warning" : "neutral"}
+            label={
+              locale === "en"
+                ? `Rollback holds · ${metrics.rollbackTenants}`
+                : `Rollback hold · ${metrics.rollbackTenants}`
+            }
+          />
+          <StatusChip
+            tone={metrics.partnerAttention > 0 ? "warning" : "neutral"}
+            label={
+              locale === "en"
+                ? `Partner follow-up · ${metrics.partnerAttention}`
+                : `Partner 補件 · ${metrics.partnerAttention}`
+            }
+          />
+          <StatusChip
+            tone={metrics.criticalAlerts > 0 ? "danger" : "success"}
+            label={
+              locale === "en"
+                ? `Critical alerts · ${metrics.criticalAlerts}`
+                : `重大告警 · ${metrics.criticalAlerts}`
+            }
+          />
+        </div>
+      </CalloutBanner>
+
       <WorkflowSplitLayout
         main={
           <>
@@ -484,41 +579,154 @@ export default function HomePage() {
           </>
         }
         side={
-          <WorkflowPanel
-            title={copy.quickLinksTitle}
-            description={copy.quickLinksSubtitle}
-          >
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                gap: 10,
-              }}
+          <>
+            <DataViewCard
+              title={locale === "en" ? "Operator snapshot" : "治理摘要"}
+              subtitle={
+                locale === "en"
+                  ? "A compact read of the queues that most often bounce between platform and ops."
+                  : "把最常在 platform 與 ops 之間來回的隊列濃縮成一張摘要。"
+              }
+              tone="info"
+              summary={
+                locale === "en"
+                  ? "This card mirrors the right-hand summary posture from the design canvas while preserving live counts."
+                  : "這張卡對應設計稿右側摘要姿態，同時保留真實即時計數。"
+              }
             >
-              {copy.routes.map((route) => (
-                <Link
-                  key={route.href}
-                  href={route.href}
-                  style={{
-                    display: "grid",
-                    gap: 4,
-                    padding: "14px 16px",
-                    borderRadius: 14,
-                    border: "1px solid #dbe4ee",
-                    background: "#f8fafc",
-                    textDecoration: "none",
-                  }}
-                >
-                  <strong style={{ color: "#0f172a", fontSize: 13.5 }}>
-                    {route.label}
-                  </strong>
-                  <span style={{ color: "#64748b", fontSize: 12.5 }}>
-                    {route.note}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </WorkflowPanel>
+              <DetailMetadataGrid
+                columns={1}
+                minColumnWidth="100%"
+                items={[
+                  {
+                    id: "queue-items",
+                    label: locale === "en" ? "Governance items" : "治理事項",
+                    value: governanceItemCount.toLocaleString(
+                      locale === "en" ? "en-US" : "zh-TW",
+                    ),
+                    tone: governanceItemCount > 0 ? "warning" : "success",
+                  },
+                  {
+                    id: "drivers",
+                    label:
+                      locale === "en"
+                        ? "Dispatch-eligible drivers"
+                        : "可派遣司機",
+                    value: metrics.driverEligible.toLocaleString(
+                      locale === "en" ? "en-US" : "zh-TW",
+                    ),
+                  },
+                  {
+                    id: "stale-drivers",
+                    label:
+                      locale === "en"
+                        ? "Stale driver locations"
+                        : "定位過舊司機",
+                    value: metrics.staleDrivers.toLocaleString(
+                      locale === "en" ? "en-US" : "zh-TW",
+                    ),
+                    tone: metrics.staleDrivers > 0 ? "warning" : "neutral",
+                  },
+                  {
+                    id: "critical-platform-alerts",
+                    label:
+                      locale === "en"
+                        ? "Critical platform alerts"
+                        : "重大平台告警",
+                    value: metrics.criticalAlerts.toLocaleString(
+                      locale === "en" ? "en-US" : "zh-TW",
+                    ),
+                    tone: metrics.criticalAlerts > 0 ? "danger" : "success",
+                  },
+                ]}
+              />
+            </DataViewCard>
+
+            <DataViewCard
+              title={copy.quickLinksTitle}
+              subtitle={copy.quickLinksSubtitle}
+              tone="neutral"
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: 10,
+                }}
+              >
+                {quickLinkCards.map((route) => {
+                  const styles = quickLinkCardStyle(route.tone);
+
+                  return (
+                    <Link
+                      key={route.href}
+                      href={route.href}
+                      style={{
+                        display: "grid",
+                        gap: 8,
+                        padding: "14px 16px",
+                        borderRadius: 16,
+                        border: `1px solid ${styles.border}`,
+                        background: styles.background,
+                        textDecoration: "none",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 30,
+                            height: 30,
+                            borderRadius: 10,
+                            background: styles.accentBackground,
+                            color: styles.accentColor,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 11,
+                            fontWeight: 700,
+                          }}
+                        >
+                          {route.label.slice(0, 2).toUpperCase()}
+                        </span>
+                        <strong
+                          style={{
+                            flex: 1,
+                            color: "#0f172a",
+                            fontSize: 13.5,
+                          }}
+                        >
+                          {route.label}
+                        </strong>
+                        {route.badge ? (
+                          <span
+                            style={{
+                              padding: "3px 8px",
+                              borderRadius: 999,
+                              background: styles.badgeBackground,
+                              color: styles.badgeColor,
+                              fontSize: 11,
+                              fontWeight: 700,
+                            }}
+                          >
+                            {route.badge}
+                          </span>
+                        ) : null}
+                      </div>
+                      <span style={{ color: "#64748b", fontSize: 12.5 }}>
+                        {route.note}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </DataViewCard>
+          </>
         }
       />
     </div>
