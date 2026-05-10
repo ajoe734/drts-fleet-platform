@@ -11,8 +11,9 @@ This is the PBK-UI-001 bootstrap slice. Per
 
 - **Wave 5 — not deployed.** CI must build / lint / typecheck cleanly, but no
   live deploy in this wave.
-- Brand layering uses neutral placeholder accents until **PBK-UI-002** wires
-  the real `packages/ui-tokens/src/brands.ts`.
+- Brand layering now resolves through
+  `packages/ui-tokens/src/brands.ts` with shared CTBC / CATHAY / GRAND demo
+  templates.
 - The CTBC reference funnel (7 screens) and authority-safe negative paths land
   in **PBK-UI-003** and **PBK-UI-004**.
 - The cutover policy between this app and the legacy
@@ -28,9 +29,9 @@ This is the PBK-UI-001 bootstrap slice. Per
 - `app/[tenantSlug]/layout.tsx` resolves the brand via `lib/brand.ts`. An
   unknown slug returns `notFound()` so we cannot accidentally render an
   unbranded experience.
-- Brand records expose accent ramps drawn from `@drts/ui-tokens`
-  (`SURFACE_ACCENTS.partner.*`). PBK-UI-002 will replace the placeholder
-  registry with the real cross-stack brand tokens.
+- Brand records are sourced from `@drts/ui-tokens` `BRAND_TEMPLATES`, including
+  display metadata, support hotline, card-art seed data, and per-brand surface
+  ramps.
 
 ## Dev / Build / Lint / Typecheck
 

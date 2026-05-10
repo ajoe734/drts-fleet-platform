@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { listKnownBrandSlugs } from "@/lib/brand";
+import { listKnownBrands } from "@/lib/brand";
 
 export default function RootIndex() {
-  const slugs = listKnownBrandSlugs();
+  const brands = listKnownBrands();
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-16">
       <header className="flex flex-col gap-2">
@@ -25,14 +25,28 @@ export default function RootIndex() {
           Known reference tenants
         </h2>
         <ul className="mt-4 grid gap-3">
-          {slugs.map((slug) => (
-            <li key={slug}>
-              <Link
-                href={`/${slug}`}
-                className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--pbk-panel-border)] px-4 py-2 text-sm font-medium text-[color:var(--pbk-accent)] hover:bg-[color:var(--pbk-accent-soft)]"
-              >
-                Open /{slug}
-              </Link>
+          {brands.map((brand) => (
+            <li
+              key={brand.code}
+              className="rounded-xl border border-[color:var(--pbk-panel-border)] p-4"
+            >
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-[color:var(--pbk-fg)]">
+                    {brand.displayName}
+                  </div>
+                  <div className="text-xs text-[color:var(--pbk-muted)]">
+                    {brand.bankName} · {brand.programName} ·{" "}
+                    {brand.hotline.phone}
+                  </div>
+                </div>
+                <Link
+                  href={`/${brand.slug}`}
+                  className="inline-flex items-center gap-2 rounded-lg border border-[color:var(--pbk-panel-border)] px-4 py-2 text-sm font-medium text-[color:var(--pbk-accent)] hover:bg-[color:var(--pbk-accent-soft)]"
+                >
+                  Open /{brand.slug}
+                </Link>
+              </div>
             </li>
           ))}
         </ul>
