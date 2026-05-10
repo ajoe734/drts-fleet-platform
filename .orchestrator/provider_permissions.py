@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +30,10 @@ GEMINI_OAUTH_CREDS_PATH = Path.home() / ".gemini" / "oauth_creds.json"
 QWEN_SETTINGS_PATH = Path.home() / ".qwen" / "settings.json"
 CODEX_CONFIG_PATH = Path.home() / ".codex" / "config.toml"
 EXTENSIONS_DIR = Path.home() / ".vscode-server" / "extensions"
+CLAUDE_AUTH_EXPIRY_SKEW_SECONDS = 60
+CLAUDE_AUTH_PROBE_SUCCESS_TTL_SECONDS = 300
+CLAUDE_AUTH_PROBE_FAILURE_TTL_SECONDS = 60
+_CLAUDE_LIVE_AUTH_PROBE_CACHE: dict[tuple[str, str], tuple[float, bool]] = {}
 
 
 def _find_extension(prefix: str) -> tuple[Path | None, str | None]:
@@ -176,11 +182,91 @@ def _json_command(command: list[str], *, env: dict[str, str] | None = None) -> d
         return {}
 
 
+def _claude_credentials_path(env: dict[str, str] | None = None) -> Path:
+    source = env or os.environ
+    home = str(source.get("HOME") or "").strip()
+    return Path(home) / ".claude" / ".credentials.json" if home else Path.home() / ".claude" / ".credentials.json"
+
+
+def _claude_oauth_payload(credentials_path: Path) -> dict[str, Any]:
+    payload = load_json(credentials_path, default={}) or {}
+    oauth = payload.get("claudeAiOauth")
+    return oauth if isinstance(oauth, dict) else {}
+
+
+def _claude_credentials_expiry(credentials_path: Path) -> float | None:
+    oauth = _claude_oauth_payload(credentials_path)
+    if not oauth:
+        return None
+    expires_at = oauth.get("expiresAt")
+    try:
+        expiry = float(expires_at)
+    except (TypeError, ValueError):
+        return None
+    return expiry / 1000.0 if expiry > 10_000_000_000 else expiry
+
+
+def _claude_has_refresh_token(credentials_path: Path) -> bool:
+    oauth = _claude_oauth_payload(credentials_path)
+    return bool(str(oauth.get("refreshToken") or "").strip())
+
+
+def _claude_live_auth_probe(binary: str | None, *, env: dict[str, str] | None = None, timeout: float = 20.0) -> bool:
+    if not binary:
+        return False
+    try:
+        result = run_command(
+            [
+                binary,
+                "-p",
+                "--permission-mode",
+                "acceptEdits",
+                "--output-format",
+                "text",
+                "Reply with exactly OK.",
+            ],
+            env=env,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    if result.returncode != 0:
+        return False
+    output = (result.stdout or "").strip()
+    if not output:
+        return False
+    return output.splitlines()[-1].strip() == "OK"
+
+
+def _cached_claude_live_auth_probe(binary: str | None, *, env: dict[str, str] | None = None) -> bool:
+    if not binary:
+        return False
+    source = env or os.environ
+    home = str(source.get("HOME") or Path.home()).strip() or str(Path.home())
+    cache_key = (str(binary), home)
+    now_ts = time.time()
+    cached = _CLAUDE_LIVE_AUTH_PROBE_CACHE.get(cache_key)
+    if cached and cached[0] > now_ts:
+        return cached[1]
+    ok = _claude_live_auth_probe(binary, env=env)
+    ttl = CLAUDE_AUTH_PROBE_SUCCESS_TTL_SECONDS if ok else CLAUDE_AUTH_PROBE_FAILURE_TTL_SECONDS
+    _CLAUDE_LIVE_AUTH_PROBE_CACHE[cache_key] = (now_ts + ttl, ok)
+    return ok
+
+
 def _claude_auth_ready(binary: str | None, *, env: dict[str, str] | None = None) -> bool:
     if not binary:
         return False
     payload = _json_command([binary, "auth", "status"], env=env)
-    return bool(payload.get("loggedIn"))
+    if not payload.get("loggedIn"):
+        return False
+    credentials_path = _claude_credentials_path(env)
+    expiry = _claude_credentials_expiry(credentials_path)
+    if expiry is None or expiry > time.time() + CLAUDE_AUTH_EXPIRY_SKEW_SECONDS:
+        return True
+    if not _claude_has_refresh_token(credentials_path):
+        return False
+    return _cached_claude_live_auth_probe(binary, env=env)
 
 
 def _gh_auth_token(binary: str | None) -> str | None:
@@ -295,6 +381,7 @@ def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
         "Bash(gh issue comment *)",
         "Bash(gh pr create *)",
         "Bash(bash scripts/ai-status.sh *)",
+        "Bash(bash scripts/dashboard-ctl.sh *)",
         "Bash(AI_NAME=* bash scripts/ai-status.sh *)",
         "Bash(AI_NAME=* bash */scripts/ai-status.sh *)",
         "Bash(bash */scripts/ai-status.sh *)",
@@ -308,6 +395,7 @@ def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
         "Bash(AI_NAME=* python3 *)",
         "Bash(AI_NAME=* cd * && python3 *)",
         "Bash(cd * && bash scripts/ai-status.sh *)",
+        "Bash(cd * && bash scripts/dashboard-ctl.sh *)",
         "Bash(cd * && bash */scripts/ai-status.sh *)",
         "Bash(python3 -m unittest discover *)",
         "Bash(cd * && python3 -m unittest discover *)",
@@ -356,6 +444,7 @@ def _verified_claude_policy(config: dict[str, Any]) -> dict[str, Any]:
         "Bash(curl -I http://localhost:*)",
         "Bash(python3 */scripts/dashboard_server.py *)",
         "Bash(nohup python3 */scripts/dashboard_server.py *)",
+        "Bash(setsid -f python3 */scripts/dashboard_server.py *)",
         "Bash(pkill -f *dashboard_server.py*)",
         "Bash(AI_NAME=* python3 scripts/ai_status.py *)",
         "Bash(AI_NAME=* python3 */scripts/ai_status.py *)",

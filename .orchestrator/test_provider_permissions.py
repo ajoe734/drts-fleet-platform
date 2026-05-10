@@ -2,13 +2,23 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import permission_broker
-from provider_permissions import ROOT, _copilot_auth_ready, _copilot_plaintext_token, _verified_claude_hooks, _verified_claude_policy
+from provider_permissions import (
+    ROOT,
+    _claude_auth_ready,
+    _claude_live_auth_probe,
+    _copilot_auth_ready,
+    _copilot_plaintext_token,
+    _verified_claude_hooks,
+    _verified_claude_policy,
+)
 
 
 class ProviderPermissionsTest(unittest.TestCase):
@@ -178,11 +188,8 @@ class ProviderPermissionsTest(unittest.TestCase):
 
     def test_local_dashboard_restart_sequence_is_auto_allowed(self) -> None:
         command = (
-            f'pkill -f "dashboard_server.py" 2>/dev/null; sleep 1\n'
-            f'nohup python3 {ROOT / "scripts" / "dashboard_server.py"} '
-            f'--host 127.0.0.1 --port 4174 --directory {ROOT / "docs-site"} '
-            '>> /tmp/dashboard.log 2>&1 &\n'
-            'sleep 1 && curl -s http://127.0.0.1:4174/consensus/baton-log.md | head -10'
+            f"cd {ROOT} && bash scripts/dashboard-ctl.sh restart\n"
+            "sleep 1 && curl -s http://127.0.0.1:4174/consensus/baton-log.md | head -10"
         )
 
         self.assertEqual(permission_broker.classify_command(command), "allow")
@@ -205,8 +212,60 @@ class ProviderPermissionsTest(unittest.TestCase):
 
         self.assertIn("Bash(lsof *)", policy["allow"])
         self.assertIn("Bash(curl -I http://127.0.0.1:*)", policy["allow"])
+        self.assertIn("Bash(bash scripts/dashboard-ctl.sh *)", policy["allow"])
         self.assertIn("Bash(nohup python3 */scripts/dashboard_server.py *)", policy["allow"])
+        self.assertIn("Bash(setsid -f python3 */scripts/dashboard_server.py *)", policy["allow"])
         self.assertIn("Bash(pkill -f *dashboard_server.py*)", policy["allow"])
+
+    def test_claude_auth_ready_rejects_expired_oauth_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            credentials_path = Path(tmp) / ".claude" / ".credentials.json"
+            credentials_path.parent.mkdir(parents=True, exist_ok=True)
+            credentials_path.write_text(
+                json.dumps({"claudeAiOauth": {"expiresAt": int((time.time() - 300) * 1000)}}),
+                encoding="utf-8",
+            )
+            with patch("provider_permissions._json_command", return_value={"loggedIn": True}):
+                self.assertFalse(_claude_auth_ready("/usr/bin/claude", env={"HOME": tmp}))
+
+    def test_claude_auth_ready_accepts_unexpired_oauth_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            credentials_path = Path(tmp) / ".claude" / ".credentials.json"
+            credentials_path.parent.mkdir(parents=True, exist_ok=True)
+            credentials_path.write_text(
+                json.dumps({"claudeAiOauth": {"expiresAt": int((time.time() + 300) * 1000)}}),
+                encoding="utf-8",
+            )
+            with patch("provider_permissions._json_command", return_value={"loggedIn": True}):
+                self.assertTrue(_claude_auth_ready("/usr/bin/claude", env={"HOME": tmp}))
+
+    def test_claude_auth_ready_refreshes_expired_oauth_credentials_when_refresh_token_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            credentials_path = Path(tmp) / ".claude" / ".credentials.json"
+            credentials_path.parent.mkdir(parents=True, exist_ok=True)
+            credentials_path.write_text(
+                json.dumps(
+                    {
+                        "claudeAiOauth": {
+                            "expiresAt": int((time.time() - 300) * 1000),
+                            "refreshToken": "refresh-demo",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch("provider_permissions._json_command", return_value={"loggedIn": True}),
+                patch("provider_permissions._claude_live_auth_probe", return_value=True),
+            ):
+                self.assertTrue(_claude_auth_ready("/usr/bin/claude", env={"HOME": tmp}))
+
+    def test_claude_live_auth_probe_returns_false_on_timeout(self) -> None:
+        with patch(
+            "provider_permissions.run_command",
+            side_effect=subprocess.TimeoutExpired(cmd=["claude"], timeout=20.0),
+        ):
+            self.assertFalse(_claude_live_auth_probe("/usr/bin/claude"))
 
     def test_copilot_plaintext_token_reads_camel_case_token_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

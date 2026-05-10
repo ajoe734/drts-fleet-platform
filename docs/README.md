@@ -42,6 +42,8 @@ order. They live at repo root, not under `docs/`.
 Supporting repo-local orientation:
 
 - `docs/01-product/scope-phase1.md`
+- `docs/01-product/platform-admin-ops-tenant-console-product-spec-20260508.md`
+- `docs/05-ui/drts-management-ui-review-execution-tasks-20260508.md`
 - `TARGET_ARCHITECTURE.md`
 - `ROADMAP.md`
 - `DEVELOPMENT_WORKBREAKDOWN.md`
@@ -80,6 +82,9 @@ remains open now.
 - `docs/03-runbooks/cross-repo-gap-matrix-20260424.md`
 - `docs/03-runbooks/execution-next-wave-task-board.md`
 - `docs/03-runbooks/execution-mode-candidate-backlog.md`
+- `docs/03-runbooks/platform-admin-ops-console-design-execution-packet-20260508.md`
+- `docs/03-runbooks/tenant-console-and-cross-system-design-execution-packet-20260508.md`
+- `docs/03-runbooks/full-system-ui-completion-execution-packet-20260509.md`
 - `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
 - `docs/03-runbooks/phase1-operational-remediation-execution-packet-20260430.md`
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`

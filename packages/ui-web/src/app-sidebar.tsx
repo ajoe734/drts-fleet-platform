@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { MANAGEMENT_COLORS } from "./management-theme";
 
 export interface SidebarNavItem {
   href: string;
@@ -31,7 +32,7 @@ export function AppSidebar({
       style={{
         width: "240px",
         minHeight: "100vh",
-        background: "#0f172a",
+        background: MANAGEMENT_COLORS.sidebar,
         display: "flex",
         flexDirection: "column",
         flexShrink: 0,
@@ -53,7 +54,7 @@ export function AppSidebar({
               width: "32px",
               height: "32px",
               borderRadius: "8px",
-              background: "#1d4ed8",
+              background: MANAGEMENT_COLORS.sidebarActive,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -95,8 +96,10 @@ export function AppSidebar({
                 textDecoration: "none",
                 fontSize: "13.5px",
                 fontWeight: active ? 600 : 400,
-                color: active ? "#f1f5f9" : "#94a3b8",
-                background: active ? "#1d4ed8" : "transparent",
+                color: active ? "#f1f5f9" : MANAGEMENT_COLORS.textDim,
+                background: active
+                  ? MANAGEMENT_COLORS.sidebarActive
+                  : "transparent",
               }}
             >
               {icon && (

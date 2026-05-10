@@ -8,6 +8,7 @@
     "scripts/ai_status.py",
     "scripts/ai-status.sh",
     "scripts/sync-state.sh",
+    "scripts/dashboard-ctl.sh",
     "scripts/dashboard_server.py",
     "scripts/launch-docs-site.sh",
     "scripts/orchestrator_bundle.py",

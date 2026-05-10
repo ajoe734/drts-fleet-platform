@@ -222,3 +222,133 @@ Dispatch rule:
 If a future wave is materialized from this packet, it should open as an
 explicit `ORX-*` family linked back to the accepted remediation plan rather
 than being merged silently into historical `OPX-*` prose.
+
+## 12. 2026-05-08 Platform Admin And Ops Console Design Wave
+
+The management-console design review has now been converted into a supervisor-
+ready execution packet at:
+
+- `docs/03-runbooks/platform-admin-ops-console-design-execution-packet-20260508.md`
+
+This wave is scoped to repo-local implementation of the supplied `drts.zip`
+designs for:
+
+- `Platform Admin`
+- `Ops Console`
+
+It does not include:
+
+- `Tenant Console` productization
+- `Partner Booking`
+- `Driver App`
+
+Materialized task families for this wave:
+
+1. `MGMT-UI-001`
+   - initial shared desktop primitive extraction
+2. `MGMT-UI-003` through `MGMT-UI-005`
+   - shared shell, table/filter/status, and workflow primitive hardening
+3. `ADM-UI-002` through `ADM-UI-004`
+   - platform admin governance, finance, and control-plane surfaces
+4. `ADM-UI-005` and `ADM-UI-006`
+   - explicit tenant-detail and partner-detail deep-page hardening follow-ons
+5. `OPS-UI-002` through `OPS-UI-005`
+   - ops dashboard, dispatch, casework, reporting, and registry surfaces
+6. `OPS-UI-006` through `OPS-UI-008`
+   - explicit dispatch-board authority split, dispatch-detail, and callcenter
+     workspace follow-ons
+7. `MGMT-UI-002`
+   - route-by-route verification and evidence packet
+
+Dispatch rule:
+
+1. treat `MGMT-UI-001` as the landed primitive baseline
+2. dispatch `MGMT-UI-003` through `MGMT-UI-005` before backlog/todo page-family rewrites
+3. after foundation hardening lands, page-family tasks may run in parallel by disjoint write scope
+4. keep `ADM-UI-001`, `OPS-UI-001`, `ADM-MP-*`, and `OPS-MP-*` as completed prerequisites to extend rather than replace
+5. treat `MGMT-UI-002` as the final evidence gate for this design wave
+
+## 13. 2026-05-08 Tenant Console And Cross-System Design Wave
+
+The selected tenant-console and cross-system guardrail work has now been
+converted into a supervisor-ready execution packet at:
+
+- `docs/03-runbooks/tenant-console-and-cross-system-design-execution-packet-20260508.md`
+
+This wave is intentionally narrower than a full tenant-portal rebuild. It
+materializes the user-selected slices:
+
+- `UI-TN-01` through `UI-TN-06`
+- `UI-TN-12` through `UI-TN-17`
+- `UI-XS-01` through `UI-XS-04`
+
+Materialized task families for this wave:
+
+1. `TEN-UI-001`
+   - tenant-console productization topology decision
+2. `XS-UI-001` through `XS-UI-004`
+   - route/endpoints, backend-gap inventory, command matrix, and query/filter
+     normalization
+3. `TEN-UI-002` through `TEN-UI-008`
+   - tenant shell, home, booking, integration, governance, and real-RBAC
+     productization
+4. `TEN-UI-009`
+   - tenant-console verification packet
+
+Dispatch rule:
+
+1. dispatch `TEN-UI-001` first; do not broad-start tenant UI rewrites while the
+   target app topology is ambiguous
+2. dispatch `XS-UI-001` immediately after the topology decision lands
+3. do not finalize tenant workflow implementations before the endpoint,
+   command-action, and filter/query guardrails are explicit
+4. treat `TEN-UI-009` as the final evidence gate for this selected tenant wave
+
+## 14. 2026-05-09 Full-System UI Completion Wave
+
+The repo now has a new supervisor-ready packet for the gap between "main
+consoles are materially rebuilt" and "the complete system UI is actually
+finished":
+
+- `docs/03-runbooks/full-system-ui-completion-execution-packet-20260509.md`
+
+This wave explicitly reopens the remaining full-system families that were
+previously only deferred or partially verified:
+
+- repo-local partner booking mode completion
+- Passenger App / Passenger Web and passenger receipt landing zones
+- Call Point / Concierge Portal landing zone and materialization
+- full auth / registration / invite / revoke / negative-flow matrix
+- multi-platform forwarded-authority completion across driver / ops / admin /
+  tenant surfaces
+- final full-system verification packet
+
+Materialized task families for this wave:
+
+1. `SYS-UI-001`
+   - full-system surface reopen and landing-zone decision
+2. `SYS-UI-002`
+   - repo-local partner booking mode productization
+3. `SYS-UI-003` and `SYS-UI-004`
+   - passenger shell plus passenger booking/status/receipt/negative flows
+4. `SYS-UI-005`
+   - call point / concierge portal materialization
+5. `SYS-UI-006`
+   - cross-surface auth / registration / invite / revoke / failure matrix
+6. `SYS-UI-007`
+   - multi-platform forwarded-authority completion
+7. `SYS-UI-008`
+   - full-system UI verification packet
+
+Dispatch rule:
+
+1. dispatch `SYS-UI-001` first; do not claim full-system completion while the
+   missing landing zones are still ambiguous
+2. after `SYS-UI-001`, `SYS-UI-002`, `SYS-UI-003`, and `SYS-UI-005` may run in
+   parallel if write scopes stay disjoint
+3. keep `SYS-UI-006` as the cross-surface positive/negative/auth-flow closure
+   gate
+4. keep `SYS-UI-007` under focused review because it cuts across driver / ops /
+   admin / tenant authority presentation
+5. treat `SYS-UI-008` as the only acceptable basis for any future "完整系統 UI
+   已完成" claim

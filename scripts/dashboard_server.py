@@ -170,6 +170,11 @@ class NoCacheRequestHandler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
 
 
+class ReusableThreadingHTTPServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serve local orchestrator dashboard assets without browser caching.")
     parser.add_argument("--host", default="127.0.0.1", help="Host interface to bind. Default: 127.0.0.1")
@@ -200,7 +205,7 @@ def main() -> None:
     }
     NoCacheRequestHandler.repo_root = repo_root
     handler = functools.partial(NoCacheRequestHandler, directory=directory)
-    server = ThreadingHTTPServer((args.host, args.port), handler)
+    server = ReusableThreadingHTTPServer((args.host, args.port), handler)
     print(f"Serving dashboard at http://{args.host}:{args.port}/index.html")
     server.serve_forever()
 

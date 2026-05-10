@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+from copy import deepcopy
 import json
 import os
 import random
@@ -12,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -48,7 +50,11 @@ from common import (
     write_activity_log,
 )
 from github_bus import sync_github_bus
-from provider_permissions import provider_capabilities as build_provider_capabilities, write_provider_capabilities
+from provider_permissions import (
+    _claude_live_auth_probe,
+    provider_capabilities as build_provider_capabilities,
+    write_provider_capabilities,
+)
 from runtime_state import (
     clear_dispatch_pause,
     enqueue_event,
@@ -109,6 +115,10 @@ JSON_WORKER_FAILURE_PATTERN = re.compile(
 
 LOCAL_TZ = ZoneInfo("Asia/Taipei")
 SUPERVISOR_LOG_QUIET = False
+_SUPERVISOR_EXIT_RECORDED = False
+_WORKER_LOG_CACHE: dict[str, dict[str, Any]] = {}
+AUTH_PAUSE_RECOVERY_PROBE_INTERVAL_SECONDS = 60
+WORKER_LOG_TAIL_CHARS = 65536
 ACTIVE_RUNTIME_STATUSES = {
     "running",
     "started",
@@ -167,6 +177,86 @@ def clear_supervisor_pid(config: dict[str, Any]) -> None:
         return
     if current == str(os.getpid()):
         path.unlink(missing_ok=True)
+
+
+def record_supervisor_exit(
+    config: dict[str, Any],
+    *,
+    reason: str,
+    signal_number: int | None = None,
+    signal_name: str | None = None,
+    exception: str | None = None,
+    traceback_text: str | None = None,
+) -> None:
+    global _SUPERVISOR_EXIT_RECORDED
+    if _SUPERVISOR_EXIT_RECORDED:
+        return
+    _SUPERVISOR_EXIT_RECORDED = True
+    stopped_at = utc_now()
+    payload = {
+        "type": "supervisor_exit",
+        "message": f"Supervisor pid={os.getpid()} exited: {reason}.",
+        "pid": os.getpid(),
+        "reason": reason,
+        "stopped_at": stopped_at,
+    }
+    if signal_number is not None:
+        payload["signal_number"] = signal_number
+    if signal_name:
+        payload["signal_name"] = signal_name
+    if exception:
+        payload["exception"] = exception
+    if traceback_text:
+        payload["traceback"] = traceback_text
+
+    try:
+        state = load_runtime_state(config)
+        supervisor_state = state.setdefault("supervisor", {})
+        if supervisor_state.get("pid") in {None, os.getpid()}:
+            supervisor_state.update(
+                {
+                    "pid": os.getpid(),
+                    "lifecycle": "stopped",
+                    "stopped_at": stopped_at,
+                    "exit_reason": reason,
+                }
+            )
+            if signal_number is not None:
+                supervisor_state["exit_signal"] = signal_number
+            if signal_name:
+                supervisor_state["exit_signal_name"] = signal_name
+            if exception:
+                supervisor_state["exit_exception"] = exception
+            save_runtime_state(config, state)
+    except Exception as state_error:  # pragma: no cover - best-effort shutdown evidence
+        payload["state_write_error"] = repr(state_error)
+
+    try:
+        write_activity_log(config, payload)
+    except Exception:  # pragma: no cover - shutdown logging must never mask the exit
+        pass
+    console_log(payload["message"], quiet=SUPERVISOR_LOG_QUIET)
+
+
+def install_supervisor_signal_handlers(config: dict[str, Any]) -> None:
+    def handle_signal(signum: int, _frame: Any) -> None:
+        try:
+            signal_name = signal.Signals(signum).name
+        except ValueError:
+            signal_name = None
+        record_supervisor_exit(
+            config,
+            reason="signal",
+            signal_number=signum,
+            signal_name=signal_name,
+        )
+        clear_supervisor_pid(config)
+        raise SystemExit(128 + signum)
+
+    for signame in ("SIGTERM", "SIGINT", "SIGHUP"):
+        sig = getattr(signal, signame, None)
+        if sig is not None:
+            signal.signal(sig, handle_signal)
 
 
 def iter_matching_supervisor_pids() -> list[int]:
@@ -622,13 +712,61 @@ def ensure_planning_baton_dispatch(
     return True
 
 
-def load_provider_report(config: dict[str, Any]) -> dict[str, Any]:
+def _provider_report_with_auth_pause_overrides(
+    config: dict[str, Any],
+    report: dict[str, Any],
+    state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not state:
+        return report
+    providers = report.get("providers")
+    pauses = provider_pause_registry(state)
+    if not isinstance(providers, dict) or not pauses:
+        return report
+
+    updated_report = report
+    updated_providers = providers
+    pause_note = "Supervisor has an active auth pause from a live worker failure; treat this lane as unauthenticated until cleared."
+    for agent_id, entry in pauses.items():
+        if str(entry.get("kind") or "") != "auth":
+            continue
+        normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
+        agent = (config.get("agents", {}) or {}).get(normalized, {})
+        provider_key = normalize_agent_id(str(agent.get("provider") or normalized).strip()) or normalized
+        provider_info = updated_providers.get(provider_key)
+        if not isinstance(provider_info, dict):
+            continue
+        if updated_report is report:
+            updated_report = deepcopy(report)
+            updated_providers = updated_report.setdefault("providers", {})
+            provider_info = updated_providers.get(provider_key, {})
+        updated_info = dict(provider_info)
+        notes = [str(note).strip() for note in list(updated_info.get("notes") or []) if str(note).strip()]
+        if pause_note not in notes:
+            notes.append(pause_note)
+        updated_info.update(
+            {
+                "auth_ready": False,
+                "local_cli_worker_supported": False,
+                "supports_auto_approve": False,
+                "auth_pause_active": True,
+                "auth_pause_reason": entry.get("reason"),
+                "auth_pause_paused_at": entry.get("paused_at"),
+                "notes": notes,
+            }
+        )
+        updated_providers[provider_key] = updated_info
+    return updated_report
+
+
+def load_provider_report(config: dict[str, Any], state: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
         if config.get("supervisor", {}).get("auto_refresh_provider_capabilities", True):
             report = build_provider_capabilities(config)
             write_provider_capabilities(config, report=report)
-            return report
-        return load_json(config_path(config, "provider_capabilities"), default={}) or {}
+            return _provider_report_with_auth_pause_overrides(config, report, state)
+        report = load_json(config_path(config, "provider_capabilities"), default={}) or {}
+        return _provider_report_with_auth_pause_overrides(config, report, state)
     except KeyError:
         return {}
 
@@ -950,21 +1088,95 @@ def file_iso_mtime(path: Path) -> str | None:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
+def _worker_log_cache_key(worker: dict[str, Any], log_path: Path) -> str:
+    run_id = str(worker.get("run_id") or "").strip()
+    return run_id or str(log_path)
+
+
+def _trim_worker_log_tail(text: str) -> str:
+    if len(text) <= WORKER_LOG_TAIL_CHARS:
+        return text
+    return text[-WORKER_LOG_TAIL_CHARS:]
+
+
+def _read_worker_log_delta(log_path: Path, start: int) -> tuple[str, int]:
+    try:
+        with log_path.open("rb") as handle:
+            handle.seek(max(0, start))
+            payload = handle.read()
+            end = handle.tell()
+    except OSError:
+        return "", start
+    return payload.decode("utf-8", errors="ignore"), end
+
+
+def refresh_worker_log_cache(worker: dict[str, Any]) -> dict[str, Any]:
     log_path_value = worker.get("log_path")
     if not log_path_value:
-        return
+        return {"tail": "", "delta": "", "full_scan": False, "changed": False, "mtime": None}
+
     log_path = Path(log_path_value)
     if not log_path.exists():
-        return
-    mtime = file_iso_mtime(log_path)
+        return {"tail": "", "delta": "", "full_scan": False, "changed": False, "mtime": None}
+
+    try:
+        stat = log_path.stat()
+    except OSError:
+        return {"tail": "", "delta": "", "full_scan": False, "changed": False, "mtime": None}
+
+    mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    cache_key = _worker_log_cache_key(worker, log_path)
+    cache = _WORKER_LOG_CACHE.setdefault(cache_key, {})
+    inode = (int(stat.st_dev), int(stat.st_ino))
+    offset = int(cache.get("offset", 0) or 0)
+    full_scan = (
+        cache.get("path") != str(log_path)
+        or cache.get("inode") != inode
+        or offset <= 0
+        or int(stat.st_size) < offset
+    )
+
+    if not full_scan and cache.get("mtime") == mtime and int(cache.get("size", -1)) == int(stat.st_size):
+        return {
+            "tail": str(cache.get("tail") or ""),
+            "delta": "",
+            "full_scan": False,
+            "changed": False,
+            "mtime": mtime,
+        }
+
+    start = 0 if full_scan else offset
+    delta, end = _read_worker_log_delta(log_path, start)
+    previous_tail = "" if full_scan else str(cache.get("tail") or "")
+    tail = _trim_worker_log_tail(delta if full_scan else previous_tail + delta)
+    cache.update(
+        {
+            "path": str(log_path),
+            "inode": inode,
+            "offset": end,
+            "size": int(stat.st_size),
+            "mtime": mtime,
+            "tail": tail,
+        }
+    )
+    return {
+        "tail": tail,
+        "delta": delta,
+        "full_scan": full_scan,
+        "changed": full_scan or bool(delta),
+        "mtime": mtime,
+    }
+
+
+def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
+    snapshot = refresh_worker_log_cache(worker)
+    mtime = snapshot.get("mtime")
     if mtime and (not worker.get("last_event_at") or mtime > worker.get("last_event_at", "")):
         worker["last_event_at"] = mtime
-    try:
-        content = log_path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+    if not snapshot.get("changed"):
         return
-    for line in content.splitlines():
+    scan_text = str(snapshot.get("tail") if snapshot.get("full_scan") else snapshot.get("delta") or "")
+    for line in scan_text.splitlines():
         line = line.strip()
         if not line.startswith("{"):
             continue
@@ -983,21 +1195,22 @@ def update_from_log(config: dict[str, Any], worker: dict[str, Any]) -> None:
                 worker["pr_url"] = normalize_pr_url(config, payload.get("pr_url"))
             if payload.get("session_url") and not worker.get("session_url"):
                 worker["session_url"] = payload.get("session_url")
+    tail = str(snapshot.get("tail") or "")
     if not worker.get("session_id"):
         for pattern in SESSION_ID_PATTERNS:
-            match = pattern.search(content)
+            match = pattern.search(tail)
             if match:
                 worker["session_id"] = match.group(1)
                 worker.setdefault("resume_token", worker["session_id"])
                 break
     if not worker.get("pr_url"):
-        for url in URL_PATTERN.findall(content):
+        for url in URL_PATTERN.findall(tail):
             if "/pull/" in url:
                 worker["pr_url"] = normalize_pr_url(config, url)
                 break
     worker["pr_url"] = normalize_pr_url(config, worker.get("pr_url"))
     if not worker.get("session_url"):
-        for url in URL_PATTERN.findall(content):
+        for url in URL_PATTERN.findall(tail):
             if "/agent" in url or "/sessions/" in url:
                 worker["session_url"] = url
                 break
@@ -1143,16 +1356,10 @@ def _is_result_level_provider_blocker(candidate: str) -> bool:
 
 
 def detect_worker_failure(worker: dict[str, Any]) -> str | None:
-    log_path_value = worker.get("log_path")
-    if not log_path_value:
+    tail = str(refresh_worker_log_cache(worker).get("tail") or "")
+    if not tail:
         return None
-    log_path = Path(log_path_value)
-    if not log_path.exists():
-        return None
-    try:
-        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    except OSError:
-        return None
+    lines = tail.splitlines()
 
     fallback_detected: str | None = None
     for line in reversed(lines):
@@ -1319,6 +1526,49 @@ def provider_info_for_agent(
     return {}
 
 
+def mark_provider_capability_auth_ready(
+    config: dict[str, Any],
+    agent_id: str,
+    *,
+    reason: str,
+) -> bool:
+    try:
+        path = config_path(config, "provider_capabilities")
+    except KeyError:
+        return False
+    report = load_json(path, default={}) or {}
+    if not isinstance(report, dict):
+        return False
+    providers = report.setdefault("providers", {})
+    if not isinstance(providers, dict):
+        report["providers"] = {}
+        providers = report["providers"]
+    provider_key = provider_report_key_for_agent(config, agent_id)
+    current = providers.get(provider_key)
+    updated = dict(current) if isinstance(current, dict) else {}
+    note = "Auth pause cleared after live validation; supervisor cache updated to avoid stale-lane restarts."
+    notes = [str(item) for item in updated.get("notes", []) if str(item).strip()]
+    if note not in notes:
+        notes.append(note)
+    previous = dict(updated)
+    updated.update(
+        {
+            "auth_ready": True,
+            "local_cli_worker_supported": True,
+            "supports_auto_approve": True,
+            "auth_pause_active": False,
+            "last_auth_clear_reason": reason,
+            "last_auth_clear_at": utc_now(),
+            "notes": notes,
+        }
+    )
+    providers[provider_key] = updated
+    if updated == previous:
+        return False
+    write_json(path, report)
+    return True
+
+
 def provider_pause_registry(state: dict[str, Any]) -> dict[str, Any]:
     registry = state.setdefault("provider_pauses", {})
     quota_registry = state.setdefault("quota_paused_agents", {})
@@ -1368,6 +1618,30 @@ def clear_provider_pause(state: dict[str, Any], agent_id: str) -> None:
     state.setdefault("quota_paused_agents", {}).pop(normalized, None)
 
 
+def _auth_pause_recovery_probe_due(entry: dict[str, Any], now_ts: float) -> bool:
+    last_probe_at = str(entry.get("last_recovery_probe_at") or "").strip()
+    if not last_probe_at:
+        return True
+    try:
+        last_dt = datetime.fromisoformat(last_probe_at.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    return (now_ts - last_dt.timestamp()) >= AUTH_PAUSE_RECOVERY_PROBE_INTERVAL_SECONDS
+
+
+def _provider_auth_round_trip_succeeded(config: dict[str, Any], agent_id: str) -> bool:
+    provider_key = provider_report_key_for_agent(config, agent_id)
+    provider = (config.get("providers", {}) or {}).get(provider_key, {})
+    delivery_mode = str(provider.get("delivery_mode") or "").strip()
+    if delivery_mode != "claude_cli":
+        return False
+    runtime = provider.get("runtime", {})
+    cli = command_exists(runtime.get("cli") or "claude")
+    env = os.environ.copy()
+    env.update(runtime_env_overrides(runtime))
+    return _claude_live_auth_probe(cli, env=env)
+
+
 def is_agent_dispatch_paused(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -1376,7 +1650,7 @@ def is_agent_dispatch_paused(
     provider_report: dict[str, Any] | None = None,
 ) -> bool:
     normalized = normalize_agent_id(agent_id) or str(agent_id).strip()
-    report = provider_report or load_provider_report(config)
+    report = provider_report if provider_report is not None else load_provider_report(config, state=state)
     provider_info = provider_info_for_agent(config, report, normalized)
     if provider_info.get("auth_ready") is False:
         return True
@@ -1404,9 +1678,21 @@ def expire_provider_pauses(
         kind = str(entry.get("kind") or "")
         resume_at = entry.get("resume_at")
         if kind == "auth":
-            # Auth failures from real worker runs are stronger evidence than a
-            # lightweight capability probe. Keep the lane paused until a human
-            # or explicit repair flow clears it.
+            if not _auth_pause_recovery_probe_due(entry, now_ts):
+                continue
+            entry["last_recovery_probe_at"] = utc_now()
+            if _provider_auth_round_trip_succeeded(config, agent_id):
+                clear_provider_pause(state, agent_id)
+                mark_provider_capability_auth_ready(
+                    config,
+                    agent_id,
+                    reason="Live prompt round-trip succeeded during auth-pause recovery.",
+                )
+                expired.append(agent_id)
+                console_log(
+                    f"auth pause recovered: agent={agent_id} live validation succeeded",
+                    quiet=SUPERVISOR_LOG_QUIET,
+                )
             continue
         if resume_at is not None and float(resume_at) <= now_ts:
             clear_provider_pause(state, agent_id)
@@ -1742,10 +2028,17 @@ def display_name_is_legacy_alias(name: str | None) -> bool:
     return "legacy alias" in str(name or "").lower()
 
 
-def first_viable_agent(config: dict[str, Any], preferred: list[str], exclude: set[str], state: dict[str, Any] | None = None) -> str | None:
+def first_viable_agent(
+    config: dict[str, Any],
+    preferred: list[str],
+    exclude: set[str],
+    state: dict[str, Any] | None = None,
+    provider_report: dict[str, Any] | None = None,
+) -> str | None:
     known = known_agent_display_names(config)
     seen: set[str] = set()
-    provider_report = load_provider_report(config) if state is not None else None
+    if provider_report is None and state is not None:
+        provider_report = load_provider_report(config, state=state)
     for candidate in preferred:
         name = str(candidate or "").strip()
         if not name or name in seen or name in exclude or display_name_is_legacy_alias(name):
@@ -1821,6 +2114,7 @@ def proactive_claim_plan_for_idle_agent(
     finalize_statuses: set[str],
     dependency_done_statuses: set[str],
     state: dict[str, Any] | None = None,
+    provider_report: dict[str, Any] | None = None,
 ) -> dict[str, str] | None:
     if not helper_settings.get("enabled", True):
         return None
@@ -1899,6 +2193,7 @@ def proactive_claim_plan_for_idle_agent(
         candidate_order,
         exclude={assigned_agent, counterpart_agent} if claim_role == "reviewer" else {assigned_agent},
         state=state,
+        provider_report=provider_report,
     )
     if best_agent != idle_agent_name:
         return None
@@ -1923,7 +2218,13 @@ def proactive_claim_plan_for_idle_agent(
     reviewer_candidates.extend(normalized_mapping_values(reassignment_settings.get("reviewer_fallbacks", {}), assigned_agent))
     if helper_settings.get("availability_first", True) or helper_settings.get("allow_any_idle_lane", True):
         reviewer_candidates.extend(ordered_idle)
-    new_reviewer = first_viable_agent(config, reviewer_candidates, exclude={idle_agent_name}, state=state)
+    new_reviewer = first_viable_agent(
+        config,
+        reviewer_candidates,
+        exclude={idle_agent_name},
+        state=state,
+        provider_report=provider_report,
+    )
     if not new_reviewer:
         return None
     return {
@@ -1950,6 +2251,7 @@ def proactive_claim_plan_for_task(
     finalize_statuses: set[str],
     dependency_done_statuses: set[str],
     state: dict[str, Any] | None = None,
+    provider_report: dict[str, Any] | None = None,
 ) -> dict[str, str] | None:
     for idle_agent_name in ordered_idle_agent_names(idle_agent_names, agent_loads):
         plan = proactive_claim_plan_for_idle_agent(
@@ -1964,6 +2266,7 @@ def proactive_claim_plan_for_task(
             finalize_statuses=finalize_statuses,
             dependency_done_statuses=dependency_done_statuses,
             state=state,
+            provider_report=provider_report,
         )
         if plan:
             return plan
@@ -2708,7 +3011,11 @@ def resume_claude_worker(
     }
 
 
-def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
+def poll_workers(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
     changed = False
     approval_state = load_approval_state(config)
     task_map = task_index_from_status(config, load_status(config))
@@ -2728,7 +3035,8 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
 
     stall_after = float(config.get("supervisor", {}).get("stall_after_seconds", 300))
     now = datetime.now(timezone.utc)
-    provider_report = load_provider_report(config)
+    if provider_report is None:
+        provider_report = load_provider_report(config, state=state)
     changed = retry_due_workers(config, state, provider_report, now) or changed
     workers = state.setdefault("workers", {})
     for run_id, worker in list(workers.items()):
@@ -3990,6 +4298,7 @@ def choose_helper_claim_agent(
     agent_loads: dict[str, list[int]],
     helper_settings: dict[str, Any],
     state: dict[str, Any] | None = None,
+    provider_report: dict[str, Any] | None = None,
 ) -> bool:
     if not helper_settings.get("enabled", True):
         return False
@@ -4010,6 +4319,7 @@ def choose_helper_claim_agent(
         finalize_statuses=finalize_statuses,
         dependency_done_statuses=dependency_done_statuses,
         state=state,
+        provider_report=provider_report,
     )
     return plan is not None
 
@@ -5084,6 +5394,7 @@ def apply_chair_provider_action(
         )
         return True
     existing = provider_pause_registry(state).get(agent_id)
+    existing_kind = str(existing.get("kind") or "") if isinstance(existing, dict) else ""
     if isinstance(existing, dict):
         resume_at = existing.get("resume_at")
         if resume_at is not None and float(resume_at) > datetime.now(timezone.utc).timestamp():
@@ -5102,10 +5413,13 @@ def apply_chair_provider_action(
                 },
             )
             return False
-        if str(existing.get("kind") or "") == "auth" and not reason:
+        if existing_kind == "auth" and not reason:
             return False
     if agent_id in provider_pause_registry(state) or agent_id in state.setdefault("quota_paused_agents", {}):
         clear_provider_pause(state, agent_id)
+        cache_updated = False
+        if existing_kind == "auth":
+            cache_updated = mark_provider_capability_auth_ready(config, agent_id, reason=reason)
         write_activity_log(
             config,
             {
@@ -5113,6 +5427,7 @@ def apply_chair_provider_action(
                 "action": "clear_pause",
                 "agent": display_name_for(config, agent_id),
                 "provider": agent_id,
+                "provider_capability_cache_updated": cache_updated,
                 "message": reason or f"Chairman cleared provider pause for {display_name_for(config, agent_id)}.",
             },
         )
@@ -5270,7 +5585,10 @@ def refresh_chair_review_state(
             return invalidate(f"Chair review output invalid for {active.get('agent')}: {error}")
         changed = False
         changed = apply_chair_approval_actions(config, payload) or changed
-        changed = apply_chair_provider_actions(config, state, payload) or changed
+        provider_actions_changed = apply_chair_provider_actions(config, state, payload)
+        changed = provider_actions_changed or changed
+        if provider_actions_changed:
+            provider_report = load_provider_report(config, state=state)
         changed = apply_chair_reassignment_actions(config, state, payload, provider_report) or changed
         changed = apply_chair_task_actions(config, state, payload, provider_report) or changed
         ttl_minutes = int(payload.get("approval_ttl_minutes") or chair_review_settings(config).get("default_approval_ttl_minutes", 45))
@@ -5335,7 +5653,8 @@ def dispatch_ready_tasks(
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
     max_tasks_per_agent = max(1, int(settings.get("max_tasks_per_agent", 1)))
     max_dispatches_per_tick = max(1, int(settings.get("max_dispatches_per_tick", 4)))
-    provider_report = provider_report or load_provider_report(config)
+    if provider_report is None:
+        provider_report = load_provider_report(config, state=state)
 
     agent_ids = list(config.get("agents", {}).keys())
     active_agents, active_task_agents = active_worker_indexes(state, active_statuses)
@@ -5422,6 +5741,7 @@ def dispatch_ready_tasks(
                     finalize_statuses=finalize_statuses,
                     dependency_done_statuses=dependency_done_statuses,
                     state=state,
+                    provider_report=provider_report,
                 )
 
             if helper_claim_plan:
@@ -5544,7 +5864,7 @@ def dispatch_underutilization_sidecars(config: dict[str, Any], state: dict[str, 
 
     status = load_status(config)
     task_map = task_index_from_status(config, status)
-    provider_report = load_provider_report(config)
+    provider_report = load_provider_report(config, state=state)
     idle_agents = eligible_idle_agents_for_sidecars(
         config,
         state,
@@ -5755,7 +6075,7 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
     active_task_ids = {tid for tid, _ in active_task_agents}
     pending_task_ids = {tid for tid, _ in pending_task_agents}
     agent_loads = agent_dispatch_loads(config, state, active_statuses)
-    provider_report = load_provider_report(config)
+    provider_report = load_provider_report(config, state=state)
 
     idle_agent_names: list[str] = []
     for agent_id, agent in (config.get("agents", {}) or {}).items():
@@ -5805,6 +6125,7 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
             finalize_statuses=finalize_statuses,
             dependency_done_statuses=dependency_done_statuses,
             state=state,
+            provider_report=provider_report,
         )
         if not plan:
             continue
@@ -5882,6 +6203,14 @@ def run_once(
         supervisor_state["pid"] = current_pid
         supervisor_state["last_heartbeat_at"] = heartbeat_at
         supervisor_state["lifecycle"] = "running"
+        for key in (
+            "stopped_at",
+            "exit_reason",
+            "exit_signal",
+            "exit_signal_name",
+            "exit_exception",
+        ):
+            supervisor_state.pop(key, None)
         if not supervisor_state.get("started_at") or previous_pid != current_pid:
             supervisor_state["started_at"] = heartbeat_at
         update_supervisor_mode_metadata(
@@ -5894,7 +6223,7 @@ def run_once(
     previous_heartbeat = state.get("supervisor", {}).get("last_heartbeat_at")
     stamp_supervisor_state(state)
     changed = False
-    provider_report = load_provider_report(config)
+    provider_report = load_provider_report(config, state=state)
     changed = bool(expire_provider_pauses(config, state, provider_report)) or changed
     pruned = prune_stale_approvals(config)
     if pruned:
@@ -5906,7 +6235,7 @@ def run_once(
         changed = bool(expire_provider_pauses(config, state, provider_report)) or changed
     status = load_status(config)
     desired_focus_mode = desired_focus_mode_from_status(status)
-    changed = poll_workers(config, state) or changed
+    changed = poll_workers(config, state, provider_report) or changed
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
     changed = prune_completed_dispatch_pauses(state, status) or changed
@@ -5921,7 +6250,7 @@ def run_once(
         changed = dispatch_ready_tasks(config, state, provider_report) or changed
         changed = dispatch_underutilization_sidecars(config, state) or changed
     changed = process_queue(config, state, provider_report) or changed
-    changed = poll_workers(config, state) or changed
+    changed = poll_workers(config, state, provider_report) or changed
     status = load_status(config)
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
@@ -5954,34 +6283,48 @@ def main() -> int:
     if manage_pid_file:
         terminate_older_supervisors(config)
         atexit.register(clear_supervisor_pid, config)
+        install_supervisor_signal_handlers(config)
         write_supervisor_pid(config)
     poll_interval = args.poll_interval or float(config.get("supervisor", {}).get("poll_interval_seconds", 2.0))
     console_log(
         f"starting supervisor pid={os.getpid()} poll_interval={poll_interval:.1f}s config={args.config}",
         quiet=args.quiet,
     )
-    run_once(
-        config,
-        watch=not args.no_watch,
-        replay=args.replay,
-        quiet=args.quiet,
-        verbose=args.verbose,
-        once=args.once,
-        manage_pid_file=manage_pid_file,
-    )
-    if args.once:
-        return 0
-    while True:
-        time.sleep(poll_interval)
+    try:
         run_once(
             config,
             watch=not args.no_watch,
-            replay=False,
+            replay=args.replay,
             quiet=args.quiet,
             verbose=args.verbose,
-            once=False,
-            manage_pid_file=True,
+            once=args.once,
+            manage_pid_file=manage_pid_file,
         )
+        if args.once:
+            return 0
+        while True:
+            time.sleep(poll_interval)
+            run_once(
+                config,
+                watch=not args.no_watch,
+                replay=False,
+                quiet=args.quiet,
+                verbose=args.verbose,
+                once=False,
+                manage_pid_file=True,
+            )
+    except SystemExit:
+        raise
+    except BaseException as exc:
+        if manage_pid_file:
+            record_supervisor_exit(
+                config,
+                reason="fatal_exception",
+                exception=repr(exc),
+                traceback_text=traceback.format_exc(),
+            )
+            clear_supervisor_pid(config)
+        raise
 
 
 if __name__ == "__main__":

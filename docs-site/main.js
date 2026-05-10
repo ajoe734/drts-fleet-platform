@@ -48,6 +48,22 @@ function basename(value) {
   return segments[segments.length - 1] || text;
 }
 
+function latestTimestamp(...values) {
+  let bestValue = null;
+  let bestTime = Number.NEGATIVE_INFINITY;
+  values.flat().forEach((value) => {
+    const text = String(value || "").trim();
+    if (!text) return;
+    const stamp = Date.parse(text);
+    if (Number.isNaN(stamp)) return;
+    if (stamp > bestTime) {
+      bestTime = stamp;
+      bestValue = text;
+    }
+  });
+  return bestValue;
+}
+
 // ── Progress bar ──────────────────────────────────────────────────────────────
 
 function renderProgressBar(tasks) {
@@ -936,7 +952,14 @@ async function render({ syncFirst = false } = {}) {
 
     qs("#objective").textContent =
       status.objective || snapshot.objective || "目前沒有可顯示的目標。";
-    qs("#updated-at").textContent = formatTime(status.updated_at);
+    const freshestUpdate = latestTimestamp(
+      status.updated_at,
+      orchState?.last_heartbeat_at,
+      orchState?.supervisor?.last_heartbeat_at,
+    );
+    qs("#updated-at").textContent = formatTime(
+      freshestUpdate || status.updated_at,
+    );
     const projectBadge = qs("#project-badge");
     if (projectBadge) projectBadge.textContent = `${projectName} Runtime`;
     document.title = `${projectName} 協作看板`;

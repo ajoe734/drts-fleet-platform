@@ -22,6 +22,7 @@ PORTABLE_SCRIPT_FILES = [
     "scripts/ai_status.py",
     "scripts/ai-status.sh",
     "scripts/sync-state.sh",
+    "scripts/dashboard-ctl.sh",
     "scripts/dashboard_server.py",
     "scripts/launch-docs-site.sh",
     "scripts/orchestrator_bundle.py",
@@ -281,11 +282,15 @@ Run locally from the repository root only:
 bash scripts/setup-llm-cli.sh
 bash scripts/run-supervisor.sh --verbose
 bash scripts/run-dashboard.sh
+bash scripts/dashboard-ctl.sh start
 bash scripts/run-dashboard-tunnel.sh
+bash scripts/dashboard-ctl.sh start-tunnel
 ```
 
 The dashboard will be served at `http://127.0.0.1:4174/index.html` unless you override `HOST` or `PORT`.
 A temporary public URL can be created with `bash scripts/run-dashboard-tunnel.sh`.
+A detached local dashboard service can be started with `bash scripts/dashboard-ctl.sh start`.
+A detached public quick tunnel can be started with `bash scripts/dashboard-ctl.sh start-tunnel`.
 
 ## 5. Work Order For Every LLM
 
@@ -360,11 +365,13 @@ bash scripts/run-supervisor.sh --verbose
 Dashboard:
 ```bash
 bash scripts/run-dashboard.sh
+bash scripts/dashboard-ctl.sh start
 ```
 
 Temporary public dashboard URL:
 ```bash
 bash scripts/run-dashboard-tunnel.sh
+bash scripts/dashboard-ctl.sh start-tunnel
 ```
 
 ## 3. Seed the first task
@@ -471,6 +478,8 @@ Run the local collaboration control plane from the repo root:
 bash scripts/run-supervisor.sh --verbose
 bash scripts/run-dashboard.sh
 bash scripts/run-dashboard-tunnel.sh
+bash scripts/dashboard-ctl.sh start
+bash scripts/dashboard-ctl.sh start-tunnel
 ```
 
 ## 7. First Smoke Test
@@ -644,6 +653,7 @@ def main() -> int:
                 "bash scripts/setup-llm-cli.sh",
                 "bash scripts/run-supervisor.sh --verbose",
                 "bash scripts/run-dashboard.sh",
+                "bash scripts/dashboard-ctl.sh start",
             ],
         }, indent=2, ensure_ascii=False))
         return 0

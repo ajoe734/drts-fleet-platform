@@ -90,8 +90,11 @@ SAFE_BASH_PATTERNS = [
     re.compile(r"^kill \d+"),
     re.compile(r"^pkill -f supervisor\.py"),
     re.compile(r"^pkill -f [\"']dashboard_server\.py[\"']"),
+    re.compile(r"^bash (?:[A-Za-z0-9_./-]+/)?scripts/dashboard-ctl\.sh(?:\s|$)"),
+    re.compile(r"^cd .+ && bash scripts/dashboard-ctl\.sh(?:\s|$)"),
     re.compile(r"^python3 .+/scripts/dashboard_server\.py(\s|$)"),
     re.compile(r"^nohup python3 .+/scripts/dashboard_server\.py"),
+    re.compile(r"^setsid -f python3 .+/scripts/dashboard_server\.py"),
     re.compile(r"^curl(?:\s+-[A-Za-z0-9-]+)*\s+http://127\.0\.0\.1:\d+"),
     re.compile(r"^curl(?:\s+-[A-Za-z0-9-]+)*\s+http://localhost:\d+"),
     # file operations

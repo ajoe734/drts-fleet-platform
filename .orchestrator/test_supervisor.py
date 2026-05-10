@@ -11,7 +11,45 @@ from unittest import mock
 import supervisor
 
 
+class SupervisorLifecycleTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        supervisor._SUPERVISOR_EXIT_RECORDED = False
+
+    def test_record_supervisor_exit_updates_state_and_activity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            state_file = root / "state.json"
+            activity_log = root / "activity-log.jsonl"
+            state_file.write_text(
+                json.dumps({"supervisor": {"pid": os.getpid(), "lifecycle": "running"}}),
+                encoding="utf-8",
+            )
+            config = {
+                "paths": {
+                    "state_file": str(state_file),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                    "activity_log": str(activity_log),
+                }
+            }
+            supervisor._SUPERVISOR_EXIT_RECORDED = False
+
+            supervisor.record_supervisor_exit(
+                config,
+                reason="fatal_exception",
+                exception="RuntimeError('boom')",
+            )
+
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(state["supervisor"]["lifecycle"], "stopped")
+            self.assertEqual(state["supervisor"]["exit_reason"], "fatal_exception")
+            self.assertEqual(state["supervisor"]["exit_exception"], "RuntimeError('boom')")
+            self.assertIn('"type": "supervisor_exit"', activity_log.read_text(encoding="utf-8"))
+
+
 class DetectWorkerFailureTests(unittest.TestCase):
+    def setUp(self) -> None:
+        supervisor._WORKER_LOG_CACHE.clear()
+
     def _worker_for_log(self, content: str) -> dict[str, str]:
         handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
         handle.write(content)
@@ -149,6 +187,52 @@ class DetectWorkerFailureTests(unittest.TestCase):
             supervisor.detect_worker_failure(worker),
             'Error: Model "grok-code-fast-1" from --model flag is not available.',
         )
+
+    def test_detects_appended_failure_after_initial_full_scan(self) -> None:
+        handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
+        handle.write("initial log line\n")
+        handle.flush()
+        handle.close()
+        self.addCleanup(Path(handle.name).unlink, missing_ok=True)
+        worker = {"run_id": "run-append-failure", "log_path": handle.name}
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+        with Path(handle.name).open("a", encoding="utf-8") as output:
+            output.write("Failed to authenticate. API Error: 401 authentication_error: Invalid authentication credentials\n")
+
+        self.assertIn("Failed to authenticate", supervisor.detect_worker_failure(worker) or "")
+
+    def test_update_from_log_reads_appended_metadata_without_rescanning_full_log(self) -> None:
+        handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
+        handle.write("bootstrap\n")
+        handle.flush()
+        handle.close()
+        self.addCleanup(Path(handle.name).unlink, missing_ok=True)
+        worker = {"run_id": "run-append-metadata", "log_path": handle.name}
+        config = {"github_bus": {"repo": "example/repo"}}
+
+        supervisor.update_from_log(config, worker)
+
+        with Path(handle.name).open("a", encoding="utf-8") as output:
+            output.write(
+                json.dumps(
+                    {
+                        "session_id": "sess-123",
+                        "type": "result",
+                        "pr_url": "https://github.com/example/repo/pull/42",
+                        "session_url": "https://chatgpt.com/sessions/abc",
+                    }
+                )
+            )
+            output.write("\n")
+
+        supervisor.update_from_log(config, worker)
+
+        self.assertEqual(worker["session_id"], "sess-123")
+        self.assertEqual(worker["resume_token"], "sess-123")
+        self.assertEqual(worker["pr_url"], "https://github.com/example/repo/pull/42")
+        self.assertEqual(worker["session_url"], "https://chatgpt.com/sessions/abc")
 
     def test_detects_real_gemini_quota_failure(self) -> None:
         worker = self._worker_for_log(
@@ -348,6 +432,7 @@ class DetectWorkerFailureTests(unittest.TestCase):
 
 class ProcessQueueDispatchGuardTests(unittest.TestCase):
     def setUp(self) -> None:
+        supervisor._WORKER_LOG_CACHE.clear()
         self.config = {
             "schema": {
                 "tasks_path": "tasks",
@@ -554,6 +639,19 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         event = queue_delivery_event.call_args.args[1]
         self.assertEqual(event["reason"], "owned_ready_dispatch")
         self.assertEqual(event["task_id"], "BUS-VAL-003")
+
+    def test_dispatch_ready_tasks_reuses_supplied_provider_report(self) -> None:
+        state = {"queue": {"events": {}}, "workers": {}, "seen_event_keys": {}}
+        status = {"tasks": []}
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "load_provider_report", side_effect=AssertionError("unexpected provider reload")),
+        ):
+            changed = supervisor.dispatch_ready_tasks(self.config, state, provider_report={})
+
+        self.assertFalse(changed)
 
     def test_prune_completed_dispatch_pauses_removes_done_task_entries(self) -> None:
         state = {
@@ -1461,6 +1559,18 @@ class UnderutilizationSidecarDispatchTests(unittest.TestCase):
         status_after = {"tasks": [parent_task, created_sidecar]}
 
         with (
+            mock.patch.object(
+                supervisor,
+                "load_provider_report",
+                return_value={
+                    "providers": {
+                        "codex": {"auth_ready": True},
+                        "claude": {"auth_ready": True},
+                        "gemini": {"auth_ready": False},
+                        "qwen": {"auth_ready": True},
+                    }
+                },
+            ),
             mock.patch.object(supervisor, "load_status", side_effect=[status_before, status_after]),
             mock.patch.object(supervisor, "load_sidecar_catalog", return_value=[]),
             mock.patch.object(supervisor, "create_sidecar_task", return_value=(True, "")) as create_sidecar_task,
@@ -1693,6 +1803,36 @@ class UnderutilizationMainTaskDispatchTests(unittest.TestCase):
 
 
 class PollWorkersRecoveryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        supervisor._WORKER_LOG_CACHE.clear()
+
+    def test_poll_workers_reuses_supplied_provider_report(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {
+                "active_worker_statuses": ["running", "started", "waiting_approval", "manual_pending", "retry_backoff", "suspended_approval", "stalled", "fallback"],
+            },
+            "providers": {},
+            "agents": {},
+        }
+        state = {"queue": {"events": {}}, "workers": {}}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": []}),
+            mock.patch.object(supervisor, "load_provider_report", side_effect=AssertionError("unexpected provider reload")),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+        ):
+            changed = supervisor.poll_workers(config, state, provider_report={})
+
+        self.assertFalse(changed)
+
     def test_lower_priority_worker_is_superseded_when_finalize_backlog_exists(self) -> None:
         config = {
             "schema": {
@@ -3300,6 +3440,63 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertIn("copilot", state["provider_pauses"])
         self.assertIn("copilot", state["quota_paused_agents"])
 
+    def test_chair_auth_clear_updates_provider_capability_cache(self) -> None:
+        state = {
+            "provider_pauses": {
+                "claude": {
+                    "kind": "auth",
+                    "reason": "Invalid authentication credentials",
+                    "paused_at": "2026-05-08T01:03:00Z",
+                    "resume_at": None,
+                }
+            },
+            "quota_paused_agents": {},
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            provider_capabilities = root / "provider-capabilities.json"
+            provider_capabilities.write_text(
+                json.dumps(
+                    {
+                        "providers": {
+                            "claude": {
+                                "auth_ready": False,
+                                "local_cli_worker_supported": False,
+                                "supports_auto_approve": False,
+                                "notes": [],
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = {
+                "supervisor": {"auto_refresh_provider_capabilities": False},
+                "agents": {"claude": {"display_name": "Claude", "provider": "claude"}},
+                "paths": {
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "provider_capabilities": str(provider_capabilities),
+                },
+            }
+
+            changed = supervisor.apply_chair_provider_action(
+                config,
+                state,
+                {
+                    "agent": "Claude",
+                    "action": "clear_pause",
+                    "reason": "Live prompt round-trip succeeded after re-auth.",
+                },
+            )
+            report = supervisor.load_provider_report(config, state=state)
+
+        self.assertTrue(changed)
+        self.assertNotIn("claude", state["provider_pauses"])
+        self.assertTrue(report["providers"]["claude"]["auth_ready"])
+        self.assertTrue(report["providers"]["claude"]["local_cli_worker_supported"])
+        self.assertTrue(report["providers"]["claude"]["supports_auto_approve"])
+
     def test_dispatcher_skips_task_waiting_on_chair_reassignment(self) -> None:
         config = {
             "schema": {
@@ -3867,7 +4064,7 @@ class ChairmanFlowTests(unittest.TestCase):
                                 "agent": "Gemini2",
                                 "action": "pause",
                                 "kind": "auth",
-                                "reason": "Stalled provider-health worker; no new dispatches until verified.",
+                                "reason": "status: 401 Invalid authentication credentials from live provider-health dispatch.",
                                 "reset_seconds": None,
                             }
                         ],
@@ -4154,6 +4351,55 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertFalse(supervisor.is_agent_dispatch_paused(config, {}, "claude2", provider_report=provider_report))
 
+    def test_load_provider_report_forces_auth_paused_lane_unavailable(self) -> None:
+        config = {
+            "agents": {
+                "claude": {"display_name": "Claude", "provider": "claude"},
+                "claude2": {"display_name": "Claude2", "provider": "claude2"},
+            }
+        }
+        state = {
+            "provider_pauses": {
+                "claude2": {
+                    "kind": "auth",
+                    "reason": "Invalid authentication credentials",
+                    "paused_at": "2026-05-08T01:03:00Z",
+                    "resume_at": None,
+                }
+            },
+            "quota_paused_agents": {},
+        }
+        base_report = {
+            "providers": {
+                "claude": {
+                    "auth_ready": True,
+                    "local_cli_worker_supported": True,
+                    "supports_auto_approve": True,
+                    "notes": [],
+                },
+                "claude2": {
+                    "auth_ready": True,
+                    "local_cli_worker_supported": True,
+                    "supports_auto_approve": True,
+                    "notes": [],
+                },
+            }
+        }
+
+        with (
+            mock.patch.object(supervisor, "build_provider_capabilities", return_value=base_report),
+            mock.patch.object(supervisor, "write_provider_capabilities"),
+        ):
+            report = supervisor.load_provider_report(config, state=state)
+
+        self.assertTrue(base_report["providers"]["claude2"]["auth_ready"])
+        self.assertTrue(report["providers"]["claude"]["auth_ready"])
+        self.assertFalse(report["providers"]["claude2"]["auth_ready"])
+        self.assertFalse(report["providers"]["claude2"]["local_cli_worker_supported"])
+        self.assertFalse(report["providers"]["claude2"]["supports_auto_approve"])
+        self.assertTrue(report["providers"]["claude2"]["auth_pause_active"])
+        self.assertEqual(report["providers"]["claude2"]["auth_pause_reason"], "Invalid authentication credentials")
+
     def test_auth_pause_does_not_expire_from_surface_auth_ready_probe(self) -> None:
         config = {"agents": {"claude": {"display_name": "Claude", "provider": "claude"}}}
         state = {
@@ -4169,11 +4415,39 @@ class ChairmanFlowTests(unittest.TestCase):
         }
         provider_report = {"providers": {"claude": {"auth_ready": True}}}
 
-        expired = supervisor.expire_provider_pauses(config, state, provider_report)
+        with mock.patch.object(supervisor, "_provider_auth_round_trip_succeeded", return_value=False):
+            expired = supervisor.expire_provider_pauses(config, state, provider_report)
 
         self.assertEqual(expired, [])
         self.assertIn("claude", state["provider_pauses"])
         self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "claude", provider_report=provider_report))
+
+    def test_auth_pause_clears_after_live_round_trip_recovery(self) -> None:
+        config = {
+            "agents": {"claude": {"display_name": "Claude", "provider": "claude"}},
+            "providers": {"claude": {"delivery_mode": "claude_cli", "runtime": {"cli": "claude"}}},
+        }
+        state = {
+            "provider_pauses": {
+                "claude": {
+                    "kind": "auth",
+                    "reason": "Invalid authentication credentials",
+                    "paused_at": "2026-04-30T12:51:53Z",
+                    "resume_at": None,
+                }
+            },
+            "quota_paused_agents": {},
+        }
+        provider_report = {"providers": {"claude": {"auth_ready": False}}}
+
+        with (
+            mock.patch.object(supervisor, "_provider_auth_round_trip_succeeded", return_value=True),
+            mock.patch.object(supervisor, "mark_provider_capability_auth_ready", return_value=True),
+        ):
+            expired = supervisor.expire_provider_pauses(config, state, provider_report)
+
+        self.assertEqual(expired, ["claude"])
+        self.assertNotIn("claude", state["provider_pauses"])
 
 
 if __name__ == "__main__":

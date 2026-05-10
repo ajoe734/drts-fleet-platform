@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
 from pathlib import Path
 
 from adapters.base import DeliveryCapability, DeliveryRequest, DeliveryResult
@@ -14,9 +13,9 @@ from common import (
     shell_quote,
     spawn_background_process,
     command_exists,
-    run_command,
     runtime_env_overrides,
 )
+from provider_permissions import _claude_auth_ready
 
 
 def _claude_provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict]:
@@ -34,19 +33,6 @@ def _claude_runtime_env(runtime: dict, *, ensure_dirs: bool = False) -> dict[str
     env = os.environ.copy()
     env.update(overrides)
     return env
-
-
-def _claude_auth_ready(cli: str | None, env: dict[str, str] | None = None) -> bool:
-    if not cli:
-        return False
-    status = run_command([cli, "auth", "status"], env=env)
-    if status.returncode != 0 or not status.stdout:
-        return False
-    try:
-        payload = json.loads(status.stdout)
-    except json.JSONDecodeError:
-        return False
-    return bool(payload.get("loggedIn"))
 
 
 class ClaudeCLIAdapter(ClaudeCodeAdapter):

@@ -8,6 +8,7 @@ PORT="${PORT:-4174}"
 LOCAL_HOST="${LOCAL_HOST:-127.0.0.1}"
 BIN_DIR="${CLOUDFLARED_BIN_DIR:-$ROOT_DIR/.orchestrator/bin}"
 LOG_DIR="${DASHBOARD_TUNNEL_LOG_DIR:-$ROOT_DIR/.orchestrator/logs}"
+TUNNEL_PROTOCOL="${TUNNEL_PROTOCOL:-http2}"
 DASHBOARD_LOG="$LOG_DIR/dashboard-${PORT}.log"
 TUNNEL_LOG="$LOG_DIR/dashboard-tunnel.log"
 
@@ -107,7 +108,7 @@ ensure_dashboard() {
 wait_for_tunnel_url() {
   for _ in $(seq 1 30); do
     local url
-    url="$(grep -Eo 'https://[-a-zA-Z0-9.]+\.trycloudflare\.com' "$TUNNEL_LOG" | head -n 1 || true)"
+    url="$(grep -Eo 'https://[-a-zA-Z0-9.]+\.trycloudflare\.com' "$TUNNEL_LOG" | tail -n 1 || true)"
 
     if [[ -n "$url" ]]; then
       echo "$url"
@@ -132,7 +133,7 @@ ensure_dashboard
 
 : >"$TUNNEL_LOG"
 echo "Starting Cloudflare quick tunnel for http://${LOCAL_HOST}:${PORT}"
-"$CLOUDFLARED_BIN" tunnel --no-autoupdate --url "http://${LOCAL_HOST}:${PORT}" >"$TUNNEL_LOG" 2>&1 &
+"$CLOUDFLARED_BIN" tunnel --no-autoupdate --protocol "$TUNNEL_PROTOCOL" --url "http://${LOCAL_HOST}:${PORT}" >"$TUNNEL_LOG" 2>&1 &
 TUNNEL_PID=$!
 
 PUBLIC_URL="$(wait_for_tunnel_url || true)"

@@ -289,6 +289,30 @@ importers:
         specifier: ^4.2.4
         version: 4.2.4
 
+  apps/tenant-console-web:
+    dependencies:
+      "@drts/api-client":
+        specifier: workspace:*
+        version: link:../../packages/api-client
+      "@drts/contracts":
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      "@drts/shared-types":
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+      "@drts/ui-web":
+        specifier: workspace:*
+        version: link:../../packages/ui-web
+      next:
+        specifier: ^16.2.3
+        version: 16.2.3(@playwright/test@1.59.1)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      react:
+        specifier: ^19.2.5
+        version: 19.2.5
+      react-dom:
+        specifier: ^19.2.5
+        version: 19.2.5(react@19.2.5)
+
   apps/tenant-portal-web:
     dependencies:
       "@drts/api-client":

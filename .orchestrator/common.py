@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import re
 import shutil
@@ -21,6 +22,7 @@ LOCAL_CONFIG_PATH = ORCHESTRATOR_DIR / "config.local.json"
 TASK_BRIEFS_DIR = ORCHESTRATOR_DIR / "task-briefs"
 EVIDENCE_DIR = ORCHESTRATOR_DIR / "evidence"
 AI_GUIDE_PATH = ROOT / "AI_COLLABORATION_GUIDE.md"
+_AI_STATUS_MODULE: Any | None = None
 
 
 def utc_now() -> str:
@@ -281,6 +283,53 @@ def render_template(path: Path, variables: dict[str, Any]) -> str:
     return text
 
 
+def _load_ai_status_module() -> Any:
+    global _AI_STATUS_MODULE
+    if _AI_STATUS_MODULE is not None:
+        return _AI_STATUS_MODULE
+    script_path = ROOT / "scripts" / "ai_status.py"
+    spec = importlib.util.spec_from_file_location("orchestrator_ai_status", script_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load ai_status module from {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _AI_STATUS_MODULE = module
+    return module
+
+
+def refresh_status_views(config: dict[str, Any]) -> None:
+    module = _load_ai_status_module()
+    try:
+        status_path = config_path(config, "status_file")
+        log_path = config_path(config, "activity_log")
+    except KeyError:
+        return
+    repo_root = status_path.parent
+    overrides = {
+        "ROOT": repo_root,
+        "STATUS_FILE": status_path,
+        "LOG_FILE": log_path,
+        "CURRENT_WORK_FILE": repo_root / "current-work.md",
+        "DOCS_SITE_DIR": repo_root / "docs-site",
+    }
+    originals = {name: getattr(module, name) for name in overrides}
+    try:
+        for name, value in overrides.items():
+            setattr(module, name, value)
+        state = module.load_state()
+        if not isinstance(state, dict) or "objective" not in state:
+            module.sync_docs_site()
+            return
+        logs = module.load_logs()
+        render_state = deepcopy(state)
+        render_state["updated_at"] = utc_now()
+        module.write_current_work(render_state, logs)
+        module.sync_docs_site()
+    finally:
+        for name, value in originals.items():
+            setattr(module, name, value)
+
+
 def write_activity_log(config: dict[str, Any], entry: dict[str, Any]) -> None:
     payload = {
         "ts": utc_now(),
@@ -288,6 +337,12 @@ def write_activity_log(config: dict[str, Any], entry: dict[str, Any]) -> None:
         **entry,
     }
     append_jsonl(config_path(config, "activity_log"), payload)
+    if str(entry.get("type") or "").strip().lower() == "permission_hook":
+        return
+    try:
+        refresh_status_views(config)
+    except Exception as exc:
+        print(f"Warning: failed to refresh status views after activity log write: {exc}", file=sys.stderr)
 
 
 def runtime_log_path(prefix: str, target: str) -> Path:

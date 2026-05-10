@@ -82,13 +82,20 @@ The repository also contains a portable orchestrator bundle for shared multi-LLM
 - setup: `pnpm orchestrator:setup`
 - supervisor: `pnpm orchestrator:supervisor`
 - dashboard: `pnpm orchestrator:dashboard`
+- dashboard service start: `pnpm orchestrator:dashboard:start`
+- dashboard service stop: `pnpm orchestrator:dashboard:stop`
+- dashboard service status: `pnpm orchestrator:dashboard:status`
 - dashboard tunnel: `pnpm orchestrator:dashboard:tunnel`
+- dashboard tunnel service start: `pnpm orchestrator:dashboard:tunnel:start`
+- dashboard tunnel service stop: `pnpm orchestrator:dashboard:tunnel:stop`
+- dashboard tunnel service status: `pnpm orchestrator:dashboard:tunnel:status`
 - public dashboard: `pnpm orchestrator:dashboard:public`
 - tests: `pnpm orchestrator:test`
 
 The dashboard serves from `http://127.0.0.1:4174/index.html` by default.
 `pnpm orchestrator:dashboard:tunnel` prints a temporary public `trycloudflare.com` URL for external viewing.
-For external access on a VM, use `pnpm orchestrator:dashboard:public` and expose TCP `4174`.
+`pnpm orchestrator:dashboard:tunnel:start` starts a detached local dashboard service plus a detached quick tunnel and writes the current URL to `.orchestrator/dashboard-tunnel-url.txt`.
+For direct port exposure on a VM, use `pnpm orchestrator:dashboard:public` and expose TCP `4174`.
 
 Important:
 

@@ -36,13 +36,19 @@ Next steps:
 2. Start dashboard
    bash scripts/run-dashboard.sh
 
-3. If you need a temporary public URL for the dashboard
+3. If you want the dashboard to stay up in the background
+   bash scripts/dashboard-ctl.sh start
+
+4. If you need a temporary public URL for the dashboard
    bash scripts/run-dashboard-tunnel.sh
 
-4. In each LLM CLI, use this first prompt:
+5. If you need a detached public dashboard tunnel
+   bash scripts/dashboard-ctl.sh start-tunnel
+
+6. In each LLM CLI, use this first prompt:
    $FIRST_PROMPT
 
-5. As the repo gains project-specific architecture or backlog docs, update
+7. As the repo gains project-specific architecture or backlog docs, update
    AI_COLLABORATION_GUIDE.md and ai-status.json canonical layers so the prompt
    stays aligned with the repo's real source of truth.
 EOF
