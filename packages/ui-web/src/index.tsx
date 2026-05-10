@@ -58,6 +58,18 @@ export type {
 export { AppShellCard } from "./app-shell-card";
 export { AppSidebar } from "./app-sidebar";
 export type { AppSidebarProps, SidebarNavItem } from "./app-sidebar";
+export { ManagementSidebar } from "./management-sidebar";
+export type {
+  ManagementSidebarItem,
+  ManagementSidebarProps,
+  ManagementSidebarSection,
+} from "./management-sidebar";
+export { ManagementTopbar } from "./management-topbar";
+export type {
+  ManagementBreadcrumbItem,
+  ManagementTopbarProps,
+  ManagementTopbarUser,
+} from "./management-topbar";
 export { ManagementShell, ManagementPageStack } from "./management-shell";
 export type {
   ManagementShellProps,

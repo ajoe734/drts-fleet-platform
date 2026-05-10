@@ -1,3 +1,11 @@
+import {
+  DISPLAY_STRINGS,
+  STATUS_DISPLAY_STRINGS,
+  STATUS_TONE_BY_VALUE,
+  type ConsoleAccentName,
+  type ForwardedStatus,
+  type LocalizedDisplayString,
+} from "@drts/ui-tokens";
 import type { ReactNode } from "react";
 import {
   MANAGEMENT_SURFACE_TONES,
@@ -21,6 +29,10 @@ const STEP_ACCENT: Record<StepState, string> = {
 
 const RAIL_IDLE = "#dbe2ea";
 
+export type StatusChipLocale = keyof LocalizedDisplayString;
+
+const DEFAULT_STATUS_CHIP_LOCALE: StatusChipLocale = "zhTW";
+
 function toneForStepState(state: StepState): ManagementTone {
   switch (state) {
     case "complete":
@@ -37,6 +49,34 @@ function toneForStepState(state: StepState): ManagementTone {
 
 function stackGap(density: ManagementDensity, compact: string, roomy: string) {
   return density === "compact" ? compact : roomy;
+}
+
+function localizedLabel(
+  value: LocalizedDisplayString,
+  locale: StatusChipLocale = DEFAULT_STATUS_CHIP_LOCALE,
+) {
+  return value[locale];
+}
+
+function authorityDisplayLabel(
+  authority: "owned" | "forwarded",
+  locale?: StatusChipLocale,
+) {
+  return localizedLabel(DISPLAY_STRINGS.authority[authority], locale);
+}
+
+function surfaceDisplayLabel(
+  surface: ConsoleAccentName,
+  locale?: StatusChipLocale,
+) {
+  return localizedLabel(DISPLAY_STRINGS.surfaces[surface], locale);
+}
+
+function forwardedStatusLabel(
+  status: ForwardedStatus,
+  locale?: StatusChipLocale,
+) {
+  return localizedLabel(STATUS_DISPLAY_STRINGS[status], locale);
 }
 
 function renderEmptyState(
@@ -836,17 +876,58 @@ export function CalloutBanner({
   return <WorkflowCallout {...forwardedProps}>{children}</WorkflowCallout>;
 }
 
-export interface StatusChipProps {
+type ManualStatusChipProps = {
   label: ReactNode;
   tone?: ManagementTone;
   authorityLabel?: string;
-}
+  authority?: never;
+  status?: never;
+  locale?: never;
+};
+
+type OwnedStatusChipProps = {
+  authority: "owned";
+  label?: ReactNode;
+  authorityLabel?: string;
+  locale?: StatusChipLocale;
+  tone?: never;
+  status?: never;
+};
+
+type ForwardedStatusChipProps = {
+  authority: "forwarded";
+  status: ForwardedStatus;
+  label?: ReactNode;
+  authorityLabel?: string;
+  locale?: StatusChipLocale;
+  tone?: never;
+};
+
+export type StatusChipProps =
+  | ManualStatusChipProps
+  | OwnedStatusChipProps
+  | ForwardedStatusChipProps;
 
 export function StatusChip({
-  label,
-  tone = "neutral",
+  label: rawLabel,
+  tone: rawTone = "neutral",
   authorityLabel,
+  authority,
+  status,
+  locale,
 }: StatusChipProps) {
+  const label =
+    authority === "owned"
+      ? (rawLabel ?? authorityDisplayLabel("owned", locale))
+      : authority === "forwarded"
+        ? (rawLabel ?? forwardedStatusLabel(status, locale))
+        : rawLabel;
+  const tone =
+    authority === "owned"
+      ? "owned"
+      : authority === "forwarded"
+        ? STATUS_TONE_BY_VALUE[status]
+        : rawTone;
   const toneStyles = TONE_STYLES[tone];
 
   return (
@@ -886,16 +967,142 @@ export function StatusChip({
   );
 }
 
-export function AuthorityBadge({
-  label,
-  tone = "warning",
-  category = "authority",
-}: {
-  label: ReactNode;
-  tone?: ManagementTone;
+type AuthorityBadgeSemanticProps =
+  | {
+      authority: "owned";
+      label?: ReactNode;
+      locale?: StatusChipLocale;
+      category?: string;
+      status?: never;
+    }
+  | {
+      authority: "forwarded";
+      label?: ReactNode;
+      locale?: StatusChipLocale;
+      category?: string;
+      status?: ForwardedStatus;
+    };
+
+type AuthorityBadgeLegacyProps = {
+  authority?: never;
+  label?: ReactNode;
   category?: string;
-}) {
-  return <StatusChip label={label} tone={tone} authorityLabel={category} />;
+  tone?: ManagementTone;
+  locale?: never;
+  status?: never;
+};
+
+export type AuthorityBadgeProps =
+  | AuthorityBadgeSemanticProps
+  | AuthorityBadgeLegacyProps;
+
+export function AuthorityBadge(props: AuthorityBadgeProps) {
+  if (!("authority" in props)) {
+    return (
+      <StatusChip
+        label={props.label}
+        tone={props.tone ?? "neutral"}
+        {...(props.category !== undefined
+          ? { authorityLabel: props.category }
+          : {})}
+      />
+    );
+  }
+
+  const { authority, label, locale, category = "authority", status } = props;
+
+  if (authority === "forwarded" && status) {
+    return (
+      <StatusChip
+        authority="forwarded"
+        status={status}
+        {...(label !== undefined ? { label } : {})}
+        {...(locale !== undefined ? { locale } : {})}
+        authorityLabel={category}
+      />
+    );
+  }
+
+  return (
+    <StatusChip
+      label={label ?? authorityDisplayLabel(authority, locale)}
+      tone={authority}
+      authorityLabel={category}
+    />
+  );
+}
+
+export interface PlatformBadgeProps {
+  surface: ConsoleAccentName;
+  label?: ReactNode;
+  locale?: StatusChipLocale;
+}
+
+export function PlatformBadge({ surface, label, locale }: PlatformBadgeProps) {
+  return (
+    <StatusChip
+      label={label ?? surfaceDisplayLabel(surface, locale)}
+      tone={surface}
+    />
+  );
+}
+
+type AuthorityBannerBaseProps = Omit<
+  WorkflowCalloutProps,
+  "tone" | "eyebrow" | "meta"
+> & {
+  eyebrow?: string;
+  meta?: ReactNode;
+  locale?: StatusChipLocale;
+};
+
+export type AuthorityBannerProps =
+  | (AuthorityBannerBaseProps & {
+      authority: "owned";
+      label?: string;
+      status?: never;
+    })
+  | (AuthorityBannerBaseProps & {
+      authority: "forwarded";
+      label?: string;
+      status?: ForwardedStatus;
+    });
+
+export function AuthorityBanner({
+  authority,
+  label,
+  locale,
+  status,
+  eyebrow,
+  meta,
+  ...props
+}: AuthorityBannerProps) {
+  const resolvedTone =
+    authority === "forwarded" && status
+      ? STATUS_TONE_BY_VALUE[status]
+      : authority;
+  const resolvedMeta =
+    authority === "forwarded" && status ? (
+      <>
+        <StatusChip
+          authority="forwarded"
+          status={status}
+          {...(locale !== undefined ? { locale } : {})}
+        />
+        {meta}
+      </>
+    ) : (
+      meta
+    );
+
+  return (
+    <CalloutBanner
+      {...props}
+      tone={resolvedTone}
+      eyebrow={eyebrow ?? label ?? authorityDisplayLabel(authority, locale)}
+      meta={resolvedMeta}
+    />
+  );
 }
 
 export interface StepperItem {
