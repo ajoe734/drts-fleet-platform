@@ -967,7 +967,7 @@ export function StatusChip({
   );
 }
 
-export type AuthorityBadgeProps =
+type AuthorityBadgeSemanticProps =
   | {
       authority: "owned";
       label?: ReactNode;
@@ -983,13 +983,34 @@ export type AuthorityBadgeProps =
       status?: ForwardedStatus;
     };
 
-export function AuthorityBadge({
-  authority,
-  label,
-  locale,
-  category = "authority",
-  status,
-}: AuthorityBadgeProps) {
+type AuthorityBadgeLegacyProps = {
+  authority?: never;
+  label?: ReactNode;
+  category?: string;
+  tone?: ManagementTone;
+  locale?: never;
+  status?: never;
+};
+
+export type AuthorityBadgeProps =
+  | AuthorityBadgeSemanticProps
+  | AuthorityBadgeLegacyProps;
+
+export function AuthorityBadge(props: AuthorityBadgeProps) {
+  if (!("authority" in props)) {
+    return (
+      <StatusChip
+        label={props.label}
+        tone={props.tone ?? "neutral"}
+        {...(props.category !== undefined
+          ? { authorityLabel: props.category }
+          : {})}
+      />
+    );
+  }
+
+  const { authority, label, locale, category = "authority", status } = props;
+
   if (authority === "forwarded" && status) {
     return (
       <StatusChip
