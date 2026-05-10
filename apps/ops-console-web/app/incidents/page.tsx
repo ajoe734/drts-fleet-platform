@@ -348,9 +348,9 @@ export default function IncidentsPage() {
             tone={criticalCount > 0 ? "danger" : "success"}
           />
           <KpiCard
-            label={t("incidents.resolvedCount")}
+            label={t("incidents.linkedCount")}
             value={linkedCount}
-            detail={t("incidents.resolvedSub")}
+            detail={t("incidents.linkedSub")}
             tone="info"
           />
         </KpiRow>
