@@ -2,13 +2,6 @@
 
 :root {
   color-scheme: light;
-  --pbk-bg: #f7f5f0;
-  --pbk-fg: #14202c;
-  --pbk-muted: #5a6573;
-  --pbk-panel: #ffffff;
-  --pbk-panel-border: rgba(20, 32, 44, 0.12);
-  --pbk-accent: #18314b;
-  --pbk-accent-soft: rgba(24, 49, 75, 0.1);
 }
 
 * {
@@ -22,8 +15,8 @@ body {
 }
 
 body {
-  background: var(--pbk-bg);
-  color: var(--pbk-fg);
+  background: var(--pbk-bg, #ffffff);
+  color: var(--pbk-fg, #111827);
   font-family:
     ui-sans-serif,
     system-ui,

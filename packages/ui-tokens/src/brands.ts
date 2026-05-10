@@ -20,6 +20,16 @@ export interface PartnerBrandCardArt {
   readonly gradientTo: string;
 }
 
+export interface PartnerBrandTheme {
+  readonly pageBackground: string;
+  readonly pageForeground: string;
+  readonly pageMuted: string;
+  readonly panel: string;
+  readonly panelBorder: string;
+  readonly accentText: string;
+  readonly accentSoft: string;
+}
+
 export interface PartnerBrandTemplate {
   readonly code: PartnerBrandCode;
   readonly slug: string;
@@ -34,9 +44,20 @@ export interface PartnerBrandTemplate {
   readonly accent: string;
   readonly ink: string;
   readonly surface: AccentRamp;
+  readonly theme: PartnerBrandTheme;
   readonly hotline: PartnerBrandHotline;
   readonly cardArt: PartnerBrandCardArt;
 }
+
+export const PARTNER_DEFAULT_THEME = {
+  pageBackground: "#FFF9F1",
+  pageForeground: "#1F2937",
+  pageMuted: "#6B7280",
+  panel: "#FFFFFF",
+  panelBorder: "rgba(31, 41, 55, 0.12)",
+  accentText: "#B45309",
+  accentSoft: "rgba(217, 119, 6, 0.10)",
+} as const satisfies PartnerBrandTheme;
 
 function createSurface(
   fg: string,
@@ -45,6 +66,26 @@ function createSurface(
   border: string,
 ): AccentRamp {
   return { fg, hi, bg, border };
+}
+
+function createTheme(
+  pageBackground: string,
+  pageForeground: string,
+  pageMuted: string,
+  panel: string,
+  panelBorder: string,
+  accentText: string,
+  accentSoft: string,
+): PartnerBrandTheme {
+  return {
+    pageBackground,
+    pageForeground,
+    pageMuted,
+    panel,
+    panelBorder,
+    accentText,
+    accentSoft,
+  };
 }
 
 export const BRAND_TEMPLATES = {
@@ -62,6 +103,15 @@ export const BRAND_TEMPLATES = {
     accent: "#C9A356",
     ink: "#0E1424",
     surface: createSurface("#1B4FA0", "#C9A356", "#EBF1FB", "#C7D7F0"),
+    theme: createTheme(
+      "#F4F7FC",
+      "#14202C",
+      "#5C6778",
+      "#FFFFFF",
+      "rgba(20, 32, 44, 0.12)",
+      "#0A2A6E",
+      "rgba(27, 79, 160, 0.10)",
+    ),
     hotline: {
       label: "24 小時禮賓專線",
       phone: "0800-024-365",
@@ -93,6 +143,15 @@ export const BRAND_TEMPLATES = {
     accent: "#B7C98B",
     ink: "#122018",
     surface: createSurface("#0F5132", "#B7C98B", "#EAF5EE", "#C7E3D1"),
+    theme: createTheme(
+      "#F2F7F3",
+      "#15231A",
+      "#57665C",
+      "#FFFFFF",
+      "rgba(18, 32, 24, 0.12)",
+      "#0A3621",
+      "rgba(15, 81, 50, 0.10)",
+    ),
     hotline: {
       label: "旅遊服務專線",
       phone: "0800-700-188",
@@ -124,6 +183,15 @@ export const BRAND_TEMPLATES = {
     accent: "#D7B48A",
     ink: "#20130E",
     surface: createSurface("#7C2D12", "#D7B48A", "#F8EFEA", "#E7CFC1"),
+    theme: createTheme(
+      "#FBF5F1",
+      "#241611",
+      "#6C5A53",
+      "#FFFDFC",
+      "rgba(32, 19, 14, 0.12)",
+      "#4A1908",
+      "rgba(124, 45, 18, 0.10)",
+    ),
     hotline: {
       label: "Concierge Desk",
       phone: "02-7701-9000",
