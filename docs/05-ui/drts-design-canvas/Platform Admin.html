@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>Platform Admin · DRTS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#1E1B4B"/>
+  <rect x="20" y="22" width="60" height="56" rx="6" fill="#FFFFFF" stroke="#4F46E5" stroke-width="2"/>
+  <rect x="26" y="30" width="14" height="40" rx="2" fill="#EEF2FF"/>
+  <rect x="44" y="32" width="32" height="3" rx="1.5" fill="#4F46E5"/>
+  <rect x="44" y="40" width="22" height="2.5" rx="1" fill="#A5B4FC"/>
+  <rect x="44" y="48" width="32" height="20" rx="2" fill="#EEF2FF"/>
+</svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="macos-window.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="mgmt-tokens.jsx"></script>
+<script type="text/babel" src="mgmt-shell.jsx"></script>
+<script type="text/babel" src="mgmt-data.jsx"></script>
+<script type="text/babel" src="platform-screens.jsx"></script>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "dark": false,
+  "density": "compact",
+  "lang": "zh"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const th = buildMgmtTheme({ console: 'platform', dark: tw.dark, density: tw.density });
+  const W = 1440, H = 900;
+  const Frame = ({ children, chrome, title }) => chrome
+    ? <MacWindow title="Platform Admin · DRTS" url={'https://admin.drts.io' + (title?.url || '')} variant={tw.dark ? 'dark' : 'light'} width={W} height={H}>{children}</MacWindow>
+    : <div style={{ width: W, height: H, background: th.bg, borderRadius: 10, overflow: 'hidden', border: '1px solid ' + th.border }}>{children}</div>;
+  const Hero = ({ title, children }) => <Frame chrome title={{ url: title }}>{children}</Frame>;
+  const Bare = ({ children }) => <Frame>{children}</Frame>;
+
+  return (
+    <>
+      <DesignCanvas projectName="Platform Admin" subtitle="平台治理控制平面 · 13 routes + 治理流程深入" accent="#4F46E5">
+        <DCSection id="overview" title="01 · Overview" subtitle="工作首頁 + 健康總覽">
+          <DCArtboard id="home" label="Home / 工作首頁" width={W} height={H}><Hero title="/"><PA_Home theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="health" label="Platform Health" width={W} height={H}><Bare><PA_Health theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="tenant-flow" title="02 · 租戶治理流程" subtitle="清單 → 詳情 → rollout 推進">
+          <DCArtboard id="tenants" label="Tenants 清單" width={W} height={H}><Hero title="/tenants"><PA_Tenants theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="tenant-detail" label="Tenant detail · Rollout" width={W} height={H}><Bare><PA_TenantDetail theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="partner-flow" title="03 · 合作夥伴 entry 流程" subtitle="清單 → 詳情 → readiness/credential">
+          <DCArtboard id="partners" label="Partner entries" width={W} height={H}><Bare><PA_Partners theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="partner-detail" label="Partner detail · readiness" width={W} height={H}><Hero title="/partners/ctbc-elite"><PA_PartnerDetail theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="users-fleet" title="04 · 平台人員 / 車隊與法遵">
+          <DCArtboard id="users" label="Platform users" width={W} height={H}><Bare><PA_Users theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="fleet" label="Fleet & compliance" width={W} height={H}><Bare><PA_Fleet theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="switchboard" label="Public info & placard" width={W} height={H}><Bare><PA_Switchboard theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="pricing-flow" title="05 · 計價發布流程">
+          <DCArtboard id="pricing" label="Pricing rules" width={W} height={H}><Hero title="/pricing"><PA_Pricing theme={th} /></Hero></DCArtboard>
+        </DCSection>
+
+        <DCSection id="settle-flow" title="06 · 結算與對帳流程" subtitle="總覽 → issue 詳情 → resolve">
+          <DCArtboard id="payments" label="Settlement / reconciliation" width={W} height={H}><Hero title="/payments"><PA_Payments theme={th} /></Hero></DCArtboard>
+          <DCArtboard id="recon-detail" label="Reconciliation issue · detail" width={W} height={H}><Bare><PA_ReconDetail theme={th} /></Bare></DCArtboard>
+        </DCSection>
+
+        <DCSection id="platform-layer" title="07 · 平台層治理">
+          <DCArtboard id="notices" label="Notices & maintenance" width={W} height={H}><Bare><PA_Notices theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="audit" label="Audit & evidence" width={W} height={H}><Bare><PA_Audit theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="flags" label="Feature flags" width={W} height={H}><Bare><PA_Flags theme={th} /></Bare></DCArtboard>
+          <DCArtboard id="adapters" label="Adapter registry" width={W} height={H}><Bare><PA_Adapters theme={th} /></Bare></DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection title="Theme">
+          <TweakToggle label="深色模式" value={tw.dark} onChange={v => setTweak('dark', v)} />
+          <TweakRadio label="密度" value={tw.density} onChange={v => setTweak('density', v)} options={[{ value: 'compact', label: 'Compact' }, { value: 'comfy', label: 'Comfy' }]} />
+          <TweakRadio label="語言" value={tw.lang} onChange={v => setTweak('lang', v)} options={[{ value: 'zh', label: '繁中' }, { value: 'en', label: 'EN' }]} />
+        </TweakSection>
+      </TweaksPanel>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
