@@ -11,6 +11,9 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },
+  "dependencies": {
+    "@drts/ui-tokens": "workspace:*"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --max-warnings=0",
