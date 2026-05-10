@@ -14,7 +14,7 @@ const en = {
   "nav.users": "Users",
   "nav.fleet": "Fleet & Devices",
   "nav.switchboard": "Switchboard",
-  "nav.pricing": "Pricing & Split",
+  "nav.pricing": "Pricing",
   "nav.payments": "Payments",
   "nav.health": "Health & Alerts",
   "nav.notices": "Notices",
@@ -353,8 +353,8 @@ const en = {
     "Effective to must be later than or equal to effective from.",
 
   // ── Pricing ──
-  "pricing.title": "Pricing & Split",
-  "pricing.subtitle": "{rules} pricing rule(s) · {plans} fee plan(s)",
+  "pricing.title": "Pricing",
+  "pricing.subtitle": "pricing rules · driver fee plans · publish windows",
   "pricing.loading": "Loading pricing...",
   "pricing.tab.rules": "Pricing Rules",
   "pricing.tab.feePlans": "Driver Fee Plans",
@@ -824,7 +824,7 @@ const zh: typeof en = {
   "nav.users": "使用者",
   "nav.fleet": "車隊與裝置",
   "nav.switchboard": "交換台",
-  "nav.pricing": "定價與分潤",
+  "nav.pricing": "計價",
   "nav.payments": "付款",
   "nav.health": "健康與警示",
   "nav.notices": "公告",
@@ -1149,8 +1149,8 @@ const zh: typeof en = {
   "switchboard.err.effectiveToOrder": "失效時間必須晚於或等於生效時間。",
 
   // ── Pricing ──
-  "pricing.title": "定價與分潤",
-  "pricing.subtitle": "{rules} 條定價規則 · {plans} 個費用方案",
+  "pricing.title": "計價",
+  "pricing.subtitle": "pricing rules · driver fee plans · publish windows",
   "pricing.loading": "載入定價資料中...",
   "pricing.tab.rules": "定價規則",
   "pricing.tab.feePlans": "司機費用方案",
