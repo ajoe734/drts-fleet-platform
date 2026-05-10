@@ -9,7 +9,15 @@ import {
   useState,
   useTransition,
 } from "react";
-import { PageHeader } from "@drts/ui-web";
+import {
+  CalloutBanner,
+  DataViewCard,
+  KpiCard,
+  KpiRow,
+  PageHeader,
+  StatusChip,
+} from "@drts/ui-web";
+import type { ManagementTone } from "@drts/ui-web";
 import type {
   CreateIncidentCommand,
   IncidentCategory,
@@ -272,151 +280,154 @@ export default function IncidentsPage() {
   return (
     <>
       <PageHeader
+        eyebrow={locale === "en" ? "Incident workspace" : "Incident Workspace"}
         title={t("incidents.title")}
         subtitle={t("incidents.subtitle")}
+        meta={[
+          {
+            label: locale === "en" ? "Active" : "未結",
+            value: openCount,
+          },
+          {
+            label: locale === "en" ? "Critical" : "重大",
+            value: criticalCount,
+            tone: criticalCount > 0 ? "danger" : "success",
+          },
+          {
+            label: locale === "en" ? "Linked entities" : "已連結",
+            value: linkedCount,
+            tone: linkedCount > 0 ? "info" : "neutral",
+          },
+          {
+            label: locale === "en" ? "Recovery pending" : "待 recovery",
+            value: recoveryPendingCount,
+            tone: recoveryPendingCount > 0 ? "warning" : "neutral",
+          },
+        ]}
       />
-      <div>
+      <div className="console-shell">
         {error && (
-          <div className="error-banner">
-            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
-          </div>
+          <CalloutBanner
+            tone="danger"
+            title={getOpsLabel(locale, "error")}
+            description={error}
+          />
         )}
 
-        <section className="workspace-hero">
-          <div>
-            <p className="eyebrow">
-              {locale === "en" ? "Incident workspace" : "Incident Workspace"}
-            </p>
-            <h3>
-              {selectedIncident
-                ? `${selectedIncident.incidentId} · ${selectedIncident.title}`
-                : t("incidents.selectIncident")}
-            </h3>
-            <p>
-              {selectedIncident
-                ? locale === "en"
-                  ? `${selectedIncident.incidentId} is active in the service recovery workspace.`
-                  : `${selectedIncident.incidentId} 已進入 service recovery workspace。`
-                : locale === "en"
-                  ? "Select an incident to coordinate SOS response, escalation, and service recovery."
-                  : "選擇事故以協調 SOS 回應、升級與 service recovery。"}
-            </p>
-          </div>
-          <div className="hero-chip-row">
-            <span className="hero-chip hero-chip-critical">
-              {locale === "en"
-                ? `${criticalQueue.length} critical in queue`
-                : `${criticalQueue.length} 筆重大事故待處理`}
-            </span>
-            <span className="hero-chip">
-              {locale === "en"
-                ? `${recoveryPendingCount} without recovery actions`
-                : `${recoveryPendingCount} 筆尚未記錄 recovery`}
-            </span>
-            <span className="hero-chip">
-              {locale === "en"
-                ? `${linkedCount} linked entities`
-                : `${linkedCount} 筆已連結實體`}
-            </span>
-          </div>
+        <section className="workspace-headline">
+          <p className="eyebrow workspace-kicker">
+            {locale === "en" ? "Active incident" : "目前事故"}
+          </p>
+          <h3>
+            {selectedIncident
+              ? `${selectedIncident.incidentId} · ${selectedIncident.title}`
+              : t("incidents.selectIncident")}
+          </h3>
+          <p>
+            {selectedIncident
+              ? locale === "en"
+                ? `${selectedIncident.incidentId} is active in the service recovery workspace.`
+                : `${selectedIncident.incidentId} 已進入 service recovery workspace。`
+              : locale === "en"
+                ? "Select an incident to coordinate SOS response, escalation, and service recovery."
+                : "選擇事故以協調 SOS 回應、升級與 service recovery。"}
+          </p>
         </section>
 
-        <section className="summary-grid">
-          {[
-            {
-              label: t("incidents.activeCount"),
-              value: openCount,
-              note: t("incidents.activeSub"),
-              isCritical: false,
-            },
-            {
-              label: t("incidents.criticalCount"),
-              value: criticalCount,
-              note: t("incidents.criticalSub"),
-              isCritical: true,
-            },
-            {
-              label: t("incidents.resolvedCount"),
-              value: linkedCount,
-              note: t("incidents.resolvedSub"),
-              isCritical: false,
-            },
-          ].map((card) => (
-            <button
-              key={card.label}
-              className={`summary-card ${card.isCritical ? "summary-card-alert" : ""}`}
-              type="button"
-              onClick={card.isCritical ? focusCriticalQueue : undefined}
-            >
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
-            </button>
-          ))}
-        </section>
+        <KpiRow minWidth="170px">
+          <KpiCard
+            label={t("incidents.activeCount")}
+            value={openCount}
+            detail={t("incidents.activeSub")}
+            tone={openCount > 0 ? "ops" : "neutral"}
+          />
+          <KpiCard
+            label={t("incidents.criticalCount")}
+            value={criticalCount}
+            detail={t("incidents.criticalSub")}
+            tone={criticalCount > 0 ? "danger" : "success"}
+          />
+          <KpiCard
+            label={t("incidents.resolvedCount")}
+            value={linkedCount}
+            detail={t("incidents.resolvedSub")}
+            tone="info"
+          />
+        </KpiRow>
 
-        <section className="assumption-panel">
-          <strong>
-            {locale === "en"
+        <CalloutBanner
+          tone="info"
+          title={
+            locale === "en"
               ? "Authority and service recovery guardrails"
-              : "權限與 service recovery guardrails"}
-          </strong>
+              : "權限與 service recovery guardrails"
+          }
+        >
           <ul className="assumption-list">
             {incidentGuardrails.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
-        </section>
+        </CalloutBanner>
 
-        <section id="critical-sos-queue" className="sos-queue">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">
-                {getOpsLabel(locale, "incidentsPriorityQueue")}
+        <section id="critical-sos-queue">
+          <DataViewCard
+            title={getOpsLabel(locale, "incidentsCriticalQueue")}
+            subtitle={getOpsLabel(locale, "incidentsPriorityQueue")}
+            tone={criticalQueue.length > 0 ? "danger" : "success"}
+            density="compact"
+            summary={getOpsLabel(locale, "incidentsActiveCritical", {
+              count: criticalQueue.length,
+            })}
+            actions={
+              criticalCount > 0 ? (
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={focusCriticalQueue}
+                >
+                  {locale === "en" ? "Focus queue" : "聚焦佇列"}
+                </button>
+              ) : undefined
+            }
+          >
+            {criticalQueue.length > 0 ? (
+              <div className="sos-list">
+                {criticalQueue.map((record) => (
+                  <article key={record.incidentId} className="sos-card">
+                    <div>
+                      <div className="sos-title-row">
+                        <strong className="cell-title">{record.title}</strong>
+                        {renderSeverityBadge(record.severity, locale)}
+                      </div>
+                      <div className="cell-subcopy">
+                        {record.incidentId} ·{" "}
+                        {formatOpsCodeLabel(locale, record.category)}
+                      </div>
+                      <div className="cell-subcopy">{record.description}</div>
+                    </div>
+                    <div className="sos-meta">
+                      <StatusChip
+                        tone="neutral"
+                        label={formatOpsCodeLabel(locale, record.status)}
+                      />
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={() => void loadTimeline(record.incidentId)}
+                      >
+                        {getOpsLabel(locale, "incidentsReviewTimeline")}
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="all-clear-copy">
+                {getOpsLabel(locale, "incidentsAllClear")}
               </p>
-              <h3>{getOpsLabel(locale, "incidentsCriticalQueue")}</h3>
-            </div>
-            <span className="panel-note">
-              {getOpsLabel(locale, "incidentsActiveCritical", {
-                count: criticalQueue.length,
-              })}
-            </span>
-          </div>
-          {criticalQueue.length > 0 ? (
-            <div className="sos-list">
-              {criticalQueue.map((record) => (
-                <article key={record.incidentId} className="sos-card">
-                  <div>
-                    <div className="sos-title-row">
-                      <strong className="cell-title">{record.title}</strong>
-                      {renderSeverityBadge(record.severity, locale)}
-                    </div>
-                    <div className="cell-subcopy">
-                      {record.incidentId} ·{" "}
-                      {formatOpsCodeLabel(locale, record.category)}
-                    </div>
-                    <div className="cell-subcopy">{record.description}</div>
-                  </div>
-                  <div className="sos-meta">
-                    <span className="status-pill">
-                      {formatOpsCodeLabel(locale, record.status)}
-                    </span>
-                    <button
-                      className="btn"
-                      type="button"
-                      onClick={() => void loadTimeline(record.incidentId)}
-                    >
-                      {getOpsLabel(locale, "incidentsReviewTimeline")}
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          ) : (
-            <p className="all-clear-copy">
-              {getOpsLabel(locale, "incidentsAllClear")}
-            </p>
-          )}
+            )}
+          </DataViewCard>
         </section>
 
         <div className="toolbar">
@@ -536,16 +547,15 @@ export default function IncidentsPage() {
           <p>{getOpsLabel(locale, "incidentsLoading")}</p>
         ) : (
           <div className="content-grid">
-            <section className="panel">
-              <div className="panel-head">
-                <div>
-                  <p className="eyebrow">{t("incidents.registry")}</p>
-                  <h3>{t("incidents.backlog")}</h3>
-                </div>
-                <span className="panel-note">
-                  {t("incidents.visible", { count: filteredRecords.length })}
-                </span>
-              </div>
+            <DataViewCard
+              title={t("incidents.backlog")}
+              subtitle={t("incidents.registry")}
+              tone="ops"
+              density="compact"
+              summary={t("incidents.visible", {
+                count: filteredRecords.length,
+              })}
+            >
               <table className="table">
                 <thead>
                   <tr>
@@ -701,15 +711,14 @@ export default function IncidentsPage() {
                   )}
                 </tbody>
               </table>
-            </section>
+            </DataViewCard>
 
-            <section className="panel">
-              <div className="panel-head">
-                <div>
-                  <p className="eyebrow">{t("incidents.timeline")}</p>
-                  <h3>{selectedIncidentId ?? t("incidents.selectIncident")}</h3>
-                </div>
-              </div>
+            <DataViewCard
+              title={selectedIncidentId ?? t("incidents.selectIncident")}
+              subtitle={t("incidents.timeline")}
+              tone="neutral"
+              density="compact"
+            >
               {selectedIncident && (
                 <section className="incident-brief">
                   <div className="detail-grid">
@@ -890,7 +899,7 @@ export default function IncidentsPage() {
                   )}
                 </div>
               )}
-            </section>
+            </DataViewCard>
           </div>
         )}
 
@@ -900,87 +909,39 @@ export default function IncidentsPage() {
         </Link>
 
         <style jsx>{`
-          .summary-grid,
-          .sos-list,
-          .toolbar,
-          .content-grid,
-          .link-stack,
-          .detail-grid {
-            display: grid;
-            gap: 0.75rem;
-          }
-          .workspace-hero,
-          .assumption-panel,
-          .summary-card,
-          .sos-queue,
-          .panel {
-            padding: 1rem;
-            border-radius: 1rem;
-            border: 1px solid #e2e8f0;
-            background: #fff;
-          }
-          .workspace-hero,
-          .assumption-panel {
-            margin-bottom: 1rem;
-          }
-          .workspace-hero {
+          .console-shell {
+            --line-soft: #dbe4f0;
+            --line-strong: #cbd5e1;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --shadow-soft: 0 18px 40px -28px rgba(15, 23, 42, 0.35);
+            color: var(--text-main);
             display: grid;
             gap: 1rem;
-            grid-template-columns: minmax(0, 1fr) auto;
-            align-items: start;
-            background: linear-gradient(135deg, #eff6ff, #fff7ed 70%, #ffffff);
+            padding: 0.25rem 0 1.5rem;
           }
-          .hero-chip-row {
-            display: flex;
-            gap: 0.65rem;
-            flex-wrap: wrap;
-            justify-content: flex-end;
+          .workspace-headline {
+            display: grid;
+            gap: 0.4rem;
           }
-          .hero-chip {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.22rem 0.6rem;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            font-weight: 700;
-            background: rgba(255, 255, 255, 0.86);
-            border: 1px solid #93c5fd;
+          .workspace-headline h3 {
+            margin: 0;
+            font-size: 1.12rem;
+            letter-spacing: -0.02em;
+          }
+          .workspace-kicker {
             color: #1d4ed8;
-          }
-          .hero-chip-critical {
-            border-color: #fca5a5;
-            background: #fee2e2;
-            color: #b91c1c;
-          }
-          .assumption-panel strong {
-            display: block;
-            margin-bottom: 0.55rem;
           }
           .assumption-list {
             margin: 0;
             padding-left: 1.1rem;
             color: #475569;
           }
-          .summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .summary-card {
-            background: #f8fafc;
-            text-align: left;
-            cursor: default;
-          }
-          .summary-card-alert {
-            cursor: pointer;
-            border-color: #fca5a5;
-            background: linear-gradient(135deg, #fff1f2, #fef2f2);
-          }
-          .summary-card strong {
-            font-size: 1.4rem;
-          }
-          .sos-queue {
-            margin-bottom: 1rem;
-            background: linear-gradient(135deg, #fff7ed, #fff1f2);
+          .sos-list,
+          .link-stack,
+          .detail-grid {
+            display: grid;
+            gap: 0.75rem;
           }
           .sos-card {
             display: grid;
@@ -988,9 +949,10 @@ export default function IncidentsPage() {
             grid-template-columns: minmax(0, 1fr) auto;
             align-items: center;
             padding: 0.9rem 1rem;
-            border-radius: 0.9rem;
+            border-radius: 1rem;
             border: 1px solid #fdba74;
             background: rgba(255, 255, 255, 0.92);
+            box-shadow: var(--shadow-soft);
           }
           .sos-title-row,
           .sos-meta {
@@ -1003,63 +965,32 @@ export default function IncidentsPage() {
             margin: 0;
             color: #166534;
           }
-          .status-pill,
-          .severity-badge {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: fit-content;
-            padding: 0.2rem 0.55rem;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            font-weight: 700;
-            text-transform: capitalize;
-          }
-          .status-pill {
-            background: #e2e8f0;
-            color: #334155;
-          }
-          .severity-badge {
-            border: 1px solid transparent;
-          }
-          .severity-critical {
-            background: #fee2e2;
-            border-color: #fca5a5;
-            color: #b91c1c;
-          }
-          .severity-high {
-            background: #ffedd5;
-            border-color: #fdba74;
-            color: #c2410c;
-          }
-          .severity-medium {
-            background: #fef3c7;
-            border-color: #fcd34d;
-            color: #a16207;
-          }
-          .severity-low {
-            background: #e2e8f0;
-            border-color: #cbd5e1;
-            color: #334155;
-          }
           .toolbar {
+            display: grid;
+            gap: 0.75rem;
             grid-template-columns: 2fr repeat(3, minmax(0, 1fr)) auto auto;
             align-items: center;
-            margin-bottom: 1rem;
+            padding: 0.95rem 1rem;
+            border: 1px solid var(--line-soft);
+            border-radius: 1.1rem;
+            background: rgba(255, 255, 255, 0.86);
+            box-shadow: var(--shadow-soft);
           }
           .search-input,
           .filter-select {
             width: 100%;
             padding: 0.75rem 0.85rem;
-            border-radius: 0.8rem;
-            border: 1px solid #cbd5e1;
+            border-radius: 0.9rem;
+            border: 1px solid var(--line-strong);
+            background: rgba(255, 255, 255, 0.96);
           }
           .btn {
-            padding: 0.65rem 0.85rem;
-            border-radius: 0.75rem;
-            border: 1px solid #cbd5e1;
-            background: white;
+            padding: 0.68rem 0.92rem;
+            border-radius: 999px;
+            border: 1px solid var(--line-strong);
+            background: rgba(255, 255, 255, 0.94);
             cursor: pointer;
+            color: var(--text-main);
           }
           .btn-primary {
             background: #0f172a;
@@ -1072,7 +1003,10 @@ export default function IncidentsPage() {
             color: #92400e;
           }
           .content-grid {
+            display: grid;
+            gap: 0.9rem;
             grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+            align-items: start;
           }
           .detail-grid {
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1082,19 +1016,24 @@ export default function IncidentsPage() {
             justify-content: space-between;
             gap: 1rem;
             align-items: flex-start;
-            margin-bottom: 0.75rem;
+            margin-bottom: 0.95rem;
           }
           .eyebrow,
           .panel-note,
           .cell-subcopy,
           .empty-copy {
-            color: #64748b;
+            color: var(--text-muted);
           }
           .eyebrow {
             margin: 0 0 0.25rem;
-            font-size: 0.75rem;
+            font-size: 0.74rem;
             letter-spacing: 0.08em;
             text-transform: uppercase;
+          }
+          .panel-head h3 {
+            margin: 0;
+            font-size: 1.12rem;
+            letter-spacing: -0.02em;
           }
           .table {
             width: 100%;
@@ -1102,14 +1041,21 @@ export default function IncidentsPage() {
           }
           .table th,
           .table td {
-            padding: 0.75rem 0.5rem;
+            padding: 0.8rem 0.55rem;
             border-bottom: 1px solid #e2e8f0;
             text-align: left;
             vertical-align: top;
           }
+          .table th {
+            color: var(--text-muted);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+          }
           .cell-title {
             font-weight: 600;
-            color: #0f172a;
+            color: var(--text-main);
           }
           .inline-link,
           .route-link {
@@ -1120,18 +1066,26 @@ export default function IncidentsPage() {
             display: grid;
             gap: 0.8rem;
             margin-bottom: 1rem;
-            padding: 0.9rem 1rem;
-            border-radius: 0.9rem;
+            padding: 0.95rem 1rem;
+            border-radius: 1rem;
             border: 1px solid #dbeafe;
-            background: #f8fbff;
+            background: linear-gradient(
+              180deg,
+              rgba(248, 251, 255, 0.96),
+              rgba(255, 255, 255, 0.98)
+            );
           }
           .label {
             display: block;
             margin-bottom: 0.2rem;
-            color: #64748b;
+            color: var(--text-muted);
             font-size: 0.74rem;
             letter-spacing: 0.06em;
             text-transform: uppercase;
+          }
+          .detail-grid strong,
+          .timeline-list strong {
+            color: var(--text-main);
           }
           .brief-description {
             margin: 0;
@@ -1144,7 +1098,7 @@ export default function IncidentsPage() {
             gap: 0.9rem;
           }
           .timeline-list small {
-            color: #64748b;
+            color: var(--text-muted);
           }
           .row-selected {
             background: #eff6ff;
@@ -1180,11 +1134,13 @@ export default function IncidentsPage() {
             border-top: 1px solid #e2e8f0;
           }
           @media (max-width: 900px) {
-            .workspace-hero,
             .toolbar,
             .content-grid,
             .sos-card {
               grid-template-columns: 1fr;
+            }
+            .toolbar {
+              padding: 0.9rem;
             }
           }
         `}</style>
@@ -1326,10 +1282,16 @@ function ServiceRecoveryForm({
 }
 
 function renderSeverityBadge(severity: IncidentSeverity, locale: "en" | "zh") {
+  const tone: ManagementTone =
+    severity === "critical"
+      ? "danger"
+      : severity === "high"
+        ? "warning"
+        : severity === "medium"
+          ? "info"
+          : "neutral";
   return (
-    <span className={`severity-badge severity-${severity}`}>
-      {formatOpsCodeLabel(locale, severity)}
-    </span>
+    <StatusChip tone={tone} label={formatOpsCodeLabel(locale, severity)} />
   );
 }
 

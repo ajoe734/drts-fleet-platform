@@ -3,7 +3,14 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
-import { PageHeader } from "@drts/ui-web";
+import {
+  CalloutBanner,
+  DataViewCard,
+  KpiCard,
+  KpiRow,
+  PageHeader,
+  StatusChip,
+} from "@drts/ui-web";
 import type {
   ComplaintCaseRecord,
   ComplaintCategory,
@@ -87,14 +94,16 @@ function formatRelativeSla(value: string, locale: "en" | "zh") {
     : `SLA 已逾期 ${Math.abs(deltaMinutes)} 分鐘`;
 }
 
-function getComplaintQueueTone(record: ComplaintCaseRecord) {
+function getComplaintSeverityTone(
+  record: ComplaintCaseRecord,
+): "danger" | "warning" | "neutral" {
   if (record.slaBreach) {
-    return "queue-badge badge-danger";
+    return "danger";
   }
   if (record.severity === "high") {
-    return "queue-badge badge-warning";
+    return "warning";
   }
-  return "queue-badge";
+  return "neutral";
 }
 
 function resolveSelectedComplaintCaseNo(
@@ -308,114 +317,116 @@ export default function ComplaintsPage() {
   return (
     <>
       <PageHeader
+        eyebrow={locale === "en" ? "Complaint workspace" : "客訴 Workspace"}
         title={t("complaints.title")}
         subtitle={t("complaints.subtitle")}
+        meta={[
+          {
+            label: locale === "en" ? "Active" : "未結",
+            value: activeCases,
+          },
+          {
+            label: locale === "en" ? "SLA breach" : "SLA 違規",
+            value: slaBreached,
+            tone: slaBreached > 0 ? "danger" : "success",
+          },
+          {
+            label: locale === "en" ? "Escalation ready" : "可升級",
+            value: escalationReadyCases.length,
+            tone: escalationReadyCases.length > 0 ? "warning" : "neutral",
+          },
+          {
+            label: locale === "en" ? "Unassigned" : "未指派",
+            value: unassignedCases,
+            tone: unassignedCases > 0 ? "warning" : "neutral",
+          },
+        ]}
       />
-      <div>
+      <div className="console-shell">
         {error && (
-          <div className="error-banner">
-            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
-          </div>
+          <CalloutBanner
+            tone="danger"
+            title={getOpsLabel(locale, "error")}
+            description={error}
+          />
         )}
 
-        <section className="workspace-hero">
-          <div>
-            <p className="eyebrow">
-              {locale === "en" ? "Complaint workspace" : "Complaint Workspace"}
-            </p>
-            <h3>
-              {selectedRecord
-                ? `${selectedRecord.caseNo} · ${formatOpsCodeLabel(
-                    locale,
-                    selectedRecord.category,
-                  )}`
-                : t("complaints.caseDetail")}
-            </h3>
-            <p>{workspaceHeadline}</p>
-          </div>
-          <div className="hero-chip-row">
-            <span className="hero-chip hero-chip-critical">
-              {locale === "en"
-                ? `${slaBreached} breached SLA case(s)`
-                : `${slaBreached} 筆 SLA 違規案件`}
-            </span>
-            <span className="hero-chip">
-              {locale === "en"
-                ? `${escalationReadyCases.length} escalation-ready`
-                : `${escalationReadyCases.length} 筆可升級 incident`}
-            </span>
-            <span className="hero-chip">
-              {locale === "en"
-                ? `${unassignedCases} unassigned active case(s)`
-                : `${unassignedCases} 筆活躍案件未指派`}
-            </span>
-          </div>
+        <section className="workspace-headline">
+          <p className="eyebrow workspace-kicker">
+            {locale === "en" ? "Active case" : "目前案件"}
+          </p>
+          <h3>
+            {selectedRecord
+              ? `${selectedRecord.caseNo} · ${formatOpsCodeLabel(
+                  locale,
+                  selectedRecord.category,
+                )}`
+              : t("complaints.caseDetail")}
+          </h3>
+          <p>{workspaceHeadline}</p>
         </section>
 
-        <section className="summary-grid">
-          {[
-            {
-              label: t("complaints.activeCases"),
-              value: activeCases,
-              note: t("complaints.activeCasesSub"),
-            },
-            {
-              label: t("complaints.hotlineLinked"),
-              value: hotlineLinked,
-              note: t("complaints.hotlineLinkedSub"),
-            },
-            {
-              label: t("complaints.slaBreached"),
-              value: slaBreached,
-              note: t("complaints.slaBreachedSub"),
-            },
-            {
-              label: t("complaints.closedExport"),
-              value: readyForAudit,
-              note: t("complaints.closedExportSub"),
-            },
-          ].map((card) => (
-            <div key={card.label} className="summary-card">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
-            </div>
-          ))}
-        </section>
+        <KpiRow minWidth="170px">
+          <KpiCard
+            label={t("complaints.activeCases")}
+            value={activeCases}
+            detail={t("complaints.activeCasesSub")}
+            tone={activeCases > 0 ? "ops" : "neutral"}
+          />
+          <KpiCard
+            label={t("complaints.hotlineLinked")}
+            value={hotlineLinked}
+            detail={t("complaints.hotlineLinkedSub")}
+            tone="info"
+          />
+          <KpiCard
+            label={t("complaints.slaBreached")}
+            value={slaBreached}
+            detail={t("complaints.slaBreachedSub")}
+            tone={slaBreached > 0 ? "danger" : "success"}
+          />
+          <KpiCard
+            label={t("complaints.closedExport")}
+            value={readyForAudit}
+            detail={t("complaints.closedExportSub")}
+            tone={readyForAudit > 0 ? "success" : "neutral"}
+          />
+        </KpiRow>
 
-        <section className="assumption-panel">
-          <strong>
-            {locale === "en"
+        <CalloutBanner
+          tone="info"
+          title={
+            locale === "en"
               ? "Authority and escalation guardrails"
-              : "權限與 escalation guardrails"}
-          </strong>
+              : "權限與 escalation guardrails"
+          }
+        >
           <ul className="assumption-list">
             {complaintGuardrails.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
-        </section>
+        </CalloutBanner>
 
-        <section className="priority-queue">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">
-                {locale === "en"
-                  ? "SLA + escalation queue"
-                  : "SLA / escalation 佇列"}
-              </p>
-              <h3>
-                {locale === "en"
-                  ? "Immediate complaints requiring ops attention"
-                  : "需立即處理的客訴案件"}
-              </h3>
-            </div>
-            <span className="panel-note">
-              {locale === "en"
-                ? `${Math.min(escalationReadyCases.length, 4)} shown`
-                : `顯示 ${Math.min(escalationReadyCases.length, 4)} 筆`}
-            </span>
-          </div>
+        <DataViewCard
+          title={
+            locale === "en"
+              ? "Immediate complaints requiring ops attention"
+              : "需立即處理的客訴案件"
+          }
+          subtitle={
+            locale === "en"
+              ? "SLA breach and high-severity cases ready for incident escalation."
+              : "SLA 違規與高優先案件，已可升級 incident。"
+          }
+          tone="warning"
+          density="compact"
+          summary={
+            locale === "en"
+              ? `${Math.min(escalationReadyCases.length, 4)} shown of ${escalationReadyCases.length}`
+              : `共 ${escalationReadyCases.length} 筆，顯示前 ${Math.min(escalationReadyCases.length, 4)} 筆`
+          }
+        >
           {escalationReadyCases.length > 0 ? (
             <div className="queue-grid">
               {escalationReadyCases.slice(0, 4).map((record) => (
@@ -427,13 +438,16 @@ export default function ComplaintsPage() {
                 >
                   <div className="queue-card-head">
                     <strong>{record.caseNo}</strong>
-                    <span className={getComplaintQueueTone(record)}>
-                      {record.slaBreach
-                        ? locale === "en"
-                          ? "SLA breach"
-                          : "SLA 違規"
-                        : formatOpsCodeLabel(locale, record.severity)}
-                    </span>
+                    <StatusChip
+                      tone={getComplaintSeverityTone(record)}
+                      label={
+                        record.slaBreach
+                          ? locale === "en"
+                            ? "SLA breach"
+                            : "SLA 違規"
+                          : formatOpsCodeLabel(locale, record.severity)
+                      }
+                    />
                   </div>
                   <div className="queue-card-subcopy">
                     {formatOpsCodeLabel(locale, record.category)} ·{" "}
@@ -452,7 +466,7 @@ export default function ComplaintsPage() {
                 : "目前沒有需要立即升級 incident 的客訴案件。"}
             </p>
           )}
-        </section>
+        </DataViewCard>
 
         <div className="toolbar">
           <input
@@ -507,11 +521,12 @@ export default function ComplaintsPage() {
         </div>
 
         {showCreate && (
-          <section className="panel">
-            <div className="panel-head">
-              <h3>{t("complaints.createTitle")}</h3>
-              <p>{t("complaints.createNote")}</p>
-            </div>
+          <DataViewCard
+            title={t("complaints.createTitle")}
+            subtitle={t("complaints.createNote")}
+            tone="ops"
+            density="compact"
+          >
             <form
               className="form-grid"
               onSubmit={(event) => {
@@ -641,22 +656,28 @@ export default function ComplaintsPage() {
                   : t("complaints.form.createRecord")}
               </button>
             </form>
-          </section>
+          </DataViewCard>
         )}
 
         {loading ? (
           <p>{t("complaints.loading")}</p>
         ) : (
           <div className="content-grid">
-            <section className="panel">
-              <div className="panel-head">
-                <h3>{t("complaints.caseList")}</h3>
-                <p>
-                  {t("complaints.results", { count: filteredRecords.length })}
-                </p>
-              </div>
+            <DataViewCard
+              title={
+                locale === "en"
+                  ? "Registry and SLA queue"
+                  : "案件台帳與 SLA 佇列"
+              }
+              subtitle={t("complaints.caseList")}
+              tone="ops"
+              density="compact"
+              summary={t("complaints.results", {
+                count: filteredRecords.length,
+              })}
+            >
               <div className="table-wrap">
-                <table>
+                <table className="table">
                   <thead>
                     <tr>
                       <th>{t("complaints.col.case")}</th>
@@ -678,12 +699,22 @@ export default function ComplaintsPage() {
                         }
                         onClick={() => setSelectedCaseNo(record.caseNo)}
                       >
-                        <td>{record.caseNo}</td>
-                        <td>{formatOpsCodeLabel(locale, record.category)}</td>
+                        <td>
+                          <div className="cell-title">{record.caseNo}</div>
+                          <div className="table-subcopy">
+                            {formatOpsCodeLabel(locale, record.severity)}
+                          </div>
+                        </td>
+                        <td>
+                          <span className="soft-pill">
+                            {formatOpsCodeLabel(locale, record.category)}
+                          </span>
+                        </td>
                         <td>
                           <div>{formatOpsCodeLabel(locale, record.status)}</div>
                           <div className="table-subcopy">
-                            {formatOpsCodeLabel(locale, record.severity)}
+                            {record.assigneeId ??
+                              (locale === "en" ? "Ops queue" : "待 ops 指派")}
                           </div>
                         </td>
                         <td>{record.assigneeId ?? "-"}</td>
@@ -691,9 +722,10 @@ export default function ComplaintsPage() {
                         <td>{record.relatedCallId ?? "-"}</td>
                         <td>
                           {record.slaBreach ? (
-                            <span className="sla-badge">
-                              {locale === "en" ? "BREACH" : "違規"}
-                            </span>
+                            <StatusChip
+                              tone="danger"
+                              label={locale === "en" ? "BREACH" : "違規"}
+                            />
                           ) : (
                             <span className="table-subcopy">
                               {formatRelativeSla(record.slaDueAt, locale)}
@@ -706,29 +738,40 @@ export default function ComplaintsPage() {
                   </tbody>
                 </table>
               </div>
-            </section>
+            </DataViewCard>
 
-            <section className="panel">
-              <div className="panel-head">
-                <h3>{t("complaints.caseDetail")}</h3>
-                <p>
-                  {selectedRecord
-                    ? selectedRecord.caseNo
-                    : t("complaints.selectCase")}
-                </p>
-              </div>
-
+            <DataViewCard
+              title={
+                locale === "en"
+                  ? "Embedded case workspace"
+                  : "內嵌案件 workspace"
+              }
+              subtitle={t("complaints.caseDetail")}
+              tone="neutral"
+              density="compact"
+              summary={
+                selectedRecord
+                  ? selectedRecord.caseNo
+                  : t("complaints.selectCase")
+              }
+            >
               {selectedRecord ? (
                 <div className="details-stack">
-                  <section className="detail-card">
+                  <section className="detail-card detail-hero-card">
                     <div className="detail-status-row">
-                      <span className={getComplaintQueueTone(selectedRecord)}>
-                        {selectedRecord.slaBreach
-                          ? locale === "en"
-                            ? "SLA breach"
-                            : "SLA 違規"
-                          : formatOpsCodeLabel(locale, selectedRecord.severity)}
-                      </span>
+                      <StatusChip
+                        tone={getComplaintSeverityTone(selectedRecord)}
+                        label={
+                          selectedRecord.slaBreach
+                            ? locale === "en"
+                              ? "SLA breach"
+                              : "SLA 違規"
+                            : formatOpsCodeLabel(
+                                locale,
+                                selectedRecord.severity,
+                              )
+                        }
+                      />
                       {!selectedRecord.relatedIncidentId &&
                         (selectedRecord.slaBreach ||
                           selectedRecord.severity === "high") && (
@@ -770,7 +813,7 @@ export default function ComplaintsPage() {
                           })}
                         </small>
                         {selectedRecord.slaBreach && (
-                          <span className="sla-badge">SLA BREACH</span>
+                          <StatusChip tone="danger" label="SLA BREACH" />
                         )}
                       </div>
                       <div>
@@ -1137,7 +1180,7 @@ export default function ComplaintsPage() {
               ) : (
                 <p className="empty-state">{t("complaints.noSelection")}</p>
               )}
-            </section>
+            </DataViewCard>
           </div>
         )}
 
@@ -1147,93 +1190,39 @@ export default function ComplaintsPage() {
         </Link>
 
         <style jsx>{`
-          .summary-grid,
-          .content-grid,
-          .form-grid,
-          .detail-grid,
-          .detail-subgrid,
-          .queue-grid {
-            display: grid;
-            gap: 0.9rem;
-          }
-          .workspace-hero,
-          .priority-queue,
-          .assumption-panel,
-          .panel,
-          .detail-card {
-            border: 1px solid #dbe4f0;
-            border-radius: 1rem;
-            background: #fff;
-          }
-          .workspace-hero,
-          .priority-queue,
-          .assumption-panel {
-            padding: 1rem;
-            margin-bottom: 1rem;
-          }
-          .workspace-hero {
+          .console-shell {
+            --line-soft: #dbe4f0;
+            --line-strong: #cbd5e1;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --shadow-soft: 0 18px 40px -28px rgba(15, 23, 42, 0.35);
+            color: var(--text-main);
             display: grid;
             gap: 1rem;
-            grid-template-columns: minmax(0, 1fr) auto;
-            align-items: start;
-            background: linear-gradient(135deg, #fff7ed, #fff1f2 65%, #ffffff);
+            padding: 0.25rem 0 1.5rem;
           }
-          .hero-chip-row,
+          .workspace-headline {
+            display: grid;
+            gap: 0.4rem;
+          }
+          .workspace-headline h3 {
+            margin: 0;
+            font-size: 1.12rem;
+            letter-spacing: -0.02em;
+          }
+          .workspace-kicker {
+            color: #9a3412;
+          }
           .detail-status-row {
             display: flex;
             gap: 0.65rem;
             flex-wrap: wrap;
             align-items: center;
           }
-          .hero-chip,
-          .queue-badge {
-            display: inline-flex;
-            align-items: center;
-            padding: 0.22rem 0.6rem;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            font-weight: 700;
-          }
-          .hero-chip {
-            background: rgba(255, 255, 255, 0.86);
-            border: 1px solid #fdba74;
-            color: #9a3412;
-          }
-          .hero-chip-critical,
-          .badge-danger {
-            background: #fee2e2;
-            border: 1px solid #fca5a5;
-            color: #b91c1c;
-          }
-          .queue-badge,
-          .badge-warning {
-            background: #fef3c7;
-            border: 1px solid #fcd34d;
-            color: #a16207;
-          }
-          .assumption-panel strong {
-            display: block;
-            margin-bottom: 0.55rem;
-          }
           .assumption-list {
             margin: 0;
             padding-left: 1.1rem;
-            color: #475569;
-          }
-          .summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .summary-card {
-            padding: 0.95rem 1rem;
-            border: 1px solid #dbe4f0;
-            border-radius: 1rem;
-            background: #fff;
-          }
-          .summary-card strong {
-            display: block;
-            font-size: 1.35rem;
-            margin: 0.2rem 0;
+            color: var(--text-muted);
           }
           .toolbar,
           .action-row {
@@ -1243,7 +1232,18 @@ export default function ComplaintsPage() {
             align-items: center;
           }
           .toolbar {
-            margin-bottom: 1rem;
+            padding: 0.95rem 1rem;
+            border: 1px solid var(--line-soft);
+            border-radius: 1.1rem;
+            background: rgba(255, 255, 255, 0.86);
+            box-shadow: var(--shadow-soft);
+          }
+          .form-grid,
+          .detail-grid,
+          .detail-subgrid,
+          .queue-grid {
+            display: grid;
+            gap: 0.9rem;
           }
           .queue-grid {
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1252,11 +1252,16 @@ export default function ComplaintsPage() {
             display: grid;
             gap: 0.5rem;
             padding: 0.9rem 1rem;
-            border-radius: 0.95rem;
-            border: 1px solid #fed7aa;
-            background: #fffbeb;
+            border-radius: 1rem;
+            border: 1px solid #fdba74;
+            background: linear-gradient(
+              180deg,
+              rgba(255, 251, 235, 0.96),
+              rgba(255, 255, 255, 0.98)
+            );
             text-align: left;
             cursor: pointer;
+            box-shadow: var(--shadow-soft);
           }
           .queue-card-head {
             display: flex;
@@ -1271,7 +1276,7 @@ export default function ComplaintsPage() {
           }
           .queue-card-subcopy,
           .table-subcopy {
-            color: #64748b;
+            color: var(--text-muted);
             font-size: 0.82rem;
           }
           .search-input,
@@ -1279,74 +1284,103 @@ export default function ComplaintsPage() {
           select,
           textarea {
             width: 100%;
-            border: 1px solid #cbd5e1;
-            border-radius: 0.85rem;
-            padding: 0.7rem 0.8rem;
+            border: 1px solid var(--line-strong);
+            border-radius: 0.9rem;
+            padding: 0.75rem 0.85rem;
             font: inherit;
-            background: #fff;
+            background: rgba(255, 255, 255, 0.96);
           }
           .btn {
-            border: 1px solid #cbd5e1;
+            border: 1px solid var(--line-strong);
             border-radius: 999px;
-            padding: 0.65rem 1rem;
-            background: #fff;
+            padding: 0.68rem 1rem;
+            background: rgba(255, 255, 255, 0.94);
             cursor: pointer;
+            color: var(--text-main);
           }
           .btn-primary {
-            border-color: #9a3412;
-            background: #9a3412;
+            border-color: #0f172a;
+            background: #0f172a;
             color: #fff;
           }
           .btn-warning {
-            background: #fef3c7;
-            border-color: #f59e0b;
-            color: #92400e;
+            background: #fff7ed;
+            border-color: #fb923c;
+            color: #9a3412;
           }
           .inline-link {
             color: #0f172a;
             text-decoration: none;
           }
           .content-grid {
+            display: grid;
+            gap: 0.9rem;
             grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
-            margin-top: 1rem;
-            margin-bottom: 1rem;
+            align-items: start;
           }
-          .panel,
           .detail-card {
-            padding: 1rem;
-          }
-          .panel-head {
-            display: flex;
-            justify-content: space-between;
-            gap: 0.75rem;
-            align-items: baseline;
-            margin-bottom: 0.8rem;
+            padding: 1rem 1.05rem;
+            border: 1px solid var(--line-soft);
+            border-radius: 1.2rem;
+            background: rgba(255, 255, 255, 0.96);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(12px);
           }
           .table-wrap {
             overflow-x: auto;
           }
-          table {
+          .table {
             width: 100%;
             border-collapse: collapse;
           }
-          th,
-          td {
+          .table th,
+          .table td {
             text-align: left;
-            padding: 0.75rem 0.65rem;
+            padding: 0.8rem 0.65rem;
             border-bottom: 1px solid #e2e8f0;
             vertical-align: top;
           }
+          .table th {
+            color: var(--text-muted);
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+          }
           tbody tr {
             cursor: pointer;
+            transition: background 120ms ease;
           }
           .selected-row {
             background: #fff7ed;
+          }
+          .cell-title {
+            color: var(--text-main);
+            font-weight: 700;
+          }
+          .soft-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.22rem 0.6rem;
+            border-radius: 999px;
+            background: #eef2ff;
+            border: 1px solid #c7d2fe;
+            color: #4338ca;
+            font-size: 0.78rem;
+            font-weight: 700;
           }
           .details-stack,
           .stack-form,
           .timeline-list {
             display: grid;
             gap: 0.8rem;
+          }
+          .detail-hero-card {
+            background: linear-gradient(
+              180deg,
+              rgba(255, 247, 237, 0.92),
+              rgba(255, 255, 255, 0.98)
+            );
           }
           .quick-link {
             font-size: 0.88rem;
@@ -1363,8 +1397,15 @@ export default function ComplaintsPage() {
             font-size: 0.75rem;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: #64748b;
+            color: var(--text-muted);
             margin-bottom: 0.25rem;
+          }
+          .detail-grid strong,
+          .detail-subgrid h4 {
+            color: var(--text-main);
+          }
+          .detail-grid small {
+            color: var(--text-muted);
           }
           .description {
             margin-top: 0.8rem;
@@ -1372,14 +1413,17 @@ export default function ComplaintsPage() {
             color: #334155;
           }
           .timeline-item {
-            border-left: 3px solid #c2410c;
-            padding-left: 0.75rem;
+            border-left: 3px solid #f97316;
+            padding: 0.1rem 0 0.1rem 0.8rem;
+            display: grid;
+            gap: 0.18rem;
           }
           .export-banner {
-            padding: 0.85rem 1rem;
-            border-radius: 0.9rem;
-            background: #fff7ed;
+            padding: 0.9rem 1rem;
+            border-radius: 1rem;
+            background: linear-gradient(135deg, #fff7ed, #ffffff);
             color: #9a3412;
+            border: 1px solid #fed7aa;
             display: grid;
             gap: 0.25rem;
             margin-bottom: 0.8rem;
@@ -1387,25 +1431,22 @@ export default function ComplaintsPage() {
           .full-span {
             grid-column: 1 / -1;
           }
-          .sla-badge {
-            display: inline-flex;
-            margin-top: 0.3rem;
-            padding: 0.2rem 0.6rem;
-            border-radius: 999px;
-            background: #fef2f2;
-            color: #dc2626;
-            font-size: 0.7rem;
-            font-weight: 700;
-            letter-spacing: 0.05em;
-            border: 1px solid #fca5a5;
-          }
           .empty-state {
-            color: #64748b;
+            color: var(--text-muted);
+          }
+          .eyebrow {
+            margin: 0 0 0.28rem;
+            font-size: 0.74rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--text-muted);
           }
           @media (max-width: 960px) {
-            .workspace-hero,
             .content-grid {
               grid-template-columns: 1fr;
+            }
+            .toolbar {
+              padding: 0.9rem;
             }
           }
         `}</style>
