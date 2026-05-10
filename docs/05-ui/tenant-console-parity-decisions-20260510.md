@@ -130,3 +130,79 @@ quota-impact read model, so the TEN-UI-RD-010 blocker does not apply.
 The route stays read-only. Inline mutation, geocode rewriting, and
 sensitive-flag toggles remain behind `UpsertTenantAddressCommand` and are
 not exposed in this surface.
+
+## TEN-UI-RD-011 — TN_Passengers contract validation
+
+Status: shipped
+Owner: `Codex`
+Reviewer: `Codex2`
+Last checked: `2026-05-10`
+
+### Decision
+
+Implement the tenant passengers surface against the published passenger
+directory contract. Keep the shipped route read-only and do not recreate
+sunset-only consent-version, CSV-import, or visitor-segmentation behavior that
+is not published in the tenant contract.
+
+### Why this is unblocked
+
+The published tenant passenger contract already exposes the directory fields
+needed for the TN_Passengers artboard's core roster view:
+
+- `TenantPassengerRecord` exposes full name, employee number, department,
+  mobile, email, active flag, roles, quality issues, and timestamps.
+- `GET /api/tenant/passengers` already returns the tenant-scoped passenger
+  directory.
+- `POST /api/tenant/passengers` accepts `UpsertTenantPassengerCommand` for
+  add / edit / deactivate mutations without inventing a second write surface.
+- `packages/api-client/src/index.ts` already publishes `listPassengers` and
+  `upsertPassenger`.
+
+The design artboard references consent-version framing, CSV import, and a
+visitor tab, but those semantics are not part of the published tenant
+passenger contract:
+
+- `TenantPassengerRecord` does not expose consent-version history.
+- `TenantPassengerMasterRole` publishes `passenger`, `employee`, `cardholder`,
+  and `vip`, but not a dedicated `visitor` enum.
+- No tenant passenger import endpoint or batch-import result contract is
+  published.
+
+### Source references
+
+- Tenant route inventory and passenger-directory scope:
+  - `docs/01-product/platform-admin-ops-tenant-console-product-spec-20260508.md`
+    section `9.6.3`
+  - `docs/03-runbooks/tenant-console-and-cross-system-design-execution-packet-20260508.md`
+    `Current Repo Baseline`
+- Tenant passenger contract:
+  - `packages/contracts/src/index.ts` (`TenantPassengerRecord`,
+    `TenantPassengerMasterRole`, `TenantPassengerQualityIssue`,
+    `UpsertTenantPassengerCommand`)
+- Tenant passenger controller:
+  - `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`
+    (`@Get("tenant/passengers")`, `@Post("tenant/passengers")`)
+- Tenant API client:
+  - `packages/api-client/src/index.ts` (`listPassengers`, `upsertPassenger`)
+- Design target:
+  - `docs/05-ui/drts-design-canvas/tenant-screens.jsx` `TN_Passengers`
+
+### Verified implementation surface
+
+- Route shell:
+  - `apps/tenant-console-web/app/passengers/page.tsx`
+- Tenant nav (new `Directory` group entry with `/passengers`):
+  - `apps/tenant-console-web/lib/navigation.ts`
+- Storybook parity story:
+  - `packages/ui-web/src/tenant-passengers.stories.tsx`
+
+### Scope guardrail
+
+The route stays read-only. It must not:
+
+- infer consent-version or import-job fields that are not in the published
+  contract
+- invent a dedicated visitor enum or visitor-only data model
+- expose CSV import or batch-mutation UX without a published tenant passenger
+  import contract

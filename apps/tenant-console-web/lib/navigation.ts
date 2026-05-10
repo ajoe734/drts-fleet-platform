@@ -34,6 +34,11 @@ export const tenantNavGroups: TenantNavGroup[] = [
     label: "Directory",
     items: [
       {
+        href: "/passengers",
+        label: "Passengers",
+        note: "Tenant passenger directory — identity, department, role tags, and active state.",
+      },
+      {
         href: "/addresses",
         label: "Addresses",
         note: "Tenant address book — saved pickups, drop-offs, tags, and ownership.",
