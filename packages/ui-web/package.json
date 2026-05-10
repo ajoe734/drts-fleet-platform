@@ -19,10 +19,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src --max-warnings=0",
+    "storybook": "storybook dev -p ${STORYBOOK_PORT:-6006}",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build-storybook": "storybook build"
   },
   "devDependencies": {
-    "next": "^16.2.3"
+    "@storybook/nextjs-vite": "^10.3.6",
+    "next": "^16.2.3",
+    "storybook": "^10.3.6",
+    "vite": "^8.0.11"
   }
 }
