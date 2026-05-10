@@ -7,6 +7,15 @@ export type { PageHeaderProps } from "./page-header";
 export { AppShellCard } from "./app-shell-card";
 export { AppSidebar } from "./app-sidebar";
 export type { AppSidebarProps, SidebarNavItem } from "./app-sidebar";
+export {
+  ManagementThemeProvider,
+  useOptionalManagementTheme,
+  useTheme,
+} from "./management-theme-context";
+export type {
+  ManagementThemeContextValue,
+  ManagementThemeProviderProps,
+} from "./management-theme-context";
 export { ManagementSidebar } from "./management-sidebar";
 export type {
   ManagementSidebarItem,

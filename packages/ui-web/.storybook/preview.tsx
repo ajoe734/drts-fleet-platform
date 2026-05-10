@@ -1,6 +1,23 @@
 import type { Preview } from "@storybook/nextjs-vite";
+import { ManagementThemeProvider } from "../src/management-theme-context";
+
+function resolveDark(value: unknown) {
+  return value === true || value === "true";
+}
 
 const preview: Preview = {
+  decorators: [
+    (Story, context) => (
+      <ManagementThemeProvider
+        density={
+          context.globals.density === "compact" ? "compact" : "comfortable"
+        }
+        dark={resolveDark(context.globals.dark)}
+      >
+        <Story />
+      </ManagementThemeProvider>
+    ),
+  ],
   globalTypes: {
     density: {
       description: "Management density",

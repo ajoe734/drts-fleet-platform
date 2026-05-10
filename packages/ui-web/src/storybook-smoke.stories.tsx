@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { ManagementShell } from "./management-shell";
 import { PageHeader } from "./page-header";
 import { StatCard } from "./stat-card";
-import type { ManagementDensity, ManagementMode } from "./management-theme";
+import { useTheme } from "./management-theme-context";
 
 const meta = {
   title: "Foundation/Smoke",
@@ -12,15 +12,11 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-function SmokeScene({
-  density,
-  mode,
-}: {
-  density: ManagementDensity;
-  mode: ManagementMode;
-}) {
+function SmokeScene() {
+  const { density, mode } = useTheme();
+
   return (
-    <ManagementShell mode={mode} density={density}>
+    <ManagementShell>
       <div
         style={{
           maxWidth: "960px",
@@ -66,12 +62,5 @@ function SmokeScene({
 }
 
 export const DashboardSlice: Story = {
-  render: (_args, context) => (
-    <SmokeScene
-      density={
-        context.globals.density === "compact" ? "compact" : "comfortable"
-      }
-      mode={context.globals.dark === true ? "dark" : "light"}
-    />
-  ),
+  render: () => <SmokeScene />,
 };
