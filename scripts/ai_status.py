@@ -808,14 +808,17 @@ def recompute_agents(state: dict[str, Any]) -> None:
         ]
         waiting = [task for task in queued if task not in ready]
 
-        if any(task["status"] == "blocked" for task in active):
-            agent["status"] = "blocked"
-            agent["current_task_ids"] = [task["id"] for task in active]
-        elif any(task["status"] == "in_progress" for task in active):
+        # Prefer in_progress > review > blocked: an agent with one running task
+        # and one blocked task is "working", not "blocked". Only when ALL active
+        # tasks are blocked do we surface that as the agent state.
+        if any(task["status"] == "in_progress" for task in active):
             agent["status"] = "working"
             agent["current_task_ids"] = [task["id"] for task in active]
         elif any(task["status"] == "review" for task in active):
             agent["status"] = "reviewing"
+            agent["current_task_ids"] = [task["id"] for task in active]
+        elif any(task["status"] == "blocked" for task in active):
+            agent["status"] = "blocked"
             agent["current_task_ids"] = [task["id"] for task in active]
         elif approved:
             agent["status"] = "finalize"
