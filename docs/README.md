@@ -44,6 +44,7 @@ Supporting repo-local orientation:
 - `docs/01-product/scope-phase1.md`
 - `docs/01-product/platform-admin-ops-tenant-console-product-spec-20260508.md`
 - `docs/05-ui/drts-management-ui-review-execution-tasks-20260508.md`
+- `docs/05-ui/drts-zip-vs-current-ui-diff-report-20260510.md`
 - `TARGET_ARCHITECTURE.md`
 - `ROADMAP.md`
 - `DEVELOPMENT_WORKBREAKDOWN.md`
@@ -85,6 +86,8 @@ remains open now.
 - `docs/03-runbooks/platform-admin-ops-console-design-execution-packet-20260508.md`
 - `docs/03-runbooks/tenant-console-and-cross-system-design-execution-packet-20260508.md`
 - `docs/03-runbooks/full-system-ui-completion-execution-packet-20260509.md`
+- `docs/03-runbooks/openai-agent-feedback-incident-20260510.md`
+- `docs/03-runbooks/agent-operating-memory-20260510.md`
 - `docs/03-runbooks/phase1-operational-blueprint-execution-packet-20260429.md`
 - `docs/03-runbooks/phase1-operational-remediation-execution-packet-20260430.md`
 - `docs/03-runbooks/gap-p2s3-001-cloud-iap-checklist.md`
