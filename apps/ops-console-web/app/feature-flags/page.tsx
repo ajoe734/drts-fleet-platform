@@ -1,10 +1,15 @@
+import type { CSSProperties } from "react";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 import {
+  CalloutBanner,
   DataCellStack,
+  DataFilterBar,
   DataTable,
   DataViewCard,
+  KpiCard,
+  KpiRow,
   PageHeader,
   StatusChip,
   Td,
@@ -16,6 +21,20 @@ interface FlagRecord {
   enabled: boolean;
   description?: string;
 }
+
+const pageLayoutStyle: CSSProperties = {
+  display: "grid",
+  gap: "20px",
+};
+
+const scopeItemStyle: CSSProperties = {
+  display: "grid",
+  gap: "8px",
+  padding: "12px 14px",
+  border: "1px solid #dbe2ea",
+  borderRadius: "14px",
+  background: "#f8fafc",
+};
 
 function featureFlagDescription(locale: string, flag: FlagRecord) {
   if (locale !== "zh") return flag.description ?? "—";
@@ -40,6 +59,24 @@ function featureFlagDescription(locale: string, flag: FlagRecord) {
   return descriptions[flag.key] || flag.description || "—";
 }
 
+function getFlagScope(flag: FlagRecord, locale: "en" | "zh") {
+  const prefix = flag.key.split(".")[0] ?? flag.key;
+
+  if (locale === "en") {
+    if (prefix === "ops-console") return "Ops console";
+    if (prefix === "driver-app") return "Driver app";
+    if (prefix === "tenant-portal") return "Tenant portal";
+    if (prefix === "phase1") return "Phase 1";
+    return prefix;
+  }
+
+  if (prefix === "ops-console") return "營運後台";
+  if (prefix === "driver-app") return "司機 App";
+  if (prefix === "tenant-portal") return "租戶入口";
+  if (prefix === "phase1") return "Phase 1";
+  return prefix;
+}
+
 export default async function FeatureFlagsPage() {
   const [client, locale] = await Promise.all([
     getServerOpsClient(),
@@ -55,79 +92,233 @@ export default async function FeatureFlagsPage() {
     error = e instanceof Error ? e.message : t("common.unknown", locale);
   }
 
-  const enabled = flags.filter((f) => f.enabled).length;
+  const enabled = flags.filter((flag) => flag.enabled).length;
   const disabled = flags.length - enabled;
+  const scopeGroups = Array.from(
+    flags.reduce((acc, flag) => {
+      const scope = getFlagScope(flag, locale);
+      const current = acc.get(scope) ?? { total: 0, enabled: 0 };
+      current.total += 1;
+      if (flag.enabled) current.enabled += 1;
+      acc.set(scope, current);
+      return acc;
+    }, new Map<string, { total: number; enabled: number }>()),
+  );
 
   return (
-    <>
+    <div style={pageLayoutStyle}>
       <PageHeader
+        eyebrow={locale === "en" ? "Master data" : "主資料"}
         title={t("flags.title", locale)}
-        subtitle={t("flags.subtitle", locale, { total: flags.length, enabled })}
+        subtitle={
+          locale === "en"
+            ? "Read-only visibility into rollout switches governed by platform controls."
+            : "只讀檢視由平台治理發佈的 rollout switches。"
+        }
+        meta={[
+          {
+            label: locale === "en" ? "Flags" : "旗標數",
+            value: flags.length,
+          },
+          {
+            label: locale === "en" ? "Enabled" : "啟用中",
+            value: enabled,
+            tone: "success",
+          },
+          {
+            label: locale === "en" ? "Scopes" : "範圍",
+            value: scopeGroups.length,
+          },
+        ]}
       />
 
-      {error && (
-        <div
-          style={{
-            background: "#fee2e2",
-            border: "1px solid #fca5a5",
-            borderRadius: "8px",
-            padding: "12px 16px",
-            color: "#b91c1c",
-            fontSize: "13.5px",
-            marginBottom: "20px",
-          }}
-        >
-          {error}
-        </div>
+      <KpiRow minWidth="170px">
+        <KpiCard
+          label={locale === "en" ? "Enabled" : "啟用中"}
+          value={enabled}
+          detail={
+            locale === "en" ? `${disabled} disabled` : `${disabled} 個目前停用`
+          }
+          tone="success"
+        />
+        <KpiCard
+          label={locale === "en" ? "Ops console" : "營運後台"}
+          value={
+            flags.filter((flag) => flag.key.startsWith("ops-console.")).length
+          }
+          detail={
+            locale === "en"
+              ? "Operationally visible switches"
+              : "營運面可見的控制開關"
+          }
+          tone="ops"
+        />
+        <KpiCard
+          label={locale === "en" ? "Driver app" : "司機 App"}
+          value={
+            flags.filter((flag) => flag.key.startsWith("driver-app.")).length
+          }
+          detail={
+            locale === "en"
+              ? "Mobile rollout dependencies"
+              : "行動端 rollout 依賴"
+          }
+          tone="info"
+        />
+        <KpiCard
+          label={locale === "en" ? "Read only" : "唯讀"}
+          value={locale === "en" ? "Yes" : "是"}
+          detail={
+            locale === "en"
+              ? "Published by platform governance, not edited here"
+              : "由平台治理發佈，不能在此頁直接修改"
+          }
+          tone="neutral"
+        />
+      </KpiRow>
+
+      {error ? (
+        <CalloutBanner
+          tone="danger"
+          title={t("flags.title", locale)}
+          description={error}
+        />
+      ) : (
+        <CalloutBanner
+          tone="info"
+          title={
+            locale === "en"
+              ? "Read-only operational mirror"
+              : "營運鏡像唯讀檢視"
+          }
+          description={
+            locale === "en"
+              ? "Flags stay visible in ops so rollout state can be correlated with incidents, dispatch drift, or support load without changing source governance."
+              : "營運可以在這裡對照 rollout 狀態與 incident、dispatch 漂移或客服負載，但不能改寫旗標來源治理。"
+          }
+        />
       )}
 
-      <DataViewCard
-        title={t("flags.title", locale)}
-        subtitle={t("flags.subtitle", locale, { total: flags.length, enabled })}
-        tone="info"
-        density="compact"
-        summary={t("flags.registrySummary", locale, {
-          enabled,
-          disabled,
-        })}
-        footer={t("flags.registryFooter", locale)}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1.7fr) minmax(280px, 0.9fr)",
+          gap: "16px",
+          alignItems: "start",
+        }}
       >
-        <DataTable
+        <DataViewCard
+          title={t("flags.title", locale)}
+          subtitle={t("flags.subtitle", locale, {
+            total: flags.length,
+            enabled,
+          })}
+          tone="ops"
           density="compact"
-          tone="info"
-          columns={[
-            { label: t("flags.col.key", locale) },
-            { label: t("flags.col.status", locale), width: "100px" },
-            { label: t("flags.col.description", locale) },
-          ]}
-          empty={t("flags.empty", locale)}
+          summary={t("flags.registrySummary", locale, {
+            enabled,
+            disabled,
+          })}
+          footer={t("flags.registryFooter", locale)}
+          filters={
+            <DataFilterBar
+              ariaLabel={locale === "en" ? "Flag views" : "旗標檢視"}
+              value="all"
+              filters={[
+                {
+                  value: "all",
+                  label: locale === "en" ? "All" : "全部",
+                  count: flags.length,
+                  tone: "ops",
+                },
+                {
+                  value: "enabled",
+                  label: locale === "en" ? "Enabled" : "啟用",
+                  count: enabled,
+                  tone: "success",
+                },
+                {
+                  value: "disabled",
+                  label: locale === "en" ? "Disabled" : "停用",
+                  count: disabled,
+                  tone: "neutral",
+                },
+              ]}
+            />
+          }
         >
-          {flags.map((f, i) => (
-            <Tr key={i}>
-              <Td mono density="compact">
+          <DataTable
+            density="compact"
+            tone="ops"
+            columns={[
+              { label: t("flags.col.key", locale) },
+              { label: locale === "en" ? "Scope" : "範圍", width: "120px" },
+              { label: t("flags.col.status", locale), width: "100px" },
+              { label: t("flags.col.description", locale) },
+            ]}
+            empty={t("flags.empty", locale)}
+          >
+            {flags.map((flag) => (
+              <Tr key={flag.key}>
+                <Td mono density="compact">
+                  <DataCellStack
+                    primary={flag.key}
+                    secondary={flag.enabled ? "enabled" : "disabled"}
+                  />
+                </Td>
+                <Td density="compact" muted>
+                  {getFlagScope(flag, locale)}
+                </Td>
+                <Td density="compact">
+                  <StatusChip
+                    tone={flag.enabled ? "success" : "neutral"}
+                    authorityLabel={locale === "zh" ? "狀態" : "state"}
+                    label={
+                      flag.enabled
+                        ? t("common.enabled", locale)
+                        : t("common.disabled", locale)
+                    }
+                  />
+                </Td>
+                <Td muted density="compact">
+                  {featureFlagDescription(locale, flag)}
+                </Td>
+              </Tr>
+            ))}
+          </DataTable>
+        </DataViewCard>
+
+        <DataViewCard
+          title={locale === "en" ? "Scope summary" : "範圍摘要"}
+          subtitle={
+            locale === "en"
+              ? "How many switches are active per product surface."
+              : "依產品面統計目前有多少開關與啟用項。"
+          }
+          tone="info"
+          density="compact"
+        >
+          <div style={{ display: "grid", gap: "10px" }}>
+            {scopeGroups.map(([scope, summary]) => (
+              <div key={scope} style={scopeItemStyle}>
                 <DataCellStack
-                  primary={f.key}
-                  secondary={f.enabled ? "enabled" : "disabled"}
-                />
-              </Td>
-              <Td density="compact">
-                <StatusChip
-                  tone={f.enabled ? "success" : "neutral"}
-                  authorityLabel={locale === "zh" ? "狀態" : "state"}
-                  label={
-                    f.enabled
-                      ? t("common.enabled", locale)
-                      : t("common.disabled", locale)
+                  primary={<strong>{scope}</strong>}
+                  secondary={
+                    locale === "en"
+                      ? `${summary.enabled} enabled of ${summary.total}`
+                      : `${summary.total} 個中有 ${summary.enabled} 個啟用`
                   }
                 />
-              </Td>
-              <Td muted density="compact">
-                {featureFlagDescription(locale, f)}
-              </Td>
-            </Tr>
-          ))}
-        </DataTable>
-      </DataViewCard>
-    </>
+                <StatusChip
+                  tone={summary.enabled > 0 ? "success" : "neutral"}
+                  authorityLabel={locale === "zh" ? "啟用" : "enabled"}
+                  label={`${summary.enabled}/${summary.total}`}
+                />
+              </div>
+            ))}
+          </div>
+        </DataViewCard>
+      </div>
+    </div>
   );
 }
