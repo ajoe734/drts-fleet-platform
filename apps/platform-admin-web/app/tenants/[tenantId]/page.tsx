@@ -74,6 +74,44 @@ const anchorSectionStyle = {
   scrollMarginTop: 96,
 } satisfies React.CSSProperties;
 
+const heroGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 1fr)",
+  gap: 16,
+  alignItems: "start",
+} satisfies React.CSSProperties;
+
+const statusSummaryGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+} satisfies React.CSSProperties;
+
+function roleStateLabel(
+  locale: string,
+  role: PlatformAdminTenantRecord["bootstrapDefaults"]["roleDefaults"][number],
+) {
+  if (role.acknowledgedAt) {
+    return locale === "en" ? "Acknowledged" : "已確認";
+  }
+  if (role.invitedAt) {
+    return locale === "en" ? "Invited" : "已邀請";
+  }
+  return locale === "en" ? "Pending" : "待處理";
+}
+
+function roleStateTone(
+  role: PlatformAdminTenantRecord["bootstrapDefaults"]["roleDefaults"][number],
+) {
+  if (role.acknowledgedAt) {
+    return "success" as const;
+  }
+  if (role.invitedAt) {
+    return "info" as const;
+  }
+  return role.required ? ("warning" as const) : ("neutral" as const);
+}
+
 function rolloutStepState(
   tenant: PlatformAdminTenantRecord,
   stage: PlatformTenantRolloutStage,
@@ -509,6 +547,9 @@ export default function TenantDetailPage() {
       )
     : [];
   const recentAudit = auditRecords.slice(0, 6);
+  const allRolesAcknowledged =
+    tenant !== null &&
+    acknowledgedRoles === tenant.bootstrapDefaults.roleDefaults.length;
 
   const onboardingItems = useMemo<DetailListItem[]>(() => {
     if (!tenant) {
@@ -827,6 +868,236 @@ export default function TenantDetailPage() {
           </a>
         </FilterPillRow>
       </WorkflowPanel>
+
+      <div id="rollout" style={anchorSectionStyle}>
+        <div style={heroGridStyle}>
+          <DataViewCard
+            title={copy.rolloutTitle}
+            subtitle={copy.rolloutSubtitle}
+            tone="platform"
+            actions={
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {PLATFORM_TENANT_ROLLOUT_STAGES.map((stage) => (
+                  <button
+                    key={stage}
+                    type="button"
+                    style={actionButtonStyle({
+                      tone: "secondary",
+                      size: "sm",
+                    })}
+                    disabled={promotingStage === stage}
+                    onClick={() => void promoteStage(stage)}
+                  >
+                    {promotingStage === stage
+                      ? t("common.saving")
+                      : `${copy.promote} ${formatPlatformCodeLabel(locale, stage)}`}
+                  </button>
+                ))}
+              </div>
+            }
+          >
+            <Stepper items={rolloutSteps} />
+            <div style={statusSummaryGridStyle}>
+              <CalloutBanner
+                tone={tenant.rollout.rollbackPrepared ? "success" : "warning"}
+                title={
+                  locale === "en" ? "Rollback readiness" : "Rollback readiness"
+                }
+                description={
+                  tenant.rollout.rollbackPrepared
+                    ? locale === "en"
+                      ? "Rollback owner and fallback posture are recorded."
+                      : "Rollback owner 與 fallback posture 已經記錄。"
+                    : locale === "en"
+                      ? "Rollback owner or readiness evidence is still missing."
+                      : "Rollback owner 或 readiness 證據仍待補齊。"
+                }
+              />
+              <CalloutBanner
+                tone={allRolesAcknowledged ? "success" : "warning"}
+                title={
+                  locale === "en" ? "Role acknowledgements" : "角色確認狀態"
+                }
+                description={
+                  locale === "en"
+                    ? `${acknowledgedRoles ?? 0}/${tenant.bootstrapDefaults.roleDefaults.length} roles acknowledged`
+                    : `${acknowledgedRoles ?? 0}/${tenant.bootstrapDefaults.roleDefaults.length} 個角色已確認`
+                }
+              />
+              <CalloutBanner
+                tone={tenant.rollout.notes ? "info" : "neutral"}
+                title={locale === "en" ? "Cutover note" : "Cutover 備註"}
+                description={tenant.rollout.notes ?? copy.noRolloutNotes}
+              />
+            </div>
+            <DetailMetadataGrid
+              minColumnWidth="180px"
+              items={[
+                {
+                  id: "cutover",
+                  label: locale === "en" ? "Cutover owner" : "Cutover owner",
+                  value: tenant.rollout.cutoverOwner ?? copy.noCutoverOwner,
+                },
+                {
+                  id: "rollback-owner",
+                  label: locale === "en" ? "Rollback owner" : "Rollback owner",
+                  value: tenant.rollout.rollbackOwner ?? copy.noRollbackOwner,
+                },
+                {
+                  id: "last-promoted",
+                  label: locale === "en" ? "Last promoted" : "最近推進時間",
+                  value: tenant.rollout.lastPromotedAt
+                    ? formatDateTime(tenant.rollout.lastPromotedAt)
+                    : "—",
+                },
+                {
+                  id: "current-stage",
+                  label: locale === "en" ? "Current stage" : "目前階段",
+                  value: formatPlatformCodeLabel(locale, tenant.rollout.stage),
+                },
+              ]}
+            />
+          </DataViewCard>
+
+          <DataViewCard
+            title={copy.onboardingTitle}
+            subtitle={copy.onboardingSubtitle}
+            tone="info"
+            summary={
+              locale === "en"
+                ? "This package stays visible during rollout review so cutover ownership, API scope, and billing defaults do not drift."
+                : "在 rollout review 時持續把 onboarding package 放在同一屏，避免 cutover owner、API scope 與 billing defaults 漂移。"
+            }
+          >
+            <DetailMetadataGrid
+              items={onboardingItems}
+              minColumnWidth="220px"
+            />
+          </DataViewCard>
+        </div>
+      </div>
+
+      <div id="roles" style={anchorSectionStyle}>
+        <DataViewCard
+          title={copy.rolesTitle}
+          subtitle={copy.rolesSubtitle}
+          tone="warning"
+          summary={
+            locale === "en"
+              ? "Roles and invite state stay in a table so rollout reviewers can scan pending acknowledgements before production promotion."
+              : "以表格保留 roles 與 invite state，讓 rollout reviewer 在 production promotion 前快速掃描待確認項。"
+          }
+        >
+          <KpiRow minWidth="160px">
+            <KpiCard
+              label={locale === "en" ? "Required roles" : "必要角色"}
+              value={requiredRoles ?? 0}
+              tone="warning"
+            />
+            <KpiCard
+              label={locale === "en" ? "Invited" : "已邀請"}
+              value={invitedRoles ?? 0}
+              tone="info"
+            />
+            <KpiCard
+              label={locale === "en" ? "Acknowledged" : "已確認"}
+              value={acknowledgedRoles ?? 0}
+              tone="success"
+            />
+          </KpiRow>
+          <DataTable
+            columns={[
+              { label: locale === "en" ? "Role" : "角色", width: "220px" },
+              {
+                label: locale === "en" ? "Requirement" : "要求",
+                width: "120px",
+              },
+              { label: locale === "en" ? "State" : "狀態", width: "140px" },
+              { label: locale === "en" ? "Timestamp" : "時間", width: "180px" },
+              { label: locale === "en" ? "Action" : "操作", width: "140px" },
+            ]}
+            empty={
+              locale === "en" ? "No roles configured." : "目前沒有角色設定。"
+            }
+          >
+            {tenant.bootstrapDefaults.roleDefaults.map((role) => {
+              const actionId =
+                role.acknowledgedAt || role.invitedAt
+                  ? `ack:${role.roleCode}`
+                  : `invite:${role.roleCode}`;
+              return (
+                <Tr key={role.roleCode}>
+                  <Td>
+                    <DataCellStack
+                      primary={<strong>{role.displayName}</strong>}
+                      secondary={formatPlatformCodeLabel(locale, role.roleCode)}
+                    />
+                  </Td>
+                  <Td>
+                    <StatusChip
+                      label={
+                        role.required
+                          ? locale === "en"
+                            ? "Required"
+                            : "必要"
+                          : locale === "en"
+                            ? "Optional"
+                            : "選填"
+                      }
+                      tone={role.required ? "warning" : "neutral"}
+                    />
+                  </Td>
+                  <Td>
+                    <StatusChip
+                      label={roleStateLabel(locale, role)}
+                      tone={roleStateTone(role)}
+                    />
+                  </Td>
+                  <Td muted>
+                    {role.acknowledgedAt
+                      ? formatDateTime(role.acknowledgedAt)
+                      : role.invitedAt
+                        ? formatDateTime(role.invitedAt)
+                        : "—"}
+                  </Td>
+                  <Td>
+                    {role.acknowledgedAt ? (
+                      <StatusChip
+                        label={locale === "en" ? "Complete" : "已完成"}
+                        tone="success"
+                      />
+                    ) : role.invitedAt ? (
+                      <button
+                        type="button"
+                        style={actionButtonStyle({
+                          tone: "secondary",
+                          size: "sm",
+                        })}
+                        disabled={roleAction === actionId}
+                        onClick={() => void acknowledgeRole(role.roleCode)}
+                      >
+                        {copy.acknowledge}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        style={actionButtonStyle({
+                          tone: "secondary",
+                          size: "sm",
+                        })}
+                        disabled={roleAction === actionId}
+                        onClick={() => void inviteRole(role.roleCode)}
+                      >
+                        {copy.invite}
+                      </button>
+                    )}
+                  </Td>
+                </Tr>
+              );
+            })}
+          </DataTable>
+        </DataViewCard>
+      </div>
 
       <WorkflowSplitLayout
         main={
@@ -1551,236 +1822,6 @@ export default function TenantDetailPage() {
         }
         side={
           <>
-            <div id="rollout" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.rolloutTitle}
-                description={copy.rolloutSubtitle}
-                meta={
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <StatusChip
-                      label={`${locale === "en" ? "Stage" : "階段"}: ${formatPlatformCodeLabel(locale, tenant.rollout.stage)}`}
-                      tone={tenantStageTone(tenant.rollout.stage)}
-                    />
-                    <StatusChip
-                      label={`Sandbox: ${tenant.rollout.sandboxStatus}`}
-                      tone={tenantStageTone(tenant.rollout.sandboxStatus)}
-                    />
-                    <StatusChip
-                      label={`Pilot: ${tenant.rollout.pilotStatus}`}
-                      tone={tenantStageTone(tenant.rollout.pilotStatus)}
-                    />
-                    <StatusChip
-                      label={`Production: ${tenant.rollout.productionStatus}`}
-                      tone={tenantStageTone(tenant.rollout.productionStatus)}
-                    />
-                  </div>
-                }
-              >
-                <Stepper items={rolloutSteps} />
-                <DetailMetadataGrid
-                  minColumnWidth="180px"
-                  items={[
-                    {
-                      id: "cutover",
-                      label:
-                        locale === "en" ? "Cutover owner" : "Cutover owner",
-                      value: tenant.rollout.cutoverOwner ?? copy.noCutoverOwner,
-                    },
-                    {
-                      id: "rollback-owner",
-                      label:
-                        locale === "en" ? "Rollback owner" : "Rollback owner",
-                      value:
-                        tenant.rollout.rollbackOwner ?? copy.noRollbackOwner,
-                    },
-                    {
-                      id: "rollback-prepared",
-                      label:
-                        locale === "en"
-                          ? "Rollback prepared"
-                          : "Rollback 已備妥",
-                      value:
-                        locale === "en"
-                          ? tenant.rollout.rollbackPrepared
-                            ? "Yes"
-                            : "No"
-                          : tenant.rollout.rollbackPrepared
-                            ? "是"
-                            : "否",
-                    },
-                    {
-                      id: "last-promoted",
-                      label: locale === "en" ? "Last promoted" : "最近推進時間",
-                      value: tenant.rollout.lastPromotedAt
-                        ? formatDateTime(tenant.rollout.lastPromotedAt)
-                        : "—",
-                    },
-                  ]}
-                />
-                <CalloutBanner
-                  tone={tenant.rollout.rollbackPrepared ? "info" : "warning"}
-                  title={
-                    locale === "en"
-                      ? "Rollout note and rollback readiness"
-                      : "Rollout 備註與 rollback readiness"
-                  }
-                  description={tenant.rollout.notes ?? copy.noRolloutNotes}
-                />
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {PLATFORM_TENANT_ROLLOUT_STAGES.map((stage) => (
-                    <button
-                      key={stage}
-                      type="button"
-                      style={actionButtonStyle({
-                        tone: "secondary",
-                        size: "sm",
-                      })}
-                      disabled={promotingStage === stage}
-                      onClick={() => void promoteStage(stage)}
-                    >
-                      {promotingStage === stage
-                        ? t("common.saving")
-                        : `${copy.promote} ${formatPlatformCodeLabel(locale, stage)}`}
-                    </button>
-                  ))}
-                </div>
-              </WorkflowPanel>
-            </div>
-
-            <div id="roles" style={anchorSectionStyle}>
-              <WorkflowPanel
-                title={copy.rolesTitle}
-                description={copy.rolesSubtitle}
-              >
-                <KpiRow minWidth="150px">
-                  <KpiCard
-                    label={locale === "en" ? "Required roles" : "必要角色"}
-                    value={requiredRoles ?? 0}
-                    tone="warning"
-                  />
-                  <KpiCard
-                    label={locale === "en" ? "Invited" : "已邀請"}
-                    value={invitedRoles ?? 0}
-                    tone="info"
-                  />
-                  <KpiCard
-                    label={locale === "en" ? "Acknowledged" : "已確認"}
-                    value={acknowledgedRoles ?? 0}
-                    tone="success"
-                  />
-                </KpiRow>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {tenant.bootstrapDefaults.roleDefaults.map((role) => {
-                    const actionId =
-                      role.acknowledgedAt || role.invitedAt
-                        ? `ack:${role.roleCode}`
-                        : `invite:${role.roleCode}`;
-                    return (
-                      <div
-                        key={role.roleCode}
-                        style={{
-                          display: "grid",
-                          gap: 6,
-                          padding: "12px 14px",
-                          borderRadius: 14,
-                          border: "1px solid #e2e8f0",
-                          background: "#f8fafc",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            gap: 8,
-                            alignItems: "center",
-                          }}
-                        >
-                          <strong style={{ color: "#0f172a", fontSize: 13.5 }}>
-                            {role.displayName}
-                          </strong>
-                          <StatusChip
-                            label={
-                              role.acknowledgedAt
-                                ? t("tenants.role.acknowledged")
-                                : role.invitedAt
-                                  ? t("tenants.role.invited")
-                                  : locale === "en"
-                                    ? "Pending"
-                                    : "待處理"
-                            }
-                            tone={
-                              role.acknowledgedAt
-                                ? "success"
-                                : role.invitedAt
-                                  ? "info"
-                                  : role.required
-                                    ? "warning"
-                                    : "neutral"
-                            }
-                          />
-                        </div>
-                        <div style={{ color: "#64748b", fontSize: 12.5 }}>
-                          {formatPlatformCodeLabel(locale, role.roleCode)}
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 8,
-                            flexWrap: "wrap",
-                            alignItems: "center",
-                          }}
-                        >
-                          <StatusChip
-                            label={
-                              role.required
-                                ? locale === "en"
-                                  ? "Required"
-                                  : "必要"
-                                : locale === "en"
-                                  ? "Optional"
-                                  : "選填"
-                            }
-                            tone={role.required ? "warning" : "neutral"}
-                          />
-                          {role.acknowledgedAt ? (
-                            <span style={{ fontSize: 12.5, color: "#64748b" }}>
-                              {formatDateTime(role.acknowledgedAt)}
-                            </span>
-                          ) : role.invitedAt ? (
-                            <button
-                              type="button"
-                              style={actionButtonStyle({
-                                tone: "secondary",
-                                size: "sm",
-                              })}
-                              disabled={roleAction === actionId}
-                              onClick={() =>
-                                void acknowledgeRole(role.roleCode)
-                              }
-                            >
-                              {copy.acknowledge}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              style={actionButtonStyle({
-                                tone: "secondary",
-                                size: "sm",
-                              })}
-                              disabled={roleAction === actionId}
-                              onClick={() => void inviteRole(role.roleCode)}
-                            >
-                              {copy.invite}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </WorkflowPanel>
-            </div>
-
             <WorkflowPanel
               title={copy.lifecycleTitle}
               description={copy.lifecycleSubtitle}

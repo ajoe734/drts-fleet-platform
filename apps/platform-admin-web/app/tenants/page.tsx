@@ -29,6 +29,8 @@ import {
   DataFilterBar,
   DataTable,
   DataViewCard,
+  FilterPill,
+  FilterPillRow,
   KpiCard,
   KpiRow,
   PageHeader,
@@ -44,6 +46,21 @@ type TenantFilter =
   | "pilot"
   | "production"
   | "rollback_hold";
+
+const watchlistGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+} satisfies React.CSSProperties;
+
+const watchlistCardStyle = {
+  display: "grid",
+  gap: 8,
+  padding: "14px 16px",
+  borderRadius: 16,
+  border: "1px solid #dbe4ee",
+  background: "#f8fafc",
+} satisfies React.CSSProperties;
 
 export default function TenantsPage() {
   const { t, locale } = useTranslation();
@@ -159,6 +176,24 @@ export default function TenantsPage() {
     }
   }, [filter, tenants]);
 
+  const rolloutWatchlist = useMemo(
+    () =>
+      [...tenants]
+        .filter(
+          (tenant) =>
+            tenant.status === "rollback_hold" ||
+            tenant.rollout.stage === "pilot" ||
+            tenant.rollout.stage === "sandbox",
+        )
+        .sort(
+          (left, right) =>
+            new Date(right.updatedAt).getTime() -
+            new Date(left.updatedAt).getTime(),
+        )
+        .slice(0, 3),
+    [tenants],
+  );
+
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
     setCreating(true);
@@ -262,17 +297,17 @@ export default function TenantsPage() {
 
       <KpiRow minWidth="220px">
         <KpiCard
-          label={locale === "en" ? "Registered tenants" : "已登錄租戶"}
+          label={locale === "en" ? "Active tenants" : "活躍租戶"}
           value={counts.all}
           detail={
             locale === "en"
               ? `${counts.active} active · ${counts.paused} paused`
               : `${counts.active} 啟用 · ${counts.paused} 暫停`
           }
-          tone="neutral"
+          tone="platform"
         />
         <KpiCard
-          label={locale === "en" ? "Production rollout" : "Production rollout"}
+          label={locale === "en" ? "Production lane" : "Production lane"}
           value={counts.production}
           detail={
             locale === "en"
@@ -280,6 +315,16 @@ export default function TenantsPage() {
               : `${counts.pilot} pilot · ${counts.sandbox} sandbox`
           }
           tone="success"
+        />
+        <KpiCard
+          label={locale === "en" ? "Pilot and sandbox" : "Pilot 與 sandbox"}
+          value={counts.pilot + counts.sandbox}
+          detail={
+            locale === "en"
+              ? "Tenants still moving through rollout gates"
+              : "仍在 rollout gate 中前進的租戶"
+          }
+          tone="info"
         />
         <KpiCard
           label={locale === "en" ? "Rollback hold" : "Rollback hold"}
@@ -292,6 +337,91 @@ export default function TenantsPage() {
           tone={counts.rollback_hold > 0 ? "danger" : "neutral"}
         />
       </KpiRow>
+
+      <WorkflowPanel
+        title={locale === "en" ? "Rollout watchlist" : "Rollout watchlist"}
+        description={
+          locale === "en"
+            ? "Keep sandbox, pilot, and rollback-hold tenants in a single governance lane before drilling into the tenant detail route."
+            : "在進入 tenant detail 前，先把 sandbox、pilot 與 rollback hold 租戶集中在同一條治理 watchlist。"
+        }
+        tone="platform"
+        meta={
+          <FilterPillRow>
+            <FilterPill
+              label={locale === "en" ? "All tenants" : "全部租戶"}
+              count={counts.all}
+              tone="neutral"
+              active={filter === "all"}
+            />
+            <FilterPill
+              label="sandbox"
+              count={counts.sandbox}
+              tone="warning"
+              active={filter === "sandbox"}
+            />
+            <FilterPill
+              label="pilot"
+              count={counts.pilot}
+              tone="info"
+              active={filter === "pilot"}
+            />
+            <FilterPill
+              label="production"
+              count={counts.production}
+              tone="success"
+              active={filter === "production"}
+            />
+            <FilterPill
+              label="rollback hold"
+              count={counts.rollback_hold}
+              tone="danger"
+              active={filter === "rollback_hold"}
+            />
+          </FilterPillRow>
+        }
+      >
+        <div style={watchlistGridStyle}>
+          {rolloutWatchlist.map((tenant) => (
+            <div key={tenant.id} style={watchlistCardStyle}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  alignItems: "flex-start",
+                }}
+              >
+                <DataCellStack
+                  primary={<strong>{tenant.name}</strong>}
+                  secondary={`${tenant.code} · ${tenant.id}`}
+                />
+                <StatusChip
+                  label={formatPlatformCodeLabel(locale, tenant.rollout.stage)}
+                  tone={tenantStageTone(tenant.rollout.stage)}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <StatusChip
+                  label={formatPlatformCodeLabel(locale, tenant.status)}
+                  tone={tenantStatusTone(tenant.status)}
+                />
+                <StatusChip
+                  label={formatPlatformCodeLabel(
+                    locale,
+                    tenant.integrationPackage.mode,
+                  )}
+                  tone="neutral"
+                />
+              </div>
+              <div style={{ color: "#64748b", fontSize: 12.5 }}>
+                {locale === "en" ? "Updated" : "最近更新"}:{" "}
+                {new Date(tenant.updatedAt).toLocaleString()}
+              </div>
+            </div>
+          ))}
+        </div>
+      </WorkflowPanel>
 
       {counts.rollback_hold > 0 ? (
         <CalloutBanner
@@ -348,7 +478,12 @@ export default function TenantsPage() {
 
       <DataViewCard
         title={copy.summary}
-        subtitle={copy.subtitle}
+        subtitle={
+          locale === "en"
+            ? "Platform-owned roster for rollout posture, module coverage, quota baselines, and integration mode."
+            : "平台治理名單，集中呈現 rollout posture、模組覆蓋、配額基線與介接模式。"
+        }
+        tone="platform"
         filters={
           <DataFilterBar
             value={filter}
@@ -388,6 +523,11 @@ export default function TenantsPage() {
             ]}
           />
         }
+        summary={
+          locale === "en"
+            ? `${visibleTenants.length} visible rows · open tenant detail to manage rollout, onboarding defaults, and role acknowledgements.`
+            : `目前顯示 ${visibleTenants.length} 筆租戶；進入 detail 後可治理 rollout、onboarding defaults 與角色確認。`
+        }
       >
         <DataTable
           columns={[
@@ -402,7 +542,7 @@ export default function TenantsPage() {
           empty={t("tenants.empty")}
         >
           {visibleTenants.map((tenant) => (
-            <Tr key={tenant.id}>
+            <Tr key={tenant.id} highlighted={tenant.status === "rollback_hold"}>
               <Td>
                 <DataCellStack
                   primary={<strong>{tenant.name}</strong>}
