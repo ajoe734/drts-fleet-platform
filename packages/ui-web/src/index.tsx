@@ -14,17 +14,28 @@ export type {
 } from "./management-shell";
 export {
   MANAGEMENT_COLORS,
+  MANAGEMENT_COLOR_MODES,
   MANAGEMENT_RADIUS,
   MANAGEMENT_SPACING,
   MANAGEMENT_SURFACE_TONES,
+  MANAGEMENT_SURFACE_TONE_MODES,
   MANAGEMENT_TYPOGRAPHY,
   densityValue,
+  managementColors,
   managementMainShellStyle,
   managementPageStackStyle,
+  managementSurfaceTone,
 } from "./management-theme";
-export type { ManagementDensity, ManagementTone } from "./management-theme";
+export type {
+  ManagementAccent,
+  ManagementAuthority,
+  ManagementDensity,
+  ManagementMode,
+  ManagementTone,
+} from "./management-theme";
 export {
   AuthorityBadge,
+  AuthorityBanner,
   CalloutBanner,
   DataCellStack,
   DataFilterBar,
@@ -35,6 +46,7 @@ export {
   FilterPillRow,
   KpiCard,
   KpiRow,
+  PlatformBadge,
   SectionHeader,
   StatusChip,
   Stepper,
@@ -44,6 +56,8 @@ export {
   WorkflowPanel,
 } from "./management-primitives";
 export type {
+  AuthorityBadgeProps,
+  AuthorityBannerProps,
   CalloutBannerProps,
   DataFilterBarProps,
   DataFilterOption,
@@ -53,8 +67,10 @@ export type {
   FilterPillProps,
   KpiCardProps,
   PageMetaItem,
+  PlatformBadgeProps,
   SectionHeaderProps,
   StatusChipProps,
+  StatusChipLocale,
   StepState,
   StepperOrientation,
   StepperProps,
