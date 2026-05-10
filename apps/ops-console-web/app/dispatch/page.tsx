@@ -16,15 +16,28 @@ import {
 } from "@/lib/ops-analytics";
 import { PageHeader } from "@drts/ui-web";
 import { StatCard } from "@drts/ui-web";
-import { AuthorityBadge, Card, CardBody } from "@drts/ui-web";
+import {
+  AuthorityBadge,
+  Card,
+  CardBody,
+  managementSurfaceTone,
+} from "@drts/ui-web";
 import { DispatchWorkflow } from "./dispatch-workflow";
+import {
+  DISPATCH_VIEW_ORDER,
+  getDispatchViewHref,
+  getDispatchViewLabelKey,
+  isGovernanceScopedOrder,
+  isNoSupplyScopedOrder,
+  resolveDispatchView,
+  toOwnedDispatchBoardMode,
+  type DispatchView,
+} from "./dispatch-view-model";
 import { ForwardedOrderBoard } from "./forwarded-order-board";
 
 type DispatchPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
-
-type DispatchView = "forwarded" | "owned";
 
 async function resolveOrFallback<T>(
   loader: () => Promise<T>,
@@ -41,24 +54,38 @@ function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function resolveView(value: string | undefined): DispatchView {
-  return value === "owned" ? "owned" : "forwarded";
-}
+function actionLinkStyle(view: DispatchView, active = false) {
+  const tone =
+    view === "forwarded"
+      ? managementSurfaceTone("forwarded")
+      : view === "owned"
+        ? managementSurfaceTone("owned")
+        : managementSurfaceTone("warning");
 
-function actionLinkStyle(active = false) {
   return {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: "10px",
-    border: `1px solid ${active ? "#0f172a" : "#cbd5e1"}`,
-    background: active ? "#0f172a" : "#ffffff",
-    color: active ? "#ffffff" : "#334155",
-    padding: "10px 12px",
+    borderRadius: "999px",
+    border: `1px solid ${active ? tone.border : "#d7dde8"}`,
+    background: active ? tone.background : "#ffffff",
+    color: active ? tone.text : "#334155",
+    padding: "10px 14px",
     fontSize: "13px",
-    fontWeight: 600,
+    fontWeight: 700,
     textDecoration: "none",
     whiteSpace: "nowrap" as const,
+    boxShadow: active ? `inset 0 0 0 1px ${tone.border}` : "none",
+  };
+}
+
+function summaryCardStyle(background: string, border: string, color: string) {
+  return {
+    border: `1px solid ${border}`,
+    borderRadius: "16px",
+    padding: "16px 18px",
+    background,
+    color,
   };
 }
 
@@ -73,25 +100,19 @@ export default async function DispatchPage({
         {} as Record<string, string | string[] | undefined>,
       )) as Promise<Record<string, string | string[] | undefined>>,
   ]);
-  const view = resolveView(firstParam(resolvedSearchParams?.view));
+  const view = resolveDispatchView(firstParam(resolvedSearchParams?.view));
   const focusOrderId = firstParam(resolvedSearchParams?.orderId) ?? "";
   const actions = (
     <>
-      <Link href="/dispatch" style={actionLinkStyle(view === "forwarded")}>
-        {t("dispatch.view.forwarded", locale)}
-      </Link>
-      <Link
-        href="/dispatch?view=owned"
-        style={actionLinkStyle(view === "owned")}
-      >
-        {t("dispatch.view.owned", locale)}
-      </Link>
-      <Link href="/revenue" style={actionLinkStyle()}>
-        {t("dispatch.view.revenue", locale)}
-      </Link>
-      <Link href="/contracts" style={actionLinkStyle()}>
-        {t("dispatch.view.contracts", locale)}
-      </Link>
+      {DISPATCH_VIEW_ORDER.map((tabView) => (
+        <Link
+          key={tabView}
+          href={getDispatchViewHref(tabView)}
+          style={actionLinkStyle(tabView, view === tabView)}
+        >
+          {t(getDispatchViewLabelKey(tabView), locale)}
+        </Link>
+      ))}
     </>
   );
 
@@ -192,12 +213,65 @@ export default async function DispatchPage({
     ),
   ]);
   const insights = buildDispatchInsights(orders, dispatchJobs);
+  const ownedBoardMode = toOwnedDispatchBoardMode(view);
+  const orderJobMap = dispatchJobs.reduce(
+    (acc, job) => {
+      acc[job.orderId] = job;
+      return acc;
+    },
+    {} as Record<string, DispatchJobRecord>,
+  );
+  const governanceScopedCount = orders.filter((order) =>
+    isGovernanceScopedOrder(order, orderJobMap[order.orderId]),
+  ).length;
+  const noSupplyScopedCount = orders.filter((order) =>
+    isNoSupplyScopedOrder(order, orderJobMap[order.orderId]),
+  ).length;
+  const activeSummary =
+    view === "governance"
+      ? {
+          category: "ops" as const,
+          tone: "warning" as const,
+          label: t("dispatch.page.governanceAuthority", locale),
+          headline: t("dispatch.page.governanceHeadline", locale),
+          summary: t("dispatch.page.governanceSummary", locale, {
+            count: governanceScopedCount,
+          }),
+          palette: managementSurfaceTone("warning"),
+        }
+      : view === "no_supply"
+        ? {
+            category: "queue" as const,
+            tone: "warning" as const,
+            label: t("dispatch.page.noSupplyAuthority", locale),
+            headline: t("dispatch.page.noSupplyHeadline", locale),
+            summary: t("dispatch.page.noSupplySummary", locale, {
+              count: noSupplyScopedCount,
+            }),
+            palette: managementSurfaceTone("warning"),
+          }
+        : {
+            category: "owned" as const,
+            tone: "info" as const,
+            label: t("dispatch.page.ownedAuthority", locale),
+            headline: t("dispatch.page.ownedHeadline", locale),
+            summary: t("dispatch.page.ownedSummary", locale, {
+              count: insights.exceptionOrders,
+            }),
+            palette: managementSurfaceTone("owned"),
+          };
+  const ownedPageSubtitle =
+    view === "governance"
+      ? t("dispatch.governance.subtitle", locale)
+      : view === "no_supply"
+        ? t("dispatch.noSupply.subtitle", locale)
+        : t("dispatch.subtitle", locale);
 
   return (
     <>
       <PageHeader
         title={t("dispatch.title", locale)}
-        subtitle={t("dispatch.subtitle", locale)}
+        subtitle={ownedPageSubtitle}
         actions={actions}
       />
 
@@ -255,87 +329,35 @@ export default async function DispatchPage({
         <CardBody>
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: "16px",
+              ...summaryCardStyle(
+                activeSummary.palette.background,
+                activeSummary.palette.border,
+                activeSummary.palette.text,
+              ),
               marginBottom: "16px",
             }}
           >
             <div
               style={{
-                border: "1px solid #dbeafe",
-                borderRadius: "12px",
-                padding: "14px 16px",
-                background: "#f8fbff",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                fontSize: "11px",
+                letterSpacing: "0.06em",
+                marginBottom: "8px",
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  fontSize: "11px",
-                  letterSpacing: "0.06em",
-                  color: "#64748b",
-                  marginBottom: "6px",
-                }}
-              >
-                <AuthorityBadge
-                  category="owned"
-                  label={t("dispatch.page.ownedAuthority", locale)}
-                  tone="info"
-                />
-              </div>
-              <div
-                style={{ fontSize: "14px", fontWeight: 600, color: "#0f172a" }}
-              >
-                {t("dispatch.page.ownedHeadline", locale)}
-              </div>
-              <div
-                style={{ marginTop: "6px", fontSize: "13px", color: "#475569" }}
-              >
-                {t("dispatch.page.ownedSummary", locale, {
-                  count: insights.exceptionOrders,
-                })}
-              </div>
+              <AuthorityBadge
+                category={activeSummary.category}
+                label={activeSummary.label}
+                tone={activeSummary.tone}
+              />
             </div>
-            <div
-              style={{
-                border: "1px solid #fde68a",
-                borderRadius: "12px",
-                padding: "14px 16px",
-                background: "#fffbeb",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  fontSize: "11px",
-                  letterSpacing: "0.06em",
-                  color: "#92400e",
-                  marginBottom: "6px",
-                }}
-              >
-                <AuthorityBadge
-                  category="forwarded"
-                  label={t("dispatch.page.forwardedAuthority", locale)}
-                  tone="warning"
-                />
-              </div>
-              <div
-                style={{ fontSize: "14px", fontWeight: 600, color: "#0f172a" }}
-              >
-                {t("dispatch.page.forwardedHeadline", locale)}
-              </div>
-              <div
-                style={{ marginTop: "6px", fontSize: "13px", color: "#78350f" }}
-              >
-                {t("dispatch.page.forwardedSummary", locale, {
-                  count: forwarderSyncErrors.length,
-                })}
-              </div>
+            <div style={{ fontSize: "14px", fontWeight: 700 }}>
+              {activeSummary.headline}
+            </div>
+            <div style={{ marginTop: "6px", fontSize: "13px", opacity: 0.9 }}>
+              {activeSummary.summary}
             </div>
           </div>
           <div
@@ -353,9 +375,11 @@ export default async function DispatchPage({
           </div>
           <div style={{ marginTop: "16px" }}>
             <DispatchWorkflow
+              key={ownedBoardMode}
               orders={orders}
               dispatchJobs={dispatchJobs}
               focusOrderId={focusOrderId}
+              mode={ownedBoardMode}
             />
           </div>
         </CardBody>

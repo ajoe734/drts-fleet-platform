@@ -1,7 +1,10 @@
 "use client";
 
 import { Children, type ReactNode } from "react";
-import { MANAGEMENT_COLORS } from "./management-theme";
+import {
+  MANAGEMENT_COLORS,
+  MANAGEMENT_SURFACE_TONES,
+} from "./management-theme";
 import type { ManagementTone } from "./management-theme";
 
 export interface Column {
@@ -20,12 +23,18 @@ interface DataTableProps {
 }
 
 const TABLE_TONE_HEADER: Record<ManagementTone, string> = {
-  neutral: "#f8fafc",
-  info: "#eff6ff",
-  success: "#f0fdf4",
-  warning: "#fff7ed",
-  danger: "#fef2f2",
-  accent: "#f5f3ff",
+  neutral: MANAGEMENT_SURFACE_TONES.neutral.background,
+  info: MANAGEMENT_SURFACE_TONES.info.background,
+  success: MANAGEMENT_SURFACE_TONES.success.background,
+  warning: MANAGEMENT_SURFACE_TONES.warning.background,
+  danger: MANAGEMENT_SURFACE_TONES.danger.background,
+  accent: MANAGEMENT_SURFACE_TONES.accent.background,
+  platform: MANAGEMENT_SURFACE_TONES.platform.background,
+  ops: MANAGEMENT_SURFACE_TONES.ops.background,
+  tenant: MANAGEMENT_SURFACE_TONES.tenant.background,
+  partner: MANAGEMENT_SURFACE_TONES.partner.background,
+  owned: MANAGEMENT_SURFACE_TONES.owned.background,
+  forwarded: MANAGEMENT_SURFACE_TONES.forwarded.background,
 };
 
 export function DataTable({

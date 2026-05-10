@@ -21,6 +21,10 @@ import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { Badge, Card, CardBody, CardHeader } from "@drts/ui-web";
+import {
+  getForwardedRowStyle,
+  needsForwardedAttention,
+} from "./dispatch-view-model";
 
 type ForwardedFilter =
   | "all"
@@ -109,15 +113,6 @@ function isTerminalStatus(status: ForwardedOrderStatus) {
   );
 }
 
-function needsAttention(order: ForwardedOrderRecord) {
-  return (
-    order.status === "accept_pending" ||
-    order.status === "sync_failed" ||
-    order.manualFallback.required ||
-    order.reconciliationJob?.status === "queued"
-  );
-}
-
 function pickInitialOrderId(
   orders: ForwardedOrderRecord[],
   preferredOrderId?: string,
@@ -128,7 +123,7 @@ function pickInitialOrderId(
   ) {
     return preferredOrderId;
   }
-  const attentionOrder = orders.find(needsAttention);
+  const attentionOrder = orders.find(needsForwardedAttention);
   return attentionOrder?.mirrorOrderId ?? orders[0]?.mirrorOrderId ?? null;
 }
 
@@ -216,7 +211,7 @@ function matchesFilter(order: ForwardedOrderRecord, filter: ForwardedFilter) {
     case "all":
       return true;
     case "attention":
-      return needsAttention(order);
+      return needsForwardedAttention(order);
     case "broadcasted":
       return order.status === "broadcasted";
     case "accept_pending":
@@ -1115,20 +1110,11 @@ export function ForwardedOrderBoard({
                 {visibleOrders.length > 0 ? (
                   visibleOrders.map((order) => {
                     const active = order.mirrorOrderId === selectedOrderId;
-                    const warning = needsAttention(order);
                     return (
                       <tr
                         key={order.mirrorOrderId}
                         onClick={() => setSelectedOrderId(order.mirrorOrderId)}
-                        style={{
-                          cursor: "pointer",
-                          background: active
-                            ? "#eff6ff"
-                            : warning
-                              ? "#fff7ed"
-                              : "#ffffff",
-                          borderBottom: "1px solid #f1f5f9",
-                        }}
+                        style={getForwardedRowStyle(order, active)}
                       >
                         <td
                           style={{

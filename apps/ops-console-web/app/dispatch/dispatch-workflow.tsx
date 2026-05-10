@@ -36,11 +36,16 @@ import {
   getCandidateLocationState,
   getCandidateLocationTone,
 } from "./location-state";
+import {
+  matchesOwnedDispatchBoardMode,
+  type OwnedDispatchBoardMode,
+} from "./dispatch-view-model";
 
 interface DispatchWorkflowProps {
   orders: OwnedOrderRecord[];
   dispatchJobs: DispatchJobRecord[];
   focusOrderId?: string;
+  mode?: OwnedDispatchBoardMode;
 }
 
 type QueueState =
@@ -604,6 +609,7 @@ export function DispatchWorkflow({
   orders,
   dispatchJobs,
   focusOrderId = "",
+  mode = "owned",
 }: DispatchWorkflowProps) {
   const { t, locale } = useTranslation();
   const client = getOpsClient();
@@ -687,9 +693,16 @@ export function DispatchWorkflow({
       ),
     [candidates, liveOrders, orderJobMap],
   );
+  const scopedOrders = useMemo(
+    () =>
+      liveOrders.filter((order) =>
+        matchesOwnedDispatchBoardMode(order, mode, orderJobMap[order.orderId]),
+      ),
+    [liveOrders, mode, orderJobMap],
+  );
 
   useEffect(() => {
-    const visibleJobIds = liveOrders
+    const visibleJobIds = scopedOrders
       .map((order) => orderJobMap[order.orderId]?.dispatchJobId ?? null)
       .filter((jobId): jobId is string => Boolean(jobId));
     const missingJobIds = visibleJobIds.filter(
@@ -711,7 +724,7 @@ export function DispatchWorkflow({
           autoLoadedCandidateJobsRef.current.delete(jobId);
         });
     });
-  }, [candidates, client, liveOrders, orderJobMap]);
+  }, [candidates, client, orderJobMap, scopedOrders]);
 
   const reloadDispatchState = async () => {
     const [nextOrders, nextDispatchJobs] = await Promise.all([
@@ -903,7 +916,7 @@ export function DispatchWorkflow({
     };
   }, []);
 
-  const filteredOrders = liveOrders.filter((order) => {
+  const filteredOrders = scopedOrders.filter((order) => {
     const job = orderJobMap[order.orderId];
     if (filterMode === "attention") {
       const needsAttention =

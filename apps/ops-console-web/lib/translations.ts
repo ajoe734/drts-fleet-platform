@@ -572,13 +572,27 @@ const en = {
   "dispatch.workflow.eventFailed": "Failed to process dispatch event",
   "dispatch.view.forwarded": "Forwarded Board",
   "dispatch.view.owned": "Owned Dispatch",
-  "dispatch.view.revenue": "Revenue / Recon",
-  "dispatch.view.contracts": "Manual Review",
+  "dispatch.view.governance": "Override Governance",
+  "dispatch.view.noSupply": "No-supply",
+  "dispatch.governance.subtitle":
+    "Override approvals, exception holds, and timed-out redispatches",
+  "dispatch.noSupply.subtitle":
+    "No-supply escalations, delayed queue recovery, and retry orchestration",
   "dispatch.page.ownedHeadline":
     "Owned board stays inside local dispatch authority.",
   "dispatch.page.ownedSummary":
     "{count} exception-hold / no-supply orders need workflow review alongside live candidate context.",
   "dispatch.page.ownedAuthority": "Ops-owned dispatch lane",
+  "dispatch.page.governanceHeadline":
+    "Governance tab isolates override and exception decisions before release back to dispatch.",
+  "dispatch.page.governanceSummary":
+    "{count} orders currently require exception-desk or override governance review.",
+  "dispatch.page.governanceAuthority": "Override governance lane",
+  "dispatch.page.noSupplyHeadline":
+    "No-supply tab keeps recovery work separate from normal owned queue execution.",
+  "dispatch.page.noSupplySummary":
+    "{count} orders are in no-supply or delayed-queue recovery lanes right now.",
+  "dispatch.page.noSupplyAuthority": "No-supply escalation lane",
   "dispatch.page.forwardedHeadline":
     "Forwarded work stays in mirror-order triage and reconciliation lanes.",
   "dispatch.page.forwardedSummary":
@@ -2022,13 +2036,25 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.eventFailed": "處理派車事件失敗",
   "dispatch.view.forwarded": "外部平台看板",
   "dispatch.view.owned": "本地派車",
-  "dispatch.view.revenue": "收益 / 對帳",
-  "dispatch.view.contracts": "人工審查",
+  "dispatch.view.governance": "Override 治理",
+  "dispatch.view.noSupply": "無供給",
+  "dispatch.governance.subtitle": "Override 核准、例外保留與逾時重派治理",
+  "dispatch.noSupply.subtitle": "無供給升級、延遲佇列復原與重試協調",
   "dispatch.page.ownedHeadline":
     "本地派車看板維持在本地 dispatch authority 內處理。",
   "dispatch.page.ownedSummary":
     "{count} 筆例外保留 / 無供給訂單需要搭配即時候選供給一起檢查。",
   "dispatch.page.ownedAuthority": "營運自有派車 lane",
+  "dispatch.page.governanceHeadline":
+    "治理分頁將 override 與例外決策獨立出來，不與一般 owned queue 混在一起。",
+  "dispatch.page.governanceSummary":
+    "目前有 {count} 筆訂單需要 exception desk / override 治理審查。",
+  "dispatch.page.governanceAuthority": "Override 治理 lane",
+  "dispatch.page.noSupplyHeadline":
+    "無供給分頁將供給不足復原工作獨立，避免干擾一般 owned 派車節奏。",
+  "dispatch.page.noSupplySummary":
+    "目前有 {count} 筆訂單位於 no-supply 或 delayed queue 復原流程。",
+  "dispatch.page.noSupplyAuthority": "無供給升級 lane",
   "dispatch.page.forwardedHeadline":
     "Forwarded 工作維持在鏡像訂單分流與 reconciliation 流程中。",
   "dispatch.page.forwardedSummary":
