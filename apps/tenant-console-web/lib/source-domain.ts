@@ -1,4 +1,8 @@
-import type { BookingRecord } from "@drts/contracts";
+import type {
+  BookingRecord,
+  InvoiceLineRecord,
+  TenantInvoiceRecord,
+} from "@drts/contracts";
 
 type SourceTone = "owned" | "external";
 type SourceDomain = "owned" | "partner_external" | "forwarded_authority";
@@ -80,6 +84,103 @@ export function getBookingSourceVisibility(
       "Escalate only when the owned dispatch workflow itself needs manual intervention or policy override.",
     financeAuthority:
       "DRTS remains the local pricing, dispatch, and settlement authority for this booking unless a later finance artifact says otherwise.",
+  };
+}
+
+export function getInvoiceLineSourceVisibility(
+  line: Pick<
+    InvoiceLineRecord,
+    "channelKey" | "partnerEntrySlug" | "partnerId" | "issuerAuthorizationRef"
+  >,
+): SourceVisibility {
+  if (line.channelKey === "forwarded_shadow") {
+    return {
+      domain: "forwarded_authority",
+      tone: "external",
+      badge: "External finance authority",
+      summary: "External platform settlement owner",
+      detail:
+        "Settlement, receipt ownership, and driver payout stay with the external platform. DRTS only mirrors audit-safe finance context locally.",
+      statusBoundary:
+        "Invoice visibility can remain tenant-safe while external-platform reconciliation states stay on ops and finance operations surfaces.",
+      escalationHint:
+        "Use ops or finance reconciliation lanes when a mirrored settlement row looks stale, missing, or disputed.",
+      financeAuthority:
+        "External platform settlement, payout, and receipt issuance remain authoritative for this line.",
+    };
+  }
+
+  if (line.partnerEntrySlug || line.partnerId || line.issuerAuthorizationRef) {
+    return {
+      domain: "partner_external",
+      tone: "external",
+      badge: "Externally fulfilled",
+      summary: "Partner-sponsored fulfillment path",
+      detail:
+        "This line carries partner-program provenance. Tenant billing stays visible here while partner-side sponsorship and fulfillment context remains distinct from DRTS-operated trips.",
+      statusBoundary:
+        "Tenant billing keeps the business artifact visible, while partner-side fulfillment and sponsorship state remain outside this route.",
+      escalationHint:
+        "Use partner support or ops escalation when the sponsorship or fulfillment side needs intervention.",
+      financeAuthority:
+        "Tenant billing remains readable, but downstream sponsor or partner obligations can still sit outside DRTS-owned execution.",
+    };
+  }
+
+  return {
+    domain: "owned",
+    tone: "owned",
+    badge: "DRTS finance authority",
+    summary: "Platform-operated billing",
+    detail:
+      "DRTS remains the local billing and settlement authority for this line item.",
+    statusBoundary:
+      "Owned billing artifacts stay within the same tenant-visible lifecycle and do not depend on external-platform reconciliation.",
+    escalationHint:
+      "Escalate only when the owned DRTS billing or settlement workflow itself needs manual intervention.",
+    financeAuthority:
+      "DRTS remains the authoritative billing, settlement, and payout lane for this line item.",
+  };
+}
+
+export function summarizeInvoiceSourceDomains(
+  invoice: Pick<TenantInvoiceRecord, "lines">,
+) {
+  const counts = invoice.lines.reduce(
+    (summary, line) => {
+      const visibility = getInvoiceLineSourceVisibility(line);
+      if (visibility.tone === "external") {
+        summary.external += 1;
+      } else {
+        summary.owned += 1;
+      }
+
+      if (line.channelKey === "forwarded_shadow") {
+        summary.externalFinanceAuthority += 1;
+      }
+
+      return summary;
+    },
+    { owned: 0, external: 0, externalFinanceAuthority: 0 },
+  );
+
+  if (counts.externalFinanceAuthority > 0) {
+    return {
+      badge: "External finance authority present",
+      detail: `${counts.externalFinanceAuthority} line(s) remain under external-platform settlement ownership.`,
+    };
+  }
+
+  if (counts.external > 0) {
+    return {
+      badge: "Mixed source domain",
+      detail: `${counts.owned} DRTS-operated line(s), ${counts.external} externally fulfilled line(s).`,
+    };
+  }
+
+  return {
+    badge: "DRTS operated only",
+    detail: `${counts.owned} DRTS-operated line(s).`,
   };
 }
 
