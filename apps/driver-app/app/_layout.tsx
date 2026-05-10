@@ -17,7 +17,7 @@ import {
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 
-import { tokens } from "@/components/ui/tokens";
+import { driverTheme } from "@/components/ui-rn";
 
 const DRIVER_SESSION_REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -95,16 +95,16 @@ export default function RootLayout() {
         screenOptions={{
           headerShown: false,
           headerStyle: {
-            backgroundColor: tokens.colors.surface,
+            backgroundColor: driverTheme.colors.surface,
           },
           headerTitleStyle: {
-            ...tokens.type.sectionTitle,
-            color: tokens.colors.textStrong,
+            ...driverTheme.typography.sectionTitle,
+            color: driverTheme.colors.textStrong,
           },
-          headerTintColor: tokens.colors.primary,
+          headerTintColor: driverTheme.colors.primary,
           headerShadowVisible: false,
           contentStyle: {
-            backgroundColor: tokens.colors.appBg,
+            backgroundColor: driverTheme.colors.appBackground,
           },
         }}
       >
