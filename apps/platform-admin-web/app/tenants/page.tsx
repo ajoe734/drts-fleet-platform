@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
@@ -218,7 +219,7 @@ export default function TenantsPage() {
   );
 
   if (loading) {
-    return <div className="admin-empty">{t("tenants.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("tenants.loading")}</div>;
   }
 
   return (
@@ -231,14 +232,14 @@ export default function TenantsPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               type="button"
-              className="admin-btn admin-btn--secondary"
+              style={actionButtonStyle({ tone: "secondary" })}
               onClick={() => void loadTenants()}
             >
               {copy.refresh}
             </button>
             <button
               type="button"
-              className="admin-btn admin-btn--primary"
+              style={actionButtonStyle({ tone: "primary" })}
               onClick={() => setShowCreate((current) => !current)}
             >
               {showCreate ? t("common.cancel") : t("tenants.newTenant")}
@@ -334,7 +335,7 @@ export default function TenantsPage() {
             />
             <button
               type="submit"
-              className="admin-btn admin-btn--primary"
+              style={actionButtonStyle({ tone: "primary" })}
               disabled={
                 creating || !createForm.name.trim() || !createForm.code.trim()
               }
@@ -462,14 +463,17 @@ export default function TenantsPage() {
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <Link
                     href={`/tenants/${tenant.id}`}
-                    className="admin-btn admin-btn--secondary admin-btn--sm"
+                    style={actionButtonStyle({ tone: "secondary", size: "sm" })}
                   >
                     {copy.view}
                   </Link>
                   {tenant.status === "active" ? (
                     <button
                       type="button"
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
+                      style={actionButtonStyle({
+                        tone: "secondary",
+                        size: "sm",
+                      })}
                       disabled={tenantActionId === `${tenant.id}:suspend`}
                       onClick={() => void runTenantAction(tenant.id, "suspend")}
                     >
@@ -478,7 +482,10 @@ export default function TenantsPage() {
                   ) : (
                     <button
                       type="button"
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
+                      style={actionButtonStyle({
+                        tone: "secondary",
+                        size: "sm",
+                      })}
                       disabled={tenantActionId === `${tenant.id}:activate`}
                       onClick={() =>
                         void runTenantAction(tenant.id, "activate")
@@ -490,7 +497,10 @@ export default function TenantsPage() {
                   {tenant.status !== "rollback_hold" ? (
                     <button
                       type="button"
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
+                      style={actionButtonStyle({
+                        tone: "secondary",
+                        size: "sm",
+                      })}
                       disabled={tenantActionId === `${tenant.id}:rollback_hold`}
                       onClick={() =>
                         void runTenantAction(tenant.id, "rollback_hold")

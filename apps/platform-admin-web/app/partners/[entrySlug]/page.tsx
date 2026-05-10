@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
@@ -473,7 +474,7 @@ export default function PartnerDetailPage() {
     readinessItems.length > 0 && readinessItems.every((item) => item.ready);
 
   if (loading) {
-    return <div className="admin-empty">{t("partners.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("partners.loading")}</div>;
   }
 
   if (!entry) {
@@ -484,7 +485,10 @@ export default function PartnerDetailPage() {
           title={copy.title}
           subtitle={copy.subtitle}
           actions={
-            <Link href="/partners" className="admin-btn admin-btn--secondary">
+            <Link
+              href="/partners"
+              style={actionButtonStyle({ tone: "secondary" })}
+            >
               {copy.back}
             </Link>
           }
@@ -527,12 +531,15 @@ export default function PartnerDetailPage() {
         ]}
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Link href="/partners" className="admin-btn admin-btn--secondary">
+            <Link
+              href="/partners"
+              style={actionButtonStyle({ tone: "secondary" })}
+            >
               {copy.back}
             </Link>
             <button
               type="button"
-              className="admin-btn admin-btn--secondary"
+              style={actionButtonStyle({ tone: "secondary" })}
               onClick={() => void loadEntry()}
             >
               {t("common.refresh")}
@@ -655,7 +662,7 @@ export default function PartnerDetailPage() {
                 />
                 <button
                   type="submit"
-                  className="admin-btn admin-btn--primary"
+                  style={actionButtonStyle({ tone: "primary" })}
                   disabled={saving || !editForm.displayName.trim()}
                 >
                   {saving ? t("common.saving") : copy.save}
@@ -734,8 +741,10 @@ export default function PartnerDetailPage() {
                   href={credentialPreviewUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="admin-btn admin-btn--secondary admin-btn--sm"
-                  style={{ textDecoration: "none", width: "fit-content" }}
+                  style={{
+                    ...actionButtonStyle({ tone: "secondary", size: "sm" }),
+                    width: "fit-content",
+                  }}
                 >
                   {copy.preview}
                 </a>
@@ -744,7 +753,7 @@ export default function PartnerDetailPage() {
                 {entry.status === "active" ? (
                   <button
                     type="button"
-                    className="admin-btn admin-btn--secondary"
+                    style={actionButtonStyle({ tone: "secondary" })}
                     disabled={changingStatus === "inactive"}
                     onClick={() => void setEntryStatus("inactive")}
                   >
@@ -753,7 +762,7 @@ export default function PartnerDetailPage() {
                 ) : entry.status === "inactive" ? (
                   <button
                     type="button"
-                    className="admin-btn admin-btn--secondary"
+                    style={actionButtonStyle({ tone: "secondary" })}
                     disabled={changingStatus === "active"}
                     onClick={() => void setEntryStatus("active")}
                   >
@@ -763,7 +772,7 @@ export default function PartnerDetailPage() {
                 {entry.status !== "revoked" ? (
                   <button
                     type="button"
-                    className="admin-btn admin-btn--secondary"
+                    style={actionButtonStyle({ tone: "secondary" })}
                     disabled={changingStatus === "revoked"}
                     onClick={() => void setEntryStatus("revoked")}
                   >
@@ -779,7 +788,7 @@ export default function PartnerDetailPage() {
             >
               <button
                 type="button"
-                className="admin-btn admin-btn--secondary admin-btn--sm"
+                style={actionButtonStyle({ tone: "secondary", size: "sm" })}
                 disabled={issuingCredential || entry.status === "revoked"}
                 onClick={() => void issueCredential()}
               >
@@ -848,7 +857,10 @@ export default function PartnerDetailPage() {
                       {!credential.revokedAt ? (
                         <button
                           type="button"
-                          className="admin-btn admin-btn--secondary admin-btn--sm"
+                          style={actionButtonStyle({
+                            tone: "secondary",
+                            size: "sm",
+                          })}
                           disabled={revokingCredentialId === credential.keyId}
                           onClick={() =>
                             void revokeCredential(credential.keyId)

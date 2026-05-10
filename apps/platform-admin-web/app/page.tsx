@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
 import { partnerHasReadinessGaps } from "@/components/partner-governance-shared";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
@@ -314,7 +315,7 @@ export default function HomePage() {
 
   if (loading) {
     return (
-      <div className="admin-empty">
+      <div style={emptyStateStyle}>
         {locale === "en" ? "Loading..." : "載入中..."}
       </div>
     );
@@ -329,7 +330,7 @@ export default function HomePage() {
         actions={
           <button
             type="button"
-            className="admin-btn admin-btn--secondary"
+            style={actionButtonStyle({ tone: "secondary" })}
             onClick={() => void loadSnapshot()}
           >
             {copy.refresh}
@@ -408,7 +409,7 @@ export default function HomePage() {
               actions={
                 <Link
                   href="/health"
-                  className="admin-btn admin-btn--secondary admin-btn--sm"
+                  style={actionButtonStyle({ tone: "secondary", size: "sm" })}
                 >
                   {copy.openAll}
                 </Link>
@@ -424,7 +425,10 @@ export default function HomePage() {
                     actions={
                       <Link
                         href={item.href}
-                        className="admin-btn admin-btn--secondary admin-btn--sm"
+                        style={actionButtonStyle({
+                          tone: "secondary",
+                          size: "sm",
+                        })}
                       >
                         {copy.viewRoute}
                       </Link>

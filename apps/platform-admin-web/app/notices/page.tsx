@@ -6,6 +6,11 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import {
+  actionButtonStyle,
+  emptyStateStyle,
+  switchStyle,
+} from "@/components/platform-ui";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -381,7 +386,7 @@ export default function NoticesPage() {
   ] as const;
 
   if (loading) {
-    return <div className="admin-empty">{t("notices.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("notices.loading")}</div>;
   }
 
   return (
@@ -397,7 +402,7 @@ export default function NoticesPage() {
         ]}
         actions={
           <button
-            className="admin-btn admin-btn--secondary"
+            style={actionButtonStyle({ tone: "secondary" })}
             onClick={() => void loadData()}
           >
             {t("common.refresh")}
@@ -703,7 +708,7 @@ export default function NoticesPage() {
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button
                 type="submit"
-                className="admin-btn admin-btn--primary"
+                style={actionButtonStyle({ tone: "primary" })}
                 disabled={creating || !formTitle.trim() || !formBody.trim()}
               >
                 {creating
@@ -756,14 +761,16 @@ export default function NoticesPage() {
                     : t("notices.maintDisabled")}
                 </span>
               </div>
-              <label className="admin-switch">
-                <input
-                  type="checkbox"
-                  checked={maintEnabled}
-                  onChange={(event) => setMaintEnabled(event.target.checked)}
-                />
-                <span className="admin-switch-slider" />
-              </label>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={maintEnabled}
+                aria-label={copy.currentState}
+                onClick={() => setMaintEnabled((value) => !value)}
+                style={switchStyle.root(maintEnabled)}
+              >
+                <span aria-hidden style={switchStyle.thumb(maintEnabled)} />
+              </button>
             </div>
 
             <div>
@@ -862,7 +869,7 @@ export default function NoticesPage() {
 
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button
-                className="admin-btn admin-btn--primary"
+                style={actionButtonStyle({ tone: "primary" })}
                 onClick={() => void handleSetMaintenance()}
                 disabled={updatingMaint}
               >
@@ -967,7 +974,7 @@ export default function NoticesPage() {
               <Td align="right">
                 {notice.status !== "resolved" ? (
                   <button
-                    className="admin-btn admin-btn--secondary admin-btn--sm"
+                    style={actionButtonStyle({ tone: "secondary", size: "sm" })}
                     onClick={() => void handleResolve(notice.noticeId)}
                   >
                     {t("notices.resolve")}

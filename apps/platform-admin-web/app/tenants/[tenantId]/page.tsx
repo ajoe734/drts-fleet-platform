@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
 import {
   formatDateTime,
   truncate,
@@ -656,7 +657,7 @@ export default function TenantDetailPage() {
   }, [copy.noScopes, copy.noWebhookEvents, locale, tenant]);
 
   if (loading) {
-    return <div className="admin-empty">{t("tenants.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("tenants.loading")}</div>;
   }
 
   if (!tenant) {
@@ -667,7 +668,10 @@ export default function TenantDetailPage() {
           title={copy.title}
           subtitle={copy.subtitle}
           actions={
-            <Link href="/tenants" className="admin-btn admin-btn--secondary">
+            <Link
+              href="/tenants"
+              style={actionButtonStyle({ tone: "secondary" })}
+            >
               {copy.back}
             </Link>
           }
@@ -706,12 +710,15 @@ export default function TenantDetailPage() {
         ]}
         actions={
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Link href="/tenants" className="admin-btn admin-btn--secondary">
+            <Link
+              href="/tenants"
+              style={actionButtonStyle({ tone: "secondary" })}
+            >
               {copy.back}
             </Link>
             <button
               type="button"
-              className="admin-btn admin-btn--secondary"
+              style={actionButtonStyle({ tone: "secondary" })}
               onClick={() => void loadTenant()}
             >
               {copy.refreshAudit}
@@ -976,7 +983,7 @@ export default function TenantDetailPage() {
                 />
                 <button
                   type="submit"
-                  className="admin-btn admin-btn--primary"
+                  style={actionButtonStyle({ tone: "primary" })}
                   disabled={savingSettings || !editForm.name.trim()}
                 >
                   {savingSettings ? t("common.saving") : copy.saveSettings}
@@ -1346,7 +1353,7 @@ export default function TenantDetailPage() {
                 </div>
                 <button
                   type="submit"
-                  className="admin-btn admin-btn--primary"
+                  style={actionButtonStyle({ tone: "primary" })}
                   disabled={savingOnboarding}
                 >
                   {savingOnboarding ? t("common.saving") : copy.saveOnboarding}
@@ -1487,7 +1494,7 @@ export default function TenantDetailPage() {
                 actions={
                   <Link
                     href="/audit"
-                    className="admin-btn admin-btn--secondary admin-btn--sm"
+                    style={actionButtonStyle({ tone: "secondary", size: "sm" })}
                   >
                     Audit ledger
                   </Link>
@@ -1624,7 +1631,10 @@ export default function TenantDetailPage() {
                     <button
                       key={stage}
                       type="button"
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
+                      style={actionButtonStyle({
+                        tone: "secondary",
+                        size: "sm",
+                      })}
                       disabled={promotingStage === stage}
                       onClick={() => void promoteStage(stage)}
                     >
@@ -1739,7 +1749,10 @@ export default function TenantDetailPage() {
                           ) : role.invitedAt ? (
                             <button
                               type="button"
-                              className="admin-btn admin-btn--secondary admin-btn--sm"
+                              style={actionButtonStyle({
+                                tone: "secondary",
+                                size: "sm",
+                              })}
                               disabled={roleAction === actionId}
                               onClick={() =>
                                 void acknowledgeRole(role.roleCode)
@@ -1750,7 +1763,10 @@ export default function TenantDetailPage() {
                           ) : (
                             <button
                               type="button"
-                              className="admin-btn admin-btn--secondary admin-btn--sm"
+                              style={actionButtonStyle({
+                                tone: "secondary",
+                                size: "sm",
+                              })}
                               disabled={roleAction === actionId}
                               onClick={() => void inviteRole(role.roleCode)}
                             >
@@ -1791,7 +1807,7 @@ export default function TenantDetailPage() {
                 {tenant.status === "active" ? (
                   <button
                     type="button"
-                    className="admin-btn admin-btn--secondary"
+                    style={actionButtonStyle({ tone: "secondary" })}
                     disabled={lifecycleAction === "suspend"}
                     onClick={() => void runLifecycle("suspend")}
                   >
@@ -1800,7 +1816,7 @@ export default function TenantDetailPage() {
                 ) : (
                   <button
                     type="button"
-                    className="admin-btn admin-btn--secondary"
+                    style={actionButtonStyle({ tone: "secondary" })}
                     disabled={lifecycleAction === "activate"}
                     onClick={() => void runLifecycle("activate")}
                   >
@@ -1809,7 +1825,7 @@ export default function TenantDetailPage() {
                 )}
                 <button
                   type="button"
-                  className="admin-btn admin-btn--secondary"
+                  style={actionButtonStyle({ tone: "secondary" })}
                   disabled={lifecycleAction === "rollback_hold"}
                   onClick={() => void runLifecycle("rollback_hold")}
                 >

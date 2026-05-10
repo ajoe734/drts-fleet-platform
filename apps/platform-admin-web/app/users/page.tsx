@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
@@ -155,7 +156,7 @@ export default function UsersPage() {
   );
 
   if (loading) {
-    return <div className="admin-empty">{t("users.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("users.loading")}</div>;
   }
 
   return (
@@ -168,14 +169,14 @@ export default function UsersPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               type="button"
-              className="admin-btn admin-btn--secondary"
+              style={actionButtonStyle({ tone: "secondary" })}
               onClick={() => void loadUsers()}
             >
               {copy.refresh}
             </button>
             <button
               type="button"
-              className="admin-btn admin-btn--primary"
+              style={actionButtonStyle({ tone: "primary" })}
               onClick={() => setShowCreate((current) => !current)}
             >
               {showCreate ? t("common.cancel") : copy.add}
@@ -302,7 +303,7 @@ export default function UsersPage() {
             </div>
             <button
               type="submit"
-              className="admin-btn admin-btn--primary"
+              style={actionButtonStyle({ tone: "primary" })}
               disabled={
                 creating || !formEmail.trim() || !formDisplayName.trim()
               }
@@ -400,7 +401,7 @@ export default function UsersPage() {
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button
                     type="button"
-                    className="admin-btn admin-btn--secondary admin-btn--sm"
+                    style={actionButtonStyle({ tone: "secondary", size: "sm" })}
                     disabled={
                       updatingUserId === user.userId ||
                       user.roleCode === "admin"
@@ -416,7 +417,7 @@ export default function UsersPage() {
                   </button>
                   <button
                     type="button"
-                    className="admin-btn admin-btn--secondary admin-btn--sm"
+                    style={actionButtonStyle({ tone: "secondary", size: "sm" })}
                     disabled={
                       updatingUserId === user.userId ||
                       user.roleCode === "viewer"
@@ -433,7 +434,10 @@ export default function UsersPage() {
                   {user.status === "suspended" ? (
                     <button
                       type="button"
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
+                      style={actionButtonStyle({
+                        tone: "secondary",
+                        size: "sm",
+                      })}
                       disabled={updatingUserId === user.userId}
                       onClick={() =>
                         void handleUpdate(user.userId, {
@@ -447,7 +451,10 @@ export default function UsersPage() {
                   ) : (
                     <button
                       type="button"
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
+                      style={actionButtonStyle({
+                        tone: "secondary",
+                        size: "sm",
+                      })}
                       disabled={updatingUserId === user.userId}
                       onClick={() =>
                         void handleUpdate(user.userId, {

@@ -20,23 +20,23 @@ a {
 }
 
 /* Admin page components */
-.admin-page-header {
+.platform-ui-page-header {
   margin-bottom: 24px;
 }
 
-.admin-page-header h1 {
+.platform-ui-page-header h1 {
   margin: 0 0 8px;
   font-size: 24px;
   font-weight: 700;
 }
 
-.admin-page-header p {
+.platform-ui-page-header p {
   margin: 0;
   color: #6b7280;
   font-size: 14px;
 }
 
-.admin-card {
+.platform-ui-card {
   background: rgba(255, 255, 255, 0.85);
   border: 1px solid rgba(15, 118, 110, 0.15);
   border-radius: 12px;
@@ -44,13 +44,13 @@ a {
   margin-bottom: 16px;
 }
 
-.admin-table {
+.platform-ui-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
 }
 
-.admin-table th {
+.platform-ui-table th {
   text-align: left;
   padding: 10px 12px;
   border-bottom: 2px solid rgba(15, 118, 110, 0.2);
@@ -58,16 +58,16 @@ a {
   color: #374151;
 }
 
-.admin-table td {
+.platform-ui-table td {
   padding: 10px 12px;
   border-bottom: 1px solid #e5e7eb;
 }
 
-.admin-table tr:last-child td {
+.platform-ui-table tr:last-child td {
   border-bottom: none;
 }
 
-.admin-badge {
+.platform-ui-badge {
   display: inline-block;
   padding: 3px 8px;
   border-radius: 999px;
@@ -75,32 +75,32 @@ a {
   font-weight: 600;
 }
 
-.admin-badge--success {
+.platform-ui-badge--success {
   background: rgba(16, 185, 129, 0.12);
   color: #065f46;
 }
 
-.admin-badge--warning {
+.platform-ui-badge--warning {
   background: rgba(245, 158, 11, 0.12);
   color: #92400e;
 }
 
-.admin-badge--info {
+.platform-ui-badge--info {
   background: rgba(59, 130, 246, 0.12);
   color: #1e40af;
 }
 
-.admin-badge--danger {
+.platform-ui-badge--danger {
   background: rgba(239, 68, 68, 0.12);
   color: #991b1b;
 }
 
-.admin-badge--neutral {
+.platform-ui-badge--neutral {
   background: rgba(107, 114, 128, 0.12);
   color: #374151;
 }
 
-.admin-btn {
+.platform-ui-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -114,50 +114,50 @@ a {
   text-decoration: none;
 }
 
-.admin-btn--primary {
+.platform-ui-btn--primary {
   background: var(--accent);
   color: #fff;
 }
 
-.admin-btn--primary:hover {
+.platform-ui-btn--primary:hover {
   background: #0d6e66;
 }
 
-.admin-btn--secondary {
+.platform-ui-btn--secondary {
   background: rgba(15, 118, 110, 0.08);
   color: var(--accent);
 }
 
-.admin-btn--secondary:hover {
+.platform-ui-btn--secondary:hover {
   background: rgba(15, 118, 110, 0.15);
 }
 
-.admin-btn--sm {
+.platform-ui-btn--sm {
   padding: 5px 10px;
   font-size: 12px;
 }
 
-.admin-empty {
+.platform-ui-empty {
   text-align: center;
   padding: 48px 20px;
   color: #6b7280;
 }
 
-.admin-toolbar {
+.platform-ui-toolbar {
   display: flex;
   gap: 8px;
   margin-bottom: 16px;
   align-items: center;
 }
 
-.admin-toggle-group {
+.platform-ui-toggle-group {
   display: inline-flex;
   border: 1px solid rgba(15, 118, 110, 0.2);
   border-radius: 8px;
   overflow: hidden;
 }
 
-.admin-toggle-btn {
+.platform-ui-toggle-btn {
   padding: 6px 14px;
   border: none;
   background: transparent;
@@ -166,30 +166,30 @@ a {
   transition: background 0.15s;
 }
 
-.admin-toggle-btn + .admin-toggle-btn {
+.platform-ui-toggle-btn + .platform-ui-toggle-btn {
   border-left: 1px solid rgba(15, 118, 110, 0.2);
 }
 
-.admin-toggle-btn.active {
+.platform-ui-toggle-btn.active {
   background: rgba(15, 118, 110, 0.12);
   color: var(--accent);
   font-weight: 500;
 }
 
-.admin-switch {
+.platform-ui-switch {
   position: relative;
   display: inline-block;
   width: 40px;
   height: 22px;
 }
 
-.admin-switch input {
+.platform-ui-switch input {
   opacity: 0;
   width: 0;
   height: 0;
 }
 
-.admin-switch-slider {
+.platform-ui-switch-slider {
   position: absolute;
   cursor: pointer;
   inset: 0;
@@ -198,7 +198,7 @@ a {
   transition: background 0.2s;
 }
 
-.admin-switch-slider::before {
+.platform-ui-switch-slider::before {
   content: "";
   position: absolute;
   height: 16px;
@@ -210,10 +210,10 @@ a {
   transition: transform 0.2s;
 }
 
-.admin-switch input:checked + .admin-switch-slider {
+.platform-ui-switch input:checked + .platform-ui-switch-slider {
   background: var(--accent);
 }
 
-.admin-switch input:checked + .admin-switch-slider::before {
+.platform-ui-switch input:checked + .platform-ui-switch-slider::before {
   transform: translateX(18px);
 }

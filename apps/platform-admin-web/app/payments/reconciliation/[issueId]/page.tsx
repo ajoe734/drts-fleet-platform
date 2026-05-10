@@ -455,17 +455,20 @@ export default function ReconciliationIssueDetailPage() {
   }
 
   if (loading) {
-    return <div className="admin-empty">{t("payments.loading")}</div>;
+    return <div className="platform-ui-empty">{t("payments.loading")}</div>;
   }
 
   if (!issue) {
     return (
       <div>
-        <div className="admin-page-header">
+        <div className="platform-ui-page-header">
           <h1>{detailCopy.title}</h1>
           <p>{detailCopy.notFound}</p>
         </div>
-        <Link href="/payments" className="admin-btn admin-btn--secondary">
+        <Link
+          href="/payments"
+          className="platform-ui-btn platform-ui-btn--secondary"
+        >
           {detailCopy.back}
         </Link>
       </div>
@@ -474,17 +477,20 @@ export default function ReconciliationIssueDetailPage() {
 
   return (
     <div>
-      <div className="admin-page-header">
+      <div className="platform-ui-page-header">
         <h1>{detailCopy.title}</h1>
         <p>{detailCopy.subtitle}</p>
       </div>
 
-      <div className="admin-toolbar">
-        <Link href="/payments" className="admin-btn admin-btn--secondary">
+      <div className="platform-ui-toolbar">
+        <Link
+          href="/payments"
+          className="platform-ui-btn platform-ui-btn--secondary"
+        >
           {detailCopy.back}
         </Link>
         <button
-          className="admin-btn admin-btn--secondary"
+          className="platform-ui-btn platform-ui-btn--secondary"
           onClick={() => void loadData()}
         >
           {t("common.refresh")}
@@ -493,7 +499,7 @@ export default function ReconciliationIssueDetailPage() {
 
       {error && (
         <div
-          className="admin-card"
+          className="platform-ui-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
           <p style={{ color: "#dc2626", margin: 0 }}>
@@ -627,7 +633,7 @@ export default function ReconciliationIssueDetailPage() {
                     />
                   </label>
                   <button
-                    className="admin-btn admin-btn--secondary"
+                    className="platform-ui-btn platform-ui-btn--secondary"
                     onClick={() => void handleAssignIssue()}
                     disabled={issueActionId === issue.issueId}
                     style={{ marginTop: 12 }}
@@ -660,7 +666,7 @@ export default function ReconciliationIssueDetailPage() {
                       />
                     </label>
                     <button
-                      className="admin-btn admin-btn--secondary"
+                      className="platform-ui-btn platform-ui-btn--secondary"
                       onClick={() => void handleCommentIssue()}
                       disabled={issueActionId === issue.issueId}
                       style={{ marginTop: 8 }}
@@ -719,7 +725,7 @@ export default function ReconciliationIssueDetailPage() {
                       />
                     </label>
                     <button
-                      className="admin-btn admin-btn--primary"
+                      className="platform-ui-btn platform-ui-btn--primary"
                       onClick={() => void handleResolveIssue()}
                       disabled={issueActionId === issue.issueId}
                       style={{ marginTop: 8 }}
@@ -753,7 +759,7 @@ export default function ReconciliationIssueDetailPage() {
                     />
                   </label>
                   <button
-                    className="admin-btn admin-btn--secondary"
+                    className="platform-ui-btn platform-ui-btn--secondary"
                     onClick={() => void handleReopenIssue()}
                     disabled={issueActionId === issue.issueId}
                     style={{ marginTop: 8 }}

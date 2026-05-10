@@ -7,6 +7,7 @@
 
 import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
+import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
 import type {
   AdapterHealthRecord,
   OperationalObservabilitySnapshot,
@@ -467,7 +468,7 @@ export default function HealthPage() {
   ] as const;
 
   if (loading) {
-    return <div className="admin-empty">{t("health.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("health.loading")}</div>;
   }
 
   return (
@@ -493,14 +494,14 @@ export default function HealthPage() {
         actions={
           <>
             <button
-              className="admin-btn admin-btn--secondary"
+              style={actionButtonStyle({ tone: "secondary" })}
               onClick={loadData}
             >
               {t("common.refresh")}
             </button>
             <Link
               href="/adapter-registry"
-              className="admin-btn admin-btn--secondary"
+              style={actionButtonStyle({ tone: "secondary" })}
             >
               {copy.registryLink}
             </Link>
@@ -531,7 +532,7 @@ export default function HealthPage() {
         actions={
           <Link
             href="/adapter-registry"
-            className="admin-btn admin-btn--secondary"
+            style={actionButtonStyle({ tone: "secondary" })}
           >
             {copy.registryLink}
           </Link>
@@ -712,7 +713,7 @@ export default function HealthPage() {
         actions={
           <Link
             href="/adapter-registry"
-            className="admin-btn admin-btn--secondary"
+            style={actionButtonStyle({ tone: "secondary" })}
           >
             {copy.registryLink}
           </Link>
@@ -797,7 +798,7 @@ export default function HealthPage() {
               <Td align="right">
                 <Link
                   href="/adapter-registry"
-                  className="admin-btn admin-btn--secondary admin-btn--sm"
+                  style={actionButtonStyle({ tone: "secondary", size: "sm" })}
                 >
                   {copy.drillThrough}
                 </Link>

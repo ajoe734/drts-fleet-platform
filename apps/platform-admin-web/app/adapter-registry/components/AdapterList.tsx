@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { CredentialStatus } from "@drts/contracts";
+import {
+  actionButtonStyle,
+  emptyStateStyle,
+  surfaceCardStyle,
+} from "@/components/platform-ui";
 import type {
   AdapterHealthRecord,
   PlatformAdapter,
@@ -412,12 +417,11 @@ export function AdapterList() {
       ) : null}
 
       {isLoading && (
-        <div className="admin-empty">{t("adapterRegistry.loading")}</div>
+        <div style={emptyStateStyle}>{t("adapterRegistry.loading")}</div>
       )}
       {error && (
         <div
-          className="admin-card"
-          style={{ borderColor: "rgba(239,68,68,0.3)" }}
+          style={{ ...surfaceCardStyle, borderColor: "rgba(239,68,68,0.3)" }}
         >
           <p style={{ color: "#dc2626", margin: 0 }}>
             {getPlatformLabel(locale, "error")}: {error}
@@ -583,7 +587,7 @@ export function AdapterList() {
                 <Td density="compact" align="right">
                   <button
                     onClick={() => handleEditClick(adapter)}
-                    className="admin-btn admin-btn--secondary admin-btn--sm"
+                    style={actionButtonStyle({ tone: "secondary", size: "sm" })}
                   >
                     {t("common.edit")}
                   </button>
@@ -595,7 +599,7 @@ export function AdapterList() {
       ) : (
         !isLoading &&
         !error && (
-          <div className="admin-empty">
+          <div style={emptyStateStyle}>
             <p>{t("adapterRegistry.empty")}</p>
           </div>
         )

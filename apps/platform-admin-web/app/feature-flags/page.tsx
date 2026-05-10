@@ -6,6 +6,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { getPlatformLabel } from "@/lib/localized-labels";
@@ -292,7 +293,7 @@ export default function FeatureFlagsPage() {
   });
 
   if (loading) {
-    return <div className="admin-empty">{t("flags.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("flags.loading")}</div>;
   }
 
   return (
@@ -309,7 +310,7 @@ export default function FeatureFlagsPage() {
         ]}
         actions={
           <button
-            className="admin-btn admin-btn--secondary"
+            style={actionButtonStyle({ tone: "secondary" })}
             onClick={() => void loadFlags()}
           >
             {t("common.refresh")}
@@ -400,14 +401,14 @@ export default function FeatureFlagsPage() {
           actions={
             <>
               <button
-                className="admin-btn admin-btn--secondary"
+                style={actionButtonStyle({ tone: "secondary" })}
                 onClick={() => setPendingToggle(null)}
                 disabled={updating === pendingToggle.key}
               >
                 {t("common.cancel")}
               </button>
               <button
-                className="admin-btn admin-btn--primary"
+                style={actionButtonStyle({ tone: "primary" })}
                 onClick={() => void handleConfirmToggle()}
                 disabled={updating === pendingToggle.key}
               >
@@ -575,7 +576,10 @@ export default function FeatureFlagsPage() {
                 <Td align="right">
                   {group.global ? (
                     <button
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
+                      style={actionButtonStyle({
+                        tone: "secondary",
+                        size: "sm",
+                      })}
                       onClick={() =>
                         setPendingToggle({
                           key: group.key,

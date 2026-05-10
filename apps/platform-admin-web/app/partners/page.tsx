@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { formatPlatformCodeLabel } from "@/lib/localized-labels";
@@ -183,7 +184,7 @@ export default function PartnersPage() {
   );
 
   if (loading) {
-    return <div className="admin-empty">{t("partners.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("partners.loading")}</div>;
   }
 
   return (
@@ -196,14 +197,14 @@ export default function PartnersPage() {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               type="button"
-              className="admin-btn admin-btn--secondary"
+              style={actionButtonStyle({ tone: "secondary" })}
               onClick={() => void loadEntries()}
             >
               {copy.refresh}
             </button>
             <button
               type="button"
-              className="admin-btn admin-btn--primary"
+              style={actionButtonStyle({ tone: "primary" })}
               onClick={() => setShowCreate((current) => !current)}
             >
               {showCreate ? t("common.cancel") : t("partners.newEntry")}
@@ -275,7 +276,7 @@ export default function PartnersPage() {
             <EntryForm form={createForm} setForm={setCreateForm} t={t} />
             <button
               type="submit"
-              className="admin-btn admin-btn--primary"
+              style={actionButtonStyle({ tone: "primary" })}
               disabled={
                 creating ||
                 !createForm.partnerCode.trim() ||
@@ -412,14 +413,20 @@ export default function PartnersPage() {
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <Link
                       href={`/partners/${entry.entrySlug}`}
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
+                      style={actionButtonStyle({
+                        tone: "secondary",
+                        size: "sm",
+                      })}
                     >
                       {copy.view}
                     </Link>
                     {entry.status === "active" ? (
                       <button
                         type="button"
-                        className="admin-btn admin-btn--secondary admin-btn--sm"
+                        style={actionButtonStyle({
+                          tone: "secondary",
+                          size: "sm",
+                        })}
                         disabled={
                           changingStatus === `${entry.entrySlug}:inactive`
                         }
@@ -432,7 +439,10 @@ export default function PartnersPage() {
                     ) : entry.status === "inactive" ? (
                       <button
                         type="button"
-                        className="admin-btn admin-btn--secondary admin-btn--sm"
+                        style={actionButtonStyle({
+                          tone: "secondary",
+                          size: "sm",
+                        })}
                         disabled={
                           changingStatus === `${entry.entrySlug}:active`
                         }
@@ -446,7 +456,10 @@ export default function PartnersPage() {
                     {entry.status !== "revoked" ? (
                       <button
                         type="button"
-                        className="admin-btn admin-btn--secondary admin-btn--sm"
+                        style={actionButtonStyle({
+                          tone: "secondary",
+                          size: "sm",
+                        })}
                         disabled={
                           changingStatus === `${entry.entrySlug}:revoked`
                         }

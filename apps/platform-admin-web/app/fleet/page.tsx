@@ -6,6 +6,11 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import {
+  fieldLabelStyle,
+  inputStyle,
+  textMutedStyle,
+} from "@/components/platform-ui";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -25,7 +30,7 @@ import type {
 } from "@drts/contracts";
 
 function badgeClassForLifecycle(status: string) {
-  if (status === "active") return "admin-badge--success";
+  if (status === "active") return "platform-ui-badge--success";
   if (
     status === "expired" ||
     status === "terminated" ||
@@ -34,9 +39,9 @@ function badgeClassForLifecycle(status: string) {
     status === "retired" ||
     status === "suspended"
   ) {
-    return "admin-badge--warning";
+    return "platform-ui-badge--warning";
   }
-  return "admin-badge--neutral";
+  return "platform-ui-badge--neutral";
 }
 
 function createInitialDriverForm(): CreateDriverMasterCommand {
@@ -490,11 +495,12 @@ export default function FleetPage() {
     [client, loadData, offboardingForm],
   );
 
-  if (loading) return <div className="admin-empty">{t("fleet.loading")}</div>;
+  if (loading)
+    return <div className="platform-ui-empty">{t("fleet.loading")}</div>;
 
   return (
     <div>
-      <div className="admin-page-header">
+      <div className="platform-ui-page-header">
         <h1>{t("fleet.title")}</h1>
         <p>
           {t("fleet.subtitle", {
@@ -507,7 +513,7 @@ export default function FleetPage() {
 
       {error && (
         <div
-          className="admin-card"
+          className="platform-ui-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
           <p style={{ color: "#dc2626", margin: 0 }}>
@@ -525,7 +531,7 @@ export default function FleetPage() {
         }}
       >
         <div
-          className="admin-card"
+          className="platform-ui-card"
           style={{ marginBottom: 0, background: "rgba(15,118,110,0.04)" }}
         >
           <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
@@ -566,7 +572,7 @@ export default function FleetPage() {
         ].map((card) => (
           <div
             key={card.label}
-            className="admin-card"
+            className="platform-ui-card"
             style={{ marginBottom: 0 }}
           >
             <p style={{ margin: "0 0 8px", fontSize: 13, color: "#6b7280" }}>
@@ -581,7 +587,7 @@ export default function FleetPage() {
 
       {complianceWarnings.length > 0 && (
         <div
-          className="admin-card"
+          className="platform-ui-card"
           style={{
             borderColor: "rgba(245,158,11,0.28)",
             background: "rgba(245,158,11,0.06)",
@@ -600,22 +606,22 @@ export default function FleetPage() {
         </div>
       )}
 
-      <div className="admin-toolbar">
-        <div className="admin-toggle-group">
+      <div className="platform-ui-toolbar">
+        <div className="platform-ui-toggle-group">
           <button
-            className={`admin-toggle-btn ${activeTab === "vehicles" ? "active" : ""}`}
+            className={`platform-ui-toggle-btn ${activeTab === "vehicles" ? "active" : ""}`}
             onClick={() => setActiveTab("vehicles")}
           >
             {t("fleet.tab.vehicles")} ({vehicles.length})
           </button>
           <button
-            className={`admin-toggle-btn ${activeTab === "drivers" ? "active" : ""}`}
+            className={`platform-ui-toggle-btn ${activeTab === "drivers" ? "active" : ""}`}
             onClick={() => setActiveTab("drivers")}
           >
             {t("fleet.tab.drivers")} ({drivers.length})
           </button>
           <button
-            className={`admin-toggle-btn ${activeTab === "contracts" ? "active" : ""}`}
+            className={`platform-ui-toggle-btn ${activeTab === "contracts" ? "active" : ""}`}
             onClick={() => setActiveTab("contracts")}
           >
             {t("fleet.tab.contracts")} ({contracts.length})
@@ -630,7 +636,7 @@ export default function FleetPage() {
         ).map(([jobType, label]) => (
           <button
             key={jobType}
-            className="admin-btn admin-btn--secondary"
+            className="platform-ui-btn platform-ui-btn--secondary"
             type="button"
             disabled={reportActionId === jobType}
             onClick={() => void requestFleetReport(jobType)}
@@ -640,13 +646,16 @@ export default function FleetPage() {
               : label}
           </button>
         ))}
-        <button className="admin-btn admin-btn--secondary" onClick={loadData}>
+        <button
+          className="platform-ui-btn platform-ui-btn--secondary"
+          onClick={loadData}
+        >
           {t("common.refresh")}
         </button>
       </div>
 
       <div
-        className="admin-card"
+        className="platform-ui-card"
         style={{
           marginTop: -4,
           marginBottom: 16,
@@ -693,7 +702,7 @@ export default function FleetPage() {
                 </p>
                 {reportJob?.artifact && (
                   <a
-                    className="admin-btn admin-btn--secondary"
+                    className="platform-ui-btn platform-ui-btn--secondary"
                     href={reportJob.artifact.downloadMetadata.downloadUrl}
                     rel="noreferrer"
                     target="_blank"
@@ -708,7 +717,7 @@ export default function FleetPage() {
       </div>
 
       {activeTab === "drivers" && (
-        <div className="admin-card" style={{ marginBottom: 16 }}>
+        <div className="platform-ui-card" style={{ marginBottom: 16 }}>
           <form
             onSubmit={submitDriver}
             style={{
@@ -719,9 +728,9 @@ export default function FleetPage() {
             }}
           >
             <label>
-              <div className="admin-field-label">{t("fleet.col.name")}</div>
+              <div style={fieldLabelStyle}>{t("fleet.col.name")}</div>
               <input
-                className="admin-input"
+                style={inputStyle}
                 value={driverForm.name}
                 onChange={(event) =>
                   setDriverForm((current) => ({
@@ -733,9 +742,9 @@ export default function FleetPage() {
               />
             </label>
             <label>
-              <div className="admin-field-label">{t("fleet.form.phone")}</div>
+              <div style={fieldLabelStyle}>{t("fleet.form.phone")}</div>
               <input
-                className="admin-input"
+                style={inputStyle}
                 value={driverForm.phone ?? ""}
                 onChange={(event) =>
                   setDriverForm((current) => ({
@@ -746,9 +755,9 @@ export default function FleetPage() {
               />
             </label>
             <label>
-              <div className="admin-field-label">{t("fleet.form.email")}</div>
+              <div style={fieldLabelStyle}>{t("fleet.form.email")}</div>
               <input
-                className="admin-input"
+                style={inputStyle}
                 value={driverForm.email ?? ""}
                 onChange={(event) =>
                   setDriverForm((current) => ({
@@ -779,7 +788,7 @@ export default function FleetPage() {
               <span>{t("fleet.form.licensesValid")}</span>
             </label>
             <button
-              className="admin-btn"
+              className="platform-ui-btn"
               type="submit"
               disabled={creatingDriver}
             >
@@ -791,13 +800,13 @@ export default function FleetPage() {
         </div>
       )}
 
-      <div className="admin-card" style={{ overflowX: "auto" }}>
+      <div className="platform-ui-card" style={{ overflowX: "auto" }}>
         {activeTab === "vehicles" &&
           (vehicles.length === 0 ? (
-            <p className="admin-empty">{t("fleet.noVehicles")}</p>
+            <p className="platform-ui-empty">{t("fleet.noVehicles")}</p>
           ) : (
             <>
-              <table className="admin-table">
+              <table className="platform-ui-table">
                 <thead>
                   <tr>
                     <th>{t("fleet.col.vehicleId")}</th>
@@ -831,10 +840,10 @@ export default function FleetPage() {
                       <td>{v.plateNo || "—"}</td>
                       <td>
                         <span
-                          className={`admin-badge ${
+                          className={`platform-ui-badge ${
                             v.dispatchableFlag
-                              ? "admin-badge--success"
-                              : "admin-badge--neutral"
+                              ? "platform-ui-badge--success"
+                              : "platform-ui-badge--neutral"
                           }`}
                         >
                           {v.dispatchableFlag
@@ -845,7 +854,7 @@ export default function FleetPage() {
                       <td>{v.operatingArea || "—"}</td>
                       <td>
                         <span
-                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.contract.lifecycleStatus)}`}
+                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.contract.lifecycleStatus)}`}
                         >
                           {formatPlatformCodeLabel(
                             locale,
@@ -855,7 +864,7 @@ export default function FleetPage() {
                       </td>
                       <td>
                         <span
-                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.insurance.lifecycleStatus)}`}
+                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.insurance.lifecycleStatus)}`}
                         >
                           {formatPlatformCodeLabel(
                             locale,
@@ -865,7 +874,7 @@ export default function FleetPage() {
                       </td>
                       <td>
                         <span
-                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.exclusivity.lifecycleStatus)}`}
+                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.exclusivity.lifecycleStatus)}`}
                         >
                           {formatPlatformCodeLabel(
                             locale,
@@ -875,7 +884,7 @@ export default function FleetPage() {
                       </td>
                       <td>
                         <span
-                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.offboarding.status)}`}
+                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.offboarding.status)}`}
                         >
                           {formatPlatformCodeLabel(
                             locale,
@@ -894,7 +903,7 @@ export default function FleetPage() {
                             ),
                           )
                         ) : (
-                          <span className="admin-badge admin-badge--success">
+                          <span className="platform-ui-badge platform-ui-badge--success">
                             {t("fleet.noneBlocked")}
                           </span>
                         )}
@@ -903,12 +912,7 @@ export default function FleetPage() {
                         {v.supplyLifecycle.lastTrace ? (
                           <div>
                             <div>{v.supplyLifecycle.lastTrace.message}</div>
-                            <div
-                              style={{
-                                color: "var(--admin-text-muted)",
-                                fontSize: 12,
-                              }}
-                            >
+                            <div style={textMutedStyle}>
                               {formatDateTime(
                                 v.supplyLifecycle.lastTrace.occurredAt,
                               )}
@@ -932,7 +936,7 @@ export default function FleetPage() {
                     gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
                   }}
                 >
-                  <div className="admin-card">
+                  <div className="platform-ui-card">
                     <h3 style={{ marginTop: 0 }}>
                       {t("fleet.detail.dispatch")}
                     </h3>
@@ -945,7 +949,7 @@ export default function FleetPage() {
                         (reason) => (
                           <span
                             key={reason}
-                            className="admin-badge admin-badge--warning"
+                            className="platform-ui-badge platform-ui-badge--warning"
                           >
                             {formatPlatformCodeLabel(locale, reason)}
                           </span>
@@ -953,7 +957,7 @@ export default function FleetPage() {
                       )}
                       {selectedVehicle.supplyLifecycle.dispatch.blockedReasons
                         .length === 0 && (
-                        <span className="admin-badge admin-badge--success">
+                        <span className="platform-ui-badge platform-ui-badge--success">
                           {t("fleet.noneBlocked")}
                         </span>
                       )}
@@ -967,7 +971,7 @@ export default function FleetPage() {
                       }}
                     >
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -987,7 +991,7 @@ export default function FleetPage() {
                           : t("fleet.markDispatchable")}
                       </button>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -1009,7 +1013,7 @@ export default function FleetPage() {
                     </div>
                   </div>
 
-                  <div className="admin-card">
+                  <div className="platform-ui-card">
                     <h3 style={{ marginTop: 0 }}>
                       {t("fleet.detail.insurance")}
                     </h3>
@@ -1025,7 +1029,7 @@ export default function FleetPage() {
                         : "—"}
                     </p>
                     <span
-                      className={`admin-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.insurance.lifecycleStatus)}`}
+                      className={`platform-ui-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.insurance.lifecycleStatus)}`}
                     >
                       {formatPlatformCodeLabel(
                         locale,
@@ -1035,7 +1039,7 @@ export default function FleetPage() {
                     </span>
                   </div>
 
-                  <div className="admin-card">
+                  <div className="platform-ui-card">
                     <h3 style={{ marginTop: 0 }}>
                       {t("fleet.detail.exclusivity")}
                     </h3>
@@ -1047,11 +1051,11 @@ export default function FleetPage() {
                       }}
                     >
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.provider")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           value={exclusivityForm.exclusiveProviderName ?? ""}
                           onChange={(event) =>
                             setExclusivityForm((current) => ({
@@ -1062,11 +1066,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.declarationFile")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           value={exclusivityForm.declarationFileId ?? ""}
                           onChange={(event) =>
                             setExclusivityForm((current) => ({
@@ -1077,11 +1081,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.effectiveStart")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           placeholder="2026-12-31T00:00:00.000Z"
                           value={exclusivityForm.effectiveStart ?? ""}
                           onChange={(event) =>
@@ -1093,11 +1097,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.effectiveEnd")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           placeholder="2026-12-31T23:59:59.000Z"
                           value={exclusivityForm.effectiveEnd ?? ""}
                           onChange={(event) =>
@@ -1111,7 +1115,7 @@ export default function FleetPage() {
                     </div>
                     <div style={{ marginTop: 12, marginBottom: 12 }}>
                       <span
-                        className={`admin-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.exclusivity.lifecycleStatus)}`}
+                        className={`platform-ui-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.exclusivity.lifecycleStatus)}`}
                       >
                         {formatPlatformCodeLabel(
                           locale,
@@ -1119,12 +1123,7 @@ export default function FleetPage() {
                             .lifecycleStatus,
                         )}
                       </span>{" "}
-                      <span
-                        style={{
-                          color: "var(--admin-text-muted)",
-                          fontSize: 12,
-                        }}
-                      >
+                      <span style={textMutedStyle}>
                         {formatPlatformCodeLabel(
                           locale,
                           selectedVehicle.supplyLifecycle.exclusivity
@@ -1134,7 +1133,7 @@ export default function FleetPage() {
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -1150,7 +1149,7 @@ export default function FleetPage() {
                           : t("fleet.submitExclusivity")}
                       </button>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -1166,7 +1165,7 @@ export default function FleetPage() {
                           : t("fleet.approveExclusivity")}
                       </button>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -1184,7 +1183,7 @@ export default function FleetPage() {
                     </div>
                   </div>
 
-                  <div className="admin-card">
+                  <div className="platform-ui-card">
                     <h3 style={{ marginTop: 0 }}>
                       {t("fleet.detail.offboarding")}
                     </h3>
@@ -1196,11 +1195,11 @@ export default function FleetPage() {
                       }}
                     >
                       <label style={{ gridColumn: "1 / -1" }}>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.offboardingReason")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           value={offboardingForm.reason}
                           onChange={(event) =>
                             setOffboardingForm((current) => ({
@@ -1211,11 +1210,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.requestedBy")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           value={offboardingForm.requestedBy ?? ""}
                           onChange={(event) =>
                             setOffboardingForm((current) => ({
@@ -1226,11 +1225,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.debrandingTicket")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           value={offboardingForm.debrandingTicketId ?? ""}
                           onChange={(event) =>
                             setOffboardingForm((current) => ({
@@ -1241,11 +1240,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.effectiveStart")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           placeholder="2026-12-31T00:00:00.000Z"
                           value={offboardingForm.effectiveAt ?? ""}
                           onChange={(event) =>
@@ -1257,11 +1256,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.debrandingDueAt")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           placeholder="2026-12-31T23:59:59.000Z"
                           value={offboardingForm.debrandingDueAt ?? ""}
                           onChange={(event) =>
@@ -1295,10 +1294,9 @@ export default function FleetPage() {
                     </div>
                     <p
                       style={{
+                        ...textMutedStyle,
                         marginTop: 12,
                         marginBottom: 12,
-                        color: "var(--admin-text-muted)",
-                        fontSize: 12,
                       }}
                     >
                       {t("fleet.detail.debrandingStatus")}:{" "}
@@ -1310,7 +1308,7 @@ export default function FleetPage() {
                     </p>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -1326,7 +1324,7 @@ export default function FleetPage() {
                           : t("fleet.startOffboarding")}
                       </button>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -1352,9 +1350,9 @@ export default function FleetPage() {
 
         {activeTab === "drivers" &&
           (drivers.length === 0 ? (
-            <p className="admin-empty">{t("fleet.noDrivers")}</p>
+            <p className="platform-ui-empty">{t("fleet.noDrivers")}</p>
           ) : (
-            <table className="admin-table">
+            <table className="platform-ui-table">
               <thead>
                 <tr>
                   <th>{t("fleet.col.driverId")}</th>
@@ -1376,12 +1374,7 @@ export default function FleetPage() {
                     </td>
                     <td>
                       <div>{d.name || "—"}</div>
-                      <div
-                        style={{
-                          color: "var(--admin-text-muted)",
-                          fontSize: 12,
-                        }}
-                      >
+                      <div style={textMutedStyle}>
                         {d.dispatchEligible
                           ? t("fleet.driverDispatchEligible")
                           : t("fleet.driverNotEligible")}
@@ -1389,17 +1382,17 @@ export default function FleetPage() {
                     </td>
                     <td>
                       <span
-                        className={`admin-badge ${badgeClassForLifecycle(d.lifecycleStatus)}`}
+                        className={`platform-ui-badge ${badgeClassForLifecycle(d.lifecycleStatus)}`}
                       >
                         {formatPlatformCodeLabel(locale, d.lifecycleStatus)}
                       </span>
                     </td>
                     <td>
                       <span
-                        className={`admin-badge ${
+                        className={`platform-ui-badge ${
                           d.workState === "available"
-                            ? "admin-badge--success"
-                            : "admin-badge--neutral"
+                            ? "platform-ui-badge--success"
+                            : "platform-ui-badge--neutral"
                         }`}
                       >
                         {formatPlatformCodeLabel(locale, d.workState)}
@@ -1407,10 +1400,10 @@ export default function FleetPage() {
                     </td>
                     <td>
                       <span
-                        className={`admin-badge ${
+                        className={`platform-ui-badge ${
                           d.licensesValid
-                            ? "admin-badge--success"
-                            : "admin-badge--warning"
+                            ? "platform-ui-badge--success"
+                            : "platform-ui-badge--warning"
                         }`}
                       >
                         {d.licensesValid
@@ -1424,12 +1417,7 @@ export default function FleetPage() {
                           ? t("fleet.profileReady")
                           : t("fleet.profileMissing")}
                       </div>
-                      <div
-                        style={{
-                          color: "var(--admin-text-muted)",
-                          fontSize: 12,
-                        }}
-                      >
+                      <div style={textMutedStyle}>
                         {formatDateTime(d.profileUpdatedAt || "")}
                       </div>
                     </td>
@@ -1445,12 +1433,7 @@ export default function FleetPage() {
                             >
                               {binding.deviceId}
                             </div>
-                            <div
-                              style={{
-                                color: "var(--admin-text-muted)",
-                                fontSize: 12,
-                              }}
-                            >
+                            <div style={textMutedStyle}>
                               {binding.deviceLabel || binding.status}
                             </div>
                             <div
@@ -1462,7 +1445,7 @@ export default function FleetPage() {
                               }}
                             >
                               <button
-                                className="admin-btn admin-btn--secondary"
+                                className="platform-ui-btn platform-ui-btn--secondary"
                                 disabled={
                                   binding.status === "revoked" ||
                                   bindingActionId === binding.bindingId
@@ -1476,12 +1459,7 @@ export default function FleetPage() {
                                   ? t("fleet.revokingDevice")
                                   : t("fleet.revokeDevice")}
                               </button>
-                              <span
-                                style={{
-                                  color: "var(--admin-text-muted)",
-                                  fontSize: 12,
-                                }}
-                              >
+                              <span style={textMutedStyle}>
                                 {binding.status === "revoked"
                                   ? t("fleet.deviceRevoked")
                                   : t("fleet.deviceRebindHint")}
@@ -1501,7 +1479,7 @@ export default function FleetPage() {
                           </div>
                         ))
                       ) : (
-                        <span className="admin-badge admin-badge--success">
+                        <span className="platform-ui-badge platform-ui-badge--success">
                           {t("fleet.noneBlocked")}
                         </span>
                       )}
@@ -1523,7 +1501,7 @@ export default function FleetPage() {
                             return (
                               <button
                                 key={nextStatus}
-                                className="admin-btn admin-btn--secondary"
+                                className="platform-ui-btn platform-ui-btn--secondary"
                                 disabled={
                                   busy || d.lifecycleStatus === nextStatus
                                 }
@@ -1549,9 +1527,9 @@ export default function FleetPage() {
 
         {activeTab === "contracts" &&
           (contracts.length === 0 ? (
-            <p className="admin-empty">{t("fleet.noContracts")}</p>
+            <p className="platform-ui-empty">{t("fleet.noContracts")}</p>
           ) : (
-            <table className="admin-table">
+            <table className="platform-ui-table">
               <thead>
                 <tr>
                   <th>{t("fleet.col.contractId")}</th>
@@ -1578,10 +1556,10 @@ export default function FleetPage() {
                     </td>
                     <td>
                       <span
-                        className={`admin-badge ${
+                        className={`platform-ui-badge ${
                           c.lifecycleStatus === "active"
-                            ? "admin-badge--success"
-                            : "admin-badge--warning"
+                            ? "platform-ui-badge--success"
+                            : "platform-ui-badge--warning"
                         }`}
                       >
                         {formatPlatformCodeLabel(locale, c.lifecycleStatus)}

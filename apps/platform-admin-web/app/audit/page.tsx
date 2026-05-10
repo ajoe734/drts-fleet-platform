@@ -6,6 +6,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
+import { actionButtonStyle, emptyStateStyle } from "@/components/platform-ui";
 import {
   formatDateTime,
   truncate,
@@ -238,7 +239,7 @@ export default function AuditPage() {
         };
 
   if (loading) {
-    return <div className="admin-empty">{t("audit.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("audit.loading")}</div>;
   }
 
   return (
@@ -260,7 +261,7 @@ export default function AuditPage() {
         ]}
         actions={
           <button
-            className="admin-btn admin-btn--secondary"
+            style={actionButtonStyle({ tone: "secondary" })}
             onClick={() => void loadRecords()}
           >
             {t("common.refresh")}
@@ -603,7 +604,10 @@ export default function AuditPage() {
                 <Td align="right">
                   {record.oldValuesSummary || record.newValuesSummary ? (
                     <button
-                      className="admin-btn admin-btn--secondary admin-btn--sm"
+                      style={actionButtonStyle({
+                        tone: "secondary",
+                        size: "sm",
+                      })}
                       type="button"
                       onClick={() =>
                         setExpandedAuditId((current) =>

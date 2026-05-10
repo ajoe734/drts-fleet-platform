@@ -7,6 +7,25 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import {
+  actionButtonStyle,
+  emptyStateStyle,
+  mergeStyles,
+  monoTextStyle,
+  pageHeaderStyle,
+  pageHeaderSubtitleStyle,
+  pageHeaderTitleStyle,
+  statusBadgeStyle,
+  surfaceCardStyle,
+  tableCardStyle,
+  tableCellStyle,
+  tableHeadCellStyle,
+  tableStyle,
+  toggleButtonStyle,
+  toggleGroupStyle,
+  toolbarStyle,
+  inputStyle,
+} from "@/components/platform-ui";
 import { useTranslation } from "@/lib/i18n";
 import {
   formatPlatformCodeLabel,
@@ -89,6 +108,16 @@ function normalizeDateTimeLocalValue(value: string) {
     localValue,
     isoValue: parsed.toISOString(),
   };
+}
+
+function pricingRuleStatusTone(status: PlatformPricingRuleRecord["status"]) {
+  if (status === "active") {
+    return "success" as const;
+  }
+  if (status === "draft") {
+    return "warning" as const;
+  }
+  return "neutral" as const;
 }
 
 export default function PricingPage() {
@@ -292,14 +321,14 @@ export default function PricingPage() {
   }
 
   if (loading) {
-    return <div className="admin-empty">{t("pricing.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("pricing.loading")}</div>;
   }
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h1>{t("pricing.title")}</h1>
-        <p>
+      <div style={pageHeaderStyle}>
+        <h1 style={pageHeaderTitleStyle}>{t("pricing.title")}</h1>
+        <p style={pageHeaderSubtitleStyle}>
           {t("pricing.subtitle", {
             rules: rules.length,
             plans: feePlans.length,
@@ -309,8 +338,9 @@ export default function PricingPage() {
 
       {error && (
         <div
-          className="admin-card"
-          style={{ borderColor: "rgba(239,68,68,0.3)" }}
+          style={mergeStyles(surfaceCardStyle, {
+            borderColor: "rgba(239,68,68,0.3)",
+          })}
         >
           <p style={{ color: "#dc2626", margin: 0 }}>
             {getPlatformLabel(locale, "error")}: {error}
@@ -319,7 +349,7 @@ export default function PricingPage() {
       )}
 
       {productRuleCatalog && (
-        <div className="admin-card" style={{ marginBottom: 16 }}>
+        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 16 })}>
           <h3 style={{ marginTop: 0 }}>{t("pricing.title")} Governance</h3>
           <p style={{ margin: "0 0 8px", color: "#374151" }}>
             Canonical quoted fare source:{" "}
@@ -356,8 +386,10 @@ export default function PricingPage() {
         }}
       >
         <div
-          className="admin-card"
-          style={{ marginBottom: 0, background: "rgba(15,118,110,0.04)" }}
+          style={mergeStyles(surfaceCardStyle, {
+            marginBottom: 0,
+            background: "rgba(15,118,110,0.04)",
+          })}
         >
           <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
             {pricingWorkflowCopy.publishWindowTitle}
@@ -366,7 +398,7 @@ export default function PricingPage() {
             {pricingWorkflowCopy.publishWindowNote}
           </p>
         </div>
-        <div className="admin-card" style={{ marginBottom: 0 }}>
+        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
           <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
             {pricingWorkflowCopy.nextPublish}
           </p>
@@ -385,7 +417,7 @@ export default function PricingPage() {
             </p>
           )}
         </div>
-        <div className="admin-card" style={{ marginBottom: 0 }}>
+        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
           <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
             {pricingWorkflowCopy.overrideActors}
           </p>
@@ -400,7 +432,7 @@ export default function PricingPage() {
             {activeRules.length} active · {draftRules.length} draft
           </small>
         </div>
-        <div className="admin-card" style={{ marginBottom: 0 }}>
+        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
           <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
             {pricingWorkflowCopy.overrideFields}
           </p>
@@ -439,7 +471,7 @@ export default function PricingPage() {
             note: t("pricing.publishedPlansNote"),
           },
         ].map((card) => (
-          <div key={card.label} className="admin-card">
+          <div key={card.label} style={surfaceCardStyle}>
             <p
               style={{
                 margin: "0 0 8px",
@@ -457,12 +489,13 @@ export default function PricingPage() {
         ))}
       </div>
 
-      <div className="admin-toolbar">
-        <div className="admin-toggle-group">
+      <div style={toolbarStyle}>
+        <div style={toggleGroupStyle}>
           {(["all", "active", "draft", "archived"] as const).map((value) => (
             <button
               key={value}
-              className={`admin-toggle-btn ${filter === value ? "active" : ""}`}
+              type="button"
+              style={toggleButtonStyle(filter === value)}
               onClick={() => setFilter(value)}
             >
               {formatPlatformCodeLabel(locale, value)}
@@ -470,13 +503,15 @@ export default function PricingPage() {
           ))}
         </div>
         <button
-          className="admin-btn admin-btn--primary"
+          type="button"
+          style={actionButtonStyle({ tone: "primary" })}
           onClick={() => setShowCreate((current) => !current)}
         >
           {showCreate ? t("pricing.cancelDraft") : t("pricing.newPricingDraft")}
         </button>
         <button
-          className="admin-btn admin-btn--secondary"
+          type="button"
+          style={actionButtonStyle()}
           onClick={() => void loadData()}
         >
           {t("common.refresh")}
@@ -484,7 +519,7 @@ export default function PricingPage() {
       </div>
 
       {showCreate && (
-        <div className="admin-card" style={{ marginBottom: 16 }}>
+        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 16 })}>
           <h3 style={{ marginTop: 0 }}>{t("pricing.sectionCreateDraft")}</h3>
           <form onSubmit={handleCreatePricingRule}>
             <div style={formGridStyle}>
@@ -582,7 +617,7 @@ export default function PricingPage() {
             </label>
             <button
               type="submit"
-              className="admin-btn admin-btn--primary"
+              style={actionButtonStyle({ tone: "primary" })}
               disabled={
                 creatingPricingRule ||
                 !pricingForm.ruleName.trim() ||
@@ -597,7 +632,7 @@ export default function PricingPage() {
         </div>
       )}
 
-      <div className="admin-card" style={{ marginBottom: 16 }}>
+      <div style={mergeStyles(surfaceCardStyle, { marginBottom: 16 })}>
         <h3 style={{ marginTop: 0 }}>{t("pricing.sectionPublishPlan")}</h3>
         <form onSubmit={handlePublishFeePlan}>
           <div style={formGridStyle}>
@@ -668,7 +703,7 @@ export default function PricingPage() {
           </div>
           <button
             type="submit"
-            className="admin-btn admin-btn--primary"
+            style={actionButtonStyle({ tone: "primary" })}
             disabled={publishingFeePlan || !feePlanForm.version.trim()}
           >
             {publishingFeePlan
@@ -678,10 +713,7 @@ export default function PricingPage() {
         </form>
       </div>
 
-      <div
-        className="admin-card"
-        style={{ overflowX: "auto", marginBottom: 16 }}
-      >
+      <div style={mergeStyles(tableCardStyle, { marginBottom: 16 })}>
         <div
           style={{
             display: "flex",
@@ -695,52 +727,58 @@ export default function PricingPage() {
             {feePlans.length}
           </span>
         </div>
-        <table className="admin-table">
+        <table style={tableStyle}>
           <thead>
             <tr>
-              <th>{t("pricing.col.plan")}</th>
-              <th>{t("pricing.col.version")}</th>
-              <th>{t("pricing.col.serviceFee")}</th>
-              <th>{t("pricing.col.reimbMode")}</th>
-              <th>{t("pricing.col.status")}</th>
-              <th>{t("notices.col.created")}</th>
+              <th style={tableHeadCellStyle}>{t("pricing.col.plan")}</th>
+              <th style={tableHeadCellStyle}>{t("pricing.col.version")}</th>
+              <th style={tableHeadCellStyle}>{t("pricing.col.serviceFee")}</th>
+              <th style={tableHeadCellStyle}>{t("pricing.col.reimbMode")}</th>
+              <th style={tableHeadCellStyle}>{t("pricing.col.status")}</th>
+              <th style={tableHeadCellStyle}>{t("notices.col.created")}</th>
             </tr>
           </thead>
           <tbody>
             {feePlans.length > 0 ? (
               feePlans.map((plan) => (
                 <tr key={plan.feePlanId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
+                  <td style={mergeStyles(tableCellStyle, monoTextStyle)}>
                     <div>{plan.planName}</div>
                     <div style={{ color: "#6b7280" }}>{plan.feePlanId}</div>
                   </td>
-                  <td>
+                  <td style={tableCellStyle}>
                     <code>{plan.version}</code>
                   </td>
-                  <td>{(plan.serviceFeeBps / 100).toFixed(2)}%</td>
-                  <td>
-                    <span className="admin-badge admin-badge--info">
+                  <td style={tableCellStyle}>
+                    {(plan.serviceFeeBps / 100).toFixed(2)}%
+                  </td>
+                  <td style={tableCellStyle}>
+                    <span style={statusBadgeStyle("info")}>
                       {formatPlatformCodeLabel(locale, plan.reimbursementMode)}
                     </span>
                   </td>
-                  <td>
-                    <span className="admin-badge admin-badge--success">
+                  <td style={tableCellStyle}>
+                    <span style={statusBadgeStyle("success")}>
                       {formatPlatformCodeLabel(locale, plan.status)}
                     </span>
                   </td>
-                  <td>{formatDateTime(plan.publishedAt)}</td>
+                  <td style={tableCellStyle}>
+                    {formatDateTime(plan.publishedAt)}
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={6}>{t("pricing.noPlans")}</td>
+                <td colSpan={6} style={tableCellStyle}>
+                  {t("pricing.noPlans")}
+                </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      <div className="admin-card" style={{ overflowX: "auto" }}>
+      <div style={tableCardStyle}>
         <div
           style={{
             display: "flex",
@@ -754,66 +792,71 @@ export default function PricingPage() {
             {filteredRules.length}
           </span>
         </div>
-        <table className="admin-table">
+        <table style={tableStyle}>
           <thead>
             <tr>
-              <th>{t("pricing.col.rule")}</th>
-              <th>{t("pricing.col.version")}</th>
-              <th>{t("pricing.col.serviceFee")}</th>
-              <th>{t("pricing.col.reimbMode")}</th>
-              <th>{getPlatformLabel(locale, "applicableTo")}</th>
-              <th>{t("pricing.col.status")}</th>
-              <th>{t("notices.col.created")}</th>
-              <th>{t("pricing.form.notes")}</th>
-              <th>{t("common.actions")}</th>
+              <th style={tableHeadCellStyle}>{t("pricing.col.rule")}</th>
+              <th style={tableHeadCellStyle}>{t("pricing.col.version")}</th>
+              <th style={tableHeadCellStyle}>{t("pricing.col.serviceFee")}</th>
+              <th style={tableHeadCellStyle}>{t("pricing.col.reimbMode")}</th>
+              <th style={tableHeadCellStyle}>
+                {getPlatformLabel(locale, "applicableTo")}
+              </th>
+              <th style={tableHeadCellStyle}>{t("pricing.col.status")}</th>
+              <th style={tableHeadCellStyle}>{t("notices.col.created")}</th>
+              <th style={tableHeadCellStyle}>{t("pricing.form.notes")}</th>
+              <th style={tableHeadCellStyle}>{t("common.actions")}</th>
             </tr>
           </thead>
           <tbody>
             {filteredRules.length > 0 ? (
               filteredRules.map((rule) => (
                 <tr key={rule.ruleId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
+                  <td style={mergeStyles(tableCellStyle, monoTextStyle)}>
                     <div>{rule.ruleName}</div>
                     <div style={{ color: "#6b7280" }}>{rule.ruleId}</div>
                   </td>
-                  <td>
+                  <td style={tableCellStyle}>
                     <code>v{rule.version}</code>
                   </td>
-                  <td>{(rule.serviceFeeBps / 100).toFixed(2)}%</td>
-                  <td>
-                    <span className="admin-badge admin-badge--info">
+                  <td style={tableCellStyle}>
+                    {(rule.serviceFeeBps / 100).toFixed(2)}%
+                  </td>
+                  <td style={tableCellStyle}>
+                    <span style={statusBadgeStyle("info")}>
                       {formatPlatformCodeLabel(locale, rule.reimbursementMode)}
                     </span>
                   </td>
-                  <td>
+                  <td style={tableCellStyle}>
                     {rule.applicableTo === "all"
                       ? t("common.allTenants")
                       : rule.applicableTo}
                   </td>
-                  <td>
+                  <td style={tableCellStyle}>
                     <span
-                      className={`admin-badge ${
-                        rule.status === "active"
-                          ? "admin-badge--success"
-                          : rule.status === "draft"
-                            ? "admin-badge--warning"
-                            : "admin-badge--neutral"
-                      }`}
+                      style={statusBadgeStyle(
+                        pricingRuleStatusTone(rule.status),
+                      )}
                     >
                       {formatPlatformCodeLabel(locale, rule.status)}
                     </span>
                   </td>
-                  <td>
+                  <td style={tableCellStyle}>
                     {rule.publishedAt ? formatDateTime(rule.publishedAt) : "—"}
                   </td>
-                  <td style={{ fontSize: 12, maxWidth: 260 }}>
+                  <td
+                    style={mergeStyles(tableCellStyle, {
+                      fontSize: 12,
+                      maxWidth: 260,
+                    })}
+                  >
                     {rule.notes || "—"}
                   </td>
-                  <td>
+                  <td style={tableCellStyle}>
                     {rule.status === "draft" ? (
                       <div style={{ display: "grid", gap: 10, minWidth: 260 }}>
                         <button
-                          className="admin-btn admin-btn--secondary"
+                          style={actionButtonStyle()}
                           onClick={() =>
                             publishRuleFormRuleId === rule.ruleId
                               ? closePublishRuleForm()
@@ -878,7 +921,7 @@ export default function PricingPage() {
                             </p>
                             <div style={actionsStyle}>
                               <button
-                                className="admin-btn admin-btn--secondary"
+                                style={actionButtonStyle()}
                                 type="button"
                                 onClick={closePublishRuleForm}
                                 disabled={publishingRuleId === rule.ruleId}
@@ -886,7 +929,7 @@ export default function PricingPage() {
                                 {t("common.cancel")}
                               </button>
                               <button
-                                className="admin-btn admin-btn--primary"
+                                style={actionButtonStyle({ tone: "primary" })}
                                 type="button"
                                 onClick={() =>
                                   void handlePublishRule(rule.ruleId)
@@ -911,7 +954,9 @@ export default function PricingPage() {
               ))
             ) : (
               <tr>
-                <td colSpan={9}>{t("pricing.noRules")}</td>
+                <td colSpan={9} style={tableCellStyle}>
+                  {t("pricing.noRules")}
+                </td>
               </tr>
             )}
           </tbody>
@@ -944,13 +989,4 @@ const actionsStyle: React.CSSProperties = {
   display: "flex",
   gap: 8,
   flexWrap: "wrap",
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "0.75rem 0.85rem",
-  borderRadius: 12,
-  border: "1px solid #d1d5db",
-  background: "#fff",
-  fontSize: 14,
 };

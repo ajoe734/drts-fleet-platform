@@ -681,19 +681,19 @@ export default function PaymentsPage() {
     );
 
   if (loading) {
-    return <div className="admin-empty">{t("payments.loading")}</div>;
+    return <div className="platform-ui-empty">{t("payments.loading")}</div>;
   }
 
   return (
     <div>
-      <div className="admin-page-header">
+      <div className="platform-ui-page-header">
         <h1>{t("payments.title")}</h1>
         <p>{t("payments.subtitle")}</p>
       </div>
 
       {error && (
         <div
-          className="admin-card"
+          className="platform-ui-card"
           style={{ borderColor: "rgba(239,68,68,0.3)" }}
         >
           <p style={{ color: "#dc2626", margin: 0 }}>
@@ -747,7 +747,7 @@ export default function PaymentsPage() {
             note: t("payments.shadow.summaryNote"),
           },
         ].map((card) => (
-          <div key={card.label} className="admin-card">
+          <div key={card.label} className="platform-ui-card">
             <p
               style={{
                 margin: "0 0 8px",
@@ -773,7 +773,7 @@ export default function PaymentsPage() {
           marginBottom: 16,
         }}
       >
-        <div className="admin-card">
+        <div className="platform-ui-card">
           <h3 style={{ marginTop: 0 }}>{t("payments.generateInvoiceTitle")}</h3>
           <form onSubmit={handleGenerateInvoice}>
             <div style={formGridStyle}>
@@ -808,7 +808,7 @@ export default function PaymentsPage() {
             </div>
             <button
               type="submit"
-              className="admin-btn admin-btn--primary"
+              className="platform-ui-btn platform-ui-btn--primary"
               disabled={invoicePending}
             >
               {invoicePending
@@ -818,7 +818,7 @@ export default function PaymentsPage() {
           </form>
         </div>
 
-        <div className="admin-card">
+        <div className="platform-ui-card">
           <h3 style={{ marginTop: 0 }}>
             {t("payments.generateStatementsTitle")}
           </h3>
@@ -838,7 +838,7 @@ export default function PaymentsPage() {
             </div>
             <button
               type="submit"
-              className="admin-btn admin-btn--primary"
+              className="platform-ui-btn platform-ui-btn--primary"
               disabled={statementPending}
             >
               {statementPending
@@ -850,7 +850,7 @@ export default function PaymentsPage() {
       </div>
 
       <div
-        className="admin-card"
+        className="platform-ui-card"
         style={{ overflowX: "auto", marginBottom: 16 }}
       >
         <div style={{ marginBottom: 12 }}>
@@ -871,7 +871,7 @@ export default function PaymentsPage() {
           }}
         >
           <div
-            className="admin-card"
+            className="platform-ui-card"
             style={{ marginBottom: 0, background: "rgba(15,118,110,0.04)" }}
           >
             <p style={{ margin: "0 0 4px", fontSize: 13, color: "#6b7280" }}>
@@ -882,7 +882,7 @@ export default function PaymentsPage() {
             </p>
           </div>
           <div
-            className="admin-card"
+            className="platform-ui-card"
             style={{ marginBottom: 0, background: "rgba(59,130,246,0.04)" }}
           >
             <p style={{ margin: "0 0 4px", fontSize: 13, color: "#6b7280" }}>
@@ -1100,7 +1100,7 @@ export default function PaymentsPage() {
           </div>
           <button
             type="submit"
-            className="admin-btn admin-btn--primary"
+            className="platform-ui-btn platform-ui-btn--primary"
             disabled={issueDraftPending}
           >
             {issueDraftPending
@@ -1189,7 +1189,7 @@ export default function PaymentsPage() {
         </div>
 
         <div style={{ marginTop: 16 }}>
-          <table className="admin-table">
+          <table className="platform-ui-table">
             <thead>
               <tr>
                 <th>{t("payments.reconciliation.col.issue")}</th>
@@ -1214,12 +1214,12 @@ export default function PaymentsPage() {
                       </div>
                       <div style={{ marginTop: 6 }}>
                         <span
-                          className={`admin-badge ${
+                          className={`platform-ui-badge ${
                             issue.status === "resolved"
-                              ? "admin-badge--success"
+                              ? "platform-ui-badge--success"
                               : issue.status === "assigned"
-                                ? "admin-badge--warning"
-                                : "admin-badge--neutral"
+                                ? "platform-ui-badge--warning"
+                                : "platform-ui-badge--neutral"
                           }`}
                         >
                           {formatPlatformCodeLabel(locale, issue.status)}
@@ -1243,18 +1243,18 @@ export default function PaymentsPage() {
                             gap: 4,
                           }}
                         >
-                          <span className="admin-badge admin-badge--neutral">
+                          <span className="platform-ui-badge platform-ui-badge--neutral">
                             {formatPlatformCodeLabel(
                               locale,
                               issue.forwardedFinanceContext.platformCode,
                             )}
                           </span>
-                          <span className="admin-badge admin-badge--neutral">
+                          <span className="platform-ui-badge platform-ui-badge--neutral">
                             {t(
                               `payments.matrix.ledger.${issue.forwardedFinanceContext.localLedgerMode}`,
                             )}
                           </span>
-                          <span className="admin-badge admin-badge--warning">
+                          <span className="platform-ui-badge platform-ui-badge--warning">
                             {t("payments.shadow.payoutAuthority")}:{" "}
                             {t(
                               `payments.shadow.authority.${issue.forwardedFinanceContext.driverPayoutAuthority}`,
@@ -1301,7 +1301,7 @@ export default function PaymentsPage() {
                       <div style={{ ...issueActionGridStyle, marginBottom: 8 }}>
                         <Link
                           href={`/payments/reconciliation/${encodeURIComponent(issue.issueId)}`}
-                          className="admin-btn admin-btn--secondary"
+                          className="platform-ui-btn platform-ui-btn--secondary"
                         >
                           {reconciliationWorkflowCopy.openDetail}
                         </Link>
@@ -1327,7 +1327,7 @@ export default function PaymentsPage() {
                               style={inputStyle}
                             />
                             <button
-                              className="admin-btn admin-btn--secondary"
+                              className="platform-ui-btn platform-ui-btn--secondary"
                               onClick={() => void handleAssignIssue(issue)}
                               disabled={issueActionId === issue.issueId}
                             >
@@ -1359,7 +1359,7 @@ export default function PaymentsPage() {
                               style={inputStyle}
                             />
                             <button
-                              className="admin-btn admin-btn--secondary"
+                              className="platform-ui-btn platform-ui-btn--secondary"
                               onClick={() => void handleCommentIssue(issue)}
                               disabled={issueActionId === issue.issueId}
                             >
@@ -1415,7 +1415,7 @@ export default function PaymentsPage() {
                               style={inputStyle}
                             />
                             <button
-                              className="admin-btn admin-btn--primary"
+                              className="platform-ui-btn platform-ui-btn--primary"
                               onClick={() => void handleResolveIssue(issue)}
                               disabled={issueActionId === issue.issueId}
                             >
@@ -1453,7 +1453,7 @@ export default function PaymentsPage() {
                               style={inputStyle}
                             />
                             <button
-                              className="admin-btn admin-btn--secondary"
+                              className="platform-ui-btn platform-ui-btn--secondary"
                               onClick={() => void handleReopenIssue(issue)}
                               disabled={issueActionId === issue.issueId}
                             >
@@ -1476,7 +1476,7 @@ export default function PaymentsPage() {
       </div>
 
       <div
-        className="admin-card"
+        className="platform-ui-card"
         style={{
           overflowX: "auto",
           marginBottom: 16,
@@ -1489,7 +1489,7 @@ export default function PaymentsPage() {
             {t("payments.shadow.subtitle")}
           </p>
         </div>
-        <table className="admin-table">
+        <table className="platform-ui-table">
           <thead>
             <tr>
               <th>{t("payments.shadow.col.platform")}</th>
@@ -1557,7 +1557,7 @@ export default function PaymentsPage() {
                       </div>
                     </td>
                     <td>
-                      <span className="admin-badge admin-badge--neutral">
+                      <span className="platform-ui-badge platform-ui-badge--neutral">
                         {t(`payments.matrix.ledger.${context.localLedgerMode}`)}
                       </span>
                     </td>
@@ -1565,12 +1565,12 @@ export default function PaymentsPage() {
                       <div>{issue.ownerId ?? "—"}</div>
                       <div style={{ marginTop: 6 }}>
                         <span
-                          className={`admin-badge ${
+                          className={`platform-ui-badge ${
                             issue.status === "resolved"
-                              ? "admin-badge--success"
+                              ? "platform-ui-badge--success"
                               : issue.status === "assigned"
-                                ? "admin-badge--warning"
-                                : "admin-badge--neutral"
+                                ? "platform-ui-badge--warning"
+                                : "platform-ui-badge--neutral"
                           }`}
                         >
                           {formatPlatformCodeLabel(locale, issue.status)}
@@ -1593,7 +1593,7 @@ export default function PaymentsPage() {
       </div>
 
       <div
-        className="admin-card"
+        className="platform-ui-card"
         style={{ overflowX: "auto", marginBottom: 16 }}
       >
         <div style={{ marginBottom: 12 }}>
@@ -1602,7 +1602,7 @@ export default function PaymentsPage() {
             {t("payments.matrix.subtitle")}
           </p>
         </div>
-        <table className="admin-table">
+        <table className="platform-ui-table">
           <thead>
             <tr>
               <th>{t("payments.matrix.col.channel")}</th>
@@ -1677,10 +1677,10 @@ export default function PaymentsPage() {
                   </td>
                   <td>
                     <span
-                      className={`admin-badge ${
+                      className={`platform-ui-badge ${
                         row.localLedgerMode === "shadow_only"
-                          ? "admin-badge--neutral"
-                          : "admin-badge--success"
+                          ? "platform-ui-badge--neutral"
+                          : "platform-ui-badge--success"
                       }`}
                     >
                       {describeLedgerMode(row.localLedgerMode)}
@@ -1697,12 +1697,12 @@ export default function PaymentsPage() {
         </table>
       </div>
 
-      <div className="admin-toolbar">
-        <div className="admin-toggle-group">
+      <div className="platform-ui-toolbar">
+        <div className="platform-ui-toggle-group">
           {(["all", "paid", "issued", "draft"] as const).map((value) => (
             <button
               key={value}
-              className={`admin-toggle-btn ${
+              className={`platform-ui-toggle-btn ${
                 invoiceFilter === value ? "active" : ""
               }`}
               onClick={() => setInvoiceFilter(value)}
@@ -1712,7 +1712,7 @@ export default function PaymentsPage() {
           ))}
         </div>
         <button
-          className="admin-btn admin-btn--secondary"
+          className="platform-ui-btn platform-ui-btn--secondary"
           onClick={() => void loadFinance()}
         >
           {t("common.refresh")}
@@ -1720,7 +1720,7 @@ export default function PaymentsPage() {
       </div>
 
       <div
-        className="admin-card"
+        className="platform-ui-card"
         style={{ overflowX: "auto", marginBottom: 16 }}
       >
         <div
@@ -1736,7 +1736,7 @@ export default function PaymentsPage() {
             {filteredInvoices.length}
           </span>
         </div>
-        <table className="admin-table">
+        <table className="platform-ui-table">
           <thead>
             <tr>
               <th>{t("payments.col.invoice")}</th>
@@ -1766,20 +1766,20 @@ export default function PaymentsPage() {
                     <div>{describeInvoiceChannelMix(invoice)}</div>
                     <div style={{ marginTop: 6, display: "flex", gap: 4 }}>
                       {hasOnlyShadowLines(invoice.lines) ? (
-                        <span className="admin-badge admin-badge--neutral">
+                        <span className="platform-ui-badge platform-ui-badge--neutral">
                           {t("payments.shadow.badge")}
                         </span>
                       ) : hasShadowLines(invoice.lines) ? (
                         <>
-                          <span className="admin-badge admin-badge--success">
+                          <span className="platform-ui-badge platform-ui-badge--success">
                             {t("payments.payable.badge")}
                           </span>
-                          <span className="admin-badge admin-badge--neutral">
+                          <span className="platform-ui-badge platform-ui-badge--neutral">
                             {t("payments.shadow.badge")}
                           </span>
                         </>
                       ) : (
-                        <span className="admin-badge admin-badge--success">
+                        <span className="platform-ui-badge platform-ui-badge--success">
                           {t("payments.payable.badge")}
                         </span>
                       )}
@@ -1788,12 +1788,12 @@ export default function PaymentsPage() {
                   <td>{formatMoney(invoice.amount)}</td>
                   <td>
                     <span
-                      className={`admin-badge ${
+                      className={`platform-ui-badge ${
                         invoice.status === "paid"
-                          ? "admin-badge--success"
+                          ? "platform-ui-badge--success"
                           : invoice.status === "draft"
-                            ? "admin-badge--neutral"
-                            : "admin-badge--warning"
+                            ? "platform-ui-badge--neutral"
+                            : "platform-ui-badge--warning"
                       }`}
                     >
                       {formatPlatformCodeLabel(locale, invoice.status)}
@@ -1831,7 +1831,7 @@ export default function PaymentsPage() {
       </div>
 
       <div
-        className="admin-card"
+        className="platform-ui-card"
         style={{ overflowX: "auto", marginBottom: 16 }}
       >
         <div
@@ -1847,7 +1847,7 @@ export default function PaymentsPage() {
             {statements.length}
           </span>
         </div>
-        <table className="admin-table">
+        <table className="platform-ui-table">
           <thead>
             <tr>
               <th>{t("payments.col.statement")}</th>
@@ -1877,20 +1877,20 @@ export default function PaymentsPage() {
                     <div>{describeStatementChannelMix(statement)}</div>
                     <div style={{ marginTop: 6, display: "flex", gap: 4 }}>
                       {hasOnlyShadowLines(statement.lines) ? (
-                        <span className="admin-badge admin-badge--neutral">
+                        <span className="platform-ui-badge platform-ui-badge--neutral">
                           {t("payments.shadow.badge")}
                         </span>
                       ) : hasShadowLines(statement.lines) ? (
                         <>
-                          <span className="admin-badge admin-badge--success">
+                          <span className="platform-ui-badge platform-ui-badge--success">
                             {t("payments.payable.badge")}
                           </span>
-                          <span className="admin-badge admin-badge--neutral">
+                          <span className="platform-ui-badge platform-ui-badge--neutral">
                             {t("payments.shadow.badge")}
                           </span>
                         </>
                       ) : (
-                        <span className="admin-badge admin-badge--success">
+                        <span className="platform-ui-badge platform-ui-badge--success">
                           {t("payments.payable.badge")}
                         </span>
                       )}
@@ -1906,10 +1906,10 @@ export default function PaymentsPage() {
                   <td>{formatMoney(statement.netAmount)}</td>
                   <td>
                     <span
-                      className={`admin-badge ${
+                      className={`platform-ui-badge ${
                         statement.payoutStatus === "paid"
-                          ? "admin-badge--success"
-                          : "admin-badge--warning"
+                          ? "platform-ui-badge--success"
+                          : "platform-ui-badge--warning"
                       }`}
                     >
                       {formatPlatformCodeLabel(locale, statement.payoutStatus)}
@@ -1926,7 +1926,7 @@ export default function PaymentsPage() {
         </table>
       </div>
 
-      <div className="admin-card" style={{ overflowX: "auto" }}>
+      <div className="platform-ui-card" style={{ overflowX: "auto" }}>
         <div
           style={{
             display: "flex",
@@ -1952,7 +1952,7 @@ export default function PaymentsPage() {
         >
           {t("payments.shadow.reimbursementGuardrail")}
         </p>
-        <table className="admin-table">
+        <table className="platform-ui-table">
           <thead>
             <tr>
               <th>{t("payments.col.batch")}</th>
@@ -2032,7 +2032,7 @@ export default function PaymentsPage() {
                     >
                       {!batch.approvedAt && (
                         <button
-                          className="admin-btn admin-btn--secondary"
+                          className="platform-ui-btn platform-ui-btn--secondary"
                           onClick={() => void handleApproveBatch(batch)}
                           disabled={batchActionId === batch.batchId}
                         >
@@ -2041,7 +2041,7 @@ export default function PaymentsPage() {
                       )}
                       {batch.status !== "paid" && (
                         <button
-                          className="admin-btn admin-btn--primary"
+                          className="platform-ui-btn platform-ui-btn--primary"
                           onClick={() => void handleMarkPaid(batch)}
                           disabled={batchActionId === batch.batchId}
                         >
