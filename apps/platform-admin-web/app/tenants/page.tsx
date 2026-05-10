@@ -146,6 +146,7 @@ export default function TenantsPage() {
   const counts = useMemo(
     () => ({
       all: tenants.length,
+      draft: tenants.filter((tenant) => tenant.status === "draft").length,
       sandbox: tenants.filter((tenant) => tenant.rollout.stage === "sandbox")
         .length,
       pilot: tenants.filter((tenant) => tenant.rollout.stage === "pilot")
@@ -298,11 +299,11 @@ export default function TenantsPage() {
       <KpiRow minWidth="220px">
         <KpiCard
           label={locale === "en" ? "Active tenants" : "活躍租戶"}
-          value={counts.all}
+          value={counts.active}
           detail={
             locale === "en"
-              ? `${counts.active} active · ${counts.paused} paused`
-              : `${counts.active} 啟用 · ${counts.paused} 暫停`
+              ? `${counts.draft} draft · ${counts.paused} paused`
+              : `${counts.draft} 草稿 · ${counts.paused} 暫停`
           }
           tone="platform"
         />

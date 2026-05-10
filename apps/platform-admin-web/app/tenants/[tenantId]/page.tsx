@@ -74,12 +74,16 @@ const anchorSectionStyle = {
   scrollMarginTop: 96,
 } satisfies React.CSSProperties;
 
-const heroGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1.35fr) minmax(320px, 1fr)",
-  gap: 16,
-  alignItems: "start",
-} satisfies React.CSSProperties;
+function heroGridStyle(isCompact: boolean) {
+  return {
+    display: "grid",
+    gridTemplateColumns: isCompact
+      ? "minmax(0, 1fr)"
+      : "minmax(0, 1.35fr) minmax(280px, 1fr)",
+    gap: 16,
+    alignItems: "start",
+  } satisfies React.CSSProperties;
+}
 
 const statusSummaryGridStyle = {
   display: "grid",
@@ -160,6 +164,19 @@ export default function TenantDetailPage() {
     useState<PlatformTenantRolloutStage | null>(null);
   const [lifecycleAction, setLifecycleAction] = useState<string | null>(null);
   const [roleAction, setRoleAction] = useState<string | null>(null);
+  const [isCompactViewport, setIsCompactViewport] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia("(max-width: 960px)");
+    const syncViewport = () => setIsCompactViewport(mediaQuery.matches);
+    syncViewport();
+    mediaQuery.addEventListener("change", syncViewport);
+    return () => mediaQuery.removeEventListener("change", syncViewport);
+  }, []);
 
   const copy =
     locale === "en"
@@ -870,7 +887,7 @@ export default function TenantDetailPage() {
       </WorkflowPanel>
 
       <div id="rollout" style={anchorSectionStyle}>
-        <div style={heroGridStyle}>
+        <div style={heroGridStyle(isCompactViewport)}>
           <DataViewCard
             title={copy.rolloutTitle}
             subtitle={copy.rolloutSubtitle}
