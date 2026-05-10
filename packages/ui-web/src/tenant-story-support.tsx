@@ -22,7 +22,10 @@ export const tenantSections: ManagementSidebarSection[] = [
   {
     key: "billing",
     title: "Billing",
-    items: [{ href: "/invoices", label: "Invoices" }],
+    items: [
+      { href: "/invoices", label: "Invoices" },
+      { href: "/reports", label: "Reports" },
+    ],
   },
   {
     key: "integrations",

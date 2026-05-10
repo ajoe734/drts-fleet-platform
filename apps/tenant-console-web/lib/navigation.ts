@@ -53,6 +53,11 @@ export const tenantNavGroups: TenantNavGroup[] = [
         label: "Invoices",
         note: "Billing profile, invoice line visibility, and short-lived artifact downloads.",
       },
+      {
+        href: "/reports",
+        label: "Reports",
+        note: "Tenant report jobs, artifact readiness, and contract-backed export history.",
+      },
     ],
   },
   {
