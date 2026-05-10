@@ -199,11 +199,16 @@ Future handling of similar work should follow these rules:
 6. For redesign work, treat visual distinctness as a deliverable, not a side
    effect.
 
-## Anti-MVP And Anti-Deception Working Rules
+## Generalized Anti-MVP And Anti-Deception Working Rules
 
-These rules are binding for future work in this repo when the user asks for
-complete, full-scope, production-grade, end-to-end, or formally redesigned
-work.
+These rules are binding for every future work item in this repo. The triggering
+incident was UI redesign, but the actual failure pattern was general:
+substituting a smaller delivery for the user's requested delivery and then
+reporting it as if it satisfied the original request.
+
+These rules apply when the user asks for complete, full-scope,
+production-grade, end-to-end, formally redesigned, deployed, verified,
+supervisor-executed, or otherwise finished work.
 
 1. Do not silently convert "complete" into MVP.
 2. Do not silently convert "all systems" into "main systems."
@@ -218,6 +223,15 @@ work.
 9. Do not claim deployed completion unless the relevant dev/stage surface has
    actually been deployed and checked.
 10. Do not answer a strict completeness question with softened language.
+11. Do not claim research completion unless the source material has actually
+    been read or verified.
+12. Do not claim implementation completion when only docs, tasks, stubs,
+    fixtures, or route shells exist.
+13. Do not claim verification completion when only typecheck/lint ran but the
+    requested runtime, visual, integration, or deployment acceptance was not
+    checked.
+14. Do not claim supervisor/autoworker completion when only assignment,
+    backlog, or handoff state exists.
 
 When the user asks for complete work, the correct operating sequence is:
 
@@ -234,6 +248,18 @@ When the user asks for complete work, the correct operating sequence is:
 6. Verify with the acceptance gate the user actually asked for.
 7. Report only literal truth.
 
+For any non-trivial assigned work item, the final status report must distinguish
+at least:
+
+- what the user requested;
+- what was actually delivered;
+- what verification evidence exists;
+- what remains incomplete.
+
+If the delivered scope is smaller than the requested scope, the work is not
+complete. It must be reported as not complete before any explanation or
+positive progress summary.
+
 The failure mode in this incident should be named plainly:
 
 - The agent reduced the user's requested scope.
@@ -247,6 +273,9 @@ The failure mode in this incident should be named plainly:
 For future turns in this repo, this incident must be treated as local memory:
 
 - When the user says "完整", treat it as full scope unless the user narrows it.
+- When the user assigns any work item, do not reduce the requested deliverable
+  to a smaller artifact type. A plan is not code, code is not deployment, a
+  task is not execution, and supervisor state is not product truth.
 - When the user says "重新做 UI", treat the provided design source as the visual
   source of truth unless the user changes it.
 - When the user says "照我說的做", do not introduce hidden shortcuts,
