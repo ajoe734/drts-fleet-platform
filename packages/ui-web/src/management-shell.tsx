@@ -1,3 +1,5 @@
+"use client";
+
 import type { CSSProperties, ReactNode } from "react";
 import {
   ManagementSidebar,
@@ -14,6 +16,7 @@ import {
   type ManagementDensity,
   type ManagementMode,
 } from "./management-theme";
+import { useOptionalManagementTheme } from "./management-theme-context";
 
 export interface ManagementShellProps {
   children: ReactNode;
@@ -26,17 +29,25 @@ export interface ManagementShellProps {
 
 export function ManagementShell({
   children,
-  density = "comfortable",
-  mode = "light",
+  density,
+  mode,
   sidebar,
   topbar,
   style,
 }: ManagementShellProps) {
-  const colors = managementColors(mode);
+  const theme = useOptionalManagementTheme();
+  const resolvedDensity = density ?? theme?.density ?? "comfortable";
+  const resolvedMode = mode ?? theme?.mode ?? "light";
+  const colors = managementColors(resolvedMode);
 
   if (!sidebar && !topbar) {
     return (
-      <main style={{ ...managementMainShellStyle(density, mode), ...style }}>
+      <main
+        style={{
+          ...managementMainShellStyle(resolvedDensity, resolvedMode),
+          ...style,
+        }}
+      >
         {children}
       </main>
     );
@@ -56,14 +67,22 @@ export function ManagementShell({
       }}
     >
       {sidebar ? (
-        <ManagementSidebar {...sidebar} density={density} mode={mode} />
+        <ManagementSidebar
+          {...sidebar}
+          density={resolvedDensity}
+          mode={resolvedMode}
+        />
       ) : null}
       {topbar ? (
-        <ManagementTopbar {...topbar} density={density} mode={mode} />
+        <ManagementTopbar
+          {...topbar}
+          density={resolvedDensity}
+          mode={resolvedMode}
+        />
       ) : null}
       <main
         style={{
-          ...managementMainShellStyle(density, mode),
+          ...managementMainShellStyle(resolvedDensity, resolvedMode),
           gridColumn: sidebar ? 2 : 1,
           gridRow: topbar ? 2 : 1,
         }}
@@ -83,13 +102,15 @@ export interface ManagementPageStackProps {
 
 export function ManagementPageStack({
   children,
-  density = "comfortable",
+  density,
   as = "div",
   style,
 }: ManagementPageStackProps) {
+  const theme = useOptionalManagementTheme();
+  const resolvedDensity = density ?? theme?.density ?? "comfortable";
   const Tag = as;
   return (
-    <Tag style={{ ...managementPageStackStyle(density), ...style }}>
+    <Tag style={{ ...managementPageStackStyle(resolvedDensity), ...style }}>
       {children}
     </Tag>
   );

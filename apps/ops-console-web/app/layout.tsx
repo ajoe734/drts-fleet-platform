@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { managementMainShellStyle } from "@drts/ui-web";
 import { RuntimeConfigScript } from "@/lib/runtime-config";
 import { LanguageProvider } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/server-locale";
@@ -25,11 +24,10 @@ export default async function RootLayout({
 
   return (
     <html lang={locale}>
-      <body style={{ margin: 0, display: "flex", minHeight: "100vh" }}>
+      <body style={{ margin: 0, minHeight: "100vh" }}>
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
-          <Sidebar />
-          <main style={managementMainShellStyle()}>{children}</main>
+          <Sidebar>{children}</Sidebar>
         </LanguageProvider>
       </body>
     </html>
