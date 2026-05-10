@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useDeferredValue, useEffect, useState, useTransition } from "react";
-import { PageHeader } from "@drts/ui-web";
+import {
+  CalloutBanner,
+  DataViewCard,
+  KpiCard,
+  KpiRow,
+  PageHeader,
+} from "@drts/ui-web";
 import { useTranslation } from "@/lib/i18n";
 import type {
   CreateMaintenanceRecordCommand,
@@ -228,65 +234,82 @@ export default function MaintenancePage() {
   return (
     <>
       <PageHeader
+        eyebrow={copy(locale, "Fleet readiness", "車隊整備")}
         title={t("maintenance.title")}
         subtitle={t("maintenance.subtitle")}
+        meta={[
+          {
+            label: copy(locale, "Records", "工單"),
+            value: records.length,
+          },
+          {
+            label: copy(locale, "Overdue", "逾期"),
+            value: overdueCount,
+            tone: overdueCount > 0 ? "warning" : "success",
+          },
+          {
+            label: copy(locale, "Dispatch impact", "派車影響"),
+            value: dispatchImpactCount,
+            tone: dispatchImpactCount > 0 ? "ops" : "neutral",
+          },
+        ]}
       />
       <div>
-        {error && (
-          <div className="error-banner">
-            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
-          </div>
-        )}
+        {error ? (
+          <CalloutBanner
+            tone="danger"
+            title={copy(
+              locale,
+              "Maintenance data unavailable",
+              "保養資料暫時不可用",
+            )}
+            description={`${getOpsLabel(locale, "error")}: ${error}`}
+          />
+        ) : null}
 
-        <section className="summary-grid">
-          {[
-            {
-              label: t("maintenance.activeOrders"),
-              value: activeCount,
-              note: t("maintenance.activeOrdersSub"),
-            },
-            {
-              label: t("maintenance.overdue"),
-              value: overdueCount,
-              note: t("maintenance.overdueSub"),
-            },
-            {
-              label: t("maintenance.completed"),
-              value: completedCount,
-              note: t("maintenance.completedSub"),
-            },
-            {
-              label: copy(locale, "Dispatch-impact backlog", "派車影響工單"),
-              value: dispatchImpactCount,
-              note: copy(
-                locale,
-                "Open work orders that may affect dispatch supply",
-                "可能影響派車供給的未結工單",
-              ),
-            },
-          ].map((card) => (
-            <div key={card.label} className="summary-card">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
-            </div>
-          ))}
-        </section>
+        <KpiRow minWidth="170px">
+          <KpiCard
+            label={t("maintenance.activeOrders")}
+            value={activeCount}
+            detail={t("maintenance.activeOrdersSub")}
+            tone="ops"
+          />
+          <KpiCard
+            label={t("maintenance.overdue")}
+            value={overdueCount}
+            detail={t("maintenance.overdueSub")}
+            tone={overdueCount > 0 ? "warning" : "success"}
+          />
+          <KpiCard
+            label={t("maintenance.completed")}
+            value={completedCount}
+            detail={t("maintenance.completedSub")}
+            tone="success"
+          />
+          <KpiCard
+            label={copy(locale, "Dispatch-impact backlog", "派車影響工單")}
+            value={dispatchImpactCount}
+            detail={copy(
+              locale,
+              "Open work orders that may affect dispatch supply",
+              "可能影響派車供給的未結工單",
+            )}
+            tone={dispatchImpactCount > 0 ? "danger" : "neutral"}
+          />
+        </KpiRow>
 
         <section className="watch-grid">
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">
-                  {copy(locale, "Dispatch impact", "派車影響")}
-                </p>
-                <h3>{copy(locale, "Operational watchlist", "營運關注清單")}</h3>
-              </div>
-              <span className="panel-note">
-                {copy(locale, "Vehicles at risk", "受影響車輛")}{" "}
-                {impactedVehicles.size}
-              </span>
-            </div>
+          <DataViewCard
+            title={copy(locale, "Operational watchlist", "營運關注清單")}
+            subtitle={copy(
+              locale,
+              "Dispatch impact cues derived from overdue, in-progress, and scheduled work orders.",
+              "根據逾期、進行中與已排程工單整理派車影響提示。",
+            )}
+            tone={dispatchImpactCount > 0 ? "warning" : "neutral"}
+            density="compact"
+            summary={`${copy(locale, "Vehicles at risk", "受影響車輛")} ${impactedVehicles.size}`}
+          >
             <div className="watch-list">
               {watchlist.length > 0 ? (
                 watchlist.map((record) => {
@@ -326,18 +349,17 @@ export default function MaintenancePage() {
                 </div>
               )}
             </div>
-          </div>
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">
-                  {copy(locale, "Shift planner", "排程摘要")}
-                </p>
-                <h3>
-                  {copy(locale, "Today and next actions", "今日與近期動作")}
-                </h3>
-              </div>
-            </div>
+          </DataViewCard>
+          <DataViewCard
+            title={copy(locale, "Today and next actions", "今日與近期動作")}
+            subtitle={copy(
+              locale,
+              "Quick planning summary for workshop occupancy and vehicles returning to supply.",
+              "快速掌握今日到期、保修占用與可回歸車隊的車輛數。",
+            )}
+            tone="ops"
+            density="compact"
+          >
             <div className="detail-card-grid">
               <div className="detail-card">
                 <span>{copy(locale, "Due today", "今日到期")}</span>
@@ -378,7 +400,7 @@ export default function MaintenancePage() {
                 </small>
               </div>
             </div>
-          </div>
+          </DataViewCard>
         </section>
 
         <div className="toolbar">

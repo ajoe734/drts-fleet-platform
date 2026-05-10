@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import React, { useEffect, useState, useTransition, useMemo } from "react";
-import { PageHeader } from "@drts/ui-web";
+import {
+  CalloutBanner,
+  DataViewCard,
+  KpiCard,
+  KpiRow,
+  PageHeader,
+} from "@drts/ui-web";
 import type {
   CreateReportJobCommand,
   FilingPackageDetailRecord,
@@ -310,62 +316,91 @@ export default function ReportsPage() {
 
   return (
     <>
-      <PageHeader title={t("reports.title")} subtitle={t("reports.subtitle")} />
+      <PageHeader
+        eyebrow={copyText(locale, "Compliance exports", "合規匯出")}
+        title={t("reports.title")}
+        subtitle={t("reports.subtitle")}
+        meta={[
+          {
+            label: copyText(locale, "Jobs", "工作"),
+            value: jobs.length,
+          },
+          {
+            label: copyText(locale, "Queued", "排隊中"),
+            value: queuedReports,
+            tone: queuedReports > 0 ? "warning" : "success",
+          },
+          {
+            label: copyText(locale, "Ready artifacts", "可下載產物"),
+            value: readyArtifacts + completedPackages,
+            tone:
+              readyArtifacts + completedPackages > 0 ? "success" : "neutral",
+          },
+        ]}
+      />
       <div>
-        {error && (
-          <div className="error-banner">
-            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
-          </div>
-        )}
+        {error ? (
+          <CalloutBanner
+            tone="danger"
+            title={copyText(
+              locale,
+              "Report data unavailable",
+              "報表資料暫時不可用",
+            )}
+            description={`${getOpsLabel(locale, "error")}: ${error}`}
+          />
+        ) : null}
 
-        <section className="summary-grid">
-          {[
-            {
-              label: t("reports.queuedJobs"),
-              value: queuedReports,
-              note: t("reports.queuedJobsSub"),
-            },
-            {
-              label: t("reports.completedReports"),
-              value: completedReports,
-              note: t("reports.completedReportsSub"),
-            },
-            {
-              label: t("reports.regulatoryJobs"),
-              value: regulatoryJobs,
-              note: t("reports.regulatoryJobsSub"),
-            },
-            {
-              label: t("reports.artifactsReady"),
-              value: readyArtifacts + completedPackages,
-              note: t("reports.artifactsReadySub"),
-            },
-            {
-              label: copyText(locale, "Expiring access", "即將過期的存取"),
-              value: expiringArtifacts,
-              note: copyText(
-                locale,
-                "Signed URLs expiring within 12 hours",
-                "12 小時內到期的簽名網址",
-              ),
-            },
-          ].map((card) => (
-            <div key={card.label} className="summary-card">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
-            </div>
-          ))}
-        </section>
+        <KpiRow minWidth="170px">
+          <KpiCard
+            label={t("reports.queuedJobs")}
+            value={queuedReports}
+            detail={t("reports.queuedJobsSub")}
+            tone={queuedReports > 0 ? "warning" : "success"}
+          />
+          <KpiCard
+            label={t("reports.completedReports")}
+            value={completedReports}
+            detail={t("reports.completedReportsSub")}
+            tone="success"
+          />
+          <KpiCard
+            label={t("reports.regulatoryJobs")}
+            value={regulatoryJobs}
+            detail={t("reports.regulatoryJobsSub")}
+            tone="ops"
+          />
+          <KpiCard
+            label={t("reports.artifactsReady")}
+            value={readyArtifacts + completedPackages}
+            detail={t("reports.artifactsReadySub")}
+            tone={
+              readyArtifacts + completedPackages > 0 ? "success" : "neutral"
+            }
+          />
+          <KpiCard
+            label={copyText(locale, "Expiring access", "即將過期的存取")}
+            value={expiringArtifacts}
+            detail={copyText(
+              locale,
+              "Signed URLs expiring within 12 hours",
+              "12 小時內到期的簽名網址",
+            )}
+            tone={expiringArtifacts > 0 ? "warning" : "neutral"}
+          />
+        </KpiRow>
 
         {Object.keys(packageTypeCounts).length > 0 && (
-          <section className="summary-grid">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Filing Packages by Type</p>
-                <h3>Filing Packages by Type</h3>
-              </div>
-            </div>
+          <DataViewCard
+            title="Filing Packages by Type"
+            subtitle={copyText(
+              locale,
+              "Volume split across immutable package families.",
+              "依不可變申報包類型檢視目前產量分布。",
+            )}
+            tone="ops"
+            density="compact"
+          >
             {Object.entries(packageTypeCounts).map(([packageType, count]) => (
               <div key={packageType} className="summary-card">
                 <span>{formatOpsCodeLabel(locale, packageType)}</span>
@@ -373,21 +408,20 @@ export default function ReportsPage() {
                 <small>Filing Packages</small>
               </div>
             ))}
-          </section>
+          </DataViewCard>
         )}
 
         <section className="detail-grid">
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">
-                  {copyText(locale, "Queue posture", "佇列狀態")}
-                </p>
-                <h3>
-                  {copyText(locale, "Report job supervision", "報表工作監控")}
-                </h3>
-              </div>
-            </div>
+          <DataViewCard
+            title={copyText(locale, "Report job supervision", "報表工作監控")}
+            subtitle={copyText(
+              locale,
+              "Background job posture for queued, running, and failed exports.",
+              "集中檢視 queued、running 與 failed 的背景匯出工作。",
+            )}
+            tone={failedReports > 0 ? "warning" : "ops"}
+            density="compact"
+          >
             <div className="detail-card-grid">
               {[
                 {
@@ -425,23 +459,22 @@ export default function ReportsPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </DataViewCard>
 
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">
-                  {copyText(locale, "Access rules", "存取規則")}
-                </p>
-                <h3>
-                  {copyText(
-                    locale,
-                    "Artifact and filing controls",
-                    "產物與申報控制",
-                  )}
-                </h3>
-              </div>
-            </div>
+          <DataViewCard
+            title={copyText(
+              locale,
+              "Artifact and filing controls",
+              "產物與申報控制",
+            )}
+            subtitle={copyText(
+              locale,
+              "Signed access, immutable bundles, and handoff-safe download posture.",
+              "簽名下載、不可變申報包與可安全交付的下載規則。",
+            )}
+            tone="neutral"
+            density="compact"
+          >
             <div className="detail-card-grid">
               {[
                 {
@@ -479,7 +512,7 @@ export default function ReportsPage() {
                 </div>
               ))}
             </div>
-          </div>
+          </DataViewCard>
         </section>
 
         <section className="form-stack">

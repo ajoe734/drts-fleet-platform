@@ -13,6 +13,7 @@ import { getOpsClient } from "@/lib/api-client";
 import { getServerLocale } from "@/lib/server-locale";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { t } from "@/lib/translations";
+import { DataViewCard, KpiCard, KpiRow, PageHeader } from "@drts/ui-web";
 import {
   buildRevenueInsights,
   formatCompactNumber,
@@ -20,9 +21,7 @@ import {
   type RevenueFilters,
   type RevenuePeriod,
 } from "@/lib/ops-analytics";
-import { PageHeader } from "@drts/ui-web";
-import { StatCard } from "@drts/ui-web";
-import { Card, CardHeader, CardBody } from "@drts/ui-web";
+import { Card, CardHeader } from "@drts/ui-web";
 import { DataTable, Tr, Td } from "@drts/ui-web";
 import { Badge } from "@drts/ui-web";
 
@@ -308,254 +307,269 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   return (
     <>
       <PageHeader
+        eyebrow={copyText(locale, "Revenue controls", "營收控盤")}
         title={t("revenue.title", locale)}
         subtitle={t("revenue.subtitle", locale)}
+        meta={[
+          {
+            label: copyText(locale, "Trips", "趟次"),
+            value: formatCompactNumber(insights.completedTrips),
+          },
+          {
+            label: copyText(locale, "Revenue", "營收"),
+            value: formatMinorCurrency(insights.totalRevenueMinor),
+            tone: "success",
+          },
+          {
+            label: copyText(locale, "Mismatch queue", "不一致佇列"),
+            value: formatCompactNumber(mismatchedJobsCount),
+            tone: mismatchedJobsCount > 0 ? "warning" : "neutral",
+          },
+        ]}
       />
 
-      {/* Filter bar */}
-      <Card style={{ marginBottom: "20px" }}>
-        <CardBody style={{ padding: "12px 16px" }}>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "16px",
-              alignItems: "center",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span
-                style={{
-                  fontSize: "11.5px",
-                  color: "#64748b",
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                {t("revenue.periodLabel", locale)}
-              </span>
-              <div style={{ display: "flex", gap: "6px" }}>
-                {(["today", "7d", "30d", "all"] as RevenuePeriod[]).map((p) => (
-                  <ChipLink
-                    key={p}
-                    href={buildHref(filters, { period: p })}
-                    active={p === filters.period}
-                  >
-                    {t(`revenue.period.${p}`, locale)}
-                  </ChipLink>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span
-                style={{
-                  fontSize: "11.5px",
-                  color: "#64748b",
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                {t("revenue.productLabel", locale)}
-              </span>
-              <div style={{ display: "flex", gap: "6px" }}>
-                {(["all", "standard_taxi", "business_dispatch"] as const).map(
-                  (sb) => (
-                    <ChipLink
-                      key={sb}
-                      href={buildHref(filters, { serviceBucket: sb })}
-                      active={sb === filters.serviceBucket}
-                    >
-                      {sb === "all"
-                        ? t("revenue.bucket.all", locale)
-                        : t(`revenue.bucket.${sb}`, locale)}
-                    </ChipLink>
-                  ),
-                )}
-              </div>
-            </div>
-          </div>
-          {vehicleOptions.length > 0 && (
-            <div
+      <DataViewCard
+        title={copyText(locale, "Revenue view controls", "營收檢視控制")}
+        subtitle={copyText(
+          locale,
+          "Slice payout and reconciliation posture by period, product, and vehicle.",
+          "依期間、產品與車輛切換 payout 與對帳視角。",
+        )}
+        tone="ops"
+        density="compact"
+      >
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "16px",
+            alignItems: "center",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                marginTop: "10px",
-                flexWrap: "wrap",
+                fontSize: "11.5px",
+                color: "#64748b",
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
               }}
             >
-              <span
-                style={{
-                  fontSize: "11.5px",
-                  color: "#64748b",
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                }}
-              >
-                {t("common.vehicle", locale)}
-              </span>
-              <ChipLink
-                href={buildHref(filters, { vehicleId: "all" })}
-                active={filters.vehicleId === "all"}
-              >
-                {t("revenue.vehicle.all", locale)}
-              </ChipLink>
-              {vehicleOptions.map((vid) => (
+              {t("revenue.periodLabel", locale)}
+            </span>
+            <div style={{ display: "flex", gap: "6px" }}>
+              {(["today", "7d", "30d", "all"] as RevenuePeriod[]).map((p) => (
                 <ChipLink
-                  key={vid}
-                  href={buildHref(filters, { vehicleId: vid })}
-                  active={vid === filters.vehicleId}
+                  key={p}
+                  href={buildHref(filters, { period: p })}
+                  active={p === filters.period}
                 >
-                  {vid}
+                  {t(`revenue.period.${p}`, locale)}
                 </ChipLink>
               ))}
             </div>
-          )}
-        </CardBody>
-      </Card>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span
+              style={{
+                fontSize: "11.5px",
+                color: "#64748b",
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              {t("revenue.productLabel", locale)}
+            </span>
+            <div style={{ display: "flex", gap: "6px" }}>
+              {(["all", "standard_taxi", "business_dispatch"] as const).map(
+                (sb) => (
+                  <ChipLink
+                    key={sb}
+                    href={buildHref(filters, { serviceBucket: sb })}
+                    active={sb === filters.serviceBucket}
+                  >
+                    {sb === "all"
+                      ? t("revenue.bucket.all", locale)
+                      : t(`revenue.bucket.${sb}`, locale)}
+                  </ChipLink>
+                ),
+              )}
+            </div>
+          </div>
+        </div>
+        {vehicleOptions.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              marginTop: "10px",
+              flexWrap: "wrap",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "11.5px",
+                color: "#64748b",
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              {t("common.vehicle", locale)}
+            </span>
+            <ChipLink
+              href={buildHref(filters, { vehicleId: "all" })}
+              active={filters.vehicleId === "all"}
+            >
+              {t("revenue.vehicle.all", locale)}
+            </ChipLink>
+            {vehicleOptions.map((vid) => (
+              <ChipLink
+                key={vid}
+                href={buildHref(filters, { vehicleId: vid })}
+                active={vid === filters.vehicleId}
+              >
+                {vid}
+              </ChipLink>
+            ))}
+          </div>
+        )}
+      </DataViewCard>
 
-      {/* KPI strip */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: "16px",
-          marginBottom: "20px",
-        }}
-      >
-        <StatCard
+      <KpiRow minWidth="170px">
+        <KpiCard
           label={t("revenue.completedTrips", locale)}
           value={formatCompactNumber(insights.completedTrips)}
-          sub={t("revenue.completedTripsSub", locale)}
-          accent="#15803d"
+          detail={t("revenue.completedTripsSub", locale)}
+          tone="success"
         />
-        <StatCard
+        <KpiCard
           label={t("revenue.recognizedRevenue", locale)}
           value={formatMinorCurrency(insights.totalRevenueMinor)}
-          sub={t("revenue.recognizedRevenueSub", locale)}
-          accent="#1d4ed8"
+          detail={t("revenue.recognizedRevenueSub", locale)}
+          tone="ops"
         />
-        <StatCard
+        <KpiCard
           label={t("revenue.averageTrip", locale)}
           value={formatMinorCurrency(insights.averageRevenueMinor)}
-          sub={t("revenue.averageTripSub", locale)}
-          accent="#7c3aed"
+          detail={t("revenue.averageTripSub", locale)}
+          tone="info"
         />
-        <StatCard
+        <KpiCard
           label={t("revenue.queuedPipeline", locale)}
           value={formatMinorCurrency(insights.queuedRevenueMinor)}
-          sub={t("revenue.queuedPipelineSub", locale)}
-          accent="#b45309"
+          detail={t("revenue.queuedPipelineSub", locale)}
+          tone="warning"
         />
-      </div>
+      </KpiRow>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: "16px",
-          marginBottom: "20px",
-        }}
-      >
-        <StatCard
+      <KpiRow minWidth="170px">
+        <KpiCard
           label={t("revenue.matrix.title", locale)}
           value={formatCompactNumber(settlementChannels.length)}
-          sub={copyText(
+          detail={copyText(
             locale,
             "Settlement channels under review",
             "目前檢視中的結算通道",
           )}
-          accent="#0f766e"
+          tone="ops"
         />
-        <StatCard
+        <KpiCard
           label={copyText(locale, "Shadow ledger lanes", "影子帳務通道")}
           value={formatCompactNumber(shadowLedgerCount)}
-          sub={copyText(
+          detail={copyText(
             locale,
             "Channels still settled externally",
             "仍由外部結算的通道",
           )}
-          accent="#b45309"
+          tone="warning"
         />
-        <StatCard
+        <KpiCard
           label={copyText(locale, "Mismatch queue", "不一致佇列")}
           value={formatCompactNumber(mismatchedJobsCount)}
-          sub={copyText(
+          detail={copyText(
             locale,
             "Forwarded orders waiting on reconciliation follow-up",
             "等待對帳後續處理的轉派訂單",
           )}
-          accent="#dc2626"
+          tone={mismatchedJobsCount > 0 ? "danger" : "neutral"}
         />
-        <StatCard
+        <KpiCard
           label={copyText(locale, "Sync failures", "同步失敗")}
           value={formatCompactNumber(forwardedSyncFailedCount)}
-          sub={copyText(
+          detail={copyText(
             locale,
             "Mirror orders with adapter sync failures",
             "鏡像訂單發生 adapter 同步失敗",
           )}
-          accent="#7c3aed"
+          tone={forwardedSyncFailedCount > 0 ? "warning" : "neutral"}
         />
-      </div>
+      </KpiRow>
 
-      <Card style={{ marginBottom: "20px" }}>
-        <CardBody style={{ padding: "14px 16px" }}>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.2fr 1fr",
-              gap: "12px",
-              alignItems: "center",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  fontSize: "11px",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.06em",
-                  color: "#64748b",
-                  marginBottom: "4px",
-                }}
-              >
-                {copyText(locale, "Monitoring posture", "監控視角")}
-              </div>
-              <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                {copyText(
-                  locale,
-                  "Settlement-matrix-first review keeps payout, receipt, and reconciliation authority visible before statement close.",
-                  "以結算矩陣優先的檢視方式，能在關帳前先看清 payout、receipt 與 reconciliation 權責。",
-                )}
-              </div>
-            </div>
+      <DataViewCard
+        title={copyText(locale, "Monitoring posture", "監控視角")}
+        subtitle={copyText(
+          locale,
+          "Settlement-matrix-first review keeps payout, receipt, and reconciliation authority visible before statement close.",
+          "以結算矩陣優先的檢視方式，在關帳前先看清 payout、receipt 與 reconciliation 權責。",
+        )}
+        tone="neutral"
+        density="compact"
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1.2fr 1fr",
+            gap: "12px",
+            alignItems: "center",
+          }}
+        >
+          <div>
             <div
               style={{
-                display: "flex",
-                gap: "8px",
-                flexWrap: "wrap",
-                justifyContent: "flex-end",
+                fontSize: "11px",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "#64748b",
+                marginBottom: "4px",
               }}
             >
-              <Badge variant="green">
-                {formatCompactNumber(insights.payoutStatuses.length)}{" "}
-                {copyText(locale, "payout lanes", "付款通道")}
-              </Badge>
-              <Badge variant="yellow">
-                {formatCompactNumber(shadowLedgerCount)}{" "}
-                {copyText(locale, "shadow-only", "僅影子帳")}
-              </Badge>
-              <Badge variant={mismatchedJobsCount > 0 ? "red" : "green"}>
-                {formatCompactNumber(mismatchedJobsCount)}{" "}
-                {copyText(locale, "mismatches", "不一致")}
-              </Badge>
+              {copyText(locale, "Monitoring posture", "監控視角")}
+            </div>
+            <div style={{ fontWeight: 600, color: "#0f172a" }}>
+              {copyText(
+                locale,
+                "Settlement-matrix-first review keeps payout, receipt, and reconciliation authority visible before statement close.",
+                "以結算矩陣優先的檢視方式，能在關帳前先看清 payout、receipt 與 reconciliation 權責。",
+              )}
             </div>
           </div>
-        </CardBody>
-      </Card>
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              flexWrap: "wrap",
+              justifyContent: "flex-end",
+            }}
+          >
+            <Badge variant="green">
+              {formatCompactNumber(insights.payoutStatuses.length)}{" "}
+              {copyText(locale, "payout lanes", "付款通道")}
+            </Badge>
+            <Badge variant="yellow">
+              {formatCompactNumber(shadowLedgerCount)}{" "}
+              {copyText(locale, "shadow-only", "僅影子帳")}
+            </Badge>
+            <Badge variant={mismatchedJobsCount > 0 ? "red" : "green"}>
+              {formatCompactNumber(mismatchedJobsCount)}{" "}
+              {copyText(locale, "mismatches", "不一致")}
+            </Badge>
+          </div>
+        </div>
+      </DataViewCard>
 
       {/* Breakdowns */}
       <div

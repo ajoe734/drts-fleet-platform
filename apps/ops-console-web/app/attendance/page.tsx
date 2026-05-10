@@ -1,11 +1,40 @@
 import Link from "next/link";
+import type { CSSProperties } from "react";
 import type { AttendanceRecord, ShiftRecord } from "@drts/contracts";
 import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { t } from "@/lib/translations";
-import { PageHeader, StatCard, Card, CardHeader, CardBody } from "@drts/ui-web";
-import { Badge, DataTable, Td, Tr } from "@drts/ui-web";
+import {
+  Badge,
+  CalloutBanner,
+  DataTable,
+  DataViewCard,
+  KpiCard,
+  KpiRow,
+  PageHeader,
+  Td,
+  Tr,
+} from "@drts/ui-web";
+
+const pageLayoutStyle: CSSProperties = {
+  display: "grid",
+  gap: "20px",
+};
+
+const primarySplitStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.45fr) minmax(280px, 0.95fr)",
+  gap: "16px",
+  alignItems: "start",
+};
+
+const secondarySplitStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: "16px",
+  alignItems: "start",
+};
 
 function formatDt(value: string | null | undefined): string {
   if (!value) return "—";
@@ -132,115 +161,105 @@ export default async function AttendancePage() {
     (record) =>
       record.status === "present" && record.date === currentAttendanceDate,
   ).length;
-  const monitorCards = [
-    {
-      label: copy(locale, "Active shifts", "進行中班次"),
-      value: activeShifts.length,
-      sub: copy(locale, "Drivers currently on duty", "目前正在值勤的駕駛"),
-      accent: "#2563eb",
-    },
-    {
-      label: copy(locale, "Attendance exceptions", "出勤異常"),
-      value: exceptionAttendance.length,
-      sub: copy(
-        locale,
-        "Partial or absent attendance records",
-        "部分出勤或缺勤紀錄",
-      ),
-      accent: "#dc2626",
-    },
-    {
-      label: copy(locale, "Extended shifts", "延長班次"),
-      value: longRunningShifts.length,
-      sub: copy(
-        locale,
-        "Active shifts already over 10 hours",
-        "進行中且超過 10 小時",
-      ),
-      accent: "#d97706",
-    },
-    {
-      label: copy(locale, "Tracked hours", "追蹤工時"),
-      value: hoursValue(totalTrackedHours),
-      sub: copy(
-        locale,
-        "Hours captured in attendance records",
-        "出勤紀錄累計工時",
-      ),
-      accent: "#15803d",
-    },
-  ];
 
   return (
-    <>
+    <div style={pageLayoutStyle}>
       <PageHeader
+        eyebrow={copy(locale, "Workforce monitor", "出勤監控")}
         title={t("attendance.title", locale)}
         subtitle={t("attendance.subtitle", locale)}
+        meta={[
+          {
+            label: copy(locale, "Shifts", "班次"),
+            value: shifts.length,
+          },
+          {
+            label: copy(locale, "Active", "進行中"),
+            value: activeShifts.length,
+            tone: activeShifts.length > 0 ? "ops" : "neutral",
+          },
+          {
+            label: copy(locale, "Exceptions", "異常"),
+            value: exceptionAttendance.length,
+            tone: exceptionAttendance.length > 0 ? "warning" : "success",
+          },
+        ]}
       />
 
-      {error && (
-        <div
-          style={{
-            background: "#fee2e2",
-            border: "1px solid #fca5a5",
-            borderRadius: "8px",
-            padding: "12px 16px",
-            color: "#b91c1c",
-            fontSize: "13.5px",
-            marginBottom: "20px",
-          }}
+      {error ? (
+        <CalloutBanner
+          tone="danger"
+          title={copy(
+            locale,
+            "Attendance data unavailable",
+            "出勤資料暫時不可用",
+          )}
+          description={error}
+        />
+      ) : null}
+
+      <KpiRow minWidth="170px">
+        <KpiCard
+          label={copy(locale, "Active shifts", "進行中班次")}
+          value={activeShifts.length}
+          detail={copy(
+            locale,
+            "Drivers currently on duty",
+            "目前正在值勤的駕駛",
+          )}
+          tone="ops"
+        />
+        <KpiCard
+          label={copy(locale, "Attendance exceptions", "出勤異常")}
+          value={exceptionAttendance.length}
+          detail={copy(
+            locale,
+            "Partial or absent attendance records",
+            "部分出勤或缺勤紀錄",
+          )}
+          tone={exceptionAttendance.length > 0 ? "danger" : "success"}
+        />
+        <KpiCard
+          label={copy(locale, "Extended shifts", "延長班次")}
+          value={longRunningShifts.length}
+          detail={copy(
+            locale,
+            "Active shifts already over 10 hours",
+            "進行中且超過 10 小時",
+          )}
+          tone={longRunningShifts.length > 0 ? "warning" : "neutral"}
+        />
+        <KpiCard
+          label={copy(locale, "Tracked hours", "追蹤工時")}
+          value={hoursValue(totalTrackedHours)}
+          detail={copy(
+            locale,
+            "Hours captured in attendance records",
+            "出勤紀錄累計工時",
+          )}
+          tone="success"
+        />
+      </KpiRow>
+
+      <div style={primarySplitStyle}>
+        <DataViewCard
+          title={copy(locale, "Live clock-in board", "當班監控看板")}
+          subtitle={copy(
+            locale,
+            "Current on-duty shifts with vehicle pairing, duration, and origin snapshot.",
+            "集中檢視目前值勤班次、車輛配對、已值勤時數與起點資訊。",
+          )}
+          tone="ops"
+          density="compact"
+          summary={copy(
+            locale,
+            `${activeShifts.length} active shifts, ${vehiclelessShifts.length} still waiting for a vehicle assignment.`,
+            `${activeShifts.length} 個進行中班次，其中 ${vehiclelessShifts.length} 個仍待補車輛指派。`,
+          )}
         >
-          {error}
-        </div>
-      )}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: "16px",
-          marginBottom: "20px",
-        }}
-      >
-        {monitorCards.map((card) => (
-          <StatCard
-            key={card.label}
-            label={card.label}
-            value={String(card.value)}
-            sub={card.sub}
-            accent={card.accent}
-          />
-        ))}
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1.3fr 0.9fr",
-          gap: "20px",
-          marginBottom: "20px",
-        }}
-      >
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {copy(locale, "Shift monitor", "班次監控")}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {copy(locale, "Live clock-in board", "當班監控看板")}
-            </div>
-          </CardHeader>
           <DataTable
+            density="compact"
+            tone="ops"
             columns={[
               { label: t("attendance.col.driver", locale) },
               { label: t("attendance.col.vehicle", locale) },
@@ -252,22 +271,24 @@ export default async function AttendancePage() {
           >
             {activeShifts.map((shift) => (
               <Tr key={shift.shiftId}>
-                <Td>
+                <Td density="compact">
                   <div style={{ fontWeight: 600 }}>{shift.driverId}</div>
                   <div style={{ color: "#64748b", fontSize: "12px" }}>
                     {shift.shiftId}
                   </div>
                 </Td>
-                <Td>
+                <Td density="compact">
                   {shift.vehicleId ?? "—"}
-                  {!shift.vehicleId && (
+                  {!shift.vehicleId ? (
                     <div style={{ color: "#dc2626", fontSize: "12px" }}>
                       {copy(locale, "Needs vehicle assignment", "待補車輛指派")}
                     </div>
-                  )}
+                  ) : null}
                 </Td>
-                <Td muted>{formatDt(shift.clockedInAt)}</Td>
-                <Td>
+                <Td density="compact" muted>
+                  {formatDt(shift.clockedInAt)}
+                </Td>
+                <Td density="compact">
                   <Badge
                     variant={
                       shiftDurationHours(shift) >= 10 ? "yellow" : "blue"
@@ -276,32 +297,25 @@ export default async function AttendancePage() {
                     {hoursValue(shiftDurationHours(shift))}
                   </Badge>
                 </Td>
-                <Td muted>{shift.startLocation ?? "—"}</Td>
+                <Td density="compact" muted>
+                  {shift.startLocation ?? "—"}
+                </Td>
               </Tr>
             ))}
           </DataTable>
-        </Card>
+        </DataViewCard>
 
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {copy(locale, "Supervisor cues", "值班提示")}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {copy(locale, "Attention queue", "需關注項目")}
-            </div>
-          </CardHeader>
-          <CardBody style={{ display: "grid", gap: "12px" }}>
+        <DataViewCard
+          title={copy(locale, "Attention queue", "需關注項目")}
+          subtitle={copy(
+            locale,
+            "Supervisor prompts derived from live attendance and shift state.",
+            "根據即時出勤與班次狀態整理的值班提示。",
+          )}
+          tone={exceptionAttendance.length > 0 ? "warning" : "neutral"}
+          density="compact"
+        >
+          <div style={{ display: "grid", gap: "12px" }}>
             <div
               style={{
                 padding: "12px 14px",
@@ -385,7 +399,7 @@ export default async function AttendancePage() {
                     </div>
                   </div>
                 ))}
-                {exceptionAttendance.length === 0 && (
+                {exceptionAttendance.length === 0 ? (
                   <div style={{ fontSize: "12px", color: "#64748b" }}>
                     {copy(
                       locale,
@@ -393,35 +407,27 @@ export default async function AttendancePage() {
                       "目前沒有部分出勤或缺勤紀錄。",
                     )}
                   </div>
-                )}
+                ) : null}
               </div>
             </div>
-          </CardBody>
-        </Card>
+          </div>
+        </DataViewCard>
       </div>
 
-      <Card style={{ marginBottom: "20px" }}>
-        <CardHeader>
-          <div
-            style={{
-              fontSize: "11px",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              color: "#64748b",
-              marginBottom: "2px",
-            }}
-          >
-            {copy(locale, "Shift timeline", "班次時間軸")}
-          </div>
-          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
-            {copy(
-              locale,
-              "Gantt-style attendance visibility",
-              "甘特式出勤可視化",
-            )}
-          </div>
-        </CardHeader>
-        <div style={{ display: "grid", gap: "10px", padding: "0 16px 16px" }}>
+      <DataViewCard
+        title={copy(
+          locale,
+          "Gantt-style attendance visibility",
+          "甘特式出勤可視化",
+        )}
+        subtitle={copy(
+          locale,
+          "Recent attendance rows plotted on a 24-hour UTC lane so long shifts and anomalies stand out.",
+          "以 24 小時 UTC 軸呈現近期出勤，讓長班與異常狀態更容易被看見。",
+        )}
+        tone="info"
+      >
+        <div style={{ display: "grid", gap: "10px" }}>
           <div
             style={{
               display: "grid",
@@ -503,36 +509,20 @@ export default async function AttendancePage() {
             </div>
           )}
         </div>
-      </Card>
+      </DataViewCard>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: "20px",
-          marginBottom: "20px",
-        }}
-      >
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
-            >
-              {copy(locale, "Attendance ledger", "出勤帳本")}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {t("attendance.attendanceRecords", locale)}
-            </div>
-          </CardHeader>
+      <div style={secondarySplitStyle}>
+        <DataViewCard
+          title={t("attendance.attendanceRecords", locale)}
+          subtitle={copy(
+            locale,
+            "Recent attendance rows with tracked hours and exception status.",
+            "近期出勤紀錄，包含工時與異常標記。",
+          )}
+          density="compact"
+        >
           <DataTable
+            density="compact"
             columns={[
               { label: t("attendance.col.attendanceId", locale) },
               { label: t("attendance.col.driver", locale) },
@@ -544,40 +534,45 @@ export default async function AttendancePage() {
           >
             {attendance.slice(0, 20).map((record) => (
               <Tr key={record.attendanceId}>
-                <Td mono>{record.attendanceId}</Td>
-                <Td>{record.driverId}</Td>
-                <Td muted>{record.date}</Td>
-                <Td>
+                <Td density="compact" mono>
+                  {record.attendanceId}
+                </Td>
+                <Td density="compact">{record.driverId}</Td>
+                <Td density="compact" muted>
+                  {record.date}
+                </Td>
+                <Td density="compact">
                   <Badge variant={timelineBadgeVariant(record.status)}>
                     {formatOpsCodeLabel(locale, record.status)}
                   </Badge>
                 </Td>
-                <Td muted>{hoursValue(record.totalHours)}</Td>
+                <Td density="compact" muted>
+                  {hoursValue(record.totalHours)}
+                </Td>
               </Tr>
             ))}
           </DataTable>
-        </Card>
+        </DataViewCard>
 
-        <Card>
-          <CardHeader>
-            <div
-              style={{
-                fontSize: "11px",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: "#64748b",
-                marginBottom: "2px",
-              }}
+        <DataViewCard
+          title={t("attendance.completedShifts", locale)}
+          subtitle={copy(
+            locale,
+            "Closed shifts sorted by latest clock-in time for end-of-day review.",
+            "依最近上班時間排序的已完成班次，供收班檢視使用。",
+          )}
+          density="compact"
+          footer={
+            <Link
+              href="/dashboard"
+              style={{ color: "#0f172a", textDecoration: "none" }}
             >
-              {copy(locale, "Closed shifts", "已結束班次")}
-            </div>
-            <div
-              style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}
-            >
-              {t("attendance.completedShifts", locale)}
-            </div>
-          </CardHeader>
+              <strong>{copy(locale, "Back to dashboard", "返回儀表板")}</strong>
+            </Link>
+          }
+        >
           <DataTable
+            density="compact"
             columns={[
               { label: t("attendance.col.shiftId", locale) },
               { label: t("attendance.col.driver", locale) },
@@ -590,28 +585,29 @@ export default async function AttendancePage() {
           >
             {completedShifts.slice(0, 10).map((shift) => (
               <Tr key={shift.shiftId}>
-                <Td mono>{shift.shiftId}</Td>
-                <Td>{shift.driverId}</Td>
-                <Td>
+                <Td density="compact" mono>
+                  {shift.shiftId}
+                </Td>
+                <Td density="compact">{shift.driverId}</Td>
+                <Td density="compact">
                   <Badge variant={shiftBadgeVariant(shift.status)}>
                     {formatOpsCodeLabel(locale, shift.status)}
                   </Badge>
                 </Td>
-                <Td muted>{formatDt(shift.clockedInAt)}</Td>
-                <Td muted>{formatDt(shift.clockedOutAt)}</Td>
-                <Td muted>{hoursValue(shift.totalHours)}</Td>
+                <Td density="compact" muted>
+                  {formatDt(shift.clockedInAt)}
+                </Td>
+                <Td density="compact" muted>
+                  {formatDt(shift.clockedOutAt)}
+                </Td>
+                <Td density="compact" muted>
+                  {hoursValue(shift.totalHours)}
+                </Td>
               </Tr>
             ))}
           </DataTable>
-        </Card>
+        </DataViewCard>
       </div>
-
-      <Link
-        href="/dashboard"
-        style={{ color: "#0f172a", textDecoration: "none", fontWeight: 600 }}
-      >
-        {copy(locale, "Back to dashboard", "返回儀表板")}
-      </Link>
-    </>
+    </div>
   );
 }
