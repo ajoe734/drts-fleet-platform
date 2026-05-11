@@ -12,28 +12,16 @@ import { formatDateTime } from "@/lib/formatters";
 
 export const dynamic = "force-dynamic";
 
-function getFormalRoleFamily(roleCode: string) {
-  const normalized = roleCode.toLowerCase();
-  if (normalized.includes("admin")) return "Tenant admin";
-  if (normalized.includes("operator") || normalized.includes("dispatch")) {
-    return "Operator";
-  }
-  if (
-    normalized.includes("finance") ||
-    normalized.includes("billing") ||
-    normalized.includes("analyst")
-  ) {
-    return "Finance / analyst";
-  }
-  if (
-    normalized.includes("integration") ||
-    normalized.includes("api") ||
-    normalized.includes("webhook")
-  ) {
-    return "Integration manager";
-  }
-  if (normalized.includes("view")) return "Viewer";
-  return "Specialized tenant role";
+function getRoleTone(roleCode: string) {
+  if (roleCode === "tenant_admin") return "status-badge";
+  if (roleCode.includes("finance")) return "source-pill";
+  return "status-chip";
+}
+
+function getStatusTone(status: TenantUserRoleRecord["status"]) {
+  if (status === "active") return "source-pill";
+  if (status === "invited") return "status-badge";
+  return "status-chip";
 }
 
 export default async function UsersPage() {
@@ -42,13 +30,18 @@ export default async function UsersPage() {
     client.listTenantUsers() as Promise<TenantUserRoleRecord[]>,
     client.listTenantRoles() as Promise<TenantRoleCatalogRecord[]>,
   ]);
+  const invitedCount = users.filter((user) => user.status === "invited").length;
+  const suspendedCount = users.filter(
+    (user) => user.status === "suspended",
+  ).length;
+  const roleByCode = new Map(roles.map((role) => [role.roleCode, role]));
 
   return (
     <div className="page-shell">
       <PageHero
         eyebrow="Users"
-        title="Tenant access management now reads from the formal backend role catalog."
-        description="The route keeps role code authority server-owned while presenting the tenant-admin, operator, finance, integration, and viewer framing from the product spec."
+        title="Tenant access management now reads like a formal roster, not a backend dump."
+        description="The route keeps role-code authority server-owned while presenting invite state, roster coverage, and catalog guidance in the shape of the TN_Users artboard."
       />
 
       <section className="metric-grid">
@@ -65,11 +58,14 @@ export default async function UsersPage() {
           </p>
         </article>
         <article className="metric-card">
-          <span className="metric-label">Invited</span>
-          <strong>
-            {users.filter((user) => user.status === "invited").length}
-          </strong>
-          <p>Invited users still waiting to acknowledge or activate access.</p>
+          <span className="metric-label">Assignable</span>
+          <strong>{roles.filter((role) => role.assignable).length}</strong>
+          <p>Catalog roles that can currently be assigned from tenant scope.</p>
+        </article>
+        <article className="metric-card">
+          <span className="metric-label">Pending</span>
+          <strong>{invitedCount + suspendedCount}</strong>
+          <p>Invited or suspended accounts that need lifecycle follow-up.</p>
         </article>
       </section>
 
@@ -77,16 +73,17 @@ export default async function UsersPage() {
         <SurfaceCard
           kicker="Users"
           title="Tenant user roster"
-          description="Role assignment and status remain command-driven. This surface reflects the current authoritative assignment without inventing a UI-local role table."
+          description="The table mirrors the artboard's roster-first layout while keeping role assignment and lifecycle state grounded in published user and role records."
         >
           <div className="table-wrap">
             <table className="data-grid">
               <thead>
                 <tr>
                   <th>User</th>
+                  <th>Role</th>
+                  <th>Access</th>
                   <th>Role code</th>
-                  <th>Formal family</th>
-                  <th>Status</th>
+                  <th>Invited</th>
                   <th>Updated</th>
                 </tr>
               </thead>
@@ -99,11 +96,27 @@ export default async function UsersPage() {
                         <span className="table-secondary">{user.email}</span>
                       </div>
                     </td>
-                    <td>{user.roleCode}</td>
-                    <td>{getFormalRoleFamily(user.roleCode)}</td>
                     <td>
-                      <span className="status-chip">{user.status}</span>
+                      <div className="table-primary">
+                        {roleByCode.get(user.roleCode)?.displayName ??
+                          user.roleCode}
+                        <span className="table-secondary">
+                          {roleByCode.get(user.roleCode)?.description ??
+                            "No catalog description available"}
+                        </span>
+                      </div>
                     </td>
+                    <td>
+                      <span className={getStatusTone(user.status)}>
+                        {user.status}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={getRoleTone(user.roleCode)}>
+                        {user.roleCode}
+                      </span>
+                    </td>
+                    <td>{formatDateTime(user.invitedAt)}</td>
                     <td>{formatDateTime(user.updatedAt)}</td>
                   </tr>
                 ))}
@@ -115,7 +128,7 @@ export default async function UsersPage() {
         <SurfaceCard
           kicker="Catalog"
           title="Backend role catalog"
-          description="The product-spec families are framing, but the canonical role list still comes from the backend role catalog."
+          description="The product-spec families are framing, but the canonical assignable list still comes from the backend role catalog and not from UI-local labels."
         >
           <ul className="panel-list">
             {roles.map((role) => (
@@ -133,7 +146,7 @@ export default async function UsersPage() {
 
       <CalloutPanel
         title="Command boundary"
-        description="Invite, role change, and suspend actions still have to follow the tenant command matrix from `XS-UI-003`. This route stops short of inventing unsupported user lifecycle mutations."
+        description="Invite, role change, and suspend actions still have to follow the tenant command matrix from `XS-UI-003`. This route deliberately stops short of inventing unsupported user lifecycle mutations."
       />
     </div>
   );
