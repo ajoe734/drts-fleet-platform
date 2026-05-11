@@ -1,10 +1,21 @@
 import Link from "next/link";
-import { OWNED_ORDER_STATUSES } from "@drts/contracts";
+import { OWNED_ORDER_STATUSES, type OwnedOrderStatus } from "@drts/contracts";
 import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
+  CalloutBanner,
+  DataCellStack,
+  DataViewCard,
+  FilterPill,
+  FilterPillRow,
+  PageHeader,
+  StatusChip,
+  managementPageStackStyle,
+} from "@drts/ui-web";
+import {
+  formatOrderStatusLabel,
+  getOrderStatusTone,
+  getSourceTone,
+  isActiveOrderStatus,
+} from "@/lib/booking-surface";
 import {
   applyBookingListQuery,
   buildBookingListQueryString,
@@ -12,13 +23,99 @@ import {
   toggleStatus,
 } from "@/lib/booking-list";
 import { getTenantClient } from "@/lib/api-client";
-import { formatDateTime, formatMoney } from "@/lib/formatters";
-import {
-  getBookingSourceVisibility,
-  getSourceToneClassName,
-} from "@/lib/source-domain";
+import { formatDateTime } from "@/lib/formatters";
+import { getBookingSourceVisibility } from "@/lib/source-domain";
 
 export const dynamic = "force-dynamic";
+
+const pageStackStyle = {
+  ...managementPageStackStyle(),
+  maxWidth: "1180px",
+  margin: "0 auto",
+};
+
+const filterGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: "12px",
+};
+
+const fieldStyle = {
+  display: "grid",
+  gap: "6px",
+};
+
+const fieldLabelStyle = {
+  fontSize: "12px",
+  fontWeight: 700,
+  color: "#475569",
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.08em",
+};
+
+const inputStyle = {
+  width: "100%",
+  minHeight: "42px",
+  borderRadius: "14px",
+  border: "1px solid #cbd5e1",
+  background: "#ffffff",
+  color: "#0f172a",
+  padding: "0 12px",
+  fontSize: "13px",
+};
+
+const tableStyle = {
+  width: "100%",
+  minWidth: "1080px",
+  borderCollapse: "collapse" as const,
+  fontSize: "13px",
+};
+
+const tableHeaderStyle = {
+  padding: "10px 12px",
+  textAlign: "left" as const,
+  fontSize: "11.5px",
+  fontWeight: 600,
+  color: "#64748b",
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.05em",
+  borderBottom: "1px solid #dbe5ef",
+  background: "#f0fdfa",
+  whiteSpace: "nowrap" as const,
+};
+
+const tableCellStyle = {
+  padding: "11px 12px",
+  verticalAlign: "top" as const,
+  borderBottom: "1px solid #eef2f7",
+};
+
+function actionLinkStyle(primary = false) {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "40px",
+    padding: "0 16px",
+    borderRadius: "999px",
+    border: primary ? "1px solid transparent" : "1px solid #99f6e4",
+    background: primary ? "#0f766e" : "#f0fdfa",
+    color: primary ? "#ffffff" : "#115e59",
+    fontSize: "13px",
+    fontWeight: 700,
+    textDecoration: "none",
+  };
+}
+
+function matchesStatuses(
+  current: OwnedOrderStatus[],
+  target: readonly OwnedOrderStatus[],
+) {
+  return (
+    current.length === target.length &&
+    target.every((status) => current.includes(status))
+  );
+}
 
 export default async function BookingsPage({
   searchParams,
@@ -33,258 +130,358 @@ export default async function BookingsPage({
     (booking) =>
       getBookingSourceVisibility(booking).domain === "forwarded_authority",
   );
+  const activeCount = bookings.filter((booking) =>
+    isActiveOrderStatus(booking.orderStatus),
+  ).length;
+  const forwardedCount = bookings.filter((booking) => {
+    return getBookingSourceVisibility(booking).domain !== "owned";
+  }).length;
+
+  const tabGroups = [
+    { label: "All", statuses: [] as OwnedOrderStatus[] },
+    {
+      label: "In progress",
+      statuses: OWNED_ORDER_STATUSES.filter((status) =>
+        isActiveOrderStatus(status),
+      ),
+    },
+    {
+      label: "Scheduled",
+      statuses: [
+        "created",
+        "recording_pending",
+        "ready_for_dispatch",
+        "preassigned",
+        "assigned",
+        "driver_accepted",
+        "enroute_pickup",
+        "arrived_pickup",
+      ] as OwnedOrderStatus[],
+    },
+    { label: "Completed", statuses: ["completed"] as OwnedOrderStatus[] },
+    { label: "Cancelled", statuses: ["cancelled"] as OwnedOrderStatus[] },
+  ];
 
   return (
-    <div className="page-shell">
-      <PageHero
+    <div style={pageStackStyle}>
+      <PageHeader
         eyebrow="Bookings"
-        title="Tenant booking oversight now uses the shared list-query model and the canonical `/bookings` route."
-        description="`status` is mapped to real `OwnedOrderStatus` values, `dateField` defaults to reservation start, and the list deep-links directly into the productized detail surface."
+        title="Bookings"
+        subtitle="Tenant booking oversight redesigned to match the TN_Bookings table-first route."
+        meta={[
+          { label: "Rows", value: String(result.total), tone: "tenant" },
+          { label: "Active", value: String(activeCount) },
+          {
+            label: "Forwarded",
+            value: String(forwardedCount),
+            tone: "warning",
+          },
+        ]}
+        actions={
+          <>
+            <Link href="/bookings" style={actionLinkStyle()}>
+              Reset filters
+            </Link>
+            <Link href="/bookings/new" style={actionLinkStyle(true)}>
+              Create booking
+            </Link>
+          </>
+        }
       />
 
-      <section className="surface-grid surface-grid-wide">
-        <SurfaceCard
-          kicker="Query"
-          title="Shared list contract"
-          description="Search, order-status filtering, date controls, and pagination all reuse the normalized query vocabulary from `XS-UI-004`."
-        >
-          <form action="/bookings" className="query-form">
-            <label className="field-stack">
-              <span>Search</span>
+      <DataViewCard
+        title="Filter lane"
+        subtitle="The upper lane keeps TN_Bookings tabs while retaining the canonical shared list-query contract."
+        tone="tenant"
+        summary="Tabs handle high-level slices; the search form and status chips still speak in real OwnedOrderStatus values."
+      >
+        <FilterPillRow>
+          {tabGroups.map((tab) => {
+            const hrefQuery = buildBookingListQueryString(query, {
+              statuses: tab.statuses,
+              page: 1,
+            });
+            return (
+              <Link
+                href={hrefQuery ? `/bookings?${hrefQuery}` : "/bookings"}
+                key={tab.label}
+                style={{ textDecoration: "none" }}
+              >
+                <FilterPill
+                  label={tab.label}
+                  active={matchesStatuses(query.statuses, tab.statuses)}
+                  tone="tenant"
+                />
+              </Link>
+            );
+          })}
+        </FilterPillRow>
+
+        <form action="/bookings" style={{ display: "grid", gap: "16px" }}>
+          <div style={filterGridStyle}>
+            <label style={fieldStyle}>
+              <span style={fieldLabelStyle}>Search</span>
               <input
                 defaultValue={query.q}
                 name="q"
                 placeholder="Booking ID, order ID, passenger, route"
+                style={inputStyle}
+                type="text"
               />
             </label>
-            <label className="field-stack">
-              <span>Date field</span>
-              <select defaultValue={query.dateField} name="dateField">
+            <label style={fieldStyle}>
+              <span style={fieldLabelStyle}>Date field</span>
+              <select
+                defaultValue={query.dateField}
+                name="dateField"
+                style={inputStyle}
+              >
                 <option value="reservationStart">Reservation start</option>
                 <option value="createdAt">Created at</option>
               </select>
             </label>
-            <label className="field-stack">
-              <span>From</span>
+            <label style={fieldStyle}>
+              <span style={fieldLabelStyle}>From</span>
               <input
                 defaultValue={query.dateFrom}
                 name="dateFrom"
+                style={inputStyle}
                 type="date"
               />
             </label>
-            <label className="field-stack">
-              <span>To</span>
-              <input defaultValue={query.dateTo} name="dateTo" type="date" />
+            <label style={fieldStyle}>
+              <span style={fieldLabelStyle}>To</span>
+              <input
+                defaultValue={query.dateTo}
+                name="dateTo"
+                style={inputStyle}
+                type="date"
+              />
             </label>
-            <label className="field-stack">
-              <span>Page size</span>
-              <select defaultValue={String(query.pageSize)} name="pageSize">
+            <label style={fieldStyle}>
+              <span style={fieldLabelStyle}>Page size</span>
+              <select
+                defaultValue={String(query.pageSize)}
+                name="pageSize"
+                style={inputStyle}
+              >
                 <option value="10">10</option>
                 <option value="25">25</option>
                 <option value="50">50</option>
               </select>
             </label>
-            {query.statuses.length > 0 ? (
-              <input
-                name="status"
-                type="hidden"
-                value={query.statuses.join(",")}
-              />
-            ) : null}
-            <div className="form-actions">
-              <button
-                className="action-button action-button-primary"
-                type="submit"
-              >
-                Apply filters
-              </button>
-              <Link
-                className="action-button action-button-secondary"
-                href="/bookings"
-              >
-                Reset
-              </Link>
-            </div>
-          </form>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Status"
-          title="Order status stays canonical"
-          description="The tenant list can filter only by backend-owned order statuses. Service buckets and local labels never replace the true workflow vocabulary."
-        >
-          <div className="chip-row">
-            {OWNED_ORDER_STATUSES.map((status) => {
-              const nextStatuses = toggleStatus(query.statuses, status);
-              const href = `/bookings?${buildBookingListQueryString(query, {
-                statuses: nextStatuses,
-                page: 1,
-              })}`;
-              return (
-                <Link
-                  className={`status-chip${query.statuses.includes(status) ? " is-active" : ""}`}
-                  href={href}
-                  key={status}
-                >
-                  {status}
-                  <span>{result.statusCounts[status] ?? 0}</span>
-                </Link>
-              );
-            })}
           </div>
-        </SurfaceCard>
-      </section>
-
-      <SurfaceCard
-        kicker="List"
-        title={`Showing ${result.items.length} of ${result.total} booking row(s)`}
-        description="The list remains a read surface over `/api/tenant/bookings`; mutate actions stay on supported commands only, and deeper fulfillment trace belongs in detail."
-      >
-        {hasForwardedAuthority ? (
-          <CalloutPanel
-            title="Forwarded bookings keep external-platform authority"
-            description="Tenant booking oversight keeps the business record readable, but adapter-native lifecycle states and platform recovery still belong to ops and driver routes."
-            tone="warning"
+          {query.statuses.length > 0 ? (
+            <input
+              name="status"
+              type="hidden"
+              value={query.statuses.join(",")}
+            />
+          ) : null}
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+            }}
           >
-            <p>
-              `accept_pending`, `confirmed_by_platform`, `lost_race`,
-              `cancelled_by_platform`, and `sync_failed` do not become tenant
-              workflow actions on this surface.
-            </p>
-          </CalloutPanel>
-        ) : null}
-        <div className="table-wrap">
-          <table className="data-grid">
-            <thead>
-              <tr>
-                <th>Booking</th>
-                <th>Passenger</th>
-                <th>Reservation</th>
-                <th>Status</th>
-                <th>Fulfillment</th>
-                <th>Route</th>
-                <th>Fare</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.items.map((booking) => {
-                const source = getBookingSourceVisibility(booking);
+            <FilterPillRow>
+              {OWNED_ORDER_STATUSES.map((status) => {
+                const nextStatuses = toggleStatus(query.statuses, status);
+                const hrefQuery = buildBookingListQueryString(query, {
+                  statuses: nextStatuses,
+                  page: 1,
+                });
                 return (
-                  <tr key={booking.bookingId}>
-                    <td>
-                      <div className="table-primary">
-                        <Link
-                          className="text-link"
-                          href={`/bookings/${booking.bookingId}`}
-                        >
-                          {booking.bookingId}
-                        </Link>
-                        <span className="table-secondary">
-                          Order {booking.orderId}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="table-primary">
-                        {booking.passenger.name}
-                        <span className="table-secondary">
-                          {booking.passenger.phone}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="table-primary">
-                        {formatDateTime(booking.reservationWindowStart)}
-                        <span className="table-secondary">
-                          to {formatDateTime(booking.reservationWindowEnd)}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="table-primary">
-                        <span className="status-badge">
-                          {booking.orderStatus}
-                        </span>
-                        <span className="table-secondary">
-                          Booking {booking.status}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="table-primary">
-                        <span className={getSourceToneClassName(source.tone)}>
-                          {source.badge}
-                        </span>
-                        <span className="table-secondary">
-                          {source.summary}
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div className="table-primary">
-                        {booking.pickup.address}
-                        <span className="table-secondary">
-                          {booking.dropoff.address}
-                        </span>
-                      </div>
-                    </td>
-                    <td>{formatMoney(booking.quotedFare)}</td>
-                    <td>
-                      <Link
-                        className="text-link"
-                        href={`/bookings/${booking.bookingId}`}
-                      >
-                        View detail
-                      </Link>
-                    </td>
-                  </tr>
+                  <Link
+                    href={hrefQuery ? `/bookings?${hrefQuery}` : "/bookings"}
+                    key={status}
+                    style={{ textDecoration: "none" }}
+                  >
+                    <FilterPill
+                      label={formatOrderStatusLabel(status)}
+                      active={query.statuses.includes(status)}
+                      count={result.statusCounts[status] ?? 0}
+                      tone={getOrderStatusTone(status)}
+                    />
+                  </Link>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
-
-        {result.items.length === 0 ? (
-          <div className="empty-panel">
-            No booking matched the current query. Try clearing status chips or
-            broadening the search window.
+            </FilterPillRow>
+            <button
+              style={{
+                ...actionLinkStyle(true),
+                border: "1px solid transparent",
+                cursor: "pointer",
+              }}
+              type="submit"
+            >
+              Apply filters
+            </button>
           </div>
-        ) : null}
+        </form>
+      </DataViewCard>
 
-        <div className="pagination-row">
-          <span className="muted-copy">
+      <DataViewCard
+        title={`Showing ${result.items.length} of ${result.total} booking row(s)`}
+        subtitle="The table is reshaped to the TN_Bookings artboard while keeping detail drill-in and authority boundaries intact."
+        tone="tenant"
+        summary="Booking rows stay read-only on this surface. Mutations remain limited to the supported detail-page command lane."
+      >
+        {hasForwardedAuthority ? (
+          <CalloutBanner
+            title="Forwarded rows keep external-platform authority"
+            description="The table still shows forwarded business records, but adapter-native recovery states remain outside tenant mutation authority."
+            tone="warning"
+            density="compact"
+          />
+        ) : null}
+        {result.items.length > 0 ? (
+          <div style={{ overflowX: "auto" }}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  <th style={{ ...tableHeaderStyle, width: "116px" }}>BK</th>
+                  <th style={{ ...tableHeaderStyle, width: "124px" }}>Order</th>
+                  <th style={{ ...tableHeaderStyle, width: "146px" }}>Type</th>
+                  <th style={tableHeaderStyle}>Pickup -&gt; drop</th>
+                  <th style={{ ...tableHeaderStyle, width: "180px" }}>Win</th>
+                  <th style={{ ...tableHeaderStyle, width: "150px" }}>Pass.</th>
+                  <th style={{ ...tableHeaderStyle, width: "130px" }}>CC</th>
+                  <th style={{ ...tableHeaderStyle, width: "174px" }}>State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.items.map((booking) => {
+                  const source = getBookingSourceVisibility(booking);
+                  return (
+                    <tr key={booking.bookingId}>
+                      <td style={tableCellStyle}>
+                        <DataCellStack
+                          primary={
+                            <Link
+                              href={`/bookings/${booking.bookingId}`}
+                              style={{
+                                color: "#0f766e",
+                                fontWeight: 700,
+                                textDecoration: "none",
+                              }}
+                            >
+                              {booking.bookingId}
+                            </Link>
+                          }
+                          secondary={
+                            <StatusChip
+                              label={source.badge}
+                              tone={getSourceTone(source)}
+                            />
+                          }
+                        />
+                      </td>
+                      <td
+                        style={{ ...tableCellStyle, fontFamily: "monospace" }}
+                      >
+                        {booking.orderId}
+                      </td>
+                      <td style={tableCellStyle}>
+                        <DataCellStack
+                          primary={booking.businessDispatchSubtype}
+                          secondary={booking.bookingType}
+                        />
+                      </td>
+                      <td style={tableCellStyle}>
+                        <DataCellStack
+                          primary={booking.pickup.address}
+                          secondary={`Drop ${booking.dropoff.address}`}
+                        />
+                      </td>
+                      <td style={tableCellStyle}>
+                        <DataCellStack
+                          primary={formatDateTime(
+                            booking.reservationWindowStart,
+                          )}
+                          secondary={formatDateTime(
+                            booking.reservationWindowEnd,
+                          )}
+                        />
+                      </td>
+                      <td style={tableCellStyle}>
+                        <DataCellStack
+                          primary={<strong>{booking.passenger.name}</strong>}
+                          secondary={booking.passenger.phone}
+                        />
+                      </td>
+                      <td
+                        style={{ ...tableCellStyle, fontFamily: "monospace" }}
+                      >
+                        {booking.costCenter ?? "Not set"}
+                      </td>
+                      <td style={tableCellStyle}>
+                        <DataCellStack
+                          primary={
+                            <StatusChip
+                              label={formatOrderStatusLabel(
+                                booking.orderStatus,
+                              )}
+                              tone={getOrderStatusTone(booking.orderStatus)}
+                            />
+                          }
+                          secondary={`Booking ${booking.status}`}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <CalloutBanner
+            title="No rows matched the current query"
+            description="Clear one or more status filters or widen the date window to return tenant booking rows."
+            tone="info"
+            density="compact"
+          />
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+          }}
+        >
+          <span style={{ color: "#64748b", fontSize: "12.5px" }}>
             Page {result.page} of {result.totalPages}
           </span>
-          <div className="link-row">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
             {result.page > 1 ? (
               <Link
-                className="text-link"
                 href={`/bookings?${buildBookingListQueryString(query, {
                   page: result.page - 1,
                 })}`}
+                style={actionLinkStyle()}
               >
                 Previous
               </Link>
             ) : null}
             {result.page < result.totalPages ? (
               <Link
-                className="text-link"
                 href={`/bookings?${buildBookingListQueryString(query, {
                   page: result.page + 1,
                 })}`}
+                style={actionLinkStyle()}
               >
                 Next
               </Link>
             ) : null}
           </div>
         </div>
-      </SurfaceCard>
-
-      <CalloutPanel
-        title="Authority boundary"
-        description="This list consumes `/api/tenant/bookings*` directly, keeps `status` aligned to `OwnedOrderStatus[]`, and does not introduce tenant-local workflow aliases."
-      />
+      </DataViewCard>
     </div>
   );
 }

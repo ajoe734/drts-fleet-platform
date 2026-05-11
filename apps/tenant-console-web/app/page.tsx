@@ -8,21 +8,30 @@ import type {
   TenantInvoiceRecord,
 } from "@drts/contracts";
 import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
+  CalloutBanner,
+  DataCellStack,
+  DataViewCard,
+  DetailMetadataGrid,
+  KpiCard,
+  KpiRow,
+  PageHeader,
+  StatusChip,
+  WorkflowSplitLayout,
+  managementPageStackStyle,
+} from "@drts/ui-web";
+import {
+  countBookingsThisMonth,
+  countCompletedToday,
+  formatOrderStatusLabel,
+  getOrderStatusTone,
+  getSourceTone,
+  isActiveOrderStatus,
+  latestInvoice,
+  needsAttention,
+} from "@/lib/booking-surface";
 import { getTenantClient } from "@/lib/api-client";
-import { formatCount, formatDateTime } from "@/lib/formatters";
-
-const ATTENTION_STATUSES = new Set([
-  "dispatch_failed",
-  "dispatch_timeout",
-  "exception_hold",
-  "no_supply",
-  "proof_pending",
-  "redispatch_required",
-]);
+import { formatCount, formatDateTime, formatMoney } from "@/lib/formatters";
+import { getBookingSourceVisibility } from "@/lib/source-domain";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +44,73 @@ type DashboardData = {
   governance: TenantIntegrationGovernancePackage | null;
   errors: string[];
 };
+
+const pageStackStyle = {
+  ...managementPageStackStyle(),
+  maxWidth: "1180px",
+  margin: "0 auto",
+};
+
+const tableStyle = {
+  width: "100%",
+  minWidth: "680px",
+  borderCollapse: "collapse" as const,
+  fontSize: "13px",
+};
+
+const tableHeaderStyle = {
+  padding: "10px 12px",
+  textAlign: "left" as const,
+  fontSize: "11.5px",
+  fontWeight: 600,
+  color: "#64748b",
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.05em",
+  borderBottom: "1px solid #dbe5ef",
+  background: "#f0fdfa",
+  whiteSpace: "nowrap" as const,
+};
+
+const tableCellStyle = {
+  padding: "11px 12px",
+  verticalAlign: "top" as const,
+  borderBottom: "1px solid #eef2f7",
+};
+
+const compactGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gap: "16px",
+};
+
+function actionLinkStyle(primary = false) {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "40px",
+    padding: "0 16px",
+    borderRadius: "999px",
+    border: primary ? "1px solid transparent" : "1px solid #99f6e4",
+    background: primary ? "#0f766e" : "#f0fdfa",
+    color: primary ? "#ffffff" : "#115e59",
+    fontSize: "13px",
+    fontWeight: 700,
+    textDecoration: "none",
+  };
+}
+
+function notificationTone(channel: NotificationRecord["channel"]) {
+  switch (channel) {
+    case "tenant_sla":
+      return "warning" as const;
+    case "driver_task":
+      return "info" as const;
+    case "ops_notice":
+    default:
+      return "tenant" as const;
+  }
+}
 
 async function loadDashboardData(): Promise<DashboardData> {
   const client = getTenantClient();
@@ -91,218 +167,360 @@ async function loadDashboardData(): Promise<DashboardData> {
 
 export default async function HomePage() {
   const data = await loadDashboardData();
-  const activeBookings = data.bookings.filter(
-    (booking) =>
-      booking.orderStatus !== "completed" &&
-      booking.orderStatus !== "cancelled",
-  );
+  const activeBookings = data.bookings
+    .filter((booking) => isActiveOrderStatus(booking.orderStatus))
+    .sort((left, right) => {
+      return (
+        new Date(left.reservationWindowStart).getTime() -
+        new Date(right.reservationWindowStart).getTime()
+      );
+    });
   const attentionBookings = activeBookings.filter((booking) =>
-    ATTENTION_STATUSES.has(booking.orderStatus),
+    needsAttention(booking.orderStatus),
   );
-  const openInvoices = data.invoices.filter(
-    (invoice) => invoice.status !== "paid",
-  );
+  const forwardedActiveCount = activeBookings.filter((booking) => {
+    return getBookingSourceVisibility(booking).domain !== "owned";
+  }).length;
+  const completedToday = countCompletedToday(data.bookings);
+  const monthlyBookings = countBookingsThisMonth(data.bookings);
+  const currentInvoice = latestInvoice(data.invoices);
   const enabledFlags =
     data.featureFlags?.flags.filter((flag) => flag.enabled) ?? [];
   const recentNotifications = data.notifications.slice(0, 3);
+  const checklist = data.governance?.onboardingChecklist.slice(0, 4) ?? [];
 
   return (
-    <div className="page-shell">
-      <PageHero
-        eyebrow="Home"
-        title="Tenant operators now land in a real admin workspace, not a launcher page."
-        description="This dashboard anchors the tenant identity context, active-booking summary, billing reminders, integration posture, and quick-entry actions on top of the new `apps/tenant-console-web` shell."
+    <div style={pageStackStyle}>
+      <PageHeader
+        eyebrow="Tenant home"
+        title="Home"
+        subtitle="Daily booking oversight, finance posture, and tenant operating reminders in the TN_Home layout."
+        meta={[
+          {
+            label: "Tenant",
+            value: data.identity?.tenantId ?? "Unavailable",
+            tone: "tenant",
+          },
+          {
+            label: "Realm",
+            value: data.identity?.realm ?? "Unavailable",
+          },
+          {
+            label: "Auth mode",
+            value: data.identity?.authMode ?? "Unavailable",
+          },
+        ]}
+        actions={
+          <>
+            <Link href="/settings" style={actionLinkStyle()}>
+              Help & settings
+            </Link>
+            <Link href="/bookings/new" style={actionLinkStyle(true)}>
+              Create booking
+            </Link>
+          </>
+        }
       />
 
-      <section className="metric-grid">
-        <article className="metric-card">
-          <span className="metric-label">Active bookings</span>
-          <strong>{formatCount(activeBookings.length)}</strong>
-          <p>
-            {attentionBookings.length > 0
-              ? `${formatCount(attentionBookings.length)} booking(s) need follow-up across dispatch or proof states.`
-              : "No active bookings currently need tenant-side follow-up."}
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Open invoices</span>
-          <strong>{formatCount(openInvoices.length)}</strong>
-          <p>
-            {data.invoices.length > 0
-              ? `${formatCount(data.invoices.length)} invoice artifact(s) are visible from tenant billing authority.`
-              : "Invoice artifacts are not currently available for this tenant context."}
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Notifications</span>
-          <strong>{formatCount(recentNotifications.length)}</strong>
-          <p>
-            {recentNotifications.length > 0
-              ? "Recent platform and tenant reminders are surfaced here before a user drills into settings."
-              : "No tenant notification feed items were returned in the current snapshot."}
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Integration posture</span>
-          <strong>
-            {data.governance?.onboardingChecklist.length
-              ? formatCount(data.governance.onboardingChecklist.length)
-              : "Ready"}
-          </strong>
-          <p>
-            {data.governance?.onboardingChecklist.length
-              ? "Checklist items still frame the integration work that API keys and webhooks must cover."
-              : "No outstanding onboarding checklist items were returned."}
-          </p>
-        </article>
-      </section>
+      <KpiRow minWidth="180px">
+        <KpiCard
+          label="In progress"
+          value={formatCount(activeBookings.length)}
+          detail={
+            attentionBookings.length > 0
+              ? `${formatCount(attentionBookings.length)} need follow-up`
+              : "No active alerts"
+          }
+          tone="tenant"
+        />
+        <KpiCard
+          label="Completed today"
+          value={formatCount(completedToday)}
+          detail="Closed booking records in the current UTC day"
+          tone="success"
+        />
+        <KpiCard
+          label="This month"
+          value={formatCount(monthlyBookings)}
+          detail="Bookings created during the current month"
+          tone="info"
+        />
+        <KpiCard
+          label="Current invoice"
+          value={currentInvoice ? formatMoney(currentInvoice.amount) : "Ready"}
+          detail={
+            currentInvoice
+              ? `${currentInvoice.invoiceId} · ${currentInvoice.status}`
+              : "No invoice snapshot returned"
+          }
+          tone="warning"
+        />
+      </KpiRow>
 
-      <section className="surface-grid surface-grid-wide">
-        <SurfaceCard
-          kicker="Identity"
-          title="Tenant authority context"
-          description="The dashboard reads the backend identity context directly so role, realm, and tenant ownership stay authority-driven."
-        >
-          <dl className="definition-grid">
-            <div>
-              <dt>Tenant</dt>
-              <dd>{data.identity?.tenantId ?? "Unavailable"}</dd>
-            </div>
-            <div>
-              <dt>Realm</dt>
-              <dd>{data.identity?.realm ?? "Unavailable"}</dd>
-            </div>
-            <div>
-              <dt>Actor</dt>
-              <dd>{data.identity?.actorType ?? "Unavailable"}</dd>
-            </div>
-            <div>
-              <dt>Auth mode</dt>
-              <dd>{data.identity?.authMode ?? "Unavailable"}</dd>
-            </div>
-          </dl>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Bookings"
-          title="Tenant operations quick lane"
-          description="Bookings remain the primary operating surface, with the route list and detail model now anchored to `/bookings`."
-        >
-          <div className="panel-stack">
-            <p>
-              Next reservation window:{" "}
-              <strong>
-                {activeBookings[0]
-                  ? formatDateTime(activeBookings[0].reservationWindowStart)
-                  : "No active reservation queued"}
-              </strong>
-            </p>
-            <div className="link-row">
-              <Link className="text-link" href="/bookings">
-                Open booking oversight
+      <WorkflowSplitLayout
+        density="comfortable"
+        main={
+          <DataViewCard
+            title="Ongoing bookings"
+            subtitle="The TN_Home main table keeps active orders at the center of the screen."
+            tone="tenant"
+            summary={
+              activeBookings.length > 0
+                ? `${formatCount(activeBookings.length)} active booking row(s), ${formatCount(forwardedActiveCount)} using partner or forwarded fulfillment.`
+                : "No active bookings are currently visible in the tenant scope."
+            }
+            actions={
+              <Link href="/bookings" style={actionLinkStyle()}>
+                Open bookings
               </Link>
-              <Link className="text-link" href="/bookings/new">
-                Start new booking intake
-              </Link>
-            </div>
-          </div>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Billing and notices"
-          title="Operational reminders stay visible"
-          description="Billing posture and notification reminders sit on the home lane so tenant admins do not need to discover them through secondary navigation."
-        >
-          {recentNotifications.length > 0 ? (
-            <ul className="panel-list">
-              {recentNotifications.map((notification) => (
-                <li key={notification.notificationId}>
-                  <strong>{notification.title}</strong>
-                  <span className="list-note">
-                    {notification.channel} ·{" "}
-                    {formatDateTime(notification.createdAt)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted-copy">
-              No tenant notification feed items are currently available.
-            </p>
-          )}
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Integration"
-          title="Integration readiness and governance"
-          description="Integration reminders summarize the backend-owned checklist instead of inventing client-local readiness truth."
-        >
-          {data.governance?.onboardingChecklist.length ? (
-            <ul className="panel-list">
-              {data.governance.onboardingChecklist.slice(0, 4).map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted-copy">
-              API key and webhook onboarding is not currently reporting any open
-              checklist item.
-            </p>
-          )}
-          <div className="link-row">
-            <Link className="text-link" href="/api-keys">
-              Review API keys
-            </Link>
-            <Link className="text-link" href="/webhooks">
-              Review webhooks
-            </Link>
-          </div>
-        </SurfaceCard>
-      </section>
-
-      <CalloutPanel
-        title="Enabled module snapshot"
-        description={
-          enabledFlags.length > 0
-            ? `${enabledFlags.length} feature flag(s) currently resolve enabled for this tenant context.`
-            : "Feature flag detail is currently unavailable or no tenant-specific module flag resolved enabled."
+            }
+          >
+            {activeBookings.length > 0 ? (
+              <div style={{ overflowX: "auto" }}>
+                <table style={tableStyle}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...tableHeaderStyle, width: "120px" }}>
+                        BK
+                      </th>
+                      <th style={tableHeaderStyle}>Passenger</th>
+                      <th style={tableHeaderStyle}>Pickup</th>
+                      <th style={{ ...tableHeaderStyle, width: "160px" }}>
+                        Window
+                      </th>
+                      <th style={{ ...tableHeaderStyle, width: "170px" }}>
+                        State
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeBookings.slice(0, 5).map((booking) => {
+                      const source = getBookingSourceVisibility(booking);
+                      return (
+                        <tr key={booking.bookingId}>
+                          <td style={tableCellStyle}>
+                            <DataCellStack
+                              primary={
+                                <Link
+                                  href={`/bookings/${booking.bookingId}`}
+                                  style={{
+                                    color: "#0f766e",
+                                    fontWeight: 700,
+                                    textDecoration: "none",
+                                  }}
+                                >
+                                  {booking.bookingId}
+                                </Link>
+                              }
+                              secondary={`Order ${booking.orderId}`}
+                              tertiary={source.badge}
+                            />
+                          </td>
+                          <td style={tableCellStyle}>
+                            <DataCellStack
+                              primary={
+                                <strong>{booking.passenger.name}</strong>
+                              }
+                              secondary={booking.passenger.phone}
+                            />
+                          </td>
+                          <td style={tableCellStyle}>
+                            <DataCellStack
+                              primary={booking.pickup.address}
+                              secondary={`Drop ${booking.dropoff.address}`}
+                            />
+                          </td>
+                          <td style={tableCellStyle}>
+                            <DataCellStack
+                              primary={formatDateTime(
+                                booking.reservationWindowStart,
+                              )}
+                              secondary={formatDateTime(
+                                booking.reservationWindowEnd,
+                              )}
+                            />
+                          </td>
+                          <td style={tableCellStyle}>
+                            <div
+                              style={{
+                                display: "grid",
+                                gap: "8px",
+                              }}
+                            >
+                              <StatusChip
+                                label={formatOrderStatusLabel(
+                                  booking.orderStatus,
+                                )}
+                                tone={getOrderStatusTone(booking.orderStatus)}
+                              />
+                              <StatusChip
+                                label={source.badge}
+                                tone={getSourceTone(source)}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <CalloutBanner
+                title="No active bookings"
+                description="The tenant has no in-progress booking rows in the current snapshot."
+                tone="info"
+                density="compact"
+              />
+            )}
+          </DataViewCard>
         }
-      >
-        {enabledFlags.length > 0 ? (
-          <div className="chip-row">
+        side={
+          <DataViewCard
+            title="Reminders"
+            subtitle="The right column mirrors the TN_Home notice stack with tenant-safe reminders."
+            tone="tenant"
+            summary="Webhook, SLA, and invoice cues stay visible without requiring a secondary route."
+          >
+            {currentInvoice ? (
+              <CalloutBanner
+                title={`${currentInvoice.invoiceId} · ${formatMoney(currentInvoice.amount)}`}
+                description={`Current invoice period ${formatDateTime(currentInvoice.periodStart)} -> ${formatDateTime(currentInvoice.periodEnd)} is ${currentInvoice.status}.`}
+                tone="warning"
+                density="compact"
+              />
+            ) : null}
+            {recentNotifications.length > 0 ? (
+              recentNotifications.map((notification) => (
+                <CalloutBanner
+                  key={notification.notificationId}
+                  title={notification.title}
+                  description={notification.message}
+                  tone={notificationTone(notification.channel)}
+                  density="compact"
+                  footer={`${notification.channel} · ${formatDateTime(notification.createdAt)}`}
+                />
+              ))
+            ) : (
+              <CalloutBanner
+                title="No recent reminders"
+                description="Notification feed records are currently empty for this tenant."
+                tone="info"
+                density="compact"
+              />
+            )}
+          </DataViewCard>
+        }
+      />
+
+      <div style={compactGridStyle}>
+        <DataViewCard
+          title="Authority context"
+          subtitle="Identity and integration ownership remain explicit on the home surface."
+          tone="tenant"
+          density="compact"
+          summary="Tenant, actor, and readiness posture stay readable without turning Home into a launcher page."
+        >
+          <DetailMetadataGrid
+            dense
+            minColumnWidth="180px"
+            items={[
+              {
+                id: "tenant",
+                label: "Tenant",
+                value: data.identity?.tenantId ?? "Unavailable",
+              },
+              {
+                id: "realm",
+                label: "Realm",
+                value: data.identity?.realm ?? "Unavailable",
+              },
+              {
+                id: "actor",
+                label: "Actor",
+                value: data.identity?.actorType ?? "Unavailable",
+              },
+              {
+                id: "auth-mode",
+                label: "Auth mode",
+                value: data.identity?.authMode ?? "Unavailable",
+              },
+              {
+                id: "integrations",
+                label: "Webhook events",
+                value: String(
+                  data.governance?.baselineWebhookEvents.length ?? 0,
+                ),
+              },
+              {
+                id: "subscriptions",
+                label: "Notification routes",
+                value: String(
+                  data.governance?.baselineNotificationSubscriptions.length ??
+                    0,
+                ),
+              },
+            ]}
+          />
+        </DataViewCard>
+        <DataViewCard
+          title="Workspace posture"
+          subtitle="Feature posture and checklist items stay visible below the hero KPI lane."
+          tone="tenant"
+          density="compact"
+          summary={
+            enabledFlags.length > 0
+              ? `${enabledFlags.length} enabled feature flag(s) in the current tenant snapshot.`
+              : "No enabled tenant feature flags were returned."
+          }
+        >
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
             {enabledFlags.slice(0, 6).map((flag) => (
-              <span className="status-chip" key={flag.key}>
-                {flag.key}
-              </span>
+              <StatusChip key={flag.key} label={flag.key} tone="tenant" />
             ))}
           </div>
-        ) : null}
-      </CalloutPanel>
-
-      <CalloutPanel
-        title="Partner mode runs in a constrained shell"
-        description="Partner booking lives at `/partner/*` with its own bootstrap session, partner-only navigation, and no tenant-admin governance exposure. Booking creation requires entry-scoped eligibility verification when the entry is not configured with `eligibility_mode = none`."
-        tone="warning"
-      >
-        <div className="link-row">
-          <Link className="text-link" href="/partner/login">
-            Open partner sign-in
-          </Link>
-        </div>
-      </CalloutPanel>
+          {checklist.length > 0 ? (
+            <div style={{ display: "grid", gap: "8px" }}>
+              {checklist.map((item) => (
+                <CalloutBanner
+                  key={item}
+                  title={item}
+                  description="Checklist items remain the published source of tenant integration readiness."
+                  tone="warning"
+                  density="compact"
+                />
+              ))}
+            </div>
+          ) : (
+            <CalloutBanner
+              title="Integration checklist clear"
+              description="No outstanding onboarding items were returned for this tenant."
+              tone="success"
+              density="compact"
+            />
+          )}
+        </DataViewCard>
+      </div>
 
       {data.errors.length > 0 ? (
-        <CalloutPanel
-          title="Partial data warning"
-          description="Some dashboard slices fell back because the current authority surface did not answer every read."
+        <CalloutBanner
+          title="Partial data returned"
+          description="The home dashboard is resilient to partial backend failures and keeps the available sections visible."
           tone="warning"
         >
-          <ul className="panel-list">
+          <ul
+            style={{
+              margin: 0,
+              paddingLeft: "18px",
+              display: "grid",
+              gap: "6px",
+            }}
+          >
             {data.errors.map((error) => (
               <li key={error}>{error}</li>
             ))}
           </ul>
-        </CalloutPanel>
+        </CalloutBanner>
       ) : null}
     </div>
   );

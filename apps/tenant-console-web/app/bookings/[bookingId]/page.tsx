@@ -1,73 +1,65 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { BookingRecord, TenantInvoiceRecord } from "@drts/contracts";
+import {
+  CalloutBanner,
+  DataViewCard,
+  DetailMetadataGrid,
+  PageHeader,
+  StatusChip,
+  Stepper,
+  Timeline,
+  WorkflowSplitLayout,
+  managementPageStackStyle,
+} from "@drts/ui-web";
 import { BookingCommandPanel } from "@/components/booking-command-panel";
 import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
+  buildBookingActivityRecords,
+  buildBookingLifecycleSteps,
+  formatOrderStatusLabel,
+  getOrderStatusTone,
+  getSourceTone,
+} from "@/lib/booking-surface";
 import { getTenantClient } from "@/lib/api-client";
 import { formatDateTime, formatMoney } from "@/lib/formatters";
-import {
-  getBookingSourceVisibility,
-  getSourceToneClassName,
-} from "@/lib/source-domain";
+import { getBookingSourceVisibility } from "@/lib/source-domain";
 
 export const dynamic = "force-dynamic";
 
-type TimelineRow = {
-  label: string;
-  at: string | null;
-  detail: string;
+const pageStackStyle = {
+  ...managementPageStackStyle(),
+  maxWidth: "1180px",
+  margin: "0 auto",
 };
 
-function buildTimeline(booking: BookingRecord): TimelineRow[] {
-  return [
-    {
-      label: "Booking created",
-      at: booking.createdAt,
-      detail: "Tenant intake accepted into the booking ledger.",
-    },
-    {
-      label: "Reservation window opens",
-      at: booking.reservationWindowStart,
-      detail: "Primary service commitment window begins.",
-    },
-    {
-      label: "Reservation window closes",
-      at: booking.reservationWindowEnd,
-      detail: "Requested pickup or dropoff commitment window ends.",
-    },
-    {
-      label: "Current workflow state",
-      at: booking.updatedAt,
-      detail: `Order status is ${booking.orderStatus}.`,
-    },
-    {
-      label: "Tenant modification cutoff",
-      at: booking.modifiableUntil,
-      detail: booking.modifiableUntil
-        ? "Further tenant edits follow this cutoff."
-        : "No explicit tenant edit cutoff was published.",
-    },
-    {
-      label: "Tenant cancellation cutoff",
-      at: booking.cancelableUntil,
-      detail: booking.cancelableUntil
-        ? "Further tenant cancellation follows this cutoff."
-        : "No explicit tenant cancellation cutoff was published.",
-    },
-  ];
+function actionLinkStyle(primary = false) {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "40px",
+    padding: "0 16px",
+    borderRadius: "999px",
+    border: primary ? "1px solid transparent" : "1px solid #99f6e4",
+    background: primary ? "#0f766e" : "#f0fdfa",
+    color: primary ? "#ffffff" : "#115e59",
+    fontSize: "13px",
+    fontWeight: 700,
+    textDecoration: "none",
+  };
 }
 
 function findRelatedInvoices(
   invoices: TenantInvoiceRecord[],
   orderId: string,
 ): TenantInvoiceRecord[] {
-  return invoices.filter((invoice) =>
-    invoice.lines.some((line) => line.orderId === orderId),
-  );
+  return invoices
+    .filter((invoice) => invoice.lines.some((line) => line.orderId === orderId))
+    .sort((left, right) => {
+      return (
+        new Date(right.periodEnd).getTime() - new Date(left.periodEnd).getTime()
+      );
+    });
 }
 
 export default async function BookingDetailPage({
@@ -88,237 +80,371 @@ export default async function BookingDetailPage({
 
   const booking = bookingResult.value;
   const source = getBookingSourceVisibility(booking);
-  const timeline = buildTimeline(booking);
+  const lifecycleItems = buildBookingLifecycleSteps(booking.orderStatus);
   const relatedInvoices =
     invoicesResult.status === "fulfilled"
       ? findRelatedInvoices(invoicesResult.value, booking.orderId)
       : [];
+  const invoiceWarning =
+    invoicesResult.status === "rejected"
+      ? invoicesResult.reason instanceof Error
+        ? invoicesResult.reason.message
+        : "Invoice context unavailable."
+      : null;
+  const activityItems = buildBookingActivityRecords(
+    booking,
+    source,
+    relatedInvoices,
+  ).map((item) => ({
+    id: item.id,
+    title: item.title,
+    detail: item.detail,
+    timestamp: item.timestamp
+      ? formatDateTime(item.timestamp)
+      : "Not published",
+    ...(item.tone ? { tone: item.tone } : {}),
+    ...(item.meta ? { meta: item.meta.join(" · ") } : {}),
+  }));
 
   return (
-    <div className="page-shell">
-      <PageHero
+    <div style={pageStackStyle}>
+      <PageHeader
         eyebrow="Booking detail"
-        title={`Booking ${booking.bookingId}`}
-        description="The detail surface keeps booking truth, fulfillment framing, fare context, and tenant-allowed commands together without leaking dispatch-only authority."
+        title={booking.bookingId}
+        subtitle={`${booking.businessDispatchSubtype} · ${booking.pickup.address} -> ${booking.dropoff.address}`}
+        meta={[
+          {
+            label: "Order state",
+            value: (
+              <StatusChip
+                label={formatOrderStatusLabel(booking.orderStatus)}
+                tone={getOrderStatusTone(booking.orderStatus)}
+              />
+            ),
+            tone: "tenant",
+          },
+          {
+            label: "Booking state",
+            value: <StatusChip label={booking.status} tone="neutral" />,
+          },
+          {
+            label: "Source",
+            value: (
+              <StatusChip label={source.badge} tone={getSourceTone(source)} />
+            ),
+          },
+        ]}
+        actions={
+          <>
+            <Link href="/bookings" style={actionLinkStyle()}>
+              Back to list
+            </Link>
+            <Link href="/bookings/new" style={actionLinkStyle()}>
+              Duplicate as new
+            </Link>
+            <Link href="#command-lane" style={actionLinkStyle(true)}>
+              Command lane
+            </Link>
+          </>
+        }
       />
 
-      <section className="surface-grid surface-grid-wide">
-        <SurfaceCard
-          kicker="Overview"
-          title="Workflow and fulfillment summary"
-          description="Booking and order state remain distinct: tenant booking status describes the business record, while order status reflects dispatch execution."
-        >
-          <div className="detail-stack">
-            <div className="chip-row">
-              <span className="status-badge">{booking.orderStatus}</span>
-              <span className="status-chip">Booking {booking.status}</span>
-              <span className={getSourceToneClassName(source.tone)}>
-                {source.badge}
-              </span>
-            </div>
-            <dl className="definition-grid">
-              <div>
-                <dt>Order ID</dt>
-                <dd>{booking.orderId}</dd>
-              </div>
-              <div>
-                <dt>Service bucket</dt>
-                <dd>{booking.serviceBucket}</dd>
-              </div>
-              <div>
-                <dt>Dispatch subtype</dt>
-                <dd>{booking.businessDispatchSubtype}</dd>
-              </div>
-              <div>
-                <dt>Fulfillment path</dt>
-                <dd>{source.summary}</dd>
-              </div>
-              <div>
-                <dt>Authority owner</dt>
-                <dd>{source.badge}</dd>
-              </div>
-            </dl>
-            <p className="muted-copy">{source.detail}</p>
-            {source.domain === "forwarded_authority" ? (
-              <CalloutPanel
-                title="Forwarded-authority boundary"
+      <WorkflowSplitLayout
+        density="comfortable"
+        main={
+          <>
+            <DataViewCard
+              title="Trip information"
+              subtitle="The primary detail card mirrors TN_BookingDetail with booking, route, passenger, and fare context grouped together."
+              tone="tenant"
+            >
+              <DetailMetadataGrid
+                dense
+                minColumnWidth="190px"
+                items={[
+                  { id: "booking", label: "Booking", value: booking.bookingId },
+                  { id: "order", label: "Order", value: booking.orderId },
+                  {
+                    id: "passenger",
+                    label: "Passenger",
+                    value: `${booking.passenger.name} · ${booking.passenger.phone}`,
+                  },
+                  {
+                    id: "cost-center",
+                    label: "Cost center",
+                    value: booking.costCenter ?? "Not provided",
+                  },
+                  {
+                    id: "pickup",
+                    label: "Pickup",
+                    value: booking.pickup.address,
+                  },
+                  {
+                    id: "dropoff",
+                    label: "Drop",
+                    value: booking.dropoff.address,
+                  },
+                  {
+                    id: "window",
+                    label: "Window",
+                    value: `${formatDateTime(booking.reservationWindowStart)} -> ${formatDateTime(booking.reservationWindowEnd)}`,
+                    columnSpan: 2,
+                  },
+                  {
+                    id: "service",
+                    label: "Service",
+                    value: booking.businessDispatchSubtype,
+                  },
+                  {
+                    id: "fare",
+                    label: "Quoted fare",
+                    value: formatMoney(booking.quotedFare),
+                  },
+                  {
+                    id: "payment",
+                    label: "Finance authority",
+                    value: source.financeAuthority,
+                    columnSpan: 2,
+                  },
+                ]}
+              />
+            </DataViewCard>
+
+            <DataViewCard
+              title="Lifecycle"
+              subtitle="Step states are derived from the published order status without exposing ops-only dispatch internals."
+              tone="tenant"
+            >
+              <Stepper
+                density="compact"
+                items={lifecycleItems.map((item) => ({
+                  id: item.id,
+                  title: item.title,
+                  description: item.description,
+                  state: item.state,
+                  stateLabel: item.stateLabel,
+                  ...(item.tone ? { tone: item.tone } : {}),
+                }))}
+                orientation="horizontal"
+              />
+            </DataViewCard>
+
+            <DataViewCard
+              title="Published activity"
+              subtitle="The activity lane is derived from published checkpoints and invoice linkage, not from hidden dispatch event streams."
+              tone="tenant"
+            >
+              <Timeline density="compact" items={activityItems} />
+            </DataViewCard>
+
+            <DataViewCard
+              title="Business context"
+              subtitle="Optional reservation attributes stay visible without leaking dispatch-only controls."
+              tone="tenant"
+              density="compact"
+            >
+              <DetailMetadataGrid
+                dense
+                minColumnWidth="190px"
+                items={[
+                  {
+                    id: "vehicle-preference",
+                    label: "Vehicle preference",
+                    value: booking.vehiclePreference ?? "Not provided",
+                  },
+                  {
+                    id: "benefit-reference",
+                    label: "Benefit reference",
+                    value: booking.benefitReference ?? "Not provided",
+                  },
+                  {
+                    id: "direction",
+                    label: "Direction",
+                    value: booking.direction ?? "Not provided",
+                  },
+                  {
+                    id: "flight",
+                    label: "Flight",
+                    value: booking.flightNo ?? "Not provided",
+                  },
+                  {
+                    id: "terminal",
+                    label: "Terminal",
+                    value: booking.terminal ?? "Not provided",
+                  },
+                  {
+                    id: "luggage",
+                    label: "Luggage",
+                    value:
+                      booking.luggageCount == null
+                        ? "Not provided"
+                        : `${booking.luggageCount} bag(s)`,
+                  },
+                  {
+                    id: "booked-by",
+                    label: "Booked by",
+                    value: booking.bookedBy
+                      ? `${booking.bookedBy.name} · ${booking.bookedBy.email}`
+                      : "Not provided",
+                    columnSpan: 2,
+                  },
+                  {
+                    id: "onsite-contact",
+                    label: "Onsite contact",
+                    value: booking.onsiteContact
+                      ? `${booking.onsiteContact.name} · ${booking.onsiteContact.phone}`
+                      : "Not provided",
+                    columnSpan: 2,
+                  },
+                  {
+                    id: "notes",
+                    label: "Notes",
+                    value: booking.notes ?? "Not provided",
+                    columnSpan: 2,
+                  },
+                ]}
+              />
+            </DataViewCard>
+          </>
+        }
+        side={
+          <>
+            <DataViewCard
+              title="Published fulfillment snapshot"
+              subtitle="This replaces the artboard's driver card because tenant contracts do not publish driver or vehicle identity here."
+              tone="tenant"
+              density="compact"
+              summary="The tenant detail view exposes fulfillment ownership and external-authority posture, but not driver assignment internals."
+            >
+              <DetailMetadataGrid
+                dense
+                minColumnWidth="180px"
+                items={[
+                  { id: "source", label: "Source", value: source.badge },
+                  {
+                    id: "fulfillment-path",
+                    label: "Fulfillment path",
+                    value: source.summary,
+                  },
+                  {
+                    id: "partner-program",
+                    label: "Partner program",
+                    value: booking.partnerProgramId ?? "Not applicable",
+                  },
+                  {
+                    id: "partner-entry",
+                    label: "Partner entry",
+                    value: booking.partnerEntrySlug ?? "Not applicable",
+                  },
+                  {
+                    id: "eligibility",
+                    label: "Eligibility",
+                    value:
+                      booking.eligibilityVerificationId ?? "Not applicable",
+                  },
+                  {
+                    id: "issuer-auth",
+                    label: "Issuer auth",
+                    value: booking.issuerAuthorizationRef ?? "Not applicable",
+                  },
+                  {
+                    id: "fare-source",
+                    label: "Fare source",
+                    value: booking.quotedFareSource ?? "Not published",
+                  },
+                  {
+                    id: "pricing-version",
+                    label: "Pricing version",
+                    value: booking.quotedFareRuleVersion ?? "Not published",
+                  },
+                ]}
+              />
+              <CalloutBanner
+                title="Authority boundary"
                 description={source.statusBoundary}
-                tone="warning"
+                tone={source.domain === "owned" ? "tenant" : "warning"}
+                density="compact"
               >
-                <p>{source.escalationHint}</p>
-              </CalloutPanel>
-            ) : null}
-          </div>
-        </SurfaceCard>
+                <div>{source.escalationHint}</div>
+              </CalloutBanner>
+            </DataViewCard>
 
-        <SurfaceCard
-          kicker="Timeline"
-          title="Booking lifecycle checkpoints"
-          description="Tenant detail shows published booking checkpoints. Low-level dispatch trace stays in the ops console authority lane."
-        >
-          <ol className="timeline-list">
-            {timeline.map((item) => (
-              <li className="timeline-item" key={item.label}>
-                <strong>{item.label}</strong>
-                <span>
-                  {item.at ? formatDateTime(item.at) : "Not published"}
-                </span>
-                <p>{item.detail}</p>
-              </li>
-            ))}
-          </ol>
-        </SurfaceCard>
-      </section>
+            <DataViewCard
+              title="Billing snapshot"
+              subtitle="Quoted fare, manual override posture, and linked tenant invoices remain visible on the right rail."
+              tone="tenant"
+              density="compact"
+            >
+              <DetailMetadataGrid
+                dense
+                minColumnWidth="180px"
+                items={[
+                  {
+                    id: "quoted-fare",
+                    label: "Quoted fare",
+                    value: formatMoney(booking.quotedFare),
+                  },
+                  {
+                    id: "fare-source",
+                    label: "Fare source",
+                    value: booking.quotedFareSource ?? "Not published",
+                  },
+                  {
+                    id: "pricing-version",
+                    label: "Pricing version",
+                    value: booking.quotedFareRuleVersion ?? "Not published",
+                  },
+                  {
+                    id: "manual-override",
+                    label: "Manual override",
+                    value: booking.manualFareOverride
+                      ? `${booking.manualFareOverride.actorType} · ${booking.manualFareOverride.reason}`
+                      : "None",
+                    columnSpan: 2,
+                  },
+                ]}
+              />
+              {invoiceWarning ? (
+                <CalloutBanner
+                  title="Invoice context unavailable"
+                  description={invoiceWarning}
+                  tone="warning"
+                  density="compact"
+                />
+              ) : relatedInvoices.length > 0 ? (
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {relatedInvoices.map((invoice) => (
+                    <CalloutBanner
+                      key={invoice.invoiceId}
+                      title={`${invoice.invoiceId} · ${formatMoney(invoice.amount)}`}
+                      description={`${invoice.status} · ${formatDateTime(invoice.periodStart)} -> ${formatDateTime(invoice.periodEnd)}`}
+                      tone="success"
+                      density="compact"
+                    />
+                  ))}
+                </div>
+              ) : (
+                <CalloutBanner
+                  title="No linked invoice row"
+                  description="This order is not yet attached to a visible tenant invoice artifact in the current snapshot."
+                  tone="info"
+                  density="compact"
+                />
+              )}
+            </DataViewCard>
+          </>
+        }
+      />
 
-      <section className="surface-grid surface-grid-wide">
-        <SurfaceCard
-          kicker="Passenger and route"
-          title="Rider context"
-          description="Passenger and route context stay adjacent so tenant users can confirm the business reservation without opening a dispatch-only screen."
-        >
-          <dl className="definition-grid">
-            <div>
-              <dt>Passenger</dt>
-              <dd>{booking.passenger.name}</dd>
-            </div>
-            <div>
-              <dt>Phone</dt>
-              <dd>{booking.passenger.phone}</dd>
-            </div>
-            <div>
-              <dt>Pickup</dt>
-              <dd>{booking.pickup.address}</dd>
-            </div>
-            <div>
-              <dt>Dropoff</dt>
-              <dd>{booking.dropoff.address}</dd>
-            </div>
-            <div>
-              <dt>Window start</dt>
-              <dd>{formatDateTime(booking.reservationWindowStart)}</dd>
-            </div>
-            <div>
-              <dt>Window end</dt>
-              <dd>{formatDateTime(booking.reservationWindowEnd)}</dd>
-            </div>
-          </dl>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Fare and invoice"
-          title="Tenant-visible finance context"
-          description="The detail surface shows quoted fare authority and invoice linkage where the backend already publishes it."
-        >
-          <dl className="definition-grid">
-            <div>
-              <dt>Quoted fare</dt>
-              <dd>{formatMoney(booking.quotedFare)}</dd>
-            </div>
-            <div>
-              <dt>Fare source</dt>
-              <dd>{booking.quotedFareSource ?? "Not published"}</dd>
-            </div>
-            <div>
-              <dt>Pricing version</dt>
-              <dd>{booking.quotedFareRuleVersion ?? "Not published"}</dd>
-            </div>
-            <div>
-              <dt>Manual override</dt>
-              <dd>
-                {booking.manualFareOverride
-                  ? `${booking.manualFareOverride.actorType} · ${booking.manualFareOverride.reason}`
-                  : "None"}
-              </dd>
-            </div>
-            <div>
-              <dt>Finance authority</dt>
-              <dd>{source.financeAuthority}</dd>
-            </div>
-          </dl>
-          {relatedInvoices.length > 0 ? (
-            <ul className="panel-list">
-              {relatedInvoices.map((invoice) => (
-                <li key={invoice.invoiceId}>
-                  <strong>{invoice.invoiceId}</strong>
-                  <span className="list-note">
-                    {invoice.status} · {formatMoney(invoice.amount)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="muted-copy">
-              No tenant invoice row is currently linked to this order.
-            </p>
-          )}
-        </SurfaceCard>
-      </section>
-
-      <section className="surface-grid surface-grid-wide">
-        <SurfaceCard
-          kicker="Additional detail"
-          title="Business context"
-          description="Optional business-travel fields remain visible here so tenant users can inspect the full reservation payload without mutating workflow state directly."
-        >
-          <dl className="definition-grid">
-            <div>
-              <dt>Cost center</dt>
-              <dd>{booking.costCenter ?? "Not provided"}</dd>
-            </div>
-            <div>
-              <dt>Vehicle preference</dt>
-              <dd>{booking.vehiclePreference ?? "Not provided"}</dd>
-            </div>
-            <div>
-              <dt>Benefit reference</dt>
-              <dd>{booking.benefitReference ?? "Not provided"}</dd>
-            </div>
-            <div>
-              <dt>Direction</dt>
-              <dd>{booking.direction ?? "Not provided"}</dd>
-            </div>
-            <div>
-              <dt>Flight</dt>
-              <dd>{booking.flightNo ?? "Not provided"}</dd>
-            </div>
-            <div>
-              <dt>Terminal</dt>
-              <dd>{booking.terminal ?? "Not provided"}</dd>
-            </div>
-            <div>
-              <dt>Luggage</dt>
-              <dd>
-                {booking.luggageCount == null
-                  ? "Not provided"
-                  : `${booking.luggageCount} bag(s)`}
-              </dd>
-            </div>
-            <div>
-              <dt>Notes</dt>
-              <dd>{booking.notes ?? "Not provided"}</dd>
-            </div>
-          </dl>
-        </SurfaceCard>
-
-        <SurfaceCard
-          kicker="Allowed actions"
+      <section id="command-lane">
+        <DataViewCard
           title="Tenant command lane"
-          description="Only supported tenant commands appear here. Driver assignment, dispatch override, and external settlement actions remain hidden."
+          subtitle="Only supported tenant update and cancel commands remain visible on the detail route."
+          tone="tenant"
         >
           <BookingCommandPanel booking={booking} />
-        </SurfaceCard>
+        </DataViewCard>
       </section>
-
-      <CalloutPanel
-        title="Authority-safe fulfillment summary"
-        description="Driver identity, live dispatch candidate state, and adapter internals remain outside tenant authority unless a dedicated backend read model is added later."
-      />
-
-      <div className="link-row">
-        <Link className="text-link" href="/bookings">
-          Back to booking list
-        </Link>
-      </div>
     </div>
   );
 }
