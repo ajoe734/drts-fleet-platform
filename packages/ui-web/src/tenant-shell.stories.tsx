@@ -1,59 +1,18 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { ManagementShell } from "./management-shell";
-import type { ManagementSidebarSection } from "./management-sidebar";
 import { PageHeader } from "./page-header";
 import { KpiCard, KpiRow, SectionHeader } from "./management-primitives";
-
-const tenantSections: ManagementSidebarSection[] = [
-  {
-    key: "workspace",
-    title: "Workspace",
-    items: [
-      { href: "/", label: "Home" },
-      { href: "/bookings", label: "Bookings" },
-      { href: "/bookings/new", label: "New Booking" },
-    ],
-  },
-  {
-    key: "integrations",
-    title: "Integrations",
-    items: [
-      { href: "/api-keys", label: "API Keys" },
-      { href: "/webhooks", label: "Webhooks" },
-    ],
-  },
-  {
-    key: "governance",
-    title: "Governance",
-    items: [
-      { href: "/audit", label: "Audit" },
-      { href: "/users", label: "Users" },
-      { href: "/settings", label: "Settings" },
-    ],
-  },
-];
-
-const tenantBrandIcon = (
-  <span
-    style={{
-      fontSize: "11px",
-      fontWeight: 700,
-      letterSpacing: "0.08em",
-    }}
-  >
-    TC
-  </span>
-);
+import { tenantBrandIcon, tenantSections } from "./tenant-story-support";
 
 const tenantSidebarFooter = (
   <div style={{ display: "grid", gap: "10px", lineHeight: 1.5 }}>
     <div>
-      Partner entry stays constrained to eligibility and booking intake. Tenant
-      admin navigation does not bleed into partner mode.
+      Partner booking stays focused on eligibility checks and trip requests.
+      Team administration stays here.
     </div>
     <div>
-      Current production traffic remains in <code>tenant-commute-hub</code>;
-      this app is the in-repo target shell.
+      Manage bookings, people, billing, and integrations for your organization
+      from one workspace.
     </div>
   </div>
 );
@@ -105,7 +64,7 @@ export const TenantHomeShell: Story = {
     <ManagementShell
       sidebar={{
         brand: "Tenant Console",
-        brandSub: "Phase 1 tenant admin",
+        brandSub: "Bookings, billing, and team access",
         brandIcon: tenantBrandIcon,
         sections: tenantSections,
         currentPath: "/",
@@ -135,7 +94,7 @@ export const TenantHomeShell: Story = {
           meta={[
             { label: "Tenant", value: "CTBC World Elite" },
             { label: "Partner mode", value: "Eligibility + intake only" },
-            { label: "Production traffic", value: "tenant-commute-hub" },
+            { label: "Workspace", value: "Bookings, billing, and access" },
           ]}
         />
         <SectionHeader

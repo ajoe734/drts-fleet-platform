@@ -26,7 +26,7 @@ export function TenantShell({ children }: { children: ReactNode }) {
     <ManagementShell
       sidebar={{
         brand: "Tenant Console",
-        brandSub: "Phase 1 tenant admin",
+        brandSub: "Bookings, billing, and team access",
         brandIcon: (
           <span
             style={{
@@ -43,13 +43,12 @@ export function TenantShell({ children }: { children: ReactNode }) {
         footer: (
           <div style={{ display: "grid", gap: "10px", lineHeight: 1.5 }}>
             <div>
-              Partner entry stays constrained to eligibility and booking intake.
-              Tenant admin navigation does not bleed into partner mode.
+              Partner booking stays focused on eligibility checks and trip
+              requests. Team administration stays here.
             </div>
             <div>
-              Current production traffic remains in{" "}
-              <code>tenant-commute-hub</code>; this app is the in-repo target
-              shell.
+              Manage bookings, people, billing, and integrations for your
+              organization from one workspace.
             </div>
           </div>
         ),
@@ -73,7 +72,8 @@ export function TenantShell({ children }: { children: ReactNode }) {
               lineHeight: 1.4,
             }}
           >
-            {activeItem?.note ?? "Route topology and shell alignment."}
+            {activeItem?.note ??
+              "Choose a section to review bookings, directories, billing, or workspace settings."}
           </div>
         ),
         envLabel: "tenant",

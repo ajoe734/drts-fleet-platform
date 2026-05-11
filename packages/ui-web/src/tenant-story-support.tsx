@@ -17,7 +17,10 @@ export const tenantSections: ManagementSidebarSection[] = [
   {
     key: "directory",
     title: "Directory",
-    items: [{ href: "/addresses", label: "Addresses" }],
+    items: [
+      { href: "/passengers", label: "Passengers" },
+      { href: "/addresses", label: "Addresses" },
+    ],
   },
   {
     key: "billing",
@@ -188,7 +191,7 @@ export function TenantStoryShell({
     <ManagementShell
       sidebar={{
         brand: "Tenant Console",
-        brandSub: "Phase 1 tenant admin",
+        brandSub: "Bookings, billing, and team access",
         brandIcon: tenantBrandIcon,
         sections: tenantSections,
         currentPath,
