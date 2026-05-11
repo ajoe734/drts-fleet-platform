@@ -7,9 +7,13 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
+  actionButtonStyle,
+  emptyStateStyle,
   fieldLabelStyle,
   inputStyle,
   textMutedStyle,
+  toggleButtonStyle,
+  toggleGroupStyle,
 } from "@/components/platform-ui";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
@@ -28,6 +32,14 @@ import type {
   VehicleContractRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
+import {
+  CalloutBanner,
+  DataViewCard,
+  KpiCard,
+  KpiRow,
+  PageHeader,
+  StatusChip,
+} from "@drts/ui-web";
 
 function badgeClassForLifecycle(status: string) {
   if (status === "active") return "platform-ui-badge--success";
@@ -495,52 +507,100 @@ export default function FleetPage() {
     [client, loadData, offboardingForm],
   );
 
-  if (loading)
-    return <div className="platform-ui-empty">{t("fleet.loading")}</div>;
+  if (loading) {
+    return <div style={emptyStateStyle}>{t("fleet.loading")}</div>;
+  }
 
   return (
-    <div>
-      <div className="platform-ui-page-header">
-        <h1>{t("fleet.title")}</h1>
-        <p>
-          {t("fleet.subtitle", {
-            vehicles: vehicles.length,
-            drivers: drivers.length,
-            contracts: contracts.length,
-          })}
-        </p>
-      </div>
+    <div style={{ display: "grid", gap: 16 }}>
+      <PageHeader
+        eyebrow={locale === "en" ? "Fleet Governance" : "車隊治理"}
+        title={t("fleet.title")}
+        subtitle={t("fleet.subtitle", {
+          vehicles: vehicles.length,
+          drivers: drivers.length,
+          contracts: contracts.length,
+        })}
+        actions={
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {(
+              [
+                ["vehicle_roster", fleetWorkflowCopy.exportVehicles],
+                ["driver_roster", fleetWorkflowCopy.exportDrivers],
+                ["contract_roster", fleetWorkflowCopy.exportContracts],
+              ] as const
+            ).map(([jobType, label]) => (
+              <button
+                key={jobType}
+                type="button"
+                style={actionButtonStyle({ tone: "secondary" })}
+                disabled={reportActionId === jobType}
+                onClick={() => void requestFleetReport(jobType)}
+              >
+                {reportActionId === jobType
+                  ? fleetWorkflowCopy.exportPending
+                  : label}
+              </button>
+            ))}
+            <button
+              type="button"
+              style={actionButtonStyle({ tone: "secondary" })}
+              onClick={() => void loadData()}
+            >
+              {t("common.refresh")}
+            </button>
+          </div>
+        }
+      />
 
       {error && (
-        <div
-          className="platform-ui-card"
-          style={{ borderColor: "rgba(239,68,68,0.3)" }}
-        >
-          <p style={{ color: "#dc2626", margin: 0 }}>
-            {getPlatformLabel(locale, "error")}: {error}
-          </p>
-        </div>
+        <CalloutBanner
+          tone="danger"
+          title={getPlatformLabel(locale, "error")}
+          description={error}
+        />
       )}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
-        <div
-          className="platform-ui-card"
-          style={{ marginBottom: 0, background: "rgba(15,118,110,0.04)" }}
-        >
-          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
-            {fleetWorkflowCopy.summaryTitle}
-          </p>
-          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
-            {fleetWorkflowCopy.summaryNote}
-          </p>
-        </div>
+      <CalloutBanner
+        tone="warning"
+        eyebrow={fleetWorkflowCopy.summaryTitle}
+        title={
+          locale === "en"
+            ? "Drivers, vehicles, contracts, and offboarding blockers stay visible in one governance lane."
+            : "司機、車輛、合約與下線阻塞集中在同一條治理路徑。"
+        }
+        description={fleetWorkflowCopy.summaryNote}
+        meta={
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <StatusChip
+              tone="warning"
+              label={`${fleetWorkflowCopy.blockedVehicles} · ${
+                vehicles.filter(
+                  (vehicle) =>
+                    !vehicle.dispatchableFlag ||
+                    vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
+                ).length
+              }`}
+            />
+            <StatusChip
+              tone="danger"
+              label={`${fleetWorkflowCopy.pendingOffboarding} · ${pendingOffboardingVehicles.length}`}
+            />
+            <StatusChip
+              tone="info"
+              label={`${fleetWorkflowCopy.pendingExclusivity} · ${
+                vehicles.filter(
+                  (vehicle) =>
+                    vehicle.supplyLifecycle.exclusivity.reviewStatus ===
+                    "pending",
+                ).length
+              }`}
+            />
+          </div>
+        }
+      />
+
+      <KpiRow minWidth="220px">
         {[
           {
             label: fleetWorkflowCopy.blockedVehicles,
@@ -570,101 +630,66 @@ export default function FleetPage() {
             value: pendingOffboardingVehicles.length,
           },
         ].map((card) => (
-          <div
+          <KpiCard
             key={card.label}
-            className="platform-ui-card"
-            style={{ marginBottom: 0 }}
-          >
-            <p style={{ margin: "0 0 8px", fontSize: 13, color: "#6b7280" }}>
-              {card.label}
-            </p>
-            <strong style={{ display: "block", fontSize: 24 }}>
-              {card.value}
-            </strong>
-          </div>
+            label={card.label}
+            value={card.value}
+            tone={
+              card.label === fleetWorkflowCopy.pendingExclusivity
+                ? "info"
+                : card.label === fleetWorkflowCopy.pendingOffboarding
+                  ? "danger"
+                  : "warning"
+            }
+          />
         ))}
-      </div>
+      </KpiRow>
 
       {complianceWarnings.length > 0 && (
-        <div
-          className="platform-ui-card"
-          style={{
-            borderColor: "rgba(245,158,11,0.28)",
-            background: "rgba(245,158,11,0.06)",
-          }}
-        >
-          <p style={{ margin: "0 0 8px", fontWeight: 600 }}>
-            {fleetWorkflowCopy.warningTitle}
-          </p>
-          <div style={{ display: "grid", gap: 6 }}>
-            {complianceWarnings.map((warning) => (
-              <div key={warning.id} style={{ fontSize: 13, color: "#92400e" }}>
-                {warning.message}
-              </div>
-            ))}
-          </div>
-        </div>
+        <CalloutBanner
+          tone="warning"
+          title={fleetWorkflowCopy.warningTitle}
+          description={
+            <div style={{ display: "grid", gap: 6 }}>
+              {complianceWarnings.map((warning) => (
+                <div key={warning.id} style={{ fontSize: 13 }}>
+                  {warning.message}
+                </div>
+              ))}
+            </div>
+          }
+        />
       )}
 
-      <div className="platform-ui-toolbar">
-        <div className="platform-ui-toggle-group">
-          <button
-            className={`platform-ui-toggle-btn ${activeTab === "vehicles" ? "active" : ""}`}
-            onClick={() => setActiveTab("vehicles")}
-          >
-            {t("fleet.tab.vehicles")} ({vehicles.length})
-          </button>
-          <button
-            className={`platform-ui-toggle-btn ${activeTab === "drivers" ? "active" : ""}`}
-            onClick={() => setActiveTab("drivers")}
-          >
-            {t("fleet.tab.drivers")} ({drivers.length})
-          </button>
-          <button
-            className={`platform-ui-toggle-btn ${activeTab === "contracts" ? "active" : ""}`}
-            onClick={() => setActiveTab("contracts")}
-          >
-            {t("fleet.tab.contracts")} ({contracts.length})
-          </button>
-        </div>
-        {(
-          [
-            ["vehicle_roster", fleetWorkflowCopy.exportVehicles],
-            ["driver_roster", fleetWorkflowCopy.exportDrivers],
-            ["contract_roster", fleetWorkflowCopy.exportContracts],
-          ] as const
-        ).map(([jobType, label]) => (
-          <button
-            key={jobType}
-            className="platform-ui-btn platform-ui-btn--secondary"
-            type="button"
-            disabled={reportActionId === jobType}
-            onClick={() => void requestFleetReport(jobType)}
-          >
-            {reportActionId === jobType
-              ? fleetWorkflowCopy.exportPending
-              : label}
-          </button>
-        ))}
-        <button
-          className="platform-ui-btn platform-ui-btn--secondary"
-          onClick={loadData}
-        >
-          {t("common.refresh")}
-        </button>
-      </div>
-
-      <div
-        className="platform-ui-card"
-        style={{
-          marginTop: -4,
-          marginBottom: 16,
-          background: "rgba(59,130,246,0.04)",
-        }}
+      <DataViewCard
+        title={locale === "en" ? "Operational focus" : "操作焦點"}
+        subtitle={fleetWorkflowCopy.exportHint}
+        filters={
+          <div style={toggleGroupStyle}>
+            <button
+              type="button"
+              style={toggleButtonStyle(activeTab === "vehicles")}
+              onClick={() => setActiveTab("vehicles")}
+            >
+              {t("fleet.tab.vehicles")} ({vehicles.length})
+            </button>
+            <button
+              type="button"
+              style={toggleButtonStyle(activeTab === "drivers")}
+              onClick={() => setActiveTab("drivers")}
+            >
+              {t("fleet.tab.drivers")} ({drivers.length})
+            </button>
+            <button
+              type="button"
+              style={toggleButtonStyle(activeTab === "contracts")}
+              onClick={() => setActiveTab("contracts")}
+            >
+              {t("fleet.tab.contracts")} ({contracts.length})
+            </button>
+          </div>
+        }
       >
-        <p style={{ margin: "0 0 12px", fontSize: 13, color: "#374151" }}>
-          {fleetWorkflowCopy.exportHint}
-        </p>
         <div
           style={{
             display: "grid",
@@ -685,36 +710,36 @@ export default function FleetPage() {
                 key={`${jobType}:artifact`}
                 style={{
                   border: "1px solid rgba(148,163,184,0.35)",
-                  borderRadius: 12,
+                  borderRadius: 14,
                   padding: 12,
-                  background: "rgba(255,255,255,0.72)",
+                  background: "rgba(255,255,255,0.78)",
+                  display: "grid",
+                  gap: 8,
                 }}
               >
-                <p style={{ margin: "0 0 6px", fontWeight: 600 }}>{label}</p>
-                <p
-                  style={{ margin: "0 0 8px", fontSize: 13, color: "#6b7280" }}
-                >
+                <p style={{ margin: 0, fontWeight: 600 }}>{label}</p>
+                <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
                   {reportJob?.artifact
                     ? `${fleetWorkflowCopy.exportReady} · ${formatDateTime(reportJob.artifact.expiresAt)}`
                     : reportActionId === jobType
                       ? fleetWorkflowCopy.exportPending
                       : fleetWorkflowCopy.exportIdle}
                 </p>
-                {reportJob?.artifact && (
+                {reportJob?.artifact ? (
                   <a
-                    className="platform-ui-btn platform-ui-btn--secondary"
                     href={reportJob.artifact.downloadMetadata.downloadUrl}
                     rel="noreferrer"
                     target="_blank"
+                    style={actionButtonStyle({ tone: "secondary" })}
                   >
                     {fleetWorkflowCopy.exportOpen}
                   </a>
-                )}
+                ) : null}
               </div>
             );
           })}
         </div>
-      </div>
+      </DataViewCard>
 
       {activeTab === "drivers" && (
         <div className="platform-ui-card" style={{ marginBottom: 16 }}>

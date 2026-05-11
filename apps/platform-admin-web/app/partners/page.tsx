@@ -21,6 +21,8 @@ import {
   DataFilterBar,
   DataTable,
   DataViewCard,
+  FilterPill,
+  FilterPillRow,
   KpiCard,
   KpiRow,
   PageHeader,
@@ -37,6 +39,21 @@ function partnerNeedsAttention(entry: PartnerChannelEntryRecord) {
     (item) => !item.ready,
   );
 }
+
+const watchlistGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+} satisfies React.CSSProperties;
+
+const watchlistCardStyle = {
+  display: "grid",
+  gap: 10,
+  padding: "14px 16px",
+  borderRadius: 16,
+  border: "1px solid #dbe4ee",
+  background: "#f8fafc",
+} satisfies React.CSSProperties;
 
 export default function PartnersPage() {
   const { t, locale } = useTranslation();
@@ -64,6 +81,16 @@ export default function PartnersPage() {
             "Provision entry routing, auth mode, eligibility mode, and branding metadata before enabling traffic.",
           attention: (count: number) =>
             `${count} entry(s) still have readiness gaps and should not be promoted blindly.`,
+          watchlistTitle: "Readiness watchlist",
+          watchlistSubtitle:
+            "Keep partner entries with readiness gaps, inactive posture, or revocation risk in a single governance lane before opening the detail route.",
+          watchlistEmpty:
+            "Every partner entry is active and has the required readiness evidence.",
+          rosterTitle: "Entry roster",
+          rosterSubtitle:
+            "Platform-owned roster for routing, auth, eligibility, readiness, and lifecycle controls.",
+          rosterSummary:
+            "Use the detail route to issue credentials, edit routing, and keep promotion authority explicit.",
           columns: {
             entry: "Entry",
             tenant: "Tenant / program",
@@ -86,6 +113,16 @@ export default function PartnersPage() {
             "在正式導流前，先補齊 entry routing、auth mode、eligibility mode 與 branding metadata。",
           attention: (count: number) =>
             `${count} 筆 entry 仍有 readiness 缺口，不應直接推進。`,
+          watchlistTitle: "Readiness watchlist",
+          watchlistSubtitle:
+            "在進入 detail route 前，先把有 readiness 缺口、尚未啟用或需要撤銷治理的 partner entry 放在同一條治理 watchlist。",
+          watchlistEmpty:
+            "目前所有 partner entry 都已啟用，且具備必要的 readiness 證據。",
+          rosterTitle: "治理清單",
+          rosterSubtitle:
+            "平台治理名單，集中呈現 routing、auth、eligibility、readiness 與 lifecycle 控制。",
+          rosterSummary:
+            "進入 detail route 後可治理憑證、編輯 routing，並維持 promotion authority 清楚落在平台側。",
           columns: {
             entry: "入口",
             tenant: "租戶 / 方案",
@@ -139,6 +176,21 @@ export default function PartnersPage() {
         return entries;
     }
   }, [entries, filter]);
+
+  const readinessWatchlist = useMemo(
+    () =>
+      [...entries]
+        .filter(
+          (entry) => partnerNeedsAttention(entry) || entry.status !== "active",
+        )
+        .sort(
+          (left, right) =>
+            new Date(right.updatedAt).getTime() -
+            new Date(left.updatedAt).getTime(),
+        )
+        .slice(0, 3),
+    [entries],
+  );
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -227,10 +279,14 @@ export default function PartnersPage() {
 
       <KpiRow minWidth="220px">
         <KpiCard
-          label={locale === "en" ? "Total entries" : "總 entry 數"}
-          value={counts.all}
-          detail={`${counts.active} active · ${counts.inactive} inactive`}
-          tone="neutral"
+          label={locale === "en" ? "Active entries" : "啟用 entry"}
+          value={counts.active}
+          detail={
+            locale === "en"
+              ? `${counts.all} total · ${counts.inactive} inactive`
+              : `${counts.all} 總數 · ${counts.inactive} 停用`
+          }
+          tone="platform"
         />
         <KpiCard
           label={locale === "en" ? "Needs attention" : "待補 readiness"}
@@ -253,6 +309,139 @@ export default function PartnersPage() {
           tone={counts.revoked > 0 ? "danger" : "neutral"}
         />
       </KpiRow>
+
+      <WorkflowPanel
+        title={copy.watchlistTitle}
+        description={copy.watchlistSubtitle}
+        tone="platform"
+        meta={
+          <FilterPillRow>
+            <FilterPill
+              label={locale === "en" ? "All entries" : "全部 entry"}
+              count={counts.all}
+              tone="neutral"
+              active={filter === "all"}
+            />
+            <FilterPill
+              label="active"
+              count={counts.active}
+              tone="success"
+              active={filter === "active"}
+            />
+            <FilterPill
+              label="inactive"
+              count={counts.inactive}
+              tone="warning"
+              active={filter === "inactive"}
+            />
+            <FilterPill
+              label={locale === "en" ? "attention" : "待處理"}
+              count={counts.attention}
+              tone="warning"
+              active={filter === "attention"}
+            />
+            <FilterPill
+              label="revoked"
+              count={counts.revoked}
+              tone="danger"
+              active={filter === "revoked"}
+            />
+          </FilterPillRow>
+        }
+      >
+        {readinessWatchlist.length > 0 ? (
+          <div style={watchlistGridStyle}>
+            {readinessWatchlist.map((entry) => {
+              const readiness = buildPartnerReadinessItems(entry, t);
+              const readyCount = readiness.filter((item) => item.ready).length;
+              const missingCount = readiness.length - readyCount;
+              const accent = entry.themeAccent?.trim() || "#1d4ed8";
+              const badgeText = entry.partnerCode.slice(0, 2).toUpperCase();
+
+              return (
+                <div key={entry.entrySlug} style={watchlistCardStyle}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 10,
+                        alignItems: "flex-start",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: 10,
+                          background: accent,
+                          color: "#ffffff",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {badgeText || "PE"}
+                      </span>
+                      <DataCellStack
+                        primary={<strong>{entry.displayName}</strong>}
+                        secondary={`/${entry.entrySlug}`}
+                        tertiary={`${entry.partnerCode} · ${entry.programId}`}
+                      />
+                    </div>
+                    <StatusChip
+                      label={formatPlatformCodeLabel(locale, entry.status)}
+                      tone={partnerStatusTone(entry.status)}
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <StatusChip
+                      label={formatPlatformCodeLabel(locale, entry.authMode)}
+                      tone="info"
+                    />
+                    <StatusChip
+                      label={formatPlatformCodeLabel(
+                        locale,
+                        entry.eligibilityMode,
+                      )}
+                      tone="neutral"
+                    />
+                    <StatusChip
+                      label={
+                        missingCount === 0
+                          ? locale === "en"
+                            ? "ready"
+                            : "已就緒"
+                          : locale === "en"
+                            ? `${missingCount} gap(s)`
+                            : `${missingCount} 項缺口`
+                      }
+                      tone={missingCount === 0 ? "success" : "warning"}
+                    />
+                  </div>
+                  <div style={{ color: "#64748b", fontSize: 12.5 }}>
+                    {locale === "en" ? "Updated" : "最近更新"}:{" "}
+                    {formatDateTime(entry.updatedAt)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ color: "#64748b", fontSize: 13.5 }}>
+            {copy.watchlistEmpty}
+          </div>
+        )}
+      </WorkflowPanel>
 
       {counts.attention > 0 ? (
         <CalloutBanner
@@ -292,8 +481,10 @@ export default function PartnersPage() {
       ) : null}
 
       <DataViewCard
-        title={copy.title}
-        subtitle={copy.subtitle}
+        title={copy.rosterTitle}
+        subtitle={copy.rosterSubtitle}
+        tone="platform"
+        summary={copy.rosterSummary}
         filters={
           <DataFilterBar
             value={filter}
@@ -354,11 +545,36 @@ export default function PartnersPage() {
             return (
               <Tr key={entry.entrySlug}>
                 <Td>
-                  <DataCellStack
-                    primary={<strong>{entry.displayName}</strong>}
-                    secondary={`/${entry.entrySlug}`}
-                    tertiary={entry.entryHost ?? undefined}
-                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 10,
+                        background: entry.themeAccent?.trim() || "#1d4ed8",
+                        color: "#ffffff",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {entry.partnerCode.slice(0, 2).toUpperCase() || "PE"}
+                    </span>
+                    <DataCellStack
+                      primary={<strong>{entry.displayName}</strong>}
+                      secondary={`/${entry.entrySlug}`}
+                      tertiary={entry.entryHost ?? undefined}
+                    />
+                  </div>
                 </Td>
                 <Td>
                   <DataCellStack
