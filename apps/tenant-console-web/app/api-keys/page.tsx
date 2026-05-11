@@ -1,35 +1,52 @@
-import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
+import type {
+  TenantApiKeyRecord,
+  TenantIntegrationGovernancePackage,
+} from "@drts/contracts";
+import { getTenantClient } from "@/lib/api-client";
+import { ApiKeyManager } from "./api-key-manager";
 
-export default function ApiKeysPage() {
-  return (
-    <div className="page-shell">
-      <PageHero
-        eyebrow="API keys"
-        title="Integration credentials move into the primary shell."
-        description="The information architecture makes API key lifecycle visible at the top level so tenant integration managers can issue, rotate, and revoke credentials without hunting through miscellaneous tools."
-      />
+export const dynamic = "force-dynamic";
 
-      <section className="surface-grid">
-        <SurfaceCard
-          kicker="Lifecycle"
-          title="Issue, rotate, revoke"
-          description="The shell is anchored to the existing tenant key commands and leaves detailed expiry, scope, and last-used presentation for `TEN-UI-006`."
-        />
-        <SurfaceCard
-          kicker="Boundary"
-          title="No client-side credential truth"
-          description="Key material remains backend-owned and one-time visible only. The route exists to expose the governance surface, not to normalize local persistence."
-        />
-      </section>
+type ApiKeyPageData = {
+  apiKeys: TenantApiKeyRecord[];
+  governance: TenantIntegrationGovernancePackage | null;
+  errors: string[];
+};
 
-      <CalloutPanel
-        title="Shared integration band"
-        description="API keys and webhooks intentionally sit next to each other in navigation because both are tenant-managed integrations, but they keep distinct lifecycle language and authority rules."
-      />
-    </div>
-  );
+async function loadApiKeyPageData(): Promise<ApiKeyPageData> {
+  const client = getTenantClient();
+  const errors: string[] = [];
+
+  const [apiKeysResult, governanceResult] = await Promise.allSettled([
+    client.listApiKeys() as Promise<TenantApiKeyRecord[]>,
+    client.getTenantIntegrationGovernancePackage() as Promise<TenantIntegrationGovernancePackage>,
+  ]);
+
+  const apiKeys =
+    apiKeysResult.status === "fulfilled" ? apiKeysResult.value : [];
+  const governance =
+    governanceResult.status === "fulfilled" ? governanceResult.value : null;
+
+  if (apiKeysResult.status === "rejected") {
+    errors.push(
+      apiKeysResult.reason instanceof Error
+        ? apiKeysResult.reason.message
+        : "Unable to load tenant API keys.",
+    );
+  }
+
+  if (governanceResult.status === "rejected") {
+    errors.push(
+      governanceResult.reason instanceof Error
+        ? governanceResult.reason.message
+        : "Unable to load integration governance policy.",
+    );
+  }
+
+  return { apiKeys, governance, errors };
+}
+
+export default async function ApiKeysPage() {
+  const pageData = await loadApiKeyPageData();
+  return <ApiKeyManager {...pageData} />;
 }
