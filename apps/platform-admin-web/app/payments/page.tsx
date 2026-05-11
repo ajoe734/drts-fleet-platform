@@ -6,8 +6,13 @@
 "use client";
 
 import Link from "next/link";
-import React, { useCallback, useEffect, useState } from "react";
-import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  actionButtonStyle,
+  emptyStateStyle,
+  inputStyle,
+} from "@/components/platform-ui";
+import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
   formatPlatformCodeLabel,
@@ -24,6 +29,22 @@ import type {
   SettlementMatrixRecord,
   TenantInvoiceRecord,
 } from "@drts/contracts";
+import {
+  CalloutBanner,
+  DataCellStack,
+  DataFilterBar,
+  DataTable,
+  DataViewCard,
+  DetailMetadataGrid,
+  KpiCard,
+  KpiRow,
+  PageHeader,
+  StatusChip,
+  Td,
+  Tr,
+  WorkflowPanel,
+  WorkflowSplitLayout,
+} from "@drts/ui-web";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 const DEFAULT_FINANCE_ACTOR_ID = "finance.console";
@@ -176,6 +197,31 @@ function parseArtifactIds(value: string) {
     .filter(Boolean);
 }
 
+function issueStatusTone(status: ReconciliationIssueRecord["status"]) {
+  switch (status) {
+    case "resolved":
+      return "success" as const;
+    case "reopened":
+      return "danger" as const;
+    case "assigned":
+      return "info" as const;
+    case "open":
+    default:
+      return "warning" as const;
+  }
+}
+
+function reimbursementTone(status: ReimbursementBatchRecord["status"]) {
+  switch (status) {
+    case "paid":
+      return "success" as const;
+    case "pending":
+      return "info" as const;
+    default:
+      return "warning" as const;
+  }
+}
+
 export default function PaymentsPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
@@ -210,7 +256,6 @@ export default function PaymentsPage() {
   const [invoicePending, setInvoicePending] = useState(false);
   const [statementPending, setStatementPending] = useState(false);
   const [batchActionId, setBatchActionId] = useState<string | null>(null);
-  const [issueActionId, setIssueActionId] = useState<string | null>(null);
   const [issueDraftPending, setIssueDraftPending] = useState(false);
   const [issueStatusFilter, setIssueStatusFilter] = useState<
     "all" | ReconciliationIssueRecord["status"]
@@ -222,30 +267,6 @@ export default function PaymentsPage() {
     "all" | (typeof RECONCILIATION_CHANNEL_OPTIONS)[number]
   >("all");
   const [remittanceProofs, setRemittanceProofs] = useState<
-    Record<string, string>
-  >({});
-  const [issueAssignments, setIssueAssignments] = useState<
-    Record<string, string>
-  >({});
-  const [issueComments, setIssueComments] = useState<Record<string, string>>(
-    {},
-  );
-  const [issueCommentArtifactIds, setIssueCommentArtifactIds] = useState<
-    Record<string, string>
-  >({});
-  const [issueResolutionSummaries, setIssueResolutionSummaries] = useState<
-    Record<string, string>
-  >({});
-  const [issueResolutionArtifactIds, setIssueResolutionArtifactIds] = useState<
-    Record<string, string>
-  >({});
-  const [issueResolutionCodes, setIssueResolutionCodes] = useState<
-    Record<string, ReconciliationIssueRecord["resolutionCode"] | "">
-  >({});
-  const [issueReopenReasons, setIssueReopenReasons] = useState<
-    Record<string, string>
-  >({});
-  const [issueReopenArtifactIds, setIssueReopenArtifactIds] = useState<
     Record<string, string>
   >({});
   const [newIssue, setNewIssue] = useState({
@@ -415,138 +436,6 @@ export default function PaymentsPage() {
     }
   }
 
-  async function handleAssignIssue(issue: ReconciliationIssueRecord) {
-    const assigneeId =
-      issueAssignments[issue.issueId]?.trim() || issue.ownerId || "";
-    if (!assigneeId) {
-      setError(t("payments.reconciliation.assigneeRequired"));
-      return;
-    }
-
-    setIssueActionId(issue.issueId);
-    setError(null);
-    try {
-      await client.assignReconciliationIssue(issue.issueId, {
-        assigneeId,
-        actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
-        note: issueComments[issue.issueId]?.trim() || null,
-      });
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIssueActionId(null);
-    }
-  }
-
-  async function handleCommentIssue(issue: ReconciliationIssueRecord) {
-    const message = issueComments[issue.issueId]?.trim() || "";
-    if (!message) {
-      setError(t("payments.reconciliation.commentRequired"));
-      return;
-    }
-    const artifactIds = parseArtifactIds(
-      issueCommentArtifactIds[issue.issueId] ?? "",
-    );
-
-    setIssueActionId(issue.issueId);
-    setError(null);
-    try {
-      await client.addReconciliationIssueComment(issue.issueId, {
-        actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
-        message,
-        artifactIds,
-      });
-      setIssueComments((current) => ({ ...current, [issue.issueId]: "" }));
-      setIssueCommentArtifactIds((current) => ({
-        ...current,
-        [issue.issueId]: "",
-      }));
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIssueActionId(null);
-    }
-  }
-
-  async function handleResolveIssue(issue: ReconciliationIssueRecord) {
-    const resolutionSummary =
-      issueResolutionSummaries[issue.issueId]?.trim() || "";
-    if (!resolutionSummary) {
-      setError(t("payments.reconciliation.resolveSummaryRequired"));
-      return;
-    }
-    const artifactIds = parseArtifactIds(
-      issueResolutionArtifactIds[issue.issueId] ?? "",
-    );
-
-    setIssueActionId(issue.issueId);
-    setError(null);
-    try {
-      await client.resolveReconciliationIssue(issue.issueId, {
-        actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
-        resolutionCode:
-          (issueResolutionCodes[issue.issueId] as NonNullable<
-            ReconciliationIssueRecord["resolutionCode"]
-          >) || "resolved_other",
-        resolutionSummary,
-        artifactIds,
-      });
-      setIssueResolutionSummaries((current) => ({
-        ...current,
-        [issue.issueId]: "",
-      }));
-      setIssueResolutionCodes((current) => ({
-        ...current,
-        [issue.issueId]: "",
-      }));
-      setIssueResolutionArtifactIds((current) => ({
-        ...current,
-        [issue.issueId]: "",
-      }));
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIssueActionId(null);
-    }
-  }
-
-  async function handleReopenIssue(issue: ReconciliationIssueRecord) {
-    const reason = issueReopenReasons[issue.issueId]?.trim() || "";
-    if (!reason) {
-      setError(t("payments.reconciliation.reopenReasonRequired"));
-      return;
-    }
-    const artifactIds = parseArtifactIds(
-      issueReopenArtifactIds[issue.issueId] ?? "",
-    );
-
-    setIssueActionId(issue.issueId);
-    setError(null);
-    try {
-      await client.reopenReconciliationIssue(issue.issueId, {
-        actorId: financeActorId.trim() || DEFAULT_FINANCE_ACTOR_ID,
-        reason,
-        artifactIds,
-      });
-      setIssueReopenReasons((current) => ({
-        ...current,
-        [issue.issueId]: "",
-      }));
-      setIssueReopenArtifactIds((current) => ({
-        ...current,
-        [issue.issueId]: "",
-      }));
-      await loadFinance();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIssueActionId(null);
-    }
-  }
-
   async function handleApproveBatch(batch: ReimbursementBatchRecord) {
     setBatchActionId(batch.batchId);
     setError(null);
@@ -589,21 +478,31 @@ export default function PaymentsPage() {
     invoiceFilter === "all"
       ? invoices
       : invoices.filter((invoice) => invoice.status === invoiceFilter);
-  const filteredReconciliationIssues = reconciliationIssues.filter((issue) => {
-    if (issueStatusFilter !== "all" && issue.status !== issueStatusFilter) {
-      return false;
-    }
-    if (issueTypeFilter !== "all" && issue.issueType !== issueTypeFilter) {
-      return false;
-    }
-    if (
-      issueChannelFilter !== "all" &&
-      issue.channelKey !== issueChannelFilter
-    ) {
-      return false;
-    }
-    return true;
-  });
+  const filteredReconciliationIssues = useMemo(
+    () =>
+      reconciliationIssues.filter((issue) => {
+        if (issueStatusFilter !== "all" && issue.status !== issueStatusFilter) {
+          return false;
+        }
+        if (issueTypeFilter !== "all" && issue.issueType !== issueTypeFilter) {
+          return false;
+        }
+        if (
+          issueChannelFilter !== "all" &&
+          issue.channelKey !== issueChannelFilter
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [
+      issueChannelFilter,
+      issueStatusFilter,
+      issueTypeFilter,
+      reconciliationIssues,
+    ],
+  );
+
   const totalInvoiceAmountMinor = filteredInvoices.reduce(
     (sum, invoice) => sum + (invoice.amount?.amountMinor ?? 0),
     0,
@@ -621,6 +520,9 @@ export default function PaymentsPage() {
   const openReconciliationCount = reconciliationIssues.filter(
     (issue) => issue.status !== "resolved",
   ).length;
+  const reopenedCount = reconciliationIssues.filter(
+    (issue) => issue.status === "reopened",
+  ).length;
 
   const allLineChannelKeys: (string | null | undefined)[] = [
     ...invoices.flatMap((invoice) =>
@@ -634,1468 +536,1173 @@ export default function PaymentsPage() {
     isShadowChannel(key),
   ).length;
   const drtsPayableLineCount = allLineChannelKeys.length - shadowLineCount;
-
   const forwardedShadowIssues = reconciliationIssues.filter(
     (issue) => issue.forwardedFinanceContext != null,
   );
-  const reconciliationWorkflowCopy =
+  const publishedInvoices = invoices.filter(
+    (invoice) => invoice.status === "paid",
+  );
+  const issuedInvoices = invoices.filter(
+    (invoice) => invoice.status === "issued",
+  );
+  const settlementRows = sortSettlementMatrix(settlementMatrix);
+  const pendingReimbursements = reimbursements.filter(
+    (batch) => batch.status !== "paid",
+  );
+
+  const copy =
     locale === "en"
       ? {
-          title: "Resolution workflow",
+          eyebrow: "Settlement governance",
+          title: "Payments",
           subtitle:
-            "Open issues here, then drill into detail to assign ownership, capture evidence, and close with an auditable resolution.",
-          status: "Status",
-          type: "Issue Type",
-          channel: "Channel",
-          filtered: "Filtered",
-          openDetail: "Open detail",
+            "tenant invoices · driver statements · reimbursements · settlement matrix · reconciliation issues",
+          export: "Export queue",
+          openIssue: "Open issue",
+          authorityTitle:
+            "Platform finance keeps the operator queue, not the accounting truth.",
+          authorityDescription:
+            "Use this surface to stage invoices, statements, reimbursement evidence, and reconciliation routing while canonical pricing, payout, and forwarder state remain contract-owned.",
+          authorityFooter:
+            "Forwarded shadow orders need explicit reconciliation before remittance can be treated as complete.",
+          workflowTitle: "Reconciliation workflow",
+          workflowDescription:
+            "Open, assign, and close exceptions from one queue, then drill into the detail surface for the full evidence trail.",
+          workflowFooter:
+            "The queue stays biased toward unresolved issues so reopened items stay visible.",
+          releaseTitle: "Release controls",
+          releaseDescription:
+            "Generate invoices and statements without leaving the finance governance route.",
+          releaseFooter:
+            "Generation actions refresh the same dataset used by the tables below.",
+          reimbursementTitle: "Reimbursement batches",
+          reimbursementDescription:
+            "Approval and remittance proof stay coupled to the driver statement record.",
+          reimbursementFooter: (count: number) =>
+            `${count} reimbursement batch row(s) currently need operator attention.`,
+          matrixTitle: "Settlement matrix",
+          matrixDescription:
+            "Each channel keeps payer, invoice, payout, and reconciliation ownership visible in one grid.",
+          matrixFooter:
+            "Matrix rows are ordered by tenant, partner, phone, then forwarded shadow channels.",
+          invoiceTitle: "Tenant invoices",
+          invoiceDescription: (count: number) =>
+            `${count} invoice row(s) visible for the current status filter.`,
+          invoiceFooter:
+            "Channel mix stays visible so tenant, partner, and forwarded lines can be audited without opening each record.",
+          statementTitle: "Driver statements",
+          statementDescription: (count: number) =>
+            `${count} driver statement snapshot(s) are loaded for this period set.`,
+          statementFooter:
+            "Shadow-only statements should be rare and usually imply forwarded payout follow-up.",
+          createIssueTitle: "Open reconciliation issue",
+          createIssueDescription:
+            "Seed the detail workflow with the actor, finance context, and the first evidence note.",
+          createIssueFooter:
+            "Issue creation stays lightweight; assignment notes and resolution codes live in the detail route.",
+          filtered: "Filtered queue",
+          backlog: "Open backlog",
+          none: "None",
         }
       : {
-          title: "對帳處理流程",
+          eyebrow: "結算治理",
+          title: "Payments",
           subtitle:
-            "先在這裡建立或篩選 issue，再進入 detail 頁完成指派、證據補件與可稽核結案。",
-          status: "狀態",
-          type: "問題類型",
-          channel: "渠道",
+            "tenant invoices · driver statements · reimbursements · settlement matrix · reconciliation issues",
+          export: "匯出佇列",
+          openIssue: "開立 issue",
+          authorityTitle: "平台財務在這裡治理待辦，但不改寫會計真值。",
+          authorityDescription:
+            "此頁負責開立 invoice、statement、報銷證據與對帳路由；pricing、payout 與 forwarder 狀態仍由既有 authority 持有。",
+          authorityFooter:
+            "轉送 shadow 訂單必須先完成 reconciliation，remittance 才能視為正式結案。",
+          workflowTitle: "對帳處理流程",
+          workflowDescription:
+            "在同一個 queue 內開立、指派與追蹤例外，再進 detail 頁補齊完整證據鏈。",
+          workflowFooter: "列表預設偏向未解決 issue，reopened 項目不會被埋掉。",
+          releaseTitle: "產出控制",
+          releaseDescription:
+            "直接在 finance 治理路徑內產 invoice 與 driver statements。",
+          releaseFooter: "所有產出動作都會回刷同一份治理資料集。",
+          reimbursementTitle: "報銷批次",
+          reimbursementDescription:
+            "核准與 remittance proof 與司機 statement 綁定檢視。",
+          reimbursementFooter: (count: number) =>
+            `目前有 ${count} 筆報銷批次仍需要治理人處理。`,
+          matrixTitle: "Settlement matrix",
+          matrixDescription:
+            "各通路的 payer、invoice、payout 與 reconciliation ownership 在同一張矩陣內對齊。",
+          matrixFooter:
+            "矩陣依 tenant、partner、電話派遣、forwarded shadow 的順序排列。",
+          invoiceTitle: "租戶 invoices",
+          invoiceDescription: (count: number) =>
+            `依目前狀態篩選顯示 ${count} 筆 invoice。`,
+          invoiceFooter:
+            "保留 channel mix，讓租戶、合作夥伴與 forwarded lines 不用逐筆點開就能先做稽核。",
+          statementTitle: "司機 statements",
+          statementDescription: (count: number) =>
+            `已載入 ${count} 筆司機 statement snapshot。`,
+          statementFooter:
+            "如果 statement 幾乎只含 shadow lines，通常代表 forwarded payout 還有後續處理。",
+          createIssueTitle: "開立 reconciliation issue",
+          createIssueDescription:
+            "先建立 actor、財務關聯與第一筆 evidence note，再交給 detail workflow 深入處理。",
+          createIssueFooter:
+            "建立 issue 維持輕量；指派備註與 resolution code 留在 detail route 處理。",
           filtered: "目前顯示",
-          openDetail: "查看詳情",
+          backlog: "未結 backlog",
+          none: "無",
         };
 
-  const describeLedgerMode = (
-    mode: SettlementMatrixRecord["localLedgerMode"],
-  ) =>
-    mode === "shadow_only"
-      ? t("payments.matrix.ledger.shadow_only")
-      : t("payments.matrix.ledger.full_service");
+  const invoiceFilters = [
+    {
+      value: "all",
+      label: locale === "en" ? "All" : "全部",
+      count: invoices.length,
+    },
+    {
+      value: "draft",
+      label: locale === "en" ? "Draft" : "草稿",
+      count: invoices.filter((invoice) => invoice.status === "draft").length,
+      tone: "warning" as const,
+    },
+    {
+      value: "issued",
+      label: locale === "en" ? "Issued" : "已開立",
+      count: issuedInvoices.length,
+      tone: "info" as const,
+    },
+    {
+      value: "paid",
+      label: locale === "en" ? "Paid" : "已付款",
+      count: publishedInvoices.length,
+      tone: "success" as const,
+    },
+  ] as const;
 
-  const describeInvoiceChannelMix = (invoice: TenantInvoiceRecord) =>
-    summarizeChannelMix(
-      invoice.lines.map((line) => line.channelKey),
-      describeMatrixChannel,
-    );
+  const issueStatusFilters = [
+    {
+      value: "all",
+      label: locale === "en" ? "All" : "全部",
+      count: reconciliationIssues.length,
+    },
+    {
+      value: "open",
+      label: locale === "en" ? "Open" : "Open",
+      count: reconciliationIssues.filter((issue) => issue.status === "open")
+        .length,
+      tone: "warning" as const,
+    },
+    {
+      value: "assigned",
+      label: locale === "en" ? "Assigned" : "Assigned",
+      count: reconciliationIssues.filter((issue) => issue.status === "assigned")
+        .length,
+      tone: "info" as const,
+    },
+    {
+      value: "reopened",
+      label: locale === "en" ? "Reopened" : "Reopened",
+      count: reopenedCount,
+      tone: "danger" as const,
+    },
+    {
+      value: "resolved",
+      label: locale === "en" ? "Resolved" : "Resolved",
+      count: reconciliationIssues.filter((issue) => issue.status === "resolved")
+        .length,
+      tone: "success" as const,
+    },
+  ] as const;
 
-  const describeStatementChannelMix = (statement: DriverStatementRecord) =>
-    summarizeChannelMix(
-      statement.lines.map((line) => line.channelKey),
-      describeMatrixChannel,
-    );
+  const issueTypeFilters = [
+    { value: "all", label: locale === "en" ? "All types" : "全部類型" },
+    ...RECONCILIATION_ISSUE_TYPE_OPTIONS.map((issueType) => ({
+      value: issueType,
+      label: formatPlatformCodeLabel(locale, issueType),
+      count: reconciliationIssues.filter(
+        (issue) => issue.issueType === issueType,
+      ).length,
+    })),
+  ] as const;
+
+  const issueChannelFilters = [
+    { value: "all", label: locale === "en" ? "All channels" : "全部渠道" },
+    ...RECONCILIATION_CHANNEL_OPTIONS.map((channelKey) => ({
+      value: channelKey,
+      label: describeMatrixChannel(channelKey),
+      count: reconciliationIssues.filter(
+        (issue) => issue.channelKey === channelKey,
+      ).length,
+    })),
+  ] as const;
 
   if (loading) {
-    return <div className="platform-ui-empty">{t("payments.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("payments.loading")}</div>;
   }
 
   return (
-    <div>
-      <div className="platform-ui-page-header">
-        <h1>{t("payments.title")}</h1>
-        <p>{t("payments.subtitle")}</p>
-      </div>
-
-      {error && (
-        <div
-          className="platform-ui-card"
-          style={{ borderColor: "rgba(239,68,68,0.3)" }}
-        >
-          <p style={{ color: "#dc2626", margin: 0 }}>
-            {getPlatformLabel(locale, "error")}: {error}
-          </p>
-        </div>
-      )}
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
-        {[
-          {
-            label: t("payments.invoiceTotal"),
-            value: `${totalInvoiceAmountMinor.toLocaleString()} minor`,
-            note: `${filteredInvoices.length}`,
-          },
-          {
-            label: t("payments.statementNet"),
-            value: `${totalStatementNetMinor.toLocaleString()} minor`,
-            note: `${statements.length}`,
-          },
-          {
-            label: t("payments.pendingReimbursements"),
-            value: `${pendingReimbursementMinor.toLocaleString()} minor`,
-            note: t("payments.pendingReimbNote"),
-          },
-          {
-            label: t("payments.paidReimbursements"),
-            value: `${paidReimbursementMinor.toLocaleString()} minor`,
-            note: t("payments.invoiceTotalNote"),
-          },
+    <div style={{ display: "grid", gap: "20px" }}>
+      <PageHeader
+        eyebrow={copy.eyebrow}
+        title={copy.title}
+        subtitle={copy.subtitle}
+        meta={[
           {
             label: t("payments.reconciliation.openCount"),
             value: String(openReconciliationCount),
-            note: `${reconciliationIssues.length} ${t("payments.reconciliation.totalIssues")}`,
-          },
-          {
-            label: t("payments.payable.summaryTitle"),
-            value: String(drtsPayableLineCount),
-            note: t("payments.payable.summaryNote"),
+            tone: openReconciliationCount > 0 ? "warning" : "success",
           },
           {
             label: t("payments.shadow.summaryTitle"),
-            value: String(shadowLineCount),
-            note: t("payments.shadow.summaryNote"),
+            value: String(forwardedShadowIssues.length),
+            tone: forwardedShadowIssues.length > 0 ? "info" : "neutral",
           },
-        ].map((card) => (
-          <div key={card.label} className="platform-ui-card">
-            <p
+          {
+            label: t("payments.pendingReimbursements"),
+            value: pendingReimbursements.length.toString(),
+            tone: pendingReimbursements.length > 0 ? "warning" : "success",
+          },
+        ]}
+        actions={
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            <button
+              type="button"
+              style={actionButtonStyle()}
+              onClick={() => void loadFinance()}
+            >
+              {copy.export}
+            </button>
+            <button
+              type="button"
+              style={actionButtonStyle({ tone: "primary" })}
+              onClick={() =>
+                document
+                  .getElementById("payments-create-issue")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" })
+              }
+            >
+              {copy.openIssue}
+            </button>
+          </div>
+        }
+      />
+
+      {error ? (
+        <CalloutBanner
+          tone="danger"
+          title={`${getPlatformLabel(locale, "error")}: ${error}`}
+          description={copy.workflowFooter}
+        />
+      ) : null}
+
+      <CalloutBanner
+        tone="platform"
+        eyebrow={copy.eyebrow}
+        title={copy.authorityTitle}
+        description={copy.authorityDescription}
+        meta={
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            <StatusChip
+              tone={openReconciliationCount > 0 ? "warning" : "success"}
+              label={`${copy.backlog} · ${openReconciliationCount}`}
+            />
+            <StatusChip
+              tone={forwardedShadowIssues.length > 0 ? "platform" : "neutral"}
+              label={`shadow · ${forwardedShadowIssues.length}`}
+            />
+            <StatusChip
+              tone={pendingReimbursements.length > 0 ? "warning" : "success"}
+              label={`remittance · ${pendingReimbursements.length}`}
+            />
+          </div>
+        }
+        footer={copy.authorityFooter}
+      />
+
+      <KpiRow minWidth="170px">
+        <KpiCard
+          label={t("payments.invoiceTotal")}
+          value={`${totalInvoiceAmountMinor.toLocaleString()} minor`}
+          detail={`${filteredInvoices.length} invoice row(s)`}
+          tone="info"
+        />
+        <KpiCard
+          label={t("payments.statementNet")}
+          value={`${totalStatementNetMinor.toLocaleString()} minor`}
+          detail={`${statements.length} statement snapshot(s)`}
+          tone="platform"
+        />
+        <KpiCard
+          label={t("payments.pendingReimbursements")}
+          value={`${pendingReimbursementMinor.toLocaleString()} minor`}
+          detail={t("payments.pendingReimbNote")}
+          tone="warning"
+        />
+        <KpiCard
+          label={t("payments.paidReimbursements")}
+          value={`${paidReimbursementMinor.toLocaleString()} minor`}
+          detail={t("payments.invoiceTotalNote")}
+          tone="success"
+        />
+        <KpiCard
+          label={t("payments.payable.summaryTitle")}
+          value={String(drtsPayableLineCount)}
+          detail={t("payments.payable.summaryNote")}
+          tone="neutral"
+        />
+        <KpiCard
+          label={t("payments.shadow.summaryTitle")}
+          value={String(shadowLineCount)}
+          detail={t("payments.shadow.summaryNote")}
+          tone={shadowLineCount > 0 ? "info" : "neutral"}
+        />
+      </KpiRow>
+
+      <WorkflowSplitLayout
+        ariaLabel={copy.title}
+        main={
+          <>
+            <DataViewCard
+              title={copy.workflowTitle}
+              subtitle={copy.workflowDescription}
+              tone="warning"
+              summary={`${copy.filtered}: ${filteredReconciliationIssues.length}`}
+              footer={copy.workflowFooter}
+              filters={
+                <div style={{ display: "grid", gap: "10px" }}>
+                  <DataFilterBar
+                    value={issueStatusFilter}
+                    onChange={(value) => setIssueStatusFilter(value)}
+                    filters={issueStatusFilters}
+                    ariaLabel={copy.workflowTitle}
+                  />
+                  <DataFilterBar
+                    value={issueTypeFilter}
+                    onChange={(value) => setIssueTypeFilter(value)}
+                    filters={issueTypeFilters}
+                    ariaLabel={
+                      locale === "en" ? "Issue type filter" : "問題類型篩選"
+                    }
+                  />
+                  <DataFilterBar
+                    value={issueChannelFilter}
+                    onChange={(value) => setIssueChannelFilter(value)}
+                    filters={issueChannelFilters}
+                    ariaLabel={
+                      locale === "en" ? "Issue channel filter" : "渠道篩選"
+                    }
+                  />
+                </div>
+              }
+            >
+              <DetailMetadataGrid
+                minColumnWidth="180px"
+                items={[
+                  {
+                    id: "finance-actor",
+                    label: t("payments.reconciliation.actorId"),
+                    value: financeActorId,
+                  },
+                  {
+                    id: "filtered",
+                    label: copy.filtered,
+                    value: String(filteredReconciliationIssues.length),
+                    tone: "warning",
+                  },
+                  {
+                    id: "open",
+                    label: copy.backlog,
+                    value: String(openReconciliationCount),
+                    tone: openReconciliationCount > 0 ? "warning" : "success",
+                  },
+                  {
+                    id: "reopened",
+                    label: locale === "en" ? "Reopened" : "Reopened",
+                    value: String(reopenedCount),
+                    tone: reopenedCount > 0 ? "danger" : "neutral",
+                  },
+                ]}
+              />
+              <DataTable
+                tone="warning"
+                minWidth={1120}
+                empty={
+                  locale === "en"
+                    ? "No reconciliation issues."
+                    : "目前沒有 reconciliation issue。"
+                }
+                columns={[
+                  { label: "Issue", width: "16%" },
+                  { label: "Summary", width: "24%" },
+                  { label: "Owner", width: "14%" },
+                  { label: "Context", width: "20%" },
+                  { label: "Status", width: "12%" },
+                  { label: "Action", width: "14%" },
+                ]}
+              >
+                {filteredReconciliationIssues.map((issue) => (
+                  <Tr
+                    key={issue.issueId}
+                    highlighted={
+                      issue.status !== "resolved" || issue.reopenCount > 0
+                    }
+                  >
+                    <Td mono>
+                      <DataCellStack
+                        primary={<strong>{issue.issueId}</strong>}
+                        secondary={formatPlatformCodeLabel(
+                          locale,
+                          issue.issueType,
+                        )}
+                        tertiary={formatDateTime(issue.updatedAt)}
+                      />
+                    </Td>
+                    <Td>
+                      <DataCellStack
+                        primary={issue.summary}
+                        secondary={
+                          issue.channelKey
+                            ? describeMatrixChannel(issue.channelKey)
+                            : copy.none
+                        }
+                        tertiary={
+                          issue.forwardedFinanceContext
+                            ? `shadow · ${formatPlatformCodeLabel(
+                                locale,
+                                issue.forwardedFinanceContext.platformCode,
+                              )}`
+                            : undefined
+                        }
+                      />
+                    </Td>
+                    <Td>
+                      <DataCellStack
+                        primary={issue.ownerId ?? copy.none}
+                        secondary={issue.openedBy}
+                        tertiary={
+                          issue.resolutionCode
+                            ? formatPlatformCodeLabel(
+                                locale,
+                                issue.resolutionCode,
+                              )
+                            : undefined
+                        }
+                      />
+                    </Td>
+                    <Td>
+                      <DataCellStack
+                        primary={
+                          issue.externalOrderId ?? issue.orderId ?? copy.none
+                        }
+                        secondary={
+                          issue.partnerId ?? issue.tenantId ?? copy.none
+                        }
+                        tertiary={
+                          issue.linkedReconciliationJobId ??
+                          issue.mirrorOrderId ??
+                          undefined
+                        }
+                      />
+                    </Td>
+                    <Td>
+                      <div style={{ display: "grid", gap: "8px" }}>
+                        <StatusChip
+                          tone={issueStatusTone(issue.status)}
+                          label={formatPlatformCodeLabel(locale, issue.status)}
+                        />
+                        <span style={{ fontSize: "12px", color: "#64748b" }}>
+                          {t("payments.reconciliation.evidenceCount", {
+                            count: issue.evidenceArtifactIds.length,
+                          })}
+                        </span>
+                      </div>
+                    </Td>
+                    <Td align="right">
+                      <Link
+                        href={`/payments/reconciliation/${encodeURIComponent(issue.issueId)}`}
+                        style={actionButtonStyle({ size: "sm" })}
+                      >
+                        {locale === "en" ? "Open detail" : "查看詳情"}
+                      </Link>
+                    </Td>
+                  </Tr>
+                ))}
+              </DataTable>
+            </DataViewCard>
+
+            <DataViewCard
+              title={copy.matrixTitle}
+              subtitle={copy.matrixDescription}
+              tone="info"
+              summary={`${settlementRows.length} matrix row(s)`}
+              footer={copy.matrixFooter}
+            >
+              <DataTable
+                tone="info"
+                minWidth={980}
+                empty={
+                  locale === "en"
+                    ? "No settlement matrix rows."
+                    : "目前沒有 settlement matrix。"
+                }
+                columns={[
+                  { label: t("payments.matrix.col.channel"), width: "16%" },
+                  { label: t("payments.matrix.col.payer"), width: "16%" },
+                  { label: t("payments.matrix.col.invoice"), width: "17%" },
+                  { label: t("payments.matrix.col.payout"), width: "17%" },
+                  {
+                    label: t("payments.matrix.col.reconciliation"),
+                    width: "17%",
+                  },
+                  { label: t("payments.matrix.col.ledger"), width: "17%" },
+                ]}
+              >
+                {settlementRows.map((row) => (
+                  <Tr
+                    key={row.channelKey}
+                    highlighted={row.channelKey === "forwarded_shadow"}
+                  >
+                    <Td>
+                      <DataCellStack
+                        primary={
+                          <strong>
+                            {describeMatrixChannel(row.channelKey)}
+                          </strong>
+                        }
+                        secondary={row.channelKey}
+                      />
+                    </Td>
+                    <Td>{describeMatrixField("payer", row, row.payerType)}</Td>
+                    <Td>
+                      {describeMatrixField("invoice", row, row.invoicePath)}
+                    </Td>
+                    <Td>
+                      {describeMatrixField(
+                        "payout",
+                        row,
+                        row.driverPayoutAuthority,
+                      )}
+                    </Td>
+                    <Td>
+                      {describeMatrixField(
+                        "reconciliation",
+                        row,
+                        row.reconciliationPath,
+                      )}
+                    </Td>
+                    <Td>
+                      <DataCellStack
+                        primary={formatPlatformCodeLabel(
+                          locale,
+                          row.localLedgerMode,
+                        )}
+                        secondary={formatPlatformCodeLabel(
+                          locale,
+                          row.driverPayoutAuthority,
+                        )}
+                      />
+                    </Td>
+                  </Tr>
+                ))}
+              </DataTable>
+            </DataViewCard>
+
+            <div
               style={{
-                margin: "0 0 8px",
-                fontSize: 13,
-                color: "#6b7280",
+                display: "grid",
+                gap: "16px",
+                gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
               }}
             >
-              {card.label}
-            </p>
-            <strong style={{ display: "block", fontSize: 22 }}>
-              {card.value}
-            </strong>
-            <small style={{ color: "#6b7280" }}>{card.note}</small>
-          </div>
-        ))}
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
-        <div className="platform-ui-card">
-          <h3 style={{ marginTop: 0 }}>{t("payments.generateInvoiceTitle")}</h3>
-          <form onSubmit={handleGenerateInvoice}>
-            <div style={formGridStyle}>
-              <label style={labelStyle}>
-                {t("payments.form.tenantId")}
-                <input
-                  value={invoiceTenantId}
-                  onChange={(event) => setInvoiceTenantId(event.target.value)}
-                  style={inputStyle}
-                />
-              </label>
-              <label style={labelStyle}>
-                {t("payments.form.periodStart")}
-                <input
-                  type="date"
-                  value={invoicePeriodStart}
-                  onChange={(event) =>
-                    setInvoicePeriodStart(event.target.value)
-                  }
-                  style={inputStyle}
-                />
-              </label>
-              <label style={labelStyle}>
-                {t("payments.form.periodEnd")}
-                <input
-                  type="date"
-                  value={invoicePeriodEnd}
-                  onChange={(event) => setInvoicePeriodEnd(event.target.value)}
-                  style={inputStyle}
-                />
-              </label>
-            </div>
-            <button
-              type="submit"
-              className="platform-ui-btn platform-ui-btn--primary"
-              disabled={invoicePending}
-            >
-              {invoicePending
-                ? t("payments.generating")
-                : t("payments.generateInvoice")}
-            </button>
-          </form>
-        </div>
-
-        <div className="platform-ui-card">
-          <h3 style={{ marginTop: 0 }}>
-            {t("payments.generateStatementsTitle")}
-          </h3>
-          <form onSubmit={handleGenerateStatements}>
-            <div style={formGridStyle}>
-              <label style={labelStyle}>
-                {t("payments.form.periodMonth")}
-                <input
-                  value={statementPeriodMonth}
-                  onChange={(event) =>
-                    setStatementPeriodMonth(event.target.value)
-                  }
-                  placeholder="2026-03"
-                  style={inputStyle}
-                />
-              </label>
-            </div>
-            <button
-              type="submit"
-              className="platform-ui-btn platform-ui-btn--primary"
-              disabled={statementPending}
-            >
-              {statementPending
-                ? t("payments.generating")
-                : t("payments.generateStatements")}
-            </button>
-          </form>
-        </div>
-      </div>
-
-      <div
-        className="platform-ui-card"
-        style={{ overflowX: "auto", marginBottom: 16 }}
-      >
-        <div style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: "0 0 4px" }}>
-            {t("payments.reconciliation.title")}
-          </h3>
-          <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-            {t("payments.reconciliation.subtitle")}
-          </p>
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: 12,
-            marginBottom: 16,
-          }}
-        >
-          <div
-            className="platform-ui-card"
-            style={{ marginBottom: 0, background: "rgba(15,118,110,0.04)" }}
-          >
-            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#6b7280" }}>
-              {reconciliationWorkflowCopy.title}
-            </p>
-            <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
-              {reconciliationWorkflowCopy.subtitle}
-            </p>
-          </div>
-          <div
-            className="platform-ui-card"
-            style={{ marginBottom: 0, background: "rgba(59,130,246,0.04)" }}
-          >
-            <p style={{ margin: "0 0 4px", fontSize: 13, color: "#6b7280" }}>
-              {reconciliationWorkflowCopy.filtered}
-            </p>
-            <strong style={{ display: "block", fontSize: 24 }}>
-              {filteredReconciliationIssues.length}
-            </strong>
-            <small style={{ color: "#6b7280" }}>
-              {openReconciliationCount} {t("payments.reconciliation.openCount")}
-            </small>
-          </div>
-        </div>
-
-        <div style={{ ...formGridStyle, marginBottom: 12 }}>
-          <label style={labelStyle}>
-            {t("payments.reconciliation.actorId")}
-            <input
-              value={financeActorId}
-              onChange={(event) => setFinanceActorId(event.target.value)}
-              style={inputStyle}
-            />
-          </label>
-        </div>
-
-        <form onSubmit={handleCreateReconciliationIssue}>
-          <div style={formGridStyle}>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.issueType")}
-              <select
-                value={newIssue.issueType}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    issueType: event.target
-                      .value as ReconciliationIssueRecord["issueType"],
-                    channelKey:
-                      event.target.value === "forwarder_status_mismatch"
-                        ? "forwarded_shadow"
-                        : "partner_airport",
-                  }))
+              <DataViewCard
+                title={copy.invoiceTitle}
+                subtitle={copy.invoiceDescription(filteredInvoices.length)}
+                tone="neutral"
+                footer={copy.invoiceFooter}
+                filters={
+                  <DataFilterBar
+                    value={invoiceFilter}
+                    onChange={(value) => setInvoiceFilter(value)}
+                    filters={invoiceFilters}
+                    ariaLabel={copy.invoiceTitle}
+                  />
                 }
-                style={inputStyle}
               >
-                {RECONCILIATION_ISSUE_TYPE_OPTIONS.map((issueType) => (
-                  <option key={issueType} value={issueType}>
-                    {formatPlatformCodeLabel(locale, issueType)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.channel")}
-              <select
-                value={newIssue.channelKey}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    channelKey: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              >
-                {RECONCILIATION_CHANNEL_OPTIONS.map((channelKey) => (
-                  <option key={channelKey} value={channelKey}>
-                    {describeMatrixChannel(channelKey)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.assignee")}
-              <input
-                value={newIssue.assigneeId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    assigneeId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.orderId")}
-              <input
-                value={newIssue.orderId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    orderId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.partnerId")}
-              <input
-                value={newIssue.partnerId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    partnerId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.partnerProgramId")}
-              <input
-                value={newIssue.partnerProgramId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    partnerProgramId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.sponsorReference")}
-              <input
-                value={newIssue.sponsorReference}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    sponsorReference: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.mirrorOrderId")}
-              <input
-                value={newIssue.mirrorOrderId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    mirrorOrderId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.externalOrderId")}
-              <input
-                value={newIssue.externalOrderId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    externalOrderId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={labelStyle}>
-              {t("payments.reconciliation.linkedJobId")}
-              <input
-                value={newIssue.linkedReconciliationJobId}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    linkedReconciliationJobId: event.target.value,
-                  }))
-                }
-                style={inputStyle}
-              />
-            </label>
-            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
-              {t("payments.reconciliation.summary")}
-              <textarea
-                value={newIssue.summary}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    summary: event.target.value,
-                  }))
-                }
-                style={textAreaStyle}
-              />
-            </label>
-            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
-              {t("payments.reconciliation.comment")}
-              <textarea
-                value={newIssue.comment}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    comment: event.target.value,
-                  }))
-                }
-                style={textAreaStyle}
-              />
-            </label>
-            <label style={{ ...labelStyle, gridColumn: "1 / -1" }}>
-              {t("payments.reconciliation.artifactIds")}
-              <input
-                value={newIssue.artifactIds}
-                onChange={(event) =>
-                  setNewIssue((current) => ({
-                    ...current,
-                    artifactIds: event.target.value,
-                  }))
-                }
-                placeholder={t("payments.reconciliation.artifactPlaceholder")}
-                style={inputStyle}
-              />
-            </label>
-          </div>
-          <button
-            type="submit"
-            className="platform-ui-btn platform-ui-btn--primary"
-            disabled={issueDraftPending}
-          >
-            {issueDraftPending
-              ? t("payments.reconciliation.opening")
-              : t("payments.reconciliation.open")}
-          </button>
-        </form>
-
-        <div
-          style={{
-            ...formGridStyle,
-            marginTop: 16,
-            marginBottom: 16,
-            alignItems: "end",
-          }}
-        >
-          <label style={labelStyle}>
-            {reconciliationWorkflowCopy.status}
-            <select
-              value={issueStatusFilter}
-              onChange={(event) =>
-                setIssueStatusFilter(
-                  event.target.value as
-                    | "all"
-                    | ReconciliationIssueRecord["status"],
-                )
-              }
-              style={inputStyle}
-            >
-              <option value="all">
-                {formatPlatformCodeLabel(locale, "all")}
-              </option>
-              {["open", "assigned", "reopened", "resolved"].map((status) => (
-                <option key={status} value={status}>
-                  {formatPlatformCodeLabel(locale, status)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label style={labelStyle}>
-            {reconciliationWorkflowCopy.type}
-            <select
-              value={issueTypeFilter}
-              onChange={(event) =>
-                setIssueTypeFilter(
-                  event.target.value as
-                    | "all"
-                    | ReconciliationIssueRecord["issueType"],
-                )
-              }
-              style={inputStyle}
-            >
-              <option value="all">
-                {formatPlatformCodeLabel(locale, "all")}
-              </option>
-              {RECONCILIATION_ISSUE_TYPE_OPTIONS.map((issueType) => (
-                <option key={issueType} value={issueType}>
-                  {formatPlatformCodeLabel(locale, issueType)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label style={labelStyle}>
-            {reconciliationWorkflowCopy.channel}
-            <select
-              value={issueChannelFilter}
-              onChange={(event) =>
-                setIssueChannelFilter(
-                  event.target.value as
-                    | "all"
-                    | (typeof RECONCILIATION_CHANNEL_OPTIONS)[number],
-                )
-              }
-              style={inputStyle}
-            >
-              <option value="all">
-                {formatPlatformCodeLabel(locale, "all")}
-              </option>
-              {RECONCILIATION_CHANNEL_OPTIONS.map((channelKey) => (
-                <option key={channelKey} value={channelKey}>
-                  {describeMatrixChannel(channelKey)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <div style={{ marginTop: 16 }}>
-          <table className="platform-ui-table">
-            <thead>
-              <tr>
-                <th>{t("payments.reconciliation.col.issue")}</th>
-                <th>{t("payments.reconciliation.col.summary")}</th>
-                <th>{t("payments.reconciliation.col.owner")}</th>
-                <th>{t("payments.reconciliation.col.context")}</th>
-                <th>{t("payments.reconciliation.col.notes")}</th>
-                <th>{t("payments.reconciliation.col.actions")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredReconciliationIssues.length > 0 ? (
-                filteredReconciliationIssues.map((issue) => (
-                  <tr key={issue.issueId}>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      <div>{issue.issueId}</div>
-                      <div style={{ color: "#6b7280" }}>
-                        {formatPlatformCodeLabel(locale, issue.issueType)}
-                      </div>
-                      <div style={{ color: "#6b7280" }}>
-                        {formatPlatformCodeLabel(locale, issue.source)}
-                      </div>
-                      <div style={{ marginTop: 6 }}>
-                        <span
-                          className={`platform-ui-badge ${
-                            issue.status === "resolved"
-                              ? "platform-ui-badge--success"
-                              : issue.status === "assigned"
-                                ? "platform-ui-badge--warning"
-                                : "platform-ui-badge--neutral"
-                          }`}
-                        >
-                          {formatPlatformCodeLabel(locale, issue.status)}
-                        </span>
-                      </div>
-                    </td>
-                    <td style={{ minWidth: 260 }}>
-                      <div>{issue.summary}</div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>
-                        {describeMatrixChannel(issue.channelKey)}
-                      </div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>
-                        {formatDateTime(issue.updatedAt)}
-                      </div>
-                      {issue.forwardedFinanceContext && (
-                        <div
-                          style={{
-                            marginTop: 6,
-                            display: "flex",
-                            flexWrap: "wrap",
-                            gap: 4,
-                          }}
-                        >
-                          <span className="platform-ui-badge platform-ui-badge--neutral">
-                            {formatPlatformCodeLabel(
-                              locale,
-                              issue.forwardedFinanceContext.platformCode,
-                            )}
-                          </span>
-                          <span className="platform-ui-badge platform-ui-badge--neutral">
-                            {t(
-                              `payments.matrix.ledger.${issue.forwardedFinanceContext.localLedgerMode}`,
-                            )}
-                          </span>
-                          <span className="platform-ui-badge platform-ui-badge--warning">
-                            {t("payments.shadow.payoutAuthority")}:{" "}
-                            {t(
-                              `payments.shadow.authority.${issue.forwardedFinanceContext.driverPayoutAuthority}`,
-                            )}
-                          </span>
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ minWidth: 180 }}>
-                      <div>{issue.ownerId ?? "—"}</div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>
-                        {t("payments.reconciliation.reopenCount", {
-                          count: String(issue.reopenCount),
-                        })}
-                      </div>
-                    </td>
-                    <td style={{ fontSize: 12, minWidth: 220 }}>
-                      <div>{issue.orderId ?? issue.mirrorOrderId ?? "—"}</div>
-                      <div style={{ color: "#6b7280" }}>
-                        {issue.externalOrderId ?? issue.partnerId ?? "—"}
-                      </div>
-                      <div style={{ color: "#6b7280" }}>
-                        {issue.linkedReconciliationJobId ??
-                          issue.sponsorReference ??
-                          "—"}
-                      </div>
-                    </td>
-                    <td style={{ fontSize: 12, minWidth: 220 }}>
-                      <div>
-                        {t("payments.reconciliation.commentCount", {
-                          count: String(issue.comments.length),
-                        })}
-                      </div>
-                      <div style={{ color: "#6b7280" }}>
-                        {t("payments.reconciliation.evidenceCount", {
-                          count: String(issue.evidenceArtifactIds.length),
-                        })}
-                      </div>
-                      <div style={{ color: "#6b7280", marginTop: 6 }}>
-                        {issue.comments.at(-1)?.message ?? "—"}
-                      </div>
-                    </td>
-                    <td style={{ minWidth: 320 }}>
-                      <div style={{ ...issueActionGridStyle, marginBottom: 8 }}>
-                        <Link
-                          href={`/payments/reconciliation/${encodeURIComponent(issue.issueId)}`}
-                          className="platform-ui-btn platform-ui-btn--secondary"
-                        >
-                          {reconciliationWorkflowCopy.openDetail}
-                        </Link>
-                      </div>
-                      <div style={issueActionGridStyle}>
-                        {issue.status !== "resolved" && (
-                          <>
-                            <input
-                              value={
-                                issueAssignments[issue.issueId] ??
-                                issue.ownerId ??
-                                ""
-                              }
-                              onChange={(event) =>
-                                setIssueAssignments((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={t(
-                                "payments.reconciliation.assignee",
-                              )}
-                              style={inputStyle}
-                            />
-                            <button
-                              className="platform-ui-btn platform-ui-btn--secondary"
-                              onClick={() => void handleAssignIssue(issue)}
-                              disabled={issueActionId === issue.issueId}
-                            >
-                              {t("payments.reconciliation.assign")}
-                            </button>
-                            <input
-                              value={issueComments[issue.issueId] ?? ""}
-                              onChange={(event) =>
-                                setIssueComments((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={t("payments.reconciliation.comment")}
-                              style={inputStyle}
-                            />
-                            <input
-                              value={
-                                issueCommentArtifactIds[issue.issueId] ?? ""
-                              }
-                              onChange={(event) =>
-                                setIssueCommentArtifactIds((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={`${t("payments.reconciliation.artifactIds")} · ${t("payments.reconciliation.comment")}`}
-                              aria-label={`${t("payments.reconciliation.artifactIds")} (${t("payments.reconciliation.comment")})`}
-                              style={inputStyle}
-                            />
-                            <button
-                              className="platform-ui-btn platform-ui-btn--secondary"
-                              onClick={() => void handleCommentIssue(issue)}
-                              disabled={issueActionId === issue.issueId}
-                            >
-                              {t("payments.reconciliation.addComment")}
-                            </button>
-                            <select
-                              value={issueResolutionCodes[issue.issueId] ?? ""}
-                              onChange={(event) =>
-                                setIssueResolutionCodes((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target
-                                    .value as ReconciliationIssueRecord["resolutionCode"],
-                                }))
-                              }
-                              style={inputStyle}
-                            >
-                              <option value="">
-                                {t("payments.reconciliation.resolveCode")}
-                              </option>
-                              {RECONCILIATION_RESOLUTION_OPTIONS.map((code) => (
-                                <option key={code} value={code}>
-                                  {formatPlatformCodeLabel(locale, code)}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              value={
-                                issueResolutionSummaries[issue.issueId] ?? ""
-                              }
-                              onChange={(event) =>
-                                setIssueResolutionSummaries((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={t(
-                                "payments.reconciliation.resolveSummary",
-                              )}
-                              style={inputStyle}
-                            />
-                            <input
-                              value={
-                                issueResolutionArtifactIds[issue.issueId] ?? ""
-                              }
-                              onChange={(event) =>
-                                setIssueResolutionArtifactIds((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={`${t("payments.reconciliation.artifactIds")} · ${t("payments.reconciliation.resolve")}`}
-                              aria-label={`${t("payments.reconciliation.artifactIds")} (${t("payments.reconciliation.resolve")})`}
-                              style={inputStyle}
-                            />
-                            <button
-                              className="platform-ui-btn platform-ui-btn--primary"
-                              onClick={() => void handleResolveIssue(issue)}
-                              disabled={issueActionId === issue.issueId}
-                            >
-                              {t("payments.reconciliation.resolve")}
-                            </button>
-                          </>
-                        )}
-                        {issue.status === "resolved" && (
-                          <>
-                            <input
-                              value={issueReopenReasons[issue.issueId] ?? ""}
-                              onChange={(event) =>
-                                setIssueReopenReasons((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={t(
-                                "payments.reconciliation.reopenReason",
-                              )}
-                              style={inputStyle}
-                            />
-                            <input
-                              value={
-                                issueReopenArtifactIds[issue.issueId] ?? ""
-                              }
-                              onChange={(event) =>
-                                setIssueReopenArtifactIds((current) => ({
-                                  ...current,
-                                  [issue.issueId]: event.target.value,
-                                }))
-                              }
-                              placeholder={`${t("payments.reconciliation.artifactIds")} · ${t("payments.reconciliation.reopen")}`}
-                              aria-label={`${t("payments.reconciliation.artifactIds")} (${t("payments.reconciliation.reopen")})`}
-                              style={inputStyle}
-                            />
-                            <button
-                              className="platform-ui-btn platform-ui-btn--secondary"
-                              onClick={() => void handleReopenIssue(issue)}
-                              disabled={issueActionId === issue.issueId}
-                            >
-                              {t("payments.reconciliation.reopen")}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={6}>{t("payments.reconciliation.empty")}</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div
-        className="platform-ui-card"
-        style={{
-          overflowX: "auto",
-          marginBottom: 16,
-          borderColor: "rgba(245,158,11,0.35)",
-        }}
-      >
-        <div style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: "0 0 4px" }}>{t("payments.shadow.title")}</h3>
-          <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-            {t("payments.shadow.subtitle")}
-          </p>
-        </div>
-        <table className="platform-ui-table">
-          <thead>
-            <tr>
-              <th>{t("payments.shadow.col.platform")}</th>
-              <th>{t("payments.shadow.col.mirrorOrder")}</th>
-              <th>{t("payments.shadow.col.reason")}</th>
-              <th>{t("payments.shadow.col.authority")}</th>
-              <th>{t("payments.shadow.col.ledger")}</th>
-              <th>{t("payments.shadow.col.owner")}</th>
-              <th>{t("payments.shadow.col.note")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {forwardedShadowIssues.length > 0 ? (
-              forwardedShadowIssues.map((issue) => {
-                const context = issue.forwardedFinanceContext;
-                if (!context) {
-                  return null;
-                }
-                const reasonKey = `payments.shadow.reconciliationReason.${context.reconciliationReason}`;
-                const reasonLabel = t(reasonKey);
-                return (
-                  <tr key={issue.issueId}>
-                    <td style={{ minWidth: 160 }}>
-                      <div style={{ fontWeight: 600 }}>
-                        {formatPlatformCodeLabel(locale, context.platformCode)}
-                      </div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>
-                        {context.platformCode}
-                      </div>
-                    </td>
-                    <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                      <div>{issue.mirrorOrderId ?? "—"}</div>
-                      <div style={{ color: "#6b7280" }}>
-                        {issue.externalOrderId ?? "—"}
-                      </div>
-                    </td>
-                    <td style={{ minWidth: 220, fontSize: 13 }}>
-                      <div>
-                        {reasonLabel === reasonKey
-                          ? context.reconciliationReason
-                          : reasonLabel}
-                      </div>
-                      <div style={{ color: "#6b7280", fontSize: 12 }}>
-                        {issue.linkedReconciliationJobId ?? "—"}
-                      </div>
-                    </td>
-                    <td style={{ fontSize: 12, minWidth: 220 }}>
-                      <div>
-                        {t("payments.shadow.fareAuthority")}:{" "}
-                        {t(
-                          `payments.shadow.authority.${context.fareAuthority}`,
-                        )}
-                      </div>
-                      <div>
-                        {t("payments.shadow.settlementAuthority")}:{" "}
-                        {t(
-                          `payments.shadow.authority.${context.settlementAuthority}`,
-                        )}
-                      </div>
-                      <div style={{ fontWeight: 600 }}>
-                        {t("payments.shadow.payoutAuthority")}:{" "}
-                        {t(
-                          `payments.shadow.authority.${context.driverPayoutAuthority}`,
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <span className="platform-ui-badge platform-ui-badge--neutral">
-                        {t(`payments.matrix.ledger.${context.localLedgerMode}`)}
-                      </span>
-                    </td>
-                    <td style={{ minWidth: 160 }}>
-                      <div>{issue.ownerId ?? "—"}</div>
-                      <div style={{ marginTop: 6 }}>
-                        <span
-                          className={`platform-ui-badge ${
-                            issue.status === "resolved"
-                              ? "platform-ui-badge--success"
-                              : issue.status === "assigned"
-                                ? "platform-ui-badge--warning"
-                                : "platform-ui-badge--neutral"
-                          }`}
-                        >
-                          {formatPlatformCodeLabel(locale, issue.status)}
-                        </span>
-                      </div>
-                    </td>
-                    <td style={{ fontSize: 12, minWidth: 220 }}>
-                      {context.note ?? issue.summary}
-                    </td>
-                  </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan={7}>{t("payments.shadow.empty")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div
-        className="platform-ui-card"
-        style={{ overflowX: "auto", marginBottom: 16 }}
-      >
-        <div style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: "0 0 4px" }}>{t("payments.matrix.title")}</h3>
-          <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-            {t("payments.matrix.subtitle")}
-          </p>
-        </div>
-        <table className="platform-ui-table">
-          <thead>
-            <tr>
-              <th>{t("payments.matrix.col.channel")}</th>
-              <th>{t("payments.matrix.col.payer")}</th>
-              <th>{t("payments.matrix.col.sponsor")}</th>
-              <th>{t("payments.matrix.col.invoice")}</th>
-              <th>{t("payments.matrix.col.receipt")}</th>
-              <th>{t("payments.matrix.col.payout")}</th>
-              <th>{t("payments.matrix.col.discount")}</th>
-              <th>{t("payments.matrix.col.reconciliation")}</th>
-              <th>{t("payments.matrix.col.ledger")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {settlementMatrix.length > 0 ? (
-              sortSettlementMatrix(settlementMatrix).map((row) => (
-                <tr key={row.channelKey}>
-                  <td>
-                    <div>{describeMatrixChannel(row.channelKey)}</div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      {row.orderDomain} · {row.orderSources.join(" / ")}
-                    </div>
-                  </td>
-                  <td>{describeMatrixField("payer", row, row.payerType)}</td>
-                  <td>
-                    {describeMatrixField("sponsor", row, row.sponsorType)}
-                  </td>
-                  <td>
-                    <div>
-                      {describeMatrixField(
-                        "invoiceOwner",
-                        row,
-                        row.invoiceOwner,
-                      )}
-                    </div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      {describeMatrixField("invoice", row, row.invoicePath)}
-                    </div>
-                  </td>
-                  <td>
-                    {describeMatrixField("receipt", row, row.receiptOwner)}
-                  </td>
-                  <td>
-                    {describeMatrixField(
-                      "payout",
-                      row,
-                      row.driverPayoutAuthority,
-                    )}
-                  </td>
-                  <td>
-                    <div>
-                      {describeMatrixField(
-                        "discount",
-                        row,
-                        row.discountFundingSource,
-                      )}
-                    </div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      {describeMatrixField(
-                        "reimbursement",
-                        row,
-                        row.reimbursementRule,
-                      )}
-                    </div>
-                  </td>
-                  <td>
-                    {describeMatrixField(
-                      "reconciliation",
-                      row,
-                      row.reconciliationPath,
-                    )}
-                  </td>
-                  <td>
-                    <span
-                      className={`platform-ui-badge ${
-                        row.localLedgerMode === "shadow_only"
-                          ? "platform-ui-badge--neutral"
-                          : "platform-ui-badge--success"
-                      }`}
-                    >
-                      {describeLedgerMode(row.localLedgerMode)}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={9}>{t("payments.matrix.empty")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="platform-ui-toolbar">
-        <div className="platform-ui-toggle-group">
-          {(["all", "paid", "issued", "draft"] as const).map((value) => (
-            <button
-              key={value}
-              className={`platform-ui-toggle-btn ${
-                invoiceFilter === value ? "active" : ""
-              }`}
-              onClick={() => setInvoiceFilter(value)}
-            >
-              {formatPlatformCodeLabel(locale, value)}
-            </button>
-          ))}
-        </div>
-        <button
-          className="platform-ui-btn platform-ui-btn--secondary"
-          onClick={() => void loadFinance()}
-        >
-          {t("common.refresh")}
-        </button>
-      </div>
-
-      <div
-        className="platform-ui-card"
-        style={{ overflowX: "auto", marginBottom: 16 }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>{t("payments.invoicesTitle")}</h3>
-          <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {filteredInvoices.length}
-          </span>
-        </div>
-        <table className="platform-ui-table">
-          <thead>
-            <tr>
-              <th>{t("payments.col.invoice")}</th>
-              <th>{t("payments.col.tenant")}</th>
-              <th>{t("payments.col.channelMix")}</th>
-              <th>{t("payments.col.amount")}</th>
-              <th>{t("payments.col.status")}</th>
-              <th>{getPlatformLabel(locale, "pricingSnapshot")}</th>
-              <th>{t("payments.col.period")}</th>
-              <th>{getPlatformLabel(locale, "artifact")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredInvoices.length > 0 ? (
-              filteredInvoices.map((invoice) => (
-                <tr key={invoice.invoiceId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    <div>{invoice.invoiceId}</div>
-                    <div style={{ color: "#6b7280" }}>
-                      {formatDateTime(invoice.createdAt)}
-                    </div>
-                  </td>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    {invoice.tenantId}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    <div>{describeInvoiceChannelMix(invoice)}</div>
-                    <div style={{ marginTop: 6, display: "flex", gap: 4 }}>
-                      {hasOnlyShadowLines(invoice.lines) ? (
-                        <span className="platform-ui-badge platform-ui-badge--neutral">
-                          {t("payments.shadow.badge")}
-                        </span>
-                      ) : hasShadowLines(invoice.lines) ? (
-                        <>
-                          <span className="platform-ui-badge platform-ui-badge--success">
-                            {t("payments.payable.badge")}
-                          </span>
-                          <span className="platform-ui-badge platform-ui-badge--neutral">
-                            {t("payments.shadow.badge")}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="platform-ui-badge platform-ui-badge--success">
-                          {t("payments.payable.badge")}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td>{formatMoney(invoice.amount)}</td>
-                  <td>
-                    <span
-                      className={`platform-ui-badge ${
-                        invoice.status === "paid"
-                          ? "platform-ui-badge--success"
-                          : invoice.status === "draft"
-                            ? "platform-ui-badge--neutral"
-                            : "platform-ui-badge--warning"
-                      }`}
-                    >
-                      {formatPlatformCodeLabel(locale, invoice.status)}
-                    </span>
-                  </td>
-                  <td>
-                    <code>{invoice.pricingVersionSnapshot}</code>
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {formatDateTime(invoice.periodStart)} —{" "}
-                    {formatDateTime(invoice.periodEnd)}
-                  </td>
-                  <td>
-                    {invoice.artifactUrl ? (
-                      <a
-                        href={invoice.artifactUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {t("payments.downloadPdf")}
-                      </a>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={8}>{t("payments.noInvoices")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div
-        className="platform-ui-card"
-        style={{ overflowX: "auto", marginBottom: 16 }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>{t("payments.statementsTitle")}</h3>
-          <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {statements.length}
-          </span>
-        </div>
-        <table className="platform-ui-table">
-          <thead>
-            <tr>
-              <th>{t("payments.col.statement")}</th>
-              <th>{t("payments.col.driver")}</th>
-              <th>{t("payments.col.channelMix")}</th>
-              <th>{t("payments.col.period")}</th>
-              <th>{getPlatformLabel(locale, "feePlan")}</th>
-              <th>{getPlatformLabel(locale, "gross")}</th>
-              <th>{getPlatformLabel(locale, "serviceFee")}</th>
-              <th>{getPlatformLabel(locale, "subsidy")}</th>
-              <th>{t("payments.col.net")}</th>
-              <th>{getPlatformLabel(locale, "payout")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {statements.length > 0 ? (
-              statements.map((statement) => (
-                <tr key={statement.statementId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    <div>{statement.receiptNo}</div>
-                    <div style={{ color: "#6b7280" }}>
-                      {statement.statementId}
-                    </div>
-                  </td>
-                  <td>{statement.driverId}</td>
-                  <td style={{ fontSize: 12 }}>
-                    <div>{describeStatementChannelMix(statement)}</div>
-                    <div style={{ marginTop: 6, display: "flex", gap: 4 }}>
-                      {hasOnlyShadowLines(statement.lines) ? (
-                        <span className="platform-ui-badge platform-ui-badge--neutral">
-                          {t("payments.shadow.badge")}
-                        </span>
-                      ) : hasShadowLines(statement.lines) ? (
-                        <>
-                          <span className="platform-ui-badge platform-ui-badge--success">
-                            {t("payments.payable.badge")}
-                          </span>
-                          <span className="platform-ui-badge platform-ui-badge--neutral">
-                            {t("payments.shadow.badge")}
-                          </span>
-                        </>
-                      ) : (
-                        <span className="platform-ui-badge platform-ui-badge--success">
-                          {t("payments.payable.badge")}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td>{statement.periodMonth}</td>
-                  <td>
-                    <code>{statement.feePlanVersion}</code>
-                  </td>
-                  <td>{formatMoney(statement.grossEarning)}</td>
-                  <td>{formatMoney(statement.serviceFee)}</td>
-                  <td>{formatMoney(statement.subsidy)}</td>
-                  <td>{formatMoney(statement.netAmount)}</td>
-                  <td>
-                    <span
-                      className={`platform-ui-badge ${
-                        statement.payoutStatus === "paid"
-                          ? "platform-ui-badge--success"
-                          : "platform-ui-badge--warning"
-                      }`}
-                    >
-                      {formatPlatformCodeLabel(locale, statement.payoutStatus)}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={10}>{t("payments.noStatements")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="platform-ui-card" style={{ overflowX: "auto" }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <h3 style={{ margin: 0 }}>{t("payments.reimbursementsTitle")}</h3>
-          <span style={{ color: "#6b7280", fontSize: 13 }}>
-            {reimbursements.length}
-          </span>
-        </div>
-        <p
-          style={{
-            margin: "0 0 12px",
-            padding: "8px 12px",
-            background: "rgba(245,158,11,0.08)",
-            borderLeft: "3px solid rgba(245,158,11,0.6)",
-            color: "#6b7280",
-            fontSize: 12,
-          }}
-        >
-          {t("payments.shadow.reimbursementGuardrail")}
-        </p>
-        <table className="platform-ui-table">
-          <thead>
-            <tr>
-              <th>{t("payments.col.batch")}</th>
-              <th>{t("payments.col.driver")}</th>
-              <th>{getPlatformLabel(locale, "statement")}</th>
-              <th>{getPlatformLabel(locale, "total")}</th>
-              <th>{getPlatformLabel(locale, "workflow")}</th>
-              <th>{getPlatformLabel(locale, "remittance")}</th>
-              <th>{getPlatformLabel(locale, "items")}</th>
-              <th>{t("common.actions")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {reimbursements.length > 0 ? (
-              reimbursements.map((batch) => (
-                <tr key={batch.batchId}>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    <div>{batch.batchId}</div>
-                    <div style={{ color: "#6b7280" }}>{batch.periodMonth}</div>
-                  </td>
-                  <td>{batch.driverId}</td>
-                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>
-                    {batch.statementId}
-                  </td>
-                  <td>{formatMoney(batch.totalAmount)}</td>
-                  <td>
-                    <div>
-                      {reimbursementWorkflow(
-                        batch,
-                        t("payments.awaitingApproval"),
-                        formatPlatformCodeLabel(locale, "paid"),
-                        t("payments.col.approved"),
-                      )}
-                    </div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      {batch.approvedAt
-                        ? formatDateTime(batch.approvedAt)
-                        : t("payments.awaitingApproval")}
-                    </div>
-                    <div style={{ color: "#6b7280", fontSize: 12 }}>
-                      {batch.paidAt
-                        ? formatDateTime(batch.paidAt)
-                        : t("payments.awaitingRemittance")}
-                    </div>
-                  </td>
-                  <td>
-                    <input
-                      value={
-                        remittanceProofs[batch.batchId] ??
-                        batch.remittanceProofId ??
-                        ""
-                      }
-                      onChange={(event) =>
-                        setRemittanceProofs((current) => ({
-                          ...current,
-                          [batch.batchId]: event.target.value,
-                        }))
-                      }
-                      placeholder={getPlatformLabel(
-                        locale,
-                        "remittanceProofExample",
-                      )}
-                      style={{ ...inputStyle, minWidth: 180 }}
-                      disabled={batch.status === "paid"}
-                    />
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {batch.items.map((item) => item.orderId).join(", ")}
-                  </td>
-                  <td>
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {filteredInvoices.slice(0, 4).map((invoice) => (
                     <div
+                      key={invoice.invoiceId}
                       style={{
-                        display: "grid",
-                        gap: 8,
-                        minWidth: 120,
+                        padding: "12px 14px",
+                        borderRadius: "16px",
+                        border: "1px solid rgba(148,163,184,0.22)",
+                        background: "#f8fafc",
                       }}
                     >
-                      {!batch.approvedAt && (
+                      <DataCellStack
+                        primary={<strong>{invoice.invoiceId}</strong>}
+                        secondary={formatMoney(invoice.amount)}
+                        tertiary={describeInvoiceChannelMix(invoice)}
+                      />
+                    </div>
+                  ))}
+                  {filteredInvoices.length === 0 ? (
+                    <div style={emptyStateStyle}>
+                      {locale === "en"
+                        ? "No invoices in this filter."
+                        : "目前篩選沒有 invoice。"}
+                    </div>
+                  ) : null}
+                </div>
+              </DataViewCard>
+
+              <DataViewCard
+                title={copy.statementTitle}
+                subtitle={copy.statementDescription(statements.length)}
+                tone="platform"
+                footer={copy.statementFooter}
+              >
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {statements.slice(0, 4).map((statement) => (
+                    <div
+                      key={statement.statementId}
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: "16px",
+                        border: "1px solid rgba(30,64,175,0.18)",
+                        background: "rgba(239,246,255,0.72)",
+                      }}
+                    >
+                      <DataCellStack
+                        primary={<strong>{statement.statementId}</strong>}
+                        secondary={formatMoney(statement.netAmount)}
+                        tertiary={describeStatementChannelMix(statement)}
+                      />
+                      <div style={{ marginTop: "8px" }}>
+                        <StatusChip
+                          tone={
+                            hasOnlyShadowLines(statement.lines)
+                              ? "warning"
+                              : hasShadowLines(statement.lines)
+                                ? "platform"
+                                : "success"
+                          }
+                          label={
+                            hasOnlyShadowLines(statement.lines)
+                              ? locale === "en"
+                                ? "shadow only"
+                                : "shadow only"
+                              : hasShadowLines(statement.lines)
+                                ? locale === "en"
+                                  ? "mixed channels"
+                                  : "mixed channels"
+                                : locale === "en"
+                                  ? "drts payable"
+                                  : "drts payable"
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </DataViewCard>
+            </div>
+          </>
+        }
+        side={
+          <>
+            <WorkflowPanel
+              title={copy.releaseTitle}
+              description={copy.releaseDescription}
+              footer={copy.releaseFooter}
+            >
+              <div style={{ display: "grid", gap: "16px" }}>
+                <form onSubmit={handleGenerateInvoice} style={panelFormStyle}>
+                  <strong>{t("payments.generateInvoiceTitle")}</strong>
+                  <Field
+                    label={t("payments.form.tenantId")}
+                    value={invoiceTenantId}
+                    onChange={setInvoiceTenantId}
+                  />
+                  <div style={fieldGridStyle}>
+                    <Field
+                      label={t("payments.form.periodStart")}
+                      value={invoicePeriodStart}
+                      onChange={setInvoicePeriodStart}
+                      type="date"
+                    />
+                    <Field
+                      label={t("payments.form.periodEnd")}
+                      value={invoicePeriodEnd}
+                      onChange={setInvoicePeriodEnd}
+                      type="date"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    style={actionButtonStyle({ tone: "primary" })}
+                    disabled={invoicePending}
+                  >
+                    {invoicePending
+                      ? t("payments.generating")
+                      : t("payments.generateInvoice")}
+                  </button>
+                </form>
+
+                <form
+                  onSubmit={handleGenerateStatements}
+                  style={panelFormStyle}
+                >
+                  <strong>{t("payments.generateStatementsTitle")}</strong>
+                  <Field
+                    label={t("payments.form.periodMonth")}
+                    value={statementPeriodMonth}
+                    onChange={setStatementPeriodMonth}
+                    placeholder="2026-03"
+                  />
+                  <button
+                    type="submit"
+                    style={actionButtonStyle({ tone: "primary" })}
+                    disabled={statementPending}
+                  >
+                    {statementPending
+                      ? t("payments.generating")
+                      : t("payments.generateStatements")}
+                  </button>
+                </form>
+              </div>
+            </WorkflowPanel>
+
+            <DataViewCard
+              title={copy.reimbursementTitle}
+              subtitle={copy.reimbursementDescription}
+              tone="platform"
+              footer={copy.reimbursementFooter(pendingReimbursements.length)}
+            >
+              <div style={{ display: "grid", gap: "12px" }}>
+                {reimbursements.map((batch) => (
+                  <div
+                    key={batch.batchId}
+                    style={{
+                      display: "grid",
+                      gap: "10px",
+                      padding: "14px",
+                      borderRadius: "16px",
+                      border: "1px solid rgba(148,163,184,0.22)",
+                      background: "#f8fafc",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        alignItems: "flex-start",
+                        justifyContent: "space-between",
+                        gap: "10px",
+                      }}
+                    >
+                      <DataCellStack
+                        primary={<strong>{batch.batchId}</strong>}
+                        secondary={formatMoney(batch.totalAmount)}
+                        tertiary={batch.statementId}
+                      />
+                      <StatusChip
+                        tone={reimbursementTone(batch.status)}
+                        label={formatPlatformCodeLabel(locale, batch.status)}
+                      />
+                    </div>
+
+                    <DetailMetadataGrid
+                      columns={2}
+                      minColumnWidth="140px"
+                      items={[
+                        {
+                          id: `${batch.batchId}-workflow`,
+                          label: locale === "en" ? "Workflow" : "流程",
+                          value: reimbursementWorkflow(
+                            batch,
+                            locale === "en" ? "Awaiting approval" : "待核准",
+                            locale === "en" ? "Paid" : "已付款",
+                            locale === "en" ? "Approved" : "已核准",
+                          ),
+                        },
+                        {
+                          id: `${batch.batchId}-updated`,
+                          label: getPlatformLabel(locale, "updated"),
+                          value: formatDateTime(
+                            batch.paidAt ??
+                              batch.approvedAt ??
+                              `${batch.periodMonth}-01T00:00:00.000Z`,
+                          ),
+                        },
+                      ]}
+                    />
+
+                    <Field
+                      label={
+                        locale === "en"
+                          ? "Remittance proof ID"
+                          : "Remittance proof ID"
+                      }
+                      value={remittanceProofs[batch.batchId] ?? ""}
+                      onChange={(value) =>
+                        setRemittanceProofs((current) => ({
+                          ...current,
+                          [batch.batchId]: value,
+                        }))
+                      }
+                      placeholder={`remit-${batch.batchId.slice(-8)}`}
+                    />
+
+                    <div
+                      style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}
+                    >
+                      {batch.status === "pending" ? (
                         <button
-                          className="platform-ui-btn platform-ui-btn--secondary"
+                          type="button"
+                          style={actionButtonStyle()}
                           onClick={() => void handleApproveBatch(batch)}
                           disabled={batchActionId === batch.batchId}
                         >
-                          {t("payments.approve")}
+                          {locale === "en" ? "Approve batch" : "核准批次"}
                         </button>
-                      )}
-                      {batch.status !== "paid" && (
+                      ) : null}
+                      {batch.status !== "paid" ? (
                         <button
-                          className="platform-ui-btn platform-ui-btn--primary"
+                          type="button"
+                          style={actionButtonStyle({ tone: "primary" })}
                           onClick={() => void handleMarkPaid(batch)}
                           disabled={batchActionId === batch.batchId}
                         >
-                          {batchActionId === batch.batchId
-                            ? t("payments.saving")
-                            : t("payments.markPaid")}
+                          {locale === "en" ? "Mark paid" : "標記已付款"}
                         </button>
-                      )}
+                      ) : null}
                     </div>
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={8}>{t("payments.noReimbursements")}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                  </div>
+                ))}
+              </div>
+            </DataViewCard>
+
+            <WorkflowPanel
+              title={copy.createIssueTitle}
+              description={copy.createIssueDescription}
+              footer={copy.createIssueFooter}
+            >
+              <form
+                id="payments-create-issue"
+                onSubmit={handleCreateReconciliationIssue}
+                style={panelFormStyle}
+              >
+                <Field
+                  label={t("payments.reconciliation.actorId")}
+                  value={financeActorId}
+                  onChange={setFinanceActorId}
+                />
+                <div style={fieldGridStyle}>
+                  <SelectField
+                    label={t("payments.reconciliation.issueType")}
+                    value={newIssue.issueType}
+                    options={RECONCILIATION_ISSUE_TYPE_OPTIONS.map(
+                      (issueType) => ({
+                        value: issueType,
+                        label: formatPlatformCodeLabel(locale, issueType),
+                      }),
+                    )}
+                    onChange={(value) =>
+                      setNewIssue((current) => ({
+                        ...current,
+                        issueType:
+                          value as ReconciliationIssueRecord["issueType"],
+                        channelKey:
+                          value === "forwarder_status_mismatch"
+                            ? "forwarded_shadow"
+                            : "partner_airport",
+                      }))
+                    }
+                  />
+                  <SelectField
+                    label={t("payments.reconciliation.channel")}
+                    value={newIssue.channelKey}
+                    options={RECONCILIATION_CHANNEL_OPTIONS.map(
+                      (channelKey) => ({
+                        value: channelKey,
+                        label: describeMatrixChannel(channelKey),
+                      }),
+                    )}
+                    onChange={(value) =>
+                      setNewIssue((current) => ({
+                        ...current,
+                        channelKey: value,
+                      }))
+                    }
+                  />
+                </div>
+                <Field
+                  label={t("payments.reconciliation.assignee")}
+                  value={newIssue.assigneeId}
+                  onChange={(value) =>
+                    setNewIssue((current) => ({
+                      ...current,
+                      assigneeId: value,
+                    }))
+                  }
+                  placeholder="finance.lead"
+                />
+                <Field
+                  label={t("payments.reconciliation.summary")}
+                  value={newIssue.summary}
+                  onChange={(value) =>
+                    setNewIssue((current) => ({
+                      ...current,
+                      summary: value,
+                    }))
+                  }
+                />
+                <div style={fieldGridStyle}>
+                  <Field
+                    label={t("payments.reconciliation.orderId")}
+                    value={newIssue.orderId}
+                    onChange={(value) =>
+                      setNewIssue((current) => ({
+                        ...current,
+                        orderId: value,
+                      }))
+                    }
+                  />
+                  <Field
+                    label={locale === "en" ? "Tenant ID" : "租戶 ID"}
+                    value={newIssue.tenantId}
+                    onChange={(value) =>
+                      setNewIssue((current) => ({
+                        ...current,
+                        tenantId: value,
+                      }))
+                    }
+                  />
+                  <Field
+                    label={t("payments.reconciliation.partnerId")}
+                    value={newIssue.partnerId}
+                    onChange={(value) =>
+                      setNewIssue((current) => ({
+                        ...current,
+                        partnerId: value,
+                      }))
+                    }
+                  />
+                  <Field
+                    label={t("payments.reconciliation.partnerProgramId")}
+                    value={newIssue.partnerProgramId}
+                    onChange={(value) =>
+                      setNewIssue((current) => ({
+                        ...current,
+                        partnerProgramId: value,
+                      }))
+                    }
+                  />
+                  <Field
+                    label={t("payments.reconciliation.sponsorReference")}
+                    value={newIssue.sponsorReference}
+                    onChange={(value) =>
+                      setNewIssue((current) => ({
+                        ...current,
+                        sponsorReference: value,
+                      }))
+                    }
+                  />
+                  <Field
+                    label={t("payments.reconciliation.externalOrderId")}
+                    value={newIssue.externalOrderId}
+                    onChange={(value) =>
+                      setNewIssue((current) => ({
+                        ...current,
+                        externalOrderId: value,
+                      }))
+                    }
+                  />
+                  <Field
+                    label={t("payments.reconciliation.mirrorOrderId")}
+                    value={newIssue.mirrorOrderId}
+                    onChange={(value) =>
+                      setNewIssue((current) => ({
+                        ...current,
+                        mirrorOrderId: value,
+                      }))
+                    }
+                  />
+                  <Field
+                    label={t("payments.reconciliation.linkedJobId")}
+                    value={newIssue.linkedReconciliationJobId}
+                    onChange={(value) =>
+                      setNewIssue((current) => ({
+                        ...current,
+                        linkedReconciliationJobId: value,
+                      }))
+                    }
+                  />
+                </div>
+                <TextAreaField
+                  label={t("payments.reconciliation.comment")}
+                  value={newIssue.comment}
+                  onChange={(value) =>
+                    setNewIssue((current) => ({
+                      ...current,
+                      comment: value,
+                    }))
+                  }
+                />
+                <Field
+                  label={t("payments.reconciliation.artifactIds")}
+                  value={newIssue.artifactIds}
+                  onChange={(value) =>
+                    setNewIssue((current) => ({
+                      ...current,
+                      artifactIds: value,
+                    }))
+                  }
+                  placeholder={t("payments.reconciliation.artifactPlaceholder")}
+                />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {RECONCILIATION_RESOLUTION_OPTIONS.slice(0, 3).map((code) => (
+                    <StatusChip
+                      key={code}
+                      tone="neutral"
+                      label={formatPlatformCodeLabel(locale, code)}
+                    />
+                  ))}
+                </div>
+                <button
+                  type="submit"
+                  style={actionButtonStyle({ tone: "primary" })}
+                  disabled={issueDraftPending}
+                >
+                  {issueDraftPending
+                    ? t("payments.reconciliation.opening")
+                    : t("payments.reconciliation.open")}
+                </button>
+              </form>
+            </WorkflowPanel>
+          </>
+        }
+      />
     </div>
+  );
+
+  function describeInvoiceChannelMix(invoice: TenantInvoiceRecord) {
+    return summarizeChannelMix(
+      invoice.lines.map((line) => line.channelKey),
+      describeMatrixChannel,
+    );
+  }
+
+  function describeStatementChannelMix(statement: DriverStatementRecord) {
+    return summarizeChannelMix(
+      statement.lines.map((line) => line.channelKey),
+      describeMatrixChannel,
+    );
+  }
+}
+
+function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: "text" | "date";
+  placeholder?: string;
+}) {
+  return (
+    <label style={fieldLabelStyle}>
+      <span>{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        style={inputStyle}
+      />
+    </label>
   );
 }
 
-const formGridStyle: React.CSSProperties = {
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label style={fieldLabelStyle}>
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        style={inputStyle}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label style={fieldLabelStyle}>
+      <span>{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        style={textAreaStyle}
+      />
+    </label>
+  );
+}
+
+const fieldGridStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: 12,
-  marginBottom: 16,
+  gap: "12px",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
 };
 
-const labelStyle: React.CSSProperties = {
+const panelFormStyle: React.CSSProperties = {
   display: "grid",
-  gap: 4,
-  fontSize: 13,
-  fontWeight: 500,
+  gap: "12px",
 };
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "0.75rem 0.85rem",
-  borderRadius: 12,
-  border: "1px solid #d1d5db",
-  background: "#fff",
-  fontSize: 14,
+const fieldLabelStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "6px",
+  fontSize: "12px",
+  fontWeight: 700,
+  color: "#475569",
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
 };
 
 const textAreaStyle: React.CSSProperties = {
   ...inputStyle,
-  minHeight: 88,
+  minHeight: "92px",
   resize: "vertical",
-};
-
-const issueActionGridStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 8,
 };

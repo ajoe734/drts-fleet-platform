@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  actionButtonStyle,
+  emptyStateStyle,
+  inputStyle as sharedInputStyle,
+} from "@/components/platform-ui";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -19,9 +24,12 @@ import type {
 } from "@drts/contracts";
 import {
   ArtifactChipList,
+  CalloutBanner,
   DetailMetadataGrid,
   KpiCard,
   KpiRow,
+  PageHeader,
+  StatusChip,
   Timeline,
   WorkflowPanel,
   WorkflowSplitLayout,
@@ -455,20 +463,18 @@ export default function ReconciliationIssueDetailPage() {
   }
 
   if (loading) {
-    return <div className="platform-ui-empty">{t("payments.loading")}</div>;
+    return <div style={emptyStateStyle}>{t("payments.loading")}</div>;
   }
 
   if (!issue) {
     return (
-      <div>
-        <div className="platform-ui-page-header">
-          <h1>{detailCopy.title}</h1>
-          <p>{detailCopy.notFound}</p>
-        </div>
-        <Link
-          href="/payments"
-          className="platform-ui-btn platform-ui-btn--secondary"
-        >
+      <div style={{ display: "grid", gap: "16px" }}>
+        <PageHeader
+          eyebrow={detailCopy.workflow}
+          title={detailCopy.title}
+          subtitle={detailCopy.notFound}
+        />
+        <Link href="/payments" style={actionButtonStyle()}>
           {detailCopy.back}
         </Link>
       </div>
@@ -476,37 +482,83 @@ export default function ReconciliationIssueDetailPage() {
   }
 
   return (
-    <div>
-      <div className="platform-ui-page-header">
-        <h1>{detailCopy.title}</h1>
-        <p>{detailCopy.subtitle}</p>
-      </div>
+    <div style={{ display: "grid", gap: "20px" }}>
+      <PageHeader
+        eyebrow={detailCopy.workflow}
+        title={`${issue.issueId} · ${formatPlatformCodeLabel(locale, issue.issueType)}`}
+        subtitle={`${detailCopy.subtitle} ${issue.externalOrderId ? `· ${issue.externalOrderId}` : ""}`}
+        meta={[
+          {
+            label: detailCopy.currentState,
+            value: formatPlatformCodeLabel(locale, issue.status),
+            tone: statusTone(issue.status),
+          },
+          {
+            label: t("payments.reconciliation.assignee"),
+            value: issue.ownerId ?? detailCopy.none,
+          },
+          {
+            label: t("payments.reconciliation.channel"),
+            value: describeMatrixChannel(issue.channelKey),
+            tone: issue.forwardedFinanceContext ? "platform" : "neutral",
+          },
+        ]}
+        actions={
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            <Link href="/payments" style={actionButtonStyle()}>
+              {detailCopy.back}
+            </Link>
+            <button
+              type="button"
+              style={actionButtonStyle()}
+              onClick={() => void loadData()}
+            >
+              {t("common.refresh")}
+            </button>
+          </div>
+        }
+      />
 
-      <div className="platform-ui-toolbar">
-        <Link
-          href="/payments"
-          className="platform-ui-btn platform-ui-btn--secondary"
-        >
-          {detailCopy.back}
-        </Link>
-        <button
-          className="platform-ui-btn platform-ui-btn--secondary"
-          onClick={() => void loadData()}
-        >
-          {t("common.refresh")}
-        </button>
-      </div>
+      {error ? (
+        <CalloutBanner
+          tone="danger"
+          title={`${getPlatformLabel(locale, "error")}: ${error}`}
+          description={detailCopy.currentStateNote}
+        />
+      ) : null}
 
-      {error && (
-        <div
-          className="platform-ui-card"
-          style={{ borderColor: "rgba(239,68,68,0.3)" }}
-        >
-          <p style={{ color: "#dc2626", margin: 0 }}>
-            {getPlatformLabel(locale, "error")}: {error}
-          </p>
-        </div>
-      )}
+      <CalloutBanner
+        tone={issue.forwardedFinanceContext ? "platform" : "info"}
+        eyebrow={detailCopy.summary}
+        title={issue.summary}
+        description={
+          issue.resolutionSummary ??
+          (issue.forwardedFinanceContext
+            ? detailCopy.shadow
+            : detailCopy.currentStateNote)
+        }
+        meta={
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            <StatusChip
+              tone={statusTone(issue.status)}
+              label={formatPlatformCodeLabel(locale, issue.status)}
+            />
+            {issue.resolutionCode ? (
+              <StatusChip
+                tone="success"
+                label={formatPlatformCodeLabel(locale, issue.resolutionCode)}
+              />
+            ) : null}
+            <StatusChip
+              tone="neutral"
+              label={`${t("payments.reconciliation.evidenceCount", {
+                count: issue.evidenceArtifactIds.length,
+              })}`}
+            />
+          </div>
+        }
+        footer={detailCopy.currentStateNote}
+      />
 
       <KpiRow minWidth="220px">
         <KpiCard
@@ -633,10 +685,9 @@ export default function ReconciliationIssueDetailPage() {
                     />
                   </label>
                   <button
-                    className="platform-ui-btn platform-ui-btn--secondary"
+                    style={actionButtonStyle()}
                     onClick={() => void handleAssignIssue()}
                     disabled={issueActionId === issue.issueId}
-                    style={{ marginTop: 12 }}
                   >
                     {t("payments.reconciliation.assign")}
                   </button>
@@ -666,10 +717,9 @@ export default function ReconciliationIssueDetailPage() {
                       />
                     </label>
                     <button
-                      className="platform-ui-btn platform-ui-btn--secondary"
+                      style={actionButtonStyle()}
                       onClick={() => void handleCommentIssue()}
                       disabled={issueActionId === issue.issueId}
-                      style={{ marginTop: 8 }}
                     >
                       {t("payments.reconciliation.addComment")}
                     </button>
@@ -725,10 +775,9 @@ export default function ReconciliationIssueDetailPage() {
                       />
                     </label>
                     <button
-                      className="platform-ui-btn platform-ui-btn--primary"
+                      style={actionButtonStyle({ tone: "primary" })}
                       onClick={() => void handleResolveIssue()}
                       disabled={issueActionId === issue.issueId}
-                      style={{ marginTop: 8 }}
                     >
                       {t("payments.reconciliation.resolve")}
                     </button>
@@ -759,10 +808,9 @@ export default function ReconciliationIssueDetailPage() {
                     />
                   </label>
                   <button
-                    className="platform-ui-btn platform-ui-btn--secondary"
+                    style={actionButtonStyle()}
                     onClick={() => void handleReopenIssue()}
                     disabled={issueActionId === issue.issueId}
-                    style={{ marginTop: 8 }}
                   >
                     {t("payments.reconciliation.reopen")}
                   </button>
@@ -937,12 +985,7 @@ const labelStyle: React.CSSProperties = {
 };
 
 const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "0.75rem 0.85rem",
-  borderRadius: 12,
-  border: "1px solid #d1d5db",
-  background: "#fff",
-  fontSize: 14,
+  ...sharedInputStyle,
 };
 
 const textAreaStyle: React.CSSProperties = {
