@@ -351,7 +351,7 @@ export function AdapterList() {
 
   const handleSaveAdapter = async (
     updatedData: UpdatePlatformAdapterCommand,
-  ) => {
+  ): Promise<void> => {
     if (!selectedAdapter) return;
 
     try {
@@ -364,9 +364,14 @@ export function AdapterList() {
           adapter.id === selectedAdapter.id ? updatedAdapter : adapter,
         ),
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error updating adapter:", err);
-      setError(err?.message || t("adapterRegistry.errors.updateFailed"));
+      const message =
+        err instanceof Error
+          ? err.message
+          : t("adapterRegistry.errors.updateFailed");
+      setError(message);
+      throw err instanceof Error ? err : new Error(message);
     }
   };
 

@@ -1,16 +1,89 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   PlatformAdapter,
   RolloutStatus,
-  Policy,
-  UpdatePlatformAdapterCommand,
+  type UpdatePlatformAdapterCommand,
 } from "@drts/contracts";
+import {
+  actionButtonStyle,
+  fieldLabelStyle,
+  inputStyle,
+  monoTextStyle,
+  switchStyle,
+  textMutedStyle,
+} from "@/components/platform-ui";
+import { useTranslation } from "@/lib/i18n";
+import {
+  formatPlatformCodeLabel,
+  getPlatformLabel,
+} from "@/lib/localized-labels";
+import {
+  CalloutBanner,
+  DataCellStack,
+  DetailMetadataGrid,
+  StatusChip,
+  WorkflowDetailDrawer,
+} from "@drts/ui-web";
 
 interface EditAdapterModalProps {
   adapter: PlatformAdapter | null;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (updatedAdapter: UpdatePlatformAdapterCommand) => void;
+  onSave: (
+    updatedAdapter: UpdatePlatformAdapterCommand,
+  ) => Promise<void> | void;
+}
+
+function toneForRollout(status: PlatformAdapter["rolloutStatus"]) {
+  switch (status) {
+    case "COMPLETED":
+      return "success" as const;
+    case "IN_PROGRESS":
+      return "info" as const;
+    case "FAILED":
+      return "danger" as const;
+    case "NOT_STARTED":
+    default:
+      return "neutral" as const;
+  }
+}
+
+function toneForCredential(status: PlatformAdapter["credentialStatus"]) {
+  switch (status) {
+    case "VALID":
+      return "success" as const;
+    case "PENDING":
+      return "info" as const;
+    case "INVALID":
+    case "EXPIRED":
+      return "danger" as const;
+    case "NOT_CONFIGURED":
+    default:
+      return "warning" as const;
+  }
+}
+
+function toneForWebhook(enabled: boolean | undefined) {
+  return enabled ? ("success" as const) : ("warning" as const);
+}
+
+function toneForAuthority(
+  mode: PlatformAdapter["policies"]["financeAuthorityMode"],
+) {
+  switch (mode) {
+    case "OWNED":
+      return "success" as const;
+    case "SHADOW":
+      return "warning" as const;
+    case "EXTERNAL":
+    default:
+      return "info" as const;
+  }
+}
+
+function parseInteger(value: string, fallback: number): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? fallback : parsed;
 }
 
 export function EditAdapterModal({
@@ -19,344 +92,628 @@ export function EditAdapterModal({
   onClose,
   onSave,
 }: EditAdapterModalProps) {
+  const { locale } = useTranslation();
   const [editedAdapter, setEditedAdapter] = useState<PlatformAdapter | null>(
     null,
   );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (adapter) {
-      // Deep clone to avoid direct mutation of the original adapter
-      setEditedAdapter(JSON.parse(JSON.stringify(adapter)));
+    if (adapter && isOpen) {
+      setEditedAdapter(JSON.parse(JSON.stringify(adapter)) as PlatformAdapter);
+      setError(null);
+      setSaving(false);
     }
   }, [adapter, isOpen]);
+
+  const copy = useMemo(
+    () =>
+      locale === "en"
+        ? {
+            drawerEyebrow: "Adapter edit lane",
+            drawerDescription:
+              "Keep live health, authority, and rollout context visible while only mutating supported config and policy fields.",
+            name: "Name",
+            version: "Version",
+            enabled: "Enabled",
+            rolloutStatus: "Rollout status",
+            credentialStatus: "Credential status",
+            webhookTitle: "Webhook settings",
+            webhookEnabled: "Webhook enabled",
+            webhookUrl: "Webhook URL",
+            policyTitle: "Policy settings",
+            serviceBuckets: "Service buckets",
+            serviceBucketsHint: "Comma-separated service bucket ids.",
+            maxCandidates: "Max candidates",
+            acceptTimeout: "Accept timeout (seconds)",
+            fallbackThreshold: "Manual fallback threshold (seconds)",
+            supportedActions: "Supported actions",
+            supportedActionsEmpty:
+              "No adapter actions are enabled for this platform.",
+            financeAuthority: "Finance authority",
+            rolloutStage: "Rollout stage",
+            adapterType: "Adapter type",
+            environment: "Environment",
+            cancel: "Cancel",
+            save: "Save adapter",
+            saving: "Saving...",
+            close: "Close editor",
+            errorTitle: "Save failed",
+            guardrailTitle: "Only supported config is editable here",
+            guardrailDescription:
+              "Credential state, live health, and authority posture remain review context. This drawer edits only the explicit adapter update command fields.",
+            overlayLabel: "Adapter editor overlay",
+          }
+        : {
+            drawerEyebrow: "Adapter 編輯",
+            drawerDescription:
+              "在保留 live health、authority 與 rollout 脈絡的同時，只編輯目前 command 支援的 config 與 policy 欄位。",
+            name: "名稱",
+            version: "版本",
+            enabled: "啟用",
+            rolloutStatus: "Rollout 狀態",
+            credentialStatus: "憑證狀態",
+            webhookTitle: "Webhook 設定",
+            webhookEnabled: "Webhook 啟用",
+            webhookUrl: "Webhook URL",
+            policyTitle: "Policy 設定",
+            serviceBuckets: "Service buckets",
+            serviceBucketsHint: "以逗號分隔 service bucket id。",
+            maxCandidates: "最大候選數",
+            acceptTimeout: "Accept timeout（秒）",
+            fallbackThreshold: "手動 fallback 門檻（秒）",
+            supportedActions: "支援動作",
+            supportedActionsEmpty: "這個平台目前沒有開啟任何 adapter action。",
+            financeAuthority: "財務 authority",
+            rolloutStage: "Rollout stage",
+            adapterType: "Adapter 類型",
+            environment: "環境",
+            cancel: "取消",
+            save: "儲存 adapter",
+            saving: "儲存中...",
+            close: "關閉編輯器",
+            errorTitle: "儲存失敗",
+            guardrailTitle: "這裡只允許編輯支援中的 config",
+            guardrailDescription:
+              "憑證狀態、live health 與 authority posture 只做 review context；drawer 只改 adapter update command 允許的欄位。",
+            overlayLabel: "Adapter 編輯覆層",
+          },
+    [locale],
+  );
 
   if (!isOpen || !editedAdapter) {
     return null;
   }
 
-  const handleInputChange = (field: string, value: any) => {
-    setEditedAdapter((prev) => {
-      if (!prev) return null;
+  const handleInputChange = (
+    field: string,
+    value: string | boolean | number,
+  ) => {
+    setEditedAdapter((previous) => {
+      if (!previous) {
+        return null;
+      }
+
       if (field === "policies.serviceBuckets") {
         return {
-          ...prev,
+          ...previous,
           policies: {
-            ...(prev.policies as Policy),
-            serviceBuckets: value
+            ...previous.policies,
+            serviceBuckets: String(value)
               .split(",")
-              .map((s: string) => s.trim())
-              .filter((s: string) => s !== ""),
+              .map((entry) => entry.trim())
+              .filter(Boolean),
           },
         };
       }
-      // Handle nested fields like config.isEnabled or webhookStatus.isEnabled
+
       if (field.includes(".")) {
-        const [key1, key2] = field.split(".") as [
+        const [outerKey, innerKey] = field.split(".") as [
           keyof PlatformAdapter,
           string,
         ];
+        const outerValue = previous[outerKey];
+
         return {
-          ...prev,
-          [key1]: {
-            ...(prev[key1] as any),
-            [key2]: value,
+          ...previous,
+          [outerKey]: {
+            ...(typeof outerValue === "object" && outerValue !== null
+              ? (outerValue as Record<string, unknown>)
+              : {}),
+            [innerKey]: value,
           },
         };
       }
-      return { ...prev, [field]: value };
+
+      return {
+        ...previous,
+        [field]: value,
+      };
     });
   };
 
-  const handleSave = () => {
-    if (!editedAdapter) return;
-
-    const updateCommand: UpdatePlatformAdapterCommand = {
-      config: { isEnabled: editedAdapter.config.isEnabled },
-      rolloutStatus: editedAdapter.rolloutStatus,
-      policies: {
-        serviceBuckets: editedAdapter.policies.serviceBuckets,
-        maxCandidates: editedAdapter.policies.maxCandidates,
-        acceptTimeoutSeconds: editedAdapter.policies.acceptTimeoutSeconds,
-        manualFallbackThresholdSeconds:
-          editedAdapter.policies.manualFallbackThresholdSeconds,
-        financeAuthorityMode: editedAdapter.policies.financeAuthorityMode, // Keep this even if not editable yet
-      },
-    };
-
-    if (editedAdapter.webhookStatus) {
-      updateCommand.webhookStatus = {
-        url: editedAdapter.webhookStatus.url,
-        isEnabled: editedAdapter.webhookStatus.isEnabled,
-      };
+  async function handleSave() {
+    const current = editedAdapter;
+    if (!current) {
+      return;
     }
 
-    onSave(updateCommand);
-    onClose();
-  };
+    setSaving(true);
+    setError(null);
+
+    try {
+      const updateCommand: UpdatePlatformAdapterCommand = {
+        config: { isEnabled: current.config.isEnabled },
+        rolloutStatus: current.rolloutStatus,
+        policies: {
+          serviceBuckets: current.policies.serviceBuckets,
+          maxCandidates: current.policies.maxCandidates,
+          acceptTimeoutSeconds: current.policies.acceptTimeoutSeconds,
+          manualFallbackThresholdSeconds:
+            current.policies.manualFallbackThresholdSeconds,
+          financeAuthorityMode: current.policies.financeAuthorityMode,
+        },
+      };
+
+      if (current.webhookStatus) {
+        updateCommand.webhookStatus = {
+          url: current.webhookStatus.url,
+          isEnabled: current.webhookStatus.isEnabled,
+        };
+      }
+
+      await onSave(updateCommand);
+      onClose();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg p-6 shadow-xl max-w-3xl w-full">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold">
-            Edit Adapter: {editedAdapter.name}
-          </h2>
+    <div
+      role="presentation"
+      aria-label={copy.overlayLabel}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 60,
+        background: "rgba(15, 23, 42, 0.58)",
+        backdropFilter: "blur(4px)",
+        padding: "24px 16px",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+      }}
+    >
+      <WorkflowDetailDrawer
+        ariaLabel={editedAdapter.name}
+        eyebrow={copy.drawerEyebrow}
+        title={`${editedAdapter.name} · ${editedAdapter.platformCode}`}
+        description={copy.drawerDescription}
+        tone="warning"
+        density="comfortable"
+        style={{
+          width: "min(780px, 100%)",
+          maxHeight: "min(90vh, 940px)",
+        }}
+        meta={
+          <>
+            <StatusChip
+              tone={toneForRollout(editedAdapter.rolloutStatus)}
+              label={formatPlatformCodeLabel(
+                locale,
+                editedAdapter.rolloutStatus,
+              )}
+              authorityLabel={copy.rolloutStatus}
+            />
+            <StatusChip
+              tone={toneForCredential(editedAdapter.credentialStatus)}
+              label={formatPlatformCodeLabel(
+                locale,
+                editedAdapter.credentialStatus,
+              )}
+              authorityLabel={copy.credentialStatus}
+            />
+          </>
+        }
+        headerActions={
           <button
+            type="button"
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-700"
+            style={actionButtonStyle({ tone: "secondary", size: "sm" })}
           >
-            &times;
+            {copy.close}
           </button>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          {/* Name and Version (display only) */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Name
-            </label>
-            <p className="text-gray-900">{editedAdapter.name}</p>
+        }
+        footer={
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              gap: "8px",
+              flexWrap: "wrap",
+            }}
+          >
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              style={actionButtonStyle({ tone: "secondary" })}
+            >
+              {copy.cancel}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={saving}
+              style={actionButtonStyle({ tone: "primary" })}
+            >
+              {saving ? copy.saving : copy.save}
+            </button>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Version
-            </label>
-            <p className="text-gray-900">{editedAdapter.version}</p>
-          </div>
+        }
+      >
+        {error ? (
+          <CalloutBanner tone="danger" title={`${copy.errorTitle}: ${error}`} />
+        ) : null}
 
-          {/* Enabled Toggle */}
-          <div className="flex items-center justify-between col-span-2">
+        <CalloutBanner
+          tone="warning"
+          title={copy.guardrailTitle}
+          description={copy.guardrailDescription}
+        />
+
+        <DetailMetadataGrid
+          columns={2}
+          minColumnWidth="220px"
+          items={[
+            {
+              id: "name",
+              label: copy.name,
+              value: editedAdapter.name,
+            },
+            {
+              id: "version",
+              label: copy.version,
+              value: editedAdapter.version,
+            },
+            {
+              id: "adapter-type",
+              label: copy.adapterType,
+              value: formatPlatformCodeLabel(locale, editedAdapter.adapterType),
+            },
+            {
+              id: "environment",
+              label: copy.environment,
+              value: formatPlatformCodeLabel(locale, editedAdapter.environment),
+            },
+            {
+              id: "authority",
+              label: copy.financeAuthority,
+              value: (
+                <AuthorityAwareValue
+                  label={formatPlatformCodeLabel(
+                    locale,
+                    editedAdapter.policies.financeAuthorityMode,
+                  )}
+                  tone={toneForAuthority(
+                    editedAdapter.policies.financeAuthorityMode,
+                  )}
+                />
+              ),
+            },
+            {
+              id: "rollout-stage",
+              label: copy.rolloutStage,
+              value: formatPlatformCodeLabel(
+                locale,
+                editedAdapter.rolloutStage,
+              ),
+            },
+          ]}
+        />
+
+        <div style={{ display: "grid", gap: "12px" }}>
+          <div
+            style={{
+              display: "grid",
+              gap: "6px",
+              padding: "14px 16px",
+              border: "1px solid rgba(148, 163, 184, 0.3)",
+              borderRadius: "16px",
+              background: "#f8fafc",
+            }}
+          >
+            <div style={fieldLabelStyle}>{copy.enabled}</div>
             <label
-              htmlFor="isEnabled"
-              className="block text-sm font-medium text-gray-700"
+              htmlFor="adapter-enabled"
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "12px",
+                cursor: "pointer",
+              }}
             >
-              Enabled
-            </label>
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="isEnabled"
-                checked={editedAdapter.config.isEnabled}
-                onChange={(e) =>
-                  handleInputChange("config.isEnabled", e.target.checked)
-                }
-                className="h-5 w-5 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-              />
-            </div>
-          </div>
-
-          {/* Rollout Status Select */}
-          <div>
-            <label
-              htmlFor="rolloutStatus"
-              className="block text-sm font-medium text-gray-700"
-            >
-              Rollout Status
-            </label>
-            <select
-              id="rolloutStatus"
-              value={editedAdapter.rolloutStatus}
-              onChange={(e) =>
-                handleInputChange("rolloutStatus", e.target.value)
-              }
-              className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
-            >
-              {Object.values(RolloutStatus).map((status) => (
-                <option key={status} value={status}>
-                  {status.replace("_", " ")}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Credential Status (display only for now) */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Credential Status
-            </label>
-            <p className="text-gray-900">{editedAdapter.credentialStatus}</p>
-          </div>
-
-          {/* Webhook Settings */}
-          <div className="col-span-2 grid grid-cols-2 gap-4">
-            <h3 className="col-span-2 text-lg font-medium text-gray-900">
-              Webhook Settings
-            </h3>
-            {/* Webhook Enabled Toggle */}
-            <div className="flex items-center justify-between col-span-2">
-              <label
-                htmlFor="webhookEnabled"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Webhook Enabled
-              </label>
-              <div className="flex items-center">
+              <div style={{ display: "grid", gap: "4px" }}>
+                <strong>
+                  {editedAdapter.config.isEnabled
+                    ? getPlatformLabel(locale, "enabled")
+                    : getPlatformLabel(locale, "disabled")}
+                </strong>
+                <span style={textMutedStyle}>
+                  {locale === "en"
+                    ? "Toggles whether this adapter can participate in platform workflows."
+                    : "切換此 adapter 是否能參與平台流程。"}
+                </span>
+              </div>
+              <span style={{ position: "relative", display: "inline-flex" }}>
                 <input
+                  id="adapter-enabled"
                   type="checkbox"
-                  id="webhookEnabled"
-                  checked={editedAdapter.webhookStatus?.isEnabled ?? false}
-                  onChange={(e) =>
-                    handleInputChange(
-                      "webhookStatus.isEnabled",
-                      e.target.checked,
-                    )
+                  checked={editedAdapter.config.isEnabled}
+                  onChange={(event) =>
+                    handleInputChange("config.isEnabled", event.target.checked)
                   }
-                  className="h-5 w-5 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+                  style={{
+                    ...switchStyle.root(editedAdapter.config.isEnabled),
+                    position: "relative",
+                  }}
+                />
+                <span
+                  aria-hidden="true"
+                  style={switchStyle.thumb(editedAdapter.config.isEnabled)}
+                />
+              </span>
+            </label>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gap: "14px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            }}
+          >
+            <label style={{ display: "grid", gap: "6px" }}>
+              <span style={fieldLabelStyle}>{copy.rolloutStatus}</span>
+              <select
+                value={editedAdapter.rolloutStatus}
+                onChange={(event) =>
+                  handleInputChange(
+                    "rolloutStatus",
+                    event.target.value as PlatformAdapter["rolloutStatus"],
+                  )
+                }
+                style={inputStyle}
+              >
+                {Object.values(RolloutStatus).map((status) => (
+                  <option key={status} value={status}>
+                    {formatPlatformCodeLabel(locale, status)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div style={{ display: "grid", gap: "6px" }}>
+              <span style={fieldLabelStyle}>{copy.credentialStatus}</span>
+              <div
+                style={{
+                  ...inputStyle,
+                  display: "flex",
+                  alignItems: "center",
+                  minHeight: "42px",
+                }}
+              >
+                <StatusChip
+                  tone={toneForCredential(editedAdapter.credentialStatus)}
+                  label={formatPlatformCodeLabel(
+                    locale,
+                    editedAdapter.credentialStatus,
+                  )}
                 />
               </div>
             </div>
-            {/* Webhook URL Input */}
-            <div>
-              <label
-                htmlFor="webhookUrl"
-                className="block text-sm font-medium text-gray-700"
+          </div>
+        </div>
+
+        <SectionBlock title={copy.webhookTitle}>
+          <div
+            style={{
+              display: "grid",
+              gap: "14px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+            }}
+          >
+            <label style={{ display: "grid", gap: "6px" }}>
+              <span style={fieldLabelStyle}>{copy.webhookEnabled}</span>
+              <select
+                value={
+                  editedAdapter.webhookStatus?.isEnabled ? "true" : "false"
+                }
+                onChange={(event) =>
+                  handleInputChange(
+                    "webhookStatus.isEnabled",
+                    event.target.value === "true",
+                  )
+                }
+                style={inputStyle}
               >
-                Webhook URL
-              </label>
+                <option value="true">
+                  {getPlatformLabel(locale, "enabled")}
+                </option>
+                <option value="false">
+                  {getPlatformLabel(locale, "disabled")}
+                </option>
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: "6px" }}>
+              <span style={fieldLabelStyle}>{copy.webhookUrl}</span>
               <input
                 type="url"
-                id="webhookUrl"
                 value={editedAdapter.webhookStatus?.url ?? ""}
-                onChange={(e) =>
-                  handleInputChange("webhookStatus.url", e.target.value)
+                onChange={(event) =>
+                  handleInputChange("webhookStatus.url", event.target.value)
                 }
-                className="mt-1 block w-full pl-3 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                style={{
+                  ...inputStyle,
+                  ...(editedAdapter.webhookStatus?.url ? monoTextStyle : {}),
+                }}
                 placeholder="https://example.com/webhook"
               />
-            </div>
+            </label>
           </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+            <StatusChip
+              tone={toneForWebhook(editedAdapter.webhookStatus?.isEnabled)}
+              label={
+                editedAdapter.webhookStatus?.isEnabled
+                  ? getPlatformLabel(locale, "enabled")
+                  : getPlatformLabel(locale, "disabled")
+              }
+              authorityLabel={copy.webhookEnabled}
+            />
+          </div>
+        </SectionBlock>
 
-          {/* Policy Settings */}
-          <div className="col-span-2 grid grid-cols-2 gap-4">
-            <h3 className="col-span-2 text-lg font-medium text-gray-900">
-              Policy Settings
-            </h3>
-            {/* Service Buckets Input */}
-            <div>
-              <label
-                htmlFor="policies.serviceBuckets"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Service Buckets (comma-separated)
-              </label>
+        <SectionBlock title={copy.policyTitle}>
+          <div
+            style={{
+              display: "grid",
+              gap: "14px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            }}
+          >
+            <label
+              style={{ display: "grid", gap: "6px", gridColumn: "1 / -1" }}
+            >
+              <span style={fieldLabelStyle}>{copy.serviceBuckets}</span>
               <input
                 type="text"
-                id="policies.serviceBuckets"
                 value={editedAdapter.policies.serviceBuckets.join(", ")}
-                onChange={(e) =>
-                  handleInputChange("policies.serviceBuckets", e.target.value)
+                onChange={(event) =>
+                  handleInputChange(
+                    "policies.serviceBuckets",
+                    event.target.value,
+                  )
                 }
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                style={inputStyle}
               />
-            </div>
-            {/* Max Candidates Input */}
-            <div>
-              <label
-                htmlFor="policies.maxCandidates"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Max Candidates
-              </label>
+              <span style={textMutedStyle}>{copy.serviceBucketsHint}</span>
+            </label>
+            <label style={{ display: "grid", gap: "6px" }}>
+              <span style={fieldLabelStyle}>{copy.maxCandidates}</span>
               <input
                 type="number"
-                id="policies.maxCandidates"
                 value={editedAdapter.policies.maxCandidates}
-                onChange={(e) =>
+                onChange={(event) =>
                   handleInputChange(
                     "policies.maxCandidates",
-                    parseInt(e.target.value, 10),
+                    parseInteger(
+                      event.target.value,
+                      editedAdapter.policies.maxCandidates,
+                    ),
                   )
                 }
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                style={inputStyle}
               />
-            </div>
-            {/* Accept Timeout Seconds Input */}
-            <div>
-              <label
-                htmlFor="policies.acceptTimeoutSeconds"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Accept Timeout (seconds)
-              </label>
+            </label>
+            <label style={{ display: "grid", gap: "6px" }}>
+              <span style={fieldLabelStyle}>{copy.acceptTimeout}</span>
               <input
                 type="number"
-                id="policies.acceptTimeoutSeconds"
                 value={editedAdapter.policies.acceptTimeoutSeconds}
-                onChange={(e) =>
+                onChange={(event) =>
                   handleInputChange(
                     "policies.acceptTimeoutSeconds",
-                    parseInt(e.target.value, 10),
+                    parseInteger(
+                      event.target.value,
+                      editedAdapter.policies.acceptTimeoutSeconds,
+                    ),
                   )
                 }
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                style={inputStyle}
               />
-            </div>
-            {/* Manual Fallback Threshold Seconds Input */}
-            <div>
-              <label
-                htmlFor="policies.manualFallbackThresholdSeconds"
-                className="block text-sm font-medium text-gray-700"
-              >
-                Manual Fallback Threshold (seconds)
-              </label>
+            </label>
+            <label style={{ display: "grid", gap: "6px" }}>
+              <span style={fieldLabelStyle}>{copy.fallbackThreshold}</span>
               <input
                 type="number"
-                id="policies.manualFallbackThresholdSeconds"
                 value={editedAdapter.policies.manualFallbackThresholdSeconds}
-                onChange={(e) =>
+                onChange={(event) =>
                   handleInputChange(
                     "policies.manualFallbackThresholdSeconds",
-                    parseInt(e.target.value, 10),
+                    parseInteger(
+                      event.target.value,
+                      editedAdapter.policies.manualFallbackThresholdSeconds,
+                    ),
                   )
                 }
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md"
+                style={inputStyle}
               />
-            </div>
+            </label>
           </div>
+        </SectionBlock>
 
-          <div className="col-span-2">
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
-              Supported Actions
-            </h3>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {editedAdapter.supportedActions.length > 0 ? (
-                editedAdapter.supportedActions.map((action) => (
-                  <div
-                    key={action.name}
-                    className="rounded-md border border-gray-200 bg-gray-50 p-3"
-                  >
-                    <p className="text-sm font-medium text-gray-900">
-                      {action.name}
-                    </p>
-                    <p className="mt-1 text-xs text-gray-500">
-                      {action.description}
-                    </p>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-gray-500">
-                  No adapter actions are enabled for this platform.
-                </p>
-              )}
-            </div>
+        <SectionBlock title={copy.supportedActions}>
+          <div
+            style={{
+              display: "grid",
+              gap: "10px",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            }}
+          >
+            {editedAdapter.supportedActions.length > 0 ? (
+              editedAdapter.supportedActions.map((action) => (
+                <div
+                  key={action.name}
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: "14px",
+                    border: "1px solid rgba(148, 163, 184, 0.3)",
+                    background: "#f8fafc",
+                  }}
+                >
+                  <DataCellStack
+                    primary={<strong>{action.name}</strong>}
+                    secondary={action.description}
+                  />
+                </div>
+              ))
+            ) : (
+              <div style={textMutedStyle}>{copy.supportedActionsEmpty}</div>
+            )}
           </div>
-        </div>
-
-        <div className="flex justify-end mt-6">
-          <button
-            onClick={onClose}
-            className="mr-4 px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-          >
-            Save
-          </button>
-        </div>
-      </div>
+        </SectionBlock>
+      </WorkflowDetailDrawer>
     </div>
   );
+}
+
+function SectionBlock({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section style={{ display: "grid", gap: "12px" }}>
+      <div style={fieldLabelStyle}>{title}</div>
+      {children}
+    </section>
+  );
+}
+
+function AuthorityAwareValue({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "success" | "warning" | "info";
+}) {
+  return <StatusChip tone={tone} label={label} />;
 }
