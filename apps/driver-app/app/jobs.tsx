@@ -3,6 +3,7 @@ import {
   View,
   Text,
   SectionList,
+  ScrollView,
   StyleSheet,
   ActivityIndicator,
   RefreshControl,
@@ -21,6 +22,7 @@ import {
   getPlatformDisplayLabel,
 } from "@/components/platform-task-badge";
 import { getDriverClient } from "@/lib/api-client";
+import { formatMoney } from "@/lib/money";
 import {
   formatDriverTaskStatusLabel,
   formatDriverTaskTypeLabel,
@@ -32,9 +34,7 @@ import {
   EmptyState,
   ErrorBanner,
   IconButton,
-  InfoTile,
   PageHeader,
-  SegmentedControl,
   StatusChip,
   Tokens,
 } from "@/components/ui";
@@ -47,9 +47,7 @@ type TaskFilterValue =
   | "sync_issue";
 
 type TaskSection = {
-  key: "owned" | "forwarded";
-  title: string;
-  description: string;
+  key: "tasks";
   data: UnifiedDriverTaskView[];
 };
 
@@ -58,7 +56,7 @@ const FILTER_OPTIONS = [
   { label: "待處理", value: "needs_action" },
   { label: "進行中", value: "in_progress" },
   { label: "平台結案", value: "platform_closed" },
-  { label: "需同步/異常", value: "sync_issue" },
+  { label: "需同步", value: "sync_issue" },
 ] as const;
 
 const ACTION_LABELS: Record<DriverTaskAction, string> = {
@@ -386,6 +384,12 @@ function buildFilterDescription(
   }
 }
 
+function getFilterLabel(value: TaskFilterValue) {
+  return (
+    FILTER_OPTIONS.find((option) => option.value === value)?.label ?? "全部"
+  );
+}
+
 function getAllowedActionsFromTask(
   task: DriverTaskRecord,
   forwarded: boolean,
@@ -609,25 +613,13 @@ export default function JobsScreen() {
   );
 
   const sections = [
-    {
-      key: "owned" as const,
-      title: "自營任務",
-      description: "DRTS 可直接控制任務生命週期與本地操作。",
-      data: filteredTasks.filter(isOwnedTask),
-    },
-    {
-      key: "forwarded" as const,
-      title: "來源平台任務",
-      description: "第三方平台控制派遣與結案；卡片會顯示可執行操作與同步狀態。",
-      data: filteredTasks.filter((task) => !isOwnedTask(task)),
-    },
+    { key: "tasks" as const, data: filteredTasks },
   ] satisfies TaskSection[];
-  const visibleSections = sections.filter((section) => section.data.length > 0);
 
   if (loading) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="任務收件匣" />
+        <PageHeader title="任務" subtitle="同步收件匣" />
         <View style={styles.centerState}>
           <ActivityIndicator size="large" color={Tokens.colors.primary} />
           <Text style={styles.loadingLabel}>載入任務中…</Text>
@@ -639,7 +631,7 @@ export default function JobsScreen() {
   if (!tasksEnabled) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="任務收件匣" />
+        <PageHeader title="任務" subtitle="同步收件匣" />
         <EmptyState
           title="任務清單暫停提供"
           description="此功能目前未啟用，請稍後再試或改從行程作業查看目前任務。"
@@ -654,31 +646,11 @@ export default function JobsScreen() {
 
   return (
     <View style={styles.screen}>
-      <PageHeader
-        title="任務收件匣"
-        subtitle={`已指派 ${assignedCount} 筆任務`}
-        rightElement={
-          <IconButton
-            icon="refresh"
-            onPress={onRefresh}
-            disabled={refreshing}
-            accessibilityLabel="重新整理任務清單"
-          />
-        }
-      />
-
       <SectionList
-        sections={visibleSections}
+        sections={sections}
         keyExtractor={(item) => item.taskId}
         stickySectionHeadersEnabled={false}
-        renderSectionHeader={({ section }) => (
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            <Text style={styles.sectionDescription}>
-              {section.description} 共 {section.data.length} 筆。
-            </Text>
-          </View>
-        )}
+        renderSectionHeader={() => null}
         renderItem={({ item }) => {
           const order = orderMap[item.orderId] ?? null;
           const fixedPrice = order?.fixedPrice ?? false;
@@ -689,13 +661,36 @@ export default function JobsScreen() {
           const authorityBanner = buildAuthorityBanner(item);
           const syncIssue = hasSyncIssue(item);
           const platformClosed = isPlatformClosed(item);
-          const nativeStatus = !isOwnedTask(item)
+          const dimmed =
+            item.driverActionState === "completed" || platformClosed;
+          const forwarded = !isOwnedTask(item);
+          const nativeStatus = forwarded
             ? formatStatusLabel(item.nativeStatus)
             : null;
-          const pickupDropoffSummary =
+          const routeSummary =
             item.pickupSummary && item.dropoffSummary
               ? `${item.pickupSummary} → ${item.dropoffSummary}`
               : item.pickupSummary || item.dropoffSummary;
+          const cardTitle = routeSummary || `訂單 ${item.orderId}`;
+          const secondaryMeta = [
+            `訂單 ${item.orderId}`,
+            buildTaskMeta(item),
+          ].join(" · ");
+          const authoritySummary = syncIssue
+            ? buildAllowedActionSummary(item)
+            : isOwnedTask(item)
+              ? "DRTS 本地可直接操作"
+              : `${item.platformDisplayName} 規則生效`;
+          const emphasisLabel = dimmed
+            ? null
+            : formatActionStateLabel(item.driverActionState);
+          const fareLabel = order?.quotedFare
+            ? formatMoney(order.quotedFare)
+            : null;
+          const deadlineLabel = item.deadlineAt
+            ? formatTimestamp(item.deadlineAt)
+            : null;
+          const showFooterStrip = Boolean(fareLabel) || Boolean(deadlineLabel);
 
           return (
             <Pressable
@@ -704,54 +699,57 @@ export default function JobsScreen() {
               onPress={() => router.push("/trip")}
               style={({ pressed }) => [
                 styles.taskCard,
-                !isOwnedTask(item) && styles.forwardedTaskCard,
+                forwarded && !dimmed && styles.forwardedTaskCard,
                 platformClosed && styles.forwarderTerminalCard,
                 syncIssue && styles.syncIssueCard,
+                dimmed && styles.taskCardDim,
                 pressed && styles.taskCardPressed,
               ]}
             >
-              <View style={styles.taskCardHeader}>
-                <View style={styles.taskTitleBlock}>
-                  <Text style={styles.taskEyebrow}>任務編號</Text>
-                  <Text style={styles.taskId} numberOfLines={1}>
-                    {item.taskId}
-                  </Text>
-                </View>
-                <View style={styles.taskHeaderStatus}>
-                  <StatusChip
-                    label={formatStatusLabel(String(item.localStatus))}
-                    variant={getStatusChipVariant(item)}
+              <View style={styles.taskCardTopRow}>
+                <View style={styles.taskCardTopLead}>
+                  <PlatformTaskBadge
+                    platformCode={
+                      isOwnedTask(item) ? "owned" : item.sourcePlatform
+                    }
                   />
+                  {emphasisLabel ? (
+                    <StatusChip
+                      label={emphasisLabel}
+                      variant={getStatusChipVariant(item)}
+                      dot
+                    />
+                  ) : (
+                    <Text style={styles.taskInlineStatus}>
+                      {formatActionStateLabel(item.driverActionState)}
+                    </Text>
+                  )}
                 </View>
+                <Text style={styles.taskCode}>{item.taskId}</Text>
               </View>
 
-              <View style={styles.orderRow}>
-                <Text style={styles.orderLabel}>訂單</Text>
-                <Text style={styles.orderId} numberOfLines={1}>
-                  {item.orderId}
+              <View style={styles.taskTitleBlock}>
+                <Text style={styles.taskTitle} numberOfLines={2}>
+                  {cardTitle}
+                </Text>
+                <Text style={styles.taskSubtitle} numberOfLines={2}>
+                  {secondaryMeta}
                 </Text>
               </View>
-
-              {pickupDropoffSummary ? (
-                <Text style={styles.routeSummary} numberOfLines={2}>
-                  {pickupDropoffSummary}
-                </Text>
-              ) : null}
 
               <View style={styles.badgeRow}>
                 {item.routeLocked ? <RouteLockBadge /> : null}
-                <PlatformTaskBadge
-                  platformCode={
-                    isOwnedTask(item) ? "owned" : item.sourcePlatform
-                  }
-                />
                 <TaskTypeBadge
                   serviceBucket={serviceBucket}
                   businessDispatchSubtype={businessDispatchSubtype}
                   dispatchSemantics={dispatchSemantics}
                 />
                 {fixedPrice ? <FixedPriceBadge /> : null}
-                {!isOwnedTask(item) && nativeStatus ? (
+                <StatusChip
+                  label={formatStatusLabel(String(item.localStatus))}
+                  variant={getStatusChipVariant(item)}
+                />
+                {forwarded && nativeStatus ? (
                   <StatusChip
                     label={`平台：${nativeStatus}`}
                     variant={
@@ -763,11 +761,88 @@ export default function JobsScreen() {
                     }
                   />
                 ) : null}
-                <StatusChip
-                  label={formatActionStateLabel(item.driverActionState)}
-                  variant={getStatusChipVariant(item)}
-                />
               </View>
+
+              {showFooterStrip ? (
+                <View style={styles.taskFareRow}>
+                  {fareLabel ? (
+                    <Text style={styles.taskFareValue}>{fareLabel}</Text>
+                  ) : null}
+                  {deadlineLabel ? (
+                    <View style={styles.taskDeadlinePill}>
+                      <Ionicons
+                        name="time-outline"
+                        size={12}
+                        color={Tokens.colors.warning}
+                      />
+                      <Text style={styles.taskDeadlineText} numberOfLines={1}>
+                        {deadlineLabel}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              <View style={styles.taskMetaRow}>
+                <View style={styles.taskMetaItem}>
+                  <Ionicons
+                    name={syncIssue ? "alert-circle-outline" : "shield-outline"}
+                    size={14}
+                    color={
+                      syncIssue ? Tokens.colors.danger : Tokens.colors.textMuted
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.taskMetaText,
+                      syncIssue && styles.taskMetaTextDanger,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {authoritySummary}
+                  </Text>
+                </View>
+                <View style={styles.taskMetaItem}>
+                  <Ionicons
+                    name="time-outline"
+                    size={14}
+                    color={
+                      item.deadlineAt
+                        ? Tokens.colors.warning
+                        : Tokens.colors.textDim
+                    }
+                  />
+                  <Text
+                    style={[
+                      styles.taskMetaText,
+                      item.deadlineAt && styles.taskMetaTextWarn,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {buildTaskMeta(item)}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.cardActionRow}>
+                <Text style={styles.cardActionLabel}>下一步</Text>
+                <Text style={styles.cardActionValue} numberOfLines={2}>
+                  {buildAllowedActionSummary(item)}
+                </Text>
+              </View>
+
+              {syncIssue ? (
+                <View style={styles.syncIssueRow}>
+                  <Ionicons
+                    name="alert-circle"
+                    size={14}
+                    color={Tokens.colors.danger}
+                  />
+                  <Text style={styles.syncIssueText} numberOfLines={2}>
+                    需派車台處理，請等待指示
+                  </Text>
+                </View>
+              ) : null}
 
               <AuthorityBanner
                 title={authorityBanner.title}
@@ -778,22 +853,15 @@ export default function JobsScreen() {
                 style={styles.authorityBanner}
               />
 
-              <View style={styles.metaRow}>
-                <Text style={styles.metaText}>
-                  可執行操作：{buildAllowedActionSummary(item)}
-                </Text>
-                <Text style={styles.metaText}>{buildTaskMeta(item)}</Text>
-              </View>
-
               <Text style={styles.operationalNote}>
                 {buildOperationalNote(item)}
               </Text>
 
               <View style={styles.cardFooter}>
-                <View>
+                <View style={styles.footerLead}>
                   <Text style={styles.affordanceLabel}>開啟行程作業</Text>
                   <Text style={styles.affordanceMeta}>
-                    查看目前進度、權限與下一步操作
+                    開啟行程作業，查看目前進度、權限與下一步操作
                   </Text>
                 </View>
                 <View style={styles.affordanceIcon}>
@@ -809,6 +877,90 @@ export default function JobsScreen() {
         }}
         ListHeaderComponent={
           <View style={styles.listHeader}>
+            <View style={styles.heroPanel}>
+              <View style={styles.heroPanelGlow} />
+              <View style={styles.heroHeader}>
+                <View style={styles.heroTitleBlock}>
+                  <Text style={styles.heroTitle}>任務</Text>
+                  <Text style={styles.heroSubtitle}>
+                    已指派 {assignedCount} 筆任務
+                  </Text>
+                </View>
+                <IconButton
+                  icon="refresh"
+                  onPress={onRefresh}
+                  disabled={refreshing}
+                  accessibilityLabel="重新整理任務清單"
+                />
+              </View>
+
+              <View style={styles.kpiRow}>
+                <View style={styles.kpiTile}>
+                  <Text style={styles.kpiLabel}>總計</Text>
+                  <Text style={styles.kpiValue}>{assignedCount}</Text>
+                </View>
+                <View style={[styles.kpiTile, styles.kpiWarnTile]}>
+                  <Text style={[styles.kpiLabel, styles.kpiWarnLabel]}>
+                    需動作
+                  </Text>
+                  <Text style={[styles.kpiValue, styles.kpiWarnValue]}>
+                    {needsActionCount}
+                  </Text>
+                </View>
+                <View style={[styles.kpiTile, styles.kpiBrandTile]}>
+                  <Text style={[styles.kpiLabel, styles.kpiBrandLabel]}>
+                    外部平台
+                  </Text>
+                  <Text style={[styles.kpiValue, styles.kpiBrandValue]}>
+                    {forwardedCount}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRow}
+            >
+              {FILTER_OPTIONS.map((option) => {
+                const selected = option.value === selectedFilter;
+                const count =
+                  option.value === "all"
+                    ? assignedCount
+                    : tasks.filter((task) => matchesFilter(task, option.value))
+                        .length;
+
+                return (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => setSelectedFilter(option.value)}
+                    style={[
+                      styles.filterPill,
+                      selected && styles.filterPillSelected,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.filterPillLabel,
+                        selected && styles.filterPillLabelSelected,
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.filterPillCount,
+                        selected && styles.filterPillCountSelected,
+                      ]}
+                    >
+                      {count}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
             {error ? (
               <View style={styles.errorPanel}>
                 <ErrorBanner
@@ -834,27 +986,14 @@ export default function JobsScreen() {
               />
             ) : null}
 
-            <SegmentedControl
-              options={FILTER_OPTIONS.map((option) => ({
-                label: option.label,
-                value: option.value,
-              }))}
-              selectedValue={selectedFilter}
-              onValueChange={(value) =>
-                setSelectedFilter(value as TaskFilterValue)
-              }
-            />
-
-            <View style={styles.summaryGrid}>
-              <InfoTile label="全部任務" value={String(assignedCount)} />
-              <InfoTile label="待處理" value={String(needsActionCount)} />
-              <InfoTile label="來源平台" value={String(forwardedCount)} />
-              <InfoTile label="同步/異常" value={String(syncIssueCount)} />
-            </View>
-
             <View style={styles.filterSummaryCard}>
-              <Text style={styles.filterSummaryLabel}>目前檢視</Text>
+              <Text style={styles.filterSummaryLabel}>
+                目前檢視 · {getFilterLabel(selectedFilter)}
+              </Text>
               <Text style={styles.filterSummaryText}>{filterDescription}</Text>
+              <Text style={styles.filterSummaryMeta}>
+                同步/授權異常 {syncIssueCount} 筆
+              </Text>
             </View>
           </View>
         }
@@ -927,6 +1066,46 @@ const styles = StyleSheet.create({
     marginBottom: Tokens.spacing.md,
     gap: Tokens.spacing.md,
   },
+  heroPanel: {
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: 24,
+    backgroundColor: Tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    paddingHorizontal: Tokens.spacing.lg,
+    paddingTop: Tokens.spacing.lg,
+    paddingBottom: Tokens.spacing.md,
+    gap: Tokens.spacing.md,
+    ...Tokens.shadows.sm,
+  },
+  heroPanelGlow: {
+    position: "absolute",
+    top: -48,
+    right: -40,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: Tokens.colors.brandBg,
+  },
+  heroHeader: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: Tokens.spacing.md,
+  },
+  heroTitleBlock: {
+    flex: 1,
+    gap: 2,
+  },
+  heroTitle: {
+    ...Tokens.type.screenTitle,
+    color: Tokens.colors.textStrong,
+  },
+  heroSubtitle: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+  },
   errorPanel: {
     gap: Tokens.spacing.sm,
   },
@@ -936,17 +1115,92 @@ const styles = StyleSheet.create({
   retryButton: {
     alignSelf: "flex-start",
   },
-  summaryGrid: {
+  kpiRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: Tokens.spacing.sm,
+  },
+  kpiTile: {
+    flex: 1,
+    paddingHorizontal: Tokens.spacing.md,
+    paddingVertical: Tokens.spacing.md,
+    borderRadius: Tokens.radius.lg,
+    backgroundColor: Tokens.colors.surfaceLo,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+  },
+  kpiWarnTile: {
+    backgroundColor: Tokens.colors.warningBg,
+    borderColor: `${Tokens.colors.warning}22`,
+  },
+  kpiBrandTile: {
+    backgroundColor: Tokens.colors.ownedBg,
+    borderColor: Tokens.colors.ownedBorder,
+  },
+  kpiLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginBottom: Tokens.spacing.xs,
+  },
+  kpiValue: {
+    ...Tokens.type.screenTitle,
+    color: Tokens.colors.textStrong,
+    fontSize: 26,
+    lineHeight: 30,
+  },
+  kpiWarnLabel: {
+    color: Tokens.colors.warning,
+  },
+  kpiWarnValue: {
+    color: Tokens.colors.warning,
+  },
+  kpiBrandLabel: {
+    color: Tokens.colors.owned,
+  },
+  kpiBrandValue: {
+    color: Tokens.colors.owned,
+  },
+  filterRow: {
+    flexDirection: "row",
+    gap: Tokens.spacing.xs,
+    paddingRight: Tokens.spacing.md,
+  },
+  filterPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.xs,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+    borderRadius: Tokens.radius.full,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.surface,
+  },
+  filterPillSelected: {
+    backgroundColor: Tokens.colors.textStrong,
+    borderColor: Tokens.colors.textStrong,
+  },
+  filterPillLabel: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textMuted,
+    fontWeight: "600",
+  },
+  filterPillLabelSelected: {
+    color: Tokens.colors.textInverse,
+  },
+  filterPillCount: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textDim,
+  },
+  filterPillCountSelected: {
+    color: "rgba(255,255,255,0.72)",
   },
   filterSummaryCard: {
     backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.md,
+    borderRadius: Tokens.radius.lg,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.md,
+    paddingHorizontal: Tokens.spacing.md,
+    paddingVertical: Tokens.spacing.md,
   },
   filterSummaryLabel: {
     ...Tokens.type.micro,
@@ -957,88 +1211,74 @@ const styles = StyleSheet.create({
     ...Tokens.type.label,
     color: Tokens.colors.textStrong,
   },
-  sectionHeader: {
-    marginBottom: Tokens.spacing.sm,
-    marginTop: Tokens.spacing.sm,
-  },
-  sectionTitle: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
-    fontWeight: "700",
-  },
-  sectionDescription: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-    marginTop: 2,
+  filterSummaryMeta: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textDim,
+    marginTop: Tokens.spacing.xs,
   },
   emptyState: {
     paddingHorizontal: 0,
   },
   taskCard: {
     backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.md,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.md,
-    marginBottom: Tokens.spacing.sm,
-    minHeight: 220,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: 10,
+    overflow: "hidden",
+    ...Tokens.shadows.sm,
   },
   forwardedTaskCard: {
     borderColor: Tokens.colors.forwardedBorder,
-    borderLeftWidth: 4,
+    borderLeftWidth: 3,
     borderLeftColor: Tokens.colors.forwarded,
-    backgroundColor: Tokens.colors.forwardedBg,
   },
   syncIssueCard: {
     borderColor: `${Tokens.colors.warning}55`,
-    backgroundColor: Tokens.colors.warningBg,
+  },
+  taskCardDim: {
+    opacity: 0.7,
   },
   taskCardPressed: {
-    backgroundColor: "#F9FBFF",
+    backgroundColor: "#FBFDFF",
     borderColor: "#B8D0F0",
   },
-  taskCardHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: Tokens.spacing.sm,
-  },
-  taskTitleBlock: {
-    flex: 1,
-    gap: 2,
-  },
-  taskEyebrow: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
-  taskHeaderStatus: {
-    alignItems: "flex-end",
-  },
-  taskId: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textStrong,
-    fontWeight: "600",
-    flex: 1,
-  },
-  orderRow: {
+  taskCardTopRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    gap: Tokens.spacing.sm,
+    marginBottom: Tokens.spacing.sm,
+  },
+  taskCardTopLead: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
     gap: Tokens.spacing.xs,
-    marginTop: Tokens.spacing.sm,
-  },
-  orderLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
-  orderId: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textBody,
     flex: 1,
   },
-  routeSummary: {
+  taskInlineStatus: {
     ...Tokens.type.small,
-    color: Tokens.colors.textBody,
-    marginTop: Tokens.spacing.xs,
+    color: Tokens.colors.textMuted,
+    fontWeight: "600",
+  },
+  taskCode: {
+    ...Tokens.type.code,
+    color: Tokens.colors.textDim,
+  },
+  taskTitleBlock: {
+    gap: Tokens.spacing.xs,
+  },
+  taskTitle: {
+    ...Tokens.type.title,
+    color: Tokens.colors.textStrong,
+    fontWeight: "600",
+  },
+  taskSubtitle: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
   },
   badgeRow: {
     flexDirection: "row",
@@ -1046,19 +1286,87 @@ const styles = StyleSheet.create({
     gap: Tokens.spacing.xs,
     marginTop: Tokens.spacing.md,
   },
-  authorityBanner: {
+  taskFareRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.md,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderStyle: "dashed",
+    borderTopColor: Tokens.colors.border,
+  },
+  taskFareValue: {
+    ...Tokens.type.code,
+    fontSize: 13,
+    fontWeight: "700",
+    color: Tokens.colors.textStrong,
+  },
+  taskDeadlinePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  taskDeadlineText: {
+    ...Tokens.type.small,
+    color: Tokens.colors.warning,
+    fontWeight: "600",
+  },
+  syncIssueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 10,
+  },
+  syncIssueText: {
+    ...Tokens.type.small,
+    color: Tokens.colors.danger,
+    flexShrink: 1,
+  },
+  taskMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
     marginTop: Tokens.spacing.md,
   },
-  metaRow: {
-    marginTop: Tokens.spacing.md,
-    gap: Tokens.spacing.xs,
+  taskMetaItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    minWidth: "46%",
+    flexShrink: 1,
   },
-  metaText: {
+  taskMetaText: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+    flexShrink: 1,
+  },
+  taskMetaTextDanger: {
+    color: Tokens.colors.danger,
+  },
+  taskMetaTextWarn: {
+    color: Tokens.colors.warning,
+  },
+  cardActionRow: {
+    marginTop: Tokens.spacing.md,
+    paddingTop: Tokens.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Tokens.colors.border,
+    gap: 2,
+  },
+  cardActionLabel: {
     ...Tokens.type.micro,
     color: Tokens.colors.textMuted,
   },
+  cardActionValue: {
+    ...Tokens.type.bodyStrong,
+    color: Tokens.colors.textStrong,
+  },
+  authorityBanner: {
+    marginTop: Tokens.spacing.md,
+  },
   operationalNote: {
-    ...Tokens.type.micro,
+    ...Tokens.type.small,
     color: Tokens.colors.textMuted,
     marginTop: Tokens.spacing.md,
   },
@@ -1067,16 +1375,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: Tokens.spacing.md,
+    paddingTop: Tokens.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Tokens.colors.border,
+  },
+  footerLead: {
+    flex: 1,
   },
   affordanceLabel: {
-    ...Tokens.type.label,
-    color: Tokens.colors.primary,
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
     fontWeight: "600",
   },
   affordanceMeta: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-    marginTop: 2,
+    ...Tokens.type.label,
+    color: Tokens.colors.primary,
+    marginTop: Tokens.spacing.xs,
   },
   affordanceIcon: {
     width: 32,
