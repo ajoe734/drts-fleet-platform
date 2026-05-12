@@ -26,6 +26,16 @@ This is the PBK-UI-001 bootstrap slice. Per
   bring-up.
 - Every functional surface lives under `/[tenantSlug]/...`. The dynamic
   segment is required — there is no "default tenant" in this app.
+- Screen routes are explicit path states: `/[tenantSlug]/book`,
+  `/[tenantSlug]/confirmed`, `/[tenantSlug]/help`, etc. The tenant root still
+  accepts `?screen=` / `?scenario=` for backward-compatible demo entry, but
+  the canonical PBK-UI-004 negative-path states are direct routes.
+- Authority-safe negative paths are preserved as
+  `/[tenantSlug]/eligible`, `/[tenantSlug]/ineligible`,
+  `/[tenantSlug]/manual_review`, `/[tenantSlug]/inactive`, and
+  `/[tenantSlug]/eligibility-required`. These routes resolve to the correct
+  eligibility or booking gate instead of silently falling through to another
+  screen.
 - `app/[tenantSlug]/layout.tsx` resolves the brand via `lib/brand.ts`. An
   unknown slug returns `notFound()` so we cannot accidentally render an
   unbranded experience.

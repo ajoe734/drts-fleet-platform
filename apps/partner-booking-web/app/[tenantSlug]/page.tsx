@@ -1,41 +1,37 @@
 import { notFound } from "next/navigation";
-import {
-  isPartnerBookingScreenId,
-  PartnerBookingReferenceFunnel,
-} from "@drts/ui-web";
+import { PartnerBookingReferenceFunnel } from "@drts/ui-web";
 import { getBrandForSlug } from "@/lib/brand";
+import { resolvePartnerSearchState } from "@/lib/route-state";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
-  searchParams: Promise<{ screen?: string | string[] }>;
+  searchParams: Promise<{
+    screen?: string | string[];
+    scenario?: string | string[];
+  }>;
 };
-
-function normalizeScreen(
-  value: string | string[] | undefined,
-): Parameters<typeof isPartnerBookingScreenId>[0] {
-  return Array.isArray(value) ? (value[0] ?? "landing") : (value ?? "landing");
-}
 
 export default async function TenantHomePage({
   params,
   searchParams,
 }: PageProps) {
   const { tenantSlug } = await params;
-  const { screen } = await searchParams;
+  const { screen, scenario } = await searchParams;
   const brand = getBrandForSlug(tenantSlug);
   if (!brand) {
     notFound();
   }
 
-  const activeScreen = normalizeScreen(screen);
+  const routeState = resolvePartnerSearchState(screen, scenario);
 
   return (
     <PartnerBookingReferenceFunnel
       brand={brand}
-      activeScreen={
-        isPartnerBookingScreenId(activeScreen) ? activeScreen : "landing"
-      }
+      activeScreen={routeState.activeScreen}
       basePath={`/${tenantSlug}`}
+      {...(routeState.activeScenario
+        ? { activeScenario: routeState.activeScenario }
+        : {})}
     />
   );
 }
