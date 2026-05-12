@@ -1,6 +1,6 @@
 # PBK-UI-003 Sidecar Review Packet
 
-This document is the parallel review-support packet for `PBK-UI-003` ("CTBC reference funnel — 7 screens"). It does not change canonical truth. It consolidates the repo facts and verification evidence that the assigned sidecar reviewer (`Codex2`) needs to confirm that the parent task's `review_approved` state in `ai-status.json` is justified by what is actually in the tree.
+This document is the parallel review-support packet for `PBK-UI-003` ("CTBC reference funnel — 7 screens"). It does not change canonical truth. It consolidates the repo facts and verification evidence that the assigned sidecar reviewer (`Codex2`) needs to confirm that the parent task's `done` state in `ai-status.json` — and the closeout commit/push it cites — is justified by what is actually in the tree.
 
 This packet is a sibling to `support/sidecars/PBK-UI-003/PBK-UI-003-SIDECAR-ACCEPTANCE.md`. The acceptance sidecar covers start-gate scope and dependency mapping; this review sidecar covers post-implementation evidence and reviewer handoff.
 
@@ -25,7 +25,7 @@ Anchors used here:
 - **Owner:** `Claude`
 - **Reviewer:** `Codex2`
 - **Mutates Canonical:** `false`
-- **Objective:** Hand off a reviewer-facing evidence summary for the parent CTBC funnel task without editing L1/L2 truth, runtime code, or the parent backlog item itself. The parent has already been re-approved in `ai-status.json`; this packet records why and gives `Codex2` enough anchors to either confirm or reopen.
+- **Objective:** Hand off a reviewer-facing evidence summary for the parent CTBC funnel task without editing L1/L2 truth, runtime code, or the parent backlog item itself. The parent has already been finalized to `done` in `ai-status.json` with task-scoped commit and normal non-force push recorded; this packet records why and gives `Codex2` enough anchors to either confirm or reopen the sidecar.
 
 Guardrails for this packet:
 
@@ -43,15 +43,23 @@ Guardrails for this packet:
 | Phase           | `Wave 5`                                                                                                               |
 | Owner           | `Codex2`                                                                                                               |
 | Reviewer        | `Codex`                                                                                                                |
-| Status          | `review_approved` (awaiting `done` closeout by `Codex2`)                                                               |
+| Status          | `done` (closeout finalized by `Codex2`)                                                                                |
 | Depends on      | `PBK-UI-002` (`done` at commit `d7046eb`)                                                                              |
 | Planning ref    | `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`                                                                |
 | Acceptance      | `pnpm --filter @drts/partner-booking-web typecheck / build / lint`; `Storybook 對照對應 PB_* artboard (PBK-UI-003 起)` |
-| Last update     | `2026-05-12T20:29:33Z`                                                                                                 |
-| Approval commit | `fbc05f62926392b7363360757f475275b9b56deb`                                                                             |
-| Approval push   | `origin/feat/claude2-ui-redesign-foundation`                                                                           |
+| Last update     | `2026-05-12T20:31:57Z`                                                                                                 |
+| Commit hash     | `fbc05f62926392b7363360757f475275b9b56deb`                                                                             |
+| Commit subject  | `feat(PBK-UI-003): add CTBC reference funnel`                                                                          |
+| Commit agent    | `Codex2`                                                                                                               |
+| Commit reviewer | `Codex`                                                                                                                |
+| Commit recorded | `2026-05-12T20:31:57Z`                                                                                                 |
+| Push remote     | `origin`                                                                                                               |
+| Push branch     | `feat/claude2-ui-redesign-foundation`                                                                                  |
+| Push ref        | `origin/feat/claude2-ui-redesign-foundation`                                                                           |
+| Push commit     | `fbc05f62926392b7363360757f475275b9b56deb`                                                                             |
+| Push recorded   | `2026-05-12T20:31:57Z`                                                                                                 |
 
-`ai-status.json` `next` for `PBK-UI-003` records the re-approval verification rerun on 2026-05-12: `pnpm --filter @drts/ui-web typecheck`; `pnpm --filter @drts/ui-web build-storybook`; `pnpm --filter @drts/partner-booking-web typecheck`; `pnpm --filter @drts/partner-booking-web build`; `pnpm --filter @drts/partner-booking-web lint`. The reviewer's recorded conclusion is "No review findings", with closeout pending owner `Codex2`.
+`ai-status.json` `next` for `PBK-UI-003` records the closeout summary: task-scoped commit `fbc05f62926392b7363360757f475275b9b56deb` ("feat(PBK-UI-003): add CTBC reference funnel") is already on `origin/feat/claude2-ui-redesign-foundation` after a normal non-force push. The recorded verification rerun is: `pnpm --filter @drts/ui-web typecheck`; `pnpm --filter @drts/ui-web build-storybook`; `pnpm --filter @drts/partner-booking-web typecheck`; `pnpm --filter @drts/partner-booking-web build`; `pnpm --filter @drts/partner-booking-web lint`; with reviewer artboard parity confirmed for landing/eligibility/book/confirmed/trips/receipt/help against `docs/05-ui/drts-design-canvas/Partner Booking.html`.
 
 ### This sidecar task: `PBK-UI-003-SIDECAR-REVIEW`
 
@@ -105,16 +113,16 @@ The planning doc, runtime code, Storybook stories, and design canvas all line up
 
 ## §5 Acceptance Evidence Mapping
 
-The `ai-status.json` acceptance for `PBK-UI-003` is two items: the partner-booking-web commands trilogy, and the Storybook artboard comparison. The recorded reviewer rerun on 2026-05-12 covers both:
+The `ai-status.json` acceptance for `PBK-UI-003` is two items: the partner-booking-web commands trilogy, and the Storybook artboard comparison. The closeout `next` field on `PBK-UI-003` (recorded `2026-05-12T20:31:57Z`) cites the verification rerun that covers both:
 
-| Acceptance item                                                 | Evidence in `ai-status.json` `PBK-UI-003.next`                                                                    | Anchor in the tree                                                        |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `pnpm --filter @drts/partner-booking-web typecheck`             | rerun verified 2026-05-12                                                                                         | `apps/partner-booking-web/tsconfig.json`                                  |
-| `pnpm --filter @drts/partner-booking-web build`                 | rerun verified 2026-05-12                                                                                         | `apps/partner-booking-web/`                                               |
-| `pnpm --filter @drts/partner-booking-web lint`                  | rerun verified 2026-05-12                                                                                         | `apps/partner-booking-web/`                                               |
-| Storybook artboard parity (`PB_* against Partner Booking.html`) | `pnpm --filter @drts/ui-web typecheck` and `pnpm --filter @drts/ui-web build-storybook` rerun verified 2026-05-12 | `packages/ui-web/src/partner-booking.stories.tsx`, `Partner Booking.html` |
+| Acceptance item                                                 | Evidence in `ai-status.json` `PBK-UI-003.next` (closeout)                                                    | Anchor in the tree                                                        |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `pnpm --filter @drts/partner-booking-web typecheck`             | closeout verified 2026-05-12 (commit `fbc05f6`, pushed to `origin/feat/claude2-ui-redesign-foundation`)      | `apps/partner-booking-web/tsconfig.json`                                  |
+| `pnpm --filter @drts/partner-booking-web build`                 | closeout verified 2026-05-12 (commit `fbc05f6`, pushed to `origin/feat/claude2-ui-redesign-foundation`)      | `apps/partner-booking-web/`                                               |
+| `pnpm --filter @drts/partner-booking-web lint`                  | closeout verified 2026-05-12 (commit `fbc05f6`, pushed to `origin/feat/claude2-ui-redesign-foundation`)      | `apps/partner-booking-web/`                                               |
+| Storybook artboard parity (`PB_* against Partner Booking.html`) | `pnpm --filter @drts/ui-web typecheck` and `pnpm --filter @drts/ui-web build-storybook` verified at closeout | `packages/ui-web/src/partner-booking.stories.tsx`, `Partner Booking.html` |
 
-This sidecar packet does not re-execute these commands; the parent reviewer's recorded reruns are the canonical evidence. The mapping above is the audit hand-off so `Codex2` can spot-check rather than re-run unless a discrepancy appears.
+This sidecar packet does not re-execute these commands; the parent owner's recorded closeout reruns are the canonical evidence. The mapping above is the audit hand-off so `Codex2` can spot-check rather than re-run unless a discrepancy appears.
 
 ## §6 Scope Guardrails — what `PBK-UI-003` should NOT have done
 
@@ -145,12 +153,13 @@ These are the sidecar-review gates. They are framed as audit checks against arti
 
 ### A. Machine truth still matches this packet
 
-- [ ] `ai-status.json` still records `PBK-UI-003` as `review_approved`, owner `Codex2`, reviewer `Codex`, last_update `2026-05-12T20:29:33Z`. If those fields drift, refresh §2 of this packet before approving.
+- [ ] `ai-status.json` still records `PBK-UI-003` as `done`, owner `Codex2`, reviewer `Codex`, last_update `2026-05-12T20:31:57Z`, with `commit_hash` `fbc05f62926392b7363360757f475275b9b56deb`, `commit_subject` `feat(PBK-UI-003): add CTBC reference funnel`, `push_remote` `origin`, and `push_branch` `feat/claude2-ui-redesign-foundation`. If any of those fields drift, refresh §2 of this packet before approving.
 - [ ] `ai-status.json` still records `PBK-UI-002` as `done` on commit `d7046eb` pushed to `origin/feat/claude2-ui-redesign-foundation`.
 - [ ] `ai-status.json` still records this sidecar (`PBK-UI-003-SIDECAR-REVIEW`) as owned by `Claude`, reviewed by `Codex2`, with `helper_kind: review_packet` and `mutates_canonical: false`.
 
-### B. Repo state matches the parent reviewer's "no findings" record
+### B. Repo state matches the parent owner's closeout record
 
+- [ ] `git log --oneline -1 fbc05f62926392b7363360757f475275b9b56deb` resolves to `feat(PBK-UI-003): add CTBC reference funnel`, and that commit is reachable from `origin/feat/claude2-ui-redesign-foundation`.
 - [ ] `git log --oneline -1 -- packages/ui-web/src/partner-booking-funnel.tsx` resolves to commit `fbc05f6` and the file is present.
 - [ ] `packages/ui-web/src/partner-booking.stories.tsx` still exports the seven parity stories `Landing`, `Eligibility`, `Book`, `Confirmed`, `Trips`, `Receipt`, `Help` and references `Partner Booking.html` as the canvas src.
 - [ ] `packages/ui-web/src/index.tsx` still re-exports the partner-booking surface that `apps/partner-booking-web/app/[tenantSlug]/page.tsx` imports.
@@ -169,7 +178,8 @@ These are the sidecar-review gates. They are framed as audit checks against arti
 
 ## §9 Reviewer Handoff Notes (for `Codex2`)
 
-1. Treat this packet as audit material for the parent reviewer's already-recorded re-approval. The parent task is `review_approved`; the sidecar reviewer should approve, reopen, or block this packet, but not re-decide the parent's approval — that is the parent reviewer (`Codex`)'s lane.
-2. If §8.A or §8.B fails (machine truth has moved, or the implementation files have been amended after the approval timestamp), reopen this sidecar with `scripts/ai-status.sh reopen PBK-UI-003-SIDECAR-REVIEW "<reason>"` rather than approving on stale evidence.
-3. If §8.C fails (a guardrail was crossed in the parent commit), the right move is to raise that against `PBK-UI-003` directly via the parent reviewer, not to silently expand or contract this sidecar's scope.
+1. Treat this packet as audit material for the parent owner's already-recorded closeout. The parent task is `done` with task-scoped commit `fbc05f6` already pushed to `origin/feat/claude2-ui-redesign-foundation`; the sidecar reviewer should approve, reopen, or block _this packet_, but not re-decide the parent's approval or re-execute its closeout — that already happened under `Codex` (parent reviewer) and `Codex2` (parent owner).
+2. If §8.A or §8.B fails (machine truth has moved, or the implementation files / closeout commit have been amended after `2026-05-12T20:31:57Z`), reopen this sidecar with `AI_NAME=Codex2 scripts/ai-status.sh reopen PBK-UI-003-SIDECAR-REVIEW "<reason>"` rather than approving on stale evidence.
+3. If §8.C fails (a guardrail was crossed in the parent commit), the right move is to raise that against `PBK-UI-003` directly with the parent reviewer (`Codex`) and, if needed, request a follow-up canonical task — do not silently expand or contract this sidecar's scope to compensate.
 4. Approval should explicitly confirm that the only file changed under this sidecar's task scope is `support/sidecars/PBK-UI-003/PBK-UI-003-SIDECAR-REVIEW.md`. Any machine-truth state changes should appear only as `ai-status.json` / `current-work.md` / `ai-activity-log.jsonl` updates produced by `scripts/ai-status.sh`.
+5. This is a sidecar/support slice, so the sidecar's own closeout uses `NO_COMMIT_REQUIRED=1` per the collaboration guide §5 — only the packet markdown changes, no runtime commit is owed by this task.
