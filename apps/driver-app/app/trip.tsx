@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -22,6 +22,7 @@ import RouteDisplay from "@/components/route-display";
 import { ActionButton as SharedActionButton } from "@/components/ui/ActionButton";
 import {
   AppScreen,
+  AuthorityBanner,
   BottomActionBar,
   EmptyState,
   ErrorBanner,
@@ -68,6 +69,7 @@ import {
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
+import { formatMoney } from "@/lib/money";
 import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
 import {
   getTripExperienceState,
@@ -99,6 +101,37 @@ function ActionButton({
       loading={loading}
       variant={variant}
     />
+  );
+}
+
+function MetricPill({
+  icon,
+  label,
+  value,
+  tone = "neutral",
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  tone?: "neutral" | "success" | "warning" | "danger";
+}) {
+  const iconColor =
+    tone === "success"
+      ? Tokens.colors.success
+      : tone === "warning"
+        ? Tokens.colors.warning
+        : tone === "danger"
+          ? Tokens.colors.danger
+          : Tokens.colors.brand;
+
+  return (
+    <View style={styles.metricPill}>
+      <Ionicons name={icon} size={14} color={iconColor} />
+      <View style={styles.metricPillCopy}>
+        <Text style={styles.metricPillLabel}>{label}</Text>
+        <Text style={styles.metricPillValue}>{value}</Text>
+      </View>
+    </View>
   );
 }
 
@@ -577,6 +610,85 @@ function getIdleBottomActionLabel(state: TripExperienceState | null) {
   }
 }
 
+function getTripAuthorityBannerProps(
+  task: DriverTaskRecord | null,
+  state: TripExperienceState | null,
+): ComponentProps<typeof AuthorityBanner> {
+  if (!task || !isForwardedTask(task)) {
+    return {
+      title: "自營派單",
+      authorityLabel: "DRTS 行程主控",
+      description:
+        "完整本機操作權限。請依行程節點完成接單、接送、追蹤與完單佐證。",
+      tone: "owned",
+      icon: "shield-checkmark",
+    };
+  }
+
+  switch (state) {
+    case "forwarded_offered":
+      return {
+        title: "來源平台派單",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description:
+          "此訂單由來源平台主導。接受後只會送出平台請求，仍可能被其他司機搶先確認。",
+        tone: "platform",
+        icon: "swap-horizontal-outline",
+      };
+    case "forwarded_pending":
+      return {
+        title: "等待來源平台確認",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description:
+          "已送出接單要求。平台回應前，司機端所有本地生命周期操作維持鎖定。",
+        tone: "warning",
+        icon: "time-outline",
+      };
+    case "forwarded_confirmed":
+      return {
+        title: "來源平台已確認",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description:
+          "平台已確認此單。本地畫面會保留可讀的行程鏡像與後續節點，但仍需遵守平台規則。",
+        tone: "platform",
+        icon: "checkmark-circle-outline",
+      };
+    case "forwarded_lost":
+      return {
+        title: "平台已分配給其他司機",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description: "此筆平台訂單已結束，本地僅保留同步結果供查閱與追蹤。",
+        tone: "warning",
+        icon: "close-circle-outline",
+      };
+    case "forwarded_cancelled":
+      return {
+        title: "來源平台已取消",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description: "來源平台已取消訂單。本地不再提供任何後續行程操作。",
+        tone: "warning",
+        icon: "ban-outline",
+      };
+    case "sync_failed":
+      return {
+        title: "平台同步異常",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description:
+          "既有 sync_failed guardrail 保持鎖定；派車台接手處理前，司機端不開放本地狀態變更。",
+        tone: "danger",
+        icon: "alert-circle-outline",
+      };
+    default:
+      return {
+        title: "平台鏡像任務",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description: "來源平台仍是此任務的權限來源，本地只顯示安全同步資訊。",
+        tone: "platform",
+        icon: "swap-horizontal-outline",
+      };
+  }
+}
+
 export default function TripScreen() {
   const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
   const [orderDetail, setOrderDetail] = useState<OwnedOrderRecord | null>(null);
@@ -689,6 +801,10 @@ export default function TripScreen() {
     tripExperienceState,
   );
   const tripStateEyebrow = getTripStateEyebrow(taskDetail, tripExperienceState);
+  const tripAuthorityBanner = getTripAuthorityBannerProps(
+    taskDetail,
+    tripExperienceState,
+  );
   const headerSubtitle = taskDetail
     ? taskDetail.orderId
       ? `${taskDetail.taskId} · ${taskDetail.orderId}`
@@ -703,6 +819,23 @@ export default function TripScreen() {
   const forwardedOutcomeToneStyles = forwardedOutcomeSummary
     ? getStatusToneStyles(forwardedOutcomeSummary.tone)
     : null;
+  const pickupAddress = orderDetail?.pickup.address ?? "待確認上車點";
+  const dropoffAddress = orderDetail?.dropoff.address ?? "待確認下車點";
+  const routeMetricDistance = showTripMetrics
+    ? formatTripDistance(liveDistanceKm)
+    : orderDetail?.etaSnapshot
+      ? `約 ${orderDetail.etaSnapshot.etaMinutes} 分`
+      : "待同步";
+  const routeMetricDuration = showTripMetrics
+    ? formatTripDuration(liveDurationSec)
+    : isForwardedTrip
+      ? "平台決定"
+      : "開始行程後更新";
+  const routeMetricFare = orderDetail?.quotedFare
+    ? formatMoney(orderDetail.quotedFare)
+    : orderDetail?.fixedPrice
+      ? "固定車資"
+      : "金額待確認";
   const bottomNotice =
     completionSubmitBlocker === "proof_requirements_unavailable"
       ? "完單前需先載入訂單佐證需求，請重新整理後再送出。"
@@ -1254,6 +1387,14 @@ export default function TripScreen() {
 
         {taskDetail ? (
           <>
+            <AuthorityBanner
+              title={tripAuthorityBanner.title}
+              authorityLabel={tripAuthorityBanner.authorityLabel}
+              description={tripAuthorityBanner.description}
+              tone={tripAuthorityBanner.tone}
+              icon={tripAuthorityBanner.icon}
+            />
+
             <View
               style={[
                 styles.tripHero,
@@ -1283,11 +1424,6 @@ export default function TripScreen() {
                   </Text>
                 </View>
                 <View style={styles.tripHeroBadges}>
-                  <StatusChip
-                    label={tripStatusPresentation.label}
-                    variant={tripStatusChipVariant}
-                    dot
-                  />
                   {isForwardedTrip ? <RouteLockedBadge /> : null}
                   <PlatformTaskBadge platformCode={taskDetail.sourcePlatform} />
                 </View>
@@ -1295,10 +1431,82 @@ export default function TripScreen() {
 
               <View style={styles.tripHeroMetaRow}>
                 <StatusChip
+                  label={tripStatusPresentation.label}
+                  variant={tripStatusChipVariant}
+                  dot
+                />
+                <StatusChip
                   label={`內部狀態：${formatDriverTaskStatusLabel(taskDetail.status)}`}
                   variant={isForwardedTrip ? "forwarded" : "owned"}
                 />
                 <StatusChip label={taskDetail.taskId} variant="brand" />
+              </View>
+
+              <View style={styles.tripMapCard}>
+                <View style={styles.tripMapCanvas}>
+                  <View style={styles.tripMapGlow} />
+                  <View style={styles.tripMapBadge}>
+                    <Ionicons
+                      name="navigate-outline"
+                      size={12}
+                      color={tripSurfacePalette.accentColor}
+                    />
+                    <Text style={styles.tripMapBadgeText}>
+                      {routeMetricDistance}
+                    </Text>
+                  </View>
+                  <View style={styles.tripMapRouteColumn}>
+                    <View
+                      style={[styles.tripMapDot, styles.tripMapPickupDot]}
+                    />
+                    <View style={styles.tripMapConnector} />
+                    <View
+                      style={[styles.tripMapDot, styles.tripMapDropoffDot]}
+                    />
+                  </View>
+                  <View style={styles.tripMapStops}>
+                    <View style={styles.tripMapStopCard}>
+                      <Text style={styles.tripMapStopLabel}>取貨點</Text>
+                      <Text style={styles.tripMapStopAddress}>
+                        {pickupAddress}
+                      </Text>
+                    </View>
+                    <View style={styles.tripMapStopCard}>
+                      <Text style={styles.tripMapStopLabel}>送達點</Text>
+                      <Text style={styles.tripMapStopAddress}>
+                        {dropoffAddress}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.tripMetricRow}>
+                  <MetricPill
+                    icon="map-outline"
+                    label="距離"
+                    value={routeMetricDistance}
+                    tone={
+                      tripExperienceState === "sync_failed"
+                        ? "danger"
+                        : tripStatusPresentation.tone === "warning"
+                          ? "warning"
+                          : "success"
+                    }
+                  />
+                  <MetricPill
+                    icon="time-outline"
+                    label="時長"
+                    value={routeMetricDuration}
+                    tone={
+                      locationTrackingState === "active" ? "success" : "neutral"
+                    }
+                  />
+                  <MetricPill
+                    icon="pricetag-outline"
+                    label="車資"
+                    value={routeMetricFare}
+                  />
+                </View>
               </View>
 
               <View style={styles.tripStatusCallout}>
@@ -1761,6 +1969,134 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: Tokens.spacing.sm,
+  },
+  tripMapCard: {
+    borderRadius: Tokens.radius.xl,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.bgRaised,
+    overflow: "hidden",
+  },
+  tripMapCanvas: {
+    minHeight: 188,
+    padding: Tokens.spacing.lg,
+    backgroundColor: Tokens.colors.brandBg,
+    position: "relative",
+    justifyContent: "space-between",
+  },
+  tripMapGlow: {
+    position: "absolute",
+    top: -20,
+    right: -10,
+    width: 160,
+    height: 160,
+    borderRadius: 999,
+    backgroundColor: `${Tokens.colors.brand}10`,
+  },
+  tripMapBadge: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Tokens.radius.md,
+    backgroundColor: Tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    ...Tokens.shadows.sm,
+  },
+  tripMapBadgeText: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textStrong,
+  },
+  tripMapRouteColumn: {
+    position: "absolute",
+    left: Tokens.spacing.lg,
+    top: 62,
+    bottom: Tokens.spacing.lg,
+    width: 18,
+    alignItems: "center",
+  },
+  tripMapDot: {
+    width: 12,
+    height: 12,
+    borderRadius: Tokens.radius.full,
+  },
+  tripMapPickupDot: {
+    backgroundColor: Tokens.colors.success,
+    shadowColor: Tokens.colors.success,
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+  },
+  tripMapDropoffDot: {
+    backgroundColor: Tokens.colors.danger,
+    shadowColor: Tokens.colors.danger,
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+  },
+  tripMapConnector: {
+    flex: 1,
+    width: 2,
+    marginVertical: Tokens.spacing.xs,
+    borderLeftWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: Tokens.colors.borderStrong,
+  },
+  tripMapStops: {
+    gap: Tokens.spacing.md,
+    paddingLeft: 28,
+    marginTop: Tokens.spacing.md,
+  },
+  tripMapStopCard: {
+    borderRadius: Tokens.radius.lg,
+    paddingHorizontal: Tokens.spacing.md,
+    paddingVertical: Tokens.spacing.sm,
+    backgroundColor: "rgba(255,255,255,0.88)",
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+  },
+  tripMapStopLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textDim,
+    marginBottom: 2,
+  },
+  tripMapStopAddress: {
+    ...Tokens.type.bodyStrong,
+    color: Tokens.colors.textStrong,
+  },
+  tripMetricRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
+    padding: Tokens.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.surface,
+  },
+  metricPill: {
+    flex: 1,
+    minWidth: "30%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
+    borderRadius: Tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.surfaceLo,
+    paddingHorizontal: Tokens.spacing.sm,
+    paddingVertical: Tokens.spacing.sm,
+  },
+  metricPillCopy: {
+    flex: 1,
+  },
+  metricPillLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textDim,
+  },
+  metricPillValue: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
   },
   tripStatusCallout: {
     flexDirection: "row",

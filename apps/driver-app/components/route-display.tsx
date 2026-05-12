@@ -48,6 +48,9 @@ export default function RouteDisplay({
     : routeProvided === false
       ? "目前僅有上下車點摘要；如需調整，請與派車台確認後再更新。"
       : "此路線由 DRTS 任務管理，可依派遣規則確認或調整。";
+  const routeHeaderNote = forwarded
+    ? "以下內容為平台同步路線摘要。"
+    : routeAuthorityDescription;
 
   // Prefer platform-provided waypoints; otherwise fall back to order pickup/dropoff
   const platformWaypoints: any[] | null = Array.isArray(
@@ -88,9 +91,10 @@ export default function RouteDisplay({
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.eyebrow}>Route</Text>
+        <View style={styles.headerCopy}>
+          <Text style={styles.eyebrow}>Trip Route Summary</Text>
           <Text style={styles.sectionTitle}>路線資訊</Text>
+          <Text style={styles.headerNote}>{routeHeaderNote}</Text>
         </View>
         <View style={styles.badgeRow}>
           {routeLocked && (
@@ -174,15 +178,22 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: Tokens.spacing.sm,
   },
+  headerCopy: {
+    flex: 1,
+    gap: 2,
+  },
   eyebrow: {
     ...Tokens.type.micro,
     color: Tokens.colors.textDim,
-    marginBottom: 2,
   },
   sectionTitle: {
     ...Tokens.type.title,
     color: Tokens.colors.text,
     fontWeight: "700",
+  },
+  headerNote: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
   },
   badgeRow: {
     flexDirection: "row",
