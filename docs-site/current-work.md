@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-12T20:13:23Z
+Last updated: 2026-05-12T20:32:32Z
 
 ## Objective
 
@@ -36,11 +36,11 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Active Slices
 
-- `Claude`: governance-review, architecture-arbitration, control-plane; next: Closeout packet fix applied: docs/05-ui/driver-app-redesign-closeout-20260512.md now names Codex as reviewer on lines 3 and 234 (was Copilot). Grep confirms no remaining 'Copilot' references in the cl
+- `Claude`: governance-review, architecture-arbitration, control-plane; next: Preparing PBK-UI-003 review packet anchored to commit fbc05f6 and current ai-status.json review_approved state
 - `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
 - `Codex`: contracts, schema, state-system, acceptance; next: Owner closeout blocked: shared branch HEAD moved to local commit f481c294d627390bf574a46b3c6fdaaf5951f5eb (feat(ADM-UI-RD-006): finalize users fleet switchboard redesign, LLM-Agent: Codex2) before ADM
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
-- `Codex2`: contracts, schema, state-system, acceptance; next: Continuing CTBC 7-screen partner booking funnel implementation and verification in apps/partner-booking-web.
+- `Codex2`: contracts, schema, state-system, acceptance; next: Closeout blocked: local commit f481c294d627390bf574a46b3c6fdaaf5951f5eb is not task-scoped. Pre-commit restaged unrelated ADM-UI-RD-005 files (apps/platform-admin-web/app/partners/page.tsx, apps/platf
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
 - `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
 
@@ -57,11 +57,10 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `TEN-UI-RD-013`                 | Wave 3 | Cost Center route 新增                                                                       | Codex  | blocked     | `TEN-UI-RD-001`                                                                                                                                                                                                             | TN_CostCenter — 需確認 backend contract，不齊全則回 discussion_planning。                                                                       |
 | `TEN-UI-RD-014`                 | Wave 3 | Rules route 新增                                                                             | Codex  | blocked     | `TEN-UI-RD-001`                                                                                                                                                                                                             | TN_Rules — 審批與配額。                                                                                                                         |
 | `TEN-UI-RD-099`                 | Wave 3 | Wave 3 tenant closeout packet                                                                | Claude | backlog     | `TEN-UI-RD-001`, `TEN-UI-RD-002`, `TEN-UI-RD-003`, `TEN-UI-RD-004`, `TEN-UI-RD-010`, `TEN-UI-RD-011`, `TEN-UI-RD-012`, `TEN-UI-RD-013`, `TEN-UI-RD-014`, `TEN-UI-RD-015`, `TEN-UI-RD-016`, `TEN-UI-RD-017`, `TEN-UI-RD-018` | TEN-UI-RD-001..018 全 review_approved 後產出 closeout 文件，含 parity-fill 決策。                                                               |
-| `DRV-UI-RD-009`                 | Wave 4 | Wave 4 driver closeout packet                                                                | Claude | review      | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008`                                                                                      | DRV-UI-RD-001..008 全 review_approved 後產出 closeout 文件。                                                                                    |
-| `PBK-UI-003`                    | Wave 5 | CTBC reference funnel — 7 screens                                                            | Codex2 | in_progress | `PBK-UI-002`                                                                                                                                                                                                                | Landing / Eligibility / Book / Confirmed / Trips / Receipt / Help — 全部 white-label component + CTBC brand demo。Mock data。                   |
 | `PBK-UI-004`                    | Wave 5 | Authority-safe negative paths                                                                | Codex2 | todo        | `PBK-UI-003`                                                                                                                                                                                                                | 保留 tenant-console-web/app/partner/ 既有 5 條 negative path (eligible / ineligible / manual_review / inactive / eligibility-required) 並移植。 |
 | `PBK-UI-005`                    | Wave 5 | 新舊 partner mode 共存政策 (decision doc)                                                    | Codex  | backlog     | `PBK-UI-004`                                                                                                                                                                                                                | Decision doc 簽核：何時切換 / 過渡期 / 棄置策略。Supervisor + governance reviewer 共同簽。                                                      |
 | `TOK-UI-001-SIDECAR-ACCEPTANCE` | Wave 1 | [Sidecar] [Auto] [Parent TOK-UI-001] Prepare TOK-UI-001 acceptance packet and dependency map | Codex  | blocked     | `RDX-W0-002`                                                                                                                                                                                                                | 平行支援 TOK-UI-001，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。                                      |
+| `PBK-UI-003-SIDECAR-REVIEW`     | Wave 5 | [Sidecar] [Auto] [Parent PBK-UI-003] Prepare PBK-UI-003 review packet and evidence summary   | Claude | in_progress | `PBK-UI-002`                                                                                                                                                                                                                | 平行支援 PBK-UI-003，先整理 review packet、evidence summary 與 reviewer handoff，不改 canonical truth。                                         |
 
 ### External / Upstream Integration Work
 
@@ -80,18 +79,16 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `TEN-UI-RD-013`                 | Wave 3 | Cost Center route 新增                                                                       | Codex  | blocked     | `TEN-UI-RD-001`                                                                                                                                                                                                             |
 | `TEN-UI-RD-014`                 | Wave 3 | Rules route 新增                                                                             | Codex  | blocked     | `TEN-UI-RD-001`                                                                                                                                                                                                             |
 | `TEN-UI-RD-099`                 | Wave 3 | Wave 3 tenant closeout packet                                                                | Claude | backlog     | `TEN-UI-RD-001`, `TEN-UI-RD-002`, `TEN-UI-RD-003`, `TEN-UI-RD-004`, `TEN-UI-RD-010`, `TEN-UI-RD-011`, `TEN-UI-RD-012`, `TEN-UI-RD-013`, `TEN-UI-RD-014`, `TEN-UI-RD-015`, `TEN-UI-RD-016`, `TEN-UI-RD-017`, `TEN-UI-RD-018` |
-| `DRV-UI-RD-009`                 | Wave 4 | Wave 4 driver closeout packet                                                                | Claude | review      | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008`                                                                                      |
-| `PBK-UI-003`                    | Wave 5 | CTBC reference funnel — 7 screens                                                            | Codex2 | in_progress | `PBK-UI-002`                                                                                                                                                                                                                |
 | `PBK-UI-004`                    | Wave 5 | Authority-safe negative paths                                                                | Codex2 | todo        | `PBK-UI-003`                                                                                                                                                                                                                |
 | `PBK-UI-005`                    | Wave 5 | 新舊 partner mode 共存政策 (decision doc)                                                    | Codex  | backlog     | `PBK-UI-004`                                                                                                                                                                                                                |
 | `TOK-UI-001-SIDECAR-ACCEPTANCE` | Wave 1 | [Sidecar] [Auto] [Parent TOK-UI-001] Prepare TOK-UI-001 acceptance packet and dependency map | Codex  | blocked     | `RDX-W0-002`                                                                                                                                                                                                                |
+| `PBK-UI-003-SIDECAR-REVIEW`     | Wave 5 | [Sidecar] [Auto] [Parent PBK-UI-003] Prepare PBK-UI-003 review packet and evidence summary   | Claude | in_progress | `PBK-UI-002`                                                                                                                                                                                                                |
 
 ## Handoff Queue
 
-| Task            | From   | To    | Message                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Status  | Created At           |
-| --------------- | ------ | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
-| `PBK-UI-004`    | Claude | Codex | Chairman reassigned reviewer from Claude to Codex: Claude lane is capacity-paused. Preemptively move the reviewer slot to healthy Codex so the task will not stall on reviewer assignment once its dependency clears.                                                                                                                                                                                                                                                                                                                        | pending | 2026-05-12T18:55:03Z |
-| `DRV-UI-RD-009` | Claude | Codex | Closeout packet fix applied: docs/05-ui/driver-app-redesign-closeout-20260512.md now names Codex as reviewer on lines 3 and 234 (was Copilot). Grep confirms no remaining 'Copilot' references in the closeout doc. Surface signoff matrix unchanged — DRV-UI-RD-001..008 (owner, reviewer, approved-at, commit_hash) quadruples and the canvas/Screen\*/sidecar citations are the same packet you already validated. Re-review limited to the two reviewer-of-record lines plus a final consistency check vs ai-status.json reviewer=Codex. | pending | 2026-05-12T20:13:23Z |
+| Task         | From   | To    | Message                                                                                                                                                                                                               | Status  | Created At           |
+| ------------ | ------ | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
+| `PBK-UI-004` | Claude | Codex | Chairman reassigned reviewer from Claude to Codex: Claude lane is capacity-paused. Preemptively move the reviewer slot to healthy Codex so the task will not stall on reviewer assignment once its dependency clears. | pending | 2026-05-12T18:55:03Z |
 
 ## Blockers
 
@@ -114,36 +111,36 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 | Task                               | Commit                                   | Subject                                                                    | LLM Agent | Reviewer | Recorded At          |
 | ---------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `DRV-UI-RD-004`                    | 411a2ab25c62ab2892b852ced77abd9143736566 | feat(DRV-UI-RD-004): reskin trip 7-state experience                        | Codex2    | Claude   | 2026-05-12T17:51:05Z |
-| `DRV-UI-RD-005`                    | 0887ccf78ccae1ae52c71c5b31db85a4b7b4a059 | feat(DRV-UI-RD-005): reskin platform presence                              | Codex     | Codex2   | 2026-05-12T18:25:25Z |
 | `DRV-UI-RD-006`                    | 622932517dcfe34a42aa3dcf2e12cf2c10877711 | feat(DRV-UI-RD-006): reskin earnings and shift                             | Codex2    | Codex    | 2026-05-12T19:09:07Z |
 | `DRV-UI-RD-007`                    | c95a401415c6cb0642a5839b945dccb3ff42d8f8 | Task ID: DRV-UI-RD-007 Reskin SOS                                          | Codex     | Codex2   | 2026-05-12T19:22:32Z |
 | `DRV-UI-RD-008`                    | c6c7373acbde8872422110631094f19d984d2d51 | Task ID: DRV-UI-RD-008 Reskin Settings                                     | Codex2    | Codex    | 2026-05-12T19:44:41Z |
+| `DRV-UI-RD-009`                    | e1fc1ea112f4e44367f85d326a3d2ffe7b591bf4 | docs(DRV-UI-RD-009): correct reviewer-of-record in closeout packet         | Claude    | Codex    | 2026-05-12T20:20:45Z |
 | `PBK-UI-001`                       | 44e8d530d8e82a3758c5ba63b93bed8f27e79ba7 | feat(PBK-UI-001): bootstrap apps/partner-booking-web (white-label Next.js) | Claude2   | Codex2   | 2026-05-10T14:47:14Z |
 | `PBK-UI-002`                       | d7046eb                                  | PBK-UI-002 Partner token brand chrome                                      | Codex2    | Codex    | 2026-05-10T17:04:37Z |
+| `PBK-UI-003`                       | fbc05f62926392b7363360757f475275b9b56deb | feat(PBK-UI-003): add CTBC reference funnel                                | Codex2    | Codex    | 2026-05-12T20:31:57Z |
 | `ADM-UI-RD-002-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                         | Claude    | Codex2   | 2026-05-10T21:12:31Z |
 | `TEN-UI-RD-010-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                         | Claude    | Codex2   | 2026-05-12T16:20:49Z |
 | `DRV-UI-RD-008-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                         | Claude    | Codex2   | 2026-05-12T19:56:43Z |
 
 ## Latest Checkpoints
 
-- 2026-05-12T20:12:33Z Orchestrator: PostToolUse: Edit
-- 2026-05-12T20:12:37Z Orchestrator: PreToolUse: Edit
-- 2026-05-12T20:12:37Z Orchestrator: PostToolUse: Edit
-- 2026-05-12T20:12:39Z Orchestrator: PreToolUse: Bash
-- 2026-05-12T20:12:39Z Orchestrator: PostToolUse: Bash
-- 2026-05-12T20:12:43Z Orchestrator: PreToolUse: Bash
-- 2026-05-12T20:12:43Z Orchestrator: PostToolUse: Bash
-- 2026-05-12T20:12:49Z Orchestrator: PreToolUse: Bash
-- 2026-05-12T20:12:50Z Orchestrator: PostToolUse: Bash
-- 2026-05-12T20:12:54Z Orchestrator: PreToolUse: Bash
-- 2026-05-12T20:12:54Z Orchestrator: PostToolUse: Bash
-- 2026-05-12T20:13:01Z Orchestrator: PreToolUse: Bash
-- 2026-05-12T20:13:02Z Claude: `DRV-UI-RD-009` Updated docs/05-ui/driver-app-redesign-closeout-20260512.md lines 3 and 234 to reflect machine-truth reviewer (Codex, per ai-status.json) — removed both remaining 'Copilot' references that triggered the review rejection. Surface matrix and per-surface notes unchanged. Verified no other 'Copilot' references remain in the closeout doc.
-- 2026-05-12T20:13:10Z Orchestrator: PostToolUse: Bash
-- 2026-05-12T20:13:13Z Orchestrator: PreToolUse: Bash
-- 2026-05-12T20:13:13Z Orchestrator: PostToolUse: Bash
-- 2026-05-12T20:13:17Z Orchestrator: PreToolUse: Bash
-- 2026-05-12T20:13:17Z Orchestrator: PostToolUse: Bash
-- 2026-05-12T20:13:23Z Orchestrator: PreToolUse: Bash
-- 2026-05-12T20:13:23Z Claude: `DRV-UI-RD-009` Handoff to Codex: Closeout packet fix applied: docs/05-ui/driver-app-redesign-closeout-20260512.md now names Codex as reviewer on lines 3 and 234 (was Copilot). Grep confirms no remaining 'Copilot' references in the closeout doc. Surface signoff matrix unchanged — DRV-UI-RD-001..008 (owner, reviewer, approved-at, commit_hash) quadruples and the canvas/Screen\*/sidecar citations are the same packet you already validated. Re-review limited to the two reviewer-of-record lines plus a final consistency check vs ai-status.json reviewer=Codex.
+- 2026-05-12T20:32:06Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:32:06Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:32:06Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:32:06Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:32:10Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:32:10Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:32:11Z Orchestrator: PreToolUse: Read
+- 2026-05-12T20:32:11Z Orchestrator: PostToolUse: Read
+- 2026-05-12T20:32:14Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:32:14Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:32:15Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:32:15Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:32:18Z Orchestrator: PreToolUse: Read
+- 2026-05-12T20:32:19Z Orchestrator: PostToolUse: Read
+- 2026-05-12T20:32:22Z Orchestrator: PreToolUse: Read
+- 2026-05-12T20:32:22Z Orchestrator: PostToolUse: Read
+- 2026-05-12T20:32:25Z Orchestrator: PreToolUse: Read
+- 2026-05-12T20:32:25Z Orchestrator: PostToolUse: Read
+- 2026-05-12T20:32:31Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:32:32Z Claude: `PBK-UI-003-SIDECAR-REVIEW` Preparing PBK-UI-003 review packet anchored to commit fbc05f6 and current ai-status.json review_approved state
