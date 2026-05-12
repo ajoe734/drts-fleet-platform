@@ -211,3 +211,11 @@ Current packet stance:
 - support-only artifact
 - anchored to live machine truth and visible source
 - ready to hand off to `Codex` for sidecar review
+
+## 8. Closeout Readiness
+
+- reviewer approval recorded in machine truth at `2026-05-12T17:01:16Z`
+- closeout owner remains `Codex2`
+- no additional canonical, contract, or runtime edits are required for this
+  sidecar; owner closeout only needs task-scoped commit/push evidence plus the
+  `done` state transition
