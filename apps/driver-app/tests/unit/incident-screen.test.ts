@@ -16,6 +16,7 @@ vi.mock("react-native", () => ({
   ActivityIndicator: "ActivityIndicator",
   StyleSheet: { create: <T>(styles: T) => styles },
   Text: "Text",
+  TouchableOpacity: "TouchableOpacity",
   View: "View",
 }));
 
@@ -92,6 +93,14 @@ function findActionButton(renderer: any, title: string) {
   );
 }
 
+function findLongPressButton(renderer: any) {
+  return renderer.root.find(
+    (node: any) =>
+      node.type === "TouchableOpacity" &&
+      node.props.accessibilityLabel === "長按確認求援",
+  );
+}
+
 describe("IncidentScreen", () => {
   beforeEach(() => {
     mocks.replace.mockReset();
@@ -105,7 +114,7 @@ describe("IncidentScreen", () => {
     mocks.updateIncident.mockReset().mockResolvedValue(undefined);
   });
 
-  it("requires confirmation before creating a critical SOS incident", async () => {
+  it("requires long press plus confirmation before creating a critical SOS incident", async () => {
     let renderer: any;
 
     await act(async () => {
@@ -114,17 +123,26 @@ describe("IncidentScreen", () => {
     });
 
     const detailField = renderer.root.findByType("FormField");
-
     await act(async () => {
       detailField.props.onChangeText("乘客情緒激動，需立即支援");
     });
 
     await act(async () => {
-      findActionButton(renderer, "送出 SOS").props.onPress();
+      findActionButton(renderer, "交通事故").props.onPress();
+    });
+
+    await act(async () => {
+      findLongPressButton(renderer).props.onPress();
+    });
+
+    expect(mocks.confirmDangerAction).not.toHaveBeenCalled();
+    expect(mocks.createIncident).not.toHaveBeenCalled();
+
+    await act(async () => {
+      findLongPressButton(renderer).props.onLongPress();
     });
 
     expect(mocks.confirmDangerAction).toHaveBeenCalledTimes(1);
-    expect(mocks.createIncident).not.toHaveBeenCalled();
 
     const options = mocks.confirmDangerAction.mock.calls[0]?.[0] as {
       title: string;
@@ -144,7 +162,7 @@ describe("IncidentScreen", () => {
 
     expect(mocks.createIncident).toHaveBeenCalledWith({
       title: "司機 SOS 緊急通報",
-      description: "乘客情緒激動，需立即支援",
+      description: "事件情況：交通事故\n乘客情緒激動，需立即支援",
       category: "safety",
       severity: "critical",
       reportedBy: "driver",
@@ -191,7 +209,7 @@ describe("IncidentScreen", () => {
     });
 
     await act(async () => {
-      findActionButton(renderer, "送出 SOS").props.onPress();
+      findLongPressButton(renderer).props.onLongPress();
     });
 
     const options = mocks.confirmDangerAction.mock.calls[0]?.[0] as {
