@@ -1698,6 +1698,23 @@ def expire_provider_pauses(
             clear_provider_pause(state, agent_id)
             expired.append(agent_id)
             console_log(f"provider pause expired: agent={agent_id} now available", quiet=SUPERVISOR_LOG_QUIET)
+            continue
+        # Age out non-auth pauses that have no resume_at (e.g. capacity pauses scheduled with
+        # reset_seconds=None when no retry was pending). Without this they rot forever.
+        if resume_at is None:
+            paused_at_str = str(entry.get("paused_at") or "").strip()
+            if paused_at_str:
+                try:
+                    paused_dt = datetime.fromisoformat(paused_at_str.replace("Z", "+00:00"))
+                    if (now_ts - paused_dt.timestamp()) > DISPATCH_PAUSE_MAX_AGE_SECONDS:
+                        clear_provider_pause(state, agent_id)
+                        expired.append(agent_id)
+                        console_log(
+                            f"provider pause aged out: agent={agent_id} kind={kind} paused>24h",
+                            quiet=SUPERVISOR_LOG_QUIET,
+                        )
+                except ValueError:
+                    pass
     return expired
 
 
@@ -2063,6 +2080,9 @@ def ordered_idle_agent_names(idle_agent_names: list[str], agent_loads: dict[str,
     return [name for _index, name in indexed]
 
 
+DISPATCH_PAUSE_MAX_AGE_SECONDS = 24 * 3600  # provider-level pauses or any pause this old gets aged out
+
+
 def prune_completed_dispatch_pauses(state: dict[str, Any], status: dict[str, Any]) -> bool:
     tasks = status.get("tasks", [])
     if not isinstance(tasks, list):
@@ -2087,6 +2107,20 @@ def prune_completed_dispatch_pauses(state: dict[str, Any], status: dict[str, Any
         last_update = str(task.get("last_update") or "").strip()
         return bool(paused_at and last_update and last_update > paused_at)
 
+    def pause_is_too_old(pause: dict[str, Any]) -> bool:
+        # Provider-level pauses (task_id=None) and any pause older than the TTL get aged out.
+        # Without this, terminal-failure provider pauses accumulate forever — they never match
+        # the task_status / active_worker / stale_for_updated_task filters above.
+        paused_at = str(pause.get("paused_at") or "").strip()
+        if not paused_at:
+            return False
+        try:
+            paused_dt = datetime.fromisoformat(paused_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        age = (datetime.now(timezone.utc) - paused_dt).total_seconds()
+        return age > DISPATCH_PAUSE_MAX_AGE_SECONDS
+
     pauses = list(state.get("dispatch_pauses", []) or [])
     keep = [
         pause
@@ -2094,6 +2128,7 @@ def prune_completed_dispatch_pauses(state: dict[str, Any], status: dict[str, Any
         if str(task_by_id.get(str(pause.get("task_id") or ""), {}).get("status") or "").strip().lower() not in {"done", "review_approved"}
         and str(pause.get("task_id") or "") not in active_task_ids
         and not pause_is_stale_for_updated_task(pause)
+        and not pause_is_too_old(pause)
     ]
     if len(keep) == len(pauses):
         return False
@@ -2777,6 +2812,73 @@ def finalize_terminal_worker_outcome(
     )
     finalize_queue_event_record(config, state, worker, "failed", f"{failure_summary} (raw_ref: {evidence_ref})")
     return False
+
+
+_WORKER_STATE_CHANGE_TYPES = frozenset({"start", "progress", "handoff", "done", "approve", "reopen", "blocker"})
+
+
+def worker_recorded_state_change(config: dict[str, Any], worker: dict[str, Any]) -> str | None:
+    """Return the type (e.g. 'reopen') if the worker's persona emitted any task-state-change
+    event in the activity log after the worker was dispatched. None otherwise.
+
+    Used so the supervisor doesn't mis-label legitimate non-happy-path outcomes (e.g. a reviewer
+    that calls `reopen` to reject work) as "Worker exited before the task reached a terminal
+    status." If the worker successfully advanced state via scripts/ai-status.sh, that's a real
+    completion regardless of which non-terminal status the task ends in.
+    """
+    run_id = str(worker.get("run_id") or "")
+    match = re.search(r"(\d{8}T\d{6}Z)", run_id)
+    if not match:
+        return None
+    try:
+        created_dt = datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+    agent_id = normalize_agent_id(str(worker.get("agent_id") or worker.get("provider") or ""))
+    if not agent_id:
+        return None
+
+    task_id = str(worker.get("task_id") or "").strip()
+
+    try:
+        log_path = config_path(config, "activity_log")
+    except KeyError:
+        return None
+    if not log_path.exists():
+        return None
+
+    # Tail-read last 5MB — state-change events are sparse, this comfortably covers the worker
+    # lifetime even on a large (300MB+) activity log.
+    tail_bytes = 5_000_000
+    try:
+        size = log_path.stat().st_size
+        start = max(0, size - tail_bytes)
+        with log_path.open("rb") as f:
+            f.seek(start)
+            if start > 0:
+                f.readline()  # discard partial first line
+            for raw in f:
+                try:
+                    rec = json.loads(raw)
+                except Exception:
+                    continue
+                if rec.get("type") not in _WORKER_STATE_CHANGE_TYPES:
+                    continue
+                if task_id and str(rec.get("task_id") or "") != task_id:
+                    continue
+                if normalize_agent_id(str(rec.get("agent") or "")) != agent_id:
+                    continue
+                ts_str = str(rec.get("ts") or "")
+                try:
+                    rec_dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if rec_dt >= created_dt:
+                    return str(rec.get("type"))
+    except OSError:
+        return None
+    return None
 
 
 def worker_expected_completion_statuses(
@@ -3511,20 +3613,35 @@ def poll_workers(
                     },
                 )
                 finalize_queue_event_record(config, state, worker, "completed")
-            elif task_status in redispatch_statuses:
-                finalize_terminal_worker_outcome(
-                    config,
-                    state,
-                    worker,
-                    "Worker exited before the task reached a terminal status.",
-                )
             else:
-                finalize_terminal_worker_outcome(
-                    config,
-                    state,
-                    worker,
-                    "Worker exited before the task reached a terminal status.",
-                )
+                # Before declaring failure: did this worker actually advance task state via
+                # scripts/ai-status.sh? A reviewer that called `reopen` (rejecting work) or an
+                # owner that called `handoff` / `blocker` did legitimate work — the task just
+                # didn't end in the "happy path" status this worker's role expects.
+                emitted = worker_recorded_state_change(config, worker)
+                if emitted:
+                    worker["status"] = "completed"
+                    worker["last_event_at"] = utc_now()
+                    write_activity_log(
+                        config,
+                        {
+                            "type": "worker_completed",
+                            "provider": worker.get("provider"),
+                            "task_id": worker.get("task_id"),
+                            "message": f"Worker advanced task via `{emitted}`; task ended in `{task_status}`.",
+                            "worker_run_id": worker["run_id"],
+                            "pr_url": worker.get("pr_url"),
+                            "session_url": worker.get("session_url"),
+                        },
+                    )
+                    finalize_queue_event_record(config, state, worker, "completed")
+                else:
+                    finalize_terminal_worker_outcome(
+                        config,
+                        state,
+                        worker,
+                        "Worker exited before the task reached a terminal status.",
+                    )
             changed = True
     return changed
 

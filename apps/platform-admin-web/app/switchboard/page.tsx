@@ -12,9 +12,6 @@ import {
   emptyStateStyle,
   linkStyle,
   mergeStyles,
-  pageHeaderStyle,
-  pageHeaderSubtitleStyle,
-  pageHeaderTitleStyle,
   statusBadgeStyle,
   surfaceCardStyle,
   tableCardStyle,
@@ -24,7 +21,6 @@ import {
   tableStyle,
   toggleButtonStyle,
   toggleGroupStyle,
-  toolbarStyle,
   inputStyle,
   monoTextStyle,
 } from "@/components/platform-ui";
@@ -39,6 +35,14 @@ import type {
   PlacardVersionRecord,
   PublicInfoVersionRecord,
 } from "@drts/contracts";
+import {
+  CalloutBanner,
+  DataViewCard,
+  KpiCard,
+  KpiRow,
+  PageHeader,
+  StatusChip,
+} from "@drts/ui-web";
 import { getPlacardVersionCodePrecheckMessage } from "./placard-version-code";
 import {
   formatPlacardSourceOptionLabel,
@@ -313,32 +317,83 @@ export default function SwitchboardPage() {
   }
 
   return (
-    <div>
-      <div style={pageHeaderStyle}>
-        <h1 style={pageHeaderTitleStyle}>{t("switchboard.title")}</h1>
-        <p style={pageHeaderSubtitleStyle}>{t("switchboard.subtitle")}</p>
-      </div>
+    <div style={{ display: "grid", gap: 16 }}>
+      <PageHeader
+        eyebrow={locale === "en" ? "Disclosure Governance" : "揭露治理"}
+        title={t("switchboard.title")}
+        subtitle={t("switchboard.subtitle")}
+        actions={
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {activeTab === "public-info" ? (
+              <button
+                type="button"
+                style={actionButtonStyle({ tone: "primary" })}
+                onClick={() => setShowPublicInfoForm((current) => !current)}
+              >
+                {showPublicInfoForm
+                  ? t("common.cancel")
+                  : t("switchboard.newPublicInfoVersion")}
+              </button>
+            ) : (
+              <button
+                type="button"
+                style={actionButtonStyle({ tone: "primary" })}
+                onClick={() => setShowPlacardForm((current) => !current)}
+                disabled={publicInfo.length === 0}
+              >
+                {showPlacardForm
+                  ? t("common.cancel")
+                  : t("switchboard.generatePlacardVersion")}
+              </button>
+            )}
+            <button
+              type="button"
+              style={actionButtonStyle({ tone: "secondary" })}
+              onClick={() => void loadData()}
+            >
+              {t("common.refresh")}
+            </button>
+          </div>
+        }
+      />
 
       {error && (
-        <div
-          style={mergeStyles(surfaceCardStyle, {
-            borderColor: "rgba(239,68,68,0.3)",
-          })}
-        >
-          <p style={{ color: "#dc2626", margin: 0 }}>
-            {getPlatformLabel(locale, "error")}: {error}
-          </p>
-        </div>
+        <CalloutBanner
+          tone="danger"
+          title={getPlatformLabel(locale, "error")}
+          description={error}
+        />
       )}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 16,
-          marginBottom: 16,
-        }}
-      >
+      <CalloutBanner
+        tone="info"
+        eyebrow={switchboardWorkflowCopy.governanceTitle}
+        title={
+          locale === "en"
+            ? "Public disclosure and placard issuance remain linked for audit."
+            : "公開揭露與牌貼發布維持連動，便於稽核追溯。"
+        }
+        description={switchboardWorkflowCopy.governanceNote}
+        meta={
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <StatusChip
+              tone="success"
+              label={`${switchboardWorkflowCopy.liveVersion} · ${
+                livePublicInfoVersion?.versionId ?? "—"
+              }`}
+            />
+            <StatusChip
+              tone="info"
+              label={`${switchboardWorkflowCopy.livePlacard} · ${
+                livePlacardVersion?.versionCode ?? "—"
+              }`}
+            />
+          </div>
+        }
+        footer={switchboardWorkflowCopy.historyNote}
+      />
+
+      <KpiRow minWidth="220px">
         {[
           {
             label: t("switchboard.publishedPublicInfo"),
@@ -364,135 +419,117 @@ export default function SwitchboardPage() {
             note: t("switchboard.placardsTiedToLiveNote"),
           },
         ].map((card) => (
-          <div key={card.label} style={surfaceCardStyle}>
-            <p style={{ margin: "0 0 8px", fontSize: 13, color: "#6b7280" }}>
-              {card.label}
-            </p>
-            <strong style={{ display: "block", fontSize: 24 }}>
-              {card.value}
-            </strong>
-            <small style={{ color: "#6b7280" }}>{card.note}</small>
-          </div>
+          <KpiCard
+            key={card.label}
+            label={card.label}
+            value={card.value}
+            detail={card.note}
+            tone={
+              card.label === t("switchboard.publishedPublicInfo")
+                ? "success"
+                : card.label === t("switchboard.draftPublicInfo")
+                  ? "warning"
+                  : "info"
+            }
+          />
         ))}
-      </div>
+      </KpiRow>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: 16,
-          marginBottom: 16,
-        }}
+      <DataViewCard
+        title={locale === "en" ? "Live posture" : "現況姿態"}
+        subtitle={switchboardWorkflowCopy.historyNote}
+        filters={
+          <div style={toggleGroupStyle}>
+            <button
+              type="button"
+              style={toggleButtonStyle(activeTab === "public-info")}
+              onClick={() => setActiveTab("public-info")}
+            >
+              {t("switchboard.tab.publicInfo")} ({publicInfo.length})
+            </button>
+            <button
+              type="button"
+              style={toggleButtonStyle(activeTab === "placards")}
+              onClick={() => setActiveTab("placards")}
+            >
+              {t("switchboard.tab.placards")} ({placards.length})
+            </button>
+          </div>
+        }
       >
         <div
-          style={mergeStyles(surfaceCardStyle, {
-            marginBottom: 0,
-            background: "rgba(15,118,110,0.04)",
-          })}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+            gap: 16,
+          }}
         >
-          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
-            {switchboardWorkflowCopy.governanceTitle}
-          </p>
-          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
-            {switchboardWorkflowCopy.governanceNote}
-          </p>
-        </div>
-        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
-          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
-            {switchboardWorkflowCopy.liveVersion}
-          </p>
-          {livePublicInfoVersion ? (
-            <>
-              <strong style={{ display: "block", fontSize: 20 }}>
-                {livePublicInfoVersion.title}
-              </strong>
-              <small style={{ color: "#6b7280" }}>
-                {livePublicInfoVersion.versionId} ·{" "}
-                {formatDateTime(livePublicInfoVersion.publishedAt ?? "")}
-              </small>
-            </>
-          ) : (
-            <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-              {switchboardWorkflowCopy.noLiveVersion}
+          <div
+            style={mergeStyles(surfaceCardStyle, {
+              marginBottom: 0,
+              background: "rgba(15,118,110,0.04)",
+            })}
+          >
+            <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+              {switchboardWorkflowCopy.governanceTitle}
             </p>
-          )}
-        </div>
-        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
-          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
-            {switchboardWorkflowCopy.livePlacard}
-          </p>
-          {livePlacardVersion ? (
-            <>
-              <strong style={{ display: "block", fontSize: 20 }}>
-                {livePlacardVersion.versionCode}
-              </strong>
-              <small style={{ color: "#6b7280" }}>
-                {livePlacardVersion.templateName} ·{" "}
-                {formatDateTime(
-                  livePlacardVersion.publishedAt ??
-                    livePlacardVersion.createdAt,
-                )}
-              </small>
-            </>
-          ) : (
-            <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-              {switchboardWorkflowCopy.noLivePlacard}
+            <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
+              {switchboardWorkflowCopy.governanceNote}
             </p>
-          )}
+          </div>
+          <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
+            <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+              {switchboardWorkflowCopy.liveVersion}
+            </p>
+            {livePublicInfoVersion ? (
+              <>
+                <strong style={{ display: "block", fontSize: 20 }}>
+                  {livePublicInfoVersion.title}
+                </strong>
+                <small style={{ color: "#6b7280" }}>
+                  {livePublicInfoVersion.versionId} ·{" "}
+                  {formatDateTime(livePublicInfoVersion.publishedAt ?? "")}
+                </small>
+              </>
+            ) : (
+              <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
+                {switchboardWorkflowCopy.noLiveVersion}
+              </p>
+            )}
+          </div>
+          <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
+            <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+              {switchboardWorkflowCopy.livePlacard}
+            </p>
+            {livePlacardVersion ? (
+              <>
+                <strong style={{ display: "block", fontSize: 20 }}>
+                  {livePlacardVersion.versionCode}
+                </strong>
+                <small style={{ color: "#6b7280" }}>
+                  {livePlacardVersion.templateName} ·{" "}
+                  {formatDateTime(
+                    livePlacardVersion.publishedAt ??
+                      livePlacardVersion.createdAt,
+                  )}
+                </small>
+              </>
+            ) : (
+              <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
+                {switchboardWorkflowCopy.noLivePlacard}
+              </p>
+            )}
+          </div>
+          <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
+            <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
+              {switchboardWorkflowCopy.history}
+            </p>
+            <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
+              {switchboardWorkflowCopy.historyNote}
+            </p>
+          </div>
         </div>
-        <div style={mergeStyles(surfaceCardStyle, { marginBottom: 0 })}>
-          <p style={{ margin: "0 0 6px", fontSize: 13, color: "#6b7280" }}>
-            {switchboardWorkflowCopy.history}
-          </p>
-          <p style={{ margin: 0, fontSize: 13, color: "#374151" }}>
-            {switchboardWorkflowCopy.historyNote}
-          </p>
-        </div>
-      </div>
-
-      <div style={toolbarStyle}>
-        <div style={toggleGroupStyle}>
-          <button
-            type="button"
-            style={toggleButtonStyle(activeTab === "public-info")}
-            onClick={() => setActiveTab("public-info")}
-          >
-            {t("switchboard.tab.publicInfo")} ({publicInfo.length})
-          </button>
-          <button
-            type="button"
-            style={toggleButtonStyle(activeTab === "placards")}
-            onClick={() => setActiveTab("placards")}
-          >
-            {t("switchboard.tab.placards")} ({placards.length})
-          </button>
-        </div>
-        {activeTab === "public-info" ? (
-          <button
-            type="button"
-            style={actionButtonStyle({ tone: "primary" })}
-            onClick={() => setShowPublicInfoForm((current) => !current)}
-          >
-            {showPublicInfoForm
-              ? t("common.cancel")
-              : t("switchboard.newPublicInfoVersion")}
-          </button>
-        ) : (
-          <button
-            type="button"
-            style={actionButtonStyle({ tone: "primary" })}
-            onClick={() => setShowPlacardForm((current) => !current)}
-            disabled={publicInfo.length === 0}
-          >
-            {showPlacardForm
-              ? t("common.cancel")
-              : t("switchboard.generatePlacardVersion")}
-          </button>
-        )}
-        <button type="button" style={actionButtonStyle()} onClick={loadData}>
-          {t("common.refresh")}
-        </button>
-      </div>
+      </DataViewCard>
 
       {activeTab === "public-info" && showPublicInfoForm && (
         <div style={mergeStyles(surfaceCardStyle, { marginBottom: 16 })}>

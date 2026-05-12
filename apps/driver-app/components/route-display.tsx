@@ -23,9 +23,11 @@ import { Tokens } from "@/components/ui/tokens";
 export default function RouteDisplay({
   task,
   order,
+  showAuthorityBanner = true,
 }: {
   task: DriverTaskRecord;
   order?: OwnedOrderRecord | null;
+  showAuthorityBanner?: boolean;
 }) {
   const forwarded = task.sourcePlatform != null;
 
@@ -100,10 +102,12 @@ export default function RouteDisplay({
         </View>
       </View>
 
-      <PlatformAuthorityBanner
-        platformCode={task.sourcePlatform}
-        description={routeAuthorityDescription}
-      />
+      {showAuthorityBanner ? (
+        <PlatformAuthorityBanner
+          platformCode={task.sourcePlatform}
+          description={routeAuthorityDescription}
+        />
+      ) : null}
 
       {forwarded && (
         <Text style={styles.note}>

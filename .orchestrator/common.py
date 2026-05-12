@@ -90,7 +90,20 @@ def load_json(path: Path, default: Any | None = None) -> Any:
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            sanitized = _strip_js_comments(text)
+            # AI outputs sometimes wrap JSON in markdown code fences (```json ... ```).
+            # Strip fences before retrying.
+            stripped = text.strip()
+            if stripped.startswith("```"):
+                first_nl = stripped.find("\n")
+                if first_nl != -1:
+                    stripped = stripped[first_nl + 1 :]
+                if stripped.rstrip().endswith("```"):
+                    stripped = stripped.rstrip()[:-3]
+                try:
+                    return json.loads(stripped)
+                except json.JSONDecodeError:
+                    pass
+            sanitized = _strip_js_comments(stripped if stripped != text else text)
             sanitized = re.sub(r",(\s*[}\]])", r"\1", sanitized)
             try:
                 return json.loads(sanitized)
