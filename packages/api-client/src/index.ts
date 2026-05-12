@@ -149,6 +149,7 @@ import type {
   ResolvePartnerEligibilityReviewCommand,
   RevokeDriverDeviceBindingCommand,
   RotateTenantApiKeyCommand,
+  SendTestWebhookCommand,
   SetPlatformMaintenanceModeCommand,
   SetPlatformTenantRolloutStageCommand,
   SetPlatformOfflineCommand,
@@ -1289,6 +1290,36 @@ export class ApiClient {
 
   async deleteWebhookEndpoint(webhookId: string) {
     return this.delete(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}`);
+  }
+
+  async sendTestWebhook(command: SendTestWebhookCommand): Promise<{
+    deliveryId: string | null;
+    httpStatus: number | null;
+  }> {
+    return this.post<{
+      deliveryId: string | null;
+      httpStatus: number | null;
+    }>("/api/tenant/webhooks/test", { body: command });
+  }
+
+  async rotateWebhookSecret(
+    webhookId: string,
+    command: {
+      secret: string;
+      rotationReason?: string;
+    },
+  ): Promise<{
+    webhookId: string | null;
+    secretVersion: number | null;
+    httpStatus: number | null;
+  }> {
+    return this.post<{
+      webhookId: string | null;
+      secretVersion: number | null;
+      httpStatus: number | null;
+    }>(`/api/tenant/webhooks/${encodeURIComponent(webhookId)}/rotate-secret`, {
+      body: command,
+    });
   }
 
   async listWebhookDeliveries(
