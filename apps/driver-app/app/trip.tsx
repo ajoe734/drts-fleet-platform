@@ -1,12 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -20,10 +18,21 @@ import type {
 } from "@drts/contracts";
 
 import { PlatformTaskBadge } from "@/components/platform-task-badge";
-import { PlatformAuthorityBanner } from "@/components/platform-task-badge";
 import RouteDisplay from "@/components/route-display";
 import { ActionButton as SharedActionButton } from "@/components/ui/ActionButton";
-import { Tokens } from "@/components/ui";
+import {
+  AppScreen,
+  AuthorityBanner,
+  BottomActionBar,
+  EmptyState,
+  ErrorBanner,
+  FormField,
+  IconButton,
+  InfoTile,
+  PageHeader,
+  StatusChip,
+  Tokens,
+} from "@/components/ui";
 import {
   appendProofPhotos,
   buildCompletionExpenseItem,
@@ -60,6 +69,7 @@ import {
   syncDriverLocationHeartbeat,
 } from "@/lib/driver-location-heartbeat";
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
+import { formatMoney } from "@/lib/money";
 import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
 import {
   getTripExperienceState,
@@ -94,10 +104,46 @@ function ActionButton({
   );
 }
 
+function MetricPill({
+  icon,
+  label,
+  value,
+  tone = "neutral",
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  tone?: "neutral" | "success" | "warning" | "danger";
+}) {
+  const iconColor =
+    tone === "success"
+      ? Tokens.colors.success
+      : tone === "warning"
+        ? Tokens.colors.warning
+        : tone === "danger"
+          ? Tokens.colors.danger
+          : Tokens.colors.brand;
+
+  return (
+    <View style={styles.metricPill}>
+      <Ionicons name={icon} size={14} color={iconColor} />
+      <View style={styles.metricPillCopy}>
+        <Text style={styles.metricPillLabel}>{label}</Text>
+        <Text style={styles.metricPillValue}>{value}</Text>
+      </View>
+    </View>
+  );
+}
+
 function RouteLockedBadge() {
   return (
-    <View style={[styles.badge, { backgroundColor: "#fff3e0" }]}>
-      <Text style={[styles.badgeText, { color: "#e65100" }]}>路線鎖定</Text>
+    <View style={styles.routeLockedBadge}>
+      <Ionicons
+        name="lock-closed-outline"
+        size={12}
+        color={Tokens.colors.warning}
+      />
+      <Text style={styles.routeLockedBadgeText}>路線鎖定</Text>
     </View>
   );
 }
@@ -453,6 +499,196 @@ function getStatusToneStyles(tone: StatusTone) {
   }
 }
 
+function getStatusChipVariant(tone: StatusTone) {
+  switch (tone) {
+    case "warning":
+      return "warning" as const;
+    case "danger":
+      return "danger" as const;
+    case "neutral":
+      return "default" as const;
+    default:
+      return "success" as const;
+  }
+}
+
+function getTripSurfacePalette(
+  task: DriverTaskRecord | null,
+  state: TripExperienceState | null,
+) {
+  switch (state) {
+    case "sync_failed":
+      return {
+        backgroundColor: Tokens.colors.surfaceDanger,
+        borderColor: `${Tokens.colors.danger}33`,
+        accentColor: Tokens.colors.danger,
+      };
+    case "forwarded_pending":
+      return {
+        backgroundColor: Tokens.colors.warningBg,
+        borderColor: `${Tokens.colors.warning}33`,
+        accentColor: Tokens.colors.warning,
+      };
+    case "forwarded_confirmed":
+      return {
+        backgroundColor: Tokens.colors.successBg,
+        borderColor: `${Tokens.colors.success}33`,
+        accentColor: Tokens.colors.success,
+      };
+    case "forwarded_lost":
+    case "forwarded_cancelled":
+      return {
+        backgroundColor: Tokens.colors.surfaceLo,
+        borderColor: Tokens.colors.borderStrong,
+        accentColor: Tokens.colors.neutral,
+      };
+    case "forwarded_offered":
+      return {
+        backgroundColor: Tokens.colors.forwardedBg,
+        borderColor: Tokens.colors.forwardedBorder,
+        accentColor: Tokens.colors.forwarded,
+      };
+    default:
+      if (task?.sourcePlatform) {
+        return {
+          backgroundColor: Tokens.colors.forwardedBg,
+          borderColor: Tokens.colors.forwardedBorder,
+          accentColor: Tokens.colors.forwarded,
+        };
+      }
+
+      return {
+        backgroundColor: Tokens.colors.ownedBg,
+        borderColor: Tokens.colors.ownedBorder,
+        accentColor: Tokens.colors.owned,
+      };
+  }
+}
+
+function getTripStateEyebrow(
+  task: DriverTaskRecord | null,
+  state: TripExperienceState | null,
+) {
+  if (state === "sync_failed") {
+    return "平台同步異常";
+  }
+
+  if (task?.sourcePlatform) {
+    switch (state) {
+      case "forwarded_offered":
+        return "來源平台派單";
+      case "forwarded_pending":
+        return "等待來源平台";
+      case "forwarded_confirmed":
+        return "來源平台已確認";
+      case "forwarded_lost":
+        return "平台已分配給他人";
+      case "forwarded_cancelled":
+        return "來源平台已取消";
+      default:
+        return "平台鏡像任務";
+    }
+  }
+
+  return "本地行程流程";
+}
+
+function getIdleBottomActionLabel(state: TripExperienceState | null) {
+  switch (state) {
+    case "forwarded_pending":
+      return "等待平台確認";
+    case "forwarded_confirmed":
+      return "來源平台已確認";
+    case "forwarded_lost":
+      return "平台已交給其他司機";
+    case "forwarded_cancelled":
+      return "來源平台已取消";
+    case "sync_failed":
+      return "等待派車台處理";
+    default:
+      return "目前沒有可執行動作";
+  }
+}
+
+function getTripAuthorityBannerProps(
+  task: DriverTaskRecord | null,
+  state: TripExperienceState | null,
+): ComponentProps<typeof AuthorityBanner> {
+  if (!task || !isForwardedTask(task)) {
+    return {
+      title: "自營派單",
+      authorityLabel: "DRTS 行程主控",
+      description:
+        "完整本機操作權限。請依行程節點完成接單、接送、追蹤與完單佐證。",
+      tone: "owned",
+      icon: "shield-checkmark",
+    };
+  }
+
+  switch (state) {
+    case "forwarded_offered":
+      return {
+        title: "來源平台派單",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description:
+          "此訂單由來源平台主導。接受後只會送出平台請求，仍可能被其他司機搶先確認。",
+        tone: "platform",
+        icon: "swap-horizontal-outline",
+      };
+    case "forwarded_pending":
+      return {
+        title: "等待來源平台確認",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description:
+          "已送出接單要求。平台回應前，司機端所有本地生命周期操作維持鎖定。",
+        tone: "warning",
+        icon: "time-outline",
+      };
+    case "forwarded_confirmed":
+      return {
+        title: "來源平台已確認",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description:
+          "平台已確認此單。本地畫面會保留可讀的行程鏡像與後續節點，但仍需遵守平台規則。",
+        tone: "platform",
+        icon: "checkmark-circle-outline",
+      };
+    case "forwarded_lost":
+      return {
+        title: "平台已分配給其他司機",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description: "此筆平台訂單已結束，本地僅保留同步結果供查閱與追蹤。",
+        tone: "warning",
+        icon: "close-circle-outline",
+      };
+    case "forwarded_cancelled":
+      return {
+        title: "來源平台已取消",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description: "來源平台已取消訂單。本地不再提供任何後續行程操作。",
+        tone: "warning",
+        icon: "ban-outline",
+      };
+    case "sync_failed":
+      return {
+        title: "平台同步異常",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description:
+          "既有 sync_failed guardrail 保持鎖定；派車台接手處理前，司機端不開放本地狀態變更。",
+        tone: "danger",
+        icon: "alert-circle-outline",
+      };
+    default:
+      return {
+        title: "平台鏡像任務",
+        authorityLabel: `平台 ${task.sourcePlatform}`,
+        description: "來源平台仍是此任務的權限來源，本地只顯示安全同步資訊。",
+        tone: "platform",
+        icon: "swap-horizontal-outline",
+      };
+  }
+}
+
 export default function TripScreen() {
   const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
   const [orderDetail, setOrderDetail] = useState<OwnedOrderRecord | null>(null);
@@ -556,6 +792,120 @@ export default function TripScreen() {
     expenseAmountInvalid,
     completionBlockedByTracking,
   });
+  const statusToneStyles = getStatusToneStyles(tripStatusPresentation.tone);
+  const tripStatusChipVariant = getStatusChipVariant(
+    tripStatusPresentation.tone,
+  );
+  const tripSurfacePalette = getTripSurfacePalette(
+    taskDetail,
+    tripExperienceState,
+  );
+  const tripStateEyebrow = getTripStateEyebrow(taskDetail, tripExperienceState);
+  const tripAuthorityBanner = getTripAuthorityBannerProps(
+    taskDetail,
+    tripExperienceState,
+  );
+  const headerSubtitle = taskDetail
+    ? taskDetail.orderId
+      ? `${taskDetail.taskId} · ${taskDetail.orderId}`
+      : taskDetail.taskId
+    : "查看目前指派的行程與下一步操作";
+  const forwardedOutcomeSummary = forwardedActionResult
+    ? describeForwardedActionOutcome(
+        forwardedActionResult.outcome,
+        forwardedActionResult.action,
+      )
+    : null;
+  const forwardedOutcomeToneStyles = forwardedOutcomeSummary
+    ? getStatusToneStyles(forwardedOutcomeSummary.tone)
+    : null;
+  const pickupAddress = orderDetail?.pickup.address ?? "待確認上車點";
+  const dropoffAddress = orderDetail?.dropoff.address ?? "待確認下車點";
+  const routeMetricDistance = showTripMetrics
+    ? formatTripDistance(liveDistanceKm)
+    : orderDetail?.etaSnapshot
+      ? `約 ${orderDetail.etaSnapshot.etaMinutes} 分`
+      : "待同步";
+  const routeMetricDuration = showTripMetrics
+    ? formatTripDuration(liveDurationSec)
+    : isForwardedTrip
+      ? "平台決定"
+      : "開始行程後更新";
+  const routeMetricFare = orderDetail?.quotedFare
+    ? formatMoney(orderDetail.quotedFare)
+    : orderDetail?.fixedPrice
+      ? "固定車資"
+      : "金額待確認";
+  const bottomNotice =
+    completionSubmitBlocker === "proof_requirements_unavailable"
+      ? "完單前需先載入訂單佐證需求，請重新整理後再送出。"
+      : completionSubmitBlocker === "expense_amount_invalid"
+        ? "費用金額格式無效，請輸入有效的正數後再完成行程。"
+        : completionSubmitBlocker === "tracking_unavailable"
+          ? (locationTrackingMessage ??
+            "請先恢復定位追蹤，再完成行程並寫入距離與時長。")
+          : proofRequirements.minPhotoCount > 0 && missingRequiredPhotos > 0
+            ? `完單前仍需補上 ${missingRequiredPhotos} 張佐證照片。`
+            : signoffRequirementMissing
+              ? "此行程仍缺少簽收識別資料。"
+              : expenseRequirementMissing
+                ? "此行程仍缺少完整費用佐證。"
+                : forwardedOutcomeSummary
+                  ? (forwardedActionResult?.driverMessage ??
+                    forwardedOutcomeSummary.title)
+                  : tripExperienceState === "forwarded_offered"
+                    ? forwardedActionCardCopy.note
+                    : primaryTripAction
+                      ? primaryTripAction.helperText
+                      : tripStatusPresentation.detail;
+  const completeActionDisabled =
+    primaryTripAction?.action === "complete"
+      ? shouldDisableCompleteTripAction({
+          submittingAction,
+          proofRequirementsUnavailable,
+          missingRequiredPhotos,
+          signoffRequirementMissing,
+          expenseRequirementMissing,
+          expenseAmountInvalid,
+          completionBlockedByTracking,
+        })
+      : false;
+  const bottomPrimaryAction = primaryTripAction
+    ? {
+        title:
+          submittingAction === primaryTripAction.action &&
+          primaryTripAction.action === "complete"
+            ? "完成中…"
+            : primaryTripAction.label,
+        onPress: () => void handleAction(primaryTripAction.action),
+        loading:
+          submittingAction === primaryTripAction.action &&
+          primaryTripAction.action !== "complete",
+        disabled:
+          primaryTripAction.action === "complete"
+            ? completeActionDisabled
+            : submittingAction !== null,
+      }
+    : tripExperienceState === "forwarded_offered" &&
+        forwardedActionResult === null
+      ? {
+          title: "接受平台訂單",
+          onPress: () => void handleForwardedAccept(),
+          loading: submittingAction === "forwarded_accept",
+          disabled: submittingAction !== null,
+        }
+      : undefined;
+  const bottomSecondaryAction =
+    tripExperienceState === "forwarded_offered" &&
+    forwardedActionResult === null
+      ? {
+          title: "婉拒平台訂單",
+          onPress: () => void handleForwardedReject(),
+          variant: "secondary" as const,
+          loading: submittingAction === "forwarded_reject",
+          disabled: submittingAction !== null,
+        }
+      : undefined;
 
   function clearDurationTicker() {
     if (durationIntervalRef.current) {
@@ -1004,926 +1354,968 @@ export default function TripScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.label}>載入行程中…</Text>
-      </View>
+      <AppScreen scrollable={false}>
+        <PageHeader title="行程作業台" subtitle="同步目前指派的行程與狀態" />
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color={Tokens.colors.brand} />
+          <Text style={styles.loadingLabel}>載入行程中…</Text>
+        </View>
+      </AppScreen>
     );
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>行程作業台</Text>
+    <>
+      <AppScreen
+        contentContainerStyle={styles.screenContent}
+        backgroundColor={Tokens.colors.appBg}
+      >
+        <PageHeader
+          title="行程作業台"
+          subtitle={headerSubtitle}
+          rightElement={
+            <IconButton
+              icon="refresh"
+              onPress={() => void loadTrip(true)}
+              disabled={submittingAction !== null}
+              accessibilityLabel="重新整理行程"
+            />
+          }
+        />
 
-      {error && <Text style={styles.error}>錯誤：{error}</Text>}
+        {error ? <ErrorBanner message={`錯誤：${error}`} /> : null}
 
-      {taskDetail ? (
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.taskId}>任務：{taskDetail.taskId}</Text>
-            <View style={styles.badgeRow}>
-              {isForwardedTask(taskDetail) && <RouteLockedBadge />}
-              <PlatformTaskBadge platformCode={taskDetail.sourcePlatform} />
-            </View>
-          </View>
-          <Text style={styles.taskStatus}>
-            狀態：{formatDriverTaskStatusLabel(taskDetail.status)}
-          </Text>
-          <PlatformAuthorityBanner
-            platformCode={taskDetail.sourcePlatform}
-            description={tripAuthorityDescription}
-          />
-          <View
-            style={[
-              styles.tripStatusPanel,
-              {
-                backgroundColor: getStatusToneStyles(
-                  tripStatusPresentation.tone,
-                ).background,
-              },
-            ]}
-          >
-            <View style={styles.tripStatusHeader}>
-              <View
-                style={[
-                  styles.tripStatusDot,
-                  {
-                    backgroundColor: getStatusToneStyles(
-                      tripStatusPresentation.tone,
-                    ).dot,
-                  },
-                ]}
-              />
-              <Text
-                style={[
-                  styles.tripStatusLabel,
-                  {
-                    color: getStatusToneStyles(tripStatusPresentation.tone)
-                      .text,
-                  },
-                ]}
-              >
-                {tripStatusPresentation.label}
-              </Text>
-            </View>
-            <Text style={styles.tripStatusDetail}>
-              {tripStatusPresentation.detail}
-            </Text>
-          </View>
-          {tripLockBody && (
-            <View style={styles.tripLockCard}>
-              <Ionicons
-                name={tripLockBody.icon}
-                size={18}
-                color={Tokens.colors.warning}
-              />
-              <View style={styles.tripLockCopy}>
-                <Text style={styles.tripLockTitle}>{tripLockBody.title}</Text>
-                <Text style={styles.tripLockDetail}>{tripLockBody.detail}</Text>
-              </View>
-            </View>
-          )}
-          <Text style={styles.taskInfo}>
-            {taskDetail.orderId
-              ? `訂單：${taskDetail.orderId}`
-              : "尚未關聯訂單"}
-          </Text>
-          <View style={styles.authorityCard}>
-            <Text style={styles.authorityCardTitle}>可用操作與邊界</Text>
-            {tripCapabilityItems.map((item) => (
-              <Text key={item} style={styles.authorityCardItem}>
-                • {item}
-              </Text>
-            ))}
-          </View>
-          <RouteDisplay task={taskDetail} order={orderDetail} />
-          {showTripMetrics && (
-            <View style={styles.metricsCard}>
-              <View style={styles.metricsHeader}>
-                <Text style={styles.metricsTitle}>行程度量</Text>
-                {isTripInProgress && (
-                  <Text style={styles.metricsStatusPill}>
-                    {locationTrackingState === "active" ? "追蹤中" : "需處理"}
-                  </Text>
-                )}
-              </View>
-              <View style={styles.metricsGrid}>
-                <View style={styles.metricTile}>
-                  <Text style={styles.metricLabel}>距離</Text>
-                  <Text style={styles.metricValue}>
-                    {formatTripDistance(liveDistanceKm)}
-                  </Text>
-                </View>
-                <View style={styles.metricTile}>
-                  <Text style={styles.metricLabel}>時長</Text>
-                  <Text style={styles.metricValue}>
-                    {formatTripDuration(liveDurationSec)}
-                  </Text>
-                </View>
-              </View>
-              {isTripInProgress && locationTrackingState === "active" && (
-                <Text style={styles.metricHint}>
-                  {locationTrackingMessage ?? "此行程已啟用即時定位追蹤。"}
-                </Text>
-              )}
-              {isTripInProgress &&
-                locationTrackingState === "requesting_permission" && (
-                  <Text style={styles.metricWarning}>
-                    請允許定位權限以啟動即時行程追蹤。
-                  </Text>
-                )}
-              {isTripInProgress &&
-                (locationTrackingState === "permission_denied" ||
-                  locationTrackingState === "error") && (
-                  <>
-                    <Text style={styles.metricWarning}>
-                      {locationTrackingMessage ??
-                        "行程度量無法啟動。請先恢復定位追蹤，再完成行程。"}
-                    </Text>
-                    <ActionButton
-                      label="重試追蹤"
-                      onPress={() =>
-                        setTrackingRetryKey((current) => current + 1)
-                      }
-                      disabled={submittingAction !== null}
-                      variant="secondary"
-                    />
-                  </>
-                )}
-            </View>
-          )}
-          {isForwardedTrip && (
-            <>
-              <View style={styles.infoStateCard}>
-                <Text style={styles.infoStateTitle}>行程度量</Text>
-                <Text style={styles.infoStateBody}>
-                  來源平台任務不在此端啟用本地距離/時長追蹤；若平台同步延遲，請以派車台指示為準。
-                </Text>
-              </View>
-              <View style={styles.infoStateCard}>
-                <Text style={styles.infoStateTitle}>完單佐證</Text>
-                <Text style={styles.infoStateBody}>
-                  照片、簽收與費用佐證只會套用在自營行程。平台任務的完單需求由來源平台或派車台決定。
-                </Text>
-              </View>
-            </>
-          )}
-          {complianceGates.length > 0 && (
-            <View style={styles.complianceCard}>
-              <Text style={styles.complianceTitle}>合規檢查</Text>
-              {complianceGates.map((gate) => {
-                const tone = getComplianceTone(gate.state);
-                return (
-                  <View
-                    key={gate.gateType}
-                    style={[
-                      styles.complianceGate,
-                      {
-                        backgroundColor: tone.bg,
-                        borderColor: tone.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[styles.complianceGateTitle, { color: tone.text }]}
-                    >
-                      {gate.title}
-                    </Text>
-                    <Text
-                      style={[styles.complianceGateState, { color: tone.text }]}
-                    >
-                      {gate.state}
-                    </Text>
-                    <Text style={styles.complianceGateAction}>
-                      {gate.nextAction}
-                    </Text>
-                    {gate.missingItems.length > 0 && (
-                      <Text style={styles.complianceGateMeta}>
-                        缺少項目：{gate.missingItems.join(", ")}
-                      </Text>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
-          )}
-          {isForwardedTrip && (
-            <Text style={styles.forwardedNote}>
-              此任務由 {taskDetail.sourcePlatform}{" "}
-              派發，派遣規則由來源平台管理。
-            </Text>
-          )}
-        </View>
-      ) : (
-        <Text style={styles.empty}>目前沒有進行中的行程。</Text>
-      )}
+        {taskDetail ? (
+          <>
+            <AuthorityBanner
+              title={tripAuthorityBanner.title}
+              authorityLabel={tripAuthorityBanner.authorityLabel}
+              description={tripAuthorityBanner.description}
+              tone={tripAuthorityBanner.tone}
+              icon={tripAuthorityBanner.icon}
+            />
 
-      {!isForwardedTrip && taskDetail && (
-        <>
-          {showCompletionProofCard && (
-            <View style={styles.proofCard}>
-              <View style={styles.proofHeader}>
-                <Text style={styles.proofTitle}>完單佐證</Text>
-                <Text style={styles.proofCounter}>
-                  已附加 {proofPhotos.length}/{MAX_COMPLETION_PROOF_PHOTOS}
-                </Text>
-              </View>
-
-              <Text style={styles.proofHint}>
-                最多可附加 5 張照片。每張佐證照片壓縮後需低於 600KB。
-              </Text>
-
-              {proofRequirementsUnavailable && (
-                <Text style={styles.unsupportedNote}>
-                  需待訂單詳情載入後才能確認佐證需求；請先重新整理行程，再完成任務。
-                </Text>
-              )}
-
-              {proofRequirements.minPhotoCount > 0 && (
-                <Text style={styles.requirementNote}>
-                  此行程至少需要 {proofRequirements.minPhotoCount} 張佐證照片。
-                  {missingRequiredPhotos > 0
-                    ? ` 完成前還需補上 ${missingRequiredPhotos} 張。`
-                    : " 已達照片需求。"}
-                </Text>
-              )}
-
-              {proofRequirements.signoffRequired && (
-                <View style={styles.requirementCard}>
-                  <Text style={styles.requirementCardTitle}>
-                    必須提供簽收佐證
-                  </Text>
-                  <Text style={styles.requirementCardHint}>
-                    完成行程前，請填寫乘客或現場簽收識別資料。
-                  </Text>
-                  <TextInput
-                    style={styles.proofInput}
-                    value={signoffReference}
-                    onChangeText={setSignoffReference}
-                    editable={submittingAction === null}
-                    placeholder="乘客簽收或簽收單號"
-                    autoCapitalize="characters"
-                  />
-                  <Text style={styles.requirementStatus}>
-                    {signoffRequirementMissing
-                      ? "尚未填寫簽收識別資料。"
-                      : "簽收需求已完成。"}
-                  </Text>
-                </View>
-              )}
-
-              {proofRequirements.expenseProofRequired && (
-                <View style={styles.requirementCard}>
-                  <Text style={styles.requirementCardTitle}>
-                    必須提供費用佐證
-                  </Text>
-                  <Text style={styles.requirementCardHint}>
-                    請填寫一筆可報銷費用，包含類型、金額與單據識別，供財務覆核。
-                  </Text>
-                  <TextInput
-                    style={styles.proofInput}
-                    value={expenseType}
-                    onChangeText={setExpenseType}
-                    editable={submittingAction === null}
-                    placeholder="費用類型，例如過路費或停車費"
-                    autoCapitalize="none"
-                  />
-                  <TextInput
-                    style={styles.proofInput}
-                    value={expenseAmount}
-                    onChangeText={setExpenseAmount}
-                    editable={submittingAction === null}
-                    placeholder="金額，例如 40 或 40.50"
-                    keyboardType="decimal-pad"
-                  />
-                  <TextInput
-                    style={styles.proofInput}
-                    value={expenseAttachmentRef}
-                    onChangeText={setExpenseAttachmentRef}
-                    editable={submittingAction === null}
-                    placeholder="單據或附件識別"
-                    autoCapitalize="characters"
-                  />
-                  <Text style={styles.requirementStatus}>
-                    {expenseAmountInvalid
-                      ? "請輸入有效的正數金額。"
-                      : expenseRequirementMissing
-                        ? "費用佐證資料尚未填完整。"
-                        : expenseAttachmentId
-                          ? `費用佐證已完成：${expenseAttachmentId}`
-                          : "費用佐證已完成。"}
-                  </Text>
-                </View>
-              )}
-
-              <View style={styles.proofActions}>
-                <ActionButton
-                  label="拍照上傳"
-                  onPress={() => void pickProofPhotos("camera")}
-                  disabled={
-                    submittingAction !== null ||
-                    remainingSlots <= 0 ||
-                    proofRequirementsUnavailable
-                  }
-                  variant="secondary"
-                />
-                <ActionButton
-                  label="從相簿選取"
-                  onPress={() => void pickProofPhotos("library")}
-                  disabled={
-                    submittingAction !== null ||
-                    remainingSlots <= 0 ||
-                    proofRequirementsUnavailable
-                  }
-                  variant="secondary"
-                />
-              </View>
-
-              {proofPhotos.length > 0 ? (
-                <View style={styles.photoGrid}>
-                  {proofPhotos.map((photo, index) => (
-                    <View
-                      key={`${photo.uri}-${index}`}
-                      style={styles.photoCard}
-                    >
-                      <Image
-                        source={{ uri: photo.uri }}
-                        style={styles.photoPreview}
-                      />
-                      <Text numberOfLines={1} style={styles.photoMeta}>
-                        {Math.round(photo.estimatedBytes / 1024)} KB
-                      </Text>
-                      <ActionButton
-                        label="移除"
-                        onPress={() => removeProofPhoto(index)}
-                        disabled={submittingAction !== null}
-                        variant="secondary"
-                      />
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={styles.emptyProofState}>尚未選取佐證照片。</Text>
-              )}
-            </View>
-          )}
-
-          {primaryTripAction && (
-            <View style={styles.primaryActionCard}>
-              <Text style={styles.primaryActionEyebrow}>主要動作</Text>
-              <Text style={styles.primaryActionTitle}>
-                {primaryTripAction.title}
-              </Text>
-              <Text style={styles.primaryActionHint}>
-                {primaryTripAction.helperText}
-              </Text>
-              <ActionButton
-                label={
-                  submittingAction === primaryTripAction.action &&
-                  primaryTripAction.action === "complete"
-                    ? "完成中…"
-                    : primaryTripAction.label
-                }
-                onPress={() => void handleAction(primaryTripAction.action)}
-                disabled={
-                  primaryTripAction.action === "complete"
-                    ? shouldDisableCompleteTripAction({
-                        submittingAction,
-                        proofRequirementsUnavailable,
-                        missingRequiredPhotos,
-                        signoffRequirementMissing,
-                        expenseRequirementMissing,
-                        expenseAmountInvalid,
-                        completionBlockedByTracking,
-                      })
-                    : submittingAction !== null
-                }
-              />
-            </View>
-          )}
-        </>
-      )}
-
-      {taskDetail && isForwardedTrip && (
-        <View style={styles.primaryActionCard}>
-          <Text style={styles.primaryActionEyebrow}>主要動作</Text>
-          <Text style={styles.primaryActionTitle}>
-            {forwardedActionCardCopy.title}
-          </Text>
-          <Text style={styles.forwardedActionNote}>
-            {taskDetail.sourcePlatform} 平台管理此任務；
-            {forwardedActionCardCopy.note}
-          </Text>
-          {forwardedActionResult && (
             <View
               style={[
-                styles.forwardedOutcomePanel,
+                styles.tripHero,
                 {
-                  backgroundColor: getStatusToneStyles(
-                    describeForwardedActionOutcome(
-                      forwardedActionResult.outcome,
-                      forwardedActionResult.action,
-                    ).tone,
-                  ).background,
+                  backgroundColor: tripSurfacePalette.backgroundColor,
+                  borderColor: tripSurfacePalette.borderColor,
                 },
               ]}
             >
-              <View style={styles.forwardedOutcomeHeader}>
+              <View style={styles.tripHeroHeader}>
+                <View style={styles.tripHeroTitleBlock}>
+                  <Text
+                    style={[
+                      styles.tripHeroEyebrow,
+                      { color: tripSurfacePalette.accentColor },
+                    ]}
+                  >
+                    {tripStateEyebrow}
+                  </Text>
+                  <Text style={styles.tripHeroTitle}>
+                    {taskDetail.orderId
+                      ? `訂單 ${taskDetail.orderId}`
+                      : `任務 ${taskDetail.taskId}`}
+                  </Text>
+                  <Text style={styles.tripHeroDescription}>
+                    {tripStatusPresentation.detail}
+                  </Text>
+                </View>
+                <View style={styles.tripHeroBadges}>
+                  {isForwardedTrip ? <RouteLockedBadge /> : null}
+                  <PlatformTaskBadge platformCode={taskDetail.sourcePlatform} />
+                </View>
+              </View>
+
+              <View style={styles.tripHeroMetaRow}>
+                <StatusChip
+                  label={tripStatusPresentation.label}
+                  variant={tripStatusChipVariant}
+                  dot
+                />
+                <StatusChip
+                  label={`內部狀態：${formatDriverTaskStatusLabel(taskDetail.status)}`}
+                  variant={isForwardedTrip ? "forwarded" : "owned"}
+                />
+                <StatusChip label={taskDetail.taskId} variant="brand" />
+              </View>
+
+              <View style={styles.tripMapCard}>
+                <View style={styles.tripMapCanvas}>
+                  <View style={styles.tripMapGlow} />
+                  <View style={styles.tripMapBadge}>
+                    <Ionicons
+                      name="navigate-outline"
+                      size={12}
+                      color={tripSurfacePalette.accentColor}
+                    />
+                    <Text style={styles.tripMapBadgeText}>
+                      {routeMetricDistance}
+                    </Text>
+                  </View>
+                  <View style={styles.tripMapRouteColumn}>
+                    <View
+                      style={[styles.tripMapDot, styles.tripMapPickupDot]}
+                    />
+                    <View style={styles.tripMapConnector} />
+                    <View
+                      style={[styles.tripMapDot, styles.tripMapDropoffDot]}
+                    />
+                  </View>
+                  <View style={styles.tripMapStops}>
+                    <View style={styles.tripMapStopCard}>
+                      <Text style={styles.tripMapStopLabel}>取貨點</Text>
+                      <Text style={styles.tripMapStopAddress}>
+                        {pickupAddress}
+                      </Text>
+                    </View>
+                    <View style={styles.tripMapStopCard}>
+                      <Text style={styles.tripMapStopLabel}>送達點</Text>
+                      <Text style={styles.tripMapStopAddress}>
+                        {dropoffAddress}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.tripMetricRow}>
+                  <MetricPill
+                    icon="map-outline"
+                    label="距離"
+                    value={routeMetricDistance}
+                    tone={
+                      tripExperienceState === "sync_failed"
+                        ? "danger"
+                        : tripStatusPresentation.tone === "warning"
+                          ? "warning"
+                          : "success"
+                    }
+                  />
+                  <MetricPill
+                    icon="time-outline"
+                    label="時長"
+                    value={routeMetricDuration}
+                    tone={
+                      locationTrackingState === "active" ? "success" : "neutral"
+                    }
+                  />
+                  <MetricPill
+                    icon="pricetag-outline"
+                    label="車資"
+                    value={routeMetricFare}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.tripStatusCallout}>
                 <View
                   style={[
-                    styles.forwardedOutcomeDot,
-                    {
-                      backgroundColor: getStatusToneStyles(
-                        describeForwardedActionOutcome(
-                          forwardedActionResult.outcome,
-                          forwardedActionResult.action,
-                        ).tone,
-                      ).dot,
-                    },
+                    styles.tripStatusDot,
+                    { backgroundColor: statusToneStyles.dot },
                   ]}
                 />
                 <Text
                   style={[
-                    styles.forwardedOutcomeTitle,
+                    styles.tripStatusCalloutText,
+                    { color: statusToneStyles.text },
+                  ]}
+                >
+                  {tripAuthorityDescription}
+                </Text>
+              </View>
+
+              {tripLockBody ? (
+                <View style={styles.tripLockCard}>
+                  <Ionicons
+                    name={tripLockBody.icon}
+                    size={18}
+                    color={tripSurfacePalette.accentColor}
+                  />
+                  <View style={styles.tripLockCopy}>
+                    <Text style={styles.tripLockTitle}>
+                      {tripLockBody.title}
+                    </Text>
+                    <Text style={styles.tripLockDetail}>
+                      {tripLockBody.detail}
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+
+              {forwardedOutcomeSummary && forwardedOutcomeToneStyles ? (
+                <View
+                  style={[
+                    styles.forwardedOutcomePanel,
                     {
-                      color: getStatusToneStyles(
-                        describeForwardedActionOutcome(
-                          forwardedActionResult.outcome,
-                          forwardedActionResult.action,
-                        ).tone,
-                      ).text,
+                      backgroundColor: forwardedOutcomeToneStyles.background,
+                      borderColor: `${forwardedOutcomeToneStyles.dot}33`,
                     },
                   ]}
                 >
-                  {
-                    describeForwardedActionOutcome(
-                      forwardedActionResult.outcome,
-                      forwardedActionResult.action,
-                    ).title
-                  }
-                </Text>
-              </View>
-              <Text style={styles.forwardedOutcomeDetail}>
-                {forwardedActionResult.driverMessage}
-              </Text>
-              <Text style={styles.forwardedOutcomeMeta}>
-                平台訂單編號：
-                {forwardedActionResult.managementCorrelationIds.mirrorOrderId}
-                {forwardedActionResult.managementCorrelationIds
-                  .reconciliationJobId
-                  ? `／對帳工單 ${forwardedActionResult.managementCorrelationIds.reconciliationJobId}`
-                  : ""}
-              </Text>
+                  <View style={styles.forwardedOutcomeHeader}>
+                    <View
+                      style={[
+                        styles.forwardedOutcomeDot,
+                        { backgroundColor: forwardedOutcomeToneStyles.dot },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.forwardedOutcomeTitle,
+                        { color: forwardedOutcomeToneStyles.text },
+                      ]}
+                    >
+                      {forwardedOutcomeSummary.title}
+                    </Text>
+                  </View>
+                  <Text style={styles.forwardedOutcomeDetail}>
+                    {forwardedActionResult?.driverMessage}
+                  </Text>
+                  <Text style={styles.forwardedOutcomeMeta}>
+                    平台訂單編號：
+                    {
+                      forwardedActionResult?.managementCorrelationIds
+                        .mirrorOrderId
+                    }
+                    {forwardedActionResult?.managementCorrelationIds
+                      .reconciliationJobId
+                      ? `／對帳工單 ${forwardedActionResult.managementCorrelationIds.reconciliationJobId}`
+                      : ""}
+                  </Text>
+                </View>
+              ) : null}
             </View>
-          )}
-          {tripExperienceState === "forwarded_offered" &&
-            forwardedActionResult === null && (
-              <View style={styles.forwardedOfferActions}>
-                <ActionButton
-                  label={
-                    submittingAction === "forwarded_accept"
-                      ? "接單送出中…"
-                      : "接受平台訂單"
+
+            <View style={styles.infoTileRow}>
+              <InfoTile
+                label="操作模式"
+                value={isForwardedTrip ? "平台主導" : "自營行程"}
+              />
+              <InfoTile
+                label="定位追蹤"
+                value={
+                  isForwardedTrip
+                    ? "未啟用"
+                    : locationTrackingState === "active"
+                      ? "追蹤中"
+                      : locationTrackingState === "requesting_permission"
+                        ? "等待授權"
+                        : "需處理"
+                }
+              />
+            </View>
+
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionEyebrow}>Workflow Boundaries</Text>
+              <Text style={styles.sectionTitle}>可用操作與邊界</Text>
+              {tripCapabilityItems.map((item) => (
+                <Text key={item} style={styles.sectionListItem}>
+                  • {item}
+                </Text>
+              ))}
+            </View>
+
+            <RouteDisplay
+              task={taskDetail}
+              order={orderDetail}
+              showAuthorityBanner={false}
+            />
+
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionEyebrow}>Trip Health</Text>
+              <Text style={styles.sectionTitle}>行程狀態與度量</Text>
+              <View style={styles.infoTileRow}>
+                <InfoTile
+                  label="距離"
+                  value={
+                    showTripMetrics ? formatTripDistance(liveDistanceKm) : "N/A"
                   }
-                  onPress={() => void handleForwardedAccept()}
-                  disabled={submittingAction !== null}
                 />
-                <ActionButton
-                  label={
-                    submittingAction === "forwarded_reject"
-                      ? "婉拒送出中…"
-                      : "婉拒平台訂單"
+                <InfoTile
+                  label="時長"
+                  value={
+                    showTripMetrics
+                      ? formatTripDuration(liveDurationSec)
+                      : "N/A"
                   }
-                  onPress={() => void handleForwardedReject()}
-                  disabled={submittingAction !== null}
-                  variant="secondary"
                 />
               </View>
-            )}
-        </View>
-      )}
+              <Text style={styles.sectionBody}>
+                {isForwardedTrip
+                  ? "來源平台任務不在此端啟用本地距離/時長追蹤；若平台同步延遲，請以派車台指示為準。"
+                  : locationTrackingState === "active"
+                    ? (locationTrackingMessage ??
+                      "此行程已啟用即時定位追蹤，距離與時長會持續更新。")
+                    : locationTrackingState === "requesting_permission"
+                      ? "請允許定位權限以啟動即時行程追蹤。"
+                      : (locationTrackingMessage ??
+                        "行程度量目前不可用；恢復定位追蹤後才能完成行程。")}
+              </Text>
+              {!isForwardedTrip &&
+              isTripInProgress &&
+              (locationTrackingState === "permission_denied" ||
+                locationTrackingState === "error") ? (
+                <View style={styles.inlineActionRow}>
+                  <ActionButton
+                    label="重試追蹤"
+                    onPress={() =>
+                      setTrackingRetryKey((current) => current + 1)
+                    }
+                    disabled={submittingAction !== null}
+                    variant="secondary"
+                  />
+                </View>
+              ) : null}
+            </View>
 
-      <View style={styles.footer}>
-        <View style={styles.sosCard}>
-          <Text style={styles.sosEyebrow}>安全支援</Text>
-          <Text style={styles.sosTitle}>需要立即通報重大安全事件？</Text>
-          <Text style={styles.sosNote}>
-            開啟 SOS 緊急通報後，送出前仍需再確認一次。
-          </Text>
-          <SharedActionButton
-            title="開啟 SOS 緊急通報"
-            onPress={() => router.push("/incident")}
-            variant="danger"
-            icon="warning-outline"
-            style={styles.sosButton}
+            {complianceGates.length > 0 ? (
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionEyebrow}>Compliance</Text>
+                <Text style={styles.sectionTitle}>合規檢查</Text>
+                <View style={styles.complianceList}>
+                  {complianceGates.map((gate) => {
+                    const tone = getComplianceTone(gate.state);
+                    return (
+                      <View
+                        key={gate.gateType}
+                        style={[
+                          styles.complianceGate,
+                          {
+                            backgroundColor: tone.bg,
+                            borderColor: tone.border,
+                          },
+                        ]}
+                      >
+                        <View style={styles.complianceGateHeader}>
+                          <Text
+                            style={[
+                              styles.complianceGateTitle,
+                              { color: tone.text },
+                            ]}
+                          >
+                            {gate.title}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.complianceGateState,
+                              { color: tone.text },
+                            ]}
+                          >
+                            {gate.state}
+                          </Text>
+                        </View>
+                        <Text style={styles.complianceGateAction}>
+                          {gate.nextAction}
+                        </Text>
+                        {gate.missingItems.length > 0 ? (
+                          <Text style={styles.complianceGateMeta}>
+                            缺少項目：{gate.missingItems.join(", ")}
+                          </Text>
+                        ) : null}
+                      </View>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+
+            {!isForwardedTrip && showCompletionProofCard ? (
+              <View style={styles.sectionCard}>
+                <Text style={styles.sectionEyebrow}>Completion Proof</Text>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.sectionTitle}>完單佐證</Text>
+                  <StatusChip
+                    label={`已附加 ${proofPhotos.length}/${MAX_COMPLETION_PROOF_PHOTOS}`}
+                    variant="default"
+                  />
+                </View>
+                <Text style={styles.sectionBody}>
+                  最多可附加 5 張照片。每張佐證照片壓縮後需低於 600KB。
+                </Text>
+
+                {proofRequirementsUnavailable ? (
+                  <ErrorBanner message="需待訂單詳情載入後才能確認佐證需求；請先重新整理行程，再完成任務。" />
+                ) : null}
+
+                {proofRequirements.minPhotoCount > 0 ? (
+                  <Text style={styles.requirementNote}>
+                    此行程至少需要 {proofRequirements.minPhotoCount}{" "}
+                    張佐證照片。
+                    {missingRequiredPhotos > 0
+                      ? ` 完成前還需補上 ${missingRequiredPhotos} 張。`
+                      : " 已達照片需求。"}
+                  </Text>
+                ) : null}
+
+                {proofRequirements.signoffRequired ? (
+                  <View style={styles.requirementCard}>
+                    <Text style={styles.requirementCardTitle}>簽收佐證</Text>
+                    <Text style={styles.requirementCardHint}>
+                      完成行程前，請填寫乘客或現場簽收識別資料。
+                    </Text>
+                    <FormField
+                      label="簽收識別"
+                      value={signoffReference}
+                      onChangeText={setSignoffReference}
+                      editable={submittingAction === null}
+                      placeholder="乘客簽收或簽收單號"
+                      autoCapitalize="characters"
+                      error={
+                        signoffRequirementMissing
+                          ? "尚未填寫簽收識別資料。"
+                          : undefined
+                      }
+                      helpText={
+                        signoffRequirementMissing
+                          ? undefined
+                          : "簽收需求已完成。"
+                      }
+                    />
+                  </View>
+                ) : null}
+
+                {proofRequirements.expenseProofRequired ? (
+                  <View style={styles.requirementCard}>
+                    <Text style={styles.requirementCardTitle}>費用佐證</Text>
+                    <Text style={styles.requirementCardHint}>
+                      請填寫一筆可報銷費用，包含類型、金額與單據識別，供財務覆核。
+                    </Text>
+                    <FormField
+                      label="費用類型"
+                      value={expenseType}
+                      onChangeText={setExpenseType}
+                      editable={submittingAction === null}
+                      placeholder="例如過路費或停車費"
+                      autoCapitalize="none"
+                    />
+                    <FormField
+                      label="金額"
+                      value={expenseAmount}
+                      onChangeText={setExpenseAmount}
+                      editable={submittingAction === null}
+                      placeholder="例如 40 或 40.50"
+                      keyboardType="decimal-pad"
+                      error={
+                        expenseAmountInvalid
+                          ? "請輸入有效的正數金額。"
+                          : undefined
+                      }
+                    />
+                    <FormField
+                      label="單據識別"
+                      value={expenseAttachmentRef}
+                      onChangeText={setExpenseAttachmentRef}
+                      editable={submittingAction === null}
+                      placeholder="單據或附件識別"
+                      autoCapitalize="characters"
+                      helpText={
+                        expenseRequirementMissing
+                          ? "費用佐證資料尚未填完整。"
+                          : expenseAttachmentId
+                            ? `費用佐證已完成：${expenseAttachmentId}`
+                            : "費用佐證已完成。"
+                      }
+                    />
+                  </View>
+                ) : null}
+
+                <View style={styles.inlineActionRow}>
+                  <ActionButton
+                    label="拍照上傳"
+                    onPress={() => void pickProofPhotos("camera")}
+                    disabled={
+                      submittingAction !== null ||
+                      remainingSlots <= 0 ||
+                      proofRequirementsUnavailable
+                    }
+                    variant="secondary"
+                  />
+                  <ActionButton
+                    label="從相簿選取"
+                    onPress={() => void pickProofPhotos("library")}
+                    disabled={
+                      submittingAction !== null ||
+                      remainingSlots <= 0 ||
+                      proofRequirementsUnavailable
+                    }
+                    variant="secondary"
+                  />
+                </View>
+
+                {proofPhotos.length > 0 ? (
+                  <View style={styles.photoGrid}>
+                    {proofPhotos.map((photo, index) => (
+                      <View
+                        key={`${photo.uri}-${index}`}
+                        style={styles.photoCard}
+                      >
+                        <Image
+                          source={{ uri: photo.uri }}
+                          style={styles.photoPreview}
+                        />
+                        <Text numberOfLines={1} style={styles.photoMeta}>
+                          {Math.round(photo.estimatedBytes / 1024)} KB
+                        </Text>
+                        <ActionButton
+                          label="移除"
+                          onPress={() => removeProofPhoto(index)}
+                          disabled={submittingAction !== null}
+                          variant="secondary"
+                        />
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <EmptyState
+                    title="尚未選取佐證照片"
+                    description="可從相機或相簿新增完單照片。"
+                    icon="images-outline"
+                    style={styles.compactEmptyState}
+                  />
+                )}
+              </View>
+            ) : null}
+
+            <View style={styles.sosCard}>
+              <Text style={styles.sectionEyebrow}>Safety Support</Text>
+              <Text style={styles.sosTitle}>需要立即通報重大安全事件？</Text>
+              <Text style={styles.sosNote}>
+                開啟 SOS 緊急通報後，送出前仍需再確認一次。
+              </Text>
+              <SharedActionButton
+                title="開啟 SOS 緊急通報"
+                onPress={() => router.push("/incident")}
+                variant="danger"
+                icon="warning-outline"
+                style={styles.sosButton}
+              />
+            </View>
+          </>
+        ) : (
+          <EmptyState
+            title="目前沒有進行中的行程"
+            description="重新整理後可再次檢查是否有新任務同步進來。"
+            actionTitle="重新整理"
+            onAction={() => void loadTrip(true)}
           />
-        </View>
-      </View>
-    </ScrollView>
+        )}
+      </AppScreen>
+
+      {taskDetail ? (
+        <BottomActionBar
+          notice={
+            bottomPrimaryAction || bottomSecondaryAction
+              ? bottomNotice
+              : getIdleBottomActionLabel(tripExperienceState)
+          }
+          primaryAction={bottomPrimaryAction}
+          secondaryAction={bottomSecondaryAction}
+        />
+      ) : null}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: "#fff" },
-  content: { paddingBottom: 24 },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  title: { fontSize: 24, fontWeight: "bold", marginBottom: 12 },
-  error: { color: "red", marginBottom: 8 },
-  empty: { textAlign: "center", color: "#999", marginTop: 32 },
-  card: {
-    padding: 16,
-    backgroundColor: "#f0f7ff",
-    borderRadius: 8,
-    marginBottom: 16,
+  screenContent: {
+    paddingBottom: Tokens.spacing["4xl"],
   },
-  cardHeader: {
+  loadingState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Tokens.spacing.md,
+  },
+  loadingLabel: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textMuted,
+  },
+  tripHero: {
+    borderRadius: Tokens.radius.xl,
+    borderWidth: 1,
+    padding: Tokens.spacing.lg,
+    gap: Tokens.spacing.md,
+    ...Tokens.shadows.md,
+  },
+  tripHeroHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 8,
+    gap: Tokens.spacing.md,
   },
-  badgeRow: { flexDirection: "row", alignItems: "center", flexShrink: 1 },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-    marginLeft: 4,
+  tripHeroTitleBlock: {
+    flex: 1,
+    gap: Tokens.spacing.xs,
   },
-  badgeText: { fontSize: 11, fontWeight: "600" },
-  taskId: { fontSize: 18, fontWeight: "600", flex: 1 },
-  taskStatus: { fontSize: 14, color: "#666", marginTop: 4 },
-  authorityCard: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: "#fff",
+  tripHeroEyebrow: {
+    ...Tokens.type.micro,
+  },
+  tripHeroTitle: {
+    ...Tokens.type.screenTitle,
+    color: Tokens.colors.text,
+  },
+  tripHeroDescription: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textBody,
+  },
+  tripHeroBadges: {
+    alignItems: "flex-end",
+    gap: Tokens.spacing.xs,
+    flexShrink: 1,
+  },
+  tripHeroMetaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
+  },
+  tripMapCard: {
+    borderRadius: Tokens.radius.xl,
     borderWidth: 1,
-    borderColor: "#d9e7f5",
-    gap: 6,
+    borderColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.bgRaised,
+    overflow: "hidden",
   },
-  authorityCardTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#0f3554",
+  tripMapCanvas: {
+    minHeight: 188,
+    padding: Tokens.spacing.lg,
+    backgroundColor: Tokens.colors.brandBg,
+    position: "relative",
+    justifyContent: "space-between",
   },
-  authorityCardItem: {
-    fontSize: 13,
-    lineHeight: 18,
-    color: "#45627d",
+  tripMapGlow: {
+    position: "absolute",
+    top: -20,
+    right: -10,
+    width: 160,
+    height: 160,
+    borderRadius: 999,
+    backgroundColor: `${Tokens.colors.brand}10`,
   },
-  tripStatusPanel: {
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 10,
-    gap: 6,
-  },
-  tripStatusHeader: {
+  tripMapBadge: {
+    alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: Tokens.radius.md,
+    backgroundColor: Tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    ...Tokens.shadows.sm,
+  },
+  tripMapBadgeText: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textStrong,
+  },
+  tripMapRouteColumn: {
+    position: "absolute",
+    left: Tokens.spacing.lg,
+    top: 62,
+    bottom: Tokens.spacing.lg,
+    width: 18,
+    alignItems: "center",
+  },
+  tripMapDot: {
+    width: 12,
+    height: 12,
+    borderRadius: Tokens.radius.full,
+  },
+  tripMapPickupDot: {
+    backgroundColor: Tokens.colors.success,
+    shadowColor: Tokens.colors.success,
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+  },
+  tripMapDropoffDot: {
+    backgroundColor: Tokens.colors.danger,
+    shadowColor: Tokens.colors.danger,
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+  },
+  tripMapConnector: {
+    flex: 1,
+    width: 2,
+    marginVertical: Tokens.spacing.xs,
+    borderLeftWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: Tokens.colors.borderStrong,
+  },
+  tripMapStops: {
+    gap: Tokens.spacing.md,
+    paddingLeft: 28,
+    marginTop: Tokens.spacing.md,
+  },
+  tripMapStopCard: {
+    borderRadius: Tokens.radius.lg,
+    paddingHorizontal: Tokens.spacing.md,
+    paddingVertical: Tokens.spacing.sm,
+    backgroundColor: "rgba(255,255,255,0.88)",
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+  },
+  tripMapStopLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textDim,
+    marginBottom: 2,
+  },
+  tripMapStopAddress: {
+    ...Tokens.type.bodyStrong,
+    color: Tokens.colors.textStrong,
+  },
+  tripMetricRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
+    padding: Tokens.spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.surface,
+  },
+  metricPill: {
+    flex: 1,
+    minWidth: "30%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
+    borderRadius: Tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.surfaceLo,
+    paddingHorizontal: Tokens.spacing.sm,
+    paddingVertical: Tokens.spacing.sm,
+  },
+  metricPillCopy: {
+    flex: 1,
+  },
+  metricPillLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textDim,
+  },
+  metricPillValue: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
+  },
+  tripStatusCallout: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Tokens.spacing.sm,
+    padding: Tokens.spacing.md,
+    borderRadius: Tokens.radius.lg,
+    backgroundColor: Tokens.colors.bgRaised,
   },
   tripStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 10,
+    height: 10,
+    borderRadius: Tokens.radius.full,
+    marginTop: 6,
   },
-  tripStatusLabel: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  tripStatusDetail: {
-    fontSize: 12,
-    color: "#334155",
-    lineHeight: 18,
+  tripStatusCalloutText: {
+    ...Tokens.type.body,
+    flex: 1,
   },
   tripLockCard: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 10,
-    borderRadius: 12,
+    gap: Tokens.spacing.sm,
+    borderRadius: Tokens.radius.lg,
     borderWidth: 1,
-    borderColor: "#fcd34d",
-    backgroundColor: "#fffbeb",
-    padding: 12,
-    marginTop: 10,
+    borderColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.bgRaised,
+    padding: Tokens.spacing.md,
   },
   tripLockCopy: {
     flex: 1,
-    gap: 2,
+    gap: Tokens.spacing.xs,
   },
   tripLockTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#92400e",
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
   },
   tripLockDetail: {
-    fontSize: 12,
-    color: "#92400e",
-    lineHeight: 17,
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
   },
-  taskInfo: { fontSize: 14, color: "#333", marginTop: 8 },
-  forwardedNote: {
-    fontSize: 11,
-    color: "#666",
-    marginTop: 8,
-    fontStyle: "italic",
-  },
-  metricsCard: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#d9e7f5",
-    gap: 10,
-  },
-  metricsHeader: {
+  routeLockedBadge: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    gap: 8,
+    gap: 4,
+    paddingHorizontal: Tokens.spacing.sm,
+    paddingVertical: 5,
+    borderRadius: Tokens.radius.pill,
+    backgroundColor: Tokens.colors.warningBg,
+    borderWidth: 1,
+    borderColor: `${Tokens.colors.warning}33`,
   },
-  metricsTitle: { fontSize: 16, fontWeight: "600", color: "#0f3554" },
-  metricsStatusPill: {
-    fontSize: 11,
-    fontWeight: "600",
-    color: "#0f6cbd",
-    backgroundColor: "#e8f3fc",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
+  routeLockedBadgeText: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.warning,
   },
-  metricsGrid: {
+  infoTileRow: {
     flexDirection: "row",
-    gap: 12,
+    gap: Tokens.spacing.md,
   },
-  metricTile: {
-    flex: 1,
-    backgroundColor: "#f7fbff",
-    borderRadius: 8,
-    padding: 12,
+  sectionCard: {
+    borderRadius: Tokens.radius.xl,
     borderWidth: 1,
-    borderColor: "#d9e7f5",
+    borderColor: Tokens.colors.border,
+    backgroundColor: Tokens.colors.bgRaised,
+    padding: Tokens.spacing.lg,
+    gap: Tokens.spacing.sm,
+    ...Tokens.shadows.sm,
   },
-  metricLabel: { fontSize: 12, color: "#4f6b85", marginBottom: 4 },
-  metricValue: { fontSize: 20, fontWeight: "700", color: "#0f3554" },
-  metricHint: { fontSize: 12, color: "#0f6cbd" },
-  metricWarning: { fontSize: 12, color: "#b42318" },
-  infoStateCard: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#d9e7f5",
-    gap: 6,
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: Tokens.spacing.sm,
   },
-  infoStateTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#0f3554",
+  sectionEyebrow: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textDim,
   },
-  infoStateBody: {
-    fontSize: 13,
-    lineHeight: 18,
-    color: "#45627d",
+  sectionTitle: {
+    ...Tokens.type.sectionTitle,
+    color: Tokens.colors.textStrong,
   },
-  complianceCard: {
-    marginTop: 12,
-    padding: 12,
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#d9e7f5",
-    gap: 10,
+  sectionBody: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textMuted,
   },
-  complianceTitle: { fontSize: 16, fontWeight: "600", color: "#0f3554" },
+  sectionListItem: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textBody,
+  },
+  inlineActionRow: {
+    flexDirection: "row",
+    gap: Tokens.spacing.sm,
+    flexWrap: "wrap",
+  },
+  complianceList: {
+    gap: Tokens.spacing.sm,
+  },
   complianceGate: {
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 10,
-    gap: 4,
+    borderRadius: Tokens.radius.lg,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.xs,
   },
-  complianceGateTitle: { fontSize: 14, fontWeight: "600" },
-  complianceGateState: {
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-  },
-  complianceGateAction: { fontSize: 12, color: "#334155" },
-  complianceGateMeta: { fontSize: 12, color: "#64748b" },
-  proofCard: {
-    backgroundColor: "#faf7ef",
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: "#f0dcc0",
-  },
-  proofHeader: {
+  complianceGateHeader: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 8,
-    gap: 8,
+    justifyContent: "space-between",
+    gap: Tokens.spacing.sm,
   },
-  proofTitle: { fontSize: 18, fontWeight: "600", color: "#5a420c" },
-  proofCounter: { fontSize: 12, color: "#7d6842" },
-  proofHint: { fontSize: 12, color: "#7d6842", marginBottom: 8 },
+  complianceGateTitle: {
+    ...Tokens.type.label,
+    flex: 1,
+  },
+  complianceGateState: {
+    ...Tokens.type.micro,
+  },
+  complianceGateAction: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textBody,
+  },
+  complianceGateMeta: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textDim,
+  },
   requirementNote: {
-    fontSize: 12,
-    color: "#8a5b00",
-    marginBottom: 8,
+    ...Tokens.type.small,
+    color: Tokens.colors.warning,
   },
   requirementCard: {
-    backgroundColor: "#fffdf7",
+    backgroundColor: Tokens.colors.surfaceLo,
     borderWidth: 1,
-    borderColor: "#ead7b5",
-    borderRadius: 8,
-    padding: 12,
-    gap: 8,
-    marginBottom: 12,
+    borderColor: Tokens.colors.border,
+    borderRadius: Tokens.radius.lg,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.xs,
   },
   requirementCardTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#5a420c",
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
   },
   requirementCardHint: {
-    fontSize: 12,
-    color: "#7d6842",
-  },
-  proofInput: {
-    borderWidth: 1,
-    borderColor: "#d8c49f",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#1f2937",
-  },
-  requirementStatus: {
-    fontSize: 12,
-    color: "#7d6842",
-  },
-  unsupportedNote: {
-    fontSize: 12,
-    color: "#b42318",
-    marginBottom: 8,
-  },
-  proofActions: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 12,
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
   },
   photoGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: Tokens.spacing.md,
   },
   photoCard: {
     width: "47%",
-    backgroundColor: "#fff",
-    borderRadius: 8,
-    padding: 8,
+    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.lg,
+    padding: Tokens.spacing.sm,
     borderWidth: 1,
-    borderColor: "#e8d7bb",
-    gap: 8,
+    borderColor: Tokens.colors.border,
+    gap: Tokens.spacing.sm,
   },
   photoPreview: {
     width: "100%",
     aspectRatio: 1.2,
-    borderRadius: 6,
-    backgroundColor: "#f1f1f1",
+    borderRadius: Tokens.radius.md,
+    backgroundColor: Tokens.colors.surfaceMuted,
   },
-  photoMeta: { fontSize: 12, color: "#666", textAlign: "center" },
-  emptyProofState: {
-    fontSize: 13,
-    color: "#666",
-    fontStyle: "italic",
+  photoMeta: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+    textAlign: "center",
   },
-  primaryActionCard: {
-    marginBottom: 16,
-    padding: 16,
-    borderRadius: 8,
-    backgroundColor: "#f3f7fb",
-    borderWidth: 1,
-    borderColor: "#d4e2f0",
-    gap: 8,
-  },
-  primaryActionEyebrow: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-    color: "#45627d",
-  },
-  primaryActionTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#0f3554",
-  },
-  primaryActionHint: {
-    fontSize: 13,
-    color: "#45627d",
-    marginBottom: 4,
-  },
-  actionButton: {
-    minHeight: 44,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  actionButtonPrimary: {
-    backgroundColor: "#0f6cbd",
-  },
-  actionButtonSecondary: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#c7d7ea",
-  },
-  actionButtonDisabled: {
-    opacity: 0.45,
-  },
-  actionButtonPressed: {
-    opacity: 0.85,
-  },
-  actionButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  actionButtonTextPrimary: {
-    color: "#fff",
-  },
-  actionButtonTextSecondary: {
-    color: "#0f6cbd",
-  },
-  forwardedActionNote: {
-    fontSize: 13,
-    color: "#45627d",
-  },
-  forwardedOfferActions: {
-    flexDirection: "row",
-    gap: 8,
-    flexWrap: "wrap",
-    marginTop: 4,
+  compactEmptyState: {
+    paddingHorizontal: 0,
+    paddingVertical: Tokens.spacing.lg,
   },
   forwardedOutcomePanel: {
-    borderRadius: 12,
-    padding: 12,
-    gap: 6,
+    borderRadius: Tokens.radius.lg,
+    borderWidth: 1,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.xs,
   },
   forwardedOutcomeHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: Tokens.spacing.sm,
   },
   forwardedOutcomeDot: {
     width: 8,
     height: 8,
-    borderRadius: 4,
+    borderRadius: Tokens.radius.full,
   },
   forwardedOutcomeTitle: {
-    fontSize: 14,
-    fontWeight: "700",
+    ...Tokens.type.label,
   },
   forwardedOutcomeDetail: {
-    fontSize: 13,
-    color: "#334155",
-    lineHeight: 18,
+    ...Tokens.type.body,
+    color: Tokens.colors.textBody,
   },
   forwardedOutcomeMeta: {
-    fontSize: 11,
-    color: "#475569",
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
   },
-  footer: { marginTop: 8 },
   sosCard: {
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: "#fff1f2",
+    padding: Tokens.spacing.lg,
+    borderRadius: Tokens.radius.xl,
+    backgroundColor: Tokens.colors.dangerBg,
     borderWidth: 1,
-    borderColor: "#f6c7cd",
-    gap: 8,
-  },
-  sosEyebrow: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-    color: "#8a0f19",
+    borderColor: `${Tokens.colors.danger}22`,
+    gap: Tokens.spacing.sm,
   },
   sosTitle: {
-    fontSize: 18,
-    fontWeight: "700",
-    color: "#6b0f17",
+    ...Tokens.type.sectionTitle,
+    color: Tokens.colors.danger,
   },
   sosNote: {
-    fontSize: 13,
-    color: "#8a3b44",
+    ...Tokens.type.body,
+    color: Tokens.colors.textBody,
   },
   sosButton: {
-    marginTop: 4,
+    marginTop: Tokens.spacing.xs,
   },
-  label: { marginTop: 8, color: "#666" },
 });
