@@ -958,7 +958,8 @@ describe("TenantPartnerService sensitive-data governance", () => {
   });
 
   it("validateBookingCostCenter accepts canonical active codes and rejects unknown, disabled, or malformed entries", () => {
-    const service = new TenantPartnerService(new AuditNotificationService());
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
 
     // Seeded tenant has CC-FIN-04 active by default.
     const seededResult = service.validateBookingCostCenter(
@@ -1018,6 +1019,60 @@ describe("TenantPartnerService sensitive-data governance", () => {
         ).getResponse().error.code,
       ).toBe("BOOKING_COST_CENTER_DISABLED");
     }
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "booking.cost_center.validation_rejected",
+          resourceId: "CC-DOES-NOT-EXIST",
+          newValuesSummary: expect.objectContaining({
+            errorCode: "BOOKING_COST_CENTER_UNKNOWN",
+          }),
+        }),
+        expect.objectContaining({
+          actionName: "booking.cost_center.validation_rejected",
+          resourceId: "bad code!",
+          newValuesSummary: expect.objectContaining({
+            errorCode: "BOOKING_COST_CENTER_INVALID",
+          }),
+        }),
+        expect.objectContaining({
+          actionName: "booking.cost_center.validation_rejected",
+          resourceId: "CC-OPS-02",
+          newValuesSummary: expect.objectContaining({
+            errorCode: "BOOKING_COST_CENTER_DISABLED",
+          }),
+        }),
+      ]),
+    );
+    expect(service.listTenantGovernanceMetricSamples()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "tenant_governance.cost_center.validation_reject_total",
+          value: 1,
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+            error_code: "BOOKING_COST_CENTER_UNKNOWN",
+          }),
+        }),
+        expect.objectContaining({
+          name: "tenant_governance.cost_center.validation_reject_total",
+          value: 1,
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+            error_code: "BOOKING_COST_CENTER_INVALID",
+          }),
+        }),
+        expect.objectContaining({
+          name: "tenant_governance.cost_center.validation_reject_total",
+          value: 1,
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+            error_code: "BOOKING_COST_CENTER_DISABLED",
+          }),
+        }),
+      ]),
+    );
   });
 
   it("validateBookingCostCenter grandfathers tenants whose directory is empty and isolates lookups by tenant", () => {
@@ -1060,6 +1115,222 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(
       service.validateBookingCostCenter("tenant-demo-002", "cc-x"),
     ).toEqual({ value: "CC-X", matchedDirectory: true });
+  });
+
+  it("tracks pending approval gauges after creating an approval request", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+    (
+      service as TenantPartnerService & {
+        dispatchApprovalNotifications: (
+          kind: string,
+          request: unknown,
+          options?: unknown,
+        ) => Promise<void>;
+      }
+    ).dispatchApprovalNotifications = vi.fn(async () => {});
+
+    service.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "Manual approval for large booking",
+      priority: 10,
+      conditions: [{ field: "booking.amount_minor", op: "gte", value: 1 }],
+      action: "require_approval",
+      approvers: [{ kind: "tenant_admin" }],
+    });
+
+    const evaluation = service.evaluateApprovalRules("tenant-demo-001", {
+      subject: {
+        subjectType: "booking",
+        bookingId: "booking-pending-001",
+        draftId: null,
+        operation: "dry_run",
+      },
+      inputSnapshot: {
+        costCenterCode: "CC-FIN-04",
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T10:00:00.000Z",
+        passengerId: "passenger-001",
+        passengerRole: "guest",
+        amountMinor: 500_000,
+        currency: "TWD",
+        vehiclePreference: "standard_taxi",
+      },
+    });
+
+    service.createBookingApprovalRequest({
+      tenantId: "tenant-demo-001",
+      bookingId: "booking-pending-001",
+      orderId: "order-pending-001",
+      evaluationSnapshot: evaluation,
+    });
+
+    expect(service.listTenantGovernanceMetricSamples()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "tenant_governance.approval.pending_count",
+          value: 1,
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+          }),
+        }),
+        expect.objectContaining({
+          name: "tenant_governance.approval.pending_age_seconds",
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+            stat: "p95",
+          }),
+        }),
+        expect.objectContaining({
+          name: "tenant_governance.approval.pending_age_seconds",
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+            stat: "max",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("refreshes pending approval age gauges when metrics are listed later", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-13T10:00:00.000Z"));
+
+    try {
+      const service = new TenantPartnerService(new AuditNotificationService());
+      (
+        service as TenantPartnerService & {
+          dispatchApprovalNotifications: (
+            kind: string,
+            request: unknown,
+            options?: unknown,
+          ) => Promise<void>;
+        }
+      ).dispatchApprovalNotifications = vi.fn(async () => {});
+
+      service.upsertApprovalRule("tenant-demo-001", {
+        ruleName: "Manual approval for large booking",
+        priority: 10,
+        conditions: [{ field: "booking.amount_minor", op: "gte", value: 1 }],
+        action: "require_approval",
+        approvers: [{ kind: "tenant_admin" }],
+      });
+
+      const evaluation = service.evaluateApprovalRules("tenant-demo-001", {
+        subject: {
+          subjectType: "booking",
+          bookingId: "booking-pending-002",
+          draftId: null,
+          operation: "dry_run",
+        },
+        inputSnapshot: {
+          costCenterCode: "CC-FIN-04",
+          businessDispatchSubtype: "enterprise_dispatch",
+          reservationWindowStart: "2026-05-13T10:00:00.000Z",
+          passengerId: "passenger-001",
+          passengerRole: "guest",
+          amountMinor: 500_000,
+          currency: "TWD",
+          vehiclePreference: "standard_taxi",
+        },
+      });
+
+      service.createBookingApprovalRequest({
+        tenantId: "tenant-demo-001",
+        bookingId: "booking-pending-002",
+        orderId: "order-pending-002",
+        evaluationSnapshot: evaluation,
+      });
+
+      vi.setSystemTime(new Date("2026-05-14T10:05:00.000Z"));
+
+      const refreshedSamples = service.listTenantGovernanceMetricSamples();
+      const refreshedP95 = refreshedSamples.find(
+        (sample) =>
+          sample.name === "tenant_governance.approval.pending_age_seconds" &&
+          sample.labels.tenant_id === "tenant-demo-001" &&
+          sample.labels.stat === "p95",
+      );
+      const refreshedMax = refreshedSamples.find(
+        (sample) =>
+          sample.name === "tenant_governance.approval.pending_age_seconds" &&
+          sample.labels.tenant_id === "tenant-demo-001" &&
+          sample.labels.stat === "max",
+      );
+
+      expect(refreshedP95).toMatchObject({
+        value: 86_700,
+        observedAt: "2026-05-14T10:05:00.000Z",
+        labels: expect.objectContaining({
+          tenant_id: "tenant-demo-001",
+          stat: "p95",
+        }),
+      });
+      expect(refreshedMax).toMatchObject({
+        value: 86_700,
+        observedAt: "2026-05-14T10:05:00.000Z",
+        labels: expect.objectContaining({
+          tenant_id: "tenant-demo-001",
+          stat: "max",
+        }),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tracks evaluator latency percentiles after approval evaluation", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    service.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "Latency probe rule",
+      priority: 10,
+      conditions: [{ field: "booking.amount_minor", op: "gte", value: 1 }],
+      action: "warn",
+    });
+
+    service.evaluateApprovalRules("tenant-demo-001", {
+      subject: {
+        subjectType: "booking",
+        bookingId: "booking-latency-001",
+        draftId: null,
+        operation: "dry_run",
+      },
+      inputSnapshot: {
+        costCenterCode: "CC-FIN-04",
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T10:00:00.000Z",
+        passengerId: "passenger-001",
+        passengerRole: "guest",
+        amountMinor: 100_000,
+        currency: "TWD",
+        vehiclePreference: "standard_taxi",
+      },
+    });
+
+    expect(service.listTenantGovernanceMetricSamples()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "tenant_governance.approval.evaluator_latency_ms",
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+            stat: "p50",
+          }),
+        }),
+        expect.objectContaining({
+          name: "tenant_governance.approval.evaluator_latency_ms",
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+            stat: "p95",
+          }),
+        }),
+        expect.objectContaining({
+          name: "tenant_governance.approval.evaluator_latency_ms",
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+            stat: "p99",
+          }),
+        }),
+      ]),
+    );
   });
 
   it("normalizes tenant API key scopes and enforces the rotation window", () => {
@@ -1958,7 +2229,8 @@ describe("TenantPartnerService approval rules", () => {
   });
 
   it("throws QUOTA_INSUFFICIENT_AT_COMMIT when a hard-block reserve exceeds the limit", async () => {
-    const service = new TenantPartnerService(new AuditNotificationService());
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
 
     service.upsertTenantQuotaPolicy("tenant-demo-001", {
       period: "monthly",
@@ -1984,6 +2256,29 @@ describe("TenantPartnerService approval rules", () => {
         },
       },
     });
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "tenant.quota_reservation.blocked",
+          newValuesSummary: expect.objectContaining({
+            errorCode: "QUOTA_INSUFFICIENT_AT_COMMIT",
+          }),
+        }),
+      ]),
+    );
+    expect(service.listTenantGovernanceMetricSamples()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "tenant_governance.quota.race_failure_total",
+          value: 1,
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+            error_code: "QUOTA_INSUFFICIENT_AT_COMMIT",
+          }),
+        }),
+      ]),
+    );
   });
 
   it("uses the caller transaction for database-backed quota reservations", async () => {
@@ -2031,6 +2326,25 @@ describe("TenantPartnerService approval rules", () => {
       }),
     );
     expect(result.ledgerEntries).toHaveLength(1);
+    expect(service.listTenantGovernanceMetricSamples()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "tenant_governance.quota.ledger_write_total",
+          value: 1,
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+          }),
+        }),
+        expect.objectContaining({
+          name: "tenant_governance.quota.usage_percent",
+          labels: expect.objectContaining({
+            tenant_id: "tenant-demo-001",
+            scope: "tenant",
+            dimension: "booking_count",
+          }),
+        }),
+      ]),
+    );
   });
 
   it("blocks over-limit reservations on the database path before persisting ledger rows", async () => {

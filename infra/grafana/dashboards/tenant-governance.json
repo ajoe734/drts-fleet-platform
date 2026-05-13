@@ -1,0 +1,501 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_TENANT_GOVERNANCE_METRICS",
+      "label": "Tenant Governance Metrics",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    },
+    {
+      "name": "DS_GRAFANA_TESTDATA",
+      "label": "Grafana TestData",
+      "type": "datasource",
+      "pluginId": "grafana-testdata-datasource",
+      "pluginName": "TestData DB"
+    }
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+      },
+      "description": "Canonical metric namespace uses tenant_governance.approval.pending_count. Prometheus bridge normalizes dots to underscores.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+          },
+          "expr": "sum by (tenant_id) (tenant_governance_approval_pending_count)",
+          "legendFormat": "{{tenant_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "${DS_GRAFANA_TESTDATA}"
+          },
+          "hide": true,
+          "refId": "S1",
+          "scenarioId": "csv_metric_values",
+          "stringInput": "time,tenant-a,tenant-b\n2026-05-13T12:00:00Z,2,1\n2026-05-13T12:05:00Z,3,1\n2026-05-13T12:10:00Z,1,0"
+        }
+      ],
+      "title": "Pending Approvals",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+      },
+      "description": "Warn at 24h and page at 48h using the stat=max series from tenant_governance.approval.pending_age_seconds.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 86400
+              },
+              {
+                "color": "red",
+                "value": 172800
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+          },
+          "expr": "max by (tenant_id) (tenant_governance_approval_pending_age_seconds{stat=\"p95\"})",
+          "legendFormat": "{{tenant_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "${DS_GRAFANA_TESTDATA}"
+          },
+          "hide": true,
+          "refId": "S1",
+          "scenarioId": "csv_metric_values",
+          "stringInput": "time,tenant-a,tenant-b\n2026-05-13T12:00:00Z,14400,7200\n2026-05-13T12:05:00Z,93600,18000\n2026-05-13T12:10:00Z,180000,36000"
+        }
+      ],
+      "title": "Pending Approval p95 Age",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+      },
+      "description": "Tracks tenant and cost-center quota consumption percentages from tenant_governance.quota.usage_percent.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 95
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "orientation": "horizontal",
+        "showValue": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+          },
+          "expr": "max by (tenant_id) (tenant_governance_quota_usage_percent{scope=\"tenant\",dimension=\"amount_minor\"})",
+          "legendFormat": "{{tenant_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "${DS_GRAFANA_TESTDATA}"
+          },
+          "hide": true,
+          "refId": "S1",
+          "scenarioId": "csv_metric_values",
+          "stringInput": "time,tenant-a,tenant-b\n2026-05-13T12:00:00Z,62,48\n2026-05-13T12:05:00Z,97,51\n2026-05-13T12:10:00Z,88,55"
+        }
+      ],
+      "title": "Quota Usage By Tenant",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+      },
+      "description": "Evaluator percentiles from tenant_governance.approval.evaluator_latency_ms.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+          },
+          "expr": "max by (tenant_id, stat) (tenant_governance_approval_evaluator_latency_ms)",
+          "legendFormat": "{{tenant_id}} {{stat}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "${DS_GRAFANA_TESTDATA}"
+          },
+          "hide": true,
+          "refId": "S1",
+          "scenarioId": "csv_metric_values",
+          "stringInput": "time,p50,p95,p99\n2026-05-13T12:00:00Z,82,145,190\n2026-05-13T12:05:00Z,90,210,260\n2026-05-13T12:10:00Z,88,180,230"
+        }
+      ],
+      "title": "Evaluator p50/p95/p99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+      },
+      "description": "Derived from tenant_governance.quota.ledger_write_total.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+          },
+          "expr": "sum by (tenant_id) (rate(tenant_governance_quota_ledger_write_total[5m]))",
+          "legendFormat": "{{tenant_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "${DS_GRAFANA_TESTDATA}"
+          },
+          "hide": true,
+          "refId": "S1",
+          "scenarioId": "csv_metric_values",
+          "stringInput": "time,tenant-a,tenant-b\n2026-05-13T12:00:00Z,0.5,0.2\n2026-05-13T12:05:00Z,0.8,0.1\n2026-05-13T12:10:00Z,0.3,0.4"
+        }
+      ],
+      "title": "Ledger Writes/sec",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+      },
+      "description": "Race-failure alerting from QUOTA_INSUFFICIENT_AT_COMMIT audit-derived counters.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cpm"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+          },
+          "expr": "sum by (tenant_id) (increase(tenant_governance_quota_race_failure_total[1m]))",
+          "legendFormat": "{{tenant_id}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "${DS_GRAFANA_TESTDATA}"
+          },
+          "hide": true,
+          "refId": "S1",
+          "scenarioId": "csv_metric_values",
+          "stringInput": "time,tenant-a,tenant-b\n2026-05-13T12:00:00Z,0,0\n2026-05-13T12:05:00Z,4,1\n2026-05-13T12:10:00Z,12,0"
+        }
+      ],
+      "title": "Race Failures/min",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+      },
+      "description": "Validation reject rate by BOOKING_COST_CENTER_* error code.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cpm"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+          },
+          "expr": "sum by (tenant_id, error_code) (increase(tenant_governance_cost_center_validation_reject_total[5m]))",
+          "legendFormat": "{{tenant_id}} {{error_code}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "grafana-testdata-datasource",
+            "uid": "${DS_GRAFANA_TESTDATA}"
+          },
+          "hide": true,
+          "refId": "S1",
+          "scenarioId": "csv_metric_values",
+          "stringInput": "time,BOOKING_COST_CENTER_UNKNOWN,BOOKING_COST_CENTER_DISABLED,BOOKING_COST_CENTER_INVALID\n2026-05-13T12:00:00Z,1,0,1\n2026-05-13T12:05:00Z,2,1,0\n2026-05-13T12:10:00Z,0,0,2"
+        }
+      ],
+      "title": "Validation Rejects/min",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 39,
+  "style": "dark",
+  "tags": ["tenant-governance", "governance", "ops"],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_TENANT_GOVERNANCE_METRICS}"
+        },
+        "definition": "label_values(tenant_governance_approval_pending_count, tenant_id)",
+        "includeAll": true,
+        "label": "Tenant",
+        "multi": true,
+        "name": "tenant_id",
+        "query": {
+          "query": "label_values(tenant_governance_approval_pending_count, tenant_id)",
+          "refId": "TenantVariableQuery"
+        },
+        "refresh": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Tenant Governance",
+  "uid": "tenant-governance",
+  "version": 1,
+  "weekStart": ""
+}

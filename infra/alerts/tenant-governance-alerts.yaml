@@ -1,0 +1,73 @@
+groups:
+  - name: tenant-governance
+    interval: 1m
+    rules:
+      - alert: TenantGovernanceQuotaNearExhaustion
+        expr: max by (tenant_id) (tenant_governance_quota_usage_percent{scope="tenant"}) > 95
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+          service: tenant-governance
+        annotations:
+          summary: Tenant quota usage exceeded 95%
+          description: >
+            Prometheus bridge for tenant_governance.quota.usage_percent is above
+            95% for tenant {{ $labels.tenant_id }}. Check quota snapshots and
+            recent ledger writes before the next booking commit fails.
+
+      - alert: TenantGovernancePendingApprovalAgeWarning
+        expr: max by (tenant_id) (tenant_governance_approval_pending_age_seconds{stat="max"}) > 86400
+        for: 15m
+        labels:
+          severity: warning
+          team: ops
+          service: tenant-governance
+        annotations:
+          summary: Pending approval exceeded 24 hours
+          description: >
+            The oldest tenant approval request is older than 24 hours for
+            tenant {{ $labels.tenant_id }}. Route to the tenant approver or
+            tenant_admin escalation path.
+
+      - alert: TenantGovernancePendingApprovalAgeCritical
+        expr: max by (tenant_id) (tenant_governance_approval_pending_age_seconds{stat="max"}) > 172800
+        for: 15m
+        labels:
+          severity: critical
+          team: ops
+          service: tenant-governance
+        annotations:
+          summary: Pending approval exceeded 48 hours
+          description: >
+            The oldest tenant approval request is older than 48 hours for
+            tenant {{ $labels.tenant_id }}. Escalate through on-call and verify
+            whether timeout/escalation automation is blocked.
+
+      - alert: TenantGovernanceEvaluatorLatencyP95Warning
+        expr: max by (tenant_id) (tenant_governance_approval_evaluator_latency_ms{stat="p95"}) > 200
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          service: tenant-governance
+        annotations:
+          summary: Approval evaluator p95 exceeded 200ms
+          description: >
+            Approval rule evaluation latency is elevated for
+            tenant {{ $labels.tenant_id }}. Check recent rule changes, quota
+            snapshot churn, and repository latency.
+
+      - alert: TenantGovernanceQuotaRaceFailuresWarning
+        expr: sum by (tenant_id) (increase(tenant_governance_quota_race_failure_total[1m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          service: tenant-governance
+        annotations:
+          summary: QUOTA_INSUFFICIENT_AT_COMMIT race failures exceeded 10/min
+          description: >
+            Audit-derived race failures are spiking for tenant
+            {{ $labels.tenant_id }}. Inspect quota reservation contention and
+            booking retry loops before users see sustained commit failures.

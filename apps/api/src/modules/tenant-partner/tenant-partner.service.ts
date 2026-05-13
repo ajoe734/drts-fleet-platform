@@ -240,6 +240,19 @@ type OrderFeedProvider = () => OwnedOrderRecord[];
 
 type MaybePromise<T> = T | Promise<T>;
 
+type TenantGovernanceMetricSample = {
+  name: string;
+  value: number;
+  observedAt: string;
+  labels: Record<string, string>;
+};
+
+type TenantGovernanceLatencySample = {
+  tenantId: string;
+  value: number;
+  observedAt: string;
+};
+
 const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
   maxAttempts: 5,
   initialBackoffSeconds: 30,
@@ -249,6 +262,7 @@ const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
 };
 
 const PARTNER_ELIGIBILITY_DECISION_TTL_SECONDS = 30 * 60;
+const MAX_TENANT_GOVERNANCE_LATENCY_SAMPLES = 256;
 
 const DEFAULT_PARTNER_ELIGIBILITY_RETRY_POLICY: PartnerEligibilityRetryPolicyRecord =
   {
@@ -686,6 +700,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     string,
     TenantQuotaMonthlySnapshotRecord
   >();
+
+  private tenantGovernanceGaugeMetrics = new Map<
+    string,
+    TenantGovernanceMetricSample
+  >();
+
+  private tenantGovernanceCounterTotals = new Map<
+    string,
+    TenantGovernanceMetricSample
+  >();
+
+  private approvalEvaluatorLatencySamples: TenantGovernanceLatencySample[] = [];
 
   private quotaReservationLocks = new Map<string, Promise<void>>();
 
@@ -1567,6 +1593,25 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((entry) => this.cloneQuotaLedgerEntry(entry));
   }
 
+  listTenantGovernanceMetricSamples() {
+    this.refreshLiveTenantGovernanceMetrics(new Date().toISOString());
+    return [
+      ...this.tenantGovernanceGaugeMetrics.values(),
+      ...this.tenantGovernanceCounterTotals.values(),
+    ]
+      .sort((left, right) =>
+        left.name === right.name
+          ? left.observedAt.localeCompare(right.observedAt)
+          : left.name.localeCompare(right.name),
+      )
+      .map((sample) => ({
+        name: sample.name,
+        value: sample.value,
+        observedAt: sample.observedAt,
+        labels: { ...sample.labels },
+      }));
+  }
+
   reserveTenantQuota(
     tx: TenantPartnerQueryExecutor | null,
     input: {
@@ -1862,6 +1907,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: EvaluateTenantApprovalRuleCommand,
     requestId?: string,
   ): TenantApprovalEvaluationResult {
+    const startedAt = Date.now();
     const inputSnapshot = command.inputSnapshot ?? {
       costCenterCode: command.sampleBooking?.costCenterCode ?? null,
       businessDispatchSubtype:
@@ -1894,6 +1940,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       tenantDefaultTimeoutHours: 24,
       tenantDefaultFallbackPolicy: "escalate_to_tenant_admin",
     });
+    const latencyMs = Date.now() - startedAt;
     this.recordTenantAudit(
       {
         actorId: null,
@@ -1907,6 +1954,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           subject: result.subject,
           decision: result.outcome?.decision ?? null,
           matchedRuleIds: result.matchedRules.map((rule) => rule.ruleId),
+          latencyMs,
         },
       },
       requestId,
@@ -2553,6 +2601,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
     const normalized = trimmed.toUpperCase();
     if (!/^[A-Z0-9][A-Z0-9-]*$/.test(normalized)) {
+      this.recordTenantAudit({
+        actorId: null,
+        actorType: "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "booking.cost_center.validation_rejected",
+        resourceType: "tenant_cost_center_validation",
+        resourceId: trimmed,
+        newValuesSummary: {
+          errorCode: "BOOKING_COST_CENTER_INVALID",
+          costCenter: trimmed,
+        },
+      });
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "BOOKING_COST_CENTER_INVALID",
@@ -2566,6 +2627,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       (candidate) => candidate.code === normalized,
     );
     if (!match) {
+      this.recordTenantAudit({
+        actorId: null,
+        actorType: "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "booking.cost_center.validation_rejected",
+        resourceType: "tenant_cost_center_validation",
+        resourceId: normalized,
+        newValuesSummary: {
+          errorCode: "BOOKING_COST_CENTER_UNKNOWN",
+          costCenter: trimmed,
+          normalized,
+        },
+      });
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "BOOKING_COST_CENTER_UNKNOWN",
@@ -2577,6 +2652,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
     if (!match.activeFlag) {
+      this.recordTenantAudit({
+        actorId: null,
+        actorType: "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "booking.cost_center.validation_rejected",
+        resourceType: "tenant_cost_center_validation",
+        resourceId: normalized,
+        newValuesSummary: {
+          errorCode: "BOOKING_COST_CENTER_DISABLED",
+          costCenter: normalized,
+        },
+      });
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "BOOKING_COST_CENTER_DISABLED",
@@ -6434,7 +6522,303 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     if (requestId) {
       auditLogInput.requestId = requestId;
     }
-    this.auditNotificationService.recordAuditLog(auditLogInput);
+    const auditLog =
+      this.auditNotificationService.recordAuditLog(auditLogInput);
+    if (auditLog) {
+      this.observeTenantGovernanceAudit(auditLog);
+    }
+    return auditLog;
+  }
+
+  private observeTenantGovernanceAudit(auditLog: AuditLogRecord) {
+    if (auditLog.moduleName !== "tenant-partner") {
+      return;
+    }
+
+    const observedAt = auditLog.createdAt;
+    const tenantId = auditLog.tenantId;
+
+    switch (auditLog.actionName) {
+      case "booking.approval_rules.evaluated": {
+        const latencyMs = this.readNumericAuditValue(
+          auditLog.newValuesSummary,
+          "latencyMs",
+        );
+        if (tenantId && latencyMs !== null) {
+          this.approvalEvaluatorLatencySamples = [
+            ...this.approvalEvaluatorLatencySamples,
+            {
+              tenantId,
+              value: latencyMs,
+              observedAt,
+            },
+          ].slice(-MAX_TENANT_GOVERNANCE_LATENCY_SAMPLES);
+          this.refreshApprovalLatencyMetrics(tenantId, observedAt);
+        }
+        break;
+      }
+      case "booking.approval_request.created":
+      case "booking.approval_request.cancelled_by_re_evaluation":
+      case "booking.approval_request.approved":
+      case "booking.approval_request.rejected":
+      case "booking.approval_request.timeout_escalated":
+        if (tenantId) {
+          this.refreshPendingApprovalMetrics(tenantId, observedAt);
+        }
+        break;
+      case "booking.cost_center.validation_rejected":
+        if (tenantId) {
+          this.incrementTenantGovernanceCounter(
+            "tenant_governance.cost_center.validation_reject_total",
+            {
+              tenant_id: tenantId,
+              error_code:
+                this.readStringAuditValue(
+                  auditLog.newValuesSummary,
+                  "errorCode",
+                ) ?? "UNKNOWN",
+            },
+            observedAt,
+          );
+        }
+        break;
+      case "tenant.quota_ledger.entry_added":
+        if (tenantId) {
+          this.incrementTenantGovernanceCounter(
+            "tenant_governance.quota.ledger_write_total",
+            {
+              tenant_id: tenantId,
+            },
+            observedAt,
+          );
+        }
+        break;
+      case "tenant.quota_snapshot.refreshed":
+        this.refreshQuotaUsageMetrics(observedAt);
+        break;
+      case "tenant.quota_reservation.blocked":
+        if (tenantId) {
+          this.incrementTenantGovernanceCounter(
+            "tenant_governance.quota.race_failure_total",
+            {
+              tenant_id: tenantId,
+              error_code:
+                this.readStringAuditValue(
+                  auditLog.newValuesSummary,
+                  "errorCode",
+                ) ?? "QUOTA_INSUFFICIENT_AT_COMMIT",
+            },
+            observedAt,
+          );
+        }
+        break;
+    }
+  }
+
+  private refreshLiveTenantGovernanceMetrics(observedAt: string) {
+    const activePendingTenantIds = new Set(
+      this.approvalRequests
+        .filter((request) => request.status === "pending")
+        .map((request) => request.tenantId),
+    );
+    for (const tenantId of activePendingTenantIds) {
+      this.refreshPendingApprovalMetrics(tenantId, observedAt);
+    }
+  }
+
+  private refreshPendingApprovalMetrics(tenantId: string, observedAt: string) {
+    const pendingAgesSeconds = this.approvalRequests
+      .filter(
+        (request) =>
+          request.tenantId === tenantId && request.status === "pending",
+      )
+      .map((request) =>
+        Math.max(
+          0,
+          (Date.parse(observedAt) - Date.parse(request.createdAt)) / 1000,
+        ),
+      )
+      .sort((left, right) => left - right);
+
+    this.upsertTenantGovernanceGauge(
+      "tenant_governance.approval.pending_count",
+      pendingAgesSeconds.length,
+      { tenant_id: tenantId },
+      observedAt,
+    );
+    this.upsertTenantGovernanceGauge(
+      "tenant_governance.approval.pending_age_seconds",
+      pendingAgesSeconds.length === 0
+        ? 0
+        : this.percentile(pendingAgesSeconds, 95),
+      {
+        tenant_id: tenantId,
+        stat: "p95",
+      },
+      observedAt,
+    );
+    this.upsertTenantGovernanceGauge(
+      "tenant_governance.approval.pending_age_seconds",
+      pendingAgesSeconds[pendingAgesSeconds.length - 1] ?? 0,
+      {
+        tenant_id: tenantId,
+        stat: "max",
+      },
+      observedAt,
+    );
+  }
+
+  private refreshApprovalLatencyMetrics(tenantId: string, observedAt: string) {
+    const samples = this.approvalEvaluatorLatencySamples
+      .filter((sample) => sample.tenantId === tenantId)
+      .map((sample) => sample.value)
+      .sort((left, right) => left - right);
+    if (samples.length === 0) {
+      return;
+    }
+
+    for (const percentile of [50, 95, 99] as const) {
+      this.upsertTenantGovernanceGauge(
+        "tenant_governance.approval.evaluator_latency_ms",
+        this.percentile(samples, percentile),
+        {
+          tenant_id: tenantId,
+          stat: `p${percentile}`,
+        },
+        observedAt,
+      );
+    }
+  }
+
+  private refreshQuotaUsageMetrics(observedAt: string) {
+    for (const snapshot of this.quotaMonthlySnapshots.values()) {
+      const scope = snapshot.costCenterCode === null ? "tenant" : "cost_center";
+      const sharedLabels = {
+        tenant_id: snapshot.tenantId,
+        scope,
+        cost_center_code: snapshot.costCenterCode ?? "__tenant__",
+        period_key: snapshot.periodKey,
+      };
+      const bookingCountPercent = this.computeUsagePercent(
+        snapshot.usage.bookingCountReserved +
+          snapshot.usage.bookingCountConsumed,
+        snapshot.limit.bookingCountLimit,
+      );
+      if (bookingCountPercent !== null) {
+        this.upsertTenantGovernanceGauge(
+          "tenant_governance.quota.usage_percent",
+          bookingCountPercent,
+          {
+            ...sharedLabels,
+            dimension: "booking_count",
+          },
+          observedAt,
+        );
+      }
+      const amountPercent = this.computeUsagePercent(
+        snapshot.usage.amountMinorReserved + snapshot.usage.amountMinorConsumed,
+        snapshot.limit.amountMinorLimit,
+      );
+      if (amountPercent !== null) {
+        this.upsertTenantGovernanceGauge(
+          "tenant_governance.quota.usage_percent",
+          amountPercent,
+          {
+            ...sharedLabels,
+            dimension: "amount_minor",
+          },
+          observedAt,
+        );
+      }
+    }
+  }
+
+  private upsertTenantGovernanceGauge(
+    name: string,
+    value: number,
+    labels: Record<string, string>,
+    observedAt: string,
+  ) {
+    this.tenantGovernanceGaugeMetrics.set(
+      this.buildTenantGovernanceMetricKey(name, labels),
+      {
+        name,
+        value,
+        observedAt,
+        labels: { ...labels },
+      },
+    );
+  }
+
+  private incrementTenantGovernanceCounter(
+    name: string,
+    labels: Record<string, string>,
+    observedAt: string,
+    increment = 1,
+  ) {
+    const key = this.buildTenantGovernanceMetricKey(name, labels);
+    const current = this.tenantGovernanceCounterTotals.get(key);
+    this.tenantGovernanceCounterTotals.set(key, {
+      name,
+      value: (current?.value ?? 0) + increment,
+      observedAt,
+      labels: { ...labels },
+    });
+  }
+
+  private buildTenantGovernanceMetricKey(
+    name: string,
+    labels: Record<string, string>,
+  ) {
+    const normalizedLabels = Object.entries(labels)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => `${key}=${value}`)
+      .join("|");
+    return `${name}|${normalizedLabels}`;
+  }
+
+  private computeUsagePercent(value: number, limit: number | null) {
+    if (limit === null) {
+      return null;
+    }
+    if (limit <= 0) {
+      return 100;
+    }
+    return (value / limit) * 100;
+  }
+
+  private percentile(values: readonly number[], percentile: number) {
+    if (values.length === 0) {
+      return 0;
+    }
+    if (values.length === 1) {
+      return values[0] ?? 0;
+    }
+    const rank = (percentile / 100) * (values.length - 1);
+    const lowerIndex = Math.floor(rank);
+    const upperIndex = Math.ceil(rank);
+    const lowerValue = values[lowerIndex] ?? values[0] ?? 0;
+    const upperValue = values[upperIndex] ?? values[values.length - 1] ?? 0;
+    if (lowerIndex === upperIndex) {
+      return lowerValue;
+    }
+    return lowerValue + (upperValue - lowerValue) * (rank - lowerIndex);
+  }
+
+  private readNumericAuditValue(
+    payload: Record<string, unknown> | undefined,
+    key: string,
+  ) {
+    const value = payload?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+
+  private readStringAuditValue(
+    payload: Record<string, unknown> | undefined,
+    key: string,
+  ) {
+    const value = payload?.[key];
+    return typeof value === "string" && value.length > 0 ? value : null;
   }
 
   private recordPartnerIngressAttempt(
@@ -6834,7 +7218,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     },
   ) {
     const preview = this.buildQuotaImpactPreview(input.tenantId, normalized);
-    this.throwIfQuotaReservationBlocked(preview.impacts);
+    this.throwIfQuotaReservationBlocked(preview.impacts, {
+      tenantId: input.tenantId,
+      bookingId: input.bookingId,
+      evaluationId: input.evaluationId,
+    });
 
     const now = new Date().toISOString();
     const entries = preview.impacts
@@ -7013,7 +7401,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         costCenterPolicy,
         costCenterSnapshot,
       });
-      this.throwIfQuotaReservationBlocked(preview.impacts);
+      this.throwIfQuotaReservationBlocked(preview.impacts, {
+        tenantId: input.tenantId,
+        bookingId: input.bookingId,
+        evaluationId: input.evaluationId,
+      });
 
       const now = new Date().toISOString();
       const entries = preview.impacts
@@ -7142,12 +7534,37 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private throwIfQuotaReservationBlocked(
     impacts: readonly TenantBookingQuotaImpactResult[],
+    context?: {
+      tenantId: string;
+      bookingId: string;
+      evaluationId: string;
+    },
   ) {
     const blockingImpact = impacts.find(
       (impact) => impact.triggered === "block",
     );
     if (!blockingImpact) {
       return;
+    }
+
+    if (context) {
+      this.recordTenantAudit({
+        actorId: null,
+        actorType: "system",
+        tenantId: context.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.quota_reservation.blocked",
+        resourceType: "tenant_quota_reservation",
+        resourceId: context.evaluationId,
+        newValuesSummary: {
+          bookingId: context.bookingId,
+          evaluationId: context.evaluationId,
+          errorCode: "QUOTA_INSUFFICIENT_AT_COMMIT",
+          periodKey: blockingImpact.periodKey,
+          costCenterCode: blockingImpact.costCenterCode,
+          dimension: blockingImpact.dimension,
+        },
+      });
     }
 
     throw new ApiRequestError(
@@ -7477,7 +7894,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     updatedSnapshots: readonly TenantQuotaMonthlySnapshotRecord[],
   ) {
     for (const entry of entries) {
-      this.auditNotificationService.recordAuditLog({
+      this.recordTenantAudit({
         actorId: null,
         actorType: "system",
         tenantId,
@@ -7496,7 +7913,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       });
     }
     for (const snapshot of updatedSnapshots) {
-      this.auditNotificationService.recordAuditLog({
+      this.recordTenantAudit({
         actorId: null,
         actorType: "system",
         tenantId,

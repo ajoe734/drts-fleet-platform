@@ -174,6 +174,89 @@ Likely actions:
 - separate issuer outage from true ineligible traffic
 - clear or annotate fallback cases before dispatch / settlement release
 
+## Tenant Governance Alerts
+
+These alerts cover the tenant governance controls added after the approval-rule,
+quota, and cost-center wave. The canonical metric namespace is:
+
+- `tenant_governance.approval.*`
+- `tenant_governance.quota.*`
+- `tenant_governance.cost_center.*`
+
+The Prometheus bridge used by Grafana and alert rules normalizes dots to
+underscores, so `tenant_governance.approval.pending_count` is queried as
+`tenant_governance_approval_pending_count` in panel expressions.
+
+| Alert key                      | Primary route | Secondary route | Measured value                                  | Warning | Critical |
+| ------------------------------ | ------------- | --------------- | ----------------------------------------------- | ------- | -------- |
+| `tenant_quota_near_exhaustion` | ops           | platform        | max tenant quota usage percent                  | 95%     | none     |
+| `tenant_pending_approval_age`  | ops           | tenant_admin    | oldest pending approval age                     | 24h     | 48h      |
+| `tenant_evaluator_latency_p95` | platform      | none            | approval evaluator p95 latency                  | 200ms   | none     |
+| `tenant_quota_race_failures`   | platform      | ops             | `QUOTA_INSUFFICIENT_AT_COMMIT` count per minute | 10/min  | none     |
+
+### Tenant quota near exhaustion
+
+Check:
+
+- the `Quota Usage By Tenant` panel for the tenant and current period
+- recent `tenant.quota_snapshot.refreshed` and `tenant.quota_ledger.entry_added`
+  audit rows
+- whether the spike is tenant-wide or isolated to one cost center
+
+Likely actions:
+
+- confirm whether the tenant intended the quota level and current period scope
+- raise or rebalance quota policy only after tenant_admin confirmation
+- if usage is unexpected, inspect duplicate booking retries or replayed commit
+  paths before changing policy
+
+### Pending approval age
+
+Check:
+
+- `Pending Approvals` and `Pending Approval p95 Age`
+- whether requests are stuck on the original approver set or should already
+  have escalated to `tenant_admin`
+- any missing notification / contact path for the approver group
+
+Likely actions:
+
+- contact the tenant approver or tenant_admin immediately at the 24h warning
+- at 48h, page the owning on-call and verify the request can still be decided
+  safely
+- if escalation automation did not fire, inspect the approval request audit
+  trail before manually intervening
+
+### Evaluator latency p95
+
+Check:
+
+- recent approval-rule edits with large condition sets
+- quota snapshot churn for the same tenant and period
+- repository / database latency during booking evaluation
+
+Likely actions:
+
+- rollback the most recent problematic rule edit if latency regressed sharply
+- inspect repository lock contention around quota snapshots
+- involve platform on-call if multiple tenants cross the threshold together
+
+### Quota race failures
+
+Check:
+
+- `Race Failures/min`
+- concurrent booking bursts for the same tenant or cost center
+- caller retry loops that may be replaying the same commit attempt
+
+Likely actions:
+
+- confirm whether failures are expected under quota saturation or indicate a
+  lost-update pattern
+- inspect the quota reservation path before suppressing alerts
+- coordinate with tenant_admin if the tenant needs temporary quota relief to
+  stop customer-facing failures
+
 ## Notes
 
 - This runbook documents the workflow-health contract added by `OPX-GV-003`.
