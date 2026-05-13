@@ -237,6 +237,9 @@
       },
       "runtime": {
         "cli": "claude",
+        "env": {
+          "CLAUDE_CONFIG_DIR": "~/.claude-autoworker"
+        },
         "output_format": "stream-json",
         "include_hook_events": true,
         "permission_mode": "acceptEdits",
