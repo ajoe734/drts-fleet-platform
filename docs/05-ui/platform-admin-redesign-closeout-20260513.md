@@ -1,6 +1,6 @@
 # Platform Admin Redesign — Wave 3 Closeout (2026-05-13)
 
-Owner: Claude · Reviewer of record (this closeout): Copilot
+Owner: Claude · Reviewer of record (this closeout): Codex
 Task: `ADM-UI-RD-010`
 Planning ref: [`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`](./drts-ui-redesign-workbreakdown-20260510.md)
 Branch: `origin/feat/claude2-ui-redesign-foundation`
@@ -52,8 +52,16 @@ The Wave 3 acceptance set per task is fixed by the planning ref:
 - `pnpm --filter @drts/platform-admin-web test`
 - `pnpm --filter @drts/ui-web build-storybook` (for parity story validation)
 
-All four legs were re-executed by the reviewer of record at each row's
-approval timestamp below.
+The reviewer rerun set varies per surface and is captured in machine truth at
+each task entry's `review_notes_zh` / `next` fields and at the matching
+`review_approved` event in `ai-activity-log.jsonl`. The per-surface notes
+below cite the exact rerun set the reviewer of record executed at the listed
+approval timestamp; not every row reran all four legs (e.g.
+`ADM-UI-RD-006`'s reviewer reran `pnpm --filter @drts/ui-web typecheck`
+instead of `build-storybook`, and `ADM-UI-RD-009`'s reviewer reran the scoped
+platform-admin-web legs without an explicit `build-storybook` invocation).
+This packet does not re-execute any leg; it cites what was actually rerun at
+review_approved time.
 
 ## Surface signoff matrix
 
@@ -174,8 +182,13 @@ apps/platform-admin-web/app/switchboard/page.tsx`.
   primitives at `edcf7e0`, with a follow-up hardening at `a7b47f5`
   (`ADM-UI-RD-005` final close).
 - Reviewer Codex re-verified `pnpm --filter @drts/platform-admin-web
-typecheck` / `build` / `test` and `pnpm --filter @drts/ui-web
-build-storybook` at 2026-05-11T00:15:09Z.
+typecheck` / `build` / `test` (no test files, exits 0) and `pnpm --filter
+@drts/ui-web typecheck` at 2026-05-11T00:15:09Z. The reviewer did **not**
+  rerun `pnpm --filter @drts/ui-web build-storybook` for this row; the
+  canvas/parity check relies on the `platform-operations.stories.tsx` file
+  being present on `f481c29` (verified by reviewer) and earlier `ui-web
+build-storybook` runs from upstream tasks (`ADM-UI-RD-001`,
+  `ADM-UI-RD-002`, `ADM-UI-RD-004`, `ADM-UI-RD-005`, `ADM-UI-RD-007`).
 
 ### ADM-UI-RD-007 — Pricing redesign (含 publish flow)
 
@@ -244,7 +257,7 @@ None blocking Wave 3. Items intentionally deferred:
 
 ## Reviewer signoff for ADM-UI-RD-010
 
-The reviewer (Copilot) is asked to confirm only that the matrix above is
+The reviewer (Codex) is asked to confirm only that the matrix above is
 internally consistent with `ai-status.json` and `ai-activity-log.jsonl` —
 i.e. each `(reviewer, approved-at, commit_hash)` triple in the matrix matches
 the machine truth on this branch, the cited canvas anchors exist in
