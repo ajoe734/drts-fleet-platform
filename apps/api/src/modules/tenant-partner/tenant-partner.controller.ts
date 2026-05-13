@@ -12,8 +12,10 @@ import {
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   IdentityContext,
+  EscalateTenantBookingApprovalRequestCommand,
   IssuePartnerIngressCredentialCommand,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
@@ -23,6 +25,7 @@ import type {
   TenantBookingQuotaImpactQuery,
   TenantCostCenterCoverageReport,
   IssueTenantApiKeyCommand,
+  ListTenantBookingApprovalRequestsQuery,
   ListTenantApprovalRulesQuery,
   ListTenantCostCentersQuery,
   PartnerIngressCredentialIssued,
@@ -35,6 +38,7 @@ import type {
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
+  TenantBookingApprovalRequestRecord,
   TenantAddressExportViewRecord,
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
@@ -55,6 +59,7 @@ import type {
   UpsertTenantPassengerCommand,
   UpsertTenantQuotaPolicyCommand,
   ReorderTenantApprovalRulesCommand,
+  RejectTenantBookingApprovalRequestCommand,
   VerifyPartnerEligibilityCommand,
 } from "@drts/contracts";
 
@@ -65,11 +70,15 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { TenantPartnerService } from "./tenant-partner.service";
 
 @Controller()
 export class TenantPartnerController {
-  constructor(private readonly tenantPartnerService: TenantPartnerService) {}
+  constructor(
+    private readonly tenantPartnerService: TenantPartnerService,
+    private readonly ownedMobilityService: OwnedMobilityService,
+  ) {}
 
   private requireTenantId(tenantId?: string) {
     const normalizedTenantId = tenantId?.trim();
@@ -82,6 +91,23 @@ export class TenantPartnerController {
     }
 
     return normalizedTenantId;
+  }
+
+  private requireTenantActorUserId(identity: IdentityContext | null) {
+    const actorUserId = identity?.actorId?.trim();
+    if (!actorUserId) {
+      throw new ApiRequestError(
+        401,
+        "TENANT_USER_REQUIRED",
+        "Authenticated tenant user identity is required for this approval action.",
+      );
+    }
+
+    return actorUserId;
+  }
+
+  private resolveTenantActorRoleCode(identity: IdentityContext | null) {
+    return identity?.roles?.[0] ?? null;
   }
 
   @Get("tenant-partner/summary")
@@ -626,6 +652,109 @@ export class TenantPartnerController {
         requestId,
       );
     return toApiSuccessEnvelope(evaluation, requestId);
+  }
+
+  @Get("tenant/approval-requests")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listApprovalRequests(
+    @Query() query: ListTenantBookingApprovalRequestsQuery,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantBookingApprovalRequestRecord[] =
+      this.tenantPartnerService.listApprovalRequests(
+        this.requireTenantId(tenantId),
+        query,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/approval-requests/:approvalRequestId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getApprovalRequest(
+        this.requireTenantId(tenantId),
+        approvalRequestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-requests/:approvalRequestId/approve")
+  async approveApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: ApproveTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.approveTenantBookingApprovalRequest(
+        this.requireTenantId(tenantId),
+        approvalRequestId,
+        this.requireTenantActorUserId(identity),
+        this.resolveTenantActorRoleCode(identity),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-requests/:approvalRequestId/reject")
+  async rejectApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: RejectTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.rejectTenantBookingApprovalRequest(
+        this.requireTenantId(tenantId),
+        approvalRequestId,
+        this.requireTenantActorUserId(identity),
+        this.resolveTenantActorRoleCode(identity),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-requests/:approvalRequestId/escalate")
+  async escalateApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: EscalateTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.escalateTenantBookingApprovalRequest(
+        this.requireTenantId(tenantId),
+        approvalRequestId,
+        this.requireTenantActorUserId(identity),
+        this.resolveTenantActorRoleCode(identity),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-requests/process-timeouts")
+  runApprovalTimeoutCronStub() {
+    throw new ApiRequestError(
+      501,
+      "APPROVAL_TIMEOUT_AUTOMATION_DEFERRED",
+      "Automated approval timeout escalation is deferred to Phase 2. Use the manual escalate route in Phase 1.",
+    );
   }
 
   @Get("tenant/addresses/export-view")

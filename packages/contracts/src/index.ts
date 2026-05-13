@@ -1328,6 +1328,72 @@ export interface TenantApprovalEvaluationResult {
 
 export const TENANT_APPROVAL_RULE_PRIORITY_STEP = 10;
 
+export type TenantBookingApprovalState =
+  | "not_required"
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "blocked"
+  | "cancelled_by_re_evaluation";
+
+export type TenantBookingApprovalRequestStatus =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "cancelled_by_re_evaluation"
+  | "timeout_escalated";
+
+export interface TenantBookingApprovalDecisionRecord {
+  decisionId: string;
+  approvalRequestId: string;
+  actorUserId: string;
+  actorRoleCode: string | null;
+  decision: "approve" | "reject";
+  reasonCode: string | null;
+  reasonNote: string | null;
+  decidedAt: string;
+}
+
+export interface TenantBookingApprovalRequestRecord {
+  approvalRequestId: string;
+  tenantId: string;
+  bookingId: string;
+  orderId: string;
+  evaluationId: string;
+  ruleIds: string[];
+  status: TenantBookingApprovalRequestStatus;
+  approvalMode: TenantApprovalMode;
+  approvers: TenantPrincipalRef[];
+  resolvedApproverUserIds: string[];
+  previousApprovers: TenantPrincipalRef[];
+  decisions: TenantBookingApprovalDecisionRecord[];
+  evaluationSnapshot: TenantApprovalEvaluationResult;
+  timeoutAt: string;
+  escalatedAt: string | null;
+  fallbackPolicy: TenantApprovalFallbackPolicy;
+  escalationTarget: TenantPrincipalRef | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface ListTenantBookingApprovalRequestsQuery {
+  status?: TenantBookingApprovalRequestStatus;
+  bookingId?: string;
+}
+
+export interface ApproveTenantBookingApprovalRequestCommand {
+  reasonNote?: string | null;
+}
+
+export interface RejectTenantBookingApprovalRequestCommand {
+  reasonCode: string;
+  reasonNote?: string | null;
+}
+
+export interface EscalateTenantBookingApprovalRequestCommand {
+  reasonNote?: string | null;
+}
+
 // --- Tenant Quotas ---
 export type TenantQuotaPeriod = "monthly";
 export type TenantQuotaEnforcementMode =
@@ -2176,6 +2242,8 @@ export interface OwnedOrderRecord {
     signoffRequired: boolean;
     expenseProofRequired: boolean;
   };
+  approvalState: TenantBookingApprovalState;
+  approvalRequestIds: string[];
   complianceGates?: ComplianceGateRecord[];
   complianceFlags: string[];
   cancelledAt: string | null;
@@ -2234,6 +2302,8 @@ export interface BookingRecord {
   quotedFareSource: QuotedFareSource | null;
   quotedFareRuleVersion: string | null;
   manualFareOverride: ManualFareOverrideRecord | null;
+  approvalState: TenantBookingApprovalState;
+  approvalRequestIds: string[];
   complianceGates?: ComplianceGateRecord[];
   orderStatus: OwnedOrderStatus;
   createdAt: string;
