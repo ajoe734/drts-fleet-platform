@@ -9,6 +9,7 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  Logger,
   OnModuleDestroy,
   OnModuleInit,
   Optional,
@@ -115,7 +116,11 @@ import {
   maskPhone,
   previewOpaqueValue,
 } from "../../common/sensitive-data-policy";
-import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import {
+  AuditNotificationService,
+  type ApprovalNotificationRecipient,
+} from "../audit-notification/audit-notification.service";
+import type { ApprovalNotificationTemplateKey } from "../audit-notification/templates/approval-notification.templates";
 import {
   BANK_CARD_INLINE_ELIGIBILITY_ADAPTER_CODE,
   BankCardInlineEligibilityAdapter,
@@ -245,6 +250,8 @@ const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
 };
 
 const PARTNER_ELIGIBILITY_DECISION_TTL_SECONDS = 30 * 60;
+const APPROVAL_TIMEOUT_REMINDER_WINDOW_MS = 12 * 60 * 60 * 1000;
+const APPROVAL_TIMEOUT_POLL_INTERVAL_MS = 60 * 1000;
 
 const DEFAULT_PARTNER_ELIGIBILITY_RETRY_POLICY: PartnerEligibilityRetryPolicyRecord =
   {
@@ -425,6 +432,7 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     displayName: "Acme Tenant Admin",
     roleCode: "tenant_admin",
     status: "active",
+    approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:00:00.000Z",
     updatedAt: "2026-04-10T00:00:00.000Z",
   },
@@ -435,6 +443,7 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     displayName: "Acme Tenant Ops",
     roleCode: "tenant_ops_admin",
     status: "active",
+    approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:10:00.000Z",
     updatedAt: "2026-04-10T00:10:00.000Z",
   },
@@ -445,6 +454,7 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     displayName: "Acme Tenant Finance",
     roleCode: "tenant_finance_admin",
     status: "active",
+    approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:20:00.000Z",
     updatedAt: "2026-04-10T00:20:00.000Z",
   },
@@ -455,6 +465,7 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     displayName: "Acme Tenant Viewer",
     roleCode: "tenant_viewer",
     status: "active",
+    approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:30:00.000Z",
     updatedAt: "2026-04-10T00:30:00.000Z",
   },
@@ -641,6 +652,8 @@ function createBootstrapPartnerIngressCredential(
 
 @Injectable()
 export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(TenantPartnerService.name);
+
   private notificationPreferences = new Map<
     string,
     TenantNotificationPreferences
@@ -712,6 +725,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     ReturnType<typeof setTimeout>
   >();
 
+  private approvalTimeoutPollTimer: ReturnType<typeof setInterval> | null =
+    null;
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
@@ -733,6 +749,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     if (!this.tenantPartnerRepository) {
+      this.startApprovalTimeoutPolling();
       return;
     }
 
@@ -953,6 +970,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         error,
         "module init",
       );
+    } finally {
+      this.startApprovalTimeoutPolling();
     }
   }
 
@@ -969,6 +988,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       clearTimeout(timer);
     }
     this.retryTimers.clear();
+    if (this.approvalTimeoutPollTimer) {
+      clearInterval(this.approvalTimeoutPollTimer);
+      this.approvalTimeoutPollTimer = null;
+    }
   }
 
   getNotificationPreferences(tenantId: string) {
@@ -1956,6 +1979,67 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((request) => this.cloneApprovalRequest(request));
   }
 
+  async processApprovalTimeouts(options?: {
+    now?: string;
+    requestId?: string;
+  }) {
+    const now = options?.now ?? new Date().toISOString();
+    const nowTimestamp = Date.parse(now);
+    const pendingRequests = this.approvalRequests
+      .filter((request) => request.status === "pending")
+      .sort((left, right) => left.timeoutAt.localeCompare(right.timeoutAt));
+
+    const approachingTimeoutRequestIds: string[] = [];
+    const escalatedRequestIds: string[] = [];
+
+    for (const request of pendingRequests) {
+      const timeoutTimestamp = Date.parse(request.timeoutAt);
+      if (!Number.isFinite(timeoutTimestamp)) {
+        continue;
+      }
+
+      const approachingTimeoutTimestamp =
+        timeoutTimestamp - APPROVAL_TIMEOUT_REMINDER_WINDOW_MS;
+      if (
+        nowTimestamp >= approachingTimeoutTimestamp &&
+        nowTimestamp < timeoutTimestamp &&
+        !this.auditNotificationService.hasApprovalNotificationDispatch(
+          request.approvalRequestId,
+          "approaching_timeout",
+        )
+      ) {
+        await this.dispatchApprovalNotifications(
+          "approaching_timeout",
+          request,
+          options?.requestId ? { requestId: options.requestId } : undefined,
+        );
+        approachingTimeoutRequestIds.push(request.approvalRequestId);
+      }
+
+      if (nowTimestamp >= timeoutTimestamp) {
+        const escalated = await this.escalateApprovalRequestInternal({
+          tenantId: request.tenantId,
+          approvalRequestId: request.approvalRequestId,
+          actorUserId: null,
+          actorType: "system",
+          reasonNote:
+            "Automatic timeout escalation from approval timeout poller.",
+          occurredAt: now,
+          ...(options?.requestId ? { requestId: options.requestId } : {}),
+        });
+        escalatedRequestIds.push(escalated.approvalRequestId);
+      }
+    }
+
+    return {
+      evaluated: pendingRequests.length,
+      approachingTimeoutNotified: approachingTimeoutRequestIds.length,
+      escalated: escalatedRequestIds.length,
+      approachingTimeoutRequestIds,
+      escalatedRequestIds,
+    };
+  }
+
   createBookingApprovalRequest(params: {
     tx?: TenantPartnerQueryExecutor | null;
     tenantId: string;
@@ -2062,7 +2146,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       approvalRequests: [request],
       context: "create booking approval request",
     });
-    return this.afterPersistence(persisted, () => {
+    const onSuccess = async () => {
       this.recordApprovalFallbackAudits(
         params.tenantId,
         params.bookingId,
@@ -2076,9 +2160,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           tenantId: params.tenantId,
           moduleName: "tenant-partner",
           actionName: "booking.approval_request.created",
-          resourceType: "tenant_approval_request",
-          resourceId: request.approvalRequestId,
+          resourceType: "booking",
+          resourceId: request.bookingId,
           newValuesSummary: {
+            approvalRequestId: request.approvalRequestId,
             bookingId: request.bookingId,
             orderId: request.orderId,
             evaluationId: request.evaluationId,
@@ -2090,8 +2175,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         },
         params.requestId,
       );
+      await this.dispatchApprovalNotifications(
+        "new_request",
+        request,
+        params.requestId ? { requestId: params.requestId } : undefined,
+      );
       return this.cloneApprovalRequest(request);
-    });
+    };
+
+    if (persisted instanceof Promise) {
+      return persisted.then(onSuccess);
+    }
+    return onSuccess();
   }
 
   cancelApprovalRequestsForReevaluation(params: {
@@ -2217,71 +2312,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         },
       );
     }
-
-    const request = this.requirePendingApprovalRequest(
-      input.tenantId,
-      input.approvalRequestId,
-    );
-    const escalationTarget = request.escalationTarget ?? {
-      kind: "tenant_admin" as const,
-      displayName: "Tenant Admin",
-    };
-    const resolvedApproverUserIds = resolveApprovalApproverUserIds(
-      {
-        approvers: [escalationTarget],
-        escalationTarget,
-        bookingCostCenterCode:
-          request.evaluationSnapshot.inputSnapshot?.costCenterCode ?? null,
-      },
-      {
-        hasUser: (userId) =>
-          this.findActiveTenantUser(input.tenantId, userId) !== null,
-        listUserIdsByRole: (roleCode) =>
-          this.listActiveTenantUsersByRole(input.tenantId, roleCode).map(
-            (userRole) => userRole.userId,
-          ),
-        getCostCenterOwnerUserId: (costCenterCode) =>
-          this.getActiveCostCenterOwnerUserId(input.tenantId, costCenterCode),
-      },
-    ).resolvedApproverUserIds;
-    const now = new Date().toISOString();
-    const escalated: TenantBookingApprovalRequestRecord = {
-      ...request,
-      status: "timeout_escalated",
-      previousApprovers: request.approvers.map((approver) =>
-        this.clonePrincipalRef(approver),
-      ),
-      approvers: [this.clonePrincipalRef(escalationTarget)],
-      resolvedApproverUserIds,
-      escalatedAt: now,
-      resolvedAt: now,
-    };
-
-    this.replaceApprovalRequest(escalated);
-    await this.persistApprovalWorkflow({
-      approvalRequests: [escalated],
-      context: "escalate approval request",
+    return this.escalateApprovalRequestInternal({
+      tenantId: input.tenantId,
+      approvalRequestId: input.approvalRequestId,
+      actorUserId: input.actorUserId,
+      actorType: "tenant_admin",
+      reasonNote: this.normalizeNullableText(input.command.reasonNote),
+      ...(input.requestId ? { requestId: input.requestId } : {}),
     });
-    this.recordTenantAudit(
-      {
-        actorId: input.actorUserId,
-        actorType: "tenant_admin",
-        tenantId: input.tenantId,
-        moduleName: "tenant-partner",
-        actionName: "booking.approval_request.timeout_escalated",
-        resourceType: "tenant_approval_request",
-        resourceId: input.approvalRequestId,
-        newValuesSummary: {
-          bookingId: escalated.bookingId,
-          orderId: escalated.orderId,
-          previousApprovers: escalated.previousApprovers,
-          escalationTarget: escalated.escalationTarget,
-          reasonNote: this.normalizeNullableText(input.command.reasonNote),
-        },
-      },
-      input.requestId,
-    );
-    return this.cloneApprovalRequest(escalated);
   }
 
   summarizeCostCenterCoverage(
@@ -3944,6 +3982,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       displayName: command.displayName.trim(),
       roleCode: command.roleCode.trim(),
       status: "invited",
+      approvalNotificationOptOut: false,
       invitedAt: now,
       updatedAt: now,
     };
@@ -3984,6 +4023,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const userRole = this.requireTenantUser(tenantId, userId);
     userRole.roleCode = command.roleCode.trim();
     userRole.status = command.status ?? userRole.status;
+    userRole.approvalNotificationOptOut =
+      command.approvalNotificationOptOut ?? userRole.approvalNotificationOptOut;
     userRole.updatedAt = new Date().toISOString();
 
     this.persistChanges(
@@ -4738,6 +4779,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
       this.auditNotificationService.recordNotification({
         tenantId: endpoint.tenantId,
+        recipientUserId: null,
         channel: "ops_notice",
         title: "Tenant webhook disabled after repeated delivery failures",
         message: [
@@ -5368,6 +5410,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       displayName: maskName(userRole.displayName),
       roleCode: userRole.roleCode,
       status: userRole.status,
+      approvalNotificationOptOut: userRole.approvalNotificationOptOut,
       invitedAt: userRole.invitedAt,
       updatedAt: userRole.updatedAt,
     };
@@ -6129,6 +6172,210 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       : null;
   }
 
+  private startApprovalTimeoutPolling() {
+    if (this.approvalTimeoutPollTimer) {
+      return;
+    }
+
+    const run = () => {
+      void this.processApprovalTimeouts().catch((error) => {
+        this.logger.error(
+          "Approval timeout poll failed.",
+          error instanceof Error ? error.stack : String(error),
+        );
+      });
+    };
+
+    this.approvalTimeoutPollTimer = setInterval(
+      run,
+      APPROVAL_TIMEOUT_POLL_INTERVAL_MS,
+    );
+    this.approvalTimeoutPollTimer.unref?.();
+  }
+
+  private resolveApprovalNotificationRecipients(
+    tenantId: string,
+    userIds: readonly string[],
+  ): ApprovalNotificationRecipient[] {
+    const recipients = new Map<string, ApprovalNotificationRecipient>();
+
+    for (const userId of userIds) {
+      const user = this.findActiveTenantUser(tenantId, userId);
+      if (!user || recipients.has(user.userId)) {
+        continue;
+      }
+      recipients.set(user.userId, {
+        userId: user.userId,
+        email: user.email,
+        displayName: user.displayName,
+        approvalNotificationOptOut: user.approvalNotificationOptOut,
+      });
+    }
+
+    return [...recipients.values()];
+  }
+
+  private toApprovalNotificationEventType(
+    templateKey: ApprovalNotificationTemplateKey,
+  ) {
+    switch (templateKey) {
+      case "new_request":
+        return "booking.approval_request.created";
+      case "approaching_timeout":
+        return "booking.approval_request.approaching_timeout";
+      case "escalated":
+        return "booking.approval_request.timeout_escalated";
+      case "approved":
+        return "booking.approval_request.approved";
+      case "rejected":
+        return "booking.approval_request.rejected";
+    }
+  }
+
+  private async dispatchApprovalNotifications(
+    templateKey: ApprovalNotificationTemplateKey,
+    request: TenantBookingApprovalRequestRecord,
+    options?: {
+      requestId?: string;
+      actorUserId?: string | null;
+      decidedAt?: string | null;
+      reasonCode?: string | null;
+      reasonNote?: string | null;
+      recipientUserIds?: readonly string[];
+    },
+  ) {
+    const recipientUserIds =
+      options?.recipientUserIds ?? request.resolvedApproverUserIds;
+    const recipients = this.resolveApprovalNotificationRecipients(
+      request.tenantId,
+      recipientUserIds,
+    );
+    const dispatchResult =
+      await this.auditNotificationService.dispatchApprovalNotification({
+        templateKey,
+        tenantId: request.tenantId,
+        approvalRequestId: request.approvalRequestId,
+        bookingId: request.bookingId,
+        orderId: request.orderId,
+        timeoutAt: request.timeoutAt,
+        recipients,
+        escalatedAt: request.escalatedAt ?? null,
+        decidedAt: options?.decidedAt ?? request.resolvedAt ?? null,
+        actorUserId: options?.actorUserId ?? null,
+        reasonCode: options?.reasonCode ?? null,
+        reasonNote: options?.reasonNote ?? null,
+        ...(options?.requestId ? { requestId: options.requestId } : {}),
+      });
+
+    if (dispatchResult.deduplicated) {
+      return dispatchResult;
+    }
+
+    await this.publishWebhookEvent(request.tenantId, {
+      eventType: this.toApprovalNotificationEventType(templateKey),
+      data: {
+        approvalRequestId: request.approvalRequestId,
+        bookingId: request.bookingId,
+        orderId: request.orderId,
+        status: request.status,
+        resolvedApproverUserIds: [...request.resolvedApproverUserIds],
+        timeoutAt: request.timeoutAt,
+        escalatedAt: request.escalatedAt,
+        resolvedAt: request.resolvedAt,
+        actorUserId: options?.actorUserId ?? null,
+        reasonCode: options?.reasonCode ?? null,
+        reasonNote: options?.reasonNote ?? null,
+      },
+      occurredAt:
+        request.resolvedAt ??
+        request.escalatedAt ??
+        new Date().toISOString(),
+    });
+
+    return dispatchResult;
+  }
+
+  private async escalateApprovalRequestInternal(input: {
+    tenantId: string;
+    approvalRequestId: string;
+    actorUserId: string | null;
+    actorType: "tenant_admin" | "system";
+    reasonNote: string | null;
+    requestId?: string;
+    occurredAt?: string;
+  }) {
+    const request = this.requirePendingApprovalRequest(
+      input.tenantId,
+      input.approvalRequestId,
+    );
+    const escalationTarget = request.escalationTarget ?? {
+      kind: "tenant_admin" as const,
+      displayName: "Tenant Admin",
+    };
+    const resolvedApproverUserIds = resolveApprovalApproverUserIds(
+      {
+        approvers: [escalationTarget],
+        escalationTarget,
+        bookingCostCenterCode:
+          request.evaluationSnapshot.inputSnapshot?.costCenterCode ?? null,
+      },
+      {
+        hasUser: (userId) =>
+          this.findActiveTenantUser(input.tenantId, userId) !== null,
+        listUserIdsByRole: (roleCode) =>
+          this.listActiveTenantUsersByRole(input.tenantId, roleCode).map(
+            (userRole) => userRole.userId,
+          ),
+        getCostCenterOwnerUserId: (costCenterCode) =>
+          this.getActiveCostCenterOwnerUserId(input.tenantId, costCenterCode),
+      },
+    ).resolvedApproverUserIds;
+    const now = input.occurredAt ?? new Date().toISOString();
+    const escalated: TenantBookingApprovalRequestRecord = {
+      ...request,
+      status: "timeout_escalated",
+      previousApprovers: request.approvers.map((approver) =>
+        this.clonePrincipalRef(approver),
+      ),
+      approvers: [this.clonePrincipalRef(escalationTarget)],
+      resolvedApproverUserIds,
+      escalatedAt: now,
+      resolvedAt: now,
+    };
+
+    this.replaceApprovalRequest(escalated);
+    await this.persistApprovalWorkflow({
+      approvalRequests: [escalated],
+      context: "escalate approval request",
+    });
+    this.recordTenantAudit(
+      {
+        actorId: input.actorUserId,
+        actorType: input.actorType,
+        tenantId: input.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "booking.approval_request.timeout_escalated",
+        resourceType: "booking",
+        resourceId: escalated.bookingId,
+        newValuesSummary: {
+          approvalRequestId: input.approvalRequestId,
+          bookingId: escalated.bookingId,
+          orderId: escalated.orderId,
+          previousApprovers: escalated.previousApprovers,
+          escalationTarget: escalated.escalationTarget,
+          reasonNote: input.reasonNote,
+        },
+      },
+      input.requestId,
+    );
+    await this.dispatchApprovalNotifications("escalated", escalated, {
+      actorUserId: input.actorUserId,
+      reasonNote: input.reasonNote,
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    });
+    return this.cloneApprovalRequest(escalated);
+  }
+
   private async recordApprovalDecision(input: {
     tenantId: string;
     approvalRequestId: string;
@@ -6220,9 +6467,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             persistedRequest.status === "approved"
               ? "booking.approval_request.approved"
               : "booking.approval_request.rejected",
-          resourceType: "tenant_approval_request",
-          resourceId: input.approvalRequestId,
+          resourceType: "booking",
+          resourceId: persistedRequest.bookingId,
           newValuesSummary: {
+            approvalRequestId: input.approvalRequestId,
             bookingId: persistedRequest.bookingId,
             orderId: persistedRequest.orderId,
             decision: input.decision,
@@ -6230,6 +6478,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           },
         },
         input.requestId,
+      );
+      await this.dispatchApprovalNotifications(
+        persistedRequest.status === "approved" ? "approved" : "rejected",
+        persistedRequest,
+        {
+          actorUserId: input.actorUserId,
+          decidedAt: decision.decidedAt,
+          reasonCode: input.reasonCode,
+          reasonNote: input.reasonNote,
+          ...(input.requestId ? { requestId: input.requestId } : {}),
+        },
       );
     }
 
