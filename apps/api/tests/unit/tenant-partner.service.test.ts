@@ -11,7 +11,9 @@ import type {
   PersistTenantPartnerChanges,
   StoredPartnerIngressCredentialRecord,
   TenantPartnerState,
+  TenantPartnerQueryExecutor,
 } from "../../src/modules/tenant-partner/tenant-partner.repository";
+import { createEmptyTenantQuotaUsage } from "../../src/modules/tenant-partner/tenant-quota-ledger";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../src/modules/tenant-partner/webhook-dispatch.service";
 
@@ -148,6 +150,65 @@ function createInMemoryTenantPartnerRepository(
     reportPersistenceFailure: vi.fn(),
     getState: () => cloneState(state),
   };
+}
+
+function createDatabaseQuotaRepository(options?: {
+  bookingCountLimit?: number | null;
+  amountMinorLimit?: number | null;
+  enforcementMode?: "hard_block" | "require_approval" | "warn_only";
+}) {
+  const limit = {
+    bookingCountLimit: options?.bookingCountLimit ?? 1,
+    amountMinorLimit: options?.amountMinorLimit ?? null,
+    currency: "TWD",
+    enforcementMode: options?.enforcementMode ?? "hard_block",
+  } as const;
+  const executor: TenantPartnerQueryExecutor = {
+    query: vi.fn(async () => ({ rows: [] })) as never,
+  };
+  const repository = {
+    isEnabled: vi.fn(() => true),
+    loadState: vi.fn(async () => createEmptyRepositoryState()),
+    persistChanges: vi.fn(async () => {}),
+    reportPersistenceFailure: vi.fn(),
+    withTransaction: vi.fn(
+      async <T>(work: (tx: TenantPartnerQueryExecutor) => Promise<T>) =>
+        work(executor),
+    ),
+    loadQuotaPoliciesForUpdate: vi.fn(async () => [
+      {
+        tenantId: "tenant-demo-001",
+        costCenterCode: null,
+        period: "monthly",
+        limit: { ...limit },
+        inheritedFromTenant: false,
+        createdAt: "2026-05-13T10:00:00.000Z",
+        updatedAt: "2026-05-13T10:05:00.000Z",
+      },
+    ]),
+    ensureQuotaMonthlySnapshots: vi.fn(async () => {}),
+    loadQuotaMonthlySnapshotsForUpdate: vi.fn(
+      async (
+        _tx: TenantPartnerQueryExecutor,
+        tenantId: string,
+        _costCenterCode: string | null,
+        periodKey: string,
+      ) => [
+        {
+          tenantId,
+          costCenterCode: null,
+          period: "monthly",
+          periodKey,
+          limit: { ...limit },
+          usage: createEmptyTenantQuotaUsage(limit),
+          refreshedAt: "2026-05-13T10:10:00.000Z",
+        },
+      ],
+    ),
+    persistQuotaReservation: vi.fn(async () => {}),
+  };
+
+  return { repository, executor };
 }
 
 describe("TenantPartnerService sensitive-data governance", () => {
@@ -1923,6 +1984,81 @@ describe("TenantPartnerService approval rules", () => {
         },
       },
     });
+  });
+
+  it("uses the caller transaction for database-backed quota reservations", async () => {
+    const { repository } = createDatabaseQuotaRepository({
+      bookingCountLimit: 1,
+    });
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    const tx: TenantPartnerQueryExecutor = {
+      query: vi.fn(async () => ({ rows: [] })) as never,
+    };
+
+    const result = await service.reserveTenantQuota(tx, {
+      tenantId: "tenant-demo-001",
+      bookingId: "booking-db-tx-001",
+      evaluationId: "eval-db-tx-001",
+      reservationWindowStart: "2026-05-13T10:00:00.000Z",
+    });
+
+    expect(repository.withTransaction).not.toHaveBeenCalled();
+    expect(repository.loadQuotaPoliciesForUpdate).toHaveBeenCalledWith(
+      tx,
+      "tenant-demo-001",
+      null,
+    );
+    expect(repository.loadQuotaMonthlySnapshotsForUpdate).toHaveBeenCalledWith(
+      tx,
+      "tenant-demo-001",
+      null,
+      "2026-05",
+    );
+    expect(repository.persistQuotaReservation).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        quotaLedger: [
+          expect.objectContaining({
+            bookingId: "booking-db-tx-001",
+            dimension: "booking_count",
+            entryType: "reserve",
+            periodKey: "2026-05",
+          }),
+        ],
+      }),
+    );
+    expect(result.ledgerEntries).toHaveLength(1);
+  });
+
+  it("blocks over-limit reservations on the database path before persisting ledger rows", async () => {
+    const { repository } = createDatabaseQuotaRepository({
+      bookingCountLimit: 0,
+    });
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await expect(
+      service.reserveTenantQuota(null, {
+        tenantId: "tenant-demo-001",
+        bookingId: "booking-db-block-001",
+        evaluationId: "eval-db-block-001",
+        reservationWindowStart: "2026-05-13T10:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "QUOTA_INSUFFICIENT_AT_COMMIT",
+        },
+      },
+    });
+
+    expect(repository.withTransaction).toHaveBeenCalledTimes(1);
+    expect(repository.persistQuotaReservation).not.toHaveBeenCalled();
   });
 
   it("serializes concurrent reserve calls so only one claimant gets the last quota unit", async () => {
