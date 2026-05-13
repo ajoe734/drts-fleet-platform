@@ -1020,6 +1020,40 @@ export interface TenantAddressExportViewRecord {
   exportGeneratedAt: string;
 }
 
+export interface TenantCostCenterRecord {
+  tenantId: string;
+  code: string;
+  name: string;
+  description: string | null;
+  ownerUserId: string | null;
+  ownerName: string | null;
+  activeFlag: boolean;
+  disabledAt: string | null;
+  disabledReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListTenantCostCentersQuery {
+  activeOnly?: boolean;
+  ownerUserId?: string;
+  search?: string;
+}
+
+export interface UpsertTenantCostCenterCommand {
+  code: string;
+  name: string;
+  description?: string | null;
+  ownerUserId?: string | null;
+  ownerName?: string | null;
+  activeFlag?: boolean;
+}
+
+export interface DisableTenantCostCenterCommand {
+  code: string;
+  reason?: string | null;
+}
+
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
 
 export interface TenantUserRoleRecord {
@@ -1540,6 +1574,7 @@ export interface CreateTenantBookingCommand {
     name: string;
     phone: string;
   };
+  /** Canonical tenant cost-center code from the tenant directory. */
   costCenter?: string;
   vehiclePreference?: string;
   signoffRequired?: boolean;
@@ -1573,6 +1608,7 @@ export interface UpdateTenantBookingCommand {
     name: string;
     phone: string;
   };
+  /** Canonical tenant cost-center code from the tenant directory. */
   costCenter?: string | null;
   vehiclePreference?: string | null;
   signoffRequired?: boolean;

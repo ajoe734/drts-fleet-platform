@@ -42,12 +42,15 @@ import type {
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
+  DisableTenantCostCenterCommand,
+  ListTenantCostCentersQuery,
   TenantAddressExportViewRecord,
   TenantAddressGeocodeSource,
   TenantAddressQualityIssue,
   TenantAddressRecord,
   TenantApiKeyGovernancePolicy,
   TenantApiKeyIssued,
+  TenantCostCenterRecord,
   TenantNotificationPreferences,
   TenantPassengerMasterRole,
   TenantPassengerQualityIssue,
@@ -68,6 +71,7 @@ import type {
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
   UpsertTenantAddressCommand,
+  UpsertTenantCostCenterCommand,
   UpsertTenantPassengerCommand,
   VerifyPartnerEligibilityCommand,
   WebhookEventPayload,
@@ -329,6 +333,48 @@ const ADDRESS_SEED: TenantAddressRecord[] = [
   },
 ];
 
+const COST_CENTER_SEED: TenantCostCenterRecord[] = [
+  {
+    tenantId: DEMO_TENANT_ID,
+    code: "CC-FIN-04",
+    name: "財務處",
+    description: "財務與季度稽核差旅",
+    ownerUserId: "tenant-user-demo-003",
+    ownerName: "財務管理員",
+    activeFlag: true,
+    disabledAt: null,
+    disabledReason: null,
+    createdAt: "2026-04-10T00:00:00.000Z",
+    updatedAt: "2026-04-10T00:00:00.000Z",
+  },
+  {
+    tenantId: DEMO_TENANT_ID,
+    code: "CC-OPS-02",
+    name: "營運處",
+    description: "營運調度與站點巡檢",
+    ownerUserId: "tenant-user-demo-002",
+    ownerName: "營運管理員",
+    activeFlag: true,
+    disabledAt: null,
+    disabledReason: null,
+    createdAt: "2026-04-10T00:05:00.000Z",
+    updatedAt: "2026-04-10T00:05:00.000Z",
+  },
+  {
+    tenantId: DEMO_TENANT_ID,
+    code: "CC-EXEC-01",
+    name: "高階主管",
+    description: "總經理室與高階接待",
+    ownerUserId: null,
+    ownerName: "CEO Office",
+    activeFlag: true,
+    disabledAt: null,
+    disabledReason: null,
+    createdAt: "2026-04-10T00:10:00.000Z",
+    updatedAt: "2026-04-10T00:10:00.000Z",
+  },
+];
+
 const USER_ROLE_SEED: TenantUserRoleRecord[] = [
   {
     userId: "tenant-user-demo-001",
@@ -574,6 +620,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private addresses = ADDRESS_SEED.map((address) => this.cloneAddress(address));
 
+  private costCenters = COST_CENTER_SEED.map((costCenter) =>
+    this.cloneCostCenter(costCenter),
+  );
+
   private userRoles = USER_ROLE_SEED.map((userRole) =>
     this.cloneUserRole(userRole),
   );
@@ -639,6 +689,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         persistedState.partnerEligibilityVerifications ?? [];
       const passengers = persistedState.passengers ?? [];
       const addresses = persistedState.addresses ?? [];
+      const costCenters = persistedState.costCenters ?? [];
       const userRoles = persistedState.userRoles ?? [];
       const apiKeys = persistedState.apiKeys ?? [];
       const hasPersistedState =
@@ -651,6 +702,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         partnerEligibilityVerifications.length > 0 ||
         passengers.length > 0 ||
         addresses.length > 0 ||
+        costCenters.length > 0 ||
         userRoles.length > 0 ||
         apiKeys.length > 0;
 
@@ -676,6 +728,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             ),
             addresses: this.addresses.map((address) =>
               this.cloneAddress(address),
+            ),
+            costCenters: this.costCenters.map((costCenter) =>
+              this.cloneCostCenter(costCenter),
             ),
             userRoles: this.userRoles.map((userRole) =>
               this.cloneUserRole(userRole),
@@ -730,6 +785,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         this.clonePassenger(passenger),
       );
       this.addresses = addresses.map((address) => this.cloneAddress(address));
+      this.costCenters =
+        costCenters.length > 0
+          ? costCenters.map((costCenter) => this.cloneCostCenter(costCenter))
+          : COST_CENTER_SEED.map((costCenter) =>
+              this.cloneCostCenter(costCenter),
+            );
       this.userRoles = userRoles.map((userRole) =>
         this.cloneUserRole(userRole),
       );
@@ -753,6 +814,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             ),
           },
           "module init partner ingress credential bootstrap",
+        );
+      }
+      if (costCenters.length === 0) {
+        this.persistChanges(
+          {
+            costCenters: this.costCenters.map((costCenter) =>
+              this.cloneCostCenter(costCenter),
+            ),
+          },
+          "module init tenant cost-center bootstrap",
         );
       }
       this.schedulePersistedWebhookRetries();
@@ -1160,6 +1231,204 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     );
 
     return this.cloneAddress(address);
+  }
+
+  listCostCenters(tenantId: string, query: ListTenantCostCentersQuery = {}) {
+    const search = this.normalizeNullableText(query.search)?.toLowerCase();
+    const ownerUserId = this.normalizeNullableText(query.ownerUserId);
+
+    return this.costCenters
+      .filter((costCenter) => costCenter.tenantId === tenantId)
+      .filter((costCenter) => {
+        if (query.activeOnly && !costCenter.activeFlag) {
+          return false;
+        }
+        if (ownerUserId && costCenter.ownerUserId !== ownerUserId) {
+          return false;
+        }
+        if (!search) {
+          return true;
+        }
+        return [costCenter.code, costCenter.name, costCenter.description]
+          .filter((value): value is string => Boolean(value))
+          .some((value) => value.toLowerCase().includes(search));
+      })
+      .map((costCenter) => this.cloneCostCenter(costCenter));
+  }
+
+  getCostCenter(tenantId: string, code: string) {
+    const normalizedCode = this.normalizeCostCenterCode(code);
+    const costCenter = this.costCenters.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.code === normalizedCode,
+    );
+
+    if (!costCenter) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "COST_CENTER_NOT_FOUND",
+        "The tenant cost center could not be found.",
+        {
+          code: normalizedCode,
+        },
+      );
+    }
+
+    return this.cloneCostCenter(costCenter);
+  }
+
+  upsertCostCenter(
+    tenantId: string,
+    command: UpsertTenantCostCenterCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.code, "code");
+    this.assertNonBlank(command.name, "name");
+
+    const code = this.normalizeCostCenterCode(command.code);
+    const existing = this.costCenters.find(
+      (candidate) => candidate.tenantId === tenantId && candidate.code === code,
+    );
+
+    const hasOwnerUserId = Object.prototype.hasOwnProperty.call(
+      command,
+      "ownerUserId",
+    );
+    const hasOwnerName = Object.prototype.hasOwnProperty.call(
+      command,
+      "ownerName",
+    );
+    const normalizedOwnerUserId = hasOwnerUserId
+      ? this.normalizeNullableText(command.ownerUserId)
+      : (existing?.ownerUserId ?? null);
+    const ownerUser =
+      normalizedOwnerUserId === null
+        ? null
+        : this.requireTenantUser(tenantId, normalizedOwnerUserId);
+    const ownerName = hasOwnerName
+      ? this.normalizeNullableText(command.ownerName)
+      : hasOwnerUserId
+        ? (ownerUser?.displayName ?? null)
+        : (existing?.ownerName ?? null);
+
+    const now = new Date().toISOString();
+    const activeFlag = command.activeFlag ?? existing?.activeFlag ?? true;
+    const disabledAt = activeFlag ? null : (existing?.disabledAt ?? now);
+    const disabledReason = activeFlag
+      ? null
+      : (existing?.disabledReason ?? "disabled_via_upsert");
+
+    const costCenter: TenantCostCenterRecord = existing
+      ? {
+          ...existing,
+          code,
+          name: command.name.trim(),
+          description: this.normalizeNullableText(
+            command.description ?? existing.description,
+          ),
+          ownerUserId: normalizedOwnerUserId,
+          ownerName,
+          activeFlag,
+          disabledAt,
+          disabledReason,
+          updatedAt: now,
+        }
+      : {
+          tenantId,
+          code,
+          name: command.name.trim(),
+          description: this.normalizeNullableText(command.description),
+          ownerUserId: normalizedOwnerUserId,
+          ownerName,
+          activeFlag,
+          disabledAt,
+          disabledReason,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+    this.costCenters = [
+      this.cloneCostCenter(costCenter),
+      ...this.costCenters.filter(
+        (candidate) =>
+          !(
+            candidate.tenantId === tenantId &&
+            candidate.code === costCenter.code
+          ),
+      ),
+    ];
+    this.persistChanges(
+      {
+        costCenters: [this.cloneCostCenter(costCenter)],
+      },
+      "upsert_cost_center",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "upsert_cost_center",
+        resourceType: "tenant_cost_center",
+        resourceId: costCenter.code,
+        newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
+      },
+      requestId,
+    );
+
+    return this.cloneCostCenter(costCenter);
+  }
+
+  disableCostCenter(
+    tenantId: string,
+    command: DisableTenantCostCenterCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.code, "code");
+    const existing = this.getCostCenter(tenantId, command.code);
+    const now = new Date().toISOString();
+    const costCenter: TenantCostCenterRecord = {
+      ...existing,
+      activeFlag: false,
+      disabledAt: now,
+      disabledReason:
+        this.normalizeNullableText(command.reason) ??
+        "disabled_by_tenant_admin",
+      updatedAt: now,
+    };
+
+    this.costCenters = [
+      this.cloneCostCenter(costCenter),
+      ...this.costCenters.filter(
+        (candidate) =>
+          !(
+            candidate.tenantId === tenantId &&
+            candidate.code === costCenter.code
+          ),
+      ),
+    ];
+    this.persistChanges(
+      {
+        costCenters: [this.cloneCostCenter(costCenter)],
+      },
+      "disable_cost_center",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "disable_cost_center",
+        resourceType: "tenant_cost_center",
+        resourceId: costCenter.code,
+        newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
+      },
+      requestId,
+    );
+
+    return this.cloneCostCenter(costCenter);
   }
 
   listTenantUsers(tenantId: string) {
@@ -3915,6 +4184,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private buildCostCenterAuditSummary(costCenter: TenantCostCenterRecord) {
+    return {
+      tenantId: costCenter.tenantId,
+      code: costCenter.code,
+      name: costCenter.name,
+      description: costCenter.description,
+      ownerUserId: costCenter.ownerUserId,
+      ownerName: costCenter.ownerName,
+      activeFlag: costCenter.activeFlag,
+      disabledAt: costCenter.disabledAt,
+      disabledReason: costCenter.disabledReason,
+      createdAt: costCenter.createdAt,
+      updatedAt: costCenter.updatedAt,
+    };
+  }
+
   private buildTenantUserAuditSummary(userRole: TenantUserRoleRecord) {
     return {
       userId: userRole.userId,
@@ -3959,6 +4244,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ...address,
       qualityIssues: [...(address.qualityIssues ?? [])],
       tags: [...address.tags],
+    };
+  }
+
+  private cloneCostCenter(
+    costCenter: TenantCostCenterRecord,
+  ): TenantCostCenterRecord {
+    return {
+      ...costCenter,
     };
   }
 
@@ -4717,6 +5010,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       issues.push("duplicate_normalized_address");
     }
     return issues;
+  }
+
+  private normalizeCostCenterCode(value: string) {
+    const normalized = this.requireNonBlank(value, "code").toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9-]*$/.test(normalized)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "COST_CENTER_CODE_INVALID",
+        "code must use uppercase letters, numbers, or hyphens.",
+        {
+          code: value,
+        },
+      );
+    }
+    return normalized;
   }
 
   private normalizePartnerCode(value: string) {

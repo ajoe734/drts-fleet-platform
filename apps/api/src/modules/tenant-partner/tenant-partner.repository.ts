@@ -6,6 +6,7 @@ import type {
   PartnerIngressCredentialRecord,
   TenantAddressRecord,
   TenantApiKeyRecord,
+  TenantCostCenterRecord,
   TenantNotificationPreferences,
   TenantPassengerRecord,
   TenantSlaProfile,
@@ -90,6 +91,7 @@ export type TenantPartnerState = {
   partnerEligibilityVerifications: PartnerEligibilityVerificationRecord[];
   passengers: TenantPassengerRecord[];
   addresses: TenantAddressRecord[];
+  costCenters: TenantCostCenterRecord[];
   userRoles: TenantUserRoleRecord[];
   apiKeys: StoredTenantApiKeyRecord[];
 };
@@ -104,6 +106,7 @@ export type PersistTenantPartnerChanges = {
   partnerEligibilityVerifications?: readonly PartnerEligibilityVerificationRecord[];
   passengers?: readonly TenantPassengerRecord[];
   addresses?: readonly TenantAddressRecord[];
+  costCenters?: readonly TenantCostCenterRecord[];
   userRoles?: readonly TenantUserRoleRecord[];
   apiKeys?: readonly StoredTenantApiKeyRecord[];
 };
@@ -130,6 +133,7 @@ export class TenantPartnerRepository {
         partnerEligibilityVerifications: [],
         passengers: [],
         addresses: [],
+        costCenters: [],
         userRoles: [],
         apiKeys: [],
       };
@@ -145,6 +149,7 @@ export class TenantPartnerRepository {
       partnerEligibilityVerificationsResult,
       passengersResult,
       addressesResult,
+      costCentersResult,
       userRolesResult,
       apiKeysResult,
     ] = await Promise.all([
@@ -208,6 +213,13 @@ export class TenantPartnerRepository {
         `
           SELECT record
           FROM core.phase1_tenant_addresses
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM core.phase1_tenant_cost_centers
           ORDER BY updated_at DESC, created_at DESC
         `,
       ),
@@ -282,6 +294,12 @@ export class TenantPartnerRepository {
         this.parseRecord<TenantAddressRecord>(
           row.record,
           "core.phase1_tenant_addresses",
+        ),
+      ),
+      costCenters: costCentersResult.rows.map((row) =>
+        this.parseRecord<TenantCostCenterRecord>(
+          row.record,
+          "core.phase1_tenant_cost_centers",
         ),
       ),
       userRoles: userRolesResult.rows.map((row) =>
@@ -601,6 +619,38 @@ export class TenantPartnerRepository {
             address.createdAt,
             address.updatedAt,
             JSON.stringify(address),
+          ],
+        ),
+      );
+    }
+
+    for (const costCenter of changes.costCenters ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO core.phase1_tenant_cost_centers (
+              tenant_id,
+              code,
+              active_flag,
+              created_at,
+              updated_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb
+            )
+            ON CONFLICT (tenant_id, code) DO UPDATE SET
+              active_flag = EXCLUDED.active_flag,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
+          `,
+          [
+            costCenter.tenantId,
+            costCenter.code,
+            costCenter.activeFlag,
+            costCenter.createdAt,
+            costCenter.updatedAt,
+            JSON.stringify(costCenter),
           ],
         ),
       );

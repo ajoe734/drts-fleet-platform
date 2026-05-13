@@ -1,11 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
   Post,
-  Delete,
+  Query,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
@@ -15,7 +16,9 @@ import type {
   IssuePartnerIngressCredentialCommand,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
+  DisableTenantCostCenterCommand,
   IssueTenantApiKeyCommand,
+  ListTenantCostCentersQuery,
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
   PartnerChannelEntryRecord,
@@ -27,6 +30,7 @@ import type {
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
   TenantAddressExportViewRecord,
+  TenantCostCenterRecord,
   TenantIntegrationGovernancePackage,
   TenantPartnerSummary,
   UpdatePartnerChannelEntryCommand,
@@ -35,6 +39,7 @@ import type {
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
   UpsertTenantAddressCommand,
+  UpsertTenantCostCenterCommand,
   UpsertTenantPassengerCommand,
   VerifyPartnerEligibilityCommand,
 } from "@drts/contracts";
@@ -329,6 +334,79 @@ export class TenantPartnerController {
       this.requireTenantId(tenantId),
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/cost-centers")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listCostCenters(
+    @Query("activeOnly") activeOnly?: string,
+    @Query("ownerUserId") ownerUserId?: string,
+    @Query("search") search?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const query: ListTenantCostCentersQuery = {};
+    if (activeOnly === "true") {
+      query.activeOnly = true;
+    }
+    if (ownerUserId?.trim()) {
+      query.ownerUserId = ownerUserId;
+    }
+    if (search?.trim()) {
+      query.search = search;
+    }
+    const items = this.tenantPartnerService.listCostCenters(
+      this.requireTenantId(tenantId),
+      query,
+    );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/cost-centers/:code")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getCostCenter(
+    @Param("code") code: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const record: TenantCostCenterRecord =
+      this.tenantPartnerService.getCostCenter(
+        this.requireTenantId(tenantId),
+        code,
+      );
+    return toApiSuccessEnvelope(record, requestId);
+  }
+
+  @Post("tenant/cost-centers")
+  upsertCostCenter(
+    @Body() command: UpsertTenantCostCenterCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.upsertCostCenter(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/cost-centers/disable")
+  disableCostCenter(
+    @Body() command: DisableTenantCostCenterCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.disableCostCenter(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
   }
 
   @Get("tenant/addresses/export-view")

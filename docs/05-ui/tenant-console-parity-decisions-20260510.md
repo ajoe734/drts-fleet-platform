@@ -1,5 +1,21 @@
 # Tenant Console Parity Decisions — 2026-05-10
 
+## 2026-05-13 Implementation Update
+
+- `BE-CC-001` now publishes the tenant cost-center directory contract and
+  tenant API surface:
+  - `TenantCostCenterRecord`
+  - `ListTenantCostCentersQuery`
+  - `UpsertTenantCostCenterCommand`
+  - `DisableTenantCostCenterCommand`
+  - `GET /api/tenant/cost-centers`
+  - `GET /api/tenant/cost-centers/:code`
+  - `POST /api/tenant/cost-centers`
+  - `POST /api/tenant/cost-centers/disable`
+- `TEN-UI-RD-013` can reopen against this canonical directory surface.
+- `TEN-UI-RD-010` and `TEN-UI-RD-014` remain blocked on the follow-on
+  approval-rule and quota contracts (`BE-RULE-001`, `BE-QUOTA-001`).
+
 ## TEN-UI-RD-010 — TN_NewBooking contract validation
 
 Status: blocked
