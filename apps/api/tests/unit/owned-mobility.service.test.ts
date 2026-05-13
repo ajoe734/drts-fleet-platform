@@ -488,6 +488,11 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const approvalAudit = {
       recordAuditLog: vi.fn(),
       recordNotification: vi.fn(),
+      dispatchApprovalNotification: vi.fn(async () => ({
+        deduplicated: false,
+        deliveredToUserIds: [],
+        skippedUserIds: [],
+      })),
     };
     const tenantPartnerService = new TenantPartnerService(
       approvalAudit as never,
@@ -538,6 +543,8 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
   });
 
   it("cancels pending approvals on re-evaluation, but ignores note-only updates", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-13T18:00:00.000Z"));
     const tenantPartnerService = new TenantPartnerService(
       new AuditNotificationService(),
     );

@@ -37,8 +37,8 @@ describe("tenant quota ledger helpers", () => {
       entryType: "consume",
     });
 
-    expect(consumed.bookingCountReserved).toBe(0);
-    expect(consumed.bookingCountConsumed).toBe(1);
+    expect(consumed.pendingReservedBookingCount).toBe(0);
+    expect(consumed.confirmedBookingCount).toBe(1);
     expect(consumed.bookingCountRemaining).toBe(1);
   });
 

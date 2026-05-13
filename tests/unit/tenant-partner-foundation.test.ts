@@ -870,13 +870,13 @@ describe("tenant partner foundation service", () => {
     expect(auditService.listAuditLogs()[0]?.actionName).toBe("rotate_api_key");
   });
 
-  it("summarizes cost-center coverage across resolved, unresolved, disabled, and cross-tenant legacy bookings", () => {
+  it("summarizes cost-center coverage across resolved, unresolved, disabled, and cross-tenant legacy bookings", async () => {
     const coverageTenantId = "tenant-coverage-001";
     const otherCoverageTenantId = "tenant-coverage-002";
     const { auditService, tenantPartnerService, ownedMobilityService } =
       createCoverageServices();
 
-    ownedMobilityService.createTenantBooking(
+    await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: { address: "台北市政府" },
@@ -891,7 +891,7 @@ describe("tenant partner foundation service", () => {
       },
       coverageTenantId,
     );
-    ownedMobilityService.createTenantBooking(
+    await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: { address: "台北市政府" },
@@ -920,7 +920,7 @@ describe("tenant partner foundation service", () => {
       name: "Other Tenant Only",
     });
 
-    ownedMobilityService.createTenantBooking(
+    await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: { address: "台北市政府" },
@@ -935,7 +935,7 @@ describe("tenant partner foundation service", () => {
       },
       coverageTenantId,
     );
-    ownedMobilityService.createTenantBooking(
+    await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: { address: "台北市政府" },
@@ -989,11 +989,11 @@ describe("tenant partner foundation service", () => {
     );
   });
 
-  it("reports grandfather tenants with no directory rows as unresolved coverage instead of failing validation", () => {
+  it("reports grandfather tenants with no directory rows as unresolved coverage instead of failing validation", async () => {
     const { tenantPartnerService, ownedMobilityService } =
       createCoverageServices();
 
-    ownedMobilityService.createTenantBooking(
+    await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: { address: "台中市政府" },
@@ -1008,7 +1008,7 @@ describe("tenant partner foundation service", () => {
       },
       OTHER_TENANT_ID,
     );
-    ownedMobilityService.createTenantBooking(
+    await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: { address: "台中市政府" },

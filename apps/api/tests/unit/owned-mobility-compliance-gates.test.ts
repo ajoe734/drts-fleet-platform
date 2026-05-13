@@ -8,6 +8,29 @@ function createService(options?: {
   callSessionRecordingId?: string | null;
   tenantPartnerService?: Record<string, unknown>;
 }) {
+  const tenantPartnerService = options?.tenantPartnerService
+    ? {
+        previewBookingQuotaImpact: vi.fn(() => ({
+          evaluationId: "quota-preview-test",
+          periodKey: "2026-04",
+          impacts: [],
+          combinedTriggered: "none" as const,
+        })),
+        evaluateApprovalRules: vi.fn(() => ({
+          evaluatedAt: "2026-04-29T00:00:00.000Z",
+          matchedRules: [],
+          outcome: {
+            decision: "allow" as const,
+            approvalRequired: false,
+            blocked: false,
+            warnings: [],
+            reasonCodes: [],
+          },
+        })),
+        reserveTenantQuota: vi.fn(() => undefined),
+        ...options.tenantPartnerService,
+      }
+    : undefined;
   const regulatoryRegistryService = {
     getEligibleCandidates: vi.fn(() => [
       {
@@ -41,7 +64,7 @@ function createService(options?: {
     taskEventsService as never,
     undefined,
     undefined,
-    options?.tenantPartnerService as never,
+    tenantPartnerService as never,
   );
 }
 

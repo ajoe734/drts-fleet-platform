@@ -696,10 +696,16 @@ export class AuditNotificationService implements OnModuleInit {
   }
 
   recordNotification(
-    input: Omit<NotificationRecord, "notificationId" | "createdAt" | "readAt">,
+    input: Omit<
+      NotificationRecord,
+      "notificationId" | "createdAt" | "readAt" | "recipientUserId"
+    > & {
+      recipientUserId?: string | null;
+    },
   ) {
     const notification: NotificationRecord = {
       ...input,
+      recipientUserId: input.recipientUserId ?? null,
       notificationId: `notif-${randomUUID()}`,
       createdAt: new Date().toISOString(),
       readAt: null,
@@ -755,7 +761,7 @@ export class AuditNotificationService implements OnModuleInit {
         actionName: "mark_notifications_read",
         resourceType: "notification_batch",
         resourceId: null,
-      newValuesSummary: {
+        newValuesSummary: {
           notificationIds: [...notificationIds],
           updated,
         },

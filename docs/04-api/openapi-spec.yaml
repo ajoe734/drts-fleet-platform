@@ -1199,21 +1199,21 @@ components:
     TenantQuotaUsage:
       type: object
       required:
-        - bookingCountReserved
-        - bookingCountConsumed
-        - amountMinorReserved
-        - amountMinorConsumed
+        - pendingReservedBookingCount
+        - confirmedBookingCount
+        - pendingReservedAmountMinor
+        - confirmedAmountMinor
         - bookingCountRemaining
         - amountMinorRemaining
         - remainingPercent
       properties:
-        bookingCountReserved:
+        pendingReservedBookingCount:
           type: integer
-        bookingCountConsumed:
+        confirmedBookingCount:
           type: integer
-        amountMinorReserved:
+        pendingReservedAmountMinor:
           type: integer
-        amountMinorConsumed:
+        confirmedAmountMinor:
           type: integer
         bookingCountRemaining:
           type: integer

@@ -57,10 +57,10 @@ export function createEmptyTenantQuotaUsage(
   limit: TenantQuotaLimit,
 ): TenantQuotaUsage {
   return materializeUsage(limit, {
-    bookingCountReserved: 0,
-    bookingCountConsumed: 0,
-    amountMinorReserved: 0,
-    amountMinorConsumed: 0,
+    pendingReservedBookingCount: 0,
+    confirmedBookingCount: 0,
+    pendingReservedAmountMinor: 0,
+    confirmedAmountMinor: 0,
   });
 }
 
@@ -68,16 +68,16 @@ export function materializeUsage(
   limit: TenantQuotaLimit,
   usage: Pick<
     TenantQuotaUsage,
-    | "bookingCountReserved"
-    | "bookingCountConsumed"
-    | "amountMinorReserved"
-    | "amountMinorConsumed"
+    | "pendingReservedBookingCount"
+    | "confirmedBookingCount"
+    | "pendingReservedAmountMinor"
+    | "confirmedAmountMinor"
   >,
 ): TenantQuotaUsage {
   const totalBookingUsage =
-    usage.bookingCountReserved + usage.bookingCountConsumed;
+    usage.pendingReservedBookingCount + usage.confirmedBookingCount;
   const totalAmountUsage =
-    usage.amountMinorReserved + usage.amountMinorConsumed;
+    usage.pendingReservedAmountMinor + usage.confirmedAmountMinor;
   const bookingCountRemaining =
     limit.bookingCountLimit === null
       ? null
@@ -103,10 +103,10 @@ export function materializeUsage(
 }
 
 type QuotaUsageMutable = {
-  bookingCountReserved: number;
-  bookingCountConsumed: number;
-  amountMinorReserved: number;
-  amountMinorConsumed: number;
+  pendingReservedBookingCount: number;
+  confirmedBookingCount: number;
+  pendingReservedAmountMinor: number;
+  confirmedAmountMinor: number;
 };
 
 export function applyLedgerEntryToUsage(
@@ -115,25 +115,25 @@ export function applyLedgerEntryToUsage(
   entry: Pick<TenantQuotaLedgerEntry, "dimension" | "amount" | "entryType">,
 ): TenantQuotaUsage {
   const next: QuotaUsageMutable = {
-    bookingCountReserved: usage.bookingCountReserved,
-    bookingCountConsumed: usage.bookingCountConsumed,
-    amountMinorReserved: usage.amountMinorReserved,
-    amountMinorConsumed: usage.amountMinorConsumed,
+    pendingReservedBookingCount: usage.pendingReservedBookingCount,
+    confirmedBookingCount: usage.confirmedBookingCount,
+    pendingReservedAmountMinor: usage.pendingReservedAmountMinor,
+    confirmedAmountMinor: usage.confirmedAmountMinor,
   };
 
   if (entry.dimension === "booking_count") {
     applyDimensionMutation(
       next,
-      "bookingCountReserved",
-      "bookingCountConsumed",
+      "pendingReservedBookingCount",
+      "confirmedBookingCount",
       entry.entryType,
       entry.amount,
     );
   } else {
     applyDimensionMutation(
       next,
-      "amountMinorReserved",
-      "amountMinorConsumed",
+      "pendingReservedAmountMinor",
+      "confirmedAmountMinor",
       entry.entryType,
       entry.amount,
     );

@@ -6293,9 +6293,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         reasonNote: options?.reasonNote ?? null,
       },
       occurredAt:
-        request.resolvedAt ??
-        request.escalatedAt ??
-        new Date().toISOString(),
+        request.resolvedAt ?? request.escalatedAt ?? new Date().toISOString(),
     });
 
     return dispatchResult;
@@ -7001,10 +6999,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const periodKey = this.requireQuotaPeriodKey(reservationWindowStart);
     const costCenterCode =
       (query.costCenterCode ?? query.costCenter)
-        ? this.getCostCenter(
-            tenantId,
+        ? this.normalizeCostCenterCode(
             query.costCenterCode ?? query.costCenter ?? "",
-          ).code
+          )
         : null;
     return {
       bookingId: this.normalizeNullableText(query.bookingId),

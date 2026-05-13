@@ -473,10 +473,10 @@ describe("tenant governance e2e integration", () => {
         "2026-04-29T14:00:00.000Z",
       ).usage,
     ).toMatchObject({
-      bookingCountReserved: 1,
-      bookingCountConsumed: 0,
-      amountMinorReserved: 150_000,
-      amountMinorConsumed: 0,
+      pendingReservedBookingCount: 1,
+      confirmedBookingCount: 0,
+      pendingReservedAmountMinor: 150_000,
+      confirmedAmountMinor: 0,
     });
 
     expect(() =>
@@ -567,10 +567,10 @@ describe("tenant governance e2e integration", () => {
         "2026-04-29T14:00:00.000Z",
       ).usage,
     ).toMatchObject({
-      bookingCountReserved: 0,
-      bookingCountConsumed: 1,
-      amountMinorReserved: 0,
-      amountMinorConsumed: 150_000,
+      pendingReservedBookingCount: 0,
+      confirmedBookingCount: 1,
+      pendingReservedAmountMinor: 0,
+      confirmedAmountMinor: 150_000,
     });
 
     vi.setSystemTime(new Date("2026-05-13T12:00:00.000Z"));
