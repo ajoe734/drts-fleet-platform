@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
+import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
 import type {
   DispatchAssignmentRecord,
@@ -13,6 +14,13 @@ import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
   record: unknown;
+};
+
+export type OwnedMobilityQueryExecutor = {
+  query<T extends QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>>;
 };
 
 type OwnedMobilityState = {
@@ -152,11 +160,54 @@ export class OwnedMobilityRepository {
       return;
     }
 
+    await this.persistChangesWithExecutor(this.databaseService!, changes);
+  }
+
+  async withTransaction<T>(work: (executor: PoolClient) => Promise<T>) {
+    if (!this.isEnabled()) {
+      throw new Error("DATABASE_URL is not configured");
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        this.logger.warn(
+          `Owned-mobility transaction rollback failed: ${
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : String(rollbackError)
+          }`,
+        );
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async persistOrderWorkflow(
+    executor: OwnedMobilityQueryExecutor,
+    changes: PersistOwnedMobilityChanges,
+  ) {
+    await this.persistChangesWithExecutor(executor, changes);
+  }
+
+  private async persistChangesWithExecutor(
+    executor: OwnedMobilityQueryExecutor,
+    changes: PersistOwnedMobilityChanges,
+  ) {
     const writes: Promise<unknown>[] = [];
 
     for (const order of changes.orders ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO ops.phase1_owned_orders (
               order_id,
@@ -198,7 +249,7 @@ export class OwnedMobilityRepository {
 
     for (const job of changes.dispatchJobs ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO ops.phase1_dispatch_jobs (
               dispatch_job_id,
@@ -231,7 +282,7 @@ export class OwnedMobilityRepository {
 
     for (const attempt of changes.dispatchAttempts ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO ops.phase1_dispatch_attempts (
               attempt_id,
@@ -267,7 +318,7 @@ export class OwnedMobilityRepository {
 
     for (const assignment of changes.dispatchAssignments ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO ops.phase1_dispatch_assignments (
               assignment_id,
@@ -306,7 +357,7 @@ export class OwnedMobilityRepository {
 
     for (const task of changes.driverTasks ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO ops.phase1_driver_tasks (
               task_id,
@@ -345,7 +396,7 @@ export class OwnedMobilityRepository {
 
     for (const traceLog of changes.dispatchTraceLogs ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO ops.phase1_dispatch_trace_logs (
               trace_id,

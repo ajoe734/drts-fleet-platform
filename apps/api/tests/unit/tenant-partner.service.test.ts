@@ -2097,7 +2097,7 @@ describe("TenantPartnerService approval rules", () => {
     ).toHaveLength(1);
     expect(
       service.getTenantQuotaSummary("tenant-demo-001").usage
-        .bookingCountReserved,
+        .pendingReservedBookingCount,
     ).toBe(1);
   });
 });

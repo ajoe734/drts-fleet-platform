@@ -1376,7 +1376,6 @@ export interface TenantBookingApprovalRequestRecord {
   createdAt: string;
   resolvedAt: string | null;
 }
-
 export interface ListTenantBookingApprovalRequestsQuery {
   status?: TenantBookingApprovalRequestStatus;
   bookingId?: string;
@@ -1410,10 +1409,10 @@ export interface TenantQuotaLimit {
 }
 
 export interface TenantQuotaUsage {
-  bookingCountReserved: number;
-  bookingCountConsumed: number;
-  amountMinorReserved: number;
-  amountMinorConsumed: number;
+  pendingReservedBookingCount: number;
+  confirmedBookingCount: number;
+  pendingReservedAmountMinor: number;
+  confirmedAmountMinor: number;
   bookingCountRemaining: number | null;
   amountMinorRemaining: number | null;
   remainingPercent: number | null;

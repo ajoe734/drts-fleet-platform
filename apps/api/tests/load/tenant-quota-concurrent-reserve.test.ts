@@ -608,11 +608,11 @@ describe("tenant quota concurrent reserve load", () => {
         costCenterCode: null,
         periodKey: PERIOD_KEY,
         usage: expect.objectContaining({
-          bookingCountReserved: 1,
+          pendingReservedBookingCount: 1,
         }),
       }),
     ]);
-    expect(summary.usage.bookingCountReserved).toBe(1);
+    expect(summary.usage.pendingReservedBookingCount).toBe(1);
     expectRealContention(repository);
   });
 
@@ -668,13 +668,13 @@ describe("tenant quota concurrent reserve load", () => {
         costCenterCode: null,
         periodKey: PERIOD_KEY,
         usage: expect.objectContaining({
-          bookingCountReserved: 1,
-          amountMinorReserved: 100,
+          pendingReservedBookingCount: 1,
+          pendingReservedAmountMinor: 100,
         }),
       }),
     ]);
-    expect(summary.usage.bookingCountReserved).toBe(1);
-    expect(summary.usage.amountMinorReserved).toBe(100);
+    expect(summary.usage.pendingReservedBookingCount).toBe(1);
+    expect(summary.usage.pendingReservedAmountMinor).toBe(100);
     expectRealContention(repository);
   });
 
@@ -752,7 +752,7 @@ describe("tenant quota concurrent reserve load", () => {
           costCenterCode: null,
           periodKey: PERIOD_KEY,
           usage: expect.objectContaining({
-            bookingCountReserved: 1,
+            pendingReservedBookingCount: 1,
           }),
         }),
         expect.objectContaining({
@@ -760,14 +760,14 @@ describe("tenant quota concurrent reserve load", () => {
           costCenterCode: COST_CENTER_CODE,
           periodKey: PERIOD_KEY,
           usage: expect.objectContaining({
-            bookingCountReserved: 1,
+            pendingReservedBookingCount: 1,
           }),
         }),
       ]),
     );
-    expect(tenantSummary.usage.bookingCountReserved).toBe(1);
+    expect(tenantSummary.usage.pendingReservedBookingCount).toBe(1);
     expect(costCenterSummary.limit.enforcementMode).toBe("warn_only");
-    expect(costCenterSummary.usage.bookingCountReserved).toBe(1);
+    expect(costCenterSummary.usage.pendingReservedBookingCount).toBe(1);
     expectRealContention(repository);
   });
 });
