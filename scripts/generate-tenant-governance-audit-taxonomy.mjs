@@ -85,10 +85,12 @@ if (stdoutOnly) {
 
 const originalDocument = readFileSync(outputPath, "utf8");
 const markerPattern = new RegExp(
-  `${escapeRegExp(startMarker)}[\\s\\S]*?${escapeRegExp(endMarker)}`,
+  `${escapeRegExp(startMarker)}\\n?([\\s\\S]*?)\\n?${escapeRegExp(endMarker)}`,
 );
 
-if (!markerPattern.test(originalDocument)) {
+const markerMatch = originalDocument.match(markerPattern);
+
+if (!markerMatch) {
   console.error(
     `Could not find generated-section markers in ${relativeToRepo(outputPath)}.`,
   );
@@ -99,7 +101,10 @@ const replacement = `${startMarker}\n${snippet}\n${endMarker}`;
 const nextDocument = originalDocument.replace(markerPattern, replacement);
 
 if (checkOnly) {
-  if (nextDocument !== originalDocument) {
+  const currentSnippet = markerMatch[1] ?? "";
+  if (
+    normalizeGeneratedBlock(currentSnippet) !== normalizeGeneratedBlock(snippet)
+  ) {
     console.error(
       `Generated tenant governance audit snippet is stale in ${relativeToRepo(outputPath)}.`,
     );
@@ -115,6 +120,51 @@ process.stdout.write(
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeGeneratedBlock(value) {
+  const normalizedLines = [];
+
+  for (const rawLine of value.split("\n")) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      if (normalizedLines.at(-1) !== "") {
+        normalizedLines.push("");
+      }
+      continue;
+    }
+
+    if (line.startsWith("|") && line.endsWith("|")) {
+      const cells = line
+        .slice(1, -1)
+        .split("|")
+        .map((cell) => normalizeTableCell(cell.trim()));
+      normalizedLines.push(`| ${cells.join(" | ")} |`);
+      continue;
+    }
+
+    normalizedLines.push(line);
+  }
+
+  while (normalizedLines[0] === "") {
+    normalizedLines.shift();
+  }
+  while (normalizedLines.at(-1) === "") {
+    normalizedLines.pop();
+  }
+
+  return normalizedLines.join("\n");
+}
+
+function normalizeTableCell(value) {
+  if (!/^:?-+:?$/.test(value)) {
+    return value;
+  }
+
+  const left = value.startsWith(":") ? ":" : "";
+  const right = value.endsWith(":") ? ":" : "";
+  return `${left}---${right}`;
 }
 
 function relativeToRepo(path) {
