@@ -695,11 +695,18 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       {},
     );
 
-    expect(escalated.status).toBe("timeout_escalated");
-    expect(
-      service.getTenantBooking("tenant-demo-001", created.bookingId)
-        .approvalState,
-    ).toBe("pending");
+    expect(escalated.status).toBe("pending");
+    expect(escalated.escalatedAt).not.toBeNull();
+    expect(escalated.previousApprovers).toEqual(request.approvers);
+    expect(escalated.resolvedApproverUserIds).toContain("tenant-user-demo-001");
+    const escalatedBooking = service.getTenantBooking(
+      "tenant-demo-001",
+      created.bookingId,
+    );
+    expect(escalatedBooking.approvalState).toBe("pending");
+    expect(escalatedBooking.approvalRequestIds).toEqual([
+      request.approvalRequestId,
+    ]);
   });
 
   it("rejects tenant attempts to set quoted fare through booking channels", () => {

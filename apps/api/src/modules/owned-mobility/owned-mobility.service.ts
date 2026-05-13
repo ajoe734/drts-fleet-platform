@@ -4408,10 +4408,10 @@ export class OwnedMobilityService implements OnModuleInit {
       order.status = "cancelled";
       order.cancelledAt = order.cancelledAt ?? now;
       order.cancelReason = order.cancelReason ?? "booking_approval_rejected";
-    } else if (request.status === "timeout_escalated") {
-      order.approvalState = "pending";
-      order.approvalRequestIds = [];
     } else {
+      // pending (incl. P1 manual escalation that rotates approvers but keeps the
+      // request actionable) and any other non-terminal status keep the booking
+      // referencing the live approval request so the rotated approvers can act.
       order.approvalState = "pending";
       order.approvalRequestIds = [request.approvalRequestId];
     }

@@ -254,8 +254,6 @@ const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
 };
 
 const PARTNER_ELIGIBILITY_DECISION_TTL_SECONDS = 30 * 60;
-const APPROVAL_TIMEOUT_REMINDER_WINDOW_MS = 12 * 60 * 60 * 1000;
-const APPROVAL_TIMEOUT_POLL_INTERVAL_MS = 60 * 1000;
 
 const DEFAULT_PARTNER_ELIGIBILITY_RETRY_POLICY: PartnerEligibilityRetryPolicyRecord =
   {
@@ -729,9 +727,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     ReturnType<typeof setTimeout>
   >();
 
-  private approvalTimeoutPollTimer: ReturnType<typeof setInterval> | null =
-    null;
-
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
@@ -755,7 +750,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     if (!this.tenantPartnerRepository) {
-      this.startApprovalTimeoutPolling();
       return;
     }
 
@@ -976,8 +970,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         error,
         "module init",
       );
-    } finally {
-      this.startApprovalTimeoutPolling();
     }
   }
 
@@ -994,10 +986,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       clearTimeout(timer);
     }
     this.retryTimers.clear();
-    if (this.approvalTimeoutPollTimer) {
-      clearInterval(this.approvalTimeoutPollTimer);
-      this.approvalTimeoutPollTimer = null;
-    }
   }
 
   getNotificationPreferences(tenantId: string) {
@@ -1985,67 +1973,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((request) => this.cloneApprovalRequest(request));
   }
 
-  async processApprovalTimeouts(options?: {
-    now?: string;
-    requestId?: string;
-  }) {
-    const now = options?.now ?? new Date().toISOString();
-    const nowTimestamp = Date.parse(now);
-    const pendingRequests = this.approvalRequests
-      .filter((request) => request.status === "pending")
-      .sort((left, right) => left.timeoutAt.localeCompare(right.timeoutAt));
-
-    const approachingTimeoutRequestIds: string[] = [];
-    const escalatedRequestIds: string[] = [];
-
-    for (const request of pendingRequests) {
-      const timeoutTimestamp = Date.parse(request.timeoutAt);
-      if (!Number.isFinite(timeoutTimestamp)) {
-        continue;
-      }
-
-      const approachingTimeoutTimestamp =
-        timeoutTimestamp - APPROVAL_TIMEOUT_REMINDER_WINDOW_MS;
-      if (
-        nowTimestamp >= approachingTimeoutTimestamp &&
-        nowTimestamp < timeoutTimestamp &&
-        !this.auditNotificationService.hasApprovalNotificationDispatch(
-          request.approvalRequestId,
-          "approaching_timeout",
-        )
-      ) {
-        await this.dispatchApprovalNotifications(
-          "approaching_timeout",
-          request,
-          options?.requestId ? { requestId: options.requestId } : undefined,
-        );
-        approachingTimeoutRequestIds.push(request.approvalRequestId);
-      }
-
-      if (nowTimestamp >= timeoutTimestamp) {
-        const escalated = await this.escalateApprovalRequestInternal({
-          tenantId: request.tenantId,
-          approvalRequestId: request.approvalRequestId,
-          actorUserId: null,
-          actorType: "system",
-          reasonNote:
-            "Automatic timeout escalation from approval timeout poller.",
-          occurredAt: now,
-          ...(options?.requestId ? { requestId: options.requestId } : {}),
-        });
-        escalatedRequestIds.push(escalated.approvalRequestId);
-      }
-    }
-
-    return {
-      evaluated: pendingRequests.length,
-      approachingTimeoutNotified: approachingTimeoutRequestIds.length,
-      escalated: escalatedRequestIds.length,
-      approachingTimeoutRequestIds,
-      escalatedRequestIds,
-    };
-  }
-
   createBookingApprovalRequest(params: {
     tx?: TenantPartnerQueryExecutor | null;
     tenantId: string;
@@ -2322,7 +2249,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       tenantId: input.tenantId,
       approvalRequestId: input.approvalRequestId,
       actorUserId: input.actorUserId,
-      actorType: "tenant_admin",
       reasonNote: this.normalizeNullableText(input.command.reasonNote),
       ...(input.requestId ? { requestId: input.requestId } : {}),
     });
@@ -6178,27 +6104,6 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       : null;
   }
 
-  private startApprovalTimeoutPolling() {
-    if (this.approvalTimeoutPollTimer) {
-      return;
-    }
-
-    const run = () => {
-      void this.processApprovalTimeouts().catch((error) => {
-        this.logger.error(
-          "Approval timeout poll failed.",
-          error instanceof Error ? error.stack : String(error),
-        );
-      });
-    };
-
-    this.approvalTimeoutPollTimer = setInterval(
-      run,
-      APPROVAL_TIMEOUT_POLL_INTERVAL_MS,
-    );
-    this.approvalTimeoutPollTimer.unref?.();
-  }
-
   private resolveApprovalNotificationRecipients(
     tenantId: string,
     userIds: readonly string[],
@@ -6302,11 +6207,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private async escalateApprovalRequestInternal(input: {
     tenantId: string;
     approvalRequestId: string;
-    actorUserId: string | null;
-    actorType: "tenant_admin" | "system";
+    actorUserId: string;
     reasonNote: string | null;
     requestId?: string;
-    occurredAt?: string;
   }) {
     const request = this.requirePendingApprovalRequest(
       input.tenantId,
@@ -6334,17 +6237,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           this.getActiveCostCenterOwnerUserId(input.tenantId, costCenterCode),
       },
     ).resolvedApproverUserIds;
-    const now = input.occurredAt ?? new Date().toISOString();
+    const now = new Date().toISOString();
+    // P1 manual escalation rotates approvers to the escalation target but keeps
+    // the request actionable so the booking is not stranded in approvalState=pending
+    // with an empty approvalRequestIds. Auto-terminal escalation is deferred to P2.
     const escalated: TenantBookingApprovalRequestRecord = {
       ...request,
-      status: "timeout_escalated",
+      status: "pending",
       previousApprovers: request.approvers.map((approver) =>
         this.clonePrincipalRef(approver),
       ),
       approvers: [this.clonePrincipalRef(escalationTarget)],
       resolvedApproverUserIds,
+      decisions: [],
       escalatedAt: now,
-      resolvedAt: now,
+      resolvedAt: null,
     };
 
     this.replaceApprovalRequest(escalated);
@@ -6355,7 +6262,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.recordTenantAudit(
       {
         actorId: input.actorUserId,
-        actorType: input.actorType,
+        actorType: "tenant_admin",
         tenantId: input.tenantId,
         moduleName: "tenant-partner",
         actionName: "booking.approval_request.timeout_escalated",
