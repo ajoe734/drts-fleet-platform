@@ -579,7 +579,10 @@ export class OwnedMobilityService implements OnModuleInit {
             ...command.onsiteContact,
           }
         : null,
-      costCenter: this.normalizeNullableText(command.costCenter),
+      costCenter: this.resolveTenantBookingCostCenter(
+        tenantId,
+        command.costCenter,
+      ),
       vehiclePreference: this.normalizeNullableText(command.vehiclePreference),
       benefitReference:
         this.normalizeNullableText(command.benefitReference) ??
@@ -933,7 +936,7 @@ export class OwnedMobilityService implements OnModuleInit {
     order.costCenter =
       command.costCenter === undefined
         ? order.costCenter
-        : this.normalizeNullableText(command.costCenter);
+        : this.resolveTenantBookingCostCenter(tenantId, command.costCenter);
     order.vehiclePreference =
       command.vehiclePreference === undefined
         ? order.vehiclePreference
@@ -4696,6 +4699,25 @@ export class OwnedMobilityService implements OnModuleInit {
   private normalizeNullableText(value: string | null | undefined) {
     const normalized = value?.trim();
     return normalized ? normalized : null;
+  }
+
+  private resolveTenantBookingCostCenter(
+    tenantId: string,
+    rawCode: string | null | undefined,
+  ): string | null {
+    // Partial test mocks of TenantPartnerService may omit the validator; fall
+    // through to text normalization when it is absent so unrelated tests do
+    // not have to stub it. Production wiring always exposes the method.
+    if (
+      this.tenantPartnerService &&
+      typeof this.tenantPartnerService.validateBookingCostCenter === "function"
+    ) {
+      return this.tenantPartnerService.validateBookingCostCenter(
+        tenantId,
+        rawCode,
+      ).value;
+    }
+    return this.normalizeNullableText(rawCode);
   }
 
   private resolveTenantPassengerProfile(

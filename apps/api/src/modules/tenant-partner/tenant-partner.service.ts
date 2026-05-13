@@ -1431,6 +1431,61 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.cloneCostCenter(costCenter);
   }
 
+  validateBookingCostCenter(
+    tenantId: string,
+    rawCode: string | null | undefined,
+  ): { value: string | null; matchedDirectory: boolean } {
+    const trimmed = this.normalizeNullableText(rawCode);
+    if (trimmed === null) {
+      return { value: null, matchedDirectory: false };
+    }
+    const tenantDirectory = this.costCenters.filter(
+      (candidate) => candidate.tenantId === tenantId,
+    );
+    // Grandfather tenants that have not yet seeded a cost-center directory:
+    // booking continues to accept the legacy free-text value so existing flows
+    // do not break before the tenant_admin onboards cost centers.
+    if (tenantDirectory.length === 0) {
+      return { value: trimmed, matchedDirectory: false };
+    }
+    const normalized = trimmed.toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9-]*$/.test(normalized)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BOOKING_COST_CENTER_INVALID",
+        "costCenter must reference a tenant cost-center code (uppercase letters, numbers, or hyphens).",
+        {
+          costCenter: trimmed,
+        },
+      );
+    }
+    const match = tenantDirectory.find(
+      (candidate) => candidate.code === normalized,
+    );
+    if (!match) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BOOKING_COST_CENTER_UNKNOWN",
+        "costCenter does not match any tenant cost-center directory entry.",
+        {
+          costCenter: trimmed,
+          normalized,
+        },
+      );
+    }
+    if (!match.activeFlag) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BOOKING_COST_CENTER_DISABLED",
+        "costCenter references a disabled tenant cost-center.",
+        {
+          costCenter: normalized,
+        },
+      );
+    }
+    return { value: normalized, matchedDirectory: true };
+  }
+
   listTenantUsers(tenantId: string) {
     return this.userRoles
       .filter((userRole) => userRole.tenantId === tenantId)
