@@ -792,7 +792,8 @@ export interface EvidenceSubjectGovernanceRecord {
 export interface NotificationRecord {
   notificationId: string;
   tenantId: string | null;
-  channel: "ops_notice" | "tenant_sla" | "driver_task";
+  recipientUserId: string | null;
+  channel: "ops_notice" | "tenant_sla" | "driver_task" | "tenant_approval";
   title: string;
   message: string;
   status: "unread" | "read";
@@ -1522,6 +1523,7 @@ export interface TenantUserRoleRecord {
   displayName: string;
   roleCode: string;
   status: TenantUserRoleStatus;
+  approvalNotificationOptOut: boolean;
   invitedAt: string;
   updatedAt: string;
 }
@@ -1535,6 +1537,7 @@ export interface CreateTenantUserCommand {
 export interface UpdateTenantRoleCommand {
   roleCode: string;
   status?: TenantUserRoleStatus;
+  approvalNotificationOptOut?: boolean;
 }
 
 export interface TenantRoleCatalogRecord {
