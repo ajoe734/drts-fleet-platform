@@ -58,8 +58,12 @@ each task entry's `review_notes_zh` / `next` fields and at the matching
 below cite the exact rerun set the reviewer of record executed at the listed
 approval timestamp; not every row reran all four legs (e.g.
 `ADM-UI-RD-006`'s reviewer reran `pnpm --filter @drts/ui-web typecheck`
-instead of `build-storybook`, and `ADM-UI-RD-009`'s reviewer reran the scoped
-platform-admin-web legs without an explicit `build-storybook` invocation).
+instead of `build-storybook`; `ADM-UI-RD-008`'s reviewer reran only the
+scoped `pnpm --filter @drts/platform-admin-web typecheck / build / test`;
+and `ADM-UI-RD-009`'s reviewer reran `pnpm --filter @drts/platform-admin-web
+typecheck`, `pnpm --filter @drts/ui-web typecheck`, and `pnpm --filter
+@drts/platform-admin-web build`, without `test` or an explicit
+`build-storybook` invocation).
 This packet does not re-execute any leg; it cites what was actually rerun at
 review_approved time.
 
@@ -75,7 +79,7 @@ review_approved time.
 | ADM-UI-RD-006 | Users + Fleet + Switchboard redesign              | Codex2 | Codex    | 2026-05-11T00:15:09Z | `f481c29`                                                                         | `42aa889` / `0061187` (pre-redesign users / fleet / switchboard baselines)                                                                                 | `Platform Admin.html#users` (`PA_Users`), `#fleet` (`PA_Fleet`), `#switchboard` (`PA_Switchboard`)                      | `platform-operations.stories.tsx` (`PA_Users parity` / `PA_Fleet parity` / `PA_Switchboard parity`)                    |
 | ADM-UI-RD-007 | Pricing redesign (含 publish flow)                | Codex2 | Codex    | 2026-05-10T22:07:37Z | `60a8c7d`                                                                         | `0061187` (`ADM-UI-003` pricing materialize baseline)                                                                                                      | `Platform Admin.html#pricing` (`PA_Pricing`)                                                                            | `platform-pricing.stories.tsx` (`PA_Pricing governance`)                                                               |
 | ADM-UI-RD-008 | Payments + Reconciliation Detail redesign         | Codex2 | Codex    | 2026-05-11T00:46:14Z | `0812c99`                                                                         | `0061187` (`ADM-UI-003` payments / reconciliation baseline)                                                                                                | `Platform Admin.html#payments` (`PA_Payments`), `#recon-detail` (`PA_ReconDetail`)                                      | `platform-payments.stories.tsx` (`PA_Payments parity` / `PA_ReconDetail parity`)                                       |
-| ADM-UI-RD-009 | Notices + Audit + Flags + Adapters redesign       | Codex2 | Codex    | 2026-05-11T01:00:54Z | `05a5e8b`                                                                         | `edcf7e0` (ui-web primitives adoption for notices / audit / flags) / `8f5e5ea` (`MGMT-UI-004` shared management data views, baseline for adapter-registry) | `Platform Admin.html#notices` (`PA_Notices`), `#audit` (`PA_Audit`), `#flags` (`PA_Flags`), `#adapters` (`PA_Adapters`) | `platform-governance.stories.tsx` (`PA_Notices parity` / `PA_Audit parity` / `PA_Flags parity` / `PA_Adapters parity`) |
+| ADM-UI-RD-009 | Notices + Audit + Flags + Adapters redesign       | Codex2 | Codex2   | 2026-05-11T01:00:54Z | `05a5e8b`                                                                         | `edcf7e0` (ui-web primitives adoption for notices / audit / flags) / `8f5e5ea` (`MGMT-UI-004` shared management data views, baseline for adapter-registry) | `Platform Admin.html#notices` (`PA_Notices`), `#audit` (`PA_Audit`), `#flags` (`PA_Flags`), `#adapters` (`PA_Adapters`) | `platform-governance.stories.tsx` (`PA_Notices parity` / `PA_Audit parity` / `PA_Flags parity` / `PA_Adapters parity`) |
 
 All nine rows ship on `origin/feat/claude2-ui-redesign-foundation`. Reviewers
 can reproduce the redesign delta for any single surface with:
@@ -212,11 +216,11 @@ build-storybook` runs from upstream tasks (`ADM-UI-RD-001`,
   workflow without losing any prior `ORX-FN-002` semantics. Forwarded payouts
   remain owned-scope-only per `ADM-MP-002` authority semantics.
 - Reviewer Codex re-approved at 2026-05-11T00:46:14Z after rerunning
-  scoped typecheck / build / test and `pnpm --filter @drts/ui-web test`.
-  The workspace-wide `@drts/ui-web typecheck` shows a pre-existing
-  unrelated failure in `packages/ui-web/src/platform-governance.stories.tsx`
-  (recorded in the `next` field) which is independent of the payments
-  delta.
+  `pnpm --filter @drts/platform-admin-web typecheck` / `build` / `test`
+  (all passed). The pre-existing unrelated failure in
+  `packages/ui-web/src/platform-governance.stories.tsx` under the
+  workspace-wide `@drts/ui-web typecheck` is recorded under "Outstanding
+  items" below and was not part of this row's review_approved rerun.
 
 ### ADM-UI-RD-009 — Notices + Audit + Flags + Adapters redesign
 
@@ -234,7 +238,10 @@ build-storybook` runs from upstream tasks (`ADM-UI-RD-001`,
 - Reviewer Codex2 confirmed at 2026-05-11T01:00:54Z that the adapter drawer
   redesign and the PA_Notices / PA_Audit / PA_Flags / PA_Adapters parity
   Storybook additions match the canvas. Verification rerun:
-  `pnpm --filter @drts/platform-admin-web typecheck` / `build` / `test`.
+  `pnpm --filter @drts/platform-admin-web typecheck`,
+  `pnpm --filter @drts/ui-web typecheck`, and
+  `pnpm --filter @drts/platform-admin-web build`. The reviewer did **not**
+  rerun `pnpm --filter @drts/platform-admin-web test` for this row.
 
 ## Outstanding items
 
