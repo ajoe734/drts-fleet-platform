@@ -17,7 +17,8 @@ This is the PBK-UI-001 bootstrap slice. Per
 - The CTBC reference funnel (7 screens) and authority-safe negative paths land
   in **PBK-UI-003** and **PBK-UI-004**.
 - The cutover policy between this app and the legacy
-  `tenant-console-web/app/partner/` route is a **PBK-UI-005** decision doc.
+  `tenant-console-web/app/partner/` route is recorded in
+  `docs/01-decisions/SD-DP-20260512-006-partner-booking-app-cutover-topology.md`.
 
 ## Routing rules (white-label invariant)
 
