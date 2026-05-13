@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -8,7 +9,12 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
+import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
+import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
+import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import {
   type PersistTenantPartnerChanges,
   type StoredTenantApiKeyRecord,
@@ -22,6 +28,34 @@ import { WebhookDispatchService } from "../../apps/api/src/modules/tenant-partne
 const TENANT_ID = "tenant-demo-001";
 const OTHER_TENANT_ID = "tenant-other-001";
 
+function createCoverageServices() {
+  const auditService = new AuditNotificationService();
+  const tenantPartnerService = new TenantPartnerService(auditService);
+  const callcenterService = new CallcenterService(auditService);
+  const regulatoryRegistryService = new RegulatoryRegistryService(
+    new OpsDispatchEventsService(new EventEmitter() as never),
+  );
+  const ownedMobilityService = new OwnedMobilityService(
+    regulatoryRegistryService,
+    auditService,
+    callcenterService,
+    new OwnedMobilityTaskEventsService(new EventEmitter() as never),
+    new OpsDispatchEventsService(new EventEmitter() as never),
+    undefined,
+    tenantPartnerService,
+  );
+
+  tenantPartnerService.registerOrderFeedProvider(() =>
+    ownedMobilityService.listOrders(),
+  );
+
+  return {
+    auditService,
+    tenantPartnerService,
+    ownedMobilityService,
+  };
+}
+
 function clonePartnerState(state: TenantPartnerState): TenantPartnerState {
   return JSON.parse(JSON.stringify(state)) as TenantPartnerState;
 }
@@ -33,9 +67,15 @@ function createEmptyPartnerState(): TenantPartnerState {
     webhookDeliveries: [],
     slaProfiles: [],
     partnerEntries: [],
+    partnerIngressCredentials: [],
     partnerEligibilityVerifications: [],
+    approvalRules: [],
     passengers: [],
     addresses: [],
+    costCenters: [],
+    quotaPolicies: [],
+    quotaLedger: [],
+    quotaMonthlySnapshots: [],
     userRoles: [],
     apiKeys: [],
   };
@@ -105,11 +145,25 @@ function createMemoryTenantPartnerRepository(
           state.partnerEntries,
         );
       }
+      if (changes.partnerIngressCredentials) {
+        state.partnerIngressCredentials = mergeUniqueByKey(
+          changes.partnerIngressCredentials,
+          "keyId",
+          state.partnerIngressCredentials,
+        );
+      }
       if (changes.partnerEligibilityVerifications) {
         state.partnerEligibilityVerifications = mergeUniqueByKey(
           changes.partnerEligibilityVerifications as readonly PartnerEligibilityVerificationRecord[],
           "eligibilityVerificationId",
           state.partnerEligibilityVerifications,
+        );
+      }
+      if (changes.approvalRules) {
+        state.approvalRules = mergeUniqueByKey(
+          changes.approvalRules,
+          "ruleId",
+          state.approvalRules,
         );
       }
       if (changes.passengers) {
@@ -124,6 +178,34 @@ function createMemoryTenantPartnerRepository(
           changes.addresses,
           "addressId",
           state.addresses,
+        );
+      }
+      if (changes.costCenters) {
+        state.costCenters = mergeUniqueByKey(
+          changes.costCenters,
+          "code",
+          state.costCenters,
+        );
+      }
+      if (changes.quotaPolicies) {
+        state.quotaPolicies = mergeUniqueByKey(
+          changes.quotaPolicies,
+          "updatedAt",
+          state.quotaPolicies,
+        );
+      }
+      if (changes.quotaLedger) {
+        state.quotaLedger = mergeUniqueByKey(
+          changes.quotaLedger,
+          "ledgerEntryId",
+          state.quotaLedger,
+        );
+      }
+      if (changes.quotaMonthlySnapshots) {
+        state.quotaMonthlySnapshots = mergeUniqueByKey(
+          changes.quotaMonthlySnapshots,
+          "periodKey",
+          state.quotaMonthlySnapshots,
         );
       }
       if (changes.userRoles) {
@@ -786,6 +868,175 @@ describe("tenant partner foundation service", () => {
     expect(rotatedApiKey.revokedApiKeyId).toBe(issuedApiKey.apiKey.apiKeyId);
     expect(rotatedApiKey.plaintextKey).toMatch(/^tk_/);
     expect(auditService.listAuditLogs()[0]?.actionName).toBe("rotate_api_key");
+  });
+
+  it("summarizes cost-center coverage across resolved, unresolved, disabled, and cross-tenant legacy bookings", () => {
+    const coverageTenantId = "tenant-coverage-001";
+    const otherCoverageTenantId = "tenant-coverage-002";
+    const { auditService, tenantPartnerService, ownedMobilityService } =
+      createCoverageServices();
+
+    ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: { address: "台北市政府" },
+        dropoff: { address: "台北車站" },
+        reservationWindowStart: "2026-04-18T10:00:00Z",
+        reservationWindowEnd: "2026-04-18T10:20:00Z",
+        passenger: {
+          name: "Legacy Passenger",
+          phone: "0900000001",
+        },
+        costCenter: "LEGACY-OPS",
+      },
+      coverageTenantId,
+    );
+    ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: { address: "台北市政府" },
+        dropoff: { address: "台北車站" },
+        reservationWindowStart: "2026-04-18T11:00:00Z",
+        reservationWindowEnd: "2026-04-18T11:20:00Z",
+        passenger: {
+          name: "Cross Tenant Passenger",
+          phone: "0900000002",
+        },
+        costCenter: "OTHER-01",
+      },
+      coverageTenantId,
+    );
+
+    tenantPartnerService.upsertCostCenter(coverageTenantId, {
+      code: "OPS-01",
+      name: "Operations",
+    });
+    tenantPartnerService.upsertCostCenter(coverageTenantId, {
+      code: "DIS-01",
+      name: "Disabled Department",
+    });
+    tenantPartnerService.upsertCostCenter(otherCoverageTenantId, {
+      code: "OTHER-01",
+      name: "Other Tenant Only",
+    });
+
+    ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: { address: "台北市政府" },
+        dropoff: { address: "台北車站" },
+        reservationWindowStart: "2026-04-18T12:00:00Z",
+        reservationWindowEnd: "2026-04-18T12:20:00Z",
+        passenger: {
+          name: "Resolved Passenger",
+          phone: "0900000003",
+        },
+        costCenter: "OPS-01",
+      },
+      coverageTenantId,
+    );
+    ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: { address: "台北市政府" },
+        dropoff: { address: "台北車站" },
+        reservationWindowStart: "2026-04-18T13:00:00Z",
+        reservationWindowEnd: "2026-04-18T13:20:00Z",
+        passenger: {
+          name: "Disabled Passenger",
+          phone: "0900000004",
+        },
+        costCenter: "DIS-01",
+      },
+      coverageTenantId,
+    );
+    tenantPartnerService.disableCostCenter(coverageTenantId, {
+      code: "DIS-01",
+      reason: "legacy_decommission",
+    });
+
+    const report =
+      tenantPartnerService.summarizeCostCenterCoverage(coverageTenantId);
+
+    expect(report).toMatchObject({
+      tenantId: coverageTenantId,
+      totalBookings: 4,
+      resolvedCount: 1,
+      unresolvedCount: 3,
+      disabledHits: 1,
+    });
+    expect(report.unresolvedSamples).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          rawCostCenter: "LEGACY-OPS",
+          occurrences: 1,
+          suggestion: null,
+        }),
+        expect.objectContaining({
+          rawCostCenter: "OTHER-01",
+          occurrences: 1,
+          suggestion: null,
+        }),
+        expect.objectContaining({
+          rawCostCenter: "DIS-01",
+          occurrences: 1,
+          suggestion: "DIS-01",
+        }),
+      ]),
+    );
+    expect(auditService.listAuditLogs()[0]?.actionName).toBe(
+      "list_cost_center_coverage",
+    );
+  });
+
+  it("reports grandfather tenants with no directory rows as unresolved coverage instead of failing validation", () => {
+    const { tenantPartnerService, ownedMobilityService } =
+      createCoverageServices();
+
+    ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: { address: "台中市政府" },
+        dropoff: { address: "台中高鐵站" },
+        reservationWindowStart: "2026-04-18T10:00:00Z",
+        reservationWindowEnd: "2026-04-18T10:20:00Z",
+        passenger: {
+          name: "Grandfather Passenger 1",
+          phone: "0911000001",
+        },
+        costCenter: "legacy-a",
+      },
+      OTHER_TENANT_ID,
+    );
+    ownedMobilityService.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        pickup: { address: "台中市政府" },
+        dropoff: { address: "台中高鐵站" },
+        reservationWindowStart: "2026-04-18T11:00:00Z",
+        reservationWindowEnd: "2026-04-18T11:20:00Z",
+        passenger: {
+          name: "Grandfather Passenger 2",
+          phone: "0911000002",
+        },
+        costCenter: "legacy-b",
+      },
+      OTHER_TENANT_ID,
+    );
+
+    const report =
+      tenantPartnerService.summarizeCostCenterCoverage(OTHER_TENANT_ID);
+
+    expect(report).toMatchObject({
+      tenantId: OTHER_TENANT_ID,
+      totalBookings: 2,
+      resolvedCount: 0,
+      unresolvedCount: 2,
+      disabledHits: 0,
+    });
+    expect(
+      report.unresolvedSamples.map((sample) => sample.rawCostCenter),
+    ).toEqual(["legacy-a", "legacy-b"]);
   });
 
   it("isolates tenant-partner state by tenant id", async () => {
