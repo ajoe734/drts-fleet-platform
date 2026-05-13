@@ -30,12 +30,21 @@ import {
   getEvidenceGovernanceCatalog,
   getEvidenceRetentionPolicy,
 } from "../../common/evidence-governance";
+import { maskEmail } from "../../common/sensitive-data-policy";
 import {
   BOOTSTRAP_AUDIT_LOG,
   cloneAuditLog,
   createAuditLogRecord,
 } from "./audit-log.persistence";
+import {
+  AuditNotificationEmailAdapter,
+  type AuditNotificationEmailDeliveryRecord,
+} from "./audit-notification.email-adapter";
 import { AuditLogRepository } from "./audit-log.repository";
+import {
+  renderApprovalNotificationTemplate,
+  type ApprovalNotificationTemplateKey,
+} from "./templates/approval-notification.templates";
 
 const MAX_IN_MEMORY_AUDIT_LOGS = 1000;
 
@@ -43,6 +52,13 @@ type OperationalIdentity = Pick<
   IdentityContext,
   "actorId" | "actorType" | "realm" | "scopes" | "tenantId"
 >;
+
+export type ApprovalNotificationRecipient = {
+  userId: string;
+  email: string;
+  displayName: string | null;
+  approvalNotificationOptOut: boolean;
+};
 
 function trimAuditLogs(auditLogs: AuditLogRecord[]) {
   return auditLogs.length <= MAX_IN_MEMORY_AUDIT_LOGS
@@ -70,6 +86,7 @@ export class AuditNotificationService implements OnModuleInit {
     {
       notificationId: "notif-tenant-sla-001",
       tenantId: "tenant-demo-001",
+      recipientUserId: null,
       channel: "tenant_sla",
       title: "Reservation window approaching",
       message: "Enterprise dispatch booking needs pre-assignment review.",
@@ -80,6 +97,7 @@ export class AuditNotificationService implements OnModuleInit {
     {
       notificationId: "notif-ops-notice-001",
       tenantId: null,
+      recipientUserId: null,
       channel: "ops_notice",
       title: "Foundation bootstrap running",
       message:
@@ -103,6 +121,8 @@ export class AuditNotificationService implements OnModuleInit {
 
   constructor(
     @Optional() private readonly auditLogRepository?: AuditLogRepository,
+    @Optional()
+    private readonly auditNotificationEmailAdapter: AuditNotificationEmailAdapter = new AuditNotificationEmailAdapter(),
   ) {
     this.rebuildEvidenceGovernanceState(this.auditLogs);
   }
@@ -128,6 +148,157 @@ export class AuditNotificationService implements OnModuleInit {
 
   listNotifications() {
     return this.notifications.map((notification) => ({ ...notification }));
+  }
+
+  listEmailDeliveries() {
+    return this.auditNotificationEmailAdapter.listDeliveries();
+  }
+
+  hasApprovalNotificationDispatch(
+    approvalRequestId: string,
+    templateKey: ApprovalNotificationTemplateKey,
+  ) {
+    return this.auditLogs.some(
+      (auditLog) =>
+        auditLog.moduleName === "audit-notification" &&
+        auditLog.actionName === `approval_notification.${templateKey}` &&
+        auditLog.resourceType === "tenant_approval_request" &&
+        auditLog.resourceId === approvalRequestId,
+    );
+  }
+
+  async dispatchApprovalNotification(input: {
+    templateKey: ApprovalNotificationTemplateKey;
+    tenantId: string;
+    approvalRequestId: string;
+    bookingId: string;
+    orderId: string;
+    timeoutAt: string;
+    recipients: readonly ApprovalNotificationRecipient[];
+    requestId?: string;
+    escalatedAt?: string | null;
+    decidedAt?: string | null;
+    actorUserId?: string | null;
+    reasonCode?: string | null;
+    reasonNote?: string | null;
+  }) {
+    if (
+      this.hasApprovalNotificationDispatch(
+        input.approvalRequestId,
+        input.templateKey,
+      )
+    ) {
+      return {
+        deduplicated: true,
+        deliveredToUserIds: [] as string[],
+        skippedUserIds: [] as string[],
+      };
+    }
+
+    const recipients = new Map<string, ApprovalNotificationRecipient>();
+    for (const recipient of input.recipients) {
+      const userId = recipient.userId.trim();
+      if (!userId || recipients.has(userId)) {
+        continue;
+      }
+      recipients.set(userId, {
+        ...recipient,
+        userId,
+        email: recipient.email.trim().toLowerCase(),
+      });
+    }
+
+    const deliveredToUserIds: string[] = [];
+    const skippedUserIds: string[] = [];
+    const skippedEmails: string[] = [];
+    const emailDeliveries: AuditNotificationEmailDeliveryRecord[] = [];
+
+    for (const recipient of recipients.values()) {
+      if (recipient.approvalNotificationOptOut || !recipient.email) {
+        skippedUserIds.push(recipient.userId);
+        if (recipient.email) {
+          const maskedEmail = maskEmail(recipient.email);
+          if (maskedEmail) {
+            skippedEmails.push(maskedEmail);
+          }
+        }
+        continue;
+      }
+
+      const context = {
+        recipientDisplayName: recipient.displayName,
+        bookingId: input.bookingId,
+        orderId: input.orderId,
+        approvalRequestId: input.approvalRequestId,
+        timeoutAt: input.timeoutAt,
+        escalatedAt: input.escalatedAt ?? null,
+        decidedAt: input.decidedAt ?? null,
+        actorUserId: input.actorUserId ?? null,
+        reasonCode: input.reasonCode ?? null,
+        reasonNote: input.reasonNote ?? null,
+      };
+      const zh = renderApprovalNotificationTemplate(
+        input.templateKey,
+        "zh",
+        context,
+      );
+      const en = renderApprovalNotificationTemplate(
+        input.templateKey,
+        "en",
+        context,
+      );
+
+      const emailDelivery = await this.auditNotificationEmailAdapter.send({
+        tenantId: input.tenantId,
+        recipientUserId: recipient.userId,
+        recipientEmail: recipient.email,
+        templateKey: input.templateKey,
+        subject: `${zh.subject} / ${en.subject}`,
+        body: [zh.body, "", "---", "", en.body].join("\n"),
+        ...(input.requestId ? { requestId: input.requestId } : {}),
+      });
+      emailDeliveries.push(emailDelivery);
+      deliveredToUserIds.push(recipient.userId);
+
+      this.recordNotification({
+        tenantId: input.tenantId,
+        recipientUserId: recipient.userId,
+        channel: "tenant_approval",
+        title: zh.title,
+        message: `${zh.message}\n${en.message}`,
+        status: "unread",
+      });
+    }
+
+    this.recordAuditLog({
+      actorId: input.actorUserId ?? null,
+      actorType: input.actorUserId ? "tenant_admin" : "system",
+      tenantId: input.tenantId,
+      moduleName: "audit-notification",
+      actionName: `approval_notification.${input.templateKey}`,
+      resourceType: "tenant_approval_request",
+      resourceId: input.approvalRequestId,
+      newValuesSummary: {
+        bookingId: input.bookingId,
+        orderId: input.orderId,
+        timeoutAt: input.timeoutAt,
+        templateKey: input.templateKey,
+        deliveredToUserIds,
+        skippedUserIds,
+        skippedEmails,
+        channelCounts: {
+          email: emailDeliveries.length,
+          inApp: deliveredToUserIds.length,
+        },
+      },
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    });
+
+    return {
+      deduplicated: false,
+      deliveredToUserIds,
+      skippedUserIds,
+    };
   }
 
   listAuditLogs(identity?: EvidenceAccessIdentity | null, requestId?: string) {
@@ -584,7 +755,7 @@ export class AuditNotificationService implements OnModuleInit {
         actionName: "mark_notifications_read",
         resourceType: "notification_batch",
         resourceId: null,
-        newValuesSummary: {
+      newValuesSummary: {
           notificationIds: [...notificationIds],
           updated,
         },
