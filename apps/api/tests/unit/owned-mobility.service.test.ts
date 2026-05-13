@@ -254,6 +254,79 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
+  it("validates costCenter against the tenant cost-center directory on create and update", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-13T12:00:00.000Z"));
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    });
+
+    const booking = service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T14:00:00.000Z",
+        reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+        costCenter: "cc-fin-04",
+      },
+      "tenant-demo-001",
+    );
+    expect(
+      service.getTenantBooking("tenant-demo-001", booking.bookingId).costCenter,
+    ).toBe("CC-FIN-04");
+
+    try {
+      service.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          reservationWindowStart: "2026-05-13T14:00:00.000Z",
+          reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+          pickup: { address: "Pickup" },
+          dropoff: { address: "Dropoff" },
+          passenger: { name: "Rider One", phone: "0912000000" },
+          costCenter: "CC-DOES-NOT-EXIST",
+        },
+        "tenant-demo-001",
+      );
+      throw new Error("Expected booking create to reject unknown cost center.");
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: { code: "BOOKING_COST_CENTER_UNKNOWN" },
+      });
+    }
+
+    tenantPartnerService.disableCostCenter("tenant-demo-001", {
+      code: "CC-FIN-04",
+      reason: "sunset",
+    });
+    try {
+      service.updateTenantBooking("tenant-demo-001", booking.bookingId, {
+        costCenter: "CC-FIN-04",
+      });
+      throw new Error(
+        "Expected booking update to reject disabled cost center.",
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: { code: "BOOKING_COST_CENTER_DISABLED" },
+      });
+    }
+
+    // Clearing the cost center is always allowed.
+    const cleared = service.updateTenantBooking(
+      "tenant-demo-001",
+      booking.bookingId,
+      { costCenter: null },
+    );
+    expect(cleared.costCenter).toBeNull();
+  });
+
   it("rejects tenant attempts to set quoted fare through booking channels", () => {
     const { service } = createOwnedMobilityService({
       candidates: [],

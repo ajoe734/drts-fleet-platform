@@ -870,6 +870,111 @@ describe("TenantPartnerService sensitive-data governance", () => {
     );
   });
 
+  it("validateBookingCostCenter accepts canonical active codes and rejects unknown, disabled, or malformed entries", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    // Seeded tenant has CC-FIN-04 active by default.
+    const seededResult = service.validateBookingCostCenter(
+      "tenant-demo-001",
+      "cc-fin-04",
+    );
+    expect(seededResult).toEqual({
+      value: "CC-FIN-04",
+      matchedDirectory: true,
+    });
+
+    // Null/blank inputs short-circuit to null without consulting the directory.
+    expect(service.validateBookingCostCenter("tenant-demo-001", null)).toEqual({
+      value: null,
+      matchedDirectory: false,
+    });
+    expect(service.validateBookingCostCenter("tenant-demo-001", "   ")).toEqual(
+      { value: null, matchedDirectory: false },
+    );
+
+    // Unknown code for a tenant whose directory is populated must throw.
+    try {
+      service.validateBookingCostCenter("tenant-demo-001", "CC-DOES-NOT-EXIST");
+      throw new Error("Expected BOOKING_COST_CENTER_UNKNOWN to throw.");
+    } catch (error) {
+      expect(
+        (
+          error as { getResponse: () => { error: { code: string } } }
+        ).getResponse().error.code,
+      ).toBe("BOOKING_COST_CENTER_UNKNOWN");
+    }
+
+    // Malformed code (spaces / lowercase punctuation) rejected as INVALID.
+    try {
+      service.validateBookingCostCenter("tenant-demo-001", "bad code!");
+      throw new Error("Expected BOOKING_COST_CENTER_INVALID to throw.");
+    } catch (error) {
+      expect(
+        (
+          error as { getResponse: () => { error: { code: string } } }
+        ).getResponse().error.code,
+      ).toBe("BOOKING_COST_CENTER_INVALID");
+    }
+
+    // Disabled code rejected with the dedicated error code.
+    service.disableCostCenter("tenant-demo-001", {
+      code: "CC-OPS-02",
+      reason: "sunset",
+    });
+    try {
+      service.validateBookingCostCenter("tenant-demo-001", "cc-ops-02");
+      throw new Error("Expected BOOKING_COST_CENTER_DISABLED to throw.");
+    } catch (error) {
+      expect(
+        (
+          error as { getResponse: () => { error: { code: string } } }
+        ).getResponse().error.code,
+      ).toBe("BOOKING_COST_CENTER_DISABLED");
+    }
+  });
+
+  it("validateBookingCostCenter grandfathers tenants whose directory is empty and isolates lookups by tenant", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    // Tenant with no cost centers: free-text accepted, no normalization to
+    // avoid breaking historical bookings before tenant_admin onboards the
+    // directory.
+    const grandfather = service.validateBookingCostCenter(
+      "tenant-no-directory-001",
+      "Legacy / cost text",
+    );
+    expect(grandfather).toEqual({
+      value: "Legacy / cost text",
+      matchedDirectory: false,
+    });
+
+    // Seeded fixture tenant gets canonical validation.
+    expect(
+      service.validateBookingCostCenter("tenant-demo-001", "cc-fin-04"),
+    ).toEqual({ value: "CC-FIN-04", matchedDirectory: true });
+
+    // After tenant B onboards CC-X, tenant A still cannot use CC-X.
+    service.upsertCostCenter("tenant-demo-002", {
+      code: "CC-X",
+      name: "Tenant B Special",
+    });
+    try {
+      service.validateBookingCostCenter("tenant-demo-001", "CC-X");
+      throw new Error(
+        "Expected cross-tenant lookup to throw BOOKING_COST_CENTER_UNKNOWN.",
+      );
+    } catch (error) {
+      expect(
+        (
+          error as { getResponse: () => { error: { code: string } } }
+        ).getResponse().error.code,
+      ).toBe("BOOKING_COST_CENTER_UNKNOWN");
+    }
+    expect(
+      service.validateBookingCostCenter("tenant-demo-002", "cc-x"),
+    ).toEqual({ value: "CC-X", matchedDirectory: true });
+  });
+
   it("normalizes tenant API key scopes and enforces the rotation window", () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
