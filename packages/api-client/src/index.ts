@@ -59,6 +59,7 @@ import type {
   DispatchCandidate,
   DispatchJobRecord,
   DispatchTraceLogRecord,
+  DisableTenantCostCenterCommand,
   DriverAcceptTaskCommand,
   DriverArrivedPickupCommand,
   DriverDeviceProvisioningSession,
@@ -162,6 +163,7 @@ import type {
   TenantApiKeyRecord,
   TenantBillingProfile,
   TenantBootstrapSession,
+  TenantCostCenterRecord,
   TenantIntegrationGovernancePackage,
   TenantInvoiceRecord,
   TenantPassengerRecord,
@@ -189,6 +191,7 @@ import type {
   UpdateTenantWebhookEndpointCommand,
   UpdateVehicleComplianceCommand,
   UpsertTenantAddressCommand,
+  UpsertTenantCostCenterCommand,
   UpsertTenantPassengerCommand,
   VehicleContractRecord,
   VehicleRegistryRecord,
@@ -1226,6 +1229,50 @@ export class ApiClient {
 
   async listAddresses(): Promise<TenantAddressRecord[]> {
     return this.getList<TenantAddressRecord>("/api/tenant/addresses");
+  }
+
+  async listCostCenters(options?: {
+    activeOnly?: boolean;
+    ownerUserId?: string;
+    search?: string;
+  }): Promise<TenantCostCenterRecord[]> {
+    const params = new URLSearchParams();
+    if (options?.activeOnly) {
+      params.set("activeOnly", "true");
+    }
+    if (options?.ownerUserId) {
+      params.set("ownerUserId", options.ownerUserId);
+    }
+    if (options?.search) {
+      params.set("search", options.search);
+    }
+    const query = params.toString();
+    return this.getList<TenantCostCenterRecord>(
+      `/api/tenant/cost-centers${query ? `?${query}` : ""}`,
+    );
+  }
+
+  async getCostCenter(code: string): Promise<TenantCostCenterRecord> {
+    return this.get<TenantCostCenterRecord>(
+      `/api/tenant/cost-centers/${encodeURIComponent(code)}`,
+    );
+  }
+
+  async upsertCostCenter(
+    command: UpsertTenantCostCenterCommand,
+  ): Promise<TenantCostCenterRecord> {
+    return this.post<TenantCostCenterRecord>("/api/tenant/cost-centers", {
+      body: command,
+    });
+  }
+
+  async disableCostCenter(
+    command: DisableTenantCostCenterCommand,
+  ): Promise<TenantCostCenterRecord> {
+    return this.post<TenantCostCenterRecord>(
+      "/api/tenant/cost-centers/disable",
+      { body: command },
+    );
   }
 
   async listAddressExportView(): Promise<TenantAddressExportViewRecord[]> {

@@ -30,6 +30,7 @@ function createEmptyRepositoryState(): TenantPartnerState {
     partnerEligibilityVerifications: [],
     passengers: [],
     addresses: [],
+    costCenters: [],
     userRoles: [],
     apiKeys: [],
   };
@@ -100,6 +101,11 @@ function createInMemoryTenantPartnerRepository(
           state.addresses,
           changes.addresses,
           (value) => value.addressId,
+        ),
+        costCenters: mergeByKey(
+          state.costCenters,
+          changes.costCenters,
+          (value) => `${value.tenantId}:${value.code}`,
         ),
         userRoles: mergeByKey(
           state.userRoles,
@@ -714,6 +720,154 @@ describe("TenantPartnerService sensitive-data governance", () => {
       qualityIssues: ["missing_geocode"],
     });
     expect(exportView.maskedAddressText).not.toContain("100 號 12 樓");
+  });
+
+  it("lists, upserts, and disables tenant cost centers with owner resolution", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
+
+    const seeded = service.listCostCenters("tenant-demo-001", {
+      activeOnly: true,
+    });
+    expect(seeded.some((costCenter) => costCenter.code === "CC-FIN-04")).toBe(
+      true,
+    );
+
+    const created = service.upsertCostCenter(
+      "tenant-demo-001",
+      {
+        code: "cc-rd-12",
+        name: "R&D Fab18",
+        description: "Airport and overnight engineering travel",
+        ownerUserId: "tenant-user-demo-002",
+      },
+      "req-cost-center-create-001",
+    );
+
+    expect(created).toMatchObject({
+      code: "CC-RD-12",
+      name: "R&D Fab18",
+      ownerUserId: "tenant-user-demo-002",
+      ownerName: "Acme Tenant Ops",
+      activeFlag: true,
+      disabledAt: null,
+    });
+
+    const detail = service.getCostCenter("tenant-demo-001", "cc-rd-12");
+    expect(detail.code).toBe("CC-RD-12");
+
+    const filtered = service.listCostCenters("tenant-demo-001", {
+      search: "fab18",
+      ownerUserId: "tenant-user-demo-002",
+    });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.code).toBe("CC-RD-12");
+
+    const disabled = service.disableCostCenter(
+      "tenant-demo-001",
+      {
+        code: "cc-rd-12",
+        reason: "department sunset",
+      },
+      "req-cost-center-disable-001",
+    );
+
+    expect(disabled).toMatchObject({
+      code: "CC-RD-12",
+      activeFlag: false,
+      disabledReason: "department sunset",
+      disabledAt: expect.any(String),
+    });
+    expect(
+      service.listCostCenters("tenant-demo-001", {
+        activeOnly: true,
+        search: "fab18",
+      }),
+    ).toEqual([]);
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "upsert_cost_center",
+          resourceType: "tenant_cost_center",
+          resourceId: "CC-RD-12",
+        }),
+        expect.objectContaining({
+          actionName: "disable_cost_center",
+          resourceType: "tenant_cost_center",
+          resourceId: "CC-RD-12",
+        }),
+      ]),
+    );
+  });
+
+  it("persists tenant cost-center lifecycle changes through the repository", async () => {
+    const repository = createInMemoryTenantPartnerRepository();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await service.onModuleInit();
+
+    service.upsertCostCenter("tenant-demo-001", {
+      code: "CC-BD-09",
+      name: "業務開發",
+      ownerName: "Regional GM",
+    });
+    service.disableCostCenter("tenant-demo-001", {
+      code: "CC-BD-09",
+      reason: "merged into ops",
+    });
+
+    const reloaded = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    await reloaded.onModuleInit();
+
+    expect(reloaded.getCostCenter("tenant-demo-001", "CC-BD-09")).toMatchObject(
+      {
+        code: "CC-BD-09",
+        name: "業務開發",
+        ownerName: "Regional GM",
+        activeFlag: false,
+        disabledReason: "merged into ops",
+      },
+    );
+  });
+
+  it("allows duplicate cost-center codes across different tenants", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const otherTenantCostCenter = service.upsertCostCenter("tenant-demo-002", {
+      code: "cc-fin-04",
+      name: "Shared Finance Code",
+      description: "Scoped to a different tenant",
+    });
+
+    expect(otherTenantCostCenter).toMatchObject({
+      tenantId: "tenant-demo-002",
+      code: "CC-FIN-04",
+      name: "Shared Finance Code",
+      description: "Scoped to a different tenant",
+      activeFlag: true,
+    });
+
+    expect(service.getCostCenter("tenant-demo-001", "cc-fin-04")).toMatchObject(
+      {
+        tenantId: "tenant-demo-001",
+        code: "CC-FIN-04",
+        name: "財務處",
+      },
+    );
+    expect(service.getCostCenter("tenant-demo-002", "cc-fin-04")).toMatchObject(
+      {
+        tenantId: "tenant-demo-002",
+        code: "CC-FIN-04",
+        name: "Shared Finance Code",
+      },
+    );
   });
 
   it("normalizes tenant API key scopes and enforces the rotation window", () => {
