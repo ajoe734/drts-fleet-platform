@@ -781,6 +781,9 @@ export class TenantPartnerRepository {
     }
 
     for (const policy of changes.quotaPolicies ?? []) {
+      const conflictClause = this.buildQuotaPolicyConflictClause(
+        policy.costCenterCode,
+      );
       writes.push(
         this.databaseService!.query(
           `
@@ -794,7 +797,7 @@ export class TenantPartnerRepository {
             ) VALUES (
               $1, $2, $3, $4, $5, $6::jsonb
             )
-            ON CONFLICT (tenant_id, cost_center_code, period) DO UPDATE SET
+            ${conflictClause} DO UPDATE SET
               updated_at = EXCLUDED.updated_at,
               created_at = EXCLUDED.created_at,
               record = EXCLUDED.record
@@ -857,6 +860,9 @@ export class TenantPartnerRepository {
     }
 
     for (const snapshot of changes.quotaMonthlySnapshots ?? []) {
+      const conflictClause = this.buildQuotaSnapshotConflictClause(
+        snapshot.costCenterCode,
+      );
       writes.push(
         this.databaseService!.query(
           `
@@ -870,7 +876,7 @@ export class TenantPartnerRepository {
             ) VALUES (
               $1, $2, $3, $4, $5, $6::jsonb
             )
-            ON CONFLICT (tenant_id, cost_center_code, period, period_key) DO UPDATE SET
+            ${conflictClause} DO UPDATE SET
               refreshed_at = EXCLUDED.refreshed_at,
               record = EXCLUDED.record
           `,
@@ -1018,8 +1024,11 @@ export class TenantPartnerRepository {
     snapshots: readonly TenantQuotaMonthlySnapshotRecord[],
   ) {
     await Promise.all(
-      snapshots.map((snapshot) =>
-        executor.query(
+      snapshots.map((snapshot) => {
+        const conflictClause = this.buildQuotaSnapshotConflictClause(
+          snapshot.costCenterCode,
+        );
+        return executor.query(
           `
             INSERT INTO core.phase1_tenant_quota_monthly_snapshots (
               tenant_id,
@@ -1031,7 +1040,7 @@ export class TenantPartnerRepository {
             ) VALUES (
               $1, $2, $3, $4, $5, $6::jsonb
             )
-            ON CONFLICT (tenant_id, cost_center_code, period, period_key) DO NOTHING
+            ${conflictClause} DO NOTHING
           `,
           [
             snapshot.tenantId,
@@ -1041,8 +1050,8 @@ export class TenantPartnerRepository {
             snapshot.refreshedAt,
             JSON.stringify(snapshot),
           ],
-        ),
-      ),
+        );
+      }),
     );
   }
 
@@ -1132,6 +1141,18 @@ export class TenantPartnerRepository {
     };
   }
 
+  private buildQuotaPolicyConflictClause(costCenterCode: string | null) {
+    return costCenterCode === null
+      ? "ON CONFLICT (tenant_id, period) WHERE cost_center_code IS NULL"
+      : "ON CONFLICT (tenant_id, cost_center_code, period) WHERE cost_center_code IS NOT NULL";
+  }
+
+  private buildQuotaSnapshotConflictClause(costCenterCode: string | null) {
+    return costCenterCode === null
+      ? "ON CONFLICT (tenant_id, period, period_key) WHERE cost_center_code IS NULL"
+      : "ON CONFLICT (tenant_id, cost_center_code, period, period_key) WHERE cost_center_code IS NOT NULL";
+  }
+
   private async persistQuotaLedgerWithExecutor(
     executor: TenantPartnerQueryExecutor,
     entries: readonly TenantQuotaLedgerEntry[],
@@ -1187,8 +1208,11 @@ export class TenantPartnerRepository {
     snapshots: readonly TenantQuotaMonthlySnapshotRecord[],
   ) {
     await Promise.all(
-      snapshots.map((snapshot) =>
-        executor.query(
+      snapshots.map((snapshot) => {
+        const conflictClause = this.buildQuotaSnapshotConflictClause(
+          snapshot.costCenterCode,
+        );
+        return executor.query(
           `
             INSERT INTO core.phase1_tenant_quota_monthly_snapshots (
               tenant_id,
@@ -1200,7 +1224,7 @@ export class TenantPartnerRepository {
             ) VALUES (
               $1, $2, $3, $4, $5, $6::jsonb
             )
-            ON CONFLICT (tenant_id, cost_center_code, period, period_key) DO UPDATE SET
+            ${conflictClause} DO UPDATE SET
               refreshed_at = EXCLUDED.refreshed_at,
               record = EXCLUDED.record
           `,
@@ -1212,8 +1236,8 @@ export class TenantPartnerRepository {
             snapshot.refreshedAt,
             JSON.stringify(snapshot),
           ],
-        ),
-      ),
+        );
+      }),
     );
   }
 }
