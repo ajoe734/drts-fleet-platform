@@ -6,6 +6,8 @@ import type {
   PartnerEligibilityVerificationRecord,
   PartnerIngressCredentialRecord,
   TenantAddressRecord,
+  TenantBookingApprovalDecisionRecord,
+  TenantBookingApprovalRequestRecord,
   TenantApprovalRuleRecord,
   TenantApiKeyRecord,
   TenantCostCenterRecord,
@@ -113,6 +115,8 @@ export type TenantPartnerState = {
   partnerIngressCredentials: StoredPartnerIngressCredentialRecord[];
   partnerEligibilityVerifications: PartnerEligibilityVerificationRecord[];
   approvalRules: TenantApprovalRuleRecord[];
+  approvalRequests: TenantBookingApprovalRequestRecord[];
+  approvalDecisions: TenantBookingApprovalDecisionRecord[];
   passengers: TenantPassengerRecord[];
   addresses: TenantAddressRecord[];
   costCenters: TenantCostCenterRecord[];
@@ -132,6 +136,8 @@ export type PersistTenantPartnerChanges = {
   partnerIngressCredentials?: readonly StoredPartnerIngressCredentialRecord[];
   partnerEligibilityVerifications?: readonly PartnerEligibilityVerificationRecord[];
   approvalRules?: readonly TenantApprovalRuleRecord[];
+  approvalRequests?: readonly TenantBookingApprovalRequestRecord[];
+  approvalDecisions?: readonly TenantBookingApprovalDecisionRecord[];
   passengers?: readonly TenantPassengerRecord[];
   addresses?: readonly TenantAddressRecord[];
   costCenters?: readonly TenantCostCenterRecord[];
@@ -163,6 +169,8 @@ export class TenantPartnerRepository {
         partnerIngressCredentials: [],
         partnerEligibilityVerifications: [],
         approvalRules: [],
+        approvalRequests: [],
+        approvalDecisions: [],
         passengers: [],
         addresses: [],
         costCenters: [],
@@ -183,6 +191,8 @@ export class TenantPartnerRepository {
       partnerIngressCredentialsResult,
       partnerEligibilityVerificationsResult,
       approvalRulesResult,
+      approvalRequestsResult,
+      approvalDecisionsResult,
       passengersResult,
       addressesResult,
       costCentersResult,
@@ -246,6 +256,20 @@ export class TenantPartnerRepository {
           SELECT record
           FROM core.phase1_tenant_approval_rules
           ORDER BY tenant_id ASC, updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM core.phase1_tenant_approval_requests
+          ORDER BY created_at DESC, approval_request_id DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM core.phase1_tenant_approval_decisions
+          ORDER BY decided_at DESC, decision_id DESC
         `,
       ),
       this.databaseService!.query<JsonRecordRow>(
@@ -355,6 +379,18 @@ export class TenantPartnerRepository {
         this.parseRecord<TenantApprovalRuleRecord>(
           row.record,
           "core.phase1_tenant_approval_rules",
+        ),
+      ),
+      approvalRequests: approvalRequestsResult.rows.map((row) =>
+        this.parseRecord<TenantBookingApprovalRequestRecord>(
+          row.record,
+          "core.phase1_tenant_approval_requests",
+        ),
+      ),
+      approvalDecisions: approvalDecisionsResult.rows.map((row) =>
+        this.parseRecord<TenantBookingApprovalDecisionRecord>(
+          row.record,
+          "core.phase1_tenant_approval_decisions",
         ),
       ),
       passengers: passengersResult.rows.map((row) =>
@@ -608,6 +644,90 @@ export class TenantPartnerRepository {
             rule.createdAt,
             rule.updatedAt,
             JSON.stringify(rule),
+          ],
+        ),
+      );
+    }
+
+    for (const request of changes.approvalRequests ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO core.phase1_tenant_approval_requests (
+              approval_request_id,
+              tenant_id,
+              booking_id,
+              order_id,
+              evaluation_id,
+              status,
+              timeout_at,
+              escalated_at,
+              created_at,
+              resolved_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb
+            )
+            ON CONFLICT (approval_request_id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              booking_id = EXCLUDED.booking_id,
+              order_id = EXCLUDED.order_id,
+              evaluation_id = EXCLUDED.evaluation_id,
+              status = EXCLUDED.status,
+              timeout_at = EXCLUDED.timeout_at,
+              escalated_at = EXCLUDED.escalated_at,
+              created_at = EXCLUDED.created_at,
+              resolved_at = EXCLUDED.resolved_at,
+              record = EXCLUDED.record
+          `,
+          [
+            request.approvalRequestId,
+            request.tenantId,
+            request.bookingId,
+            request.orderId,
+            request.evaluationId,
+            request.status,
+            request.timeoutAt,
+            request.escalatedAt,
+            request.createdAt,
+            request.resolvedAt,
+            JSON.stringify(request),
+          ],
+        ),
+      );
+    }
+
+    for (const decision of changes.approvalDecisions ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO core.phase1_tenant_approval_decisions (
+              decision_id,
+              approval_request_id,
+              actor_user_id,
+              decision,
+              reason_code,
+              decided_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7::jsonb
+            )
+            ON CONFLICT (decision_id) DO UPDATE SET
+              approval_request_id = EXCLUDED.approval_request_id,
+              actor_user_id = EXCLUDED.actor_user_id,
+              decision = EXCLUDED.decision,
+              reason_code = EXCLUDED.reason_code,
+              decided_at = EXCLUDED.decided_at,
+              record = EXCLUDED.record
+          `,
+          [
+            decision.decisionId,
+            decision.approvalRequestId,
+            decision.actorUserId,
+            decision.decision,
+            decision.reasonCode,
+            decision.decidedAt,
+            JSON.stringify(decision),
           ],
         ),
       );
@@ -1105,6 +1225,25 @@ export class TenantPartnerRepository {
     ]);
   }
 
+  async persistApprovalWorkflow(
+    executor: TenantPartnerQueryExecutor,
+    changes: {
+      approvalRequests?: readonly TenantBookingApprovalRequestRecord[];
+      approvalDecisions?: readonly TenantBookingApprovalDecisionRecord[];
+    },
+  ) {
+    await Promise.all([
+      this.persistApprovalRequestsWithExecutor(
+        executor,
+        changes.approvalRequests ?? [],
+      ),
+      this.persistApprovalDecisionsWithExecutor(
+        executor,
+        changes.approvalDecisions ?? [],
+      ),
+    ]);
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
@@ -1238,6 +1377,100 @@ export class TenantPartnerRepository {
           ],
         );
       }),
+    );
+  }
+
+  private async persistApprovalRequestsWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    requests: readonly TenantBookingApprovalRequestRecord[],
+  ) {
+    await Promise.all(
+      requests.map((request) =>
+        executor.query(
+          `
+            INSERT INTO core.phase1_tenant_approval_requests (
+              approval_request_id,
+              tenant_id,
+              booking_id,
+              order_id,
+              evaluation_id,
+              status,
+              timeout_at,
+              escalated_at,
+              created_at,
+              resolved_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb
+            )
+            ON CONFLICT (approval_request_id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              booking_id = EXCLUDED.booking_id,
+              order_id = EXCLUDED.order_id,
+              evaluation_id = EXCLUDED.evaluation_id,
+              status = EXCLUDED.status,
+              timeout_at = EXCLUDED.timeout_at,
+              escalated_at = EXCLUDED.escalated_at,
+              created_at = EXCLUDED.created_at,
+              resolved_at = EXCLUDED.resolved_at,
+              record = EXCLUDED.record
+          `,
+          [
+            request.approvalRequestId,
+            request.tenantId,
+            request.bookingId,
+            request.orderId,
+            request.evaluationId,
+            request.status,
+            request.timeoutAt,
+            request.escalatedAt,
+            request.createdAt,
+            request.resolvedAt,
+            JSON.stringify(request),
+          ],
+        ),
+      ),
+    );
+  }
+
+  private async persistApprovalDecisionsWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    decisions: readonly TenantBookingApprovalDecisionRecord[],
+  ) {
+    await Promise.all(
+      decisions.map((decision) =>
+        executor.query(
+          `
+            INSERT INTO core.phase1_tenant_approval_decisions (
+              decision_id,
+              approval_request_id,
+              actor_user_id,
+              decision,
+              reason_code,
+              decided_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7::jsonb
+            )
+            ON CONFLICT (decision_id) DO UPDATE SET
+              approval_request_id = EXCLUDED.approval_request_id,
+              actor_user_id = EXCLUDED.actor_user_id,
+              decision = EXCLUDED.decision,
+              reason_code = EXCLUDED.reason_code,
+              decided_at = EXCLUDED.decided_at,
+              record = EXCLUDED.record
+          `,
+          [
+            decision.decisionId,
+            decision.approvalRequestId,
+            decision.actorUserId,
+            decision.decision,
+            decision.reasonCode,
+            decision.decidedAt,
+            JSON.stringify(decision),
+          ],
+        ),
+      ),
     );
   }
 }

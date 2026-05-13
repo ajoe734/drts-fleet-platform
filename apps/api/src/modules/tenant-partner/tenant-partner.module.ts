@@ -1,7 +1,8 @@
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
+import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { BankCardInlineEligibilityAdapter } from "./bank-card-inline-eligibility.adapter";
 import { PARTNER_ELIGIBILITY_ADAPTERS } from "./partner-eligibility-adapter.interface";
 import { ReferenceTokenEligibilityAdapter } from "./reference-token-eligibility.adapter";
@@ -11,7 +12,11 @@ import { TenantPartnerService } from "./tenant-partner.service";
 import { WebhookDispatchService } from "./webhook-dispatch.service";
 
 @Module({
-  imports: [DatabaseModule, AuditNotificationModule],
+  imports: [
+    DatabaseModule,
+    AuditNotificationModule,
+    forwardRef(() => OwnedMobilityModule),
+  ],
   controllers: [TenantPartnerController],
   providers: [
     TenantPartnerService,

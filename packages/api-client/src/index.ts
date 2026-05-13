@@ -163,12 +163,17 @@ import type {
   TenantApiKeyRecord,
   TenantBillingProfile,
   TenantBootstrapSession,
+  TenantBookingApprovalRequestRecord,
   TenantApprovalEvaluationResult,
   TenantApprovalRuleRecord,
   TenantBookingQuotaImpactPreview,
+  ApproveTenantBookingApprovalRequestCommand,
+  EscalateTenantBookingApprovalRequestCommand,
   EvaluateTenantApprovalRuleCommand,
+  ListTenantBookingApprovalRequestsQuery,
   ListTenantApprovalRulesQuery,
   ReorderTenantApprovalRulesCommand,
+  RejectTenantBookingApprovalRequestCommand,
   TenantCostCenterCoverageReport,
   TenantCostCenterRecord,
   TenantCostCenterQuotaSummary,
@@ -1429,6 +1434,59 @@ export class ApiClient {
   async disableApprovalRule(ruleId: string): Promise<TenantApprovalRuleRecord> {
     return this.post<TenantApprovalRuleRecord>(
       `/api/tenant/approval-rules/${encodeURIComponent(ruleId)}/disable`,
+    );
+  }
+
+  async listApprovalRequests(
+    query: ListTenantBookingApprovalRequestsQuery = {},
+  ): Promise<TenantBookingApprovalRequestRecord[]> {
+    const params = new URLSearchParams();
+    if (query.status) {
+      params.set("status", query.status);
+    }
+    if (query.bookingId) {
+      params.set("bookingId", query.bookingId);
+    }
+    return this.getList<TenantBookingApprovalRequestRecord>(
+      `/api/tenant/approval-requests${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async getApprovalRequest(
+    approvalRequestId: string,
+  ): Promise<TenantBookingApprovalRequestRecord> {
+    return this.get<TenantBookingApprovalRequestRecord>(
+      `/api/tenant/approval-requests/${encodeURIComponent(approvalRequestId)}`,
+    );
+  }
+
+  async approveApprovalRequest(
+    approvalRequestId: string,
+    command: ApproveTenantBookingApprovalRequestCommand = {},
+  ): Promise<TenantBookingApprovalRequestRecord> {
+    return this.post<TenantBookingApprovalRequestRecord>(
+      `/api/tenant/approval-requests/${encodeURIComponent(approvalRequestId)}/approve`,
+      { body: command },
+    );
+  }
+
+  async rejectApprovalRequest(
+    approvalRequestId: string,
+    command: RejectTenantBookingApprovalRequestCommand,
+  ): Promise<TenantBookingApprovalRequestRecord> {
+    return this.post<TenantBookingApprovalRequestRecord>(
+      `/api/tenant/approval-requests/${encodeURIComponent(approvalRequestId)}/reject`,
+      { body: command },
+    );
+  }
+
+  async escalateApprovalRequest(
+    approvalRequestId: string,
+    command: EscalateTenantBookingApprovalRequestCommand = {},
+  ): Promise<TenantBookingApprovalRequestRecord> {
+    return this.post<TenantBookingApprovalRequestRecord>(
+      `/api/tenant/approval-requests/${encodeURIComponent(approvalRequestId)}/escalate`,
+      { body: command },
     );
   }
 
