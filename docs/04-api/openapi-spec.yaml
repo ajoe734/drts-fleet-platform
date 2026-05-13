@@ -1,0 +1,2486 @@
+openapi: 3.0.3
+info:
+  title: DRTS Tenant Governance API
+  version: 2026-05-13
+  description: >
+    Focused OpenAPI document for the tenant-governance follow-up wave. This
+    spec covers the new tenant cost-center, quota, approval-rule, and
+    approval-request surfaces added after the root `phase1_openapi_v1.yaml`
+    draft.
+  license:
+    name: Proprietary
+    url: https://docs.drts.test/legal/proprietary-api-license
+servers:
+  - url: https://api.drts.test
+    description: Production
+  - url: https://sandbox-api.drts.test
+    description: Sandbox
+tags:
+  - name: TenantCostCenters
+    description: Tenant cost-center directory and legacy coverage reporting.
+  - name: TenantQuotas
+    description: Tenant and cost-center quota summary, policy, preview, and ledger routes.
+  - name: TenantApprovalRules
+    description: Rule CRUD, reordering, and dry-run evaluation routes.
+  - name: TenantApprovalRequests
+    description: Approval request lifecycle and approver action routes.
+security:
+  - BearerAuth: []
+paths:
+  /api/tenant/cost-centers:
+    get:
+      tags:
+        - TenantCostCenters
+      operationId: listCostCenters
+      summary: List tenant cost centers
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+
+        Supports optional filtering by active flag, owner, and free-text search.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - name: activeOnly
+          in: query
+          schema:
+            type: boolean
+          description: Return only active cost centers when `true`.
+        - name: ownerUserId
+          in: query
+          schema:
+            type: string
+          description: Filter by cost-center owner user id.
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Case-insensitive match on code or name.
+      responses:
+        "200":
+          description: Tenant cost-center directory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantCostCenterListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - TenantCostCenters
+      operationId: upsertCostCenter
+      summary: Create or update a tenant cost center
+      description: |
+        RBAC: tenant principal with directory-management access. `x-tenant-id` is required.
+
+        The live service uses one upsert route for both create and update semantics and emits
+        `tenant.cost_center.created` for inserts and `tenant.cost_center.updated` for edits.
+
+        Common error codes: `COST_CENTER_CODE_INVALID`, `TENANT_USER_NOT_FOUND`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+          - Intended for tenant-admin governance flows.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertTenantCostCenterCommand"
+      responses:
+        "201":
+          description: Created or updated cost center.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantCostCenterEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/tenant/cost-centers/coverage:
+    get:
+      tags:
+        - TenantCostCenters
+      operationId: getTenantCostCenterCoverageReport
+      summary: Summarize booking-to-directory cost-center coverage
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+
+        Audits `tenant.cost_center.coverage_listed`. Used to identify legacy booking rows whose
+        `costCenter` text does not map cleanly to the current directory.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+      responses:
+        "200":
+          description: Coverage summary for the tenant's business-dispatch bookings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantCostCenterCoverageReportEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/cost-centers/{code}:
+    get:
+      tags:
+        - TenantCostCenters
+      operationId: getCostCenter
+      summary: Get a tenant cost center
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+
+        Common error codes: `COST_CENTER_NOT_FOUND`, `COST_CENTER_CODE_INVALID`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - $ref: "#/components/parameters/CostCenterCode"
+      responses:
+        "200":
+          description: Cost-center directory record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantCostCenterEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/tenant/cost-centers/disable:
+    post:
+      tags:
+        - TenantCostCenters
+      operationId: disableCostCenter
+      summary: Disable a tenant cost center
+      description: |
+        RBAC: tenant principal with directory-management access. `x-tenant-id` is required.
+
+        Emits audit action `tenant.cost_center.disabled`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+          - Intended for tenant-admin governance flows.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisableTenantCostCenterCommand"
+      responses:
+        "201":
+          description: Disabled cost center.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantCostCenterEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/tenant/quotas:
+    get:
+      tags:
+        - TenantQuotas
+      operationId: getTenantQuotaSummary
+      summary: Get tenant-wide quota summary
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+
+        The service resolves the current `periodKey` from the current time in `Asia/Taipei`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+      responses:
+        "200":
+          description: Tenant-wide quota snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantQuotaSummaryEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/cost-centers/{code}/quota:
+    get:
+      tags:
+        - TenantQuotas
+      operationId: getTenantCostCenterQuota
+      summary: Get cost-center quota summary
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+
+        Common error codes: `COST_CENTER_NOT_FOUND`, `COST_CENTER_CODE_INVALID`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - $ref: "#/components/parameters/CostCenterCode"
+      responses:
+        "200":
+          description: Cost-center quota snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantCostCenterQuotaSummaryEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/tenant/quotas/policies:
+    post:
+      tags:
+        - TenantQuotas
+      operationId: upsertTenantQuotaPolicy
+      summary: Create or update a quota policy
+      description: |
+        RBAC: tenant principal with quota-governance access. `x-tenant-id` is required.
+
+        Emits audit action `tenant.quota_policy.updated`.
+
+        Common error codes: `COST_CENTER_NOT_FOUND`,
+        `TENANT_QUOTA_BOOKING_COUNT_LIMIT_INVALID`,
+        `TENANT_QUOTA_AMOUNT_LIMIT_INVALID`,
+        `TENANT_QUOTA_CURRENCY_INVALID`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+          - Intended for tenant-admin or tenant-finance governance flows.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertTenantQuotaPolicyCommand"
+      responses:
+        "201":
+          description: Updated quota policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantQuotaPolicyEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/tenant/quotas/preview:
+    post:
+      tags:
+        - TenantQuotas
+      operationId: previewTenantBookingQuotaImpact
+      summary: Preview quota impact for a booking change
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+
+        Canonical request fields are `reservationWindowStart`, `costCenterCode`,
+        and `estimatedAmountMinor`. The live service also accepts compatibility aliases
+        `tripStartsAt`, `costCenter`, and `amountMinor`.
+
+        Common error codes: `TENANT_QUOTA_RESERVATION_WINDOW_START_INVALID`,
+        `TENANT_QUOTA_AMOUNT_MINOR_INVALID`, `TENANT_QUOTA_CURRENCY_INVALID`,
+        `COST_CENTER_NOT_FOUND`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TenantBookingQuotaImpactQuery"
+      responses:
+        "201":
+          description: Dry-run quota evaluation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantBookingQuotaImpactPreviewEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/tenant/quotas/ledger:
+    get:
+      tags:
+        - TenantQuotas
+      operationId: listTenantQuotaLedger
+      summary: List tenant quota ledger entries
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - name: periodKey
+          in: query
+          schema:
+            type: string
+            pattern: "^[0-9]{4}-[0-9]{2}$"
+          description: Filter by the derived `Asia/Taipei` monthly period key.
+        - name: costCenterCode
+          in: query
+          schema:
+            type: string
+          description: Filter by a single cost-center code.
+        - name: bookingId
+          in: query
+          schema:
+            type: string
+          description: Filter by booking id.
+      responses:
+        "200":
+          description: Matching ledger entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantQuotaLedgerListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/approval-rules:
+    get:
+      tags:
+        - TenantApprovalRules
+      operationId: listApprovalRules
+      summary: List approval rules
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - name: activeOnly
+          in: query
+          schema:
+            type: boolean
+          description: Return only active rules when `true`.
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Match rule name text.
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum:
+              - allow
+              - warn
+              - flag_manual_review
+              - require_approval
+              - block
+          description: Filter by rule action.
+      responses:
+        "200":
+          description: Rule records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRuleListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags:
+        - TenantApprovalRules
+      operationId: createApprovalRule
+      summary: Create an approval rule
+      description: |
+        RBAC: tenant principal with governance-authoring access. `x-tenant-id` is required.
+
+        Emits `tenant.approval_rule.created` when a new rule is inserted.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+          - Intended for tenant-admin governance flows.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertTenantApprovalRuleCommand"
+      responses:
+        "201":
+          description: Created rule.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRuleEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/approval-rules/{ruleId}:
+    get:
+      tags:
+        - TenantApprovalRules
+      operationId: getApprovalRule
+      summary: Get an approval rule
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+
+        Common error code: `TENANT_APPROVAL_RULE_NOT_FOUND`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - $ref: "#/components/parameters/RuleId"
+      responses:
+        "200":
+          description: Approval-rule record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRuleEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags:
+        - TenantApprovalRules
+      operationId: updateApprovalRule
+      summary: Update an approval rule
+      description: |
+        RBAC: tenant principal with governance-authoring access. `x-tenant-id` is required.
+
+        The live controller routes `PUT` through the same upsert path as `POST`.
+        Unknown `ruleId` values currently behave like create semantics rather than
+        strict replace semantics.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+          - Intended for tenant-admin governance flows.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - $ref: "#/components/parameters/RuleId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertTenantApprovalRuleCommand"
+      responses:
+        "200":
+          description: Updated rule.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRuleEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/approval-rules/{ruleId}/disable:
+    post:
+      tags:
+        - TenantApprovalRules
+      operationId: disableApprovalRule
+      summary: Disable an approval rule
+      description: |
+        RBAC: tenant principal with governance-authoring access. `x-tenant-id` is required.
+
+        Emits `tenant.approval_rule.disabled`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+          - Intended for tenant-admin governance flows.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - $ref: "#/components/parameters/RuleId"
+      responses:
+        "201":
+          description: Disabled rule.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRuleEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/tenant/approval-rules/reorder:
+    post:
+      tags:
+        - TenantApprovalRules
+      operationId: reorderApprovalRules
+      summary: Reorder approval rules
+      description: |
+        RBAC: tenant principal with governance-authoring access. `x-tenant-id` is required.
+
+        Emits `tenant.approval_rule.reordered`.
+
+        Common error codes: `TENANT_APPROVAL_RULE_REORDER_INCOMPLETE`,
+        `TENANT_APPROVAL_RULE_REORDER_DUPLICATE_IDS`, `TENANT_APPROVAL_RULE_NOT_FOUND`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+          - Intended for tenant-admin governance flows.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReorderTenantApprovalRulesCommand"
+      responses:
+        "201":
+          description: Reordered rules in final priority order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRuleListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/approval-rules/evaluate:
+    post:
+      tags:
+        - TenantApprovalRules
+      operationId: evaluateApprovalRules
+      summary: Dry-run evaluate approval rules
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+
+        Emits `booking.approval_rules.evaluated`.
+
+        Common error code: `APPROVAL_RULE_FIELD_UNKNOWN`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvaluateTenantApprovalRuleCommand"
+      responses:
+        "201":
+          description: Evaluation result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalEvaluationResultEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/approval-requests:
+    get:
+      tags:
+        - TenantApprovalRequests
+      operationId: listApprovalRequests
+      summary: List approval requests
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - pending
+              - approved
+              - rejected
+              - cancelled_by_re_evaluation
+              - timeout_escalated
+          description: Filter by approval-request status.
+        - name: bookingId
+          in: query
+          schema:
+            type: string
+          description: Filter by booking id.
+      responses:
+        "200":
+          description: Matching approval requests.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRequestListEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /api/tenant/approval-requests/{approvalRequestId}:
+    get:
+      tags:
+        - TenantApprovalRequests
+      operationId: getApprovalRequest
+      summary: Get an approval request
+      description: |
+        RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
+
+        Common error code: `APPROVAL_REQUEST_NOT_FOUND`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - $ref: "#/components/parameters/ApprovalRequestId"
+      responses:
+        "200":
+          description: Approval-request record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRequestEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /api/tenant/approval-requests/{approvalRequestId}/approve:
+    post:
+      tags:
+        - TenantApprovalRequests
+      operationId: approveApprovalRequest
+      summary: Approve a pending approval request
+      description: |
+        RBAC: authenticated tenant user identity required. `x-tenant-id` is required.
+
+        The caller must appear in `resolvedApproverUserIds`. Emits
+        `booking.approval_request.approved` when the request leaves `pending`.
+
+        Common error codes: `TENANT_USER_REQUIRED`, `APPROVAL_REQUEST_NOT_FOUND`,
+        `APPROVAL_REQUEST_NOT_PENDING`, `APPROVAL_NOT_AUTHORIZED`,
+        `APPROVAL_DECISION_ALREADY_RECORDED`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+          - Requires authenticated tenant user identity, not just a tenant token.
+          - Caller must be a resolved approver.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - $ref: "#/components/parameters/ApprovalRequestId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveTenantBookingApprovalRequestCommand"
+      responses:
+        "201":
+          description: Approval request after the approve action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRequestEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/tenant/approval-requests/{approvalRequestId}/reject:
+    post:
+      tags:
+        - TenantApprovalRequests
+      operationId: rejectApprovalRequest
+      summary: Reject a pending approval request
+      description: |
+        RBAC: authenticated tenant user identity required. `x-tenant-id` is required.
+
+        The caller must appear in `resolvedApproverUserIds`. Emits
+        `booking.approval_request.rejected` when the request leaves `pending`.
+
+        Common error codes: `TENANT_USER_REQUIRED`, `APPROVAL_REQUEST_NOT_FOUND`,
+        `APPROVAL_REQUEST_NOT_PENDING`, `APPROVAL_NOT_AUTHORIZED`,
+        `APPROVAL_DECISION_ALREADY_RECORDED`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+          - Requires authenticated tenant user identity, not just a tenant token.
+          - Caller must be a resolved approver.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - $ref: "#/components/parameters/ApprovalRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectTenantBookingApprovalRequestCommand"
+      responses:
+        "201":
+          description: Approval request after the reject action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRequestEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/tenant/approval-requests/{approvalRequestId}/escalate:
+    post:
+      tags:
+        - TenantApprovalRequests
+      operationId: escalateApprovalRequest
+      summary: Manually escalate a pending approval request
+      description: |
+        RBAC: authenticated `tenant_admin` user identity required. `x-tenant-id` is required.
+
+        Emits `booking.approval_request.timeout_escalated`. Phase 1 only ships manual
+        escalation; the timeout processing route remains a 501 stub.
+
+        Common error codes: `TENANT_USER_REQUIRED`, `APPROVAL_REQUEST_NOT_FOUND`,
+        `APPROVAL_REQUEST_NOT_PENDING`, `APPROVAL_NOT_AUTHORIZED`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - x-tenant-id header is required.
+          - Caller must be a tenant_admin user.
+      parameters:
+        - $ref: "#/components/parameters/XTenantId"
+        - $ref: "#/components/parameters/XRequestId"
+        - $ref: "#/components/parameters/ApprovalRequestId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EscalateTenantBookingApprovalRequestCommand"
+      responses:
+        "201":
+          description: Approval request after escalation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TenantApprovalRequestEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /api/tenant/approval-requests/process-timeouts:
+    post:
+      tags:
+        - TenantApprovalRequests
+      operationId: processApprovalRequestTimeouts
+      summary: Reserved timeout-processing stub
+      description: |
+        RBAC: authenticated tenant realm principal.
+
+        Phase 1 deliberately returns a 501 stub with error code
+        `APPROVAL_TIMEOUT_AUTOMATION_DEFERRED`.
+      x-rbac:
+        realm: tenant
+        notes:
+          - Reserved for future automation; currently not implemented.
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    XTenantId:
+      name: x-tenant-id
+      in: header
+      required: true
+      schema:
+        type: string
+      description: Tenant scope required by tenant-governance routes.
+    XRequestId:
+      name: x-request-id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Optional caller-supplied request correlation id.
+    CostCenterCode:
+      name: code
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Cost-center code, normalized to uppercase letters, numbers, or hyphens.
+    RuleId:
+      name: ruleId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Approval-rule identifier.
+    ApprovalRequestId:
+      name: approvalRequestId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Approval-request identifier.
+  responses:
+    BadRequest:
+      description: Bad request. See operation notes for route-specific error codes.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorEnvelope"
+    Unauthorized:
+      description: Authentication missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorEnvelope"
+    Forbidden:
+      description: Authenticated principal lacks the required tenant scope or approver permissions.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorEnvelope"
+    NotFound:
+      description: The referenced tenant-governance resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorEnvelope"
+    Conflict:
+      description: The request conflicts with the current approval or quota state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorEnvelope"
+    NotImplemented:
+      description: Reserved-but-not-implemented route.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiErrorEnvelope"
+  schemas:
+    ApiMeta:
+      type: object
+      required:
+        - requestId
+        - timestamp
+      properties:
+        requestId:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+    ApiPageInfo:
+      type: object
+      required:
+        - page
+        - pageSize
+        - totalItems
+        - totalPages
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        pageSize:
+          type: integer
+          minimum: 1
+        totalItems:
+          type: integer
+          minimum: 0
+        totalPages:
+          type: integer
+          minimum: 0
+    ApiErrorEnvelope:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - retryable
+            - traceId
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+            retryable:
+              type: boolean
+            traceId:
+              type: string
+    TenantCostCenterRecord:
+      type: object
+      required:
+        - tenantId
+        - code
+        - name
+        - ownerUserId
+        - ownerName
+        - activeFlag
+        - disabledAt
+        - disabledReason
+        - createdAt
+        - updatedAt
+      properties:
+        tenantId:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        ownerUserId:
+          type: string
+          nullable: true
+        ownerName:
+          type: string
+          nullable: true
+        activeFlag:
+          type: boolean
+        disabledAt:
+          type: string
+          format: date-time
+          nullable: true
+        disabledReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    UpsertTenantCostCenterCommand:
+      type: object
+      required:
+        - code
+        - name
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        ownerUserId:
+          type: string
+          nullable: true
+        ownerName:
+          type: string
+          nullable: true
+        activeFlag:
+          type: boolean
+    DisableTenantCostCenterCommand:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+        reason:
+          type: string
+          nullable: true
+    TenantCostCenterCoverageSample:
+      type: object
+      required:
+        - rawCostCenter
+        - occurrences
+        - suggestion
+      properties:
+        rawCostCenter:
+          type: string
+        occurrences:
+          type: integer
+          minimum: 1
+        suggestion:
+          type: string
+          nullable: true
+    TenantCostCenterCoverageReport:
+      type: object
+      required:
+        - tenantId
+        - generatedAt
+        - totalBookings
+        - resolvedCount
+        - unresolvedCount
+        - disabledHits
+        - unresolvedSamples
+      properties:
+        tenantId:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        totalBookings:
+          type: integer
+          minimum: 0
+        resolvedCount:
+          type: integer
+          minimum: 0
+        unresolvedCount:
+          type: integer
+          minimum: 0
+        disabledHits:
+          type: integer
+          minimum: 0
+        unresolvedSamples:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantCostCenterCoverageSample"
+    TenantQuotaLimit:
+      type: object
+      required:
+        - bookingCountLimit
+        - amountMinorLimit
+        - currency
+        - enforcementMode
+      properties:
+        bookingCountLimit:
+          type: integer
+          nullable: true
+        amountMinorLimit:
+          type: integer
+          nullable: true
+        currency:
+          type: string
+        enforcementMode:
+          type: string
+          enum:
+            - warn_only
+            - require_approval
+            - hard_block
+    TenantQuotaUsage:
+      type: object
+      required:
+        - bookingCountReserved
+        - bookingCountConsumed
+        - amountMinorReserved
+        - amountMinorConsumed
+        - bookingCountRemaining
+        - amountMinorRemaining
+        - remainingPercent
+      properties:
+        bookingCountReserved:
+          type: integer
+        bookingCountConsumed:
+          type: integer
+        amountMinorReserved:
+          type: integer
+        amountMinorConsumed:
+          type: integer
+        bookingCountRemaining:
+          type: integer
+          nullable: true
+        amountMinorRemaining:
+          type: integer
+          nullable: true
+        remainingPercent:
+          type: number
+          nullable: true
+    TenantQuotaPolicyRecord:
+      type: object
+      required:
+        - tenantId
+        - costCenterCode
+        - period
+        - limit
+        - inheritedFromTenant
+        - createdAt
+        - updatedAt
+      properties:
+        tenantId:
+          type: string
+        costCenterCode:
+          type: string
+          nullable: true
+        period:
+          type: string
+          enum:
+            - monthly
+        limit:
+          $ref: "#/components/schemas/TenantQuotaLimit"
+        inheritedFromTenant:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    UpsertTenantQuotaPolicyCommand:
+      type: object
+      required:
+        - period
+        - limit
+      properties:
+        costCenterCode:
+          type: string
+          nullable: true
+        period:
+          type: string
+          enum:
+            - monthly
+        limit:
+          $ref: "#/components/schemas/TenantQuotaLimit"
+    TenantQuotaSummary:
+      type: object
+      required:
+        - tenantId
+        - period
+        - periodKey
+        - limit
+        - usage
+        - refreshedAt
+      properties:
+        tenantId:
+          type: string
+        period:
+          type: string
+          enum:
+            - monthly
+        periodKey:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}$"
+        limit:
+          $ref: "#/components/schemas/TenantQuotaLimit"
+        usage:
+          $ref: "#/components/schemas/TenantQuotaUsage"
+        refreshedAt:
+          type: string
+          format: date-time
+    TenantCostCenterQuotaSummary:
+      type: object
+      required:
+        - tenantId
+        - costCenterCode
+        - period
+        - periodKey
+        - limit
+        - usage
+        - inheritedFromTenant
+        - refreshedAt
+      properties:
+        tenantId:
+          type: string
+        costCenterCode:
+          type: string
+        period:
+          type: string
+          enum:
+            - monthly
+        periodKey:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}$"
+        limit:
+          $ref: "#/components/schemas/TenantQuotaLimit"
+        usage:
+          $ref: "#/components/schemas/TenantQuotaUsage"
+        inheritedFromTenant:
+          type: boolean
+        refreshedAt:
+          type: string
+          format: date-time
+    TenantQuotaLedgerEntry:
+      type: object
+      required:
+        - ledgerEntryId
+        - tenantId
+        - costCenterCode
+        - periodKey
+        - dimension
+        - amount
+        - entryType
+        - bookingId
+        - evaluationId
+        - createdAt
+      properties:
+        ledgerEntryId:
+          type: string
+        tenantId:
+          type: string
+        costCenterCode:
+          type: string
+          nullable: true
+        periodKey:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}$"
+        dimension:
+          type: string
+          enum:
+            - booking_count
+            - amount_minor
+        amount:
+          type: integer
+        entryType:
+          type: string
+          enum:
+            - reserve
+            - release
+            - consume
+            - adjust
+        bookingId:
+          type: string
+        evaluationId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    TenantBookingQuotaImpactResult:
+      type: object
+      required:
+        - scope
+        - costCenterCode
+        - periodKey
+        - dimension
+        - remainingBefore
+        - delta
+        - remainingAfter
+        - limitValue
+        - remainingPercentAfter
+        - enforcementMode
+        - triggered
+      properties:
+        scope:
+          type: string
+          enum:
+            - tenant
+            - cost_center
+        costCenterCode:
+          type: string
+          nullable: true
+        periodKey:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}$"
+        dimension:
+          type: string
+          enum:
+            - booking_count
+            - amount_minor
+        remainingBefore:
+          type: integer
+          nullable: true
+        delta:
+          type: integer
+        remainingAfter:
+          type: integer
+          nullable: true
+        limitValue:
+          type: integer
+          nullable: true
+        remainingPercentAfter:
+          type: number
+          nullable: true
+        enforcementMode:
+          type: string
+          enum:
+            - warn_only
+            - require_approval
+            - hard_block
+        triggered:
+          type: string
+          enum:
+            - none
+            - warn
+            - approval
+            - block
+    TenantBookingQuotaImpactQuery:
+      type: object
+      required:
+        - reservationWindowStart
+      properties:
+        bookingId:
+          type: string
+          nullable: true
+        costCenterCode:
+          type: string
+          nullable: true
+          description: Canonical cost-center field.
+        costCenter:
+          type: string
+          nullable: true
+          description: Compatibility alias accepted by the live service.
+        estimatedAmountMinor:
+          type: integer
+          nullable: true
+          description: Canonical estimated amount field.
+        amountMinor:
+          type: integer
+          nullable: true
+          description: Compatibility alias accepted by the live service.
+        currency:
+          type: string
+        reservationWindowStart:
+          type: string
+          format: date-time
+          description: Canonical field used for period attribution.
+        tripStartsAt:
+          type: string
+          format: date-time
+          description: Compatibility alias accepted by the live service.
+        businessDispatchSubtype:
+          type: string
+          nullable: true
+    TenantBookingQuotaImpactPreview:
+      type: object
+      required:
+        - evaluationId
+        - periodKey
+        - impacts
+        - combinedTriggered
+      properties:
+        evaluationId:
+          type: string
+        periodKey:
+          type: string
+          pattern: "^[0-9]{4}-[0-9]{2}$"
+        impacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantBookingQuotaImpactResult"
+        combinedTriggered:
+          type: string
+          enum:
+            - none
+            - warn
+            - approval
+            - block
+    TenantPrincipalRef:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - tenant_user
+            - tenant_role
+            - cost_center_owner
+            - tenant_finance_admin
+            - tenant_admin
+            - user
+            - role
+        userId:
+          type: string
+        roleCode:
+          type: string
+        costCenterCode:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+    TenantResolvedApproverRecord:
+      type: object
+      required:
+        - descriptor
+        - principal
+        - displayName
+        - status
+        - reasonCode
+      properties:
+        descriptor:
+          $ref: "#/components/schemas/TenantPrincipalRef"
+        principal:
+          type: object
+          allOf:
+            - $ref: "#/components/schemas/TenantPrincipalRef"
+          nullable: true
+        displayName:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+            - resolved
+            - unresolved
+        reasonCode:
+          type: string
+    TenantScalarValue:
+      oneOf:
+        - type: string
+        - type: number
+        - type: boolean
+    TenantRuleValue:
+      oneOf:
+        - $ref: "#/components/schemas/TenantScalarValue"
+        - type: array
+          items:
+            $ref: "#/components/schemas/TenantScalarValue"
+    TenantApprovalRuleCondition:
+      type: object
+      required:
+        - field
+      properties:
+        field:
+          type: string
+          enum:
+            - booking.amount_minor
+            - booking.business_dispatch_subtype
+            - booking.vehicle_preference
+            - booking.direction
+            - booking.flight_no_present
+            - booking.reservation_window_start
+            - booking.passenger.role
+            - booking.passenger.id
+            - cost_center.code
+            - cost_center.monthly_quota_remaining_amount_minor
+            - cost_center.monthly_quota_remaining_percent
+            - tenant.monthly_quota_remaining_amount_minor
+            - tenant.monthly_quota_remaining_percent
+        op:
+          type: string
+          description: Canonical operator field.
+          enum:
+            - eq
+            - neq
+            - gt
+            - gte
+            - lt
+            - lte
+            - in
+            - not_in
+            - exists
+            - equals
+            - not_equals
+            - greater_than
+            - greater_than_or_equal
+            - less_than
+            - less_than_or_equal
+        operator:
+          type: string
+          description: Compatibility alias accepted by the live service.
+          enum:
+            - eq
+            - neq
+            - gt
+            - gte
+            - lt
+            - lte
+            - in
+            - not_in
+            - exists
+            - equals
+            - not_equals
+            - greater_than
+            - greater_than_or_equal
+            - less_than
+            - less_than_or_equal
+        value:
+          $ref: "#/components/schemas/TenantRuleValue"
+        values:
+          type: array
+          description: Compatibility alias accepted by the live service.
+          items:
+            $ref: "#/components/schemas/TenantScalarValue"
+    TenantApprovalRuleRecord:
+      type: object
+      required:
+        - ruleId
+        - tenantId
+        - ruleName
+        - priority
+        - activeFlag
+        - conditions
+        - action
+        - approvalMode
+        - approvers
+        - createdAt
+        - updatedAt
+      properties:
+        ruleId:
+          type: string
+        tenantId:
+          type: string
+        ruleName:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        priority:
+          type: integer
+        activeFlag:
+          type: boolean
+        effectiveFrom:
+          type: string
+          format: date-time
+          nullable: true
+        effectiveUntil:
+          type: string
+          format: date-time
+          nullable: true
+        conditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantApprovalRuleCondition"
+        action:
+          type: string
+          enum:
+            - allow
+            - warn
+            - flag_manual_review
+            - require_approval
+            - block
+        approvalMode:
+          type: string
+          nullable: true
+          enum:
+            - any_of
+            - all_of_parallel
+            - ordered_chain
+        approvers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantPrincipalRef"
+        timeoutHoursOverride:
+          type: integer
+          nullable: true
+        fallbackPolicyOverride:
+          type: string
+          nullable: true
+          enum:
+            - auto_reject
+            - escalate_to_tenant_admin
+            - manual_ops_review
+        disabledAt:
+          type: string
+          format: date-time
+          nullable: true
+        disabledReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    UpsertTenantApprovalRuleCommand:
+      type: object
+      required:
+        - priority
+        - conditions
+        - action
+      anyOf:
+        - required:
+            - ruleName
+        - required:
+            - name
+      properties:
+        ruleId:
+          type: string
+        ruleName:
+          type: string
+          description: Preferred canonical rule-name field.
+        name:
+          type: string
+          description: Compatibility alias accepted by the live service.
+        description:
+          type: string
+          nullable: true
+        priority:
+          type: integer
+        activeFlag:
+          type: boolean
+        effectiveFrom:
+          type: string
+          format: date-time
+          nullable: true
+        effectiveUntil:
+          type: string
+          format: date-time
+          nullable: true
+        conditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantApprovalRuleCondition"
+        action:
+          type: string
+          enum:
+            - allow
+            - warn
+            - flag_manual_review
+            - require_approval
+            - block
+        approvalMode:
+          type: string
+          nullable: true
+          enum:
+            - any_of
+            - all_of_parallel
+            - ordered_chain
+        approvers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantPrincipalRef"
+        timeoutHoursOverride:
+          type: integer
+          nullable: true
+        fallbackPolicyOverride:
+          type: string
+          nullable: true
+          enum:
+            - auto_reject
+            - escalate_to_tenant_admin
+            - manual_ops_review
+        disabledReason:
+          type: string
+          nullable: true
+    ReorderTenantApprovalRulesCommand:
+      type: object
+      anyOf:
+        - required:
+            - orderedRuleIds
+        - required:
+            - ruleIds
+      properties:
+        orderedRuleIds:
+          type: array
+          description: Canonical field containing the full tenant rule order.
+          items:
+            type: string
+        ruleIds:
+          type: array
+          description: Compatibility alias accepted by the live service.
+          items:
+            type: string
+    TenantApprovalWarning:
+      type: object
+      required:
+        - source
+        - code
+        - ruleId
+        - message
+      properties:
+        source:
+          type: string
+          enum:
+            - rule
+            - quota
+        code:
+          type: string
+        ruleId:
+          type: string
+          nullable: true
+        message:
+          type: string
+        messageCode:
+          type: string
+    TenantApprovalEvaluationInputSnapshot:
+      type: object
+      required:
+        - costCenterCode
+        - businessDispatchSubtype
+        - reservationWindowStart
+        - passengerId
+        - passengerRole
+        - amountMinor
+        - currency
+        - vehiclePreference
+      properties:
+        costCenterCode:
+          type: string
+          nullable: true
+        businessDispatchSubtype:
+          type: string
+          nullable: true
+        reservationWindowStart:
+          type: string
+          format: date-time
+          nullable: true
+        reservationWindowEnd:
+          type: string
+          format: date-time
+          nullable: true
+        passengerId:
+          type: string
+          nullable: true
+        passengerRole:
+          type: string
+          nullable: true
+        amountMinor:
+          type: integer
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        vehiclePreference:
+          type: string
+          nullable: true
+        direction:
+          type: string
+          nullable: true
+        flightNoPresent:
+          type: boolean
+          nullable: true
+        flightNo:
+          type: string
+          nullable: true
+        partnerEntrySlug:
+          type: string
+          nullable: true
+        eligibilityVerificationId:
+          type: string
+          nullable: true
+        signoffRequired:
+          type: boolean
+          nullable: true
+        expenseProofRequired:
+          type: boolean
+          nullable: true
+    TenantApprovalMatchedRuleResult:
+      type: object
+      required:
+        - ruleId
+        - ruleName
+        - priority
+        - action
+        - approvalMode
+        - approvers
+        - matchedConditions
+      properties:
+        ruleId:
+          type: string
+        ruleName:
+          type: string
+        priority:
+          type: integer
+        action:
+          type: string
+          enum:
+            - allow
+            - warn
+            - flag_manual_review
+            - require_approval
+            - block
+        approvalMode:
+          type: string
+          nullable: true
+          enum:
+            - any_of
+            - all_of_parallel
+            - ordered_chain
+        approvers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantPrincipalRef"
+        matchedConditions:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantApprovalRuleCondition"
+        priorityAtEvaluation:
+          type: integer
+        resolvedApprovers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantResolvedApproverRecord"
+    TenantApprovalPlan:
+      type: object
+      required:
+        - approvalMode
+        - approvers
+        - timeoutHours
+        - fallbackPolicy
+        - escalationTarget
+      properties:
+        approvalMode:
+          type: string
+          enum:
+            - any_of
+            - all_of_parallel
+            - ordered_chain
+        approvers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantPrincipalRef"
+        timeoutHours:
+          type: integer
+        fallbackPolicy:
+          type: string
+          enum:
+            - auto_reject
+            - escalate_to_tenant_admin
+            - manual_ops_review
+        escalationTarget:
+          type: object
+          allOf:
+            - $ref: "#/components/schemas/TenantPrincipalRef"
+          nullable: true
+    TenantApprovalEvaluationOutcome:
+      type: object
+      required:
+        - decision
+        - approvalRequired
+        - blocked
+        - warnings
+        - reasonCodes
+      properties:
+        decision:
+          type: string
+          enum:
+            - allow
+            - warn
+            - require_approval
+            - block
+            - manual_review
+        approvalRequired:
+          type: boolean
+        blocked:
+          type: boolean
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantApprovalWarning"
+        reasonCodes:
+          type: array
+          items:
+            type: string
+    TenantApprovalEvaluationAuditSummary:
+      type: object
+      required:
+        - ruleVersionSnapshot
+        - quotaSnapshotVersion
+        - costCenterCode
+      properties:
+        ruleVersionSnapshot:
+          type: string
+        quotaSnapshotVersion:
+          type: string
+          nullable: true
+        costCenterCode:
+          type: string
+          nullable: true
+    EvaluateTenantApprovalRuleCommand:
+      type: object
+      properties:
+        subject:
+          type: object
+          required:
+            - subjectType
+            - bookingId
+            - draftId
+            - operation
+          properties:
+            subjectType:
+              type: string
+              enum:
+                - booking
+            bookingId:
+              type: string
+              nullable: true
+            draftId:
+              type: string
+              nullable: true
+            operation:
+              type: string
+              enum:
+                - create
+                - update
+                - cancel
+                - dry_run
+        inputSnapshot:
+          $ref: "#/components/schemas/TenantApprovalEvaluationInputSnapshot"
+        quotaImpacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantBookingQuotaImpactResult"
+        includeInactive:
+          type: boolean
+        sampleBooking:
+          type: object
+          description: Compatibility payload shape still accepted by the live service.
+          properties:
+            amountMinor:
+              type: integer
+              nullable: true
+            businessDispatchSubtype:
+              type: string
+              nullable: true
+            vehiclePreference:
+              type: string
+              nullable: true
+            direction:
+              type: string
+              nullable: true
+            flightNoPresent:
+              type: boolean
+              nullable: true
+            flightNo:
+              type: string
+              nullable: true
+            reservationWindowStart:
+              type: string
+              format: date-time
+              nullable: true
+            passengerRole:
+              type: string
+              nullable: true
+            passengerId:
+              type: string
+              nullable: true
+            costCenterCode:
+              type: string
+              nullable: true
+            costCenterMonthlyQuotaRemainingAmountMinor:
+              type: integer
+              nullable: true
+            costCenterMonthlyQuotaRemainingPercent:
+              type: number
+              nullable: true
+            tenantMonthlyQuotaRemainingAmountMinor:
+              type: integer
+              nullable: true
+            tenantMonthlyQuotaRemainingPercent:
+              type: number
+              nullable: true
+    TenantApprovalEvaluationResult:
+      type: object
+      required:
+        - evaluatedAt
+        - matchedRules
+      properties:
+        evaluationId:
+          type: string
+        tenantId:
+          type: string
+        evaluatedAt:
+          type: string
+          format: date-time
+        subject:
+          type: object
+          required:
+            - subjectType
+            - bookingId
+            - draftId
+            - operation
+          properties:
+            subjectType:
+              type: string
+              enum:
+                - booking
+            bookingId:
+              type: string
+              nullable: true
+            draftId:
+              type: string
+              nullable: true
+            operation:
+              type: string
+              enum:
+                - create
+                - update
+                - cancel
+                - dry_run
+        inputSnapshot:
+          $ref: "#/components/schemas/TenantApprovalEvaluationInputSnapshot"
+        matchedRules:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantApprovalMatchedRuleResult"
+        quotaImpacts:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantBookingQuotaImpactResult"
+        outcome:
+          $ref: "#/components/schemas/TenantApprovalEvaluationOutcome"
+        approvalPlan:
+          type: object
+          allOf:
+            - $ref: "#/components/schemas/TenantApprovalPlan"
+          nullable: true
+        auditSummary:
+          $ref: "#/components/schemas/TenantApprovalEvaluationAuditSummary"
+        ruleSetVersion:
+          type: string
+        finalAction:
+          type: string
+          enum:
+            - allow
+            - warn
+            - flag_manual_review
+            - require_approval
+            - block
+        hardBlockReasonCodes:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantApprovalWarning"
+    TenantBookingApprovalDecisionRecord:
+      type: object
+      required:
+        - decisionId
+        - approvalRequestId
+        - actorUserId
+        - actorRoleCode
+        - decision
+        - reasonCode
+        - reasonNote
+        - decidedAt
+      properties:
+        decisionId:
+          type: string
+        approvalRequestId:
+          type: string
+        actorUserId:
+          type: string
+        actorRoleCode:
+          type: string
+          nullable: true
+        decision:
+          type: string
+          enum:
+            - approve
+            - reject
+        reasonCode:
+          type: string
+          nullable: true
+        reasonNote:
+          type: string
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+    TenantBookingApprovalRequestRecord:
+      type: object
+      required:
+        - approvalRequestId
+        - tenantId
+        - bookingId
+        - orderId
+        - evaluationId
+        - ruleIds
+        - status
+        - approvalMode
+        - approvers
+        - resolvedApproverUserIds
+        - previousApprovers
+        - decisions
+        - evaluationSnapshot
+        - timeoutAt
+        - escalatedAt
+        - fallbackPolicy
+        - escalationTarget
+        - createdAt
+        - resolvedAt
+      properties:
+        approvalRequestId:
+          type: string
+        tenantId:
+          type: string
+        bookingId:
+          type: string
+        orderId:
+          type: string
+        evaluationId:
+          type: string
+        ruleIds:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - approved
+            - rejected
+            - cancelled_by_re_evaluation
+            - timeout_escalated
+        approvalMode:
+          type: string
+          enum:
+            - any_of
+            - all_of_parallel
+            - ordered_chain
+        approvers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantPrincipalRef"
+        resolvedApproverUserIds:
+          type: array
+          items:
+            type: string
+        previousApprovers:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantPrincipalRef"
+        decisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantBookingApprovalDecisionRecord"
+        evaluationSnapshot:
+          $ref: "#/components/schemas/TenantApprovalEvaluationResult"
+        timeoutAt:
+          type: string
+          format: date-time
+        escalatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        fallbackPolicy:
+          type: string
+          enum:
+            - auto_reject
+            - escalate_to_tenant_admin
+            - manual_ops_review
+        escalationTarget:
+          type: object
+          allOf:
+            - $ref: "#/components/schemas/TenantPrincipalRef"
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+    ApproveTenantBookingApprovalRequestCommand:
+      type: object
+      properties:
+        reasonNote:
+          type: string
+          nullable: true
+    RejectTenantBookingApprovalRequestCommand:
+      type: object
+      required:
+        - reasonCode
+      properties:
+        reasonCode:
+          type: string
+        reasonNote:
+          type: string
+          nullable: true
+    EscalateTenantBookingApprovalRequestCommand:
+      type: object
+      properties:
+        reasonNote:
+          type: string
+          nullable: true
+    TenantCostCenterListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantCostCenterRecord"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    TenantQuotaLedgerListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantQuotaLedgerEntry"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    TenantApprovalRuleListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantApprovalRuleRecord"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    TenantApprovalRequestListData:
+      type: object
+      required:
+        - items
+        - pageInfo
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantBookingApprovalRequestRecord"
+        pageInfo:
+          $ref: "#/components/schemas/ApiPageInfo"
+    TenantCostCenterEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantCostCenterRecord"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantCostCenterListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantCostCenterListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantCostCenterCoverageReportEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantCostCenterCoverageReport"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantQuotaPolicyEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantQuotaPolicyRecord"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantQuotaSummaryEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantQuotaSummary"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantCostCenterQuotaSummaryEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantCostCenterQuotaSummary"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantBookingQuotaImpactPreviewEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantBookingQuotaImpactPreview"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantQuotaLedgerListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantQuotaLedgerListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantApprovalRuleEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantApprovalRuleRecord"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantApprovalRuleListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantApprovalRuleListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantApprovalEvaluationResultEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantApprovalEvaluationResult"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantApprovalRequestEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantBookingApprovalRequestRecord"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    TenantApprovalRequestListEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/TenantApprovalRequestListData"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
