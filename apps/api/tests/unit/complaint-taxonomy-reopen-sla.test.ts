@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
@@ -126,46 +126,55 @@ describe("Complaint taxonomy and resolution codes", () => {
 
 describe("Complaint reopen with SLA recalculation", () => {
   it("recalculates SLA and resets breach on reopen", () => {
-    const { complaintService } = createServices();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-13T08:00:00.000Z"));
 
-    const complaint = complaintService.createComplaintCase({
-      caseSource: "ops",
-      category: "driver_service",
-      severity: "normal",
-      description: "Driver complaint for reopen test",
-    });
-    expect(complaint.reopenCount).toBe(0);
+      const { complaintService } = createServices();
 
-    const originalSlaDueAt = complaint.slaDueAt;
+      const complaint = complaintService.createComplaintCase({
+        caseSource: "ops",
+        category: "driver_service",
+        severity: "normal",
+        description: "Driver complaint for reopen test",
+      });
+      expect(complaint.reopenCount).toBe(0);
 
-    complaintService.resolveComplaintCase(complaint.caseNo, {
-      resolutionCode: "resolved_driver_warning",
-      closingNote: "Initial resolution",
-    });
-    complaintService.closeComplaintCase(complaint.caseNo, {
-      resolutionCode: "resolved_driver_warning",
-      closingNote: "Closed for now",
-    });
+      const originalSlaDueAt = complaint.slaDueAt;
 
-    complaintService.markComplaintSlaBreach(complaint.caseNo);
-    expect(complaintService.getComplaintCase(complaint.caseNo).slaBreach).toBe(
-      true,
-    );
+      complaintService.resolveComplaintCase(complaint.caseNo, {
+        resolutionCode: "resolved_driver_warning",
+        closingNote: "Initial resolution",
+      });
+      complaintService.closeComplaintCase(complaint.caseNo, {
+        resolutionCode: "resolved_driver_warning",
+        closingNote: "Closed for now",
+      });
 
-    const reopened = complaintService.reopenComplaintCase(complaint.caseNo, {
-      reason: "New evidence from passenger",
-    });
+      complaintService.markComplaintSlaBreach(complaint.caseNo);
+      expect(
+        complaintService.getComplaintCase(complaint.caseNo).slaBreach,
+      ).toBe(true);
 
-    expect(reopened.caseNo).toBe(complaint.caseNo);
-    expect(reopened.status).toBe("reopened");
-    expect(reopened.reopenCount).toBe(1);
-    expect(reopened.slaBreach).toBe(false);
-    expect(reopened.slaDueAt).not.toBe(originalSlaDueAt);
+      vi.setSystemTime(new Date("2026-05-13T12:30:00.000Z"));
 
-    const timeline = complaintService.getComplaintTimeline(complaint.caseNo);
-    const actions = timeline.map((entry) => entry.action);
-    expect(actions).toContain("case_reopened");
-    expect(actions).toContain("sla_recalculated");
+      const reopened = complaintService.reopenComplaintCase(complaint.caseNo, {
+        reason: "New evidence from passenger",
+      });
+
+      expect(reopened.caseNo).toBe(complaint.caseNo);
+      expect(reopened.status).toBe("reopened");
+      expect(reopened.reopenCount).toBe(1);
+      expect(reopened.slaBreach).toBe(false);
+      expect(reopened.slaDueAt).not.toBe(originalSlaDueAt);
+
+      const timeline = complaintService.getComplaintTimeline(complaint.caseNo);
+      const actions = timeline.map((entry) => entry.action);
+      expect(actions).toContain("case_reopened");
+      expect(actions).toContain("sla_recalculated");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("increments reopenCount on each reopen", () => {
