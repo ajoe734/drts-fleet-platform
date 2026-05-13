@@ -6,6 +6,7 @@ import {
   Headers,
   Param,
   Post,
+  Put,
   Query,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
@@ -17,7 +18,12 @@ import type {
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
   DisableTenantCostCenterCommand,
+  EvaluateTenantApprovalRuleCommand,
+  TenantBookingQuotaImpactPreview,
+  TenantBookingQuotaImpactQuery,
+  TenantCostCenterCoverageReport,
   IssueTenantApiKeyCommand,
+  ListTenantApprovalRulesQuery,
   ListTenantCostCentersQuery,
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
@@ -31,16 +37,24 @@ import type {
   SendTestWebhookCommand,
   TenantAddressExportViewRecord,
   TenantCostCenterRecord,
+  TenantCostCenterQuotaSummary,
   TenantIntegrationGovernancePackage,
   TenantPartnerSummary,
+  TenantQuotaLedgerEntry,
+  TenantQuotaSummary,
+  TenantApprovalEvaluationResult,
+  TenantApprovalRuleRecord,
   UpdatePartnerChannelEntryCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
   UpsertTenantAddressCommand,
+  UpsertTenantApprovalRuleCommand,
   UpsertTenantCostCenterCommand,
   UpsertTenantPassengerCommand,
+  UpsertTenantQuotaPolicyCommand,
+  ReorderTenantApprovalRulesCommand,
   VerifyPartnerEligibilityCommand,
 } from "@drts/contracts";
 
@@ -362,6 +376,20 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
+  @Get("tenant/cost-centers/coverage")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getCostCenterCoverage(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const report: TenantCostCenterCoverageReport =
+      this.tenantPartnerService.summarizeCostCenterCoverage(
+        this.requireTenantId(tenantId),
+        requestId,
+      );
+    return toApiSuccessEnvelope(report, requestId);
+  }
+
   @Get("tenant/cost-centers/:code")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   getCostCenter(
@@ -407,6 +435,197 @@ export class TenantPartnerController {
       ),
       requestId,
     );
+  }
+
+  @Get("tenant/quotas")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getTenantQuotaSummary(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const summary: TenantQuotaSummary =
+      this.tenantPartnerService.getTenantQuotaSummary(
+        this.requireTenantId(tenantId),
+      );
+    return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("tenant/cost-centers/:code/quota")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getCostCenterQuotaSummary(
+    @Param("code") code: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const summary: TenantCostCenterQuotaSummary =
+      this.tenantPartnerService.getCostCenterQuotaSummary(
+        this.requireTenantId(tenantId),
+        code,
+      );
+    return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Post("tenant/quotas/policies")
+  upsertTenantQuotaPolicy(
+    @Body() command: UpsertTenantQuotaPolicyCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.upsertTenantQuotaPolicy(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/quotas/preview")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  previewTenantBookingQuotaImpact(
+    @Body() query: TenantBookingQuotaImpactQuery,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const preview: TenantBookingQuotaImpactPreview =
+      this.tenantPartnerService.previewBookingQuotaImpact(
+        this.requireTenantId(tenantId),
+        query,
+      );
+    return toApiSuccessEnvelope(preview, requestId);
+  }
+
+  @Get("tenant/quotas/ledger")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantQuotaLedger(
+    @Query("periodKey") periodKey?: string,
+    @Query("costCenterCode") costCenterCode?: string,
+    @Query("bookingId") bookingId?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantQuotaLedgerEntry[] =
+      this.tenantPartnerService.listTenantQuotaLedger(
+        this.requireTenantId(tenantId),
+        {
+          ...(periodKey ? { periodKey } : {}),
+          ...(costCenterCode ? { costCenterCode } : {}),
+          ...(bookingId ? { bookingId } : {}),
+        },
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/approval-rules")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listApprovalRules(
+    @Query() query: ListTenantApprovalRulesQuery,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantApprovalRuleRecord[] =
+      this.tenantPartnerService.listApprovalRules(
+        this.requireTenantId(tenantId),
+        query,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/approval-rules/:ruleId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getApprovalRule(
+    @Param("ruleId") ruleId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getApprovalRule(
+        this.requireTenantId(tenantId),
+        ruleId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-rules")
+  upsertApprovalRule(
+    @Body() command: UpsertTenantApprovalRuleCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.upsertApprovalRule(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Put("tenant/approval-rules/:ruleId")
+  updateApprovalRule(
+    @Param("ruleId") ruleId: string,
+    @Body() command: UpsertTenantApprovalRuleCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.upsertApprovalRule(
+        this.requireTenantId(tenantId),
+        { ...command, ruleId },
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-rules/:ruleId/disable")
+  disableApprovalRule(
+    @Param("ruleId") ruleId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.disableApprovalRule(
+        this.requireTenantId(tenantId),
+        ruleId,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-rules/reorder")
+  reorderApprovalRules(
+    @Body() command: ReorderTenantApprovalRulesCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.reorderApprovalRules(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-rules/evaluate")
+  evaluateApprovalRules(
+    @Body() command: EvaluateTenantApprovalRuleCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const evaluation: TenantApprovalEvaluationResult =
+      this.tenantPartnerService.evaluateApprovalRules(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      );
+    return toApiSuccessEnvelope(evaluation, requestId);
   }
 
   @Get("tenant/addresses/export-view")

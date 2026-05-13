@@ -1,14 +1,20 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
+import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
 import type {
   PartnerChannelEntryRecord,
   PartnerEligibilityVerificationRecord,
   PartnerIngressCredentialRecord,
   TenantAddressRecord,
+  TenantApprovalRuleRecord,
   TenantApiKeyRecord,
   TenantCostCenterRecord,
   TenantNotificationPreferences,
   TenantPassengerRecord,
+  TenantQuotaLedgerEntry,
+  TenantQuotaPeriod,
+  TenantQuotaPolicyRecord,
+  TenantQuotaUsage,
   TenantSlaProfile,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
@@ -19,6 +25,13 @@ import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
   record: unknown;
+};
+
+export type TenantPartnerQueryExecutor = {
+  query<T extends QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>>;
 };
 
 type WebhookRetryPolicy = {
@@ -81,6 +94,16 @@ export type StoredPartnerIngressCredentialRecord =
     keyHash: string;
   };
 
+export type TenantQuotaMonthlySnapshotRecord = {
+  tenantId: string;
+  costCenterCode: string | null;
+  period: TenantQuotaPeriod;
+  periodKey: string;
+  limit: TenantQuotaPolicyRecord["limit"];
+  usage: TenantQuotaUsage;
+  refreshedAt: string;
+};
+
 export type TenantPartnerState = {
   notificationPreferences: TenantNotificationPreferences[];
   webhookEndpoints: StoredWebhookEndpointRecord[];
@@ -89,9 +112,13 @@ export type TenantPartnerState = {
   partnerEntries: PartnerChannelEntryRecord[];
   partnerIngressCredentials: StoredPartnerIngressCredentialRecord[];
   partnerEligibilityVerifications: PartnerEligibilityVerificationRecord[];
+  approvalRules: TenantApprovalRuleRecord[];
   passengers: TenantPassengerRecord[];
   addresses: TenantAddressRecord[];
   costCenters: TenantCostCenterRecord[];
+  quotaPolicies: TenantQuotaPolicyRecord[];
+  quotaLedger: TenantQuotaLedgerEntry[];
+  quotaMonthlySnapshots: TenantQuotaMonthlySnapshotRecord[];
   userRoles: TenantUserRoleRecord[];
   apiKeys: StoredTenantApiKeyRecord[];
 };
@@ -104,9 +131,13 @@ export type PersistTenantPartnerChanges = {
   partnerEntries?: readonly PartnerChannelEntryRecord[];
   partnerIngressCredentials?: readonly StoredPartnerIngressCredentialRecord[];
   partnerEligibilityVerifications?: readonly PartnerEligibilityVerificationRecord[];
+  approvalRules?: readonly TenantApprovalRuleRecord[];
   passengers?: readonly TenantPassengerRecord[];
   addresses?: readonly TenantAddressRecord[];
   costCenters?: readonly TenantCostCenterRecord[];
+  quotaPolicies?: readonly TenantQuotaPolicyRecord[];
+  quotaLedger?: readonly TenantQuotaLedgerEntry[];
+  quotaMonthlySnapshots?: readonly TenantQuotaMonthlySnapshotRecord[];
   userRoles?: readonly TenantUserRoleRecord[];
   apiKeys?: readonly StoredTenantApiKeyRecord[];
 };
@@ -131,9 +162,13 @@ export class TenantPartnerRepository {
         partnerEntries: [],
         partnerIngressCredentials: [],
         partnerEligibilityVerifications: [],
+        approvalRules: [],
         passengers: [],
         addresses: [],
         costCenters: [],
+        quotaPolicies: [],
+        quotaLedger: [],
+        quotaMonthlySnapshots: [],
         userRoles: [],
         apiKeys: [],
       };
@@ -147,9 +182,13 @@ export class TenantPartnerRepository {
       partnerEntriesResult,
       partnerIngressCredentialsResult,
       partnerEligibilityVerificationsResult,
+      approvalRulesResult,
       passengersResult,
       addressesResult,
       costCentersResult,
+      quotaPoliciesResult,
+      quotaLedgerResult,
+      quotaMonthlySnapshotsResult,
       userRolesResult,
       apiKeysResult,
     ] = await Promise.all([
@@ -205,6 +244,13 @@ export class TenantPartnerRepository {
       this.databaseService!.query<JsonRecordRow>(
         `
           SELECT record
+          FROM core.phase1_tenant_approval_rules
+          ORDER BY tenant_id ASC, updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
           FROM core.phase1_tenant_passengers
           ORDER BY updated_at DESC, created_at DESC
         `,
@@ -221,6 +267,27 @@ export class TenantPartnerRepository {
           SELECT record
           FROM core.phase1_tenant_cost_centers
           ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM core.phase1_tenant_quota_policies
+          ORDER BY updated_at DESC, created_at DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM core.phase1_tenant_quota_ledger
+          ORDER BY created_at DESC, ledger_entry_id DESC
+        `,
+      ),
+      this.databaseService!.query<JsonRecordRow>(
+        `
+          SELECT record
+          FROM core.phase1_tenant_quota_monthly_snapshots
+          ORDER BY refreshed_at DESC
         `,
       ),
       this.databaseService!.query<JsonRecordRow>(
@@ -284,6 +351,12 @@ export class TenantPartnerRepository {
             "admin.phase1_partner_eligibility_verifications",
           ),
         ),
+      approvalRules: approvalRulesResult.rows.map((row) =>
+        this.parseRecord<TenantApprovalRuleRecord>(
+          row.record,
+          "core.phase1_tenant_approval_rules",
+        ),
+      ),
       passengers: passengersResult.rows.map((row) =>
         this.parseRecord<TenantPassengerRecord>(
           row.record,
@@ -300,6 +373,24 @@ export class TenantPartnerRepository {
         this.parseRecord<TenantCostCenterRecord>(
           row.record,
           "core.phase1_tenant_cost_centers",
+        ),
+      ),
+      quotaPolicies: quotaPoliciesResult.rows.map((row) =>
+        this.parseRecord<TenantQuotaPolicyRecord>(
+          row.record,
+          "core.phase1_tenant_quota_policies",
+        ),
+      ),
+      quotaLedger: quotaLedgerResult.rows.map((row) =>
+        this.parseRecord<TenantQuotaLedgerEntry>(
+          row.record,
+          "core.phase1_tenant_quota_ledger",
+        ),
+      ),
+      quotaMonthlySnapshots: quotaMonthlySnapshotsResult.rows.map((row) =>
+        this.parseRecord<TenantQuotaMonthlySnapshotRecord>(
+          row.record,
+          "core.phase1_tenant_quota_monthly_snapshots",
         ),
       ),
       userRoles: userRolesResult.rows.map((row) =>
@@ -489,6 +580,39 @@ export class TenantPartnerRepository {
       );
     }
 
+    for (const rule of changes.approvalRules ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO core.phase1_tenant_approval_rules (
+              rule_id,
+              tenant_id,
+              active_flag,
+              created_at,
+              updated_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb
+            )
+            ON CONFLICT (rule_id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              active_flag = EXCLUDED.active_flag,
+              created_at = EXCLUDED.created_at,
+              updated_at = EXCLUDED.updated_at,
+              record = EXCLUDED.record
+          `,
+          [
+            rule.ruleId,
+            rule.tenantId,
+            rule.activeFlag,
+            rule.createdAt,
+            rule.updatedAt,
+            JSON.stringify(rule),
+          ],
+        ),
+      );
+    }
+
     for (const endpoint of changes.webhookEndpoints ?? []) {
       writes.push(
         this.databaseService!.query(
@@ -656,6 +780,112 @@ export class TenantPartnerRepository {
       );
     }
 
+    for (const policy of changes.quotaPolicies ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO core.phase1_tenant_quota_policies (
+              tenant_id,
+              cost_center_code,
+              period,
+              updated_at,
+              created_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb
+            )
+            ON CONFLICT (tenant_id, cost_center_code, period) DO UPDATE SET
+              updated_at = EXCLUDED.updated_at,
+              created_at = EXCLUDED.created_at,
+              record = EXCLUDED.record
+          `,
+          [
+            policy.tenantId,
+            policy.costCenterCode,
+            policy.period,
+            policy.updatedAt,
+            policy.createdAt,
+            JSON.stringify(policy),
+          ],
+        ),
+      );
+    }
+
+    for (const entry of changes.quotaLedger ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO core.phase1_tenant_quota_ledger (
+              ledger_entry_id,
+              tenant_id,
+              cost_center_code,
+              period_key,
+              dimension,
+              entry_type,
+              booking_id,
+              evaluation_id,
+              created_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb
+            )
+            ON CONFLICT (ledger_entry_id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              cost_center_code = EXCLUDED.cost_center_code,
+              period_key = EXCLUDED.period_key,
+              dimension = EXCLUDED.dimension,
+              entry_type = EXCLUDED.entry_type,
+              booking_id = EXCLUDED.booking_id,
+              evaluation_id = EXCLUDED.evaluation_id,
+              created_at = EXCLUDED.created_at,
+              record = EXCLUDED.record
+          `,
+          [
+            entry.ledgerEntryId,
+            entry.tenantId,
+            entry.costCenterCode,
+            entry.periodKey,
+            entry.dimension,
+            entry.entryType,
+            entry.bookingId,
+            entry.evaluationId,
+            entry.createdAt,
+            JSON.stringify(entry),
+          ],
+        ),
+      );
+    }
+
+    for (const snapshot of changes.quotaMonthlySnapshots ?? []) {
+      writes.push(
+        this.databaseService!.query(
+          `
+            INSERT INTO core.phase1_tenant_quota_monthly_snapshots (
+              tenant_id,
+              cost_center_code,
+              period,
+              period_key,
+              refreshed_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb
+            )
+            ON CONFLICT (tenant_id, cost_center_code, period, period_key) DO UPDATE SET
+              refreshed_at = EXCLUDED.refreshed_at,
+              record = EXCLUDED.record
+          `,
+          [
+            snapshot.tenantId,
+            snapshot.costCenterCode,
+            snapshot.period,
+            snapshot.periodKey,
+            snapshot.refreshedAt,
+            JSON.stringify(snapshot),
+          ],
+        ),
+      );
+    }
+
     for (const userRole of changes.userRoles ?? []) {
       writes.push(
         this.databaseService!.query(
@@ -725,6 +955,147 @@ export class TenantPartnerRepository {
     await Promise.all(writes);
   }
 
+  async withTransaction<T>(work: (executor: PoolClient) => Promise<T>) {
+    if (!this.isEnabled()) {
+      throw new Error("DATABASE_URL is not configured");
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        this.logger.warn(
+          `Tenant-partner transaction rollback failed: ${
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : String(rollbackError)
+          }`,
+        );
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async loadQuotaPoliciesForUpdate(
+    executor: TenantPartnerQueryExecutor,
+    tenantId: string,
+    costCenterCode: string | null,
+  ) {
+    const { clause, values } = this.buildQuotaScopeClause(
+      tenantId,
+      costCenterCode,
+      "monthly",
+    );
+    const result = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM core.phase1_tenant_quota_policies
+        WHERE ${clause}
+        ORDER BY cost_center_code NULLS FIRST
+        FOR UPDATE
+      `,
+      values,
+    );
+
+    return result.rows.map((row) =>
+      this.parseRecord<TenantQuotaPolicyRecord>(
+        row.record,
+        "core.phase1_tenant_quota_policies",
+      ),
+    );
+  }
+
+  async ensureQuotaMonthlySnapshots(
+    executor: TenantPartnerQueryExecutor,
+    snapshots: readonly TenantQuotaMonthlySnapshotRecord[],
+  ) {
+    await Promise.all(
+      snapshots.map((snapshot) =>
+        executor.query(
+          `
+            INSERT INTO core.phase1_tenant_quota_monthly_snapshots (
+              tenant_id,
+              cost_center_code,
+              period,
+              period_key,
+              refreshed_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb
+            )
+            ON CONFLICT (tenant_id, cost_center_code, period, period_key) DO NOTHING
+          `,
+          [
+            snapshot.tenantId,
+            snapshot.costCenterCode,
+            snapshot.period,
+            snapshot.periodKey,
+            snapshot.refreshedAt,
+            JSON.stringify(snapshot),
+          ],
+        ),
+      ),
+    );
+  }
+
+  async loadQuotaMonthlySnapshotsForUpdate(
+    executor: TenantPartnerQueryExecutor,
+    tenantId: string,
+    costCenterCode: string | null,
+    periodKey: string,
+  ) {
+    const values: unknown[] = [tenantId, "monthly", periodKey];
+    let scopeClause = "cost_center_code IS NULL";
+    if (costCenterCode !== null) {
+      values.push(costCenterCode);
+      scopeClause = "(cost_center_code IS NULL OR cost_center_code = $4)";
+    }
+    const result = await executor.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM core.phase1_tenant_quota_monthly_snapshots
+        WHERE tenant_id = $1
+          AND period = $2
+          AND period_key = $3
+          AND ${scopeClause}
+        ORDER BY cost_center_code NULLS FIRST
+        FOR UPDATE
+      `,
+      values,
+    );
+
+    return result.rows.map((row) =>
+      this.parseRecord<TenantQuotaMonthlySnapshotRecord>(
+        row.record,
+        "core.phase1_tenant_quota_monthly_snapshots",
+      ),
+    );
+  }
+
+  async persistQuotaReservation(
+    executor: TenantPartnerQueryExecutor,
+    changes: {
+      quotaLedger?: readonly TenantQuotaLedgerEntry[];
+      quotaMonthlySnapshots?: readonly TenantQuotaMonthlySnapshotRecord[];
+    },
+  ) {
+    await Promise.all([
+      this.persistQuotaLedgerWithExecutor(executor, changes.quotaLedger ?? []),
+      this.persistQuotaSnapshotsWithExecutor(
+        executor,
+        changes.quotaMonthlySnapshots ?? [],
+      ),
+    ]);
+  }
+
   reportPersistenceFailure(error: unknown, context: string) {
     const detail = error instanceof Error ? error.message : String(error);
     this.logger.warn(
@@ -738,5 +1109,111 @@ export class TenantPartnerRepository {
     }
 
     return record as T;
+  }
+
+  private buildQuotaScopeClause(
+    tenantId: string,
+    costCenterCode: string | null,
+    period: TenantQuotaPeriod,
+  ) {
+    const values: unknown[] = [tenantId, period];
+    if (costCenterCode === null) {
+      return {
+        clause: "tenant_id = $1 AND period = $2 AND cost_center_code IS NULL",
+        values,
+      };
+    }
+
+    values.push(costCenterCode);
+    return {
+      clause:
+        "tenant_id = $1 AND period = $2 AND (cost_center_code IS NULL OR cost_center_code = $3)",
+      values,
+    };
+  }
+
+  private async persistQuotaLedgerWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    entries: readonly TenantQuotaLedgerEntry[],
+  ) {
+    await Promise.all(
+      entries.map((entry) =>
+        executor.query(
+          `
+            INSERT INTO core.phase1_tenant_quota_ledger (
+              ledger_entry_id,
+              tenant_id,
+              cost_center_code,
+              period_key,
+              dimension,
+              entry_type,
+              booking_id,
+              evaluation_id,
+              created_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb
+            )
+            ON CONFLICT (ledger_entry_id) DO UPDATE SET
+              tenant_id = EXCLUDED.tenant_id,
+              cost_center_code = EXCLUDED.cost_center_code,
+              period_key = EXCLUDED.period_key,
+              dimension = EXCLUDED.dimension,
+              entry_type = EXCLUDED.entry_type,
+              booking_id = EXCLUDED.booking_id,
+              evaluation_id = EXCLUDED.evaluation_id,
+              created_at = EXCLUDED.created_at,
+              record = EXCLUDED.record
+          `,
+          [
+            entry.ledgerEntryId,
+            entry.tenantId,
+            entry.costCenterCode,
+            entry.periodKey,
+            entry.dimension,
+            entry.entryType,
+            entry.bookingId,
+            entry.evaluationId,
+            entry.createdAt,
+            JSON.stringify(entry),
+          ],
+        ),
+      ),
+    );
+  }
+
+  private async persistQuotaSnapshotsWithExecutor(
+    executor: TenantPartnerQueryExecutor,
+    snapshots: readonly TenantQuotaMonthlySnapshotRecord[],
+  ) {
+    await Promise.all(
+      snapshots.map((snapshot) =>
+        executor.query(
+          `
+            INSERT INTO core.phase1_tenant_quota_monthly_snapshots (
+              tenant_id,
+              cost_center_code,
+              period,
+              period_key,
+              refreshed_at,
+              record
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb
+            )
+            ON CONFLICT (tenant_id, cost_center_code, period, period_key) DO UPDATE SET
+              refreshed_at = EXCLUDED.refreshed_at,
+              record = EXCLUDED.record
+          `,
+          [
+            snapshot.tenantId,
+            snapshot.costCenterCode,
+            snapshot.period,
+            snapshot.periodKey,
+            snapshot.refreshedAt,
+            JSON.stringify(snapshot),
+          ],
+        ),
+      ),
+    );
   }
 }

@@ -1054,6 +1054,387 @@ export interface DisableTenantCostCenterCommand {
   reason?: string | null;
 }
 
+export interface TenantCostCenterCoverageSample {
+  rawCostCenter: string;
+  occurrences: number;
+  suggestion: string | null;
+}
+
+export interface TenantCostCenterCoverageReport {
+  tenantId: string;
+  generatedAt: string;
+  totalBookings: number;
+  resolvedCount: number;
+  unresolvedCount: number;
+  disabledHits: number;
+  unresolvedSamples: TenantCostCenterCoverageSample[];
+}
+
+// --- Tenant Approval Rules ---
+export const TENANT_PRINCIPAL_KINDS = [
+  "tenant_user",
+  "tenant_role",
+  "cost_center_owner",
+  "tenant_finance_admin",
+  "tenant_admin",
+  "user", // Added from brief
+  "role", // Added from brief
+] as const;
+export type TenantPrincipalKind = (typeof TENANT_PRINCIPAL_KINDS)[number];
+
+export interface TenantPrincipalRef {
+  kind: TenantPrincipalKind | "user" | "role";
+  userId?: string;
+  roleCode?: string;
+  costCenterCode?: string;
+  displayName?: string | null;
+}
+
+export type TenantRuleApproverDescriptor = TenantPrincipalRef;
+
+export interface TenantResolvedApproverRecord {
+  descriptor: TenantRuleApproverDescriptor;
+  principal: TenantPrincipalRef | null;
+  displayName: string | null;
+  status: "resolved" | "unresolved";
+  reasonCode: string;
+}
+
+export const TENANT_APPROVAL_RULE_ACTIONS = [
+  "allow",
+  "warn",
+  "flag_manual_review",
+  "require_approval",
+  "block",
+] as const;
+export type TenantApprovalRuleAction =
+  (typeof TENANT_APPROVAL_RULE_ACTIONS)[number];
+
+export const TENANT_APPROVAL_MODES = [
+  "any_of",
+  "all_of_parallel",
+  "ordered_chain",
+] as const;
+export type TenantApprovalMode = (typeof TENANT_APPROVAL_MODES)[number];
+
+export const TENANT_APPROVAL_RULE_CONDITION_FIELDS = [
+  "booking.amount_minor",
+  "booking.business_dispatch_subtype",
+  "booking.vehicle_preference",
+  "booking.direction",
+  "booking.flight_no_present",
+  "booking.reservation_window_start",
+  "booking.passenger.role",
+  "booking.passenger.id",
+  "cost_center.code",
+  "cost_center.monthly_quota_remaining_amount_minor",
+  "cost_center.monthly_quota_remaining_percent",
+  "tenant.monthly_quota_remaining_amount_minor",
+  "tenant.monthly_quota_remaining_percent",
+] as const;
+export type TenantApprovalRuleConditionField =
+  (typeof TENANT_APPROVAL_RULE_CONDITION_FIELDS)[number];
+
+export const TENANT_APPROVAL_RULE_CONDITION_OPERATORS = [
+  "eq",
+  "neq",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "in",
+  "not_in",
+  "exists",
+  "equals",
+  "not_equals",
+  "greater_than",
+  "greater_than_or_equal",
+  "less_than",
+  "less_than_or_equal",
+] as const;
+export type TenantApprovalRuleConditionOperator =
+  (typeof TENANT_APPROVAL_RULE_CONDITION_OPERATORS)[number];
+
+export interface TenantApprovalRuleCondition {
+  field: TenantApprovalRuleConditionField;
+  op?: TenantApprovalRuleConditionOperator;
+  operator?: TenantApprovalRuleConditionOperator;
+  value?: string | number | boolean | Array<string | number | boolean> | null;
+  values?: Array<string | number | boolean>;
+}
+
+export type TenantApprovalFallbackPolicy =
+  | "auto_reject"
+  | "escalate_to_tenant_admin"
+  | "manual_ops_review";
+
+export interface TenantApprovalPlan {
+  approvalMode: TenantApprovalMode;
+  approvers: TenantPrincipalRef[];
+  timeoutHours: number;
+  fallbackPolicy: TenantApprovalFallbackPolicy;
+  escalationTarget: TenantPrincipalRef | null;
+}
+
+export interface TenantApprovalWarning {
+  source: "rule" | "quota";
+  code: string;
+  ruleId: string | null;
+  message: string;
+  messageCode?: string;
+}
+
+export interface TenantApprovalEvaluationInputSnapshot {
+  costCenterCode: string | null;
+  businessDispatchSubtype: string | null;
+  reservationWindowStart: string | null;
+  reservationWindowEnd?: string | null;
+  passengerId: string | null;
+  passengerRole: string | null;
+  amountMinor: number | null;
+  currency: string | null;
+  vehiclePreference: string | null;
+  direction?: string | null;
+  flightNoPresent?: boolean | null;
+  flightNo?: string | null;
+  partnerEntrySlug?: string | null;
+  eligibilityVerificationId?: string | null;
+  signoffRequired?: boolean | null;
+  expenseProofRequired?: boolean | null;
+}
+
+export interface TenantApprovalMatchedRuleResult {
+  ruleId: string;
+  ruleName: string;
+  priority: number;
+  action: TenantApprovalRuleAction;
+  approvalMode: TenantApprovalMode | null;
+  approvers: TenantPrincipalRef[];
+  matchedConditions: TenantApprovalRuleCondition[];
+  priorityAtEvaluation?: number;
+  resolvedApprovers?: TenantResolvedApproverRecord[];
+}
+
+export interface TenantApprovalRuleRecord {
+  ruleId: string;
+  tenantId: string;
+  ruleName?: string;
+  name?: string;
+  description?: string | null;
+  priority: number;
+  activeFlag: boolean;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  conditions: TenantApprovalRuleCondition[];
+  action: TenantApprovalRuleAction;
+  approvalMode: TenantApprovalMode | null;
+  approvers: TenantPrincipalRef[];
+  timeoutHoursOverride?: number | null;
+  fallbackPolicyOverride?: TenantApprovalFallbackPolicy | null;
+  disabledAt?: string | null;
+  disabledReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListTenantApprovalRulesQuery {
+  activeOnly?: boolean;
+  search?: string;
+  action?: TenantApprovalRuleAction;
+}
+
+export interface UpsertTenantApprovalRuleCommand {
+  ruleId?: string;
+  ruleName?: string;
+  name?: string;
+  description?: string | null;
+  priority: number;
+  activeFlag?: boolean;
+  effectiveFrom?: string | null;
+  effectiveUntil?: string | null;
+  conditions: TenantApprovalRuleCondition[];
+  action: TenantApprovalRuleAction;
+  approvalMode?: TenantApprovalMode | null;
+  approvers?: TenantPrincipalRef[];
+  timeoutHoursOverride?: number | null;
+  fallbackPolicyOverride?: TenantApprovalFallbackPolicy | null;
+  disabledReason?: string | null;
+}
+
+export interface ReorderTenantApprovalRulesCommand {
+  orderedRuleIds?: string[];
+  ruleIds?: string[];
+}
+
+export interface EvaluateTenantApprovalRuleCommand {
+  subject?: {
+    subjectType: "booking";
+    bookingId: string | null;
+    draftId: string | null;
+    operation: "create" | "update" | "cancel" | "dry_run";
+  };
+  inputSnapshot?: TenantApprovalEvaluationInputSnapshot;
+  quotaImpacts?: TenantBookingQuotaImpactResult[];
+  includeInactive?: boolean;
+  sampleBooking?: Partial<{
+    amountMinor: number | null;
+    businessDispatchSubtype: string | null;
+    vehiclePreference: string | null;
+    direction: string | null;
+    flightNoPresent: boolean | null;
+    flightNo: string | null;
+    reservationWindowStart: string | null;
+    passengerRole: string | null;
+    passengerId: string | null;
+    costCenterCode: string | null;
+    costCenterMonthlyQuotaRemainingAmountMinor: number | null;
+    costCenterMonthlyQuotaRemainingPercent: number | null;
+    tenantMonthlyQuotaRemainingAmountMinor: number | null;
+    tenantMonthlyQuotaRemainingPercent: number | null;
+  }>;
+}
+
+export interface TenantApprovalEvaluationResult {
+  evaluationId?: string;
+  tenantId?: string;
+  evaluatedAt: string;
+  subject?: {
+    subjectType: "booking";
+    bookingId: string | null;
+    draftId: string | null;
+    operation: "create" | "update" | "cancel" | "dry_run";
+  };
+  inputSnapshot?: TenantApprovalEvaluationInputSnapshot;
+  matchedRules: TenantApprovalMatchedRuleResult[];
+  quotaImpacts?: TenantBookingQuotaImpactResult[];
+  outcome?: {
+    decision: "allow" | "warn" | "require_approval" | "block" | "manual_review";
+    approvalRequired: boolean;
+    blocked: boolean;
+    warnings: TenantApprovalWarning[];
+    reasonCodes: string[];
+  };
+  approvalPlan?: TenantApprovalPlan | null;
+  auditSummary?: {
+    ruleVersionSnapshot: string;
+    quotaSnapshotVersion: string | null;
+    costCenterCode: string | null;
+  };
+  ruleSetVersion?: string;
+  finalAction?: TenantApprovalRuleAction;
+  hardBlockReasonCodes?: string[];
+  warnings?: TenantApprovalWarning[];
+}
+
+export const TENANT_APPROVAL_RULE_PRIORITY_STEP = 10;
+
+// --- Tenant Quotas ---
+export type TenantQuotaPeriod = "monthly";
+export type TenantQuotaEnforcementMode =
+  | "warn_only"
+  | "require_approval"
+  | "hard_block";
+
+export interface TenantQuotaLimit {
+  bookingCountLimit: number | null;
+  amountMinorLimit: number | null;
+  currency: string;
+  enforcementMode: TenantQuotaEnforcementMode;
+}
+
+export interface TenantQuotaUsage {
+  bookingCountReserved: number;
+  bookingCountConsumed: number;
+  amountMinorReserved: number;
+  amountMinorConsumed: number;
+  bookingCountRemaining: number | null;
+  amountMinorRemaining: number | null;
+  remainingPercent: number | null;
+}
+
+export interface TenantQuotaLedgerEntry {
+  ledgerEntryId: string;
+  tenantId: string;
+  costCenterCode: string | null;
+  periodKey: string;
+  dimension: "booking_count" | "amount_minor";
+  amount: number;
+  entryType: "reserve" | "release" | "consume" | "adjust";
+  bookingId: string;
+  evaluationId: string;
+  createdAt: string;
+}
+
+export interface TenantBookingQuotaImpactResult {
+  scope: "tenant" | "cost_center";
+  costCenterCode: string | null;
+  periodKey: string;
+  dimension: "booking_count" | "amount_minor";
+  remainingBefore: number | null;
+  delta: number;
+  remainingAfter: number | null;
+  limitValue: number | null;
+  remainingPercentAfter: number | null;
+  enforcementMode: TenantQuotaEnforcementMode;
+  triggered: "none" | "warn" | "approval" | "block";
+}
+
+export interface TenantQuotaPolicyRecord {
+  tenantId: string;
+  costCenterCode: string | null;
+  period: TenantQuotaPeriod;
+  limit: TenantQuotaLimit;
+  inheritedFromTenant: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpsertTenantQuotaPolicyCommand {
+  costCenterCode?: string | null;
+  period: TenantQuotaPeriod;
+  limit: TenantQuotaLimit;
+}
+
+export interface TenantQuotaSummary {
+  tenantId: string;
+  period: TenantQuotaPeriod;
+  periodKey: string;
+  limit: TenantQuotaLimit;
+  usage: TenantQuotaUsage;
+  refreshedAt: string;
+}
+
+export interface TenantCostCenterQuotaSummary {
+  tenantId: string;
+  costCenterCode: string;
+  period: TenantQuotaPeriod;
+  periodKey: string;
+  limit: TenantQuotaLimit;
+  usage: TenantQuotaUsage;
+  inheritedFromTenant: boolean;
+  refreshedAt: string;
+}
+
+export interface TenantBookingQuotaImpactQuery {
+  bookingId?: string | null;
+  costCenterCode?: string | null;
+  costCenter?: string | null;
+  estimatedAmountMinor?: number | null;
+  amountMinor?: number | null;
+  currency?: string;
+  reservationWindowStart: string;
+  tripStartsAt?: string;
+  businessDispatchSubtype?: string | null;
+}
+
+export interface TenantBookingQuotaImpactPreview {
+  evaluationId: string;
+  periodKey: string;
+  impacts: TenantBookingQuotaImpactResult[];
+  combinedTriggered: "none" | "warn" | "approval" | "block";
+}
+
+// --- Tenant User & Roles ---
 export type TenantUserRoleStatus = "invited" | "active" | "suspended";
 
 export interface TenantUserRoleRecord {
@@ -1085,6 +1466,7 @@ export interface TenantRoleCatalogRecord {
   assignable: boolean;
 }
 
+// --- Tenant API Keys ---
 export interface TenantApiKeyRecord {
   apiKeyId: string;
   tenantId: string;
@@ -1140,6 +1522,7 @@ export interface TenantApiKeyIssued {
   revokedApiKeyId: string | null;
 }
 
+// --- Tenant Webhooks ---
 export interface TenantWebhookGovernancePolicy {
   testEventType: string;
   autoDisableAfterConsecutiveFailures: number;
@@ -1160,6 +1543,7 @@ export interface TenantIntegrationGovernancePackage {
   onboardingChecklist: string[];
 }
 
+// --- Orders ---
 export const OWNED_ORDER_SOURCES = [
   "app",
   "web",
@@ -2844,6 +3228,7 @@ export interface ComplaintExportViewRecord {
   readyForAudit: boolean;
 }
 
+// --- Billing ---
 export const BILLING_DOCUMENT_STATUSES = ["draft", "issued", "paid"] as const;
 export type BillingDocumentStatus = (typeof BILLING_DOCUMENT_STATUSES)[number];
 
@@ -2873,6 +3258,11 @@ export interface InvoiceLineRecord {
   orderId: string;
   description: string;
   amount: MoneyAmount;
+  costCenterCode?: string | null;
+  costCenterName?: string | null;
+  ownerUserId?: string | null;
+  activeFlag?: boolean | null;
+  legacy_unmapped?: boolean;
   serviceBucket?: Phase1ServiceBucket;
   businessDispatchSubtype?: BusinessDispatchSubtype | null;
   channelKey?: string;
@@ -2997,6 +3387,7 @@ export interface MarkReimbursementPaidCommand {
   paidAt?: string;
 }
 
+// --- Reconciliation ---
 export const RECONCILIATION_ISSUE_TYPES = [
   "forwarder_status_mismatch",
   "partner_sponsor_mismatch",
@@ -3116,6 +3507,7 @@ export interface ReconciliationIssueRecord {
   updatedAt: string;
 }
 
+// --- Reports ---
 export const REPORT_OUTPUT_FORMATS = ["csv", "xlsx", "pdf", "zip"] as const;
 export type ReportOutputFormat = (typeof REPORT_OUTPUT_FORMATS)[number];
 
@@ -3228,6 +3620,11 @@ export interface PartnerRevenueSummaryRowRecord {
   orderId: string;
   orderNo: string;
   tenantId: string | null;
+  costCenterCode: string | null;
+  costCenterName: string | null;
+  ownerUserId: string | null;
+  activeFlag: boolean | null;
+  legacy_unmapped: boolean;
   partnerId: string;
   partnerProgramId: string | null;
   partnerEntrySlug: string;
@@ -3327,6 +3724,7 @@ export interface FilingPackageDetailRecord extends FilingPackageRecord {
   evidenceGovernance?: EvidenceSubjectGovernanceRecord | null;
 }
 
+// --- Forwarder Orders ---
 export const FORWARDED_ORDER_STATUSES = [
   "received",
   "broadcasted",

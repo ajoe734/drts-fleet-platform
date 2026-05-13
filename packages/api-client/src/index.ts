@@ -163,10 +163,21 @@ import type {
   TenantApiKeyRecord,
   TenantBillingProfile,
   TenantBootstrapSession,
+  TenantApprovalEvaluationResult,
+  TenantApprovalRuleRecord,
+  TenantBookingQuotaImpactPreview,
+  EvaluateTenantApprovalRuleCommand,
+  ListTenantApprovalRulesQuery,
+  ReorderTenantApprovalRulesCommand,
+  TenantCostCenterCoverageReport,
   TenantCostCenterRecord,
+  TenantCostCenterQuotaSummary,
   TenantIntegrationGovernancePackage,
   TenantInvoiceRecord,
   TenantPassengerRecord,
+  TenantQuotaLedgerEntry,
+  TenantQuotaPolicyRecord,
+  TenantQuotaSummary,
   TenantRoleCatalogRecord,
   TenantUserRoleRecord,
   TenantWebhookEndpoint,
@@ -191,8 +202,10 @@ import type {
   UpdateTenantWebhookEndpointCommand,
   UpdateVehicleComplianceCommand,
   UpsertTenantAddressCommand,
+  UpsertTenantApprovalRuleCommand,
   UpsertTenantCostCenterCommand,
   UpsertTenantPassengerCommand,
+  UpsertTenantQuotaPolicyCommand,
   VehicleContractRecord,
   VehicleRegistryRecord,
   VerifyPartnerEligibilityCommand,
@@ -303,6 +316,13 @@ export class ApiClient {
    */
   async patch<T>(path: string, options?: RequestOptions): Promise<T> {
     return this.request<T>("PATCH", path, options);
+  }
+
+  /**
+   * Generic PUT with envelope unwrapping.
+   */
+  async put<T>(path: string, options?: RequestOptions): Promise<T> {
+    return this.request<T>("PUT", path, options);
   }
 
   /**
@@ -1258,6 +1278,12 @@ export class ApiClient {
     );
   }
 
+  async getTenantCostCenterCoverageReport(): Promise<TenantCostCenterCoverageReport> {
+    return this.get<TenantCostCenterCoverageReport>(
+      "/api/tenant/cost-centers/coverage",
+    );
+  }
+
   async upsertCostCenter(
     command: UpsertTenantCostCenterCommand,
   ): Promise<TenantCostCenterRecord> {
@@ -1272,6 +1298,137 @@ export class ApiClient {
     return this.post<TenantCostCenterRecord>(
       "/api/tenant/cost-centers/disable",
       { body: command },
+    );
+  }
+
+  async getTenantQuotaSummary(): Promise<TenantQuotaSummary> {
+    return this.get<TenantQuotaSummary>("/api/tenant/quotas");
+  }
+
+  async getCostCenterQuotaSummary(
+    code: string,
+  ): Promise<TenantCostCenterQuotaSummary> {
+    return this.get<TenantCostCenterQuotaSummary>(
+      `/api/tenant/cost-centers/${encodeURIComponent(code)}/quota`,
+    );
+  }
+
+  async getTenantCostCenterQuota(
+    code: string,
+  ): Promise<TenantCostCenterQuotaSummary> {
+    return this.getCostCenterQuotaSummary(code);
+  }
+
+  async upsertTenantQuotaPolicy(
+    command: UpsertTenantQuotaPolicyCommand,
+  ): Promise<TenantQuotaPolicyRecord> {
+    return this.post<TenantQuotaPolicyRecord>("/api/tenant/quotas/policies", {
+      body: command,
+    });
+  }
+
+  async previewTenantBookingQuotaImpact(options: {
+    amountMinor?: number;
+    estimatedAmountMinor?: number;
+    costCenter?: string;
+    costCenterCode?: string;
+    currency?: string;
+    tripStartsAt?: string;
+    reservationWindowStart: string;
+    bookingId?: string | null;
+  }): Promise<TenantBookingQuotaImpactPreview> {
+    return this.post<TenantBookingQuotaImpactPreview>(
+      "/api/tenant/quotas/preview",
+      {
+        body: {
+          bookingId: options.bookingId,
+          costCenterCode: options.costCenterCode ?? options.costCenter,
+          estimatedAmountMinor:
+            options.estimatedAmountMinor ?? options.amountMinor ?? null,
+          currency: options.currency,
+          reservationWindowStart: options.reservationWindowStart,
+        },
+      },
+    );
+  }
+
+  async listTenantQuotaLedger(
+    options: {
+      periodKey?: string;
+      costCenterCode?: string;
+      bookingId?: string;
+    } = {},
+  ): Promise<TenantQuotaLedgerEntry[]> {
+    const params = new URLSearchParams();
+    if (options.periodKey) {
+      params.set("periodKey", options.periodKey);
+    }
+    if (options.costCenterCode) {
+      params.set("costCenterCode", options.costCenterCode);
+    }
+    if (options.bookingId) {
+      params.set("bookingId", options.bookingId);
+    }
+
+    return this.getList<TenantQuotaLedgerEntry>(
+      `/api/tenant/quotas/ledger${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async listApprovalRules(
+    query: ListTenantApprovalRulesQuery = {},
+  ): Promise<TenantApprovalRuleRecord[]> {
+    const params = new URLSearchParams();
+    if (query.activeOnly) {
+      params.set("activeOnly", "true");
+    }
+    if (query.search) {
+      params.set("search", query.search);
+    }
+    if (query.action) {
+      params.set("action", query.action);
+    }
+    return this.getList<TenantApprovalRuleRecord>(
+      `/api/tenant/approval-rules${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async upsertApprovalRule(
+    command: UpsertTenantApprovalRuleCommand,
+    ruleId?: string,
+  ): Promise<TenantApprovalRuleRecord> {
+    if (ruleId) {
+      return this.put<TenantApprovalRuleRecord>(
+        `/api/tenant/approval-rules/${encodeURIComponent(ruleId)}`,
+        { body: command },
+      );
+    }
+    return this.post<TenantApprovalRuleRecord>("/api/tenant/approval-rules", {
+      body: command,
+    });
+  }
+
+  async reorderApprovalRules(
+    command: ReorderTenantApprovalRulesCommand,
+  ): Promise<TenantApprovalRuleRecord[]> {
+    return this.post<TenantApprovalRuleRecord[]>(
+      "/api/tenant/approval-rules/reorder",
+      { body: command },
+    );
+  }
+
+  async evaluateApprovalRules(
+    command: EvaluateTenantApprovalRuleCommand,
+  ): Promise<TenantApprovalEvaluationResult> {
+    return this.post<TenantApprovalEvaluationResult>(
+      "/api/tenant/approval-rules/evaluate",
+      { body: command },
+    );
+  }
+
+  async disableApprovalRule(ruleId: string): Promise<TenantApprovalRuleRecord> {
+    return this.post<TenantApprovalRuleRecord>(
+      `/api/tenant/approval-rules/${encodeURIComponent(ruleId)}/disable`,
     );
   }
 
