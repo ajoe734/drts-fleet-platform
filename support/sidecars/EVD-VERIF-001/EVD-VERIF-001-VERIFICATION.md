@@ -1,8 +1,8 @@
 # EVD-VERIF-001 Verification
 
 - Task: `EVD-VERIF-001`
-- Owner: `Codex2`
-- Reviewer: `Codex`
+- Owner: `Codex`
+- Reviewer: `Codex2`
 - Date: `2026-05-13`
 - Mutates canonical: `false`
 - Scope: support-only verification of the existing dev-fixture chain for CTI call -> linked order -> recording attachment -> complaint case -> filing packet, with evidence-retention and legal-hold checks.
@@ -15,6 +15,7 @@ Verdict: `partial_pass`
 - Retention and legal-hold policy is present and queryable in repo-local governance surfaces.
 - The external-evidence portions are not live-wired to real CTI media storage, recording bucket storage, or a regulator filing portal.
 - The current filing package does **not** assemble complaint/call/order/recording evidence into a regulator-ready packet schema; it only builds a generic immutable manifest plus signed URLs.
+- On current `HEAD`, the `apps/api` verification tests pass, but the repo-root `tests/unit/reporting-filing.test.ts` integration-style fixture suite is no longer green; this report treats that as reproducibility evidence, not as a sidecar-owned production fix.
 
 ## Acceptance Mapping
 
@@ -25,12 +26,12 @@ Status: `pass_with_scope_limits`
 Observed repo-local chain:
 
 1. `OwnedMobilityService.createCallCenterOrder()` creates a phone order, stores `callId` / optional `recordingId`, and links the order back into `CallcenterService` via `linkOrderToCallSession()`. Reference: `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:352-470`.
-2. `CallcenterService.attachRecordingCallback()` can later attach the recording callback to the call session; `OwnedMobilityService.handleCallRecordingAttached()` listens for that event and upgrades the order from `recording_pending` to `ready_for_dispatch`, persisting `recordingId`. Reference: `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:690-747`.
+2. `CallcenterService.attachRecordingCallback()` can later attach the recording callback to the call session; `OwnedMobilityService.handleCallRecordingAttached()` listens for that event and upgrades the order from `recording_pending` to `ready_for_dispatch`, persisting `recordingId`. Reference: `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:765-822`.
 3. `CallcenterController.transferCallToComplaint()` creates a complaint case from the call session and links the new `caseNo` back to the call session. Reference: `apps/api/src/modules/callcenter/callcenter.controller.ts:173-203`.
 4. `ReportingFilingService` can generate:
    - a dispatch recording index report from the order feed, including `callId`, `recordingId`, and `missingRecording` rows
    - a filing package with immutable manifest metadata and signed download URLs
-     Reference: `tests/unit/reporting-filing.test.ts:120-163`, `apps/api/src/modules/reporting-filing/reporting-filing.service.ts:653-730`.
+     Reference: `tests/unit/reporting-filing.test.ts:47-105`, `tests/unit/reporting-filing.test.ts:120-211`, `apps/api/src/modules/reporting-filing/reporting-filing.service.ts:653-740`.
 
 Important limit:
 
@@ -43,15 +44,16 @@ Status: `partial_pass`
 What is verified:
 
 - Retention policy exists for `call_recording`, `report_artifact`, and `filing_package`, with the expected hot retention, archive cutover, archive retention, audit action, and legal-hold support. Reference: `docs/03-runbooks/evidence-retention-and-evidentiary-access-policy.md`, `apps/api/src/common/evidence-governance.ts`.
-- `AuditNotificationService.getEvidenceSubjectGovernance()` suppresses deletion when active legal holds or deletion exceptions exist. Reference: `apps/api/src/modules/audit-notification/audit-notification.service.ts:481-524`.
+- `AuditNotificationService.getEvidenceSubjectGovernance()` suppresses deletion when active legal holds or deletion exceptions exist. Reference: `apps/api/src/modules/audit-notification/audit-notification.service.ts:652-695`.
 - Unit coverage proves legal holds and deletion exceptions surface on report-artifact and filing-package detail views. Reference: `apps/api/tests/unit/reporting-filing.service.test.ts:209-307`.
 - Dispatch recording index rows do carry recording evidence indicators, including masked `callId`, masked `recordingId`, and `missingRecording`. Reference: `apps/api/tests/unit/reporting-filing.service.test.ts:39-81`, `tests/unit/reporting-filing.test.ts:120-211`.
 
 What is **not** verified / fails the stricter acceptance intent:
 
-- The filing package payload is generic. `completeFilingPackage()` only emits `itemType`, `artifactId`, `manifestHash`, package checksum, and signed URLs; it does not include complaint case data, call metadata, linked order identifiers, recording references, retention annotations, legal-hold state, or a regulator-specific schema envelope. Reference: `apps/api/src/modules/reporting-filing/reporting-filing.service.ts:653-730`.
-- For `audit_request`, the package item types are only `audit_summary` and `statistics`; there is no CTI recording artifact, complaint export, or filing-portal submission record in the assembled packet. Reference: `apps/api/src/modules/reporting-filing/reporting-filing.service.ts:933-936`.
+- The filing package payload is generic. `completeFilingPackage()` only emits `itemType`, `artifactId`, `manifestHash`, package checksum, and signed URLs; it does not include complaint case data, call metadata, linked order identifiers, recording references, retention annotations, legal-hold state, or a regulator-specific schema envelope. Reference: `apps/api/src/modules/reporting-filing/reporting-filing.service.ts:653-740`.
+- For `audit_request`, the package item types are only `audit_summary` and `statistics`; there is no CTI recording artifact, complaint export, or filing-portal submission record in the assembled packet. Reference: `apps/api/src/modules/reporting-filing/reporting-filing.service.ts:881-884`.
 - Legal hold is honored at the repo-local governance/view layer, but there is no archival worker or deletion worker here to prove that a real purge/retention process is actively skipping held evidence.
+- The broader repo-root fixture suite that most closely resembles a stitched end-to-end check is currently drifted on `HEAD`, so the support report cannot claim a clean all-green verification chain even in mocked mode. Reference: `tests/unit/reporting-filing.test.ts:47-105`, `tests/unit/reporting-filing.test.ts:108-220`, `tests/unit/reporting-filing.test.ts:223-303`.
 
 ### 3. Identify any gap where external-system evidence is mocked rather than wired to a real adapter
 
@@ -61,7 +63,7 @@ Confirmed gaps:
 
 - CTI recording media is still external-only by description. The governance policy explicitly states that binary call media remains in CTI/provider storage and repo-local authority keeps only metadata and masked references. Reference: `apps/api/src/common/evidence-governance.ts`.
 - Recording attachment is simulated through `attachRecordingCallback()` with caller-supplied `providerRecordingRef` and `recordingUrl`; there is no outbound CTI adapter, callback signature validation, or provider fetch. Reference: `tests/unit/callcenter.test.ts:89-118`.
-- Report artifacts and filing packages are generated in-process from hashed payloads and signed URLs; there is no recording bucket write, object-store manifest, or regulator filing transport. Reference: `apps/api/src/modules/reporting-filing/reporting-filing.service.ts:653-730`, `tests/unit/reporting-filing.test.ts:55-118`.
+- Report artifacts and filing packages are generated in-process from hashed payloads and signed URLs; there is no recording bucket write, object-store manifest, or regulator filing transport. Reference: `apps/api/src/modules/reporting-filing/reporting-filing.service.ts:653-740`, `tests/unit/reporting-filing.test.ts:47-105`.
 - The evidence-retention runbook itself marks `call_recording` and `filing_package` activation as repo-static until `EXT-004` blocker evidence exists. Reference: `docs/03-runbooks/evidence-retention-and-evidentiary-access-policy.md`.
 
 ### 4. Verification report is support-only; no production code change
@@ -93,6 +95,14 @@ Status: `pass`
 - No active retention executor:
   retention/legal hold policy is enforced in read/governance metadata, not proven through archival or deletion jobs.
 
+### Current HEAD reproducibility notes
+
+- `apps/api` unit verification is reproducible on current `HEAD`.
+- The repo-root fixture suite is not fully reproducible on current `HEAD`; the failing assertions are themselves useful evidence of semantic drift:
+  - `tests/unit/reporting-filing.test.ts:103-105` still expects the first audit log entry to be `generate_filing_package_completed`, but the current behavior emits `issue_filing_package_download` first once signed-download metadata is issued.
+  - `tests/unit/reporting-filing.test.ts:202-217` expects raw `callId` / `recordingId` values, but current reporting masks those identifiers per evidence-governance policy.
+  - `tests/unit/reporting-filing.test.ts:248-303` depends on an older tenant-booking fixture shape; current owned-mobility logic rejects the booking unless eligibility context is resolved in the newer path.
+
 ## Overall Conclusion
 
 `EVD-VERIF-001` demonstrates that the repo contains enough fixture wiring to simulate the chain and enough governance metadata to describe retention and legal-hold rules. It does **not** demonstrate a live external-evidence pipeline.
@@ -101,10 +111,11 @@ The highest-signal gap is the filing packet: current implementation produces an 
 
 ## Verification Commands
 
-Planned / executed commands for this verification slice:
+Executed commands for this verification slice on `2026-05-13`:
 
 ```bash
-pnpm --filter @drts/api exec vitest run apps/api/tests/unit/callcenter.service.test.ts apps/api/tests/unit/reporting-filing.service.test.ts apps/api/tests/unit/evidence-governance.test.ts apps/api/tests/unit/audit-notification.service.test.ts tests/unit/reporting-filing.test.ts tests/unit/callcenter.test.ts
+pnpm --filter @drts/api exec vitest run tests/unit/callcenter.service.test.ts tests/unit/reporting-filing.service.test.ts tests/unit/evidence-governance.test.ts tests/unit/audit-notification.service.test.ts
+pnpm exec vitest run tests/unit/reporting-filing.test.ts tests/unit/callcenter.test.ts
 ```
 
 Results:
@@ -112,4 +123,17 @@ Results:
 - `pnpm --filter @drts/api exec vitest run tests/unit/callcenter.service.test.ts tests/unit/reporting-filing.service.test.ts tests/unit/evidence-governance.test.ts tests/unit/audit-notification.service.test.ts`
   - `4` files passed, `16` tests passed
 - `pnpm exec vitest run tests/unit/reporting-filing.test.ts tests/unit/callcenter.test.ts`
-  - `2` files passed, `9` tests passed
+  - `tests/unit/callcenter.test.ts` passed
+  - `tests/unit/reporting-filing.test.ts` failed with `3` failing assertions on current `HEAD`
+  - failure classes:
+    - audit-log ordering expectation drift
+    - masked recording identifiers vs raw identifier expectation drift
+    - tenant booking fixture / eligibility path drift
+
+Rejected command shape from the prior review note:
+
+```bash
+pnpm --filter @drts/api exec vitest run apps/api/tests/unit/callcenter.service.test.ts apps/api/tests/unit/reporting-filing.service.test.ts apps/api/tests/unit/evidence-governance.test.ts apps/api/tests/unit/audit-notification.service.test.ts
+```
+
+- Under `--filter @drts/api`, the package root is already `apps/api`, so the `apps/api/tests/...` path form is incorrect and exits with `No test files found`.
