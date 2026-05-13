@@ -75,6 +75,8 @@ function buildPlatformSections(
           home: "Governance queue, cross-module shortcuts, and the latest sensitive platform activity.",
           health:
             "Platform alerts, adapter degradation, and health thresholds that need operator review.",
+          tenantGovernanceSummary:
+            "Cross-tenant cost center, rule, quota, and approval health in one monitoring lane.",
           tenants:
             "Tenant lifecycle, rollout posture, modules, and quota governance.",
           partners:
@@ -101,6 +103,8 @@ function buildPlatformSections(
       : {
           home: "治理待辦、跨模組捷徑，以及最新的平台高敏感操作。",
           health: "平台告警、adapter 降級，以及需要治理人檢視的健康門檻。",
+          tenantGovernanceSummary:
+            "把跨 tenant 的 cost center、規則、quota 與 approval 健康彙總在同一條監控工作面。",
           tenants: "租戶生命週期、rollout 姿態、模組與配額治理。",
           partners: "合作夥伴 entry readiness、憑證狀態與 promotion 安全檢查。",
           users: "平台人員身分、邀請狀態與 control plane 角色治理。",
@@ -139,6 +143,12 @@ function buildPlatformSections(
       key: "tenant-governance",
       title: sectionTitles.tenantGovernance,
       items: [
+        {
+          href: "/tenant-governance",
+          label: t("nav.tenantGovernance"),
+          icon: <ShieldCheck size={16} />,
+          note: notes.tenantGovernanceSummary,
+        },
         {
           href: "/tenants",
           label: t("nav.tenants"),
