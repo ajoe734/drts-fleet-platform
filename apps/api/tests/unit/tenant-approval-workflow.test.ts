@@ -6,6 +6,7 @@ import type {
 } from "@drts/contracts";
 
 import {
+  APPROVAL_REEVALUATION_FIELDS,
   computeApprovalRequestStatus,
   resolveApprovalApproverUserIds,
   resolveApprovalModeForExecution,
@@ -155,6 +156,95 @@ describe("tenant approval workflow helpers", () => {
       shouldReevaluateTenantBookingApproval(
         previous,
         createSnapshot({ amountMinor: previous.amountMinor }),
+      ),
+    ).toBe(false);
+  });
+
+  it("matches the design response §Q5 trigger whitelist exactly", () => {
+    // Snapshot-level proxies for the design response §Q5 field names.
+    // amountMinor is the canonical snapshot form of booking.quotedFare;
+    // passengerRole is the snapshot form of booking.passenger.role.
+    expect([...APPROVAL_REEVALUATION_FIELDS].sort()).toEqual(
+      [
+        "amountMinor",
+        "businessDispatchSubtype",
+        "costCenterCode",
+        "eligibilityVerificationId",
+        "expenseProofRequired",
+        "partnerEntrySlug",
+        "passengerId",
+        "passengerRole",
+        "reservationWindowEnd",
+        "reservationWindowStart",
+        "signoffRequired",
+        "vehiclePreference",
+      ].sort(),
+    );
+  });
+
+  it.each(APPROVAL_REEVALUATION_FIELDS.map((field) => [field]))(
+    "triggers re-evaluation when %s changes",
+    (field) => {
+      const previous = createSnapshot();
+      const overrides: Partial<TenantApprovalEvaluationInputSnapshot> = {};
+      switch (field) {
+        case "costCenterCode":
+          overrides.costCenterCode = "CC-FIN-99";
+          break;
+        case "businessDispatchSubtype":
+          overrides.businessDispatchSubtype = "premium_dispatch";
+          break;
+        case "reservationWindowStart":
+          overrides.reservationWindowStart = "2026-06-13T10:00:00.000Z";
+          break;
+        case "reservationWindowEnd":
+          overrides.reservationWindowEnd = "2026-06-13T11:00:00.000Z";
+          break;
+        case "passengerId":
+          overrides.passengerId = "passenger-demo-099";
+          break;
+        case "passengerRole":
+          overrides.passengerRole = "executive";
+          break;
+        case "amountMinor":
+          overrides.amountMinor = (previous.amountMinor ?? 0) + 50_000;
+          break;
+        case "vehiclePreference":
+          overrides.vehiclePreference = "sedan";
+          break;
+        case "partnerEntrySlug":
+          overrides.partnerEntrySlug = "partner-acme";
+          break;
+        case "eligibilityVerificationId":
+          overrides.eligibilityVerificationId = "evi-99";
+          break;
+        case "signoffRequired":
+          overrides.signoffRequired = !previous.signoffRequired;
+          break;
+        case "expenseProofRequired":
+          overrides.expenseProofRequired = !previous.expenseProofRequired;
+          break;
+      }
+      expect(
+        shouldReevaluateTenantBookingApproval(
+          previous,
+          createSnapshot(overrides),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("does not re-evaluate when only non-trigger snapshot fields differ", () => {
+    const previous = createSnapshot();
+    // currency is the only snapshot field intentionally excluded from the §Q5
+    // trigger whitelist; verifying it confirms non-whitelisted snapshot fields
+    // do not sneak in. Operational fields not present in the snapshot at all —
+    // notes / terminal / luggageCount / onsiteContact / bookedBy — are
+    // structurally excluded and cannot trigger re-evaluation.
+    expect(
+      shouldReevaluateTenantBookingApproval(
+        previous,
+        createSnapshot({ currency: "USD" }),
       ),
     ).toBe(false);
   });
