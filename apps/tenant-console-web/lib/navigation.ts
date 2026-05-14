@@ -43,6 +43,11 @@ export const tenantNavGroups: TenantNavGroup[] = [
         label: "Addresses",
         note: "Tenant address book — saved pickups, drop-offs, tags, and ownership.",
       },
+      {
+        href: "/cost-centers",
+        label: "Cost Centers",
+        note: "Tenant cost-center directory — owner assignment, quota posture, and coverage follow-up.",
+      },
     ],
   },
   {

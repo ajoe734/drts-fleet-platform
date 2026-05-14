@@ -206,6 +206,11 @@ textarea {
   color: #ffffff;
 }
 
+.status-chip.is-warning {
+  background: rgba(139, 94, 20, 0.14);
+  color: var(--warning);
+}
+
 .status-chip span,
 .status-badge span {
   opacity: 0.72;
