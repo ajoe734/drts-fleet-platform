@@ -1,0 +1,62 @@
+groups:
+  - name: tenant-governance
+    rules:
+      - alert: TenantGovernanceQuotaUsageHigh
+        expr: max by (tenant_id) (tenant_governance_quota_usage_percent) > 95
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          domain: tenant_governance
+        annotations:
+          summary: Tenant quota usage exceeded 95%
+          description: "tenant_id={{ $labels.tenant_id }} is above 95% monthly quota usage."
+          runbook: docs/03-runbooks/operational-observability-alert-runbook.md#tenant-governance-alerts
+
+      - alert: TenantGovernancePendingApprovalP95AgeHigh
+        expr: max by (tenant_id) (tenant_governance_approval_pending_age_hours{quantile="p95"}) > 24
+        for: 15m
+        labels:
+          severity: warning
+          team: ops
+          domain: tenant_governance
+        annotations:
+          summary: Pending approval p95 age exceeded 24 hours
+          description: "tenant_id={{ $labels.tenant_id }} has p95 pending approval age above 24 hours."
+          runbook: docs/03-runbooks/operational-observability-alert-runbook.md#tenant-governance-alerts
+
+      - alert: TenantGovernancePendingApprovalOldestCritical
+        expr: max by (tenant_id) (tenant_governance_approval_pending_age_hours{quantile="max"}) > 48
+        for: 15m
+        labels:
+          severity: critical
+          team: ops
+          domain: tenant_governance
+        annotations:
+          summary: Pending approval age exceeded 48 hours
+          description: "tenant_id={{ $labels.tenant_id }} has at least one approval pending longer than 48 hours."
+          runbook: docs/03-runbooks/operational-observability-alert-runbook.md#tenant-governance-alerts
+
+      - alert: TenantGovernanceEvaluatorLatencyHigh
+        expr: max by (tenant_id) (tenant_governance_approval_evaluator_latency_ms{quantile="p95"}) > 200
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+          domain: tenant_governance
+        annotations:
+          summary: Approval evaluator p95 latency exceeded 200ms
+          description: "tenant_id={{ $labels.tenant_id }} has approval evaluator p95 latency above 200ms."
+          runbook: docs/03-runbooks/operational-observability-alert-runbook.md#tenant-governance-alerts
+
+      - alert: TenantGovernanceQuotaRaceFailuresHigh
+        expr: sum by (tenant_id) (increase(tenant_governance_quota_race_failure_total[1m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          team: platform
+          domain: tenant_governance
+        annotations:
+          summary: Quota race failures exceeded 10 per minute
+          description: "tenant_id={{ $labels.tenant_id }} is seeing more than 10 QUOTA_INSUFFICIENT_AT_COMMIT failures per minute."
+          runbook: docs/03-runbooks/operational-observability-alert-runbook.md#tenant-governance-alerts
