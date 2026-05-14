@@ -1,6 +1,6 @@
 # Tenant Console Redesign — Wave 3 Closeout (2026-05-14)
 
-Owner: Claude · Reviewer of record (this closeout): Copilot
+Owner: Claude · Reviewer of record (this closeout): Codex
 Task: `TEN-UI-RD-099`
 Planning ref: [`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`](./drts-ui-redesign-workbreakdown-20260510.md)
 Parity decisions companion: [`docs/05-ui/tenant-console-parity-decisions-20260510.md`](./tenant-console-parity-decisions-20260510.md)
@@ -354,7 +354,7 @@ publications that unblocked them (`BE-CC-001`, `BE-RULE-001`,
 
 ## Reviewer signoff for TEN-UI-RD-099
 
-The reviewer (Copilot) is asked to confirm only that the matrix above is
+The reviewer (Codex) is asked to confirm only that the matrix above is
 internally consistent with `ai-status.json` and `ai-activity-log.jsonl` —
 i.e. each `(reviewer, approved-at, commit_hash, push_branch)` tuple in the
 matrix matches the machine truth on the cited branches, the cited canvas
