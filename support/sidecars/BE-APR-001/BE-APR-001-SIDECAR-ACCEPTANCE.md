@@ -1,272 +1,118 @@
-# BE-APR-001 Sidecar Acceptance Packet
+# Sidecar Acceptance Packet: BE-APR-001
 
-**Sidecar Kind:** `acceptance_packet`
-**Parent Task:** `BE-APR-001` - Tenant Booking Approval Workflow
-**Parent Owner:** `Codex`
-**Parent Reviewer:** `Codex2`
-**Sidecar Owner:** `Codex2`
-**Sidecar Reviewer:** `Codex`
-**Generated:** `2026-05-13` (UTC)
-**Snapshot anchor (parent `last_update`):** `2026-05-13T17:07:22Z`
-**Snapshot anchor (sidecar `last_update`):** `2026-05-13T17:13:55Z`
-**Status:** `ACCEPTANCE SUPPORT ARTIFACT` - support-only; does not modify canonical truth, runtime behavior, or parent lifecycle fields.
+- **Parent Task:** `BE-APR-001` (`Tenant Booking Approval Workflow`)
+- **Sidecar Task:** `BE-APR-001-SIDECAR-ACCEPTANCE`
+- **Status:** `in_progress`
+- **Owner:** `Codex`
+- **Reviewer:** `Codex2`
+- **Parent Owner:** `Claude2`
+- **Parent Reviewer:** `Codex`
+- **Scope Guardrail:** support artifact only; no canonical truth or runtime implementation changes
+- **Primary Machine Truth:** `ai-status.json`
+- **Reference Planning Doc:** `docs/03-runbooks/tenant-governance-wave-execution-packet-20260513.md` (§2, §3, §4.4, §5, §7)
 
-This packet is reviewer support only. It translates the current
-`ai-status.json` acceptance bar for `BE-APR-001` into a concrete checklist,
-pins the hard dependencies on `BE-RULE-001` and `BE-QUOTA-001`, maps the
-downstream unblock edges, and records the current in-flight implementation
-signals already visible in the worktree so the reviewer can focus on
-completeness and regression risk instead of rediscovering scope.
+## 1. Purpose
 
-Transient lifecycle truth (`status`, `next`, `last_update`, handoff messages,
-commit/push evidence) remains authoritative only in `ai-status.json` and
-`ai-activity-log.jsonl`. If those values drift after this packet was generated,
-machine truth wins.
+This packet refreshes the acceptance checklist and dependency map for `BE-APR-001` using current machine truth plus repo-visible APR implementation anchors already present on `HEAD`.
 
----
+It is reviewer support only. Canonical lifecycle truth stays in `ai-status.json` and `ai-activity-log.jsonl`; this file only helps `Codex` review the parent slice without re-discovering upstream gates, planning requirements, and already-landed source surfaces.
 
-## 1. Scope Boundary
+## 2. Machine-Truth Snapshot
 
-In scope:
+Snapshot below is aligned to the current `ai-status.json` state captured during this pass.
 
-- restate the parent acceptance checklist from `ai-status.json`
-- pin the upstream dependency edges from `BE-RULE-001` and `BE-QUOTA-001`
-- map each acceptance item to the code surfaces the reviewer should inspect
-- record visible worktree signals and current implementation gaps relevant to
-  reviewer handoff
+| Task ID                         | Status        | Owner     | Reviewer  | Notes                                                                                                                     |
+| ------------------------------- | ------------- | --------- | --------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `BE-RULE-001`                   | `done`        | `Codex`   | `Codex2`  | Approval-rule evaluator/types are closed and pushed.                                                                      |
+| `BE-QUOTA-001`                  | `done`        | `Codex`   | `Claude2` | Quota ledger/read-model is closed and pushed.                                                                             |
+| `BE-APR-001`                    | `in_progress` | `Claude2` | `Codex`   | Parent implementation is active and currently carries reviewer-blocked follow-up findings against the APR acceptance bar. |
+| `BE-APR-001-SIDECAR-ACCEPTANCE` | `in_progress` | `Codex`   | `Codex2`  | This support packet only; no canonical/runtime edits allowed.                                                             |
+| `BE-INTEG-001`                  | `todo`        | `Claude`  | `Codex2`  | Follows after APR; depends directly on this parent task.                                                                  |
+| `BE-APR-NOTIFY-001`             | `backlog`     | `Codex`   | `Codex2`  | Notification fan-out remains blocked on APR done.                                                                         |
 
-Out of scope:
+Direct machine-truth facts for the sidecar:
 
-- editing L1/L2 product truth, `ai-status.json`, `current-work.md`, or any
-  parent implementation file
-- approving or modifying sibling slices `BE-RULE-001` or `BE-QUOTA-001`
-- replacing the parent's own executable verification, commit evidence, or
-  canonical handoff
-
----
-
-## 2. Machine Truth Anchors
-
-### 2.1 Sidecar task snapshot
-
-Machine-truth row: `ai-status.json` -> `BE-APR-001-SIDECAR-ACCEPTANCE`
-
-- owner=`Codex2`
-- reviewer=`Codex`
-- status=`in_progress`
-- depends_on=`[BE-RULE-001, BE-QUOTA-001]`
-- helper_parent=`BE-APR-001`
-- helper_kind=`acceptance_packet`
-- mutates_canonical=`false`
-- artifact=`support/sidecars/BE-APR-001/BE-APR-001-SIDECAR-ACCEPTANCE.md`
+- `depends_on`: `BE-RULE-001`, `BE-QUOTA-001`
+- `artifact`: `support/sidecars/BE-APR-001/BE-APR-001-SIDECAR-ACCEPTANCE.md`
 - acceptance:
   - `Create support artifacts only`
   - `Do not edit canonical truth`
   - `Hand off the packet to the assigned reviewer`
 
-### 2.2 Parent task snapshot
+## 3. Dependency Map
 
-Machine-truth row: `ai-status.json` -> `BE-APR-001`
+### 3.1 Direct hard dependencies
 
-- title=`Tenant Booking Approval Workflow`
-- owner=`Codex`
-- reviewer=`Codex2`
-- status=`in_progress`
-- depends_on=`[BE-RULE-001, BE-QUOTA-001]`
-- planning_ref=`docs/03-runbooks/tenant-governance-wave-execution-packet-20260513.md`
-- unblocks=`[TEN-UI-RD-010, TEN-UI-RD-099]`
-- mutates_canonical=`true`
-- artifacts:
-  - `packages/contracts/src/index.ts`
-  - `apps/api/src/modules/tenant-partner/tenant-partner.service.ts`
-  - `apps/api/src/modules/tenant-partner/tenant-approval-workflow.ts`
-  - `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`
-  - `apps/api/src/modules/tenant-partner/tenant-partner.repository.ts`
-  - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
-  - `packages/api-client/src/index.ts`
-  - `apps/api/tests/unit/tenant-approval-workflow.test.ts`
-  - `apps/api/tests/unit/owned-mobility.service.test.ts`
+| Dependency     | Current status | Why it matters to APR acceptance                                                                                                                                             |
+| -------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BE-RULE-001`  | `done`         | Owns `TenantApprovalEvaluationResult`, approval modes, approver descriptor vocabulary, fallback policy, and re-eval semantics that APR must consume without redefining.      |
+| `BE-QUOTA-001` | `done`         | Owns quota reservation ordering, ledger semantics, and `QUOTA_INSUFFICIENT_AT_COMMIT` behavior that APR must execute before approval-request creation in booking-write flow. |
 
-### 2.3 Hard upstream dependencies
+### 3.2 Downstream unblock edges
 
-Machine-truth rows:
+| Task                | Relationship      | Why it waits on APR                                                                                                         |
+| ------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `TEN-UI-RD-010`     | direct unblock    | Tenant booking UI needs accepted approval-state and approval-request lifecycle behavior.                                    |
+| `TEN-UI-RD-099`     | direct unblock    | Tenant booking detail / approval UX depends on approval request status and booking mirror fields.                           |
+| `BE-INTEG-001`      | direct dependency | Governance E2E needs APR to connect rule evaluation, quota reservation, approval resolution, and booking state transitions. |
+| `BE-APR-NOTIFY-001` | blocked follow-on | Fan-out uses APR audit events and resolved approver ids.                                                                    |
+| `OBS-GOV-001`       | blocked follow-on | Approval pending count / timeout age / escalation metrics depend on APR lifecycle.                                          |
 
-- `BE-RULE-001`
-  - status=`done`
-  - commit_hash=`c0f533c3a73a9a71367f8eda308e8e9a075cd867`
-  - commit_subject=`feat(BE-RULE-001): tenant approval rules canonical contract + evaluator + API surface`
-- `BE-QUOTA-001`
-  - status=`done`
-  - commit_hash=`73b53eedd0c7c96549b36a6fe813c6acb870bbb1`
-  - commit_subject=`fix(BE-QUOTA-001): add quota persistence migration and DB-path coverage`
+### 3.3 Ownership split the reviewer should preserve
 
-Reviewer implication:
+| Surface                                                                                                      | Owned by       | APR reviewer expectation                                                                     |
+| ------------------------------------------------------------------------------------------------------------ | -------------- | -------------------------------------------------------------------------------------------- |
+| `TenantApprovalMode`, `TenantPrincipalRef`, `TenantApprovalFallbackPolicy`, `TenantApprovalEvaluationResult` | `BE-RULE-001`  | confirm APR imports/consumes these shapes instead of inventing new variants                  |
+| quota reservation / ledger semantics                                                                         | `BE-QUOTA-001` | confirm APR executes quota reservation in the required order and respects quota-owned errors |
+| approval request lifecycle + booking approval mirror                                                         | `BE-APR-001`   | confirm parent task owns and closes these behaviors                                          |
 
-- `BE-APR-001` must consume approval-rule evaluation results and quota
-  reservation semantics from those shipped slices, not redefine them.
-- Any contract drift in approval mode, fallback policy, approver descriptor,
-  or quota reservation result shape should be treated as a regression.
+## 4. Parent Acceptance Checklist
 
----
+Reviewer should walk `BE-APR-001` against the live acceptance row in `ai-status.json` plus execution packet §4.4.
 
-## 3. Planning Anchors
-
-Primary planning anchor:
-
-- `docs/03-runbooks/tenant-governance-wave-execution-packet-20260513.md`
-  - section `3 Shared types`
-  - section `4.4 BE-APR-001 - Tenant Booking Approval Workflow`
-  - section `5 Audit taxonomy additions`
-  - section `7 Downstream unblock map`
-
-Historical context only:
-
-- `docs/05-ui/tenant-canonical-contract-gaps-decision-packet-20260513.md`
-- `docs/05-ui/tenant-canonical-contract-gaps-followup-20260513.md`
-
-Reviewer note:
-
-- the execution packet is the authoritative planning anchor for acceptance
-  review; older packets explain rationale but do not override section `4.4`
-
----
-
-## 4. Dependency Map
-
-### 4.1 Hard dependencies
-
-| Dependency     | Status | Relevance                                                                                                                                          |
-| -------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BE-RULE-001`  | `done` | owns `TenantApprovalEvaluationResult`, approval modes, fallback policy, approver descriptor vocabulary, and rule-trigger semantics consumed by APR |
-| `BE-QUOTA-001` | `done` | owns `reserveTenantQuota`, quota ledger impact semantics, `QUOTA_INSUFFICIENT_AT_COMMIT`, and DB-backed reservation ordering consumed by APR       |
-
-### 4.2 Downstream coupling
-
-| Task                | Relationship   | Relevance                                                                                               |
-| ------------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
-| `TEN-UI-RD-010`     | direct unblock | tenant booking UI needs approval state, request listing/detail, and action semantics                    |
-| `TEN-UI-RD-099`     | direct unblock | tenant booking detail / approval UX depends on approval request lifecycle and booking mirror fields     |
-| `BE-INTEG-001`      | follow-on      | end-to-end governance flow depends on APR to connect rule + quota + booking lifecycle                   |
-| `BE-APR-NOTIFY-001` | follow-on      | notification fan-out depends on APR audit/request creation events and resolved approver ids             |
-| `OPS-UI-APR-001`    | follow-on      | Ops queue depends on approval request state and stale-pending visibility                                |
-| `OBS-GOV-001`       | follow-on      | governance observability depends on approval pending count, age, timeout/escalation, and audit emission |
-
-### 4.3 Shared ownership map
-
-| Surface                                                                    | Owned upstream | Consumed here |
-| -------------------------------------------------------------------------- | -------------- | ------------- |
-| `TenantApprovalMode`, `TenantPrincipalRef`, `TenantApprovalFallbackPolicy` | `BE-RULE-001`  | yes           |
-| `TenantApprovalEvaluationResult`                                           | `BE-RULE-001`  | yes           |
-| `reserveTenantQuota` + quota ledger result                                 | `BE-QUOTA-001` | yes           |
-| booking `approvalState` / `approvalRequestIds` mirror                      | `BE-APR-001`   | owned here    |
-| approval request / decision records and commands                           | `BE-APR-001`   | owned here    |
-
----
-
-## 5. Reviewer Checklist
-
-The reviewer should walk the parent against the live `ai-status.json`
-acceptance list and execution packet section `4.4`.
-
-### 5.1 Contracts and exported commands
+### 4.1 Contracts and booking mirror
 
 - verify `packages/contracts/src/index.ts` exports:
   - `TenantBookingApprovalState`
   - `TenantBookingApprovalRequestRecord`
   - `TenantBookingApprovalDecisionRecord`
-  - `ListTenantBookingApprovalRequestsQuery`
   - `ApproveTenantBookingApprovalRequestCommand`
   - `RejectTenantBookingApprovalRequestCommand`
   - `EscalateTenantBookingApprovalRequestCommand`
-- verify request status union includes:
-  - `pending`
-  - `approved`
-  - `rejected`
-  - `cancelled_by_re_evaluation`
-  - `timeout_escalated`
-- verify `OwnedOrderRecord` and `BookingRecord` both expose:
-  - `approvalState`
-  - `approvalRequestIds`
+- verify request statuses include `pending`, `approved`, `rejected`, `cancelled_by_re_evaluation`, `timeout_escalated`
+- verify `OwnedOrderRecord` and `BookingRecord` both expose `approvalState` + `approvalRequestIds`
 
-### 5.2 Persistence and repository wiring
+### 4.2 Persistence and transaction wiring
 
-- verify two new tables exist and match the accepted contract:
-  - `core.phase1_tenant_approval_requests`
-  - `core.phase1_tenant_approval_decisions`
-- verify persisted request fields include:
-  - `timeoutAt`
-  - `escalatedAt`
-  - `fallbackPolicy`
-  - `escalationTarget`
-  - `previousApprovers`
-- verify repository/service paths support:
-  - create request during booking write flow
-  - append approval/reject decisions
-  - manual escalation
-  - lookup list/detail by tenant and booking
-
-### 5.3 Workflow behavior
-
-- verify booking create/update wires operations in this order:
+- verify `core.phase1_tenant_approval_requests` and `core.phase1_tenant_approval_decisions` are the only new persistence tables for APR
+- verify stored request fields include `timeoutAt`, `escalatedAt`, `fallbackPolicy`, `escalationTarget`, `previousApprovers`
+- verify booking create/update order is:
   - rule evaluation
   - quota reservation
   - approval request creation when required
-- verify a failure in any step rolls back the booking-write transaction
-- verify approver resolution converts:
-  - `tenant_user`
-  - `tenant_role`
-  - `cost_center_owner`
-  - `tenant_finance_admin`
-  - `tenant_admin`
-    into concrete `tenant_user` ids at request creation time
+- verify booking-write transaction rolls back on failure in any of those steps
+
+### 4.3 Workflow behavior
+
+- verify approver resolution maps `tenant_role`, `cost_center_owner`, `tenant_finance_admin`, `tenant_admin` descriptors to concrete `tenant_user` ids at request creation time
 - verify empty resolution throws `APPROVAL_NO_RESOLVABLE_APPROVERS`
 - verify `any_of` works end-to-end
 - verify `all_of_parallel` works end-to-end
-- verify `ordered_chain` is accepted in contract and, if downgraded in P1,
-  the limitation is explicitly documented in the parent handoff
+- verify `ordered_chain` remains accepted in contract and, if downgraded to `all_of_parallel` for P1 execution, the owner documents that explicitly in the parent handoff
 
-### 5.4 Re-evaluation behavior
+### 4.4 Re-evaluation and authorization behavior
 
-- verify the Q5 trigger whitelist is implemented exactly for:
-  - `costCenterCode`
-  - `businessDispatchSubtype`
-  - `reservationWindowStart`
-  - `reservationWindowEnd`
-  - `passengerId`
-  - `passenger.role`
-  - `quotedFare`
-  - `vehiclePreference`
-  - `partnerEntrySlug`
-  - `eligibilityVerificationId`
-  - `signoffRequired`
-  - `expenseProofRequired`
-- verify these fields do **not** trigger re-evaluation:
-  - `notes`
-  - `terminal`
-  - `luggageCount`
-  - `onsiteContact`
-  - `bookedBy`
-- verify if re-evaluation no longer requires approval, pending requests are
-  cancelled with `cancelled_by_re_evaluation` and booking state is updated
-
-### 5.5 API, authorization, and timeout behavior
-
-- verify 5 routes exist under `/api/tenant/approval-requests`:
-  - list
-  - detail
-  - approve
-  - reject
-  - escalate
-- verify approve/reject authorization is per-request membership in
-  `resolvedApproverUserIds`, not only role-based
+- verify Q5 trigger whitelist is implemented exactly for `costCenterCode`, `businessDispatchSubtype`, `reservationWindowStart`, `reservationWindowEnd`, `passengerId`, `passenger.role`, `quotedFare`, `vehiclePreference`, `partnerEntrySlug`, `eligibilityVerificationId`, `signoffRequired`, `expenseProofRequired`
+- verify `notes`, `terminal`, `luggageCount`, `onsiteContact`, `bookedBy` do not trigger re-evaluation
+- verify if re-evaluation no longer requires approval, pending requests are cancelled with `cancelled_by_re_evaluation`
+- verify approve/reject authorization is per-request membership in `resolvedApproverUserIds`, not only role-based
 - verify non-approver action returns `APPROVAL_NOT_AUTHORIZED`
-- verify P1 timeout behavior ships both:
-  - manual escalate route by `tenant_admin`
-  - stub cron entry that returns `501`
 
-### 5.6 Audit, client, and tests
+### 4.5 API, audit, and verification gates
 
-- verify audit events exist:
+- verify 5 parent acceptance routes exist under `/api/tenant/approval-requests`: list, detail, approve, reject, escalate
+- verify P1 timeout ships manual escalate plus stub timeout-processing route that intentionally returns `501`
+- verify audit events include:
   - `booking.approval_request.created`
   - `booking.approval_request.approved`
   - `booking.approval_request.rejected`
@@ -274,99 +120,94 @@ acceptance list and execution packet section `4.4`.
   - `booking.approval_request.cancelled_by_re_evaluation`
   - `booking.approval_state.changed`
   - `approver_fallback_used`
-- verify `packages/api-client/src/index.ts` exposes 5 new approval-request
-  methods and corresponding booking-flow integration
-- verify test coverage includes:
-  - `any_of`
-  - `all_of_parallel`
-  - `cost_center_owner` fallback
-  - re-eval trigger and non-trigger cases
-  - `APPROVAL_NOT_AUTHORIZED`
-  - `APPROVAL_NO_RESOLVABLE_APPROVERS`
-  - manual escalate
-- verify executable checks passed:
+- verify API client exposes the 5 approval-request methods
+- verify executable checks in the parent handoff are all present and pass:
   - `pnpm --filter @drts/contracts build`
   - `pnpm --filter @drts/api typecheck`
   - `pnpm --filter @drts/api test`
 
----
+## 5. Repo-Visible Evidence On Current HEAD
 
-## 6. Current Worktree Signals
+These anchors are reviewer aids only. They do not replace the parent's own verification or handoff evidence.
 
-These signals are reviewer aids only; they are not acceptance by themselves.
+### 5.1 Contracts and routes already visible
 
-### 6.1 Visible progress already present
+- `packages/contracts/src/index.ts:1344-1405` contains approval state/request/decision types and the three command contracts.
+- `packages/contracts/src/index.ts:2259-2260` and `:2319-2320` expose `approvalState` and `approvalRequestIds` on booking/order records.
+- `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts:657-751` exposes list/detail/approve/reject/escalate plus timeout-processing entrypoint under `/api/tenant/approval-requests`.
+- `packages/api-client/src/index.ts:1465-1502` exposes the five approval-request client methods.
 
-- `packages/contracts/src/index.ts` already contains the APR-specific contract
-  exports and booking mirror fields.
-- `apps/api/src/modules/tenant-partner/tenant-approval-workflow.ts` exists and
-  already contains:
-  - re-evaluation trigger helper
-  - approver resolution helper
-  - approval-mode execution normalization
-  - request status computation for `any_of` and `all_of_parallel`
-- `apps/api/src/modules/tenant-partner/tenant-partner.repository.ts` already
-  references:
-  - `core.phase1_tenant_approval_requests`
-  - `core.phase1_tenant_approval_decisions`
-- `infra/migrations/V0024__tenant_approval_workflow.sql` already exists in the
-  worktree and appears to define the two approval tables expected by the parent
-  scope.
+### 5.2 Persistence and service anchors already visible
 
-### 6.2 In-flight gaps reviewer should actively verify
+- `infra/migrations/V0024__tenant_approval_workflow.sql:1-48` defines the APR request/decision tables and related indexes.
+- `apps/api/src/modules/tenant-partner/tenant-partner.repository.ts:656-704` and `:1391-1444` write request/decision rows with `timeout_at` and `escalated_at` persistence.
+- `apps/api/src/modules/tenant-partner/tenant-partner.service.ts:2099`, `:2168`, `:2244`, `:2313`, `:6361`, `:6472-6473`, `:6515` already show resolvable-approver failure, request creation, re-eval cancellation, authorization failure, timeout escalation, decision audit events, and fallback audit emission.
+- `apps/api/src/modules/owned-mobility/owned-mobility.service.ts:666-693`, `:1184-1185`, `:4403-4416`, `:4680-4681`, `:5451-5452` already mirror approval state/request ids through booking/order lifecycle.
 
-- declared artifact `apps/api/tests/unit/tenant-approval-workflow.test.ts`
-  was **not present** in the worktree at packet generation time
-- grep did **not** yet show approval-request route strings or approval audit
-  event strings in:
-  - `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`
-  - `apps/api/src/modules/tenant-partner/tenant-partner.service.ts`
-  - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
-  - `packages/api-client/src/index.ts`
-- `apps/api/src/modules/owned-mobility/owned-mobility.service.ts` currently has
-  `mapOrderToBooking`, but the visible mapping slice at packet time did not yet
-  show `approvalState` / `approvalRequestIds` being copied through, so reviewer
-  should confirm the final handoff includes that mirror and not just the type
-  additions
-- `apps/api/tests/unit/tenant-partner.service.test.ts` currently shows quota
-  reservation coverage, but this packet generation pass did not surface the
-  APR-specific test matrix yet; reviewer should treat that as unverified until
-  the parent handoff includes direct evidence
+### 5.3 Unit-test surface already visible
 
-Reviewer posture:
+- `apps/api/tests/unit/tenant-approval-workflow.test.ts:53-134` covers `any_of`, `all_of_parallel`, `ordered_chain` execution downgrade, and `cost_center_owner` fallback behavior.
+- `apps/api/tests/unit/owned-mobility.service.test.ts:330-698` covers approval create/approve/reject flows, non-approver rejection, re-eval non-trigger (`notes` only), no-resolvable-approver failure, and manual escalate to `timeout_escalated`.
 
-- treat section 6.1 as "foundation exists"
-- treat section 6.2 as "must be checked before approval"
+### 5.4 What still must come from the parent handoff
 
----
+Even with the anchors above, the reviewer still needs explicit parent evidence for:
 
-## 7. Reviewer Handoff Expectations
+- executable gate results on the owner's final tree
+- booking-write transaction rollback confirmation
+- exact P1 handling note for `ordered_chain`
+- confirmation that timeout-processing route is intentionally `501` stub behavior rather than accidental partial implementation
 
-Before approving the parent, the reviewer should expect the owner handoff to
-include:
+## 6. Reviewer Handoff Target
 
-- precise note on whether `ordered_chain` is fully executed or intentionally
-  downgraded to `all_of_parallel` for P1
-- explicit verification evidence for:
-  - contracts build
-  - API typecheck
-  - API tests
-- confirmation that booking transaction rollback behavior was exercised
-- confirmation that request-level authorization rejects non-approvers
-- confirmation that the timeout cron stub exists and intentionally returns 501
+When `Codex` reviews the parent task, this packet should help narrow the review to four questions:
 
-If any of those are absent, prefer `reopen` over inferring behavior from partial
-worktree signals.
+1. Does the parent still consume `BE-RULE-001` and `BE-QUOTA-001` contracts without redefining them?
+2. Do request lifecycle, authorization, re-evaluation, and booking mirror behaviors satisfy the exact acceptance row?
+3. Do the parent-run verification commands pass on the actual handoff tree?
+4. If `ordered_chain` is downgraded in P1, is that limitation documented explicitly rather than implied?
 
----
+When `Codex2` reviews this sidecar, the expected decision is narrower:
 
-## 8. Sidecar Closeout
+- confirm the packet matches current `ai-status.json`
+- confirm dependency and evidence sections align with planning docs plus repo-visible source anchors
+- confirm support-only scope was preserved and no canonical/runtime file was edited
 
-This sidecar creates one support artifact only:
+## 7. Evidence Anchors
 
-- `support/sidecars/BE-APR-001/BE-APR-001-SIDECAR-ACCEPTANCE.md`
+- `ai-status.json`
+  - `BE-APR-001-SIDECAR-ACCEPTANCE`
+  - `BE-APR-001`
+  - `BE-RULE-001`
+  - `BE-QUOTA-001`
+  - `BE-INTEG-001`
+  - `BE-APR-NOTIFY-001`
+  - `OBS-GOV-001`
+- `docs/03-runbooks/tenant-governance-wave-execution-packet-20260513.md`
+  - §2 Booking integration
+  - §3 Shared types
+  - §4.4 `BE-APR-001`
+  - §5 Audit taxonomy
+  - §7 UI unblock map
+- `packages/contracts/src/index.ts`
+- `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`
+- `apps/api/src/modules/tenant-partner/tenant-partner.service.ts`
+- `apps/api/src/modules/tenant-partner/tenant-partner.repository.ts`
+- `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
+- `packages/api-client/src/index.ts`
+- `apps/api/tests/unit/tenant-approval-workflow.test.ts`
+- `apps/api/tests/unit/owned-mobility.service.test.ts`
+- `infra/migrations/V0024__tenant_approval_workflow.sql`
 
-It does not modify canonical truth, runtime code, or the parent task's commit
-evidence. Parent owner `Codex` remains responsible for the canonical
-implementation, executable verification, commit/push evidence, and reviewer
-handoff.
+## 8. Sidecar Verification
+
+This pass changes only `support/sidecars/BE-APR-001/BE-APR-001-SIDECAR-ACCEPTANCE.md`.
+
+Verification performed for the sidecar artifact:
+
+- `ai-status.json` task/dependency snapshot review
+- planning doc anchor review (`tenant-governance-wave-execution-packet-20260513.md`)
+- committed-source anchor scan for contracts, controller, service, repository, migration, api-client, and unit tests
+- `git diff --check -- support/sidecars/BE-APR-001/BE-APR-001-SIDECAR-ACCEPTANCE.md`
+
+No runtime checks were run for this sidecar itself because it is support-only and does not change executable behavior.
