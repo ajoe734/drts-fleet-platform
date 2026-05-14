@@ -10,82 +10,94 @@
   - `DisableTenantCostCenterCommand`
   - `GET /api/tenant/cost-centers`
   - `GET /api/tenant/cost-centers/:code`
-  - `POST /api/tenant/cost-centers`
-  - `POST /api/tenant/cost-centers/disable`
+- `POST /api/tenant/cost-centers`
+- `POST /api/tenant/cost-centers/disable`
 - `TEN-UI-RD-013` can reopen against this canonical directory surface.
-- `TEN-UI-RD-010` and `TEN-UI-RD-014` remain blocked on the follow-on
-  approval-rule and quota contracts (`BE-RULE-001`, `BE-QUOTA-001`).
+- `TEN-UI-RD-010` can reopen against the landed booking-governance contract
+  set (`BE-CC-001`, `BE-RULE-001`, `BE-QUOTA-001`, `BE-APR-001`).
+- `TEN-UI-RD-014` requires its own route-scope decision even though the rule,
+  quota, and approval contracts now exist.
 
 ## TEN-UI-RD-010 — TN_NewBooking contract validation
 
-Status: blocked
-Owner: `Codex2`
-Reviewer: `Codex`
-Last checked: `2026-05-10`
+Status: shipped
+Owner: `Codex`
+Reviewer: `Codex2`
+Last checked: `2026-05-14`
 
 ### Decision
 
-Do not implement the TN_NewBooking design's cost-center selector, auto-applied
-approval-rule copy, quota impact card, or draft-save affordance yet.
+Implement TN_NewBooking against the published tenant booking, cost-center,
+quota preview, and approval-evaluation contracts.
 
-Block the task and return it to supervisor discussion for contract/task
-clarification.
+Keep estimated spend as preview-only input, allow booking-on-behalf metadata,
+and omit any unpublished draft-save or tenant-side quoted-fare override path.
 
 ### Why this is blocked
 
-The existing backend contract is sufficient for tenant booking creation and
-delegate-booking fields, but not for the design's cost-center rule UX:
+The required contract set is now published and wired into booking create:
 
 - `CreateTenantBookingCommand` supports:
+  - `passengerId`
   - `bookedBy`
   - `onsiteContact`
   - `costCenter`
-  - booking route, passenger, and schedule fields
-- `ProductRuleCatalog` only exposes:
-  - service bucket / subtype vocabulary
-  - pricing authority metadata
-
-What is missing from the published tenant contract:
-
-- tenant-visible cost-center directory/list endpoint or record type
-- tenant-visible approval-rule list/evaluation endpoint or record type
-- quota/remaining-usage read model for the selected cost center
-- draft/save command for tenant booking intake
+  - booking route, passenger, and reservation-window fields
+- `TenantCostCenterRecord` plus `GET /api/tenant/cost-centers` provide the
+  canonical cost-center selector source.
+- `TenantBookingQuotaImpactPreview` plus
+  `previewTenantBookingQuotaImpact` provide the quota impact card inputs.
+- `TenantApprovalEvaluationResult` plus `evaluateApprovalRules` publish the
+  rule warnings, approval outcome, and approval-plan summary.
+- `BE-APR-001` wires booking create/update to backend-owned approval state and
+  approval-request creation, so the UI can safely allow approval-required
+  submissions while continuing to block hard-stop outcomes.
 
 ### Source references
 
-- Product workflow requires booking creation, but does not publish cost-center
-  management or approval-rule read models for this route:
+- Product workflow and redesign backlog:
   - `docs/01-product/platform-admin-ops-tenant-console-product-spec-20260508.md`
     sections `9.6.2` and `9.7.2`
-- Execution packet explicitly scopes new-booking framing to what current
-  authority allows:
-  - `docs/03-runbooks/tenant-console-and-cross-system-design-execution-packet-20260508.md`
-    section `TEN-UI-005`
-- Design target expects richer UI than the current contract publishes:
-  - `docs/05-ui/drts-design-canvas/tenant-screens.jsx` `TN_NewBooking`
-- The redesign backlog already instructs agents to open a blocker instead of
-  inventing missing contracts:
   - `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`
   - `ai-status.json` task `TEN-UI-RD-010`
+- Landed backend decision packet and unblock conditions:
+  - `docs/05-ui/tenant-canonical-contract-gaps-design-response-20260513.md`
+    sections `7` and `8`
+- Design target:
+  - `docs/05-ui/drts-design-canvas/tenant-screens.jsx` `TN_NewBooking`
 
 ### Verified implementation surface
 
-- Published create-booking command:
-  - `packages/contracts/src/index.ts`
+- Contract types and client methods:
+  - `packages/contracts/src/index.ts` (`CreateTenantBookingCommand`,
+    `TenantCostCenterRecord`, `TenantBookingQuotaImpactPreview`,
+    `TenantApprovalEvaluationResult`)
+  - `packages/api-client/src/index.ts` (`listCostCenters`,
+    `previewTenantBookingQuotaImpact`, `evaluateApprovalRules`,
+    `createTenantBooking`)
+- Booking create / governance integration:
   - `apps/api/src/modules/owned-mobility/owned-mobility.service.ts`
-- Published product-rule catalog:
-  - `packages/contracts/src/index.ts`
-  - `apps/api/src/modules/product-rule/product-rule.controller.ts`
+  - `apps/api/src/modules/tenant-partner/tenant-partner.controller.ts`
 
-### Required follow-up
+### Verified implementation surface
 
-Supervisor should decide one of these before reopening `TEN-UI-RD-010`:
+- Route shell:
+  - `apps/tenant-console-web/app/bookings/new/page.tsx`
+- Form UX and local validation:
+  - `apps/tenant-console-web/app/bookings/new/tenant-booking-create-form.tsx`
+- Tenant-console BFF routes:
+  - `apps/tenant-console-web/app/api/bookings/policy-preview/route.ts`
+  - `apps/tenant-console-web/app/api/bookings/create/route.ts`
+- Storybook parity story:
+  - `packages/ui-web/src/tenant-new-booking.stories.tsx`
 
-1. Add canonical tenant contracts for cost centers, approval rules, and any
-   quota/impact read model needed by TN_NewBooking.
-2. Narrow the UI acceptance so the route only ships delegate-booking fields and
-   non-authoritative cost-center free-text framing.
+### Scope guardrail
+
+The route must not:
+
+- submit `quotedFare` through tenant booking create or update
+- invent a local draft-save workflow
+- guess a tenant-side approval override path
 
 ## TEN-UI-RD-012 — TN_Addresses contract validation
 

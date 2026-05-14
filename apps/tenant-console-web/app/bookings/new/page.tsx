@@ -1,45 +1,83 @@
-import Link from "next/link";
+import type {
+  TenantAddressRecord,
+  TenantCostCenterRecord,
+  TenantPassengerRecord,
+} from "@drts/contracts";
 import {
   CalloutPanel,
   PageHero,
   SurfaceCard,
 } from "@/components/page-primitives";
+import { getTenantClient } from "@/lib/api-client";
+import { TenantBookingCreateForm } from "./tenant-booking-create-form";
 
-export default function NewBookingPage() {
+export const dynamic = "force-dynamic";
+
+export default async function NewBookingPage() {
+  const client = getTenantClient();
+  const [passengers, addresses, costCenters] = await Promise.all([
+    client.listPassengers() as Promise<TenantPassengerRecord[]>,
+    client.listAddresses() as Promise<TenantAddressRecord[]>,
+    client.listCostCenters({ activeOnly: true }) as Promise<
+      TenantCostCenterRecord[]
+    >,
+  ]);
+
+  const activePassengers = passengers.filter((row) => row.activeFlag);
+  const activeAddresses = addresses.filter((row) => row.activeFlag);
+  const activeCostCenters = costCenters.filter((row) => row.activeFlag);
+
   return (
     <div className="page-shell">
       <PageHero
         eyebrow="New booking"
-        title="The route is live in the shell, but the policy-aware intake form still belongs to `TEN-UI-005`."
-        description="This keeps the new topology from breaking navigation while making it explicit that create-booking productization still needs passenger selection, address-book integration, cost-center framing, and authority-safe submit flows."
+        title="Create a tenant booking with passenger, cost-center, quota, and approval context in one route."
+        description="This route now stays on the published tenant contracts: directory-backed passenger and address selection, canonical cost-center selection, quota impact preview, approval-rule evaluation, and submit through `/api/tenant/bookings` without inventing a local draft state."
+      />
+
+      <section className="metric-grid">
+        <article className="metric-card">
+          <span className="metric-label">Passengers</span>
+          <strong>{activePassengers.length}</strong>
+          <p>Active tenant passengers available for booking-on-behalf flows.</p>
+        </article>
+        <article className="metric-card">
+          <span className="metric-label">Addresses</span>
+          <strong>{activeAddresses.length}</strong>
+          <p>
+            Saved pickup and drop-off locations reusable from the directory.
+          </p>
+        </article>
+        <article className="metric-card">
+          <span className="metric-label">Cost centers</span>
+          <strong>{activeCostCenters.length}</strong>
+          <p>Active cost centers that can trigger quota and approval rules.</p>
+        </article>
+      </section>
+
+      <TenantBookingCreateForm
+        addresses={activeAddresses}
+        costCenters={activeCostCenters}
+        passengers={activePassengers}
       />
 
       <section className="surface-grid">
         <SurfaceCard
-          kicker="Next slice"
-          title="Policy-aware intake"
-          description="The final route will need passenger selection, approval-impact framing, notes, service attributes, and real submit semantics backed by `/api/tenant/bookings`."
+          kicker="Contract boundary"
+          title="No fake draft or tenant-side fare override"
+          description="The page evaluates cost-center policy from the published quota preview and approval-evaluation contracts. Estimated spend stays preview-only input because tenant booking create cannot set `quotedFare`, and no estimate endpoint is published here."
         />
         <SurfaceCard
-          kicker="Boundary"
-          title="No fake draft semantics"
-          description="This placeholder does not invent client-local drafts or approval gates that the backend has not published yet."
+          kicker="Authority safety"
+          title="Booking-on-behalf stays explicit"
+          description="Passenger selection is directory-scoped, `bookedBy` is optional metadata, and blocked approval outcomes stop the local submit button instead of guessing a hidden override path."
         />
       </section>
 
       <CalloutPanel
-        title="Current path"
-        description="Use booking oversight and integration/governance routes while the dedicated new-booking workflow is being filled in."
-      >
-        <div className="link-row">
-          <Link className="text-link" href="/bookings">
-            Back to bookings
-          </Link>
-          <Link className="text-link" href="/">
-            Back to home
-          </Link>
-        </div>
-      </CalloutPanel>
+        title="What happens on submit"
+        description="A clean evaluation submits directly to the tenant booking command. Approval-required evaluations still allow submit, but the created booking carries backend-owned approval state and request IDs. Blocked evaluations stay client-blocked until the input changes."
+      />
     </div>
   );
 }

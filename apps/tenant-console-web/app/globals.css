@@ -26,7 +26,11 @@ body {
 
 body {
   background:
-    radial-gradient(circle at top left, rgba(184, 92, 56, 0.16), transparent 28%),
+    radial-gradient(
+      circle at top left,
+      rgba(184, 92, 56, 0.16),
+      transparent 28%
+    ),
     linear-gradient(180deg, #fbf8f2 0%, #edf1f6 100%);
   color: var(--text);
   font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
@@ -271,6 +275,59 @@ textarea {
   color: var(--text);
 }
 
+.booking-create-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.9fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.booking-create-main,
+.booking-create-side {
+  display: grid;
+  gap: 1rem;
+}
+
+.booking-field-span {
+  grid-column: 1 / -1;
+}
+
+.booking-toggle {
+  border: 0;
+  cursor: pointer;
+}
+
+.booking-toggle input {
+  margin: 0;
+}
+
+.booking-action-row {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}
+
+.booking-button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 1.1rem;
+  background: var(--shell);
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.booking-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.booking-button-secondary {
+  background: rgba(16, 35, 58, 0.08);
+  color: var(--shell);
+}
+
 .form-actions,
 .action-row,
 .pagination-row {
@@ -363,6 +420,12 @@ textarea {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+@media (max-width: 980px) {
+  .booking-create-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .timeline-item {
@@ -488,11 +551,8 @@ textarea {
   flex-direction: column;
   gap: 1.5rem;
   padding: 2rem 1.35rem;
-  background: linear-gradient(
-      180deg,
-      rgba(0, 0, 0, 0.04),
-      transparent 28%
-    ),
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.04), transparent 28%),
     var(--partner-accent);
   color: #fdf3eb;
 }
