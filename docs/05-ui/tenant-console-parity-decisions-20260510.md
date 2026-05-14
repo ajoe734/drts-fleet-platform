@@ -1,5 +1,30 @@
 # Tenant Console Parity Decisions — 2026-05-10
 
+## 2026-05-14 Wave 3 Closeout Update
+
+All three previously-blocked parity-fill tasks have reopened and shipped now
+that the late-Wave-3 backend contract set (`BE-CC-001`, `BE-RULE-001`,
+`BE-QUOTA-001`, `BE-APR-001`) is canonical:
+
+- `TEN-UI-RD-010` (`TN_NewBooking`) — **shipped** on commit `6e0c9fd`
+  (`origin/codex/be-cc-001-fu-seed`). Reviewer Codex2 approved at
+  2026-05-14T04:07:00Z. The § below is retained as-is; status updated from
+  `blocked` to `shipped`.
+- `TEN-UI-RD-013` (`TN_CostCenter`) — **shipped** as a read-only directory
+  surface on commit `921c456` (`origin/codex/be-cc-001-fu-seed`). Reviewer
+  Claude2 approved at 2026-05-14T03:16:30Z. The § below is retained as the
+  historical record of the blocker that BE-CC-001 then unblocked; current
+  status is `shipped`.
+- `TEN-UI-RD-014` (`TN_Rules`) — **shipped** on commit `f0e8265`
+  (`origin/codex2/ten-ui-rd-014-closeout`). Reviewer Codex approved at
+  2026-05-14T04:21:35Z. The § below is retained as the historical record of
+  the blocker that BE-RULE-001 / BE-QUOTA-001 / BE-APR-001 then unblocked;
+  current status is `shipped`.
+
+The Wave 3 tenant-console closeout packet that binds each shipped surface to
+its reviewer / approval-time / commit / canvas anchor / parity story is
+`docs/05-ui/tenant-console-redesign-closeout-20260514.md`.
+
 ## 2026-05-13 Implementation Update
 
 - `BE-CC-001` now publishes the tenant cost-center directory contract and
@@ -149,19 +174,35 @@ not exposed in this surface.
 
 ## TEN-UI-RD-013 — TN_CostCenter contract validation
 
-Status: blocked
-Owner: `Codex`
-Reviewer: `Codex2`
-Last checked: `2026-05-10`
+Status: shipped (read-only)
+Owner: `Codex2` (final shipping owner; original parity-decisions owner was `Codex`)
+Reviewer: `Claude2` (final shipping reviewer; original parity-decisions reviewer was `Codex2`)
+Last checked: `2026-05-14`
 
 ### Decision
 
-Do not implement the TN_CostCenter design yet.
+Originally blocked (see "Why this was blocked" below). After `BE-CC-001` was
+published, the task reopened and shipped as a **read-only** directory surface
+that composes the four newly-published cost-center read contracts
+(`listCostCenters`, `getTenantCostCenterQuota`, coverage helper,
+`listApprovalRules`) under `Promise.allSettled` so partial errors surface
+through `CalloutPanel` without inventing an unpublished editor surface.
 
-Block the task and return it to supervisor discussion for a canonical tenant
-cost-center management contract.
+Shipped artifacts:
 
-### Why this is blocked
+- Route: `apps/tenant-console-web/app/cost-centers/page.tsx`
+- Tenant nav (Directory group entry):
+  `apps/tenant-console-web/lib/navigation.ts`
+- Parity story: `packages/ui-web/src/tenant-cost-centers.stories.tsx`
+- Shipped commit: `921c456` on `origin/codex/be-cc-001-fu-seed`
+- Reviewer approval: Claude2 at 2026-05-14T03:16:30Z
+
+The TN_CostCenter management-table editor surface (inline create / disable
+controls, owner reassignment, approval-policy mutation) is **not** in scope
+for this read-only shipment. Reopening that scope requires a follow-up
+backend decision on the tenant-side management mutation contract.
+
+### Why this was blocked
 
 The published tenant/backend contract only treats `costCenter` as optional
 booking metadata. It does not publish the directory or policy read models that
@@ -294,19 +335,35 @@ The route stays read-only. It must not:
 
 ## TEN-UI-RD-014 — TN_Rules contract validation
 
-Status: blocked
-Owner: `Codex`
-Reviewer: `Codex2`
-Last checked: `2026-05-10`
+Status: shipped
+Owner: `Codex2` (final shipping owner; original parity-decisions owner was `Codex`)
+Reviewer: `Codex` (final shipping reviewer; original parity-decisions reviewer was `Codex2`)
+Last checked: `2026-05-14`
 
 ### Decision
 
-Do not implement the TN_Rules design yet.
+Originally blocked (see "Why this was blocked" below). After `BE-RULE-001`,
+`BE-QUOTA-001`, and `BE-APR-001` published canonical tenant approval-rule,
+quota, and approval-evaluation read/write contracts, the task reopened and
+shipped against those contracts.
 
-Block the task and return it to supervisor discussion for a canonical tenant
-approval-rule and quota contract.
+Shipped artifacts:
 
-### Why this is blocked
+- Route shell + manager: `apps/tenant-console-web/app/rules/page.tsx`,
+  `apps/tenant-console-web/app/rules/rules-manager.tsx`,
+  `apps/tenant-console-web/app/rules/actions.ts`,
+  `apps/tenant-console-web/app/rules/constants.ts`
+- Parity story: `packages/ui-web/src/tenant-rules.stories.tsx`
+- Shipped commit: `f0e8265` on `origin/codex2/ten-ui-rd-014-closeout`
+- Reviewer approval: Codex at 2026-05-14T04:21:35Z
+
+Branch note: `f0e8265` ships on a dedicated closeout branch
+(`origin/codex2/ten-ui-rd-014-closeout`) and is not yet reachable from
+`origin/codex/be-cc-001-fu-seed`. Reviewer can reproduce the redesign delta
+with `git fetch origin codex2/ten-ui-rd-014-closeout` followed by a scoped
+`git diff` against the route artifacts.
+
+### Why this was blocked
 
 The published tenant/backend surface does not expose the rule, approver, or
 quota models that the TN_Rules artboard requires.
