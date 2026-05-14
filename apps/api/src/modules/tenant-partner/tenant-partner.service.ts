@@ -241,6 +241,25 @@ type OrderFeedProvider = () => OwnedOrderRecord[];
 
 type MaybePromise<T> = T | Promise<T>;
 
+type TenantGovernanceMetricUnit =
+  | "count"
+  | "hours"
+  | "milliseconds"
+  | "percent";
+
+type TenantGovernanceMetricSample = {
+  name: string;
+  labels: Record<string, string>;
+  value: number;
+  unit: TenantGovernanceMetricUnit;
+};
+
+type TenantGovernanceMetricsSnapshot = {
+  generatedAt: string;
+  namespace: "tenant_governance";
+  samples: TenantGovernanceMetricSample[];
+};
+
 const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
   maxAttempts: 5,
   initialBackoffSeconds: 30,
@@ -250,6 +269,10 @@ const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
 };
 
 const PARTNER_ELIGIBILITY_DECISION_TTL_SECONDS = 30 * 60;
+const TENANT_GOVERNANCE_METRIC_NAMESPACE = "tenant_governance";
+const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
+const APPROVAL_NOTIFICATION_POLL_INTERVAL_MS = 60 * 1000;
+const APPROVAL_NOTIFICATION_TIMEOUT_LEAD_MS = 12 * 60 * 60 * 1000;
 
 const DEFAULT_PARTNER_ELIGIBILITY_RETRY_POLICY: PartnerEligibilityRetryPolicyRecord =
   {
@@ -723,6 +746,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     ReturnType<typeof setTimeout>
   >();
 
+  private approvalNotificationPollTimer: ReturnType<typeof setInterval> | null =
+    null;
+
+  private approvalNotificationPollInFlight = false;
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
@@ -740,6 +768,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.partnerIngressCredentials = this.partnerIngressCredentialSeeds.map(
       (seed) => createBootstrapPartnerIngressCredential(seed),
     );
+    this.startApprovalNotificationPolling();
   }
 
   async onModuleInit() {
@@ -959,6 +988,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         );
       }
       this.schedulePersistedWebhookRetries();
+      void this.pollPendingApprovalTimeoutNotifications();
     } catch (error) {
       this.tenantPartnerRepository.reportPersistenceFailure(
         error,
@@ -980,6 +1010,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       clearTimeout(timer);
     }
     this.retryTimers.clear();
+    if (this.approvalNotificationPollTimer) {
+      clearInterval(this.approvalNotificationPollTimer);
+      this.approvalNotificationPollTimer = null;
+    }
   }
 
   getNotificationPreferences(tenantId: string) {
@@ -1867,6 +1901,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     command: EvaluateTenantApprovalRuleCommand,
     requestId?: string,
   ): TenantApprovalEvaluationResult {
+    const evaluationStartedAtMs = Date.now();
     const inputSnapshot = command.inputSnapshot ?? {
       costCenterCode: command.sampleBooking?.costCenterCode ?? null,
       businessDispatchSubtype:
@@ -1899,6 +1934,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       tenantDefaultTimeoutHours: 24,
       tenantDefaultFallbackPolicy: "escalate_to_tenant_admin",
     });
+    const evaluationLatencyMs = Math.max(0, Date.now() - evaluationStartedAtMs);
     this.recordTenantAudit(
       {
         actorId: null,
@@ -1912,6 +1948,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           subject: result.subject,
           decision: result.outcome?.decision ?? null,
           matchedRuleIds: result.matchedRules.map((rule) => rule.ruleId),
+          matchedRuleCount: result.matchedRules.length,
+          evaluationLatencyMs,
+          approvalRequired: result.outcome?.approvalRequired ?? false,
         },
       },
       requestId,
@@ -2107,6 +2146,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         request,
         params.requestId ? { requestId: params.requestId } : undefined,
       );
+      void this.pollPendingApprovalTimeoutNotifications();
       return this.cloneApprovalRequest(request);
     };
 
@@ -2511,6 +2551,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
     const normalized = trimmed.toUpperCase();
     if (!/^[A-Z0-9][A-Z0-9-]*$/.test(normalized)) {
+      this.recordCostCenterValidationRejectedAudit(
+        tenantId,
+        "BOOKING_COST_CENTER_INVALID",
+        {
+          costCenter: trimmed,
+        },
+      );
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "BOOKING_COST_CENTER_INVALID",
@@ -2524,6 +2571,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       (candidate) => candidate.code === normalized,
     );
     if (!match) {
+      this.recordCostCenterValidationRejectedAudit(
+        tenantId,
+        "BOOKING_COST_CENTER_UNKNOWN",
+        {
+          costCenter: trimmed,
+          normalized,
+        },
+      );
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "BOOKING_COST_CENTER_UNKNOWN",
@@ -2535,6 +2590,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
     if (!match.activeFlag) {
+      this.recordCostCenterValidationRejectedAudit(
+        tenantId,
+        "BOOKING_COST_CENTER_DISABLED",
+        {
+          costCenter: normalized,
+        },
+      );
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "BOOKING_COST_CENTER_DISABLED",
@@ -6137,6 +6199,60 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private startApprovalNotificationPolling() {
+    if (this.approvalNotificationPollTimer) {
+      return;
+    }
+    this.approvalNotificationPollTimer = setInterval(() => {
+      void this.pollPendingApprovalTimeoutNotifications();
+    }, APPROVAL_NOTIFICATION_POLL_INTERVAL_MS);
+    this.approvalNotificationPollTimer.unref?.();
+  }
+
+  private async pollPendingApprovalTimeoutNotifications() {
+    if (this.approvalNotificationPollInFlight) {
+      return;
+    }
+
+    this.approvalNotificationPollInFlight = true;
+    try {
+      const now = Date.now();
+      const eligibleRequests = this.approvalRequests.filter((request) => {
+        if (request.status !== "pending" || request.escalatedAt) {
+          return false;
+        }
+
+        const timeoutAtMs = Date.parse(request.timeoutAt);
+        if (!Number.isFinite(timeoutAtMs) || timeoutAtMs <= now) {
+          return false;
+        }
+
+        return (
+          timeoutAtMs - APPROVAL_NOTIFICATION_TIMEOUT_LEAD_MS <= now &&
+          !this.auditNotificationService.hasApprovalNotificationDispatch(
+            request.approvalRequestId,
+            "approaching_timeout",
+          )
+        );
+      });
+
+      for (const request of eligibleRequests) {
+        await this.dispatchApprovalNotifications(
+          "approaching_timeout",
+          request,
+        );
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "unknown polling failure";
+      this.logger.error(
+        `Failed to poll pending approval timeout notifications: ${message}`,
+      );
+    } finally {
+      this.approvalNotificationPollInFlight = false;
+    }
+  }
+
   private async dispatchApprovalNotifications(
     templateKey: ApprovalNotificationTemplateKey,
     request: TenantBookingApprovalRequestRecord,
@@ -6595,6 +6711,164 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.auditNotificationService.recordAuditLog(auditLogInput);
   }
 
+  getTenantGovernanceMetricsSnapshot(
+    referenceDate = new Date(),
+  ): TenantGovernanceMetricsSnapshot {
+    const referenceTimeMs = referenceDate.getTime();
+    const auditLogs = this.auditNotificationService
+      .getAuditLogsSnapshot()
+      .filter(
+        (auditLog) =>
+          auditLog.moduleName === "tenant-partner" &&
+          typeof auditLog.tenantId === "string" &&
+          auditLog.tenantId.length > 0,
+      );
+    const tenantIds = new Set<string>([
+      ...auditLogs
+        .map((auditLog) => auditLog.tenantId)
+        .filter((tenantId): tenantId is string => Boolean(tenantId)),
+      ...this.approvalRequests.map((request) => request.tenantId),
+      ...this.costCenters.map((costCenter) => costCenter.tenantId),
+      ...Array.from(this.quotaPolicies.values()).map(
+        (policy) => policy.tenantId,
+      ),
+    ]);
+    const samples: TenantGovernanceMetricSample[] = [];
+
+    for (const tenantId of [...tenantIds].sort((left, right) =>
+      left.localeCompare(right),
+    )) {
+      const pendingApprovalAgesHours = this.approvalRequests
+        .filter(
+          (request) =>
+            request.tenantId === tenantId && request.status === "pending",
+        )
+        .map((request) =>
+          Math.max(
+            0,
+            (referenceTimeMs - Date.parse(request.createdAt)) /
+              (60 * 60 * 1000),
+          ),
+        );
+      const tenantAuditLogs = auditLogs.filter(
+        (auditLog) => auditLog.tenantId === tenantId,
+      );
+      const evaluatorLatenciesMs = tenantAuditLogs
+        .filter(
+          (auditLog) =>
+            auditLog.actionName === "booking.approval_rules.evaluated",
+        )
+        .map((auditLog) =>
+          this.readNumericSummaryValue(
+            auditLog.newValuesSummary,
+            "evaluationLatencyMs",
+          ),
+        )
+        .filter((value): value is number => value !== null);
+      const validationRejectCounts =
+        this.countCostCenterValidationRejectsByCode(tenantAuditLogs);
+      const quotaUsagePercent = this.computeQuotaPercentUsed(
+        this.getTenantQuotaSummary(tenantId).usage.remainingPercent,
+      );
+
+      samples.push(
+        this.buildTenantGovernanceMetricSample(
+          "approval.pending_count",
+          { tenant_id: tenantId },
+          pendingApprovalAgesHours.length,
+          "count",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "approval.pending_age_hours",
+          { tenant_id: tenantId, quantile: "p95" },
+          this.computePercentile(pendingApprovalAgesHours, 0.95),
+          "hours",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "approval.pending_age_hours",
+          { tenant_id: tenantId, quantile: "max" },
+          this.computePercentile(pendingApprovalAgesHours, 1),
+          "hours",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "quota.usage_percent",
+          { tenant_id: tenantId },
+          quotaUsagePercent,
+          "percent",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "quota.ledger_write_total",
+          { tenant_id: tenantId },
+          tenantAuditLogs.filter(
+            (auditLog) =>
+              auditLog.actionName === "tenant.quota_ledger.entry_added",
+          ).length,
+          "count",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "quota.ledger_write_per_second",
+          { tenant_id: tenantId },
+          this.countAuditEventsWithinWindow(
+            tenantAuditLogs,
+            "tenant.quota_ledger.entry_added",
+            FIVE_MINUTES_IN_MS,
+            referenceTimeMs,
+          ) /
+            (FIVE_MINUTES_IN_MS / 1000),
+          "count",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "quota.race_failure_total",
+          {
+            tenant_id: tenantId,
+            error_code: "QUOTA_INSUFFICIENT_AT_COMMIT",
+          },
+          tenantAuditLogs.filter(
+            (auditLog) =>
+              auditLog.actionName === "tenant.quota_reservation.blocked" &&
+              auditLog.newValuesSummary?.errorCode ===
+                "QUOTA_INSUFFICIENT_AT_COMMIT",
+          ).length,
+          "count",
+        ),
+      );
+
+      for (const [label, quantile] of [
+        ["p50", 0.5],
+        ["p95", 0.95],
+        ["p99", 0.99],
+      ] as const) {
+        samples.push(
+          this.buildTenantGovernanceMetricSample(
+            "approval.evaluator_latency_ms",
+            { tenant_id: tenantId, quantile: label },
+            this.computePercentile(evaluatorLatenciesMs, quantile),
+            "milliseconds",
+          ),
+        );
+      }
+
+      for (const [errorCode, count] of [
+        ...validationRejectCounts.entries(),
+      ].sort(([left], [right]) => left.localeCompare(right))) {
+        samples.push(
+          this.buildTenantGovernanceMetricSample(
+            "cost_center.validation_reject_total",
+            { tenant_id: tenantId, error_code: errorCode },
+            count,
+            "count",
+          ),
+        );
+      }
+    }
+
+    return {
+      generatedAt: referenceDate.toISOString(),
+      namespace: TENANT_GOVERNANCE_METRIC_NAMESPACE,
+      samples,
+    };
+  }
+
   private recordPartnerIngressAttempt(
     entry: PartnerChannelEntryRecord | null,
     requestId: string | undefined,
@@ -6991,7 +7265,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     },
   ) {
     const preview = this.buildQuotaImpactPreview(input.tenantId, normalized);
-    this.throwIfQuotaReservationBlocked(preview.impacts);
+    this.throwIfQuotaReservationBlocked(preview.impacts, {
+      tenantId: input.tenantId,
+      bookingId: input.bookingId,
+      evaluationId: input.evaluationId,
+    });
 
     const now = new Date().toISOString();
     const entries = preview.impacts
@@ -7170,7 +7448,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         costCenterPolicy,
         costCenterSnapshot,
       });
-      this.throwIfQuotaReservationBlocked(preview.impacts);
+      this.throwIfQuotaReservationBlocked(preview.impacts, {
+        tenantId: input.tenantId,
+        bookingId: input.bookingId,
+        evaluationId: input.evaluationId,
+      });
 
       const now = new Date().toISOString();
       const entries = preview.impacts
@@ -7299,12 +7581,37 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   private throwIfQuotaReservationBlocked(
     impacts: readonly TenantBookingQuotaImpactResult[],
+    context?: {
+      tenantId: string;
+      bookingId: string;
+      evaluationId: string;
+    },
   ) {
     const blockingImpact = impacts.find(
       (impact) => impact.triggered === "block",
     );
     if (!blockingImpact) {
       return;
+    }
+
+    if (context) {
+      this.recordTenantAudit({
+        actorId: null,
+        actorType: "system",
+        tenantId: context.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.quota_reservation.blocked",
+        resourceType: "booking",
+        resourceId: context.bookingId,
+        newValuesSummary: {
+          errorCode: "QUOTA_INSUFFICIENT_AT_COMMIT",
+          bookingId: context.bookingId,
+          evaluationId: context.evaluationId,
+          periodKey: blockingImpact.periodKey,
+          costCenterCode: blockingImpact.costCenterCode,
+          dimension: blockingImpact.dimension,
+        },
+      });
     }
 
     throw new ApiRequestError(
@@ -7673,6 +7980,101 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         },
       });
     }
+  }
+
+  private recordCostCenterValidationRejectedAudit(
+    tenantId: string,
+    errorCode:
+      | "BOOKING_COST_CENTER_INVALID"
+      | "BOOKING_COST_CENTER_UNKNOWN"
+      | "BOOKING_COST_CENTER_DISABLED",
+    details: Record<string, unknown>,
+  ) {
+    this.recordTenantAudit({
+      actorId: null,
+      actorType: "tenant_admin",
+      tenantId,
+      moduleName: "tenant-partner",
+      actionName: "booking.cost_center.validation_rejected",
+      resourceType: "tenant_cost_center",
+      resourceId: null,
+      newValuesSummary: {
+        errorCode,
+        ...details,
+      },
+    });
+  }
+
+  private buildTenantGovernanceMetricSample(
+    metric: string,
+    labels: Record<string, string>,
+    value: number,
+    unit: TenantGovernanceMetricUnit,
+  ): TenantGovernanceMetricSample {
+    return {
+      name: `${TENANT_GOVERNANCE_METRIC_NAMESPACE}.${metric}`,
+      labels,
+      value: Number.isFinite(value) ? value : 0,
+      unit,
+    };
+  }
+
+  private readNumericSummaryValue(
+    summary: Record<string, unknown> | undefined,
+    key: string,
+  ) {
+    const value = summary?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+
+  private computePercentile(values: readonly number[], quantile: number) {
+    if (values.length === 0) {
+      return 0;
+    }
+    const sorted = [...values].sort((left, right) => left - right);
+    const index = Math.min(
+      sorted.length - 1,
+      Math.max(0, Math.ceil(sorted.length * quantile) - 1),
+    );
+    return sorted[index] ?? 0;
+  }
+
+  private countAuditEventsWithinWindow(
+    auditLogs: readonly AuditLogRecord[],
+    actionName: string,
+    windowMs: number,
+    referenceTimeMs: number,
+  ) {
+    return auditLogs.filter((auditLog) => {
+      if (auditLog.actionName !== actionName) {
+        return false;
+      }
+      const createdAtMs = Date.parse(auditLog.createdAt);
+      return (
+        Number.isFinite(createdAtMs) &&
+        createdAtMs >= referenceTimeMs - windowMs &&
+        createdAtMs <= referenceTimeMs
+      );
+    }).length;
+  }
+
+  private countCostCenterValidationRejectsByCode(
+    auditLogs: readonly AuditLogRecord[],
+  ) {
+    const counts = new Map<string, number>();
+    auditLogs
+      .filter(
+        (auditLog) =>
+          auditLog.actionName === "booking.cost_center.validation_rejected",
+      )
+      .forEach((auditLog) => {
+        const errorCode = auditLog.newValuesSummary?.errorCode;
+        if (typeof errorCode !== "string" || errorCode.length === 0) {
+          return;
+        }
+        counts.set(errorCode, (counts.get(errorCode) ?? 0) + 1);
+      });
+    return counts;
   }
 
   private withQuotaReservationLock<T>(

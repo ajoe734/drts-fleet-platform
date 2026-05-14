@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
@@ -2099,5 +2102,54 @@ describe("TenantPartnerService approval rules", () => {
       service.getTenantQuotaSummary("tenant-demo-001").usage
         .pendingReservedBookingCount,
     ).toBe(1);
+  });
+
+  it("ships a tenant governance dashboard with the required panels and metric bindings", () => {
+    const dashboard = JSON.parse(
+      readFileSync(
+        resolve(
+          process.cwd(),
+          "..",
+          "..",
+          "infra/grafana/dashboards/tenant-governance.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      panels: Array<{ title?: string; targets?: Array<{ expr?: string }> }>;
+    };
+    const panelTitles = dashboard.panels.map((panel) => panel.title);
+    const allExpressions = dashboard.panels.flatMap((panel) =>
+      (panel.targets ?? []).map((target) => target.expr ?? ""),
+    );
+
+    expect(panelTitles).toEqual(
+      expect.arrayContaining([
+        "Pending Approvals + P95 Age",
+        "Quota Usage By Tenant",
+        "Evaluator Latency P50/P95/P99",
+        "Ledger Writes / Sec",
+        "Race Failures / Min",
+        "Validation Rejects / Min",
+      ]),
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_approval_pending_count",
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_quota_usage_percent",
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_approval_evaluator_latency_ms",
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_quota_ledger_write_total",
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_quota_race_failure_total",
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_cost_center_validation_reject_total",
+    );
   });
 });

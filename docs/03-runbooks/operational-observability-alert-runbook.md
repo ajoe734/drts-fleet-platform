@@ -174,6 +174,40 @@ Likely actions:
 - separate issuer outage from true ineligible traffic
 - clear or annotate fallback cases before dispatch / settlement release
 
+## Tenant Governance Alerts
+
+This alert set covers the tenant governance metrics namespace:
+
+- Logical namespace: `tenant_governance.approval.*`, `tenant_governance.quota.*`, `tenant_governance.cost_center.*`
+- Prometheus export names used by Grafana / alert rules replace dots with underscores, for example `tenant_governance_approval_pending_count`.
+
+Alert inventory:
+
+- `TenantGovernanceQuotaUsageHigh`
+  Trigger: quota usage above 95% for 10 minutes.
+  Response: confirm whether the tenant is near a genuine monthly cap, review the latest `tenant.quota_snapshot.refreshed` audit rows, and decide whether to raise the quota, switch enforcement to `require_approval`, or ask the tenant admin to release stale reservations.
+- `TenantGovernancePendingApprovalP95AgeHigh`
+  Trigger: p95 pending approval age above 24 hours for 15 minutes.
+  Response: open the tenant approval queue, identify which approvers are stalling, and re-drive approver notifications or escalate to the fallback chain.
+- `TenantGovernancePendingApprovalOldestCritical`
+  Trigger: oldest pending approval age above 48 hours for 15 minutes.
+  Response: treat as an on-call escalation. Confirm whether the request can be manually approved/rejected, whether the approver set is resolvable, and whether the tenant needs a temporary tenant-admin override while configuration is repaired.
+- `TenantGovernanceEvaluatorLatencyHigh`
+  Trigger: evaluator p95 latency above 200ms for 10 minutes.
+  Response: inspect recent `booking.approval_rules.evaluated` audit rows for rule explosion or malformed condition sets, then compare with API latency and database health before changing rule volume.
+- `TenantGovernanceQuotaRaceFailuresHigh`
+  Trigger: more than 10 `QUOTA_INSUFFICIENT_AT_COMMIT` race failures per minute for 5 minutes.
+  Response: verify whether one tenant is oversubscribing the same quota window, inspect `tenant.quota_reservation.blocked` and `tenant.quota_ledger.entry_added` audit rows, and consider temporarily reducing concurrency or widening the quota while the booking burst is investigated.
+
+Supporting dashboard panels:
+
+- pending approvals + p95 age
+- quota usage by tenant
+- evaluator latency p50/p95/p99
+- ledger writes per second
+- race failures per minute
+- validation rejects per minute by cost-center error code
+
 ## Notes
 
 - This runbook documents the workflow-health contract added by `OPX-GV-003`.
