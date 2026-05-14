@@ -598,7 +598,8 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
     gh_binary = command_exists("gh")
     gh_version = _gh_version(gh_binary)
     gh_auth_ready = _gh_auth_ready(gh_binary)
-    claude_auth_ready = _claude_auth_ready(claude_binary)
+    claude_probe_env = {**os.environ, **runtime_env_overrides(config.get("providers", {}).get("claude", {}).get("runtime", {}))}
+    claude_auth_ready = _claude_auth_ready(claude_binary, env=claude_probe_env)
     copilot_auth_ready = _copilot_auth_ready(gh_binary)
     copilot_settings = config.get("providers", {}).get("copilot", {})
     qwen_runtime = config.get("providers", {}).get("qwen", {}).get("qwen", {})
