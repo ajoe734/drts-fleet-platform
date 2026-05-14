@@ -21,6 +21,7 @@ const en = {
   "nav.drivers": "Drivers",
   "nav.contracts": "Contracts",
   "nav.featureFlags": "Feature Flags",
+  "nav.approvalRequests": "Approval Queue",
 
   // ── Common ──
   "common.loading": "Loading...",
@@ -1504,6 +1505,7 @@ const zh: Record<keyof typeof en, string> = {
   "nav.drivers": "司機",
   "nav.contracts": "合約",
   "nav.featureFlags": "功能旗標",
+  "nav.approvalRequests": "審批佇列",
 
   // ── Common ──
   "common.loading": "載入中...",

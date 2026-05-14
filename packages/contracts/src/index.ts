@@ -1244,6 +1244,7 @@ export interface TenantApprovalRuleRecord {
   approvers: TenantPrincipalRef[];
   timeoutHoursOverride?: number | null;
   fallbackPolicyOverride?: TenantApprovalFallbackPolicy | null;
+  escalationTarget?: TenantPrincipalRef | null;
   disabledAt?: string | null;
   disabledReason?: string | null;
   createdAt: string;
@@ -1271,6 +1272,7 @@ export interface UpsertTenantApprovalRuleCommand {
   approvers?: TenantPrincipalRef[];
   timeoutHoursOverride?: number | null;
   fallbackPolicyOverride?: TenantApprovalFallbackPolicy | null;
+  escalationTarget?: TenantPrincipalRef | null;
   disabledReason?: string | null;
 }
 
@@ -1349,12 +1351,15 @@ export type TenantBookingApprovalState =
   | "blocked"
   | "cancelled_by_re_evaluation";
 
+export const TENANT_BOOKING_APPROVAL_REQUEST_STATUSES = [
+  "pending",
+  "approved",
+  "rejected",
+  "cancelled_by_re_evaluation",
+  "timeout_escalated",
+] as const;
 export type TenantBookingApprovalRequestStatus =
-  | "pending"
-  | "approved"
-  | "rejected"
-  | "cancelled_by_re_evaluation"
-  | "timeout_escalated";
+  (typeof TENANT_BOOKING_APPROVAL_REQUEST_STATUSES)[number];
 
 export interface TenantBookingApprovalDecisionRecord {
   decisionId: string;
@@ -1388,9 +1393,26 @@ export interface TenantBookingApprovalRequestRecord {
   createdAt: string;
   resolvedAt: string | null;
 }
+
+export interface OpsPendingApprovalRequestRecord extends TenantBookingApprovalRequestRecord {
+  slaBreached: boolean;
+  lastNudgedAt: string | null;
+  lastNudgedByActorId: string | null;
+  lastNudgedByActorType: IdentityContext["actorType"] | null;
+  opsSlaAcknowledgedAt: string | null;
+  opsSlaAcknowledgedByActorId: string | null;
+  opsSlaAcknowledgedByActorType: IdentityContext["actorType"] | null;
+}
+
 export interface ListTenantBookingApprovalRequestsQuery {
   status?: TenantBookingApprovalRequestStatus;
   bookingId?: string;
+}
+
+export interface ListOpsPendingApprovalRequestsQuery {
+  tenantId?: string;
+  status?: TenantBookingApprovalRequestStatus;
+  expiresBefore?: string;
 }
 
 export interface ApproveTenantBookingApprovalRequestCommand {
@@ -1403,6 +1425,14 @@ export interface RejectTenantBookingApprovalRequestCommand {
 }
 
 export interface EscalateTenantBookingApprovalRequestCommand {
+  reasonNote?: string | null;
+}
+
+export interface NudgeOpsApprovalRequestCommand {
+  reasonNote?: string | null;
+}
+
+export interface AcknowledgeOpsApprovalRequestBreachCommand {
   reasonNote?: string | null;
 }
 

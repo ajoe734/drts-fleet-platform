@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   Wrench,
   Languages,
+  ShieldAlert,
 } from "lucide-react";
 
 type SidebarProps = {
@@ -126,6 +127,11 @@ export function Sidebar({ children }: SidebarProps) {
           href: "/maintenance",
           label: t("nav.maintenance"),
           icon: <Wrench size={16} />,
+        },
+        {
+          href: "/approval-requests",
+          label: t("nav.approvalRequests"),
+          icon: <ShieldAlert size={16} />,
         },
       ],
     },
