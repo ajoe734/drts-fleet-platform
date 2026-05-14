@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: DRTS Tenant Governance API
-  version: 2026-05-13
+  version: 2026-05-14
   description: >
     Focused OpenAPI document for the tenant-governance follow-up wave. This
     spec covers the new tenant cost-center, quota, approval-rule, and
@@ -81,7 +81,7 @@ paths:
         RBAC: tenant principal with directory-management access. `x-tenant-id` is required.
 
         The live service uses one upsert route for both create and update semantics and emits
-        `tenant.cost_center.created` for inserts and `tenant.cost_center.updated` for edits.
+        `upsert_cost_center`; infer create vs update from prior state if that distinction matters.
 
         Common error codes: `COST_CENTER_CODE_INVALID`, `TENANT_USER_NOT_FOUND`.
       x-rbac:
@@ -122,7 +122,7 @@ paths:
       description: |
         RBAC: any authenticated tenant-realm principal. `x-tenant-id` is required.
 
-        Audits `tenant.cost_center.coverage_listed`. Used to identify legacy booking rows whose
+        Audits `list_cost_center_coverage`. Used to identify legacy booking rows whose
         `costCenter` text does not map cleanly to the current directory.
       x-rbac:
         realm: tenant
@@ -186,7 +186,7 @@ paths:
       description: |
         RBAC: tenant principal with directory-management access. `x-tenant-id` is required.
 
-        Emits audit action `tenant.cost_center.disabled`.
+        Emits audit action `disable_cost_center`.
       x-rbac:
         realm: tenant
         notes:
