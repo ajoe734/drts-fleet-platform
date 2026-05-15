@@ -2,7 +2,7 @@ export type Locale = "en" | "zh";
 
 const en = {
   // ── App ──
-  "app.name": "DRTS Fleet",
+  "app.name": "DRTS",
   "app.sub": "Ops Console",
   "app.env": "Staging Environment",
   "app.lang.toggle": "中文",
@@ -1486,8 +1486,8 @@ const en = {
 
 const zh: Record<keyof typeof en, string> = {
   // ── App ──
-  "app.name": "DRTS 車隊",
-  "app.sub": "營運控制台",
+  "app.name": "DRTS",
+  "app.sub": "Ops Console",
   "app.env": "測試環境",
   "app.lang.toggle": "English",
 

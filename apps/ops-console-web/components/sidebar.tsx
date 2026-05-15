@@ -3,7 +3,10 @@
 import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { ManagementShell } from "@drts/ui-web/client";
-import { MANAGEMENT_COLORS, type ManagementSidebarSection } from "@drts/ui-web";
+import {
+  MANAGEMENT_COLOR_MODES,
+  type ManagementSidebarSection,
+} from "@drts/ui-web";
 import { useTranslation } from "@/lib/i18n";
 import { getOpsLabel } from "@/lib/localized-labels";
 import {
@@ -165,6 +168,7 @@ export function Sidebar({ children }: SidebarProps) {
 
   return (
     <ManagementShell
+      mode="dark"
       sidebar={{
         brand: t("app.name"),
         brandSub: t("app.sub"),
@@ -182,7 +186,7 @@ export function Sidebar({ children }: SidebarProps) {
                 justifyContent: "center",
                 gap: "6px",
                 width: "100%",
-                background: MANAGEMENT_COLORS.sidebarActive,
+                background: MANAGEMENT_COLOR_MODES.dark.sidebarActive,
                 border: "none",
                 borderRadius: "8px",
                 color: "#ffffff",
@@ -198,7 +202,7 @@ export function Sidebar({ children }: SidebarProps) {
             <span
               style={{
                 fontSize: "11px",
-                color: "#475569",
+                color: MANAGEMENT_COLOR_MODES.dark.textMuted,
                 textAlign: "center",
               }}
             >
