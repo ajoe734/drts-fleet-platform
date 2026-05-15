@@ -2,25 +2,26 @@ export type Locale = "en" | "zh";
 
 const en = {
   // ── App ──
-  "app.name": "DRTS Fleet",
-  "app.sub": "Platform Admin",
-  "app.env": "Staging Environment",
-  "app.lang.toggle": "中文",
+  "app.name": "DRTS PLATFORM ADMIN",
+  "app.sub": "production control plane",
+  "app.env": "admin.drts.io · production",
+  "app.lang.toggle": "繁中",
 
   // ── Nav ──
-  "nav.home": "Home",
+  "nav.home": "Workspace Home",
   "nav.tenantGovernance": "Tenant Governance",
   "nav.tenants": "Tenants",
-  "nav.partners": "Partners",
-  "nav.users": "Users",
-  "nav.fleet": "Fleet & Devices",
-  "nav.switchboard": "Switchboard",
+  "nav.partners": "Partner Entry",
+  "nav.users": "Platform Staff",
+  "nav.fleet": "Fleet & Compliance",
+  "nav.switchboard": "Statutory Info & Placards",
   "nav.pricing": "Pricing",
-  "nav.payments": "Payments",
-  "nav.health": "Health & Alerts",
-  "nav.notices": "Notices",
-  "nav.audit": "Audit Trail",
+  "nav.payments": "Settlement Governance",
+  "nav.health": "Platform Health",
+  "nav.notices": "Notices & Maintenance",
+  "nav.audit": "Audit & Evidence",
   "nav.featureFlags": "Feature Flags",
+  "nav.adapterRegistry": "Adapter Registry",
 
   // ── Common ──
   "common.enabled": "Enabled",
@@ -813,25 +814,26 @@ const en = {
 
 const zh: typeof en = {
   // ── App ──
-  "app.name": "DRTS 車隊",
-  "app.sub": "平台管理",
-  "app.env": "測試環境",
-  "app.lang.toggle": "English",
+  "app.name": "DRTS PLATFORM ADMIN",
+  "app.sub": "平台治理控制平面",
+  "app.env": "admin.drts.io · production",
+  "app.lang.toggle": "EN",
 
   // ── Nav ──
-  "nav.home": "首頁",
-  "nav.tenantGovernance": "租戶治理總覽",
-  "nav.tenants": "租戶管理",
-  "nav.partners": "合作方案",
-  "nav.users": "使用者",
-  "nav.fleet": "車隊與裝置",
-  "nav.switchboard": "交換台",
+  "nav.home": "工作首頁",
+  "nav.tenantGovernance": "租戶治理",
+  "nav.tenants": "租戶",
+  "nav.partners": "合作夥伴 entry",
+  "nav.users": "平台人員",
+  "nav.fleet": "車隊與合規",
+  "nav.switchboard": "法定資訊與牌貼",
   "nav.pricing": "計價",
-  "nav.payments": "付款",
-  "nav.health": "健康與警示",
-  "nav.notices": "公告",
-  "nav.audit": "稽核軌跡",
+  "nav.payments": "結算治理",
+  "nav.health": "平台健康",
+  "nav.notices": "公告與維護",
+  "nav.audit": "稽核與證據",
   "nav.featureFlags": "功能旗標",
+  "nav.adapterRegistry": "介接登錄",
 
   // ── Common ──
   "common.enabled": "已啟用",

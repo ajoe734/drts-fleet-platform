@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ManagementThemeProvider } from "@drts/ui-web/client";
 import { PlatformShell } from "@/components/platform-shell";
 import { LanguageProvider } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/server-locale";
@@ -13,13 +14,16 @@ export default async function RootLayout({
   children: ReactNode;
 }) {
   const locale = await getServerLocale();
+  const htmlLang = locale === "zh" ? "zh-Hant" : "en";
 
   return (
-    <html lang={locale}>
-      <body style={{ margin: 0, minHeight: "100vh" }}>
+    <html lang={htmlLang}>
+      <body className="platform-admin-body">
         <RuntimeConfigScript />
         <LanguageProvider defaultLocale={locale}>
-          <PlatformShell>{children}</PlatformShell>
+          <ManagementThemeProvider defaultDensity="compact" defaultDark>
+            <PlatformShell>{children}</PlatformShell>
+          </ManagementThemeProvider>
         </LanguageProvider>
       </body>
     </html>

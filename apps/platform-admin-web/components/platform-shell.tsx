@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { ManagementShell } from "@drts/ui-web/client";
 import {
-  MANAGEMENT_COLORS,
+  managementColors,
   type ManagementSidebarItem,
   type ManagementSidebarSection,
 } from "@drts/ui-web";
@@ -37,6 +37,10 @@ type PlatformNavSection = {
   title: string;
   items: PlatformNavItem[];
 };
+
+const DARK_COLORS = managementColors("dark");
+const WINDOW_HEIGHT =
+  "calc(100dvh - var(--platform-admin-pad) - var(--platform-admin-pad) - var(--platform-admin-toolbar-height))";
 
 function isNavItemActive(
   item: Pick<ManagementSidebarItem, "href" | "matchPaths">,
@@ -145,7 +149,7 @@ function buildPlatformSections(
       items: [
         {
           href: "/tenant-governance",
-          label: t("nav.tenantGovernance"),
+          label: locale === "en" ? "Governance Overview" : "治理總覽",
           icon: <ShieldCheck size={16} />,
           note: notes.tenantGovernanceSummary,
         },
@@ -231,7 +235,7 @@ function buildPlatformSections(
         },
         {
           href: "/adapter-registry",
-          label: locale === "en" ? "Adapter Registry" : "介接登錄",
+          label: t("nav.adapterRegistry"),
           icon: <ShieldCheck size={16} />,
           note: notes.adapterRegistry,
         },
@@ -246,15 +250,18 @@ export function PlatformShell({ children }: { children: ReactNode }) {
   const { t, locale, setLocale } = useTranslation();
 
   const navSections = buildPlatformSections(locale, t);
+  const sidebarPath = pathname === "/tenant-governance" ? "/tenants" : pathname;
   const sidebarSections: ManagementSidebarSection[] = navSections.map(
     ({ key, title, items }) => ({
       key,
       title,
-      items: items.map((item) => {
-        const { note, ...sidebarItem } = item;
-        void note;
-        return sidebarItem;
-      }),
+      items: items
+        .filter((item) => item.href !== "/tenant-governance")
+        .map((item) => {
+          const { note, ...sidebarItem } = item;
+          void note;
+          return sidebarItem;
+        }),
     }),
   );
 
@@ -265,85 +272,129 @@ export function PlatformShell({ children }: { children: ReactNode }) {
   const activeItem =
     activeSection.items.find((item) => isNavItemActive(item, pathname)) ??
     activeSection.items[0]!;
-  const shellLabel = locale === "en" ? "Platform Admin" : "平台治理";
   const breadcrumb =
     activeItem.href === "/"
-      ? [{ label: shellLabel }, { label: activeItem.label }]
-      : [
-          { label: shellLabel },
-          { label: activeSection.title },
-          { label: activeItem.label },
-        ];
+      ? [{ label: activeItem.label }]
+      : [{ label: activeSection.title }, { label: activeItem.label }];
+  const chromeUrl = `admin.drts.io${pathname === "/" ? "" : pathname}`;
 
   return (
-    <ManagementShell
-      sidebar={{
-        brand: t("app.name"),
-        brandSub: t("app.sub"),
-        brandIcon: <Shield size={16} color="white" />,
-        sections: sidebarSections,
-        currentPath: pathname,
-        footer: (
-          <div style={{ display: "grid", gap: "8px" }}>
-            <button
-              type="button"
-              onClick={() => setLocale(locale === "en" ? "zh" : "en")}
-              title={getPlatformLabel(locale, "switchLanguage")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "6px",
-                width: "100%",
-                background: MANAGEMENT_COLORS.sidebarActive,
-                border: "none",
-                borderRadius: "8px",
-                color: "#ffffff",
-                fontSize: "13px",
-                fontWeight: 600,
-                padding: "10px 12px",
-                cursor: "pointer",
-              }}
-            >
-              <Languages size={14} />
-              {t("app.lang.toggle")}
-            </button>
-            <span
-              style={{
-                fontSize: "11px",
-                color: "#475569",
-                textAlign: "center",
-              }}
-            >
-              {t("app.env")}
+    <div className="platform-admin-window">
+      <div className="platform-admin-window__frame">
+        <div className="platform-admin-window__toolbar">
+          <div
+            className="platform-admin-window__traffic-lights"
+            aria-hidden="true"
+          >
+            <span className="platform-admin-window__traffic-light platform-admin-window__traffic-light--close" />
+            <span className="platform-admin-window__traffic-light platform-admin-window__traffic-light--minimize" />
+            <span className="platform-admin-window__traffic-light platform-admin-window__traffic-light--maximize" />
+          </div>
+          <div className="platform-admin-window__title-stack">
+            <span className="platform-admin-window__title">
+              DRTS PLATFORM ADMIN
+            </span>
+            <span className="platform-admin-window__url" title={chromeUrl}>
+              {chromeUrl}
             </span>
           </div>
-        ),
-      }}
-      topbar={{
-        breadcrumb,
-        searchSlot: (
-          <div
-            style={{
-              minWidth: "320px",
-              maxWidth: "560px",
-              padding: "9px 12px",
-              borderRadius: "14px",
-              border: "1px solid #bfdbfe",
-              background: "#eff6ff",
-              color: "#1d4ed8",
-              fontSize: "12.5px",
-              lineHeight: 1.4,
-            }}
-          >
-            {activeItem.note}
-          </div>
-        ),
-        envLabel: "production",
-        envTone: "success",
-      }}
-    >
-      {children}
-    </ManagementShell>
+          <span className="platform-admin-window__meta">
+            {locale === "en" ? "Production control plane" : "正式環境控制平面"}
+          </span>
+        </div>
+
+        <ManagementShell
+          mode="dark"
+          density="compact"
+          style={{ minHeight: WINDOW_HEIGHT }}
+          sidebar={{
+            brand: t("app.name"),
+            brandSub: t("app.sub"),
+            brandIcon: (
+              <span
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 800,
+                  letterSpacing: "0.12em",
+                }}
+              >
+                PA
+              </span>
+            ),
+            sections: sidebarSections,
+            currentPath: sidebarPath,
+            style: {
+              top: "calc(var(--platform-admin-pad) + var(--platform-admin-toolbar-height))",
+              minHeight: WINDOW_HEIGHT,
+              height: WINDOW_HEIGHT,
+            },
+            footer: (
+              <div style={{ display: "grid", gap: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => setLocale(locale === "en" ? "zh" : "en")}
+                  title={getPlatformLabel(locale, "switchLanguage")}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    width: "100%",
+                    background:
+                      "linear-gradient(135deg, rgba(99,102,241,0.92), rgba(129,140,248,0.92))",
+                    border: "1px solid rgba(165,180,252,0.28)",
+                    borderRadius: "10px",
+                    color: "#ffffff",
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    padding: "10px 12px",
+                    cursor: "pointer",
+                    boxShadow: "0 16px 30px rgba(79, 70, 229, 0.22)",
+                  }}
+                >
+                  <Languages size={14} />
+                  {t("app.lang.toggle")}
+                </button>
+                <span
+                  style={{
+                    fontSize: "11px",
+                    color: DARK_COLORS.textMuted,
+                    textAlign: "center",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {t("app.env")}
+                </span>
+              </div>
+            ),
+          }}
+          topbar={{
+            breadcrumb,
+            searchSlot: (
+              <div
+                title={activeItem.note}
+                style={{
+                  width: "clamp(220px, 34vw, 420px)",
+                  padding: "9px 12px",
+                  borderRadius: "14px",
+                  border: "1px solid rgba(129, 140, 248, 0.28)",
+                  background:
+                    "linear-gradient(135deg, rgba(49, 46, 129, 0.38), rgba(30, 41, 59, 0.92))",
+                  color: "#c7d2fe",
+                  fontSize: "12px",
+                  lineHeight: 1.45,
+                }}
+              >
+                {activeItem.note}
+              </div>
+            ),
+            envLabel: "production",
+            envTone: "platform",
+          }}
+        >
+          {children}
+        </ManagementShell>
+      </div>
+    </div>
   );
 }
