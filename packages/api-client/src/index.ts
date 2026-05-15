@@ -6,12 +6,14 @@
  */
 
 import type {
+  AcknowledgeOpsApprovalRequestBreachCommand,
   AddComplaintCaseNoteCommand,
   AddReconciliationIssueCommentCommand,
   ApplyManualFareOverrideCommand,
   ApproveExceptionOverrideCommand,
   AnnounceCallAgentIdentityCommand,
   ApproveReimbursementBatchCommand,
+  AuditLogRecord,
   AssignReconciliationIssueCommand,
   AssignComplaintCaseCommand,
   AttachCallRecordingCommand,
@@ -171,7 +173,10 @@ import type {
   EscalateTenantBookingApprovalRequestCommand,
   EvaluateTenantApprovalRuleCommand,
   ListTenantBookingApprovalRequestsQuery,
+  ListOpsPendingApprovalRequestsQuery,
   ListTenantApprovalRulesQuery,
+  NudgeOpsApprovalRequestCommand,
+  OpsPendingApprovalRequestRecord,
   ReorderTenantApprovalRulesCommand,
   RejectTenantBookingApprovalRequestCommand,
   TenantCostCenterCoverageReport,
@@ -487,6 +492,48 @@ export class ApiClient {
   ): Promise<PartnerEligibilityReviewResolution> {
     return this.post<PartnerEligibilityReviewResolution>(
       "/api/ops/partner/eligibility/reviews/resolve",
+      {
+        body: command,
+      },
+    );
+  }
+
+  async listOpsPendingApprovalRequests(
+    query: ListOpsPendingApprovalRequestsQuery = {},
+  ): Promise<OpsPendingApprovalRequestRecord[]> {
+    const params = new URLSearchParams();
+    if (query.tenantId) {
+      params.set("tenantId", query.tenantId);
+    }
+    if (query.status) {
+      params.set("status", query.status);
+    }
+    if (query.expiresBefore) {
+      params.set("expiresBefore", query.expiresBefore);
+    }
+    return this.getList<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests${params.size > 0 ? `?${params.toString()}` : ""}`,
+    );
+  }
+
+  async nudgeOpsApprovalRequest(
+    approvalRequestId: string,
+    command: NudgeOpsApprovalRequestCommand = {},
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/nudge`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async acknowledgeOpsBreach(
+    approvalRequestId: string,
+    command: AcknowledgeOpsApprovalRequestBreachCommand = {},
+  ): Promise<OpsPendingApprovalRequestRecord> {
+    return this.post<OpsPendingApprovalRequestRecord>(
+      `/api/ops/approval-requests/${encodeURIComponent(approvalRequestId)}/acknowledge-breach`,
       {
         body: command,
       },
@@ -1595,12 +1642,20 @@ export class ApiClient {
     return this.post(`/api/tenant/users/${userId}/role`, { body: command });
   }
 
-  async listAuditLogs() {
-    return this.getList("/api/audit");
+  async listAuditLogs(): Promise<AuditLogRecord[]> {
+    return this.getList<AuditLogRecord>("/api/audit");
   }
 
-  async listTenantAuditLogs() {
-    return this.getList("/api/tenant/audit");
+  async listTenantAuditLogs(options: { tenantId?: string } = {}) {
+    return this.getList<AuditLogRecord>("/api/tenant/audit", {
+      ...(options.tenantId
+        ? {
+            headers: {
+              "x-tenant-id": options.tenantId,
+            },
+          }
+        : {}),
+    });
   }
 
   async listEvidencePolicies(): Promise<EvidenceRetentionPolicyRecord[]> {
