@@ -46,6 +46,7 @@ export const CANVAS_ICONS = {
   chevD: "M6 9l6 6 6-6",
   ext: "M14 4h6v6M10 14L20 4M19 13v6H5V5h6",
   copy: "M9 3h11v14H9zM5 7h11v14H5z",
+  export: "M12 3v12M8 11l4 4 4-4M5 21h14",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   filter: "M3 5h18l-7 9v6l-4-2v-4z",
   plus: "M12 5v14M5 12h14",
