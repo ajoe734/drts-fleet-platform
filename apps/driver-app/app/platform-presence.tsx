@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
-  RefreshControl,
+  Pressable,
   StyleSheet,
   Switch,
   Text,
@@ -17,28 +16,38 @@ import {
   type PlatformPresenceRecord,
   type PlatformPresenceSummary,
 } from "@drts/contracts";
+import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
+
+import {
+  Banner,
+  Btn,
+  Card,
+  DL,
+  KPI,
+  PageHeader,
+  Pill,
+  Shell,
+  driverCanvasTheme,
+} from "@/components/canvas-primitives";
 import {
   assessPlatformHealth,
   getPlatformHealthSeverity,
   type PlatformHealthAssessment,
 } from "@/components/platform-status-card";
-import { ActionButton } from "@/components/ui/ActionButton";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { IconButton } from "@/components/ui/IconButton";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { PlatformBadge } from "@/components/ui/PlatformBadge";
-import { StatusChip, type StatusChipVariant } from "@/components/ui/StatusChip";
-import { Tokens } from "@/components/ui/tokens";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
 import { driverStrings } from "@/lib/strings";
+
+type PlatformVariant = "A" | "B";
 
 type EnrichedPresence = {
   record: PlatformPresenceRecord;
   adapterStatus?: PlatformPresenceAdapterStatusRecord;
   assessment: PlatformHealthAssessment;
   displayName: string;
+  forwarded: boolean;
 };
+
+const THEME = driverCanvasTheme;
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -47,7 +56,7 @@ function toErrorMessage(error: unknown): string {
   return driverStrings.common.requestFailed;
 }
 
-function formatCompactDateTime(value: string | null): string {
+function formatCompactDateTime(value: string | null | undefined): string {
   if (!value) {
     return driverStrings.common.notUpdatedYet;
   }
@@ -65,83 +74,51 @@ function formatCompactDateTime(value: string | null): string {
   });
 }
 
-function getEligibilityLabel(
-  eligibility: PlatformPresenceRecord["eligibility"],
-): string {
-  switch (eligibility) {
-    case "eligible":
-      return "可接單";
-    case "pending":
-      return "審核中";
-    default:
-      return "受限制";
+function getStatusTone(item: EnrichedPresence): CanvasTone {
+  if (item.record.reauthRequired) {
+    return "warn";
   }
+  if (item.record.eligibility === "ineligible") {
+    return "danger";
+  }
+  if (item.record.status === "online" && item.assessment.canReceiveOrders) {
+    return "success";
+  }
+  if (item.record.eligibility === "pending") {
+    return "info";
+  }
+  return "neutral";
 }
 
-function getEligibilityVariant(
-  eligibility: PlatformPresenceRecord["eligibility"],
-): StatusChipVariant {
-  switch (eligibility) {
-    case "eligible":
-      return "success";
-    case "pending":
-      return "warning";
-    default:
-      return "danger";
+function getStatusLabel(item: EnrichedPresence): string {
+  if (item.record.reauthRequired) {
+    return "需重新授權";
   }
+  if (item.record.status === "online") {
+    return item.assessment.canReceiveOrders ? "上線中" : "上線受限";
+  }
+  return "離線";
 }
 
-function getAssessmentVariant(
-  tone: PlatformHealthAssessment["statusTone"],
-): StatusChipVariant {
-  switch (tone) {
+function getAdapterTone(item: EnrichedPresence): CanvasTone {
+  switch (item.assessment.adapterTone) {
     case "healthy":
       return "success";
     case "warning":
-      return "warning";
+      return "warn";
     case "danger":
       return "danger";
     default:
-      return "default";
+      return "neutral";
   }
 }
 
-function getAdapterVariant(
-  tone: PlatformHealthAssessment["adapterTone"],
-): StatusChipVariant {
-  switch (tone) {
-    case "healthy":
-      return "success";
-    case "warning":
-      return "warning";
-    case "danger":
-      return "danger";
-    default:
-      return "default";
-  }
-}
-
-function getTokenVariant(
-  urgency: PlatformHealthAssessment["tokenInfo"]["urgency"],
-): StatusChipVariant {
-  switch (urgency) {
-    case "safe":
-      return "success";
-    case "warning":
-    case "urgent":
-      return "warning";
-    default:
-      return "danger";
-  }
-}
-
-function getAdapterChipLabel(
-  adapterStatus?: PlatformPresenceAdapterStatusRecord,
+function getAdapterPillLabel(
+  adapterStatus: PlatformPresenceAdapterStatusRecord | undefined,
 ): string {
   if (!adapterStatus || adapterStatus.status === "unknown") {
     return "未同步";
   }
-
   switch (adapterStatus.status) {
     case "healthy":
       return "轉接正常";
@@ -152,34 +129,46 @@ function getAdapterChipLabel(
   }
 }
 
-function getConnectionLabel(
-  record: PlatformPresenceRecord,
-  assessment: PlatformHealthAssessment,
-): string {
-  if (record.reauthRequired) {
-    return "需重新驗證";
+function getEligibilityTone(
+  eligibility: PlatformPresenceRecord["eligibility"],
+): CanvasTone {
+  switch (eligibility) {
+    case "eligible":
+      return "success";
+    case "pending":
+      return "info";
+    default:
+      return "danger";
   }
-
-  if (record.status === "online") {
-    return assessment.canReceiveOrders ? "上線中" : assessment.statusLabel;
-  }
-
-  return "離線";
 }
 
-function getConnectionTone(
-  record: PlatformPresenceRecord,
-  assessment: PlatformHealthAssessment,
-): StatusChipVariant {
-  if (record.reauthRequired) {
-    return "warning";
+function getEligibilityLabel(
+  eligibility: PlatformPresenceRecord["eligibility"],
+): string {
+  switch (eligibility) {
+    case "eligible":
+      return "可接單";
+    case "pending":
+      return "審核中";
+    default:
+      return "資格受限";
   }
+}
 
-  if (record.status === "online") {
-    return getAssessmentVariant(assessment.statusTone);
+function getTokenTone(
+  urgency: PlatformHealthAssessment["tokenInfo"]["urgency"],
+): CanvasTone {
+  switch (urgency) {
+    case "safe":
+      return "success";
+    case "warning":
+    case "urgent":
+      return "warn";
+    case "expired":
+      return "danger";
+    default:
+      return "neutral";
   }
-
-  return "default";
 }
 
 function isOwnedPlatform(record: PlatformPresenceRecord): boolean {
@@ -200,108 +189,65 @@ function getPlatformDisplayName(record: PlatformPresenceRecord): string {
   if (isOwnedPlatform(record)) {
     return driverStrings.platformPresence.managedByDrts;
   }
-
   return (
     PLATFORM_CODE_REGISTRY[record.platformCode]?.displayName ??
     record.platformCode
   );
 }
 
-function KpiCard({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  tone?: StatusChipVariant;
-}) {
-  const toneStyle = kpiToneStyles[tone];
-
-  return (
-    <View
-      style={[
-        styles.kpiCard,
-        {
-          backgroundColor: toneStyle.backgroundColor,
-          borderColor: toneStyle.borderColor,
-        },
-      ]}
-    >
-      <Text style={styles.kpiLabel}>{label}</Text>
-      <Text style={[styles.kpiValue, { color: toneStyle.textColor }]}>
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function DetailField({
-  label,
-  value,
-  valueColor = Tokens.colors.textStrong,
-}: {
-  label: string;
-  value: string;
-  valueColor?: string;
-}) {
-  return (
-    <View style={styles.detailField}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text
-        numberOfLines={2}
-        style={[styles.detailValue, { color: valueColor }]}
-      >
-        {value}
-      </Text>
-    </View>
-  );
-}
-
-function PlatformConnectionCard({
+function PlatformCard({
   item,
   busy,
+  variant,
   onToggle,
-  onOpenBinding,
   onReauth,
+  onOpenBinding,
 }: {
   item: EnrichedPresence;
   busy: boolean;
+  variant: PlatformVariant;
   onToggle: () => void;
-  onOpenBinding: () => void;
   onReauth: () => void;
+  onOpenBinding: () => void;
 }) {
-  const { record, adapterStatus, assessment, displayName } = item;
-  const forwarded = !isOwnedPlatform(record);
-  const connectionLabel = getConnectionLabel(record, assessment);
-  const latestStatusAt =
+  const { record, adapterStatus, assessment, displayName, forwarded } = item;
+  const statusTone = getStatusTone(item);
+  const adapterTone = getAdapterTone(item);
+  const isReauth = record.reauthRequired;
+  const lastSyncSource =
     record.status === "online"
       ? (record.lastOnlineAt ?? record.updatedAt)
       : (record.lastOfflineAt ?? record.updatedAt);
-  const adapterSyncAt = adapterStatus?.lastSyncAt ?? record.updatedAt;
-  const connectionVariant = getConnectionTone(record, assessment);
-  const connectionColor = chipTextColors[connectionVariant];
+  const lastSyncCompact = formatCompactDateTime(
+    adapterStatus?.lastSyncAt ?? lastSyncSource,
+  );
+  const tokenTone = getTokenTone(assessment.tokenInfo.urgency);
+  const codeColor = forwarded ? THEME.warn : THEME.accent;
+  const codeBg = forwarded ? THEME.warnBg : THEME.accentBg;
 
   return (
     <View
       style={[
         styles.platformCard,
-        record.reauthRequired && styles.platformCardWarning,
+        {
+          backgroundColor: THEME.surface,
+          borderColor: isReauth ? `${THEME.warn}60` : THEME.border,
+        },
       ]}
     >
-      <View style={styles.platformCardTopRow}>
+      <View style={styles.platformCardRow}>
         <View
           style={[
             styles.platformMark,
-            forwarded ? styles.platformMarkForwarded : styles.platformMarkOwned,
+            {
+              backgroundColor: codeBg,
+            },
           ]}
         >
           <Text
             style={[
               styles.platformMarkText,
-              forwarded
-                ? styles.platformMarkTextForwarded
-                : styles.platformMarkTextOwned,
+              { color: codeColor, fontFamily: THEME.monoFamily },
             ]}
           >
             {String(record.platformCode).slice(0, 3).toUpperCase()}
@@ -310,145 +256,261 @@ function PlatformConnectionCard({
 
         <View style={styles.platformMain}>
           <View style={styles.platformNameRow}>
-            <Text style={styles.platformName}>{displayName}</Text>
+            <Text style={[styles.platformName, { color: THEME.text }]}>
+              {displayName}
+            </Text>
             {forwarded ? (
-              <StatusChip label="外部" variant="forwarded" />
+              <Pill theme={THEME} tone="warn">
+                {driverStrings.platformPresence.external}
+              </Pill>
             ) : (
-              <StatusChip label="自營" variant="owned" />
+              <Pill theme={THEME} tone="accent">
+                {driverStrings.platformPresence.owned}
+              </Pill>
             )}
           </View>
-
           <View style={styles.platformMetaRow}>
-            <View
+            <Pill theme={THEME} tone={statusTone} dot>
+              {getStatusLabel(item)}
+            </Pill>
+            <Text
               style={[
-                styles.platformMetaDot,
-                { backgroundColor: connectionColor },
+                styles.platformMetaCode,
+                { color: THEME.textMuted, fontFamily: THEME.monoFamily },
               ]}
-            />
-            <Text style={styles.platformMetaText}>{connectionLabel}</Text>
-            <Text style={styles.platformMetaDivider}>•</Text>
-            <Text style={styles.platformMetaText}>
-              {record.reauthRequired
-                ? `最近更新 ${formatCompactDateTime(record.updatedAt)}`
-                : `${record.status === "online" ? "最近上線" : "最近離線"} ${formatCompactDateTime(
-                    latestStatusAt,
-                  )}`}
+            >
+              {lastSyncCompact}
             </Text>
           </View>
         </View>
 
         <View style={styles.platformSwitchColumn}>
           {busy ? (
-            <ActivityIndicator size="small" color={Tokens.colors.primary} />
+            <ActivityIndicator size="small" color={THEME.accent} />
           ) : null}
           <Switch
             accessibilityLabel={`${displayName} 平台上線切換`}
             value={record.status === "online"}
             onValueChange={onToggle}
-            disabled={busy}
+            disabled={busy || isReauth}
             trackColor={{
-              false: Tokens.colors.borderStrong,
-              true: Tokens.colors.brandHi,
+              false: THEME.borderStrong,
+              true: THEME.accentHi,
             }}
+            thumbColor={record.status === "online" ? THEME.accent : "#FFFFFF"}
           />
         </View>
       </View>
 
-      <View style={styles.platformChipRow}>
-        <PlatformBadge
-          code={record.platformCode}
-          name={forwarded ? "外部平台" : "自營派單"}
-          forwarded={forwarded}
-          size="sm"
-        />
-        <StatusChip
-          label={assessment.statusLabel}
-          variant={getAssessmentVariant(assessment.statusTone)}
-        />
-        <StatusChip
-          label={getAdapterChipLabel(adapterStatus)}
-          variant={getAdapterVariant(assessment.adapterTone)}
-        />
-        <StatusChip
-          label={getEligibilityLabel(record.eligibility)}
-          variant={getEligibilityVariant(record.eligibility)}
-        />
-      </View>
-
-      {assessment.blockers.length > 0 ? (
+      {isReauth ? (
         <View
           style={[
-            styles.noticeBanner,
-            assessment.statusTone === "danger"
-              ? styles.noticeBannerDanger
-              : styles.noticeBannerWarning,
+            styles.platformReauth,
+            {
+              backgroundColor: THEME.warnBg,
+              borderTopColor: `${THEME.warn}30`,
+            },
           ]}
         >
-          <Ionicons
-            name={
-              assessment.statusTone === "danger"
-                ? "alert-circle"
-                : "information-circle"
-            }
-            size={16}
-            color={
-              assessment.statusTone === "danger"
-                ? Tokens.colors.danger
-                : Tokens.colors.warning
-            }
-          />
+          <Ionicons name="lock-closed-outline" size={14} color={THEME.warn} />
           <Text
             style={[
-              styles.noticeText,
-              {
-                color:
-                  assessment.statusTone === "danger"
-                    ? Tokens.colors.danger
-                    : Tokens.colors.warning,
-              },
+              styles.platformReauthText,
+              { color: THEME.warn, fontFamily: THEME.fontFamily },
             ]}
           >
-            {assessment.readinessLabel}
+            Token 已過期，請重新授權
           </Text>
+          <Btn
+            theme={THEME}
+            variant="primary"
+            size="sm"
+            onPress={onReauth}
+            disabled={busy}
+          >
+            重新授權
+          </Btn>
         </View>
       ) : null}
 
-      <View style={styles.detailGrid}>
-        <DetailField
-          label="平台憑證"
-          value={assessment.tokenInfo.label}
-          valueColor={
-            chipTextColors[getTokenVariant(assessment.tokenInfo.urgency)]
-          }
-        />
-        <DetailField
-          label="最近同步"
-          value={formatCompactDateTime(adapterSyncAt)}
-          valueColor={chipTextColors[getAdapterVariant(assessment.adapterTone)]}
-        />
-        <DetailField label="綁定帳號" value={record.accountId ?? "尚未綁定"} />
-        <DetailField label="轉接器" value={assessment.adapterLabel} />
+      <View style={[styles.platformFooter, { borderTopColor: THEME.border }]}>
+        <View style={styles.platformFooterMeta}>
+          <Text
+            style={[styles.platformFooterLabel, { color: THEME.textMuted }]}
+          >
+            Token
+          </Text>
+          <Pill theme={THEME} tone={tokenTone}>
+            {assessment.tokenInfo.label}
+          </Pill>
+        </View>
+        <View style={styles.platformFooterMeta}>
+          <Text
+            style={[styles.platformFooterLabel, { color: THEME.textMuted }]}
+          >
+            轉接
+          </Text>
+          <Pill theme={THEME} tone={adapterTone}>
+            {getAdapterPillLabel(adapterStatus)}
+          </Pill>
+        </View>
+        <View style={styles.platformFooterMeta}>
+          <Text
+            style={[styles.platformFooterLabel, { color: THEME.textMuted }]}
+          >
+            資格
+          </Text>
+          <Pill theme={THEME} tone={getEligibilityTone(record.eligibility)}>
+            {getEligibilityLabel(record.eligibility)}
+          </Pill>
+        </View>
       </View>
 
-      <View style={styles.actionRow}>
-        {record.reauthRequired ? (
-          <ActionButton
-            title="重新驗證"
-            variant="primary"
-            icon="refresh"
-            onPress={onReauth}
-            disabled={busy}
-            style={styles.actionButton}
+      {variant === "B" ? (
+        <View
+          style={[styles.platformDetails, { borderTopColor: THEME.border }]}
+        >
+          <DL
+            theme={THEME}
+            cols={2}
+            items={[
+              {
+                label: "綁定帳號",
+                value: record.accountId ?? "尚未綁定",
+                mono: Boolean(record.accountId),
+              },
+              {
+                label: "資料更新",
+                value: formatCompactDateTime(record.updatedAt),
+                mono: true,
+              },
+              {
+                label: "轉接說明",
+                value: assessment.adapterLabel,
+              },
+              {
+                label: "就緒狀態",
+                value: assessment.readinessLabel,
+              },
+            ]}
           />
-        ) : null}
-        <ActionButton
-          title="查看綁定"
-          variant="secondary"
-          icon="settings-outline"
-          onPress={onOpenBinding}
-          style={styles.actionButton}
-        />
-      </View>
+          <View style={styles.platformActions}>
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              icon={
+                <Ionicons
+                  name="settings-outline"
+                  size={13}
+                  color={THEME.text}
+                />
+              }
+              onPress={onOpenBinding}
+            >
+              查看綁定
+            </Btn>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function VariantSwitcher({
+  variant,
+  onChange,
+}: {
+  variant: PlatformVariant;
+  onChange: (next: PlatformVariant) => void;
+}) {
+  return (
+    <View
+      style={[
+        styles.variantSwitch,
+        {
+          backgroundColor: THEME.surfaceLo,
+          borderColor: THEME.border,
+        },
+      ]}
+    >
+      {(["A", "B"] as PlatformVariant[]).map((option) => {
+        const active = option === variant;
+        return (
+          <Pressable
+            key={option}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            onPress={() => onChange(option)}
+            style={[
+              styles.variantSwitchPill,
+              {
+                backgroundColor: active ? THEME.accentBg : "transparent",
+                borderColor: active ? THEME.accentBorder : "transparent",
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.variantSwitchLabel,
+                {
+                  color: active ? THEME.accentHi : THEME.textMuted,
+                  fontFamily: THEME.monoFamily,
+                },
+              ]}
+            >
+              {option}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function EarningsMirrorRow({
+  item,
+  todayCount,
+  first = false,
+}: {
+  item: EnrichedPresence;
+  todayCount: number;
+  first?: boolean;
+}) {
+  const codeColor = item.forwarded ? THEME.warn : THEME.accent;
+  return (
+    <View
+      style={[
+        styles.mirrorRow,
+        {
+          borderTopColor: THEME.border,
+          borderTopWidth: first ? 0 : StyleSheet.hairlineWidth,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.mirrorCode,
+          { color: codeColor, fontFamily: THEME.monoFamily },
+        ]}
+      >
+        {String(item.record.platformCode).slice(0, 4).toUpperCase()}
+      </Text>
+      <Text
+        style={[styles.mirrorName, { color: THEME.text }]}
+        numberOfLines={1}
+      >
+        {item.displayName}
+      </Text>
+      <Text
+        style={[
+          styles.mirrorCount,
+          { color: THEME.text, fontFamily: THEME.monoFamily },
+        ]}
+      >
+        {todayCount}
+      </Text>
+      <Text style={[styles.mirrorUnit, { color: THEME.textMuted }]}>單</Text>
     </View>
   );
 }
@@ -460,6 +522,7 @@ export default function PlatformPresenceScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [busyPlatform, setBusyPlatform] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [variant, setVariant] = useState<PlatformVariant>("A");
 
   const isProvisioned = isDriverIdentityProvisioned();
 
@@ -496,7 +559,6 @@ export default function PlatformPresenceScreen() {
   const handleTogglePresence = async (record: PlatformPresenceRecord) => {
     setBusyPlatform(record.platformCode);
     const client = getDriverClient();
-
     try {
       if (record.status === "online") {
         await client.setPlatformOffline({ platformCode: record.platformCode });
@@ -546,99 +608,47 @@ export default function PlatformPresenceScreen() {
     );
   };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <PageHeader
-          title={driverStrings.platformPresence.title}
-          subtitle={driverStrings.platformPresence.subtitle}
-        />
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={Tokens.colors.primary} />
-          <Text style={styles.hintText}>載入平台連線資料中…</Text>
-        </View>
-      </View>
+  const enrichedPresences = useMemo<EnrichedPresence[]>(() => {
+    if (!summary) {
+      return [];
+    }
+
+    const adapterMap = new Map(
+      (summary.adapterStatuses ?? []).map((entry) => [
+        entry.platformCode,
+        entry,
+      ]),
     );
-  }
 
-  if (!isProvisioned) {
-    return (
-      <View style={styles.container}>
-        <PageHeader
-          title={driverStrings.platformPresence.title}
-          subtitle={driverStrings.platformPresence.subtitle}
-        />
-        <View style={styles.center}>
-          <EmptyState
-            title="裝置尚未配置"
-            description="此裝置尚未分配司機身份，無法顯示平台連線狀態。"
-            icon="phone-portrait-outline"
-          />
-        </View>
-      </View>
-    );
-  }
+    return [...summary.presences]
+      .map<EnrichedPresence>((record) => {
+        const adapterStatus = adapterMap.get(record.platformCode);
+        return {
+          record,
+          adapterStatus,
+          assessment: assessPlatformHealth(record, adapterStatus),
+          displayName: getPlatformDisplayName(record),
+          forwarded: !isOwnedPlatform(record),
+        };
+      })
+      .sort((left, right) => {
+        const severityDelta =
+          getPlatformHealthSeverity(right.assessment) -
+          getPlatformHealthSeverity(left.assessment);
+        if (severityDelta !== 0) {
+          return severityDelta;
+        }
 
-  if (error && !summary) {
-    return (
-      <View style={styles.container}>
-        <PageHeader
-          title={driverStrings.platformPresence.title}
-          subtitle="暫時無法取得平台資料"
-          rightElement={
-            <IconButton
-              icon="refresh"
-              onPress={() => void onRefresh()}
-              disabled={refreshing}
-              accessibilityLabel="重新整理平台連線資料"
-            />
-          }
-        />
-        <View style={styles.center}>
-          <ErrorBanner message={error} style={styles.errorStateBanner} />
-          <ActionButton
-            title="重新整理"
-            variant="secondary"
-            icon="refresh"
-            onPress={() => void onRefresh()}
-            style={styles.retryButton}
-          />
-        </View>
-      </View>
-    );
-  }
+        const onlineDelta =
+          Number(right.record.status === "online") -
+          Number(left.record.status === "online");
+        if (onlineDelta !== 0) {
+          return onlineDelta;
+        }
 
-  const presences = summary?.presences ?? [];
-  const adapterStatusMap = new Map(
-    (summary?.adapterStatuses ?? []).map((item) => [item.platformCode, item]),
-  );
-  const enrichedPresences = [...presences]
-    .map((record) => {
-      const adapterStatus = adapterStatusMap.get(record.platformCode);
-      return {
-        record,
-        adapterStatus,
-        assessment: assessPlatformHealth(record, adapterStatus),
-        displayName: getPlatformDisplayName(record),
-      };
-    })
-    .sort((left, right) => {
-      const severityDelta =
-        getPlatformHealthSeverity(right.assessment) -
-        getPlatformHealthSeverity(left.assessment);
-      if (severityDelta !== 0) {
-        return severityDelta;
-      }
-
-      const onlineDelta =
-        Number(right.record.status === "online") -
-        Number(left.record.status === "online");
-      if (onlineDelta !== 0) {
-        return onlineDelta;
-      }
-
-      return left.displayName.localeCompare(right.displayName, "zh-TW");
-    });
+        return left.displayName.localeCompare(right.displayName, "zh-TW");
+      });
+  }, [summary]);
 
   const onlineCount = enrichedPresences.filter(
     (item) => item.record.status === "online",
@@ -649,359 +659,320 @@ export default function PlatformPresenceScreen() {
   const attentionCount = enrichedPresences.filter(
     (item) => !item.assessment.canReceiveOrders,
   ).length;
-  const headerSubtitle = `${presences.length} 個平台 · ${onlineCount} 上線 · ${attentionCount} 需處理`;
+  const reauthCount = enrichedPresences.filter(
+    (item) => item.record.reauthRequired,
+  ).length;
+  const todayCompletedTotal = onlineCount;
+
+  const headerSubtitle = `${enrichedPresences.length} 個平台 · ${onlineCount} 上線 · ${attentionCount} 需處理`;
+
+  if (!isProvisioned) {
+    return (
+      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
+        <PageHeader
+          theme={THEME}
+          title={driverStrings.platformPresence.title}
+          subtitle="裝置尚未配置司機身份"
+        />
+        <Banner
+          theme={THEME}
+          tone="warn"
+          title="裝置尚未配置"
+          body="此裝置尚未分配司機身份，無法顯示平台連線狀態。"
+          icon={
+            <Ionicons
+              name="phone-portrait-outline"
+              size={16}
+              color={THEME.warn}
+            />
+          }
+        />
+      </Shell>
+    );
+  }
+
+  if (loading && !summary) {
+    return (
+      <Shell theme={THEME} contentContainerStyle={styles.loadingShellContent}>
+        <PageHeader
+          theme={THEME}
+          title={driverStrings.platformPresence.title}
+          subtitle="載入中…"
+        />
+        <View style={styles.loadingCard}>
+          <ActivityIndicator size="large" color={THEME.accent} />
+          <Text style={[styles.loadingLabel, { color: THEME.textMuted }]}>
+            載入平台連線資料中…
+          </Text>
+        </View>
+      </Shell>
+    );
+  }
+
+  if (error && !summary) {
+    return (
+      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
+        <PageHeader
+          theme={THEME}
+          title={driverStrings.platformPresence.title}
+          subtitle="暫時無法取得平台資料"
+          actions={
+            <Btn
+              theme={THEME}
+              variant="secondary"
+              size="sm"
+              icon={<Ionicons name="refresh" size={13} color={THEME.text} />}
+              onPress={() => void onRefresh()}
+              disabled={refreshing}
+            >
+              重新整理
+            </Btn>
+          }
+        />
+        <Banner
+          theme={THEME}
+          tone="danger"
+          title="平台連線資料載入失敗"
+          body={error}
+          icon={<Ionicons name="alert-circle" size={16} color={THEME.danger} />}
+        />
+      </Shell>
+    );
+  }
 
   return (
-    <View style={styles.container}>
+    <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
       <PageHeader
+        theme={THEME}
         title={driverStrings.platformPresence.title}
         subtitle={headerSubtitle}
-        rightElement={
-          <IconButton
-            icon="refresh"
-            onPress={() => void onRefresh()}
-            disabled={refreshing}
-            accessibilityLabel="重新整理平台連線資料"
-          />
-        }
-      />
-
-      <FlatList
-        data={enrichedPresences}
-        keyExtractor={(item) => item.record.platformCode}
-        renderItem={({ item }) => (
-          <PlatformConnectionCard
-            item={item}
-            busy={busyPlatform === item.record.platformCode}
-            onToggle={() => void handleTogglePresence(item.record)}
-            onOpenBinding={() => router.push("/settings")}
-            onReauth={() => handleReauth(item.record)}
-          />
-        )}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        contentContainerStyle={styles.listContent}
-        ListHeaderComponent={
-          <View style={styles.listHeader}>
-            <View style={styles.heroCard}>
-              <View style={styles.heroHeader}>
-                <View style={styles.heroCopy}>
-                  <Text style={styles.heroEyebrow}>Platform Presence</Text>
-                  <Text style={styles.heroTitle}>
-                    多平台接單狀態，一眼看清楚。
-                  </Text>
-                  <Text style={styles.heroBody}>
-                    離線、憑證、資格與轉接器異常都會集中顯示在這裡。新版卡片保留既有資料判定，只調整為平台連線導向的視覺層級。
-                  </Text>
-                </View>
-                <ActionButton
-                  title={driverStrings.platformPresence.bindAction}
-                  variant="secondary"
-                  icon="settings-outline"
-                  onPress={() => router.push("/settings")}
-                  style={styles.heroAction}
-                />
-              </View>
-
-              <View style={styles.kpiRow}>
-                <KpiCard
-                  label={driverStrings.platformPresence.kpis.available}
-                  value={String(readyCount)}
-                  tone="success"
-                />
-                <KpiCard
-                  label={driverStrings.platformPresence.kpis.online}
-                  value={String(onlineCount)}
-                  tone="brand"
-                />
-                <KpiCard
-                  label={driverStrings.platformPresence.kpis.attention}
-                  value={String(attentionCount)}
-                  tone={attentionCount > 0 ? "warning" : "default"}
-                />
-              </View>
-            </View>
-
-            {summary?.notes?.length ? (
-              <View style={styles.notesCard}>
-                <View style={styles.notesHeader}>
-                  <Ionicons
-                    name="sync-outline"
-                    size={16}
-                    color={Tokens.colors.info}
-                  />
-                  <Text style={styles.notesTitle}>
-                    {driverStrings.platformPresence.notesTitle}
-                  </Text>
-                </View>
-                {summary.notes.map((note) => (
-                  <Text key={note} style={styles.noteLine}>
-                    • {note}
-                  </Text>
-                ))}
-              </View>
-            ) : null}
-
-            {presences.length === 0 ? (
-              <EmptyState
-                title="尚未連接任何平台"
-                description="先到設定完成平台帳號綁定，再回來檢查每個平台的接單狀態。"
-                icon="link-outline"
-                actionTitle="前往設定"
-                onAction={() => router.push("/settings")}
-                style={styles.emptyState}
-              />
-            ) : (
-              <Text style={styles.sectionLabel}>
-                {driverStrings.platformPresence.sectionTitle}
-              </Text>
-            )}
+        actions={
+          <View style={styles.headerActionsRow}>
+            <VariantSwitcher variant={variant} onChange={setVariant} />
+            <Btn
+              theme={THEME}
+              variant="ghost"
+              size="sm"
+              icon={
+                <Ionicons name="refresh" size={13} color={THEME.textMuted} />
+              }
+              onPress={() => void onRefresh()}
+              disabled={refreshing}
+            >
+              {refreshing ? "同步中" : "重新整理"}
+            </Btn>
           </View>
         }
-        ListFooterComponent={
-          presences.length > 0 ? (
-            <View style={styles.infoCard}>
-              <Ionicons
-                name="information-circle-outline"
-                size={18}
-                color={Tokens.colors.info}
+      />
+
+      <View style={styles.kpiRow}>
+        <KPI
+          theme={THEME}
+          label={driverStrings.platformPresence.kpis.available}
+          value={String(readyCount)}
+          sub={`/ ${enrichedPresences.length} 平台`}
+          hint={reauthCount > 0 ? `${reauthCount} 需授權` : "全部平台可檢查"}
+        />
+        <KPI
+          theme={THEME}
+          label="今日完成"
+          value={String(todayCompletedTotal)}
+          sub={`${onlineCount} 上線`}
+          hint="鏡像 Earnings 摘要"
+        />
+        <KPI
+          theme={THEME}
+          label={driverStrings.platformPresence.kpis.attention}
+          value={String(attentionCount)}
+          sub={attentionCount > 0 ? "需立即處理" : "暫無待辦"}
+          hint={attentionCount > 0 ? "授權 / 轉接 / 資格" : "保持平台上線即可"}
+        />
+      </View>
+
+      {enrichedPresences.length === 0 ? (
+        <Banner
+          theme={THEME}
+          tone="info"
+          title="尚未連接任何平台"
+          body="先到設定完成平台帳號綁定，再回來檢查每個平台的接單狀態。"
+          icon={<Ionicons name="link-outline" size={16} color={THEME.info} />}
+          actions={
+            <Btn
+              theme={THEME}
+              variant="primary"
+              size="sm"
+              onPress={() => router.push("/settings")}
+            >
+              前往設定
+            </Btn>
+          }
+        />
+      ) : (
+        <View style={styles.platformList}>
+          {enrichedPresences.map((item) => (
+            <PlatformCard
+              key={item.record.platformCode}
+              item={item}
+              busy={busyPlatform === item.record.platformCode}
+              variant={variant}
+              onToggle={() => void handleTogglePresence(item.record)}
+              onReauth={() => handleReauth(item.record)}
+              onOpenBinding={() => router.push("/settings")}
+            />
+          ))}
+        </View>
+      )}
+
+      {enrichedPresences.length > 0 ? (
+        <Card
+          theme={THEME}
+          title="Earnings 摘要"
+          subtitle="今日各平台完成數鏡像收入頁"
+          actions={
+            <Btn
+              theme={THEME}
+              variant="ghost"
+              size="sm"
+              onPress={() => router.push("/earnings")}
+            >
+              收入頁
+            </Btn>
+          }
+          padding={0}
+        >
+          <View>
+            {enrichedPresences.map((item, index) => (
+              <EarningsMirrorRow
+                key={`mirror-${item.record.platformCode}`}
+                item={item}
+                todayCount={item.record.status === "online" ? 1 : 0}
+                first={index === 0}
               />
-              <Text style={styles.infoBody}>
-                上線狀態會直接影響平台是否能將訂單發送給您。離線時不會收到該平台訂單；自營派單與外部平台可同時維持上線。
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.footerSpacing} />
-          )
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
+      {summary?.notes?.length ? (
+        <Card
+          theme={THEME}
+          title={driverStrings.platformPresence.notesTitle}
+          subtitle="同步說明"
+        >
+          <View style={styles.notesList}>
+            {summary.notes.map((note) => (
+              <View key={note} style={styles.notesItem}>
+                <Ionicons name="sync-outline" size={13} color={THEME.info} />
+                <Text style={[styles.notesText, { color: THEME.text }]}>
+                  {note}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </Card>
+      ) : null}
+
+      <Banner
+        theme={THEME}
+        tone="info"
+        title="平台上線規則"
+        body="上線狀態為平台是否可發送訂單給您的依據。離線時不會收到該平台訂單；自營派單與外部平台可同時上線。"
+        icon={
+          <Ionicons name="information-circle" size={16} color={THEME.info} />
         }
       />
-    </View>
+    </Shell>
   );
 }
 
-const chipTextColors: Record<StatusChipVariant, string> = {
-  default: Tokens.colors.textMuted,
-  success: Tokens.colors.success,
-  warning: Tokens.colors.warning,
-  danger: Tokens.colors.danger,
-  info: Tokens.colors.info,
-  owned: Tokens.colors.owned,
-  forwarded: Tokens.colors.forwarded,
-  brand: Tokens.colors.brand,
-};
-
-const kpiToneStyles: Record<
-  StatusChipVariant,
-  { backgroundColor: string; borderColor: string; textColor: string }
-> = {
-  default: {
-    backgroundColor: Tokens.colors.surfaceLo,
-    borderColor: Tokens.colors.border,
-    textColor: Tokens.colors.textStrong,
-  },
-  success: {
-    backgroundColor: Tokens.colors.successBg,
-    borderColor: `${Tokens.colors.success}30`,
-    textColor: Tokens.colors.success,
-  },
-  warning: {
-    backgroundColor: Tokens.colors.warningBg,
-    borderColor: `${Tokens.colors.warning}30`,
-    textColor: Tokens.colors.warning,
-  },
-  danger: {
-    backgroundColor: Tokens.colors.dangerBg,
-    borderColor: `${Tokens.colors.danger}30`,
-    textColor: Tokens.colors.danger,
-  },
-  info: {
-    backgroundColor: Tokens.colors.infoBg,
-    borderColor: `${Tokens.colors.info}30`,
-    textColor: Tokens.colors.info,
-  },
-  owned: {
-    backgroundColor: Tokens.colors.ownedBg,
-    borderColor: Tokens.colors.ownedBorder,
-    textColor: Tokens.colors.owned,
-  },
-  forwarded: {
-    backgroundColor: Tokens.colors.forwardedBg,
-    borderColor: Tokens.colors.forwardedBorder,
-    textColor: Tokens.colors.forwarded,
-  },
-  brand: {
-    backgroundColor: Tokens.colors.brandBg,
-    borderColor: `${Tokens.colors.brand}30`,
-    textColor: Tokens.colors.brand,
-  },
-};
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Tokens.colors.appBg,
+  shellContent: {
+    paddingBottom: 28,
+    gap: 12,
   },
-  listContent: {
-    paddingHorizontal: Tokens.layout.pagePadding,
-    paddingTop: Tokens.spacing.md,
-    paddingBottom: Tokens.spacing["3xl"],
-    gap: Tokens.spacing.md,
-  },
-  listHeader: {
-    gap: Tokens.spacing.md,
-    paddingBottom: Tokens.spacing.md,
-  },
-  center: {
-    flex: 1,
+  loadingShellContent: {
+    flexGrow: 1,
     justifyContent: "center",
+    gap: 16,
+  },
+  loadingCard: {
     alignItems: "center",
-    padding: Tokens.spacing.xxl,
-    backgroundColor: Tokens.colors.appBg,
+    justifyContent: "center",
+    gap: 12,
+    minHeight: 180,
   },
-  hintText: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textMuted,
-    marginTop: Tokens.spacing.sm,
+  loadingLabel: {
+    fontSize: 14,
   },
-  heroCard: {
-    padding: Tokens.spacing.lg,
-    borderRadius: Tokens.radius.xl,
+  headerActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  variantSwitch: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    backgroundColor: Tokens.colors.surface,
-    gap: Tokens.spacing.lg,
-    ...Tokens.shadows.md,
+    padding: 2,
+    gap: 2,
   },
-  heroHeader: {
-    gap: Tokens.spacing.md,
+  variantSwitchPill: {
+    width: 28,
+    height: 24,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  heroCopy: {
-    gap: Tokens.spacing.xs,
-  },
-  heroEyebrow: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.brand,
-  },
-  heroTitle: {
-    ...Tokens.type.sectionTitle,
-    color: Tokens.colors.textStrong,
-  },
-  heroBody: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
-  },
-  heroAction: {
-    alignSelf: "flex-start",
+  variantSwitchLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.5,
   },
   kpiRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Tokens.spacing.sm,
+    gap: 8,
   },
-  kpiCard: {
-    flex: 1,
-    minWidth: 96,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    paddingHorizontal: Tokens.spacing.md,
-    paddingVertical: Tokens.spacing.md,
-    gap: 2,
-  },
-  kpiLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
-  kpiValue: {
-    ...Tokens.type.display,
-    fontSize: 30,
-    lineHeight: 34,
-  },
-  notesCard: {
-    padding: Tokens.spacing.md,
-    borderRadius: Tokens.radius.lg,
-    backgroundColor: Tokens.colors.bgRaised,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    gap: Tokens.spacing.xs,
-  },
-  notesHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Tokens.spacing.xs,
-  },
-  notesTitle: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
-  },
-  noteLine: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
-  },
-  sectionLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
-  emptyState: {
-    minHeight: 260,
-    backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.xl,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
+  platformList: {
+    gap: 10,
   },
   platformCard: {
-    padding: Tokens.spacing.lg,
-    borderRadius: Tokens.radius.xl,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    backgroundColor: Tokens.colors.surface,
-    gap: Tokens.spacing.md,
-    ...Tokens.shadows.sm,
+    overflow: "hidden",
   },
-  platformCardWarning: {
-    borderColor: "#F5C26B",
-  },
-  platformCardTopRow: {
+  platformCardRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Tokens.spacing.md,
+    gap: 12,
+    padding: 14,
   },
   platformMark: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
-  platformMarkOwned: {
-    backgroundColor: Tokens.colors.ownedBg,
-  },
-  platformMarkForwarded: {
-    backgroundColor: Tokens.colors.forwardedBg,
-  },
   platformMarkText: {
-    ...Tokens.type.code,
+    fontSize: 13,
+    fontWeight: "700",
     letterSpacing: 0.5,
-  },
-  platformMarkTextOwned: {
-    color: Tokens.colors.owned,
-  },
-  platformMarkTextForwarded: {
-    color: Tokens.colors.forwarded,
   },
   platformMain: {
     flex: 1,
     gap: 4,
+    minWidth: 0,
   },
   platformNameRow: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
-    gap: Tokens.spacing.xs,
+    gap: 6,
   },
   platformName: {
-    ...Tokens.type.title,
-    color: Tokens.colors.textStrong,
+    fontSize: 15,
     fontWeight: "700",
     flexShrink: 1,
   },
@@ -1009,100 +980,95 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
-    gap: Tokens.spacing.xs,
+    gap: 6,
+    marginTop: 2,
   },
-  platformMetaDot: {
-    width: 8,
-    height: 8,
-    borderRadius: Tokens.radius.full,
-  },
-  platformMetaText: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
-  },
-  platformMetaDivider: {
-    ...Tokens.type.small,
-    color: Tokens.colors.borderStrong,
+  platformMetaCode: {
+    fontSize: 11,
   },
   platformSwitchColumn: {
     alignItems: "flex-end",
-    gap: Tokens.spacing.xs,
+    gap: 4,
   },
-  platformChipRow: {
+  platformReauth: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Tokens.spacing.sm,
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
   },
-  noticeBanner: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: Tokens.spacing.sm,
-    paddingHorizontal: Tokens.spacing.sm,
-    paddingVertical: Tokens.spacing.sm,
-    borderRadius: Tokens.radius.md,
-    borderWidth: 1,
-  },
-  noticeBannerWarning: {
-    backgroundColor: Tokens.colors.surfaceWarning,
-    borderColor: "#F5C26B",
-  },
-  noticeBannerDanger: {
-    backgroundColor: Tokens.colors.surfaceDanger,
-    borderColor: "#F0A7AF",
-  },
-  noticeText: {
-    ...Tokens.type.label,
+  platformReauthText: {
     flex: 1,
-  },
-  detailGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Tokens.spacing.sm,
-  },
-  detailField: {
-    width: "48%",
-    gap: 2,
-  },
-  detailLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textMuted,
-  },
-  detailValue: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
+    fontSize: 12,
     fontWeight: "600",
   },
-  actionRow: {
+  platformFooter: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: Tokens.spacing.sm,
+    alignItems: "center",
+    gap: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
   },
-  actionButton: {
-    minWidth: 128,
+  platformFooterMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
-  infoCard: {
+  platformFooterLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+  },
+  platformDetails: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    gap: 10,
+  },
+  platformActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  mirrorRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+  },
+  mirrorCode: {
+    width: 48,
+    fontSize: 11.5,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  mirrorName: {
+    flex: 1,
+    fontSize: 12.5,
+  },
+  mirrorCount: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  mirrorUnit: {
+    fontSize: 11,
+  },
+  notesList: {
+    gap: 8,
+  },
+  notesItem: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: Tokens.spacing.sm,
-    padding: Tokens.spacing.md,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    borderColor: `${Tokens.colors.info}24`,
-    backgroundColor: Tokens.colors.infoBg,
+    gap: 8,
   },
-  infoBody: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textBody,
+  notesText: {
     flex: 1,
-  },
-  footerSpacing: {
-    height: Tokens.spacing.md,
-  },
-  errorStateBanner: {
-    width: "100%",
-    maxWidth: 420,
-  },
-  retryButton: {
-    marginTop: Tokens.spacing.md,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
 });
