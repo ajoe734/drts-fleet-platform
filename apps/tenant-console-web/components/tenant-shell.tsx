@@ -2,85 +2,72 @@
 
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { ManagementShell } from "@drts/ui-web/client";
-import type { ManagementSidebarSection } from "@drts/ui-web";
-import { findNavItem, tenantNavGroups } from "@/lib/navigation";
+import {
+  CanvasShell,
+  CanvasWindowChrome,
+  ManagementThemeProvider,
+  buildCanvasTheme,
+} from "@drts/ui-web";
+import {
+  TENANT_CONSOLE_BRAND,
+  TENANT_CONSOLE_BRAND_SUB,
+  TENANT_CONSOLE_CONTEXT,
+  TENANT_CONSOLE_ENV,
+  TENANT_CONSOLE_SEARCH_PLACEHOLDER,
+  TENANT_CONSOLE_VERSION,
+  findNavItem,
+  tenantNavEntries,
+} from "@/lib/navigation";
+
+const tenantCanvasTheme = buildCanvasTheme({
+  surface: "tenant",
+  dark: true,
+  density: "compact",
+});
 
 export function TenantShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const activeItem = findNavItem(pathname);
-  const sections: ManagementSidebarSection[] = tenantNavGroups.map((group) => ({
-    key: group.label.toLowerCase().replace(/\s+/g, "-"),
-    title: group.label,
-    items: group.items.map((item) => ({
-      href: item.href,
-      label: item.label,
-    })),
-  }));
+  const activeShellProps = activeItem ? { active: activeItem.key } : {};
 
   if (pathname.startsWith("/partner")) {
     return <>{children}</>;
   }
 
   return (
-    <ManagementShell
-      sidebar={{
-        brand: "Tenant Console",
-        brandSub: "Bookings, billing, and team access",
-        brandIcon: (
-          <span
-            style={{
-              fontSize: "11px",
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-            }}
+    <ManagementThemeProvider defaultDark defaultDensity="compact">
+      <div
+        style={{
+          minHeight: "100vh",
+          background:
+            "radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 22%), #060b13",
+        }}
+      >
+        <CanvasWindowChrome
+          width="100%"
+          height="100vh"
+          outerPadding={12}
+          style={{ minHeight: "100vh" }}
+          contentStyle={{ background: tenantCanvasTheme.bg }}
+        >
+          <CanvasShell
+            theme={tenantCanvasTheme}
+            nav={tenantNavEntries}
+            brandLabel={TENANT_CONSOLE_BRAND}
+            brandSubLabel={TENANT_CONSOLE_BRAND_SUB}
+            breadcrumb={[TENANT_CONSOLE_CONTEXT, activeItem?.label ?? "首頁"]}
+            env={TENANT_CONSOLE_ENV}
+            versionLabel={TENANT_CONSOLE_VERSION}
+            searchPlaceholder={TENANT_CONSOLE_SEARCH_PLACEHOLDER}
+            searchWidth={280}
+            avatarLabel="大和"
+            style={{ height: "100%" }}
+            {...activeShellProps}
           >
-            TC
-          </span>
-        ),
-        sections,
-        currentPath: pathname,
-        footer: (
-          <div style={{ display: "grid", gap: "10px", lineHeight: 1.5 }}>
-            <div>
-              Partner booking stays focused on eligibility checks and trip
-              requests. Team administration stays here.
-            </div>
-            <div>
-              Manage bookings, people, billing, and integrations for your
-              organization from one workspace.
-            </div>
-          </div>
-        ),
-      }}
-      topbar={{
-        breadcrumb: [
-          { label: "Tenant Console" },
-          { label: activeItem?.label ?? "Home" },
-        ],
-        searchSlot: (
-          <div
-            style={{
-              minWidth: "320px",
-              maxWidth: "560px",
-              padding: "9px 12px",
-              borderRadius: "14px",
-              border: "1px solid #ccfbf1",
-              background: "#f0fdfa",
-              color: "#115e59",
-              fontSize: "12.5px",
-              lineHeight: 1.4,
-            }}
-          >
-            {activeItem?.note ??
-              "Choose a section to review bookings, directories, billing, or workspace settings."}
-          </div>
-        ),
-        envLabel: "tenant",
-        envTone: "tenant",
-      }}
-    >
-      {children}
-    </ManagementShell>
+            {children}
+          </CanvasShell>
+        </CanvasWindowChrome>
+      </div>
+    </ManagementThemeProvider>
   );
 }

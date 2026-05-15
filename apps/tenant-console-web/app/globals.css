@@ -1,17 +1,22 @@
 :root {
-  color-scheme: light;
-  --bg: #f3efe6;
-  --shell: #10233a;
-  --panel: rgba(255, 255, 255, 0.88);
-  --panel-strong: #ffffff;
-  --panel-border: rgba(16, 35, 58, 0.09);
-  --text: #10233a;
-  --muted: #5f6f82;
-  --accent: #b85c38;
-  --accent-soft: rgba(184, 92, 56, 0.14);
-  --success: #1d6b57;
-  --warning: #8b5e14;
-  --shadow: 0 24px 60px rgba(16, 35, 58, 0.12);
+  color-scheme: dark;
+  --bg: #0a0e16;
+  --shell: #141b2b;
+  --panel: rgba(20, 27, 43, 0.92);
+  --panel-strong: #1a2235;
+  --panel-muted: rgba(11, 18, 32, 0.92);
+  --panel-border: #22304a;
+  --panel-border-strong: #324a6e;
+  --text: #e5eaf3;
+  --muted: #94a3b8;
+  --dim: #64748b;
+  --accent: #5eead4;
+  --accent-strong: #99f6e4;
+  --accent-soft: rgba(15, 42, 40, 0.96);
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
 }
 
 * {
@@ -28,12 +33,17 @@ body {
   background:
     radial-gradient(
       circle at top left,
-      rgba(184, 92, 56, 0.16),
+      rgba(15, 118, 110, 0.18),
+      transparent 24%
+    ),
+    radial-gradient(
+      circle at top right,
+      rgba(30, 58, 95, 0.22),
       transparent 28%
     ),
-    linear-gradient(180deg, #fbf8f2 0%, #edf1f6 100%);
+    linear-gradient(180deg, #060b13 0%, #0a0e16 100%);
   color: var(--text);
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-family: "Inter", "Noto Sans TC", "Segoe UI", sans-serif;
 }
 
 a {
@@ -123,9 +133,9 @@ textarea {
   gap: 0.5rem;
   border-radius: 24px;
   border: 1px solid var(--panel-border);
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--panel);
   padding: 1.2rem;
-  box-shadow: 0 14px 34px rgba(16, 35, 58, 0.06);
+  box-shadow: var(--shadow);
 }
 
 .metric-card strong {
@@ -156,8 +166,8 @@ textarea {
 }
 
 .metric-label {
-  background: rgba(16, 35, 58, 0.06);
-  color: var(--shell);
+  background: var(--panel-muted);
+  color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -201,17 +211,17 @@ textarea {
 }
 
 .status-chip {
-  background: rgba(16, 35, 58, 0.08);
-  color: var(--shell);
+  background: var(--panel-muted);
+  color: var(--text);
 }
 
 .status-chip.is-active {
-  background: var(--shell);
-  color: #ffffff;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
 }
 
 .status-chip.is-warning {
-  background: rgba(139, 94, 20, 0.14);
+  background: rgba(45, 31, 8, 0.96);
   color: var(--warning);
 }
 
@@ -221,17 +231,17 @@ textarea {
 }
 
 .status-badge {
-  background: rgba(184, 92, 56, 0.14);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
 .source-pill {
-  background: rgba(29, 107, 87, 0.12);
+  background: rgba(14, 42, 31, 0.96);
   color: var(--success);
 }
 
 .source-pill-external {
-  background: rgba(139, 94, 20, 0.12);
+  background: rgba(45, 31, 8, 0.96);
   color: var(--warning);
 }
 
@@ -255,7 +265,7 @@ textarea {
 .field-stack span {
   font-size: 0.82rem;
   font-weight: 700;
-  color: var(--shell);
+  color: var(--text);
 }
 
 .field-stack .field-hint {
@@ -268,10 +278,10 @@ textarea {
 .field-stack select,
 .field-stack textarea {
   width: 100%;
-  border: 1px solid rgba(16, 35, 58, 0.12);
+  border: 1px solid var(--panel-border);
   border-radius: 16px;
   padding: 0.8rem 0.9rem;
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--panel-strong);
   color: var(--text);
 }
 
@@ -324,8 +334,8 @@ textarea {
 }
 
 .booking-button-secondary {
-  background: rgba(16, 35, 58, 0.08);
-  color: var(--shell);
+  background: var(--panel-muted);
+  color: var(--text);
 }
 
 .form-actions,
@@ -360,22 +370,22 @@ textarea {
 }
 
 .action-button-secondary {
-  border-color: rgba(16, 35, 58, 0.18);
-  background: rgba(255, 255, 255, 0.88);
-  color: var(--shell);
+  border-color: var(--panel-border);
+  background: var(--panel-strong);
+  color: var(--text);
 }
 
 .action-button-danger {
-  border-color: rgba(184, 28, 28, 0.18);
-  background: rgba(254, 242, 242, 0.96);
-  color: #b91c1c;
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(44, 16, 14, 0.96);
+  color: var(--danger);
 }
 
 .table-wrap {
   overflow-x: auto;
   border-radius: 20px;
-  border: 1px solid rgba(16, 35, 58, 0.08);
-  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--panel-border);
+  background: var(--panel);
 }
 
 .data-grid {
@@ -391,15 +401,16 @@ textarea {
 }
 
 .data-grid thead th {
-  border-bottom: 1px solid rgba(16, 35, 58, 0.08);
+  border-bottom: 1px solid var(--panel-border);
   color: var(--muted);
   font-size: 0.78rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  background: var(--panel-muted);
 }
 
 .data-grid tbody tr + tr td {
-  border-top: 1px solid rgba(16, 35, 58, 0.06);
+  border-top: 1px solid var(--panel-border);
 }
 
 .table-primary {
@@ -408,10 +419,10 @@ textarea {
 }
 
 .empty-panel {
-  border: 1px dashed rgba(16, 35, 58, 0.16);
+  border: 1px dashed var(--panel-border-strong);
   border-radius: 18px;
   padding: 1rem 1.1rem;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(11, 18, 32, 0.76);
 }
 
 .timeline-list {
@@ -431,7 +442,7 @@ textarea {
 .timeline-item {
   display: grid;
   gap: 0.2rem;
-  border-left: 3px solid rgba(184, 92, 56, 0.24);
+  border-left: 3px solid rgba(94, 234, 212, 0.28);
   padding-left: 1rem;
 }
 
@@ -449,10 +460,10 @@ textarea {
   display: block;
   overflow-x: auto;
   border-radius: 18px;
-  border: 1px dashed rgba(16, 35, 58, 0.18);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1px dashed var(--panel-border-strong);
+  background: rgba(11, 18, 32, 0.82);
   padding: 0.95rem 1rem;
-  color: var(--shell);
+  color: var(--accent-strong);
   font-size: 0.95rem;
 }
 
@@ -466,9 +477,9 @@ textarea {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  border: 1px solid rgba(16, 35, 58, 0.1);
+  border: 1px solid var(--panel-border);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(11, 18, 32, 0.82);
   padding: 0.8rem 0.9rem;
 }
 
@@ -488,17 +499,17 @@ textarea {
   display: grid;
   place-items: center;
   padding: 1rem;
-  background: rgba(16, 35, 58, 0.38);
+  background: rgba(2, 6, 23, 0.72);
   z-index: 40;
 }
 
 .modal-panel {
   width: min(680px, 100%);
   border-radius: 28px;
-  border: 1px solid rgba(16, 35, 58, 0.08);
-  background: #ffffff;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-strong);
   padding: 1.25rem;
-  box-shadow: 0 24px 64px rgba(16, 35, 58, 0.2);
+  box-shadow: var(--shadow);
 }
 
 .modal-header {
@@ -523,12 +534,12 @@ textarea {
 }
 
 .form-error {
-  border: 1px solid rgba(185, 28, 28, 0.16);
+  border: 1px solid rgba(248, 113, 113, 0.28);
   border-radius: 16px;
   padding: 0.8rem 0.9rem;
   margin-bottom: 1rem;
-  background: rgba(254, 242, 242, 0.92);
-  color: #991b1b;
+  background: rgba(44, 16, 14, 0.96);
+  color: #fecaca;
 }
 
 .partner-shell {
