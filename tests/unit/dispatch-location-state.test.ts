@@ -18,11 +18,12 @@ function buildCandidate(
     serviceBuckets: ["standard_taxi"],
     etaMinutes: 6,
     currentLocation: {
+      driverId: "driver-001",
       lat: 25.04,
       lng: 121.56,
-      heading: null,
-      speedKph: null,
+      accuracyM: null,
       recordedAt: "2026-04-30T15:10:00.000Z",
+      updatedAt: "2026-04-30T15:10:00.000Z",
     },
     ...overrides,
   };
@@ -57,11 +58,12 @@ describe("ORX-DP-004 dispatch candidate location state", () => {
       getCandidateLocationState(
         buildCandidate({
           currentLocation: {
+            driverId: "driver-001",
             lat: 25.04,
             lng: 121.56,
-            heading: null,
-            speedKph: null,
+            accuracyM: null,
             recordedAt: "not-a-date",
+            updatedAt: "not-a-date",
           },
         }),
         nowMs,

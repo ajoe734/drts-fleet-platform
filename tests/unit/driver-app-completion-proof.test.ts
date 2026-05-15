@@ -4,7 +4,6 @@ import {
   appendProofPhotos,
   estimateBase64DecodedBytes,
   getCompletionProofRequirements,
-  getUnsupportedProofRequirementMessages,
   MAX_COMPLETION_PROOF_PHOTO_BYTES,
   MAX_COMPLETION_PROOF_PHOTOS,
   type ProofPhoto,
@@ -99,9 +98,5 @@ describe("driver-app completion proof helpers", () => {
       signoffRequired: true,
       expenseProofRequired: true,
     });
-    expect(getUnsupportedProofRequirementMessages(order as never)).toEqual([
-      "This trip also requires signoff proof, which is not supported in the driver app yet.",
-      "This trip also requires expense proof, which is not supported in the driver app yet.",
-    ]);
   });
 });

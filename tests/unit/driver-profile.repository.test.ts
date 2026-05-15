@@ -14,6 +14,7 @@ describe("driver profile repository", () => {
       photoUrl: null,
       emergencyContact: null,
       bankAccount: null,
+      deviceBindings: [],
       updatedAt: "2026-04-17T14:30:00.000Z",
     };
     const query = vi.fn().mockResolvedValue({
@@ -44,6 +45,7 @@ describe("driver profile repository", () => {
       photoUrl: null,
       emergencyContact: null,
       bankAccount: null,
+      deviceBindings: [],
       updatedAt: "2026-04-17T14:31:00.000Z",
     };
 
