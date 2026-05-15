@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
+import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
@@ -21,6 +22,8 @@ function createServices() {
   const callcenterService = new CallcenterService(auditService);
   const regulatoryRegistryService = new RegulatoryRegistryService(
     new OpsDispatchEventsService(new EventEmitter() as never),
+    auditService,
+    new DriverProfileService(auditService),
   );
   const ownedMobilityService = new OwnedMobilityService(
     regulatoryRegistryService,
@@ -223,13 +226,15 @@ describe("reporting and filing service", () => {
   it("exports partner benefit revenue rows for airport-transfer review", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
-    const verification = tenantPartnerService.verifyPartnerEligibility({
+    const verification = await tenantPartnerService.verifyPartnerEligibility({
       entrySlug: "bank-demo-alpha-airport",
       cardLast4: "2468",
     });
     const callcenterService = new CallcenterService(auditService);
     const regulatoryRegistryService = new RegulatoryRegistryService(
       new OpsDispatchEventsService(new EventEmitter() as never),
+      auditService,
+      new DriverProfileService(auditService),
     );
     const ownedMobilityService = new OwnedMobilityService(
       regulatoryRegistryService,
@@ -245,7 +250,7 @@ describe("reporting and filing service", () => {
       ownedMobilityService.listOrders(),
     );
 
-    const created = ownedMobilityService.createTenantBooking(
+    const created = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
         partnerEntrySlug: "bank-demo-alpha-airport",
@@ -264,7 +269,7 @@ describe("reporting and filing service", () => {
       "tenant-demo-001",
     );
 
-    ownedMobilityService.createTenantBooking(
+    await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: { address: "台中市政府" },

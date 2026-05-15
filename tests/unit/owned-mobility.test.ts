@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
+import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { OwnedMobilityRepository } from "../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
@@ -24,6 +25,8 @@ function createService(
   const callcenterService = new CallcenterService(auditService);
   const regulatoryRegistryService = new RegulatoryRegistryService(
     new OpsDispatchEventsService(new EventEmitter() as never),
+    auditService,
+    new DriverProfileService(auditService),
   );
   const ownedMobilityService = new OwnedMobilityService(
     regulatoryRegistryService,
@@ -59,6 +62,7 @@ function createMemoryTenantPartnerRepository(): TenantPartnerRepository {
     webhookDeliveries: [],
     slaProfiles: [],
     partnerEntries: [],
+    partnerIngressCredentials: [],
     partnerEligibilityVerifications: [],
     passengers: [],
     addresses: [],
@@ -465,11 +469,11 @@ describe("owned mobility service", () => {
     }
   });
 
-  it("persists partner provenance on eligible airport-transfer bookings", () => {
+  it("persists partner provenance on eligible airport-transfer bookings", async () => {
     const tenantPartnerService = new TenantPartnerService(
       new AuditNotificationService(),
     );
-    const verification = tenantPartnerService.verifyPartnerEligibility({
+    const verification = await tenantPartnerService.verifyPartnerEligibility({
       entrySlug: "bank-demo-alpha-airport",
       cardLast4: "2468",
     });
@@ -478,7 +482,7 @@ describe("owned mobility service", () => {
       tenantPartnerService,
     );
 
-    const created = ownedMobilityService.createTenantBooking(
+    const created = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
         partnerEntrySlug: "bank-demo-alpha-airport",
@@ -545,13 +549,14 @@ describe("owned mobility service", () => {
     );
     await firstTenantPartnerService.onModuleInit();
 
-    const verification = firstTenantPartnerService.verifyPartnerEligibility(
-      {
-        entrySlug: "bank-demo-alpha-airport",
-        cardLast4: "2468",
-      },
-      "owned-mobility-reuse-request",
-    );
+    const verification =
+      await firstTenantPartnerService.verifyPartnerEligibility(
+        {
+          entrySlug: "bank-demo-alpha-airport",
+          cardLast4: "2468",
+        },
+        "owned-mobility-reuse-request",
+      );
     await Promise.resolve();
 
     const reloadedTenantPartnerService = new TenantPartnerService(
@@ -565,7 +570,7 @@ describe("owned mobility service", () => {
       reloadedTenantPartnerService,
     );
 
-    const created = ownedMobilityService.createTenantBooking(
+    const created = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "credit_card_airport_transfer",
         partnerEntrySlug: "bank-demo-alpha-airport",
@@ -1346,6 +1351,8 @@ describe("owned mobility service", () => {
     const callcenterService = new CallcenterService(auditService);
     const regulatoryRegistryService = new RegulatoryRegistryService(
       new OpsDispatchEventsService(new EventEmitter() as never),
+      auditService,
+      new DriverProfileService(auditService),
     );
     const persistChanges = vi.fn(async () => undefined);
     const repository = {
