@@ -32,16 +32,13 @@ import {
   Tokens,
 } from "@/components/ui";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
+import { driverEarningsPeriodOptions, driverStrings } from "@/lib/strings";
 import { formatMoney, getCurrencyLabel, sumMoneyAmounts } from "@/lib/money";
 import { formatDriverPayoutStatusLabel } from "@/lib/operational-labels";
 
 type PeriodKey = "today" | "week" | "month";
 
-const PERIOD_OPTIONS = [
-  { label: "今日", value: "today" },
-  { label: "本週", value: "week" },
-  { label: "本月", value: "month" },
-] as const;
+const PERIOD_OPTIONS = driverEarningsPeriodOptions;
 
 const DEFAULT_CURRENCY = "TWD";
 
@@ -314,7 +311,10 @@ export default function EarningsScreen() {
   if (loading) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="收入" subtitle="載入收益資料中" />
+        <PageHeader
+          title={driverStrings.earnings.title}
+          subtitle={driverStrings.earnings.loadingSubtitle}
+        />
         <View style={styles.centerState}>
           <ActivityIndicator size="large" color={Tokens.colors.primary} />
           <Text style={styles.loadingLabel}>載入收益資料中…</Text>
@@ -326,7 +326,10 @@ export default function EarningsScreen() {
   if (!isProvisioned) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="收入" subtitle="需要完成裝置綁定" />
+        <PageHeader
+          title={driverStrings.earnings.title}
+          subtitle="需要完成裝置綁定"
+        />
         <EmptyState
           title="裝置尚未綁定司機身份"
           description="完成裝置註冊後，才能查看平台收益與對帳資料。"
@@ -340,7 +343,10 @@ export default function EarningsScreen() {
   if (!earningsEnabled) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="收入" subtitle="收益功能未啟用" />
+        <PageHeader
+          title={driverStrings.earnings.title}
+          subtitle="收益功能未啟用"
+        />
         <EmptyState
           title="收益儀表板暫停提供"
           description="此功能目前未啟用，請稍後再試或改從設定頁確認帳務通知。"
@@ -416,7 +422,10 @@ export default function EarningsScreen() {
   if (error && !hasAnyData) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="收入" subtitle="收益資料同步失敗" />
+        <PageHeader
+          title={driverStrings.earnings.title}
+          subtitle="收益資料同步失敗"
+        />
         <View style={styles.errorState}>
           <ErrorBanner message={`收益資料同步失敗：${error}`} />
           <ActionButton
@@ -433,7 +442,7 @@ export default function EarningsScreen() {
   return (
     <View style={styles.screen}>
       <PageHeader
-        title="收入"
+        title={driverStrings.earnings.title}
         subtitle={getPeriodDescription(selectedPeriod, latestStatementMonth)}
         rightElement={
           <IconButton
@@ -458,7 +467,9 @@ export default function EarningsScreen() {
         {error ? <ErrorBanner message={`資料可能不是最新：${error}`} /> : null}
 
         <View style={styles.periodCard}>
-          <Text style={styles.periodEyebrow}>結算期間</Text>
+          <Text style={styles.periodEyebrow}>
+            {driverStrings.earnings.periodEyebrow}
+          </Text>
           <SegmentedControl
             options={PERIOD_OPTIONS.map((option) => ({
               label: option.label,

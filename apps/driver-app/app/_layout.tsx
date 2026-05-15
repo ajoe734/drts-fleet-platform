@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { AppState } from "react-native";
 import { Stack, useRouter, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import { ThemeProvider } from "@react-navigation/native";
 import "react-native-reanimated";
 
 import {
@@ -17,7 +18,8 @@ import {
   isDriverIdentityProvisioned,
 } from "@/lib/api-client";
 
-import { driverTheme } from "@/components/ui-rn";
+import { driverNavigationTheme, driverTheme } from "@/lib/theme";
+import { driverRouteTitles } from "@/lib/strings";
 
 const DRIVER_SESSION_REVALIDATE_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -88,14 +90,14 @@ function DriverHeartbeatBootstrap() {
 
 export default function RootLayout() {
   return (
-    <>
+    <ThemeProvider value={driverNavigationTheme}>
       <DriverHeartbeatBootstrap />
-      <StatusBar style="dark" />
+      <StatusBar style={driverTheme.mode === "dark" ? "light" : "dark"} />
       <Stack
         screenOptions={{
           headerShown: false,
           headerStyle: {
-            backgroundColor: driverTheme.colors.surface,
+            backgroundColor: driverTheme.colors.bgRaised,
           },
           headerTitleStyle: {
             ...driverTheme.typography.sectionTitle,
@@ -109,18 +111,33 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="index" />
-        <Stack.Screen name="onboarding" options={{ title: "工作台" }} />
-        <Stack.Screen name="jobs" options={{ title: "任務收件匣" }} />
-        <Stack.Screen name="trip" options={{ title: "行程作業" }} />
-        <Stack.Screen name="incident" options={{ title: "SOS 緊急通報" }} />
-        <Stack.Screen name="earnings" options={{ title: "收益儀表板" }} />
+        <Stack.Screen
+          name="onboarding"
+          options={{ title: driverRouteTitles.onboarding }}
+        />
+        <Stack.Screen name="jobs" options={{ title: driverRouteTitles.jobs }} />
+        <Stack.Screen name="trip" options={{ title: driverRouteTitles.trip }} />
+        <Stack.Screen
+          name="incident"
+          options={{ title: driverRouteTitles.incident }}
+        />
+        <Stack.Screen
+          name="earnings"
+          options={{ title: driverRouteTitles.earnings }}
+        />
         <Stack.Screen
           name="platform-presence"
-          options={{ title: "平台上線狀態" }}
+          options={{ title: driverRouteTitles.platformPresence }}
         />
-        <Stack.Screen name="shift" options={{ title: "班次與出勤" }} />
-        <Stack.Screen name="settings" options={{ title: "設定" }} />
+        <Stack.Screen
+          name="shift"
+          options={{ title: driverRouteTitles.shift }}
+        />
+        <Stack.Screen
+          name="settings"
+          options={{ title: driverRouteTitles.settings }}
+        />
       </Stack>
-    </>
+    </ThemeProvider>
   );
 }

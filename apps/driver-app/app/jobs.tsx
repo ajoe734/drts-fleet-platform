@@ -38,6 +38,12 @@ import {
   StatusChip,
   Tokens,
 } from "@/components/ui";
+import {
+  driverForwardedTaskStatusLabels,
+  driverJobFilterOptions,
+  driverStrings,
+  driverTaskActionLabels,
+} from "@/lib/strings";
 
 type TaskFilterValue =
   | "all"
@@ -51,22 +57,9 @@ type TaskSection = {
   data: UnifiedDriverTaskView[];
 };
 
-const FILTER_OPTIONS = [
-  { label: "全部", value: "all" },
-  { label: "待處理", value: "needs_action" },
-  { label: "進行中", value: "in_progress" },
-  { label: "平台結案", value: "platform_closed" },
-  { label: "需同步", value: "sync_issue" },
-] as const;
+const FILTER_OPTIONS = driverJobFilterOptions;
 
-const ACTION_LABELS: Record<DriverTaskAction, string> = {
-  accept: "接受任務",
-  reject: "婉拒任務",
-  depart: "前往接送點",
-  arrived_pickup: "回報已抵達",
-  start: "開始行程",
-  complete: "完成行程",
-};
+const ACTION_LABELS: Record<DriverTaskAction, string> = driverTaskActionLabels;
 
 function humanizeCode(value: string) {
   return value
@@ -79,20 +72,11 @@ function formatStatusLabel(status: string | null) {
     return "待同步";
   }
 
-  const knownForwardedStatuses: Record<string, string> = {
-    offered: "可接單",
-    broadcasted: "廣播中",
-    accept_pending: "等待平台確認",
-    confirmed: "平台已確認",
-    confirmed_by_platform: "平台已確認",
-    lost_race: "其他司機已接",
-    taken: "其他司機已接",
-    cancelled: "平台取消",
-    cancelled_by_platform: "平台取消",
-    sync_failed: "同步異常",
-  };
-
-  return knownForwardedStatuses[status] ?? formatDriverTaskStatusLabel(status);
+  return (
+    driverForwardedTaskStatusLabels[
+      status as keyof typeof driverForwardedTaskStatusLabels
+    ] ?? formatDriverTaskStatusLabel(status)
+  );
 }
 
 function formatActionStateLabel(
@@ -100,17 +84,17 @@ function formatActionStateLabel(
 ) {
   switch (actionState) {
     case "action_required":
-      return "待司機處理";
+      return driverStrings.jobs.actionStateLabels.action_required;
     case "awaiting_platform":
-      return "等待平台回覆";
+      return driverStrings.jobs.actionStateLabels.awaiting_platform;
     case "in_progress":
-      return "進行中";
+      return driverStrings.jobs.actionStateLabels.in_progress;
     case "blocked":
-      return "需派車台處理";
+      return driverStrings.jobs.actionStateLabels.blocked;
     case "completed":
-      return "已完成";
+      return driverStrings.jobs.actionStateLabels.completed;
     case "read_only":
-      return "唯讀鏡像";
+      return driverStrings.jobs.actionStateLabels.read_only;
     default:
       return humanizeCode(actionState);
   }
@@ -482,13 +466,13 @@ function RouteLockBadge() {
         color={Tokens.colors.warning}
         style={styles.routeLockIcon}
       />
-      <Text style={styles.routeLockText}>路線鎖定</Text>
+      <Text style={styles.routeLockText}>{driverStrings.jobs.routeLocked}</Text>
     </View>
   );
 }
 
 function FixedPriceBadge() {
-  return <StatusChip label="固定車資" variant="info" />;
+  return <StatusChip label={driverStrings.jobs.fixedFare} variant="info" />;
 }
 
 function TaskTypeBadge({
@@ -619,7 +603,10 @@ export default function JobsScreen() {
   if (loading) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="任務" subtitle="同步收件匣" />
+        <PageHeader
+          title={driverStrings.jobs.title}
+          subtitle={driverStrings.jobs.subtitle}
+        />
         <View style={styles.centerState}>
           <ActivityIndicator size="large" color={Tokens.colors.primary} />
           <Text style={styles.loadingLabel}>載入任務中…</Text>
@@ -631,12 +618,15 @@ export default function JobsScreen() {
   if (!tasksEnabled) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="任務" subtitle="同步收件匣" />
+        <PageHeader
+          title={driverStrings.jobs.title}
+          subtitle={driverStrings.jobs.subtitle}
+        />
         <EmptyState
           title="任務清單暫停提供"
           description="此功能目前未啟用，請稍後再試或改從行程作業查看目前任務。"
           icon="briefcase-outline"
-          actionTitle="開啟行程作業"
+          actionTitle={driverStrings.jobs.openTripWorkspace}
           onAction={() => router.push("/trip")}
           style={styles.fillState}
         />
@@ -825,7 +815,9 @@ export default function JobsScreen() {
               </View>
 
               <View style={styles.cardActionRow}>
-                <Text style={styles.cardActionLabel}>下一步</Text>
+                <Text style={styles.cardActionLabel}>
+                  {driverStrings.jobs.nextStep}
+                </Text>
                 <Text style={styles.cardActionValue} numberOfLines={2}>
                   {buildAllowedActionSummary(item)}
                 </Text>
@@ -859,7 +851,9 @@ export default function JobsScreen() {
 
               <View style={styles.cardFooter}>
                 <View style={styles.footerLead}>
-                  <Text style={styles.affordanceLabel}>開啟行程作業</Text>
+                  <Text style={styles.affordanceLabel}>
+                    {driverStrings.jobs.openTripWorkspace}
+                  </Text>
                   <Text style={styles.affordanceMeta}>
                     開啟行程作業，查看目前進度、權限與下一步操作
                   </Text>
@@ -881,7 +875,9 @@ export default function JobsScreen() {
               <View style={styles.heroPanelGlow} />
               <View style={styles.heroHeader}>
                 <View style={styles.heroTitleBlock}>
-                  <Text style={styles.heroTitle}>任務</Text>
+                  <Text style={styles.heroTitle}>
+                    {driverStrings.jobs.heroTitle}
+                  </Text>
                   <Text style={styles.heroSubtitle}>
                     已指派 {assignedCount} 筆任務
                   </Text>
@@ -896,12 +892,14 @@ export default function JobsScreen() {
 
               <View style={styles.kpiRow}>
                 <View style={styles.kpiTile}>
-                  <Text style={styles.kpiLabel}>總計</Text>
+                  <Text style={styles.kpiLabel}>
+                    {driverStrings.jobs.kpis.total}
+                  </Text>
                   <Text style={styles.kpiValue}>{assignedCount}</Text>
                 </View>
                 <View style={[styles.kpiTile, styles.kpiWarnTile]}>
                   <Text style={[styles.kpiLabel, styles.kpiWarnLabel]}>
-                    需動作
+                    {driverStrings.jobs.kpis.needsAction}
                   </Text>
                   <Text style={[styles.kpiValue, styles.kpiWarnValue]}>
                     {needsActionCount}
@@ -909,7 +907,7 @@ export default function JobsScreen() {
                 </View>
                 <View style={[styles.kpiTile, styles.kpiBrandTile]}>
                   <Text style={[styles.kpiLabel, styles.kpiBrandLabel]}>
-                    外部平台
+                    {driverStrings.jobs.kpis.external}
                   </Text>
                   <Text style={[styles.kpiValue, styles.kpiBrandValue]}>
                     {forwardedCount}

@@ -18,10 +18,10 @@ import {
 describe("ui-rn theme wiring", () => {
   it("maps authority and accent ramps directly from @drts/ui-tokens", () => {
     expect(resolveDriverTone("owned")).toEqual({
-      backgroundColor: AUTHORITY_COLORS.owned.light.bg,
-      borderColor: AUTHORITY_COLORS.owned.light.border,
-      foregroundColor: AUTHORITY_COLORS.owned.light.fg,
-      emphasisColor: AUTHORITY_COLORS.owned.light.fg,
+      backgroundColor: AUTHORITY_COLORS.owned.dark.bg,
+      borderColor: AUTHORITY_COLORS.owned.dark.border,
+      foregroundColor: AUTHORITY_COLORS.owned.dark.fg,
+      emphasisColor: AUTHORITY_COLORS.owned.dark.fg,
     });
 
     expect(resolveDriverTone("platform", "dark")).toEqual({
@@ -37,10 +37,10 @@ describe("ui-rn theme wiring", () => {
 
     expect(resolveForwardedStatusLabel("accept_pending")).toBe("等待平台確認");
     expect(resolveForwardedStatusTone("accept_pending")).toEqual({
-      backgroundColor: STATUS_TONES[toneName].light.bg,
-      borderColor: STATUS_TONES[toneName].light.border,
-      foregroundColor: STATUS_TONES[toneName].light.fg,
-      emphasisColor: STATUS_TONES[toneName].light.fg,
+      backgroundColor: STATUS_TONES[toneName].dark.bg,
+      borderColor: STATUS_TONES[toneName].dark.border,
+      foregroundColor: STATUS_TONES[toneName].dark.fg,
+      emphasisColor: STATUS_TONES[toneName].dark.fg,
     });
   });
 

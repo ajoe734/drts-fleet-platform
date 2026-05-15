@@ -27,6 +27,11 @@ import {
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
 import { getDriverClient } from "@/lib/api-client";
+import {
+  driverForwardedTaskStatusLabels,
+  driverIncidentSituations,
+  driverStrings,
+} from "@/lib/strings";
 import { formatDriverTaskStatusLabel } from "@/lib/operational-labels";
 
 type IncidentPlatformContext = {
@@ -37,14 +42,7 @@ type IncidentPlatformContext = {
   nativeStatus: string | null;
 };
 
-const SOS_SITUATIONS = [
-  { id: "passenger_conflict", label: "乘客衝突" },
-  { id: "traffic_collision", label: "交通事故" },
-  { id: "vehicle_breakdown", label: "車輛故障" },
-  { id: "medical_emergency", label: "醫療緊急" },
-  { id: "route_threat", label: "路線威脅" },
-  { id: "other", label: "其他" },
-] as const;
+const SOS_SITUATIONS = driverIncidentSituations;
 
 type SosSituationId = (typeof SOS_SITUATIONS)[number]["id"];
 
@@ -103,20 +101,11 @@ function formatPlatformStatusLabel(status: string | null): string | null {
   }
 
   const normalized = status.trim().toLowerCase();
-  const knownLabels: Record<string, string> = {
-    offered: "可接單",
-    broadcasted: "廣播中",
-    accept_pending: "等待平台確認",
-    confirmed: "平台已確認",
-    confirmed_by_platform: "平台已確認",
-    lost_race: "其他司機已接",
-    taken: "其他司機已接",
-    cancelled: "平台取消",
-    cancelled_by_platform: "平台取消",
-    sync_failed: "同步異常",
-  };
-
-  return knownLabels[normalized] ?? formatDriverTaskStatusLabel(status);
+  return (
+    driverForwardedTaskStatusLabels[
+      normalized as keyof typeof driverForwardedTaskStatusLabels
+    ] ?? formatDriverTaskStatusLabel(status)
+  );
 }
 
 function buildIncidentDescription(
@@ -398,9 +387,14 @@ export default function IncidentScreen() {
     return (
       <AppScreen scrollable={false} backgroundColor={Tokens.colors.appBg}>
         <PageHeader
-          title="安全求援"
-          subtitle="兩階段 SOS 通報會同步通知派車台與安全主管"
-          rightElement={<StatusChip label="準備中" variant="info" />}
+          title={driverStrings.incident.title}
+          subtitle={driverStrings.incident.subtitle}
+          rightElement={
+            <StatusChip
+              label={driverStrings.incident.loadingTitle}
+              variant="info"
+            />
+          }
         />
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Tokens.colors.primary} />
@@ -414,9 +408,14 @@ export default function IncidentScreen() {
     return (
       <AppScreen scrollable={false} backgroundColor={Tokens.colors.appBg}>
         <PageHeader
-          title="安全求援"
-          subtitle="兩階段 SOS 通報會同步通知派車台與安全主管"
-          rightElement={<StatusChip label="未啟用" variant="warning" />}
+          title={driverStrings.incident.title}
+          subtitle={driverStrings.incident.subtitle}
+          rightElement={
+            <StatusChip
+              label={driverStrings.incident.disabledTitle}
+              variant="warning"
+            />
+          }
         />
         <EmptyState
           title="SOS 緊急通報暫停提供"
@@ -434,10 +433,15 @@ export default function IncidentScreen() {
     <View style={styles.screen}>
       <AppScreen backgroundColor={Tokens.colors.appBg}>
         <PageHeader
-          title="安全求援"
-          subtitle="兩階段 SOS 通報會同步通知派車台與安全主管"
+          title={driverStrings.incident.title}
+          subtitle={driverStrings.incident.subtitle}
           rightElement={
-            <StatusChip label="高風險" variant="danger" strong dot />
+            <StatusChip
+              label={driverStrings.incident.urgentTitle}
+              variant="danger"
+              strong
+              dot
+            />
           }
         />
 
@@ -447,8 +451,12 @@ export default function IncidentScreen() {
               <Text style={styles.heroIconLabel}>SOS</Text>
             </View>
             <View style={styles.heroCopy}>
-              <Text style={styles.heroEyebrow}>司機安全</Text>
-              <Text style={styles.heroTitle}>緊急求援</Text>
+              <Text style={styles.heroEyebrow}>
+                {driverStrings.incident.heroEyebrow}
+              </Text>
+              <Text style={styles.heroTitle}>
+                {driverStrings.incident.heroTitle}
+              </Text>
               <Text style={styles.heroBody}>
                 送出後會建立重大安全事件，並立刻升級給派車台與安全主管優先處理。
               </Text>
@@ -460,7 +468,7 @@ export default function IncidentScreen() {
           ) : null}
 
           <SectionCard
-            title="情況"
+            title={driverStrings.incident.sections.situation}
             subtitle="先標記事件類型，安全官收到後可更快分流。"
           >
             <View style={styles.situationGrid}>
@@ -490,7 +498,10 @@ export default function IncidentScreen() {
             </View>
           </SectionCard>
 
-          <SectionCard title="當前訂單情境" subtitle={orderContextSubtitle}>
+          <SectionCard
+            title={driverStrings.incident.sections.context}
+            subtitle={orderContextSubtitle}
+          >
             {incidentContextReady ? (
               incidentContextPreview ? (
                 <View style={styles.contextCard}>
@@ -553,7 +564,7 @@ export default function IncidentScreen() {
           </SectionCard>
 
           <SectionCard
-            title="補充說明"
+            title={driverStrings.incident.sections.details}
             subtitle="可補充目前位置、乘客狀況或即時風險。"
           >
             <FormField
@@ -580,7 +591,7 @@ export default function IncidentScreen() {
           </SectionCard>
 
           <SectionCard
-            title="送出前確認"
+            title={driverStrings.incident.sections.review}
             subtitle="SOS 不會因為單次點擊而直接送出。"
           >
             <Text style={styles.confirmationBody}>
@@ -604,7 +615,7 @@ export default function IncidentScreen() {
         }
       >
         <ActionButton
-          title="取消"
+          title={driverStrings.incident.cancelAction}
           onPress={handleBackToTrip}
           variant="secondary"
           disabled={submitting}
@@ -628,7 +639,9 @@ export default function IncidentScreen() {
           ) : (
             <>
               <Text style={styles.longPressActionEyebrow}>需長按 0.8 秒</Text>
-              <Text style={styles.longPressActionLabel}>長按確認求援</Text>
+              <Text style={styles.longPressActionLabel}>
+                {driverStrings.incident.confirmAction}
+              </Text>
             </>
           )}
         </TouchableOpacity>

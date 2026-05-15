@@ -31,6 +31,7 @@ import {
   StatusChip,
   Tokens,
 } from "@/components/ui";
+import { driverStrings } from "@/lib/strings";
 
 const ODOMETER_PATTERN = /^\d+$/;
 const EXPECTED_SHIFT_HOURS = 8;
@@ -347,7 +348,10 @@ export default function ShiftScreen() {
   if (!isProvisioned) {
     return (
       <AppScreen scrollable={false}>
-        <PageHeader title="班次" subtitle="需要完成裝置配置" />
+        <PageHeader
+          title={driverStrings.shift.title}
+          subtitle="需要完成裝置配置"
+        />
         <EmptyState
           title="尚未完成裝置配置"
           description="完成裝置綁定後，才能查看班表與進行上下線打卡。"
@@ -424,7 +428,10 @@ export default function ShiftScreen() {
   if (loading) {
     return (
       <AppScreen scrollable={false}>
-        <PageHeader title="班次" subtitle="載入今日打卡記錄" />
+        <PageHeader
+          title={driverStrings.shift.title}
+          subtitle="載入今日打卡記錄"
+        />
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Tokens.colors.primary} />
           <Text style={styles.loadingLabel}>載入班次資料中…</Text>
@@ -436,7 +443,10 @@ export default function ShiftScreen() {
   if (shiftEnabled === false) {
     return (
       <AppScreen scrollable={false}>
-        <PageHeader title="班次" subtitle="班次功能未啟用" />
+        <PageHeader
+          title={driverStrings.shift.title}
+          subtitle="班次功能未啟用"
+        />
         <EmptyState
           title="班表追蹤暫停提供"
           description="此功能目前未啟用，請稍後再試或先返回工作台。"
@@ -453,7 +463,7 @@ export default function ShiftScreen() {
     return (
       <AppScreen scrollable={false}>
         <PageHeader
-          title="班次"
+          title={driverStrings.shift.title}
           subtitle="班次資料暫時無法載入"
           rightElement={
             <IconButton
@@ -511,7 +521,7 @@ export default function ShiftScreen() {
     <View style={styles.screen}>
       <AppScreen contentContainerStyle={styles.screenContent}>
         <PageHeader
-          title="班次"
+          title={driverStrings.shift.title}
           subtitle={activeShift ? "今日打卡記錄" : "準備開始班次"}
           rightElement={
             <IconButton
@@ -592,7 +602,11 @@ export default function ShiftScreen() {
         </View>
 
         <SectionCard
-          title={activeShift ? "今日總結" : "班次準備"}
+          title={
+            activeShift
+              ? driverStrings.shift.summaryTitle
+              : driverStrings.shift.readinessTitle
+          }
           subtitle={
             activeShift
               ? "顯示目前班次內可確認的出勤資訊。"
@@ -601,7 +615,7 @@ export default function ShiftScreen() {
         >
           <View style={styles.infoTileRow}>
             <ShiftInfoTile
-              label="班次狀態"
+              label={driverStrings.shift.statusLabel}
               value={activeShift ? "執勤中" : "待上線"}
               tone={activeShift ? "success" : "default"}
             />
@@ -818,7 +832,7 @@ export default function ShiftScreen() {
       >
         {activeShift ? (
           <ActionButton
-            title="下線打卡"
+            title={driverStrings.shift.punchOut}
             onPress={handleClockOut}
             variant="secondary"
             loading={submitting}
@@ -828,7 +842,7 @@ export default function ShiftScreen() {
           />
         ) : (
           <ActionButton
-            title="上線打卡"
+            title={driverStrings.shift.punchIn}
             onPress={handleClockIn}
             variant="primary"
             loading={submitting}

@@ -42,6 +42,7 @@ import {
   isOwnedUnifiedTask,
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
+import { driverActivationSteps, driverStrings } from "@/lib/strings";
 
 type WorkspaceRoute =
   | "/jobs"
@@ -60,23 +61,7 @@ type ActivationStep = {
   state: StepState;
 };
 
-const ACTIVATION_STEPS: ReadonlyArray<ActivationStep> = [
-  {
-    title: "裝置註冊",
-    description: "產生車隊識別碼",
-    state: "active",
-  },
-  {
-    title: "駕駛身份驗證",
-    description: "綁定駕駛帳號",
-    state: "pending",
-  },
-  {
-    title: "平台帳號連線",
-    description: "外部平台待綁定",
-    state: "pending",
-  },
-];
+const ACTIVATION_STEPS: ReadonlyArray<ActivationStep> = driverActivationSteps;
 
 const DEFAULT_TEST_REGISTRATION_CODE =
   process.env.EXPO_PUBLIC_DRIVER_TEST_REGISTRATION_CODE ?? "driver-demo-001";
@@ -225,7 +210,9 @@ function HeroCard({
       <View pointerEvents="none" style={styles.heroGlow} />
       <View style={styles.heroEyebrowRow}>
         <View style={styles.heroEyebrowDot} />
-        <Text style={styles.heroEyebrowText}>下一步動作</Text>
+        <Text style={styles.heroEyebrowText}>
+          {driverStrings.onboarding.heroEyebrow}
+        </Text>
       </View>
       <Text style={styles.heroTitle}>{title}</Text>
       <Text style={styles.heroMeta}>{meta}</Text>
@@ -1472,8 +1459,12 @@ export default function OnboardingScreen() {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <View>
-            <Text style={styles.sectionEyebrow}>平台連線</Text>
-            <Text style={styles.sectionTitle}>平台就緒狀態</Text>
+            <Text style={styles.sectionEyebrow}>
+              {driverStrings.onboarding.platformSectionEyebrow}
+            </Text>
+            <Text style={styles.sectionTitle}>
+              {driverStrings.onboarding.platformSectionTitle}
+            </Text>
           </View>
           <Pressable
             accessibilityRole="button"
@@ -1520,8 +1511,12 @@ export default function OnboardingScreen() {
       <View style={styles.quickSection}>
         <View style={styles.sectionHeader}>
           <View>
-            <Text style={styles.sectionEyebrow}>快速入口</Text>
-            <Text style={styles.sectionTitle}>工作捷徑</Text>
+            <Text style={styles.sectionEyebrow}>
+              {driverStrings.onboarding.quickLinksEyebrow}
+            </Text>
+            <Text style={styles.sectionTitle}>
+              {driverStrings.onboarding.quickLinksTitle}
+            </Text>
           </View>
         </View>
         <View style={styles.quickGrid}>
@@ -1584,7 +1579,9 @@ export default function OnboardingScreen() {
             size={14}
             color={tokens.colors.textMuted}
           />
-          <Text style={styles.footerLinkText}>安全求援</Text>
+          <Text style={styles.footerLinkText}>
+            {driverStrings.onboarding.footerActions.sos}
+          </Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -1599,7 +1596,9 @@ export default function OnboardingScreen() {
             size={14}
             color={tokens.colors.textMuted}
           />
-          <Text style={styles.footerLinkText}>重新整理</Text>
+          <Text style={styles.footerLinkText}>
+            {driverStrings.onboarding.footerActions.refresh}
+          </Text>
         </Pressable>
       </View>
     </AppScreen>
