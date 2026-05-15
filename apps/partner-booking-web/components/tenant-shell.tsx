@@ -8,64 +8,55 @@ type TenantShellProps = {
 
 export function TenantShell({ brand, children }: TenantShellProps) {
   return (
-    <div
-      className="min-h-screen bg-[color:var(--pbk-bg)] text-[color:var(--pbk-fg)]"
-      style={getPartnerChromeVars(brand)}
-    >
-      <div className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-6 py-12">
-        <header
-          className="flex flex-col gap-2 rounded-xl border px-5 py-4"
-          style={{
-            background: brand.surface.bg,
-            borderColor: brand.surface.border,
-            color: brand.surface.fg,
-          }}
-        >
-          <span className="text-xs font-semibold uppercase tracking-[0.2em]">
-            Partner Booking
-          </span>
-          <strong className="text-lg">{brand.displayName}</strong>
-          <div className="mt-3 flex flex-wrap items-start gap-3 text-xs text-[color:inherit]">
+    <div className="pb-shell" style={getPartnerChromeVars(brand)}>
+      <div className="pb-shell__window">
+        <div className="pb-shell__chrome">
+          <div className="pb-shell__lights" aria-hidden="true">
+            <span className="pb-shell__light pb-shell__light--stop" />
+            <span className="pb-shell__light pb-shell__light--pause" />
+            <span className="pb-shell__light pb-shell__light--go" />
+          </div>
+          <div className="pb-shell__host">
+            <span aria-hidden="true">●</span>
+            <span className="pb-shell__host-text">{brand.host}</span>
+          </div>
+          <div className="pb-shell__secure">partner entry</div>
+        </div>
+
+        <header className="pb-shell__identity">
+          <div className="pb-shell__identity-main">
             <div
-              className="min-w-44 rounded-xl px-3 py-3 text-white shadow-sm"
+              className="pb-shell__badge"
               style={{
-                background: `linear-gradient(135deg, ${brand.cardArt.gradientFrom} 0%, ${brand.cardArt.gradientTo} 72%)`,
+                background: `linear-gradient(135deg, ${brand.cardArt.gradientFrom} 0%, ${brand.cardArt.gradientTo} 100%)`,
               }}
             >
-              <div className="flex items-center gap-2">
-                <span
-                  className="inline-flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold"
-                  style={{
-                    background: brand.cardArt.badgeBackground,
-                    color: brand.cardArt.badgeForeground,
-                  }}
-                >
-                  {brand.cardArt.badgeText}
-                </span>
-                <span className="font-semibold">
-                  {brand.cardArt.issuerLabel}
-                </span>
-              </div>
-              <div className="mt-3 text-sm font-semibold">
-                {brand.cardArt.programLabel}
-              </div>
-              <div className="mt-1 text-[11px] opacity-80">
-                {brand.cardArt.networkLabel} · •••• {brand.cardArt.lastFour}
-              </div>
+              {brand.cardArt.badgeText}
             </div>
+            <div className="pb-shell__copy">
+              <span className="pb-shell__eyebrow">Partner Booking</span>
+              <div className="pb-shell__title">
+                {brand.bankName} × DRTS
+                <br />
+                {brand.programName}
+              </div>
+              <p className="pb-shell__subtitle">{brand.tagline}</p>
+            </div>
+          </div>
 
-            <div className="flex min-w-48 flex-1 flex-col gap-1 rounded-xl border border-current/10 bg-white/55 px-3 py-3">
-              <span className="font-semibold">{brand.hotline.label}</span>
-              <span className="font-mono text-sm">{brand.hotline.phone}</span>
-              <span className="text-[11px] opacity-80">
-                {brand.hotline.note}
-              </span>
-            </div>
+          <div className="pb-shell__chips">
+            <span className="pb-shell__chip pb-shell__chip--accent">
+              {brand.displayName}
+            </span>
+            <span className="pb-shell__chip">{brand.hotline.phone}</span>
+            <span className="pb-shell__chip">
+              {brand.cardArt.networkLabel} •••• {brand.cardArt.lastFour}
+            </span>
           </div>
         </header>
 
-        <main className="rounded-xl border border-[color:var(--pbk-panel-border)] bg-[color:var(--pbk-panel)] p-6 shadow-sm">
-          {children}
+        <main className="pb-shell__content">
+          <div className="pb-shell__phone">{children}</div>
         </main>
       </div>
     </div>

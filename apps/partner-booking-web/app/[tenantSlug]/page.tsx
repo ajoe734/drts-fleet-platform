@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { PartnerBookingReferenceFunnel } from "@drts/ui-web";
+import { PartnerBookingPhoneScreen } from "@drts/ui-web";
 import { getBrandForSlug } from "@/lib/brand";
 import { resolvePartnerSearchState } from "@/lib/route-state";
 
@@ -25,12 +25,11 @@ export default async function TenantHomePage({
   const routeState = resolvePartnerSearchState(screen, scenario);
 
   return (
-    <PartnerBookingReferenceFunnel
+    <PartnerBookingPhoneScreen
       brand={brand}
-      activeScreen={routeState.activeScreen}
-      basePath={`/${tenantSlug}`}
+      screen={routeState.activeScreen}
       {...(routeState.activeScenario
-        ? { activeScenario: routeState.activeScenario }
+        ? { scenario: routeState.activeScenario }
         : {})}
     />
   );
