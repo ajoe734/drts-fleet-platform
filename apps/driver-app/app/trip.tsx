@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -16,23 +16,23 @@ import type {
   ForwardedDriverActionResponse,
   OwnedOrderRecord,
 } from "@drts/contracts";
+import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
-import { PlatformTaskBadge } from "@/components/platform-task-badge";
-import RouteDisplay from "@/components/route-display";
-import { ActionButton as SharedActionButton } from "@/components/ui/ActionButton";
 import {
-  AppScreen,
-  AuthorityBanner,
-  BottomActionBar,
-  EmptyState,
-  ErrorBanner,
-  FormField,
-  IconButton,
-  InfoTile,
+  Banner,
+  Btn,
+  Card,
+  DL,
+  Field,
+  Input,
+  KPI,
   PageHeader,
-  StatusChip,
-  Tokens,
-} from "@/components/ui";
+  Pill,
+  Shell,
+  Table,
+  driverCanvasTheme,
+} from "@/components/canvas-primitives";
+import { getPlatformDisplayLabel } from "@/components/platform-task-badge";
 import {
   appendProofPhotos,
   buildCompletionExpenseItem,
@@ -94,14 +94,32 @@ function ActionButton({
   variant?: "primary" | "secondary" | "danger";
   loading?: boolean;
 }) {
+  const isDanger = variant === "danger";
+
   return (
-    <SharedActionButton
-      title={label}
+    <Btn
+      theme={driverCanvasTheme}
       onPress={onPress}
       disabled={disabled}
-      loading={loading}
-      variant={variant}
-    />
+      variant={variant === "primary" ? "primary" : "secondary"}
+      danger={isDanger}
+      size="md"
+      icon={
+        loading ? (
+          <ActivityIndicator
+            size="small"
+            color={
+              isDanger || variant === "primary"
+                ? "#FFFFFF"
+                : driverCanvasTheme.text
+            }
+          />
+        ) : null
+      }
+      style={styles.actionButton}
+    >
+      {label}
+    </Btn>
   );
 }
 
@@ -116,21 +134,50 @@ function MetricPill({
   value: string;
   tone?: "neutral" | "success" | "warning" | "danger";
 }) {
-  const iconColor =
-    tone === "success"
-      ? Tokens.colors.success
-      : tone === "warning"
-        ? Tokens.colors.warning
-        : tone === "danger"
-          ? Tokens.colors.danger
-          : Tokens.colors.brand;
+  const resolvedTone =
+    tone === "warning"
+      ? "warn"
+      : tone === "danger"
+        ? "danger"
+        : tone === "success"
+          ? "success"
+          : "neutral";
+  const colorSet = getCanvasToneSet(resolvedTone);
 
   return (
-    <View style={styles.metricPill}>
-      <Ionicons name={icon} size={14} color={iconColor} />
+    <View
+      style={[
+        styles.metricPill,
+        {
+          backgroundColor: colorSet.bg,
+          borderColor: colorSet.bd,
+        },
+      ]}
+    >
+      <Ionicons name={icon} size={13} color={colorSet.fg} />
       <View style={styles.metricPillCopy}>
-        <Text style={styles.metricPillLabel}>{label}</Text>
-        <Text style={styles.metricPillValue}>{value}</Text>
+        <Text
+          style={[
+            styles.metricPillLabel,
+            {
+              color: driverCanvasTheme.textMuted,
+              fontFamily: driverCanvasTheme.fontFamily,
+            },
+          ]}
+        >
+          {label}
+        </Text>
+        <Text
+          style={[
+            styles.metricPillValue,
+            {
+              color: driverCanvasTheme.text,
+              fontFamily: driverCanvasTheme.monoFamily,
+            },
+          ]}
+        >
+          {value}
+        </Text>
       </View>
     </View>
   );
@@ -138,16 +185,9 @@ function MetricPill({
 
 function RouteLockedBadge() {
   return (
-    <View style={styles.routeLockedBadge}>
-      <Ionicons
-        name="lock-closed-outline"
-        size={12}
-        color={Tokens.colors.warning}
-      />
-      <Text style={styles.routeLockedBadgeText}>
-        {driverStrings.trip.routeLocked}
-      </Text>
-    </View>
+    <Pill theme={driverCanvasTheme} tone="warn" dot>
+      {driverStrings.trip.routeLocked}
+    </Pill>
   );
 }
 
@@ -181,16 +221,206 @@ function getErrorMessage(error: unknown): string {
   return "Unknown error";
 }
 
-function getComplianceTone(state: string) {
+function getCanvasToneSet(tone: CanvasTone) {
+  switch (tone) {
+    case "success":
+      return {
+        fg: driverCanvasTheme.success,
+        bg: driverCanvasTheme.successBg,
+        bd: driverCanvasTheme.successBorder,
+      };
+    case "warn":
+      return {
+        fg: driverCanvasTheme.warn,
+        bg: driverCanvasTheme.warnBg,
+        bd: driverCanvasTheme.warnBorder,
+      };
+    case "danger":
+      return {
+        fg: driverCanvasTheme.danger,
+        bg: driverCanvasTheme.dangerBg,
+        bd: driverCanvasTheme.dangerBorder,
+      };
+    case "info":
+      return {
+        fg: driverCanvasTheme.info,
+        bg: driverCanvasTheme.infoBg,
+        bd: driverCanvasTheme.infoBorder,
+      };
+    case "accent":
+      return {
+        fg: driverCanvasTheme.accent,
+        bg: driverCanvasTheme.accentBg,
+        bd: driverCanvasTheme.accentBorder,
+      };
+    case "neutral":
+    default:
+      return {
+        fg: driverCanvasTheme.textMuted,
+        bg: driverCanvasTheme.neutralBg,
+        bd: driverCanvasTheme.neutralBorder,
+      };
+  }
+}
+
+function toCanvasTone(tone: StatusTone): CanvasTone {
+  switch (tone) {
+    case "warning":
+      return "warn";
+    case "danger":
+      return "danger";
+    case "neutral":
+      return "neutral";
+    case "success":
+    default:
+      return "success";
+  }
+}
+
+function toBannerTone(
+  tone: StatusTone | CanvasTone,
+): Exclude<CanvasTone, "neutral"> {
+  if (tone === "warning" || tone === "warn") {
+    return "warn";
+  }
+  if (tone === "danger") {
+    return "danger";
+  }
+  if (tone === "success") {
+    return "success";
+  }
+  if (tone === "accent") {
+    return "accent";
+  }
+  return "info";
+}
+
+function formatShortTime(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toLocaleTimeString("zh-TW", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatShortDateTime(value: string | null | undefined): string {
+  if (!value) {
+    return "尚無更新";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString("zh-TW", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatReservationWindow(order: OwnedOrderRecord | null): string {
+  const start = formatShortTime(order?.reservationWindowStart);
+  const end = formatShortTime(order?.reservationWindowEnd);
+
+  if (start && end) {
+    return `${start} - ${end}`;
+  }
+  if (start) {
+    return `自 ${start}`;
+  }
+  if (end) {
+    return `截至 ${end}`;
+  }
+  return "時間待同步";
+}
+
+function formatPickupStopTime(order: OwnedOrderRecord | null): string {
+  const start = formatShortTime(order?.reservationWindowStart);
+  return start ? `預計 ${start}` : "時間待同步";
+}
+
+function formatDropoffStopTime(order: OwnedOrderRecord | null): string {
+  const end = formatShortTime(order?.reservationWindowEnd);
+  if (end) {
+    return `預計 ${end}`;
+  }
+  if (order?.etaSnapshot?.etaMinutes != null) {
+    return `約 ${order.etaSnapshot.etaMinutes} 分後`;
+  }
+  return "時間待同步";
+}
+
+function getTrackingDescriptor(
+  isForwardedTrip: boolean,
+  locationTrackingState: LocationTrackingState,
+  locationTrackingMessage: string | null,
+  recordingActive: boolean,
+) {
+  if (isForwardedTrip) {
+    return {
+      label: "未啟用",
+      tone: "neutral" as const,
+      detail: "來源平台任務不在此端啟用本地距離/時長追蹤。",
+    };
+  }
+
+  if (recordingActive) {
+    return {
+      label: "錄製中",
+      tone: "danger" as const,
+      detail: locationTrackingMessage ?? "里程與時長正在即時更新。",
+    };
+  }
+
+  if (locationTrackingState === "requesting_permission") {
+    return {
+      label: "等待授權",
+      tone: "warning" as const,
+      detail: "定位權限確認後，才會開始記錄實際里程與時長。",
+    };
+  }
+
+  if (
+    locationTrackingState === "permission_denied" ||
+    locationTrackingState === "error"
+  ) {
+    return {
+      label: "需處理",
+      tone: "warning" as const,
+      detail:
+        locationTrackingMessage ??
+        "定位追蹤暫時不可用，恢復後才能完整寫入行程資料。",
+    };
+  }
+
+  return {
+    label: "待開始",
+    tone: "neutral" as const,
+    detail: "開始行程後會切換為錄製中並持續更新度量。",
+  };
+}
+
+function getComplianceTone(state: string): CanvasTone {
   switch (state) {
     case "clear":
-      return { bg: "#ecfdf5", border: "#86efac", text: "#166534" };
+      return "success";
     case "blocked":
-      return { bg: "#fff1f2", border: "#fda4af", text: "#9f1239" };
+      return "danger";
     case "review_required":
-      return { bg: "#fffbeb", border: "#fcd34d", text: "#92400e" };
+      return "warn";
     default:
-      return { bg: "#f8fafc", border: "#cbd5e1", text: "#334155" };
+      return "neutral";
   }
 }
 
@@ -200,6 +430,23 @@ type LocationTrackingState =
   | "active"
   | "permission_denied"
   | "error";
+
+type WorkflowRow = {
+  code: string;
+  item: string;
+  tone: CanvasTone;
+  state: string;
+  note: string;
+};
+
+type ComplianceRow = {
+  code: string;
+  title: string;
+  state: string;
+  nextAction: string;
+  tone: CanvasTone;
+  note: string;
+};
 
 function parseStartedAtMs(task: DriverTaskRecord | null): number | null {
   if (!task?.startedAt) {
@@ -345,20 +592,63 @@ function getTripStatusPresentation(
       };
     case "owned_active":
     default:
-      if (task?.status === "on_trip" && locationTrackingState === "active") {
-        return {
-          label: "行程追蹤中",
-          tone: "success",
-          detail: locationTrackingMessage ?? "里程與時長正在即時更新。",
-        };
+      switch (task?.status) {
+        case "pending_acceptance":
+          return {
+            label: "待確認接單",
+            tone: "warning",
+            detail: "請先確認任務，接著前往取貨點。",
+          };
+        case "accepted":
+        case "enroute_pickup":
+          return {
+            label: "前往取貨點",
+            tone: "success",
+            detail: "請依路線前往乘客或指定接送地點。",
+          };
+        case "arrived_pickup":
+          return {
+            label: "已抵達取貨點",
+            tone: "success",
+            detail: "確認乘客上車後即可開始行程。",
+          };
+        case "on_trip":
+          if (locationTrackingState === "active") {
+            return {
+              label: "行程錄製中",
+              tone: "success",
+              detail: locationTrackingMessage ?? "里程與時長正在即時更新。",
+            };
+          }
+          return {
+            label: "行程進行中",
+            tone: "success",
+            detail: "定位追蹤啟用後，會持續寫入里程與時長。",
+          };
+        case "proof_pending":
+          return {
+            label: "待補完單佐證",
+            tone: "warning",
+            detail: "完單前需補齊照片、簽收或費用佐證。",
+          };
+        case "completed":
+          return {
+            label: "行程已完成",
+            tone: "neutral",
+            detail: "任務已完成，等待同步最新結果。",
+          };
+        default:
+          return {
+            label: formatDriverTaskStatusLabel(
+              task?.status ?? "pending_acceptance",
+            ),
+            tone:
+              String(task?.status ?? "") === "pending_acceptance"
+                ? "warning"
+                : "success",
+            detail: "請依行程階段完成本地操作與完單佐證。",
+          };
       }
-      return {
-        label: formatDriverTaskStatusLabel(
-          task?.status ?? "pending_acceptance",
-        ),
-        tone: task?.status === "pending_acceptance" ? "warning" : "success",
-        detail: "請依行程階段完成本地操作與完單佐證。",
-      };
   }
 }
 
@@ -462,48 +752,6 @@ function getTripCapabilityItems(
   }
 }
 
-function getStatusToneStyles(tone: StatusTone) {
-  switch (tone) {
-    case "warning":
-      return {
-        dot: Tokens.colors.warning,
-        background: Tokens.colors.warningBg,
-        text: Tokens.colors.warning,
-      };
-    case "danger":
-      return {
-        dot: Tokens.colors.danger,
-        background: Tokens.colors.dangerBg,
-        text: Tokens.colors.danger,
-      };
-    case "neutral":
-      return {
-        dot: Tokens.colors.neutral,
-        background: Tokens.colors.neutralBg,
-        text: Tokens.colors.neutral,
-      };
-    default:
-      return {
-        dot: Tokens.colors.success,
-        background: Tokens.colors.successBg,
-        text: Tokens.colors.success,
-      };
-  }
-}
-
-function getStatusChipVariant(tone: StatusTone) {
-  switch (tone) {
-    case "warning":
-      return "warning" as const;
-    case "danger":
-      return "danger" as const;
-    case "neutral":
-      return "default" as const;
-    default:
-      return "success" as const;
-  }
-}
-
 function getTripSurfacePalette(
   task: DriverTaskRecord | null,
   state: TripExperienceState | null,
@@ -511,48 +759,48 @@ function getTripSurfacePalette(
   switch (state) {
     case "sync_failed":
       return {
-        backgroundColor: Tokens.colors.surfaceDanger,
-        borderColor: `${Tokens.colors.danger}33`,
-        accentColor: Tokens.colors.danger,
+        backgroundColor: driverCanvasTheme.dangerBg,
+        borderColor: driverCanvasTheme.dangerBorder,
+        accentColor: driverCanvasTheme.danger,
       };
     case "forwarded_pending":
       return {
-        backgroundColor: Tokens.colors.warningBg,
-        borderColor: `${Tokens.colors.warning}33`,
-        accentColor: Tokens.colors.warning,
+        backgroundColor: driverCanvasTheme.warnBg,
+        borderColor: driverCanvasTheme.warnBorder,
+        accentColor: driverCanvasTheme.warn,
       };
     case "forwarded_confirmed":
       return {
-        backgroundColor: Tokens.colors.successBg,
-        borderColor: `${Tokens.colors.success}33`,
-        accentColor: Tokens.colors.success,
+        backgroundColor: driverCanvasTheme.successBg,
+        borderColor: driverCanvasTheme.successBorder,
+        accentColor: driverCanvasTheme.success,
       };
     case "forwarded_lost":
     case "forwarded_cancelled":
       return {
-        backgroundColor: Tokens.colors.surfaceLo,
-        borderColor: Tokens.colors.borderStrong,
-        accentColor: Tokens.colors.neutral,
+        backgroundColor: driverCanvasTheme.surfaceLo,
+        borderColor: driverCanvasTheme.borderStrong,
+        accentColor: driverCanvasTheme.textMuted,
       };
     case "forwarded_offered":
       return {
-        backgroundColor: Tokens.colors.forwardedBg,
-        borderColor: Tokens.colors.forwardedBorder,
-        accentColor: Tokens.colors.forwarded,
+        backgroundColor: driverCanvasTheme.infoBg,
+        borderColor: driverCanvasTheme.infoBorder,
+        accentColor: driverCanvasTheme.info,
       };
     default:
       if (task?.sourcePlatform) {
         return {
-          backgroundColor: Tokens.colors.forwardedBg,
-          borderColor: Tokens.colors.forwardedBorder,
-          accentColor: Tokens.colors.forwarded,
+          backgroundColor: driverCanvasTheme.infoBg,
+          borderColor: driverCanvasTheme.infoBorder,
+          accentColor: driverCanvasTheme.info,
         };
       }
 
       return {
-        backgroundColor: Tokens.colors.ownedBg,
-        borderColor: Tokens.colors.ownedBorder,
-        accentColor: Tokens.colors.owned,
+        backgroundColor: driverCanvasTheme.accentBg,
+        borderColor: driverCanvasTheme.accentBorder,
+        accentColor: driverCanvasTheme.accent,
       };
   }
 }
@@ -602,17 +850,25 @@ function getIdleBottomActionLabel(state: TripExperienceState | null) {
   }
 }
 
+type TripAuthorityBannerDescriptor = {
+  title: string;
+  authorityLabel: string;
+  description: string;
+  tone: Exclude<CanvasTone, "neutral">;
+  icon: keyof typeof Ionicons.glyphMap;
+};
+
 function getTripAuthorityBannerProps(
   task: DriverTaskRecord | null,
   state: TripExperienceState | null,
-): ComponentProps<typeof AuthorityBanner> {
+): TripAuthorityBannerDescriptor {
   if (!task || !isForwardedTask(task)) {
     return {
       title: "自營派單",
       authorityLabel: "DRTS 行程主控",
       description:
         "完整本機操作權限。請依行程節點完成接單、接送、追蹤與完單佐證。",
-      tone: "owned",
+      tone: "accent",
       icon: "shield-checkmark",
     };
   }
@@ -621,50 +877,50 @@ function getTripAuthorityBannerProps(
     case "forwarded_offered":
       return {
         title: "來源平台派單",
-        authorityLabel: `平台 ${task.sourcePlatform}`,
+        authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
         description:
           "此訂單由來源平台主導。接受後只會送出平台請求，仍可能被其他司機搶先確認。",
-        tone: "platform",
+        tone: "info",
         icon: "swap-horizontal-outline",
       };
     case "forwarded_pending":
       return {
         title: "等待來源平台確認",
-        authorityLabel: `平台 ${task.sourcePlatform}`,
+        authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
         description:
           "已送出接單要求。平台回應前，司機端所有本地生命周期操作維持鎖定。",
-        tone: "warning",
+        tone: "warn",
         icon: "time-outline",
       };
     case "forwarded_confirmed":
       return {
         title: "來源平台已確認",
-        authorityLabel: `平台 ${task.sourcePlatform}`,
+        authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
         description:
           "平台已確認此單。本地畫面會保留可讀的行程鏡像與後續節點，但仍需遵守平台規則。",
-        tone: "platform",
+        tone: "success",
         icon: "checkmark-circle-outline",
       };
     case "forwarded_lost":
       return {
         title: "平台已分配給其他司機",
-        authorityLabel: `平台 ${task.sourcePlatform}`,
+        authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
         description: "此筆平台訂單已結束，本地僅保留同步結果供查閱與追蹤。",
-        tone: "warning",
+        tone: "warn",
         icon: "close-circle-outline",
       };
     case "forwarded_cancelled":
       return {
         title: "來源平台已取消",
-        authorityLabel: `平台 ${task.sourcePlatform}`,
+        authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
         description: "來源平台已取消訂單。本地不再提供任何後續行程操作。",
-        tone: "warning",
+        tone: "warn",
         icon: "ban-outline",
       };
     case "sync_failed":
       return {
         title: "平台同步異常",
-        authorityLabel: `平台 ${task.sourcePlatform}`,
+        authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
         description:
           "既有 sync_failed guardrail 保持鎖定；派車台接手處理前，司機端不開放本地狀態變更。",
         tone: "danger",
@@ -673,9 +929,9 @@ function getTripAuthorityBannerProps(
     default:
       return {
         title: "平台鏡像任務",
-        authorityLabel: `平台 ${task.sourcePlatform}`,
+        authorityLabel: `平台 ${getPlatformDisplayLabel(task.sourcePlatform)}`,
         description: "來源平台仍是此任務的權限來源，本地只顯示安全同步資訊。",
-        tone: "platform",
+        tone: "info",
         icon: "swap-horizontal-outline",
       };
   }
@@ -784,10 +1040,6 @@ export default function TripScreen() {
     expenseAmountInvalid,
     completionBlockedByTracking,
   });
-  const statusToneStyles = getStatusToneStyles(tripStatusPresentation.tone);
-  const tripStatusChipVariant = getStatusChipVariant(
-    tripStatusPresentation.tone,
-  );
   const tripSurfacePalette = getTripSurfacePalette(
     taskDetail,
     tripExperienceState,
@@ -808,26 +1060,48 @@ export default function TripScreen() {
         forwardedActionResult.action,
       )
     : null;
-  const forwardedOutcomeToneStyles = forwardedOutcomeSummary
-    ? getStatusToneStyles(forwardedOutcomeSummary.tone)
+  const forwardedOutcomeTone = forwardedOutcomeSummary
+    ? toBannerTone(forwardedOutcomeSummary.tone)
     : null;
   const pickupAddress = orderDetail?.pickup.address ?? "待確認上車點";
   const dropoffAddress = orderDetail?.dropoff.address ?? "待確認下車點";
+  const pickupTimeLabel = formatPickupStopTime(orderDetail);
+  const dropoffTimeLabel = formatDropoffStopTime(orderDetail);
+  const platformLabel = getPlatformDisplayLabel(taskDetail?.sourcePlatform);
+  const recordingActive =
+    Boolean(orderDetail?.recordingId) ||
+    (!isForwardedTrip && locationTrackingState === "active");
+  const trackingDescriptor = getTrackingDescriptor(
+    isForwardedTrip,
+    locationTrackingState,
+    locationTrackingMessage,
+    recordingActive,
+  );
   const routeMetricDistance = showTripMetrics
     ? formatTripDistance(liveDistanceKm)
-    : orderDetail?.etaSnapshot
-      ? `約 ${orderDetail.etaSnapshot.etaMinutes} 分`
+    : taskDetail?.actualDistanceKm != null
+      ? formatTripDistance(taskDetail.actualDistanceKm)
       : "待同步";
   const routeMetricDuration = showTripMetrics
     ? formatTripDuration(liveDurationSec)
-    : isForwardedTrip
-      ? "平台決定"
-      : "開始行程後更新";
-  const routeMetricFare = orderDetail?.quotedFare
-    ? formatMoney(orderDetail.quotedFare)
-    : orderDetail?.fixedPrice
-      ? "固定車資"
-      : "金額待確認";
+    : orderDetail?.etaSnapshot?.etaMinutes != null
+      ? `${orderDetail.etaSnapshot.etaMinutes} 分`
+      : isForwardedTrip
+        ? "平台決定"
+        : "開始行程後更新";
+  const routeMetricFare = taskDetail?.fare
+    ? formatMoney(taskDetail.fare)
+    : orderDetail?.quotedFare
+      ? formatMoney(orderDetail.quotedFare)
+      : orderDetail?.fixedPrice
+        ? "固定車資"
+        : "金額待確認";
+  const routeOverlayLabel =
+    routeMetricDistance !== "待同步"
+      ? `${routeMetricDistance} · ${routeMetricDuration}`
+      : orderDetail?.etaSnapshot?.etaMinutes != null
+        ? `ETA ${orderDetail.etaSnapshot.etaMinutes} 分`
+        : routeMetricDuration;
   const bottomNotice =
     completionSubmitBlocker === "proof_requirements_unavailable"
       ? "完單前需先載入訂單佐證需求，請重新整理後再送出。"
@@ -898,6 +1172,110 @@ export default function TripScreen() {
           disabled: submittingAction !== null,
         }
       : undefined;
+  const tripSummaryItems = [
+    {
+      label: "任務代碼",
+      value: taskDetail?.taskId ?? "未指派",
+      mono: true,
+    },
+    {
+      label: "平台來源",
+      value: isForwardedTrip ? platformLabel : "DRTS 自營",
+    },
+    {
+      label: "預約時窗",
+      value: formatReservationWindow(orderDetail),
+      mono: true,
+    },
+    {
+      label: "錄製 / 追蹤",
+      value: recordingActive
+        ? `${trackingDescriptor.label} · ${orderDetail?.recordingId ?? "local"}`
+        : trackingDescriptor.label,
+      mono: recordingActive,
+    },
+    {
+      label: "乘客 / 現場聯絡",
+      value:
+        orderDetail?.onsiteContact?.name ??
+        orderDetail?.passenger.name ??
+        "待同步",
+    },
+    {
+      label: "最後同步",
+      value: formatShortDateTime(
+        taskDetail?.completedAt ??
+          taskDetail?.startedAt ??
+          taskDetail?.acceptedAt ??
+          taskDetail?.arrivedPickupAt,
+      ),
+      mono: true,
+    },
+  ];
+  const workflowRows: WorkflowRow[] = [
+    {
+      code: isForwardedTrip ? "AUTH" : "OWND",
+      item: "操作權限",
+      tone: isForwardedTrip ? "info" : "success",
+      state: isForwardedTrip ? `平台 ${platformLabel}` : "DRTS 本地主控",
+      note: tripAuthorityDescription,
+    },
+    {
+      code: "STEP",
+      item: "下一步",
+      tone: primaryTripAction
+        ? "accent"
+        : toCanvasTone(tripStatusPresentation.tone),
+      state:
+        bottomPrimaryAction?.title ??
+        getIdleBottomActionLabel(tripExperienceState),
+      note: bottomNotice,
+    },
+    {
+      code: "TRCK",
+      item: "追蹤 / 錄製",
+      tone: toCanvasTone(trackingDescriptor.tone),
+      state: trackingDescriptor.label,
+      note: trackingDescriptor.detail,
+    },
+    {
+      code: "SOS",
+      item: "安全求援",
+      tone: "danger" as const,
+      state: "可立即啟動",
+      note: "送出後會同步通知安全官與派車台，並附上當前訂單上下文。",
+    },
+  ];
+  const complianceRows: ComplianceRow[] = complianceGates.map((gate) => ({
+    code: gate.gateType,
+    title: gate.title,
+    state: gate.state,
+    nextAction: gate.nextAction,
+    tone: getComplianceTone(gate.state),
+    note:
+      gate.missingItems.length > 0
+        ? `缺少：${gate.missingItems.join("、")}`
+        : "目前沒有缺少項目。",
+  }));
+  const proofSummaryItems = [
+    {
+      label: "照片需求",
+      value: `${proofPhotos.length}/${Math.max(proofRequirements.minPhotoCount, 1)} 張`,
+      mono: true,
+    },
+    {
+      label: "簽收識別",
+      value: proofRequirements.signoffRequired ? "需要" : "免附",
+    },
+    {
+      label: "費用佐證",
+      value: proofRequirements.expenseProofRequired ? "需要" : "免附",
+    },
+    {
+      label: "送出狀態",
+      value: completionSubmitBlocker ? "仍有缺口" : "可完成行程",
+    },
+  ];
 
   function clearDurationTicker() {
     if (durationIntervalRef.current) {
@@ -1346,136 +1724,188 @@ export default function TripScreen() {
 
   if (loading) {
     return (
-      <AppScreen scrollable={false}>
-        <PageHeader
-          title={driverStrings.trip.title}
-          subtitle={driverStrings.trip.subtitle}
-        />
-        <View style={styles.loadingState}>
-          <ActivityIndicator size="large" color={Tokens.colors.brand} />
-          <Text style={styles.loadingLabel}>載入行程中…</Text>
-        </View>
-      </AppScreen>
+      <Shell
+        theme={driverCanvasTheme}
+        contentContainerStyle={styles.shellContent}
+      >
+        <PageHeader title="進行中行程" subtitle="載入目前任務與路線狀態" />
+        <Card theme={driverCanvasTheme}>
+          <View style={styles.loadingState}>
+            <ActivityIndicator size="large" color={driverCanvasTheme.accent} />
+            <Text style={styles.loadingLabel}>載入行程中…</Text>
+          </View>
+        </Card>
+      </Shell>
     );
   }
 
   return (
-    <>
-      <AppScreen
-        contentContainerStyle={styles.screenContent}
-        backgroundColor={Tokens.colors.appBg}
-      >
-        <PageHeader
-          title={driverStrings.trip.title}
-          subtitle={headerSubtitle}
-          rightElement={
-            <IconButton
-              icon="refresh"
-              onPress={() => void loadTrip(true)}
-              disabled={submittingAction !== null}
-              accessibilityLabel="重新整理行程"
+    <Shell
+      theme={driverCanvasTheme}
+      contentContainerStyle={styles.shellContent}
+    >
+      <View style={styles.heroPane}>
+        <View style={styles.heroPaneTop}>
+          <PageHeader
+            title="進行中行程"
+            subtitle={headerSubtitle}
+            actions={
+              <View style={styles.headerActionRow}>
+                <Btn
+                  theme={driverCanvasTheme}
+                  variant="ghost"
+                  size="sm"
+                  onPress={() => void loadTrip(true)}
+                  disabled={submittingAction !== null}
+                  icon={
+                    <Ionicons
+                      name="refresh-outline"
+                      size={14}
+                      color={driverCanvasTheme.textMuted}
+                    />
+                  }
+                >
+                  重新整理
+                </Btn>
+                <Btn
+                  theme={driverCanvasTheme}
+                  variant="primary"
+                  size="sm"
+                  danger
+                  onPress={() => router.push("/incident")}
+                  icon={
+                    <Ionicons
+                      name="warning-outline"
+                      size={14}
+                      color="#FFFFFF"
+                    />
+                  }
+                >
+                  SOS
+                </Btn>
+              </View>
+            }
+          />
+
+          {error ? (
+            <Banner
+              theme={driverCanvasTheme}
+              tone="danger"
+              icon={
+                <Ionicons
+                  name="alert-circle-outline"
+                  size={16}
+                  color={driverCanvasTheme.danger}
+                />
+              }
+              title="資料同步異常"
+              body={error}
             />
-          }
-        />
+          ) : null}
 
-        {error ? <ErrorBanner message={`錯誤：${error}`} /> : null}
+          {taskDetail ? (
+            <>
+              <Banner
+                theme={driverCanvasTheme}
+                tone={tripAuthorityBanner.tone}
+                icon={
+                  <Ionicons
+                    name={tripAuthorityBanner.icon}
+                    size={16}
+                    color={getCanvasToneSet(tripAuthorityBanner.tone).fg}
+                  />
+                }
+                title={
+                  <View style={styles.bannerTitleRow}>
+                    <Text style={styles.bannerTitleText}>
+                      {tripAuthorityBanner.title}
+                    </Text>
+                    <Pill theme={driverCanvasTheme} tone="neutral">
+                      {tripAuthorityBanner.authorityLabel}
+                    </Pill>
+                  </View>
+                }
+                body={tripAuthorityBanner.description}
+              />
 
-        {taskDetail ? (
-          <>
-            <AuthorityBanner
-              title={tripAuthorityBanner.title}
-              authorityLabel={tripAuthorityBanner.authorityLabel}
-              description={tripAuthorityBanner.description}
-              tone={tripAuthorityBanner.tone}
-              icon={tripAuthorityBanner.icon}
-            />
-
-            <View
-              style={[
-                styles.tripHero,
-                {
-                  backgroundColor: tripSurfacePalette.backgroundColor,
-                  borderColor: tripSurfacePalette.borderColor,
-                },
-              ]}
-            >
-              <View style={styles.tripHeroHeader}>
-                <View style={styles.tripHeroTitleBlock}>
-                  <Text
+              <Card
+                theme={driverCanvasTheme}
+                padding={14}
+                style={styles.routeCard}
+              >
+                <View
+                  style={[
+                    styles.mapSurface,
+                    {
+                      backgroundColor: tripSurfacePalette.backgroundColor,
+                      borderColor: tripSurfacePalette.borderColor,
+                    },
+                  ]}
+                >
+                  <View
                     style={[
-                      styles.tripHeroEyebrow,
-                      { color: tripSurfacePalette.accentColor },
+                      styles.mapGlow,
+                      {
+                        backgroundColor: `${tripSurfacePalette.accentColor}22`,
+                      },
                     ]}
-                  >
-                    {tripStateEyebrow}
-                  </Text>
-                  <Text style={styles.tripHeroTitle}>
-                    {taskDetail.orderId
-                      ? `訂單 ${taskDetail.orderId}`
-                      : `任務 ${taskDetail.taskId}`}
-                  </Text>
-                  <Text style={styles.tripHeroDescription}>
-                    {tripStatusPresentation.detail}
-                  </Text>
-                </View>
-                <View style={styles.tripHeroBadges}>
-                  {isForwardedTrip ? <RouteLockedBadge /> : null}
-                  <PlatformTaskBadge platformCode={taskDetail.sourcePlatform} />
-                </View>
-              </View>
-
-              <View style={styles.tripHeroMetaRow}>
-                <StatusChip
-                  label={tripStatusPresentation.label}
-                  variant={tripStatusChipVariant}
-                  dot
-                />
-                <StatusChip
-                  label={`內部狀態：${formatDriverTaskStatusLabel(taskDetail.status)}`}
-                  variant={isForwardedTrip ? "forwarded" : "owned"}
-                />
-                <StatusChip label={taskDetail.taskId} variant="brand" />
-              </View>
-
-              <View style={styles.tripMapCard}>
-                <View style={styles.tripMapCanvas}>
-                  <View style={styles.tripMapGlow} />
-                  <View style={styles.tripMapBadge}>
+                  />
+                  <View style={styles.mapGrid} />
+                  <View style={styles.mapBadge}>
                     <Ionicons
                       name="navigate-outline"
                       size={12}
                       color={tripSurfacePalette.accentColor}
                     />
-                    <Text style={styles.tripMapBadgeText}>
-                      {routeMetricDistance}
+                    <Text
+                      style={[
+                        styles.mapBadgeText,
+                        { color: tripSurfacePalette.accentColor },
+                      ]}
+                    >
+                      {routeOverlayLabel}
                     </Text>
                   </View>
-                  <View style={styles.tripMapRouteColumn}>
-                    <View
-                      style={[styles.tripMapDot, styles.tripMapPickupDot]}
-                    />
-                    <View style={styles.tripMapConnector} />
-                    <View
-                      style={[styles.tripMapDot, styles.tripMapDropoffDot]}
-                    />
-                  </View>
-                  <View style={styles.tripMapStops}>
-                    <View style={styles.tripMapStopCard}>
-                      <Text style={styles.tripMapStopLabel}>取貨點</Text>
-                      <Text style={styles.tripMapStopAddress}>
-                        {pickupAddress}
-                      </Text>
+                  <View style={styles.routeRow}>
+                    <View style={styles.routeRail}>
+                      <View
+                        style={[
+                          styles.routeDot,
+                          { backgroundColor: driverCanvasTheme.success },
+                        ]}
+                      />
+                      <View style={styles.routeConnector} />
+                      <View
+                        style={[
+                          styles.routeDot,
+                          { backgroundColor: driverCanvasTheme.danger },
+                        ]}
+                      />
                     </View>
-                    <View style={styles.tripMapStopCard}>
-                      <Text style={styles.tripMapStopLabel}>送達點</Text>
-                      <Text style={styles.tripMapStopAddress}>
-                        {dropoffAddress}
-                      </Text>
+                    <View style={styles.routeStopsColumn}>
+                      <View style={styles.routeStopBlock}>
+                        <Text style={styles.routeStopLabel}>取貨點</Text>
+                        <Text style={styles.routeStopAddress}>
+                          {pickupAddress}
+                        </Text>
+                        <Text style={styles.routeStopTime}>
+                          {pickupTimeLabel}
+                        </Text>
+                      </View>
+                      <View style={styles.routeStopBlock}>
+                        <Text style={styles.routeStopLabel}>送達點</Text>
+                        <Text style={styles.routeStopAddress}>
+                          {dropoffAddress}
+                        </Text>
+                        <Text style={styles.routeStopTime}>
+                          {dropoffTimeLabel}
+                        </Text>
+                      </View>
                     </View>
                   </View>
                 </View>
 
-                <View style={styles.tripMetricRow}>
+                <View style={styles.metricRow}>
                   <MetricPill
                     icon="map-outline"
                     label="距離"
@@ -1492,9 +1922,7 @@ export default function TripScreen() {
                     icon="time-outline"
                     label="時長"
                     value={routeMetricDuration}
-                    tone={
-                      locationTrackingState === "active" ? "success" : "neutral"
-                    }
+                    tone={trackingDescriptor.tone}
                   />
                   <MetricPill
                     icon="pricetag-outline"
@@ -1502,823 +1930,922 @@ export default function TripScreen() {
                     value={routeMetricFare}
                   />
                 </View>
-              </View>
+              </Card>
 
-              <View style={styles.tripStatusCallout}>
-                <View
-                  style={[
-                    styles.tripStatusDot,
-                    { backgroundColor: statusToneStyles.dot },
-                  ]}
-                />
-                <Text
-                  style={[
-                    styles.tripStatusCalloutText,
-                    { color: statusToneStyles.text },
-                  ]}
-                >
+              <Card
+                theme={driverCanvasTheme}
+                padding={14}
+                style={styles.statusCard}
+              >
+                <View style={styles.statusPillRow}>
+                  <Pill
+                    theme={driverCanvasTheme}
+                    tone={toCanvasTone(tripStatusPresentation.tone)}
+                    dot
+                  >
+                    {tripStatusPresentation.label}
+                  </Pill>
+                  <Pill theme={driverCanvasTheme} tone="neutral">
+                    {taskDetail.taskId}
+                  </Pill>
+                  {isForwardedTrip ? <RouteLockedBadge /> : null}
+                  {recordingActive ? (
+                    <Pill theme={driverCanvasTheme} tone="danger" dot>
+                      錄製中
+                    </Pill>
+                  ) : null}
+                </View>
+                <Text style={styles.statusDetailText}>
+                  {tripStatusPresentation.detail}
+                </Text>
+                <View style={styles.statusPillRow}>
+                  <Pill
+                    theme={driverCanvasTheme}
+                    tone={toCanvasTone(trackingDescriptor.tone)}
+                    dot
+                  >
+                    {`追蹤 · ${trackingDescriptor.label}`}
+                  </Pill>
+                  <Pill
+                    theme={driverCanvasTheme}
+                    tone={isForwardedTrip ? "info" : "accent"}
+                  >
+                    {isForwardedTrip ? `平台 ${platformLabel}` : "自營派單"}
+                  </Pill>
+                  <Pill theme={driverCanvasTheme} tone="neutral">
+                    {formatDriverTaskStatusLabel(taskDetail.status)}
+                  </Pill>
+                </View>
+                <Text style={styles.statusMetaText}>
                   {tripAuthorityDescription}
                 </Text>
-              </View>
+              </Card>
 
               {tripLockBody ? (
-                <View style={styles.tripLockCard}>
+                <Card
+                  theme={driverCanvasTheme}
+                  padding={18}
+                  style={styles.lockCard}
+                >
                   <Ionicons
                     name={tripLockBody.icon}
-                    size={18}
+                    size={28}
                     color={tripSurfacePalette.accentColor}
                   />
-                  <View style={styles.tripLockCopy}>
-                    <Text style={styles.tripLockTitle}>
-                      {tripLockBody.title}
-                    </Text>
-                    <Text style={styles.tripLockDetail}>
-                      {tripLockBody.detail}
-                    </Text>
-                  </View>
-                </View>
+                  <Text style={styles.lockCardTitle}>{tripLockBody.title}</Text>
+                  <Text style={styles.lockCardDetail}>
+                    {tripLockBody.detail}
+                  </Text>
+                </Card>
               ) : null}
 
-              {forwardedOutcomeSummary && forwardedOutcomeToneStyles ? (
-                <View
-                  style={[
-                    styles.forwardedOutcomePanel,
-                    {
-                      backgroundColor: forwardedOutcomeToneStyles.background,
-                      borderColor: `${forwardedOutcomeToneStyles.dot}33`,
-                    },
-                  ]}
-                >
-                  <View style={styles.forwardedOutcomeHeader}>
-                    <View
-                      style={[
-                        styles.forwardedOutcomeDot,
-                        { backgroundColor: forwardedOutcomeToneStyles.dot },
-                      ]}
+              {forwardedOutcomeSummary && forwardedOutcomeTone ? (
+                <Banner
+                  theme={driverCanvasTheme}
+                  tone={forwardedOutcomeTone}
+                  icon={
+                    <Ionicons
+                      name="checkmark-done-outline"
+                      size={16}
+                      color={getCanvasToneSet(forwardedOutcomeTone).fg}
                     />
-                    <Text
-                      style={[
-                        styles.forwardedOutcomeTitle,
-                        { color: forwardedOutcomeToneStyles.text },
-                      ]}
-                    >
-                      {forwardedOutcomeSummary.title}
-                    </Text>
-                  </View>
-                  <Text style={styles.forwardedOutcomeDetail}>
-                    {forwardedActionResult?.driverMessage}
-                  </Text>
-                  <Text style={styles.forwardedOutcomeMeta}>
-                    平台訂單編號：
-                    {
-                      forwardedActionResult?.managementCorrelationIds
-                        .mirrorOrderId
-                    }
-                    {forwardedActionResult?.managementCorrelationIds
-                      .reconciliationJobId
-                      ? `／對帳工單 ${forwardedActionResult.managementCorrelationIds.reconciliationJobId}`
-                      : ""}
-                  </Text>
-                </View>
+                  }
+                  title={forwardedOutcomeSummary.title}
+                  body={
+                    <View style={styles.bannerBodyStack}>
+                      <Text style={styles.bannerBodyText}>
+                        {forwardedActionResult?.driverMessage}
+                      </Text>
+                      <Text style={styles.bannerMetaText}>
+                        平台訂單編號：
+                        {
+                          forwardedActionResult?.managementCorrelationIds
+                            .mirrorOrderId
+                        }
+                        {forwardedActionResult?.managementCorrelationIds
+                          .reconciliationJobId
+                          ? `／對帳工單 ${forwardedActionResult.managementCorrelationIds.reconciliationJobId}`
+                          : ""}
+                      </Text>
+                    </View>
+                  }
+                />
               ) : null}
-            </View>
-
-            <View style={styles.infoTileRow}>
-              <InfoTile
-                label="操作模式"
-                value={isForwardedTrip ? "平台主導" : "自營行程"}
-              />
-              <InfoTile
-                label="定位追蹤"
-                value={
-                  isForwardedTrip
-                    ? "未啟用"
-                    : locationTrackingState === "active"
-                      ? "追蹤中"
-                      : locationTrackingState === "requesting_permission"
-                        ? "等待授權"
-                        : "需處理"
-                }
-              />
-            </View>
-
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionEyebrow}>Workflow Boundaries</Text>
-              <Text style={styles.sectionTitle}>
-                {driverStrings.trip.sections.availableActions}
+            </>
+          ) : (
+            <Card theme={driverCanvasTheme} padding={18}>
+              <Text style={styles.emptyTitle}>目前沒有進行中的行程</Text>
+              <Text style={styles.emptyBody}>
+                重新整理後可再次檢查是否有新任務同步進來。
               </Text>
+              <View style={styles.inlineActionRow}>
+                <ActionButton
+                  label="重新整理"
+                  onPress={() => void loadTrip(true)}
+                  disabled={submittingAction !== null}
+                />
+              </View>
+            </Card>
+          )}
+        </View>
+
+        {taskDetail ? (
+          <View style={styles.bottomActionBar}>
+            <Text style={styles.bottomActionNotice}>
+              {bottomPrimaryAction || bottomSecondaryAction
+                ? bottomNotice
+                : getIdleBottomActionLabel(tripExperienceState)}
+            </Text>
+            <View style={styles.bottomActionButtons}>
+              {bottomSecondaryAction ? (
+                <ActionButton
+                  label={bottomSecondaryAction.title}
+                  onPress={bottomSecondaryAction.onPress}
+                  disabled={bottomSecondaryAction.disabled}
+                  loading={bottomSecondaryAction.loading}
+                  variant="secondary"
+                />
+              ) : null}
+              {bottomPrimaryAction ? (
+                <ActionButton
+                  label={bottomPrimaryAction.title}
+                  onPress={bottomPrimaryAction.onPress}
+                  disabled={bottomPrimaryAction.disabled}
+                  loading={bottomPrimaryAction.loading}
+                  variant="primary"
+                />
+              ) : (
+                <ActionButton
+                  label={getIdleBottomActionLabel(tripExperienceState)}
+                  onPress={() => undefined}
+                  disabled
+                  variant="secondary"
+                />
+              )}
+            </View>
+          </View>
+        ) : null}
+      </View>
+
+      {taskDetail ? (
+        <>
+          <View style={styles.kpiRow}>
+            <KPI
+              theme={driverCanvasTheme}
+              label="距離"
+              value={routeMetricDistance}
+              sub={tripStateEyebrow}
+              hint={taskDetail.taskId}
+            />
+            <KPI
+              theme={driverCanvasTheme}
+              label="追蹤"
+              value={trackingDescriptor.label}
+              sub={trackingDescriptor.detail}
+              hint={
+                recordingActive
+                  ? (orderDetail?.recordingId ?? "local")
+                  : "standby"
+              }
+            />
+            <KPI
+              theme={driverCanvasTheme}
+              label="車資"
+              value={routeMetricFare}
+              sub={formatReservationWindow(orderDetail)}
+              hint={orderDetail?.quotedFareSource ?? "route"}
+            />
+          </View>
+
+          <Card
+            theme={driverCanvasTheme}
+            title="行程摘要"
+            subtitle="訂單、平台與預約上下文"
+          >
+            <DL theme={driverCanvasTheme} cols={2} items={tripSummaryItems} />
+          </Card>
+
+          <Card
+            theme={driverCanvasTheme}
+            title={driverStrings.trip.sections.availableActions}
+            subtitle={forwardedActionCardCopy.title}
+          >
+            <Table
+              theme={driverCanvasTheme}
+              dense
+              columns={[
+                {
+                  h: "Code",
+                  w: 76,
+                  mono: true,
+                  r: (row: (typeof workflowRows)[number]) => (
+                    <Text style={styles.tableCodeText}>{row.code}</Text>
+                  ),
+                },
+                { h: "項目", w: 92, k: "item" },
+                {
+                  h: "狀態",
+                  w: 122,
+                  r: (row: (typeof workflowRows)[number]) => (
+                    <Pill theme={driverCanvasTheme} tone={row.tone} dot>
+                      {row.state}
+                    </Pill>
+                  ),
+                },
+                { h: "說明", k: "note" },
+              ]}
+              rows={workflowRows}
+            />
+            <View style={styles.bulletList}>
               {tripCapabilityItems.map((item) => (
-                <Text key={item} style={styles.sectionListItem}>
-                  • {item}
-                </Text>
+                <View key={item} style={styles.bulletRow}>
+                  <View style={styles.bulletDot} />
+                  <Text style={styles.bulletText}>{item}</Text>
+                </View>
               ))}
             </View>
+          </Card>
 
-            <RouteDisplay
-              task={taskDetail}
-              order={orderDetail}
-              showAuthorityBanner={false}
+          <Card
+            theme={driverCanvasTheme}
+            title={driverStrings.trip.sections.statusMetrics}
+            subtitle="追蹤、錄製與定位摘要"
+          >
+            <DL
+              theme={driverCanvasTheme}
+              cols={2}
+              items={[
+                {
+                  label: "錄製識別",
+                  value: orderDetail?.recordingId ?? "未啟用",
+                  mono: true,
+                },
+                {
+                  label: "ETA",
+                  value:
+                    orderDetail?.etaSnapshot?.etaMinutes != null
+                      ? `${orderDetail.etaSnapshot.etaMinutes} 分`
+                      : "待同步",
+                  mono: true,
+                },
+                {
+                  label: "現場聯絡",
+                  value:
+                    orderDetail?.onsiteContact?.phone ??
+                    orderDetail?.passenger.phone ??
+                    "待同步",
+                  mono: true,
+                },
+                {
+                  label: "最後更新",
+                  value: formatShortDateTime(
+                    taskDetail.completedAt ??
+                      taskDetail.startedAt ??
+                      taskDetail.arrivedPickupAt ??
+                      taskDetail.acceptedAt,
+                  ),
+                  mono: true,
+                },
+              ]}
             />
-
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionEyebrow}>Trip Health</Text>
-              <Text style={styles.sectionTitle}>
-                {driverStrings.trip.sections.statusMetrics}
-              </Text>
-              <View style={styles.infoTileRow}>
-                <InfoTile
-                  label="距離"
-                  value={
-                    showTripMetrics ? formatTripDistance(liveDistanceKm) : "N/A"
-                  }
+            {!isForwardedTrip &&
+            isTripInProgress &&
+            (locationTrackingState === "permission_denied" ||
+              locationTrackingState === "error") ? (
+              <View style={styles.inlineActionRow}>
+                <ActionButton
+                  label="重試追蹤"
+                  onPress={() => setTrackingRetryKey((current) => current + 1)}
+                  disabled={submittingAction !== null}
+                  variant="secondary"
                 />
-                <InfoTile
-                  label="時長"
-                  value={
-                    showTripMetrics
-                      ? formatTripDuration(liveDurationSec)
-                      : "N/A"
-                  }
-                />
-              </View>
-              <Text style={styles.sectionBody}>
-                {isForwardedTrip
-                  ? "來源平台任務不在此端啟用本地距離/時長追蹤；若平台同步延遲，請以派車台指示為準。"
-                  : locationTrackingState === "active"
-                    ? (locationTrackingMessage ??
-                      "此行程已啟用即時定位追蹤，距離與時長會持續更新。")
-                    : locationTrackingState === "requesting_permission"
-                      ? "請允許定位權限以啟動即時行程追蹤。"
-                      : (locationTrackingMessage ??
-                        "行程度量目前不可用；恢復定位追蹤後才能完成行程。")}
-              </Text>
-              {!isForwardedTrip &&
-              isTripInProgress &&
-              (locationTrackingState === "permission_denied" ||
-                locationTrackingState === "error") ? (
-                <View style={styles.inlineActionRow}>
-                  <ActionButton
-                    label="重試追蹤"
-                    onPress={() =>
-                      setTrackingRetryKey((current) => current + 1)
-                    }
-                    disabled={submittingAction !== null}
-                    variant="secondary"
-                  />
-                </View>
-              ) : null}
-            </View>
-
-            {complianceGates.length > 0 ? (
-              <View style={styles.sectionCard}>
-                <Text style={styles.sectionEyebrow}>Compliance</Text>
-                <Text style={styles.sectionTitle}>
-                  {driverStrings.trip.sections.compliance}
-                </Text>
-                <View style={styles.complianceList}>
-                  {complianceGates.map((gate) => {
-                    const tone = getComplianceTone(gate.state);
-                    return (
-                      <View
-                        key={gate.gateType}
-                        style={[
-                          styles.complianceGate,
-                          {
-                            backgroundColor: tone.bg,
-                            borderColor: tone.border,
-                          },
-                        ]}
-                      >
-                        <View style={styles.complianceGateHeader}>
-                          <Text
-                            style={[
-                              styles.complianceGateTitle,
-                              { color: tone.text },
-                            ]}
-                          >
-                            {gate.title}
-                          </Text>
-                          <Text
-                            style={[
-                              styles.complianceGateState,
-                              { color: tone.text },
-                            ]}
-                          >
-                            {gate.state}
-                          </Text>
-                        </View>
-                        <Text style={styles.complianceGateAction}>
-                          {gate.nextAction}
-                        </Text>
-                        {gate.missingItems.length > 0 ? (
-                          <Text style={styles.complianceGateMeta}>
-                            缺少項目：{gate.missingItems.join(", ")}
-                          </Text>
-                        ) : null}
-                      </View>
-                    );
-                  })}
-                </View>
               </View>
             ) : null}
+          </Card>
 
-            {!isForwardedTrip && showCompletionProofCard ? (
-              <View style={styles.sectionCard}>
-                <Text style={styles.sectionEyebrow}>Completion Proof</Text>
-                <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionTitle}>
-                    {driverStrings.trip.sections.completionProof}
-                  </Text>
-                  <StatusChip
-                    label={`已附加 ${proofPhotos.length}/${MAX_COMPLETION_PROOF_PHOTOS}`}
-                    variant="default"
-                  />
-                </View>
-                <Text style={styles.sectionBody}>
-                  最多可附加 5 張照片。每張佐證照片壓縮後需低於 600KB。
-                </Text>
+          {complianceRows.length > 0 ? (
+            <Card
+              theme={driverCanvasTheme}
+              title={driverStrings.trip.sections.compliance}
+              subtitle="完成行程前需確認的 gate"
+            >
+              <Table
+                theme={driverCanvasTheme}
+                dense
+                columns={[
+                  {
+                    h: "Code",
+                    w: 92,
+                    mono: true,
+                    r: (row: (typeof complianceRows)[number]) => (
+                      <Text style={styles.tableCodeText}>{row.code}</Text>
+                    ),
+                  },
+                  { h: "項目", w: 112, k: "title" },
+                  {
+                    h: "狀態",
+                    w: 112,
+                    r: (row: (typeof complianceRows)[number]) => (
+                      <Pill theme={driverCanvasTheme} tone={row.tone} dot>
+                        {row.state}
+                      </Pill>
+                    ),
+                  },
+                  { h: "處理", k: "nextAction" },
+                ]}
+                rows={complianceRows}
+              />
+            </Card>
+          ) : null}
 
-                {proofRequirementsUnavailable ? (
-                  <ErrorBanner message="需待訂單詳情載入後才能確認佐證需求；請先重新整理行程，再完成任務。" />
-                ) : null}
+          {!isForwardedTrip && showCompletionProofCard ? (
+            <Card
+              theme={driverCanvasTheme}
+              title={driverStrings.trip.sections.completionProof}
+              subtitle="照片、簽收與費用佐證"
+            >
+              {proofRequirementsUnavailable ? (
+                <Banner
+                  theme={driverCanvasTheme}
+                  tone="danger"
+                  title="需先載入訂單詳情"
+                  body="確認完單 requirements 前，請先重新整理行程。"
+                />
+              ) : null}
 
-                {proofRequirements.minPhotoCount > 0 ? (
-                  <Text style={styles.requirementNote}>
-                    此行程至少需要 {proofRequirements.minPhotoCount}{" "}
-                    張佐證照片。
-                    {missingRequiredPhotos > 0
-                      ? ` 完成前還需補上 ${missingRequiredPhotos} 張。`
-                      : " 已達照片需求。"}
-                  </Text>
-                ) : null}
+              <DL
+                theme={driverCanvasTheme}
+                cols={2}
+                items={proofSummaryItems}
+              />
 
-                {proofRequirements.signoffRequired ? (
-                  <View style={styles.requirementCard}>
-                    <Text style={styles.requirementCardTitle}>簽收佐證</Text>
-                    <Text style={styles.requirementCardHint}>
-                      完成行程前，請填寫乘客或現場簽收識別資料。
-                    </Text>
-                    <FormField
-                      label="簽收識別"
+              {proofRequirements.minPhotoCount > 0 ? (
+                <Banner
+                  theme={driverCanvasTheme}
+                  tone={missingRequiredPhotos > 0 ? "warn" : "success"}
+                  title={`至少需要 ${proofRequirements.minPhotoCount} 張照片`}
+                  body={
+                    missingRequiredPhotos > 0
+                      ? `完成前仍需補上 ${missingRequiredPhotos} 張佐證照片。`
+                      : "已達照片需求。"
+                  }
+                />
+              ) : null}
+
+              {proofRequirements.signoffRequired ? (
+                <View style={styles.fieldStack}>
+                  <Field
+                    theme={driverCanvasTheme}
+                    label="簽收識別"
+                    hint="乘客簽收或簽收單號"
+                    required
+                  >
+                    <Input
+                      theme={driverCanvasTheme}
                       value={signoffReference}
                       onChangeText={setSignoffReference}
                       editable={submittingAction === null}
-                      placeholder="乘客簽收或簽收單號"
+                      ph="乘客簽收或簽收單號"
+                      mono
                       autoCapitalize="characters"
-                      error={
-                        signoffRequirementMissing
-                          ? "尚未填寫簽收識別資料。"
-                          : undefined
-                      }
-                      helpText={
-                        signoffRequirementMissing
-                          ? undefined
-                          : "簽收需求已完成。"
-                      }
+                      autoCorrect={false}
                     />
-                  </View>
-                ) : null}
+                  </Field>
+                  <Text style={styles.fieldFeedbackText}>
+                    {signoffRequirementMissing
+                      ? "尚未填寫簽收識別資料。"
+                      : "簽收需求已完成。"}
+                  </Text>
+                </View>
+              ) : null}
 
-                {proofRequirements.expenseProofRequired ? (
-                  <View style={styles.requirementCard}>
-                    <Text style={styles.requirementCardTitle}>費用佐證</Text>
-                    <Text style={styles.requirementCardHint}>
-                      請填寫一筆可報銷費用，包含類型、金額與單據識別，供財務覆核。
-                    </Text>
-                    <FormField
-                      label="費用類型"
+              {proofRequirements.expenseProofRequired ? (
+                <View style={styles.fieldStack}>
+                  <Field
+                    theme={driverCanvasTheme}
+                    label="費用類型"
+                    hint="例如過路費或停車費"
+                    required
+                  >
+                    <Input
+                      theme={driverCanvasTheme}
                       value={expenseType}
                       onChangeText={setExpenseType}
                       editable={submittingAction === null}
-                      placeholder="例如過路費或停車費"
+                      ph="例如過路費或停車費"
                       autoCapitalize="none"
+                      autoCorrect={false}
                     />
-                    <FormField
-                      label="金額"
+                  </Field>
+                  <Field
+                    theme={driverCanvasTheme}
+                    label="金額"
+                    hint="例如 40 或 40.50"
+                    required
+                  >
+                    <Input
+                      theme={driverCanvasTheme}
                       value={expenseAmount}
                       onChangeText={setExpenseAmount}
                       editable={submittingAction === null}
-                      placeholder="例如 40 或 40.50"
-                      keyboardType="decimal-pad"
-                      error={
-                        expenseAmountInvalid
-                          ? "請輸入有效的正數金額。"
-                          : undefined
-                      }
+                      ph="例如 40 或 40.50"
+                      mono
+                      autoCapitalize="none"
+                      autoCorrect={false}
                     />
-                    <FormField
-                      label="單據識別"
+                  </Field>
+                  <Field
+                    theme={driverCanvasTheme}
+                    label="單據識別"
+                    hint="單據或附件識別"
+                    required
+                  >
+                    <Input
+                      theme={driverCanvasTheme}
                       value={expenseAttachmentRef}
                       onChangeText={setExpenseAttachmentRef}
                       editable={submittingAction === null}
-                      placeholder="單據或附件識別"
+                      ph="單據或附件識別"
+                      mono
                       autoCapitalize="characters"
-                      helpText={
-                        expenseRequirementMissing
-                          ? "費用佐證資料尚未填完整。"
-                          : expenseAttachmentId
-                            ? `費用佐證已完成：${expenseAttachmentId}`
-                            : "費用佐證已完成。"
-                      }
+                      autoCorrect={false}
                     />
-                  </View>
-                ) : null}
-
-                <View style={styles.inlineActionRow}>
-                  <ActionButton
-                    label="拍照上傳"
-                    onPress={() => void pickProofPhotos("camera")}
-                    disabled={
-                      submittingAction !== null ||
-                      remainingSlots <= 0 ||
-                      proofRequirementsUnavailable
-                    }
-                    variant="secondary"
-                  />
-                  <ActionButton
-                    label="從相簿選取"
-                    onPress={() => void pickProofPhotos("library")}
-                    disabled={
-                      submittingAction !== null ||
-                      remainingSlots <= 0 ||
-                      proofRequirementsUnavailable
-                    }
-                    variant="secondary"
-                  />
+                  </Field>
+                  <Text style={styles.fieldFeedbackText}>
+                    {expenseAmountInvalid
+                      ? "請輸入有效的正數金額。"
+                      : expenseRequirementMissing
+                        ? "費用佐證資料尚未填完整。"
+                        : expenseAttachmentId
+                          ? `費用佐證已完成：${expenseAttachmentId}`
+                          : "費用佐證已完成。"}
+                  </Text>
                 </View>
+              ) : null}
 
-                {proofPhotos.length > 0 ? (
-                  <View style={styles.photoGrid}>
-                    {proofPhotos.map((photo, index) => (
-                      <View
-                        key={`${photo.uri}-${index}`}
-                        style={styles.photoCard}
-                      >
-                        <Image
-                          source={{ uri: photo.uri }}
-                          style={styles.photoPreview}
-                        />
-                        <Text numberOfLines={1} style={styles.photoMeta}>
-                          {Math.round(photo.estimatedBytes / 1024)} KB
-                        </Text>
-                        <ActionButton
-                          label="移除"
-                          onPress={() => removeProofPhoto(index)}
-                          disabled={submittingAction !== null}
-                          variant="secondary"
-                        />
-                      </View>
-                    ))}
-                  </View>
-                ) : (
-                  <EmptyState
-                    title="尚未選取佐證照片"
-                    description="可從相機或相簿新增完單照片。"
-                    icon="images-outline"
-                    style={styles.compactEmptyState}
-                  />
-                )}
+              <View style={styles.inlineActionRow}>
+                <ActionButton
+                  label="拍照上傳"
+                  onPress={() => void pickProofPhotos("camera")}
+                  disabled={
+                    submittingAction !== null ||
+                    remainingSlots <= 0 ||
+                    proofRequirementsUnavailable
+                  }
+                  variant="secondary"
+                />
+                <ActionButton
+                  label="從相簿選取"
+                  onPress={() => void pickProofPhotos("library")}
+                  disabled={
+                    submittingAction !== null ||
+                    remainingSlots <= 0 ||
+                    proofRequirementsUnavailable
+                  }
+                  variant="secondary"
+                />
               </View>
-            ) : null}
 
-            <View style={styles.sosCard}>
-              <Text style={styles.sectionEyebrow}>Safety Support</Text>
-              <Text style={styles.sosTitle}>需要立即通報重大安全事件？</Text>
-              <Text style={styles.sosNote}>
-                開啟 SOS 緊急通報後，送出前仍需再確認一次。
-              </Text>
-              <SharedActionButton
-                title="開啟 SOS 緊急通報"
-                onPress={() => router.push("/incident")}
-                variant="danger"
-                icon="warning-outline"
-                style={styles.sosButton}
+              {proofPhotos.length > 0 ? (
+                <View style={styles.photoGrid}>
+                  {proofPhotos.map((photo, index) => (
+                    <View
+                      key={`${photo.uri}-${index}`}
+                      style={styles.photoCard}
+                    >
+                      <Image
+                        source={{ uri: photo.uri }}
+                        style={styles.photoPreview}
+                      />
+                      <Text numberOfLines={1} style={styles.photoMeta}>
+                        {Math.round(photo.estimatedBytes / 1024)} KB
+                      </Text>
+                      <ActionButton
+                        label="移除"
+                        onPress={() => removeProofPhoto(index)}
+                        disabled={submittingAction !== null}
+                        variant="secondary"
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyPhotoState}>
+                  <Ionicons
+                    name="images-outline"
+                    size={20}
+                    color={driverCanvasTheme.textDim}
+                  />
+                  <Text style={styles.emptyPhotoTitle}>尚未選取佐證照片</Text>
+                  <Text style={styles.emptyPhotoBody}>
+                    可從相機或相簿新增完單照片。
+                  </Text>
+                </View>
+              )}
+            </Card>
+          ) : null}
+
+          <Banner
+            theme={driverCanvasTheme}
+            tone="danger"
+            icon={
+              <Ionicons
+                name="warning-outline"
+                size={16}
+                color={driverCanvasTheme.danger}
               />
-            </View>
-          </>
-        ) : (
-          <EmptyState
-            title="目前沒有進行中的行程"
-            description="重新整理後可再次檢查是否有新任務同步進來。"
-            actionTitle="重新整理"
-            onAction={() => void loadTrip(true)}
+            }
+            title="需要立即通報重大安全事件？"
+            body="開啟 SOS 緊急通報後，送出前仍需再確認一次。"
+            actions={
+              <Btn
+                theme={driverCanvasTheme}
+                variant="primary"
+                size="sm"
+                danger
+                onPress={() => router.push("/incident")}
+              >
+                開啟 SOS 緊急通報
+              </Btn>
+            }
           />
-        )}
-      </AppScreen>
-
-      {taskDetail ? (
-        <BottomActionBar
-          notice={
-            bottomPrimaryAction || bottomSecondaryAction
-              ? bottomNotice
-              : getIdleBottomActionLabel(tripExperienceState)
-          }
-          primaryAction={bottomPrimaryAction}
-          secondaryAction={bottomSecondaryAction}
-        />
+        </>
       ) : null}
-    </>
+    </Shell>
   );
 }
 
 const styles = StyleSheet.create({
-  screenContent: {
-    paddingBottom: Tokens.spacing["4xl"],
+  shellContent: {
+    gap: 14,
+    paddingBottom: 28,
+  },
+  actionButton: {
+    flex: 1,
   },
   loadingState: {
-    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: Tokens.spacing.md,
+    minHeight: 220,
+    gap: 12,
   },
   loadingLabel: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    color: driverCanvasTheme.textMuted,
+    fontFamily: driverCanvasTheme.fontFamily,
   },
-  tripHero: {
-    borderRadius: Tokens.radius.xl,
-    borderWidth: 1,
-    padding: Tokens.spacing.lg,
-    gap: Tokens.spacing.md,
-    ...Tokens.shadows.md,
-  },
-  tripHeroHeader: {
-    flexDirection: "row",
+  heroPane: {
+    minHeight: 722,
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: Tokens.spacing.md,
+    gap: 14,
   },
-  tripHeroTitleBlock: {
-    flex: 1,
-    gap: Tokens.spacing.xs,
+  heroPaneTop: {
+    gap: 14,
   },
-  tripHeroEyebrow: {
-    ...Tokens.type.micro,
-  },
-  tripHeroTitle: {
-    ...Tokens.type.screenTitle,
-    color: Tokens.colors.text,
-  },
-  tripHeroDescription: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textBody,
-  },
-  tripHeroBadges: {
-    alignItems: "flex-end",
-    gap: Tokens.spacing.xs,
-    flexShrink: 1,
-  },
-  tripHeroMetaRow: {
+  headerActionRow: {
     flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     flexWrap: "wrap",
-    gap: Tokens.spacing.sm,
   },
-  tripMapCard: {
-    borderRadius: Tokens.radius.xl,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    backgroundColor: Tokens.colors.bgRaised,
-    overflow: "hidden",
+  bannerTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
   },
-  tripMapCanvas: {
-    minHeight: 188,
-    padding: Tokens.spacing.lg,
-    backgroundColor: Tokens.colors.brandBg,
+  bannerTitleText: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: "700",
+    color: driverCanvasTheme.text,
+    fontFamily: driverCanvasTheme.fontFamily,
+  },
+  bannerBodyStack: {
+    gap: 4,
+  },
+  bannerBodyText: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: driverCanvasTheme.text,
+    fontFamily: driverCanvasTheme.fontFamily,
+  },
+  bannerMetaText: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: driverCanvasTheme.textMuted,
+    fontFamily: driverCanvasTheme.monoFamily,
+  },
+  routeCard: {
+    borderRadius: 14,
+  },
+  mapSurface: {
     position: "relative",
-    justifyContent: "space-between",
+    minHeight: 188,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
+    overflow: "hidden",
+    justifyContent: "flex-end",
   },
-  tripMapGlow: {
+  mapGlow: {
     position: "absolute",
-    top: -20,
-    right: -10,
-    width: 160,
-    height: 160,
+    top: -72,
+    right: -28,
+    width: 216,
+    height: 216,
     borderRadius: 999,
-    backgroundColor: `${Tokens.colors.brand}10`,
   },
-  tripMapBadge: {
-    alignSelf: "flex-start",
+  mapGrid: {
+    ...StyleSheet.absoluteFillObject,
+    margin: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "rgba(255,255,255,0.05)",
+  },
+  mapBadge: {
+    position: "absolute",
+    top: 10,
+    left: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: Tokens.radius.md,
-    backgroundColor: Tokens.colors.surface,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: driverCanvasTheme.surface,
     borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    ...Tokens.shadows.sm,
+    borderColor: driverCanvasTheme.border,
   },
-  tripMapBadgeText: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textStrong,
+  mapBadgeText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "700",
+    fontFamily: driverCanvasTheme.monoFamily,
   },
-  tripMapRouteColumn: {
-    position: "absolute",
-    left: Tokens.spacing.lg,
-    top: 62,
-    bottom: Tokens.spacing.lg,
-    width: 18,
+  routeRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 12,
+  },
+  routeRail: {
+    width: 12,
     alignItems: "center",
+    paddingTop: 5,
+    paddingBottom: 4,
   },
-  tripMapDot: {
+  routeDot: {
     width: 12,
     height: 12,
-    borderRadius: Tokens.radius.full,
+    borderRadius: 6,
   },
-  tripMapPickupDot: {
-    backgroundColor: Tokens.colors.success,
-    shadowColor: Tokens.colors.success,
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-  },
-  tripMapDropoffDot: {
-    backgroundColor: Tokens.colors.danger,
-    shadowColor: Tokens.colors.danger,
-    shadowOpacity: 0.18,
-    shadowRadius: 4,
-  },
-  tripMapConnector: {
+  routeConnector: {
+    width: 1.5,
     flex: 1,
-    width: 2,
-    marginVertical: Tokens.spacing.xs,
-    borderLeftWidth: 1.5,
-    borderStyle: "dashed",
-    borderColor: Tokens.colors.borderStrong,
+    marginVertical: 6,
+    backgroundColor: driverCanvasTheme.border,
   },
-  tripMapStops: {
-    gap: Tokens.spacing.md,
-    paddingLeft: 28,
-    marginTop: Tokens.spacing.md,
+  routeStopsColumn: {
+    flex: 1,
+    gap: 16,
   },
-  tripMapStopCard: {
-    borderRadius: Tokens.radius.lg,
-    paddingHorizontal: Tokens.spacing.md,
-    paddingVertical: Tokens.spacing.sm,
-    backgroundColor: "rgba(255,255,255,0.88)",
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
+  routeStopBlock: {
+    gap: 3,
   },
-  tripMapStopLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textDim,
-    marginBottom: 2,
+  routeStopLabel: {
+    fontSize: 10.5,
+    lineHeight: 14,
+    fontWeight: "700",
+    color: driverCanvasTheme.textMuted,
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    fontFamily: driverCanvasTheme.fontFamily,
   },
-  tripMapStopAddress: {
-    ...Tokens.type.bodyStrong,
-    color: Tokens.colors.textStrong,
+  routeStopAddress: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "700",
+    color: driverCanvasTheme.text,
+    fontFamily: driverCanvasTheme.fontFamily,
   },
-  tripMetricRow: {
+  routeStopTime: {
+    fontSize: 11.5,
+    lineHeight: 15,
+    color: driverCanvasTheme.textDim,
+    fontFamily: driverCanvasTheme.fontFamily,
+  },
+  metricRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Tokens.spacing.sm,
-    padding: Tokens.spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: Tokens.colors.border,
-    backgroundColor: Tokens.colors.surface,
+    gap: 10,
+    marginTop: 14,
   },
   metricPill: {
     flex: 1,
-    minWidth: "30%",
+    minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
-    gap: Tokens.spacing.sm,
-    borderRadius: Tokens.radius.lg,
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
     borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    backgroundColor: Tokens.colors.surfaceLo,
-    paddingHorizontal: Tokens.spacing.sm,
-    paddingVertical: Tokens.spacing.sm,
+    borderRadius: 8,
   },
   metricPillCopy: {
     flex: 1,
+    minWidth: 0,
+    gap: 1,
   },
   metricPillLabel: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textDim,
+    fontSize: 10.5,
+    lineHeight: 14,
+    fontWeight: "700",
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
   },
   metricPillValue: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
+    fontSize: 13.5,
+    lineHeight: 18,
+    fontWeight: "700",
   },
-  tripStatusCallout: {
+  statusCard: {
+    borderRadius: 14,
+  },
+  statusPillRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: Tokens.spacing.sm,
-    padding: Tokens.spacing.md,
-    borderRadius: Tokens.radius.lg,
-    backgroundColor: Tokens.colors.bgRaised,
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
   },
-  tripStatusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: Tokens.radius.full,
+  statusDetailText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: driverCanvasTheme.text,
+    fontFamily: driverCanvasTheme.fontFamily,
+    marginTop: 10,
+  },
+  statusMetaText: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: driverCanvasTheme.textMuted,
+    fontFamily: driverCanvasTheme.fontFamily,
+    marginTop: 10,
+  },
+  lockCard: {
+    borderRadius: 14,
+  },
+  lockCardTitle: {
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: "700",
+    color: driverCanvasTheme.text,
+    textAlign: "center",
+    fontFamily: driverCanvasTheme.fontFamily,
+    marginTop: 10,
+  },
+  lockCardDetail: {
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: driverCanvasTheme.textMuted,
+    textAlign: "center",
+    fontFamily: driverCanvasTheme.fontFamily,
+    marginTop: 4,
+  },
+  bottomActionBar: {
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: driverCanvasTheme.border,
+    backgroundColor: driverCanvasTheme.bgRaised,
+    gap: 10,
+  },
+  bottomActionNotice: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: driverCanvasTheme.textMuted,
+    fontFamily: driverCanvasTheme.fontFamily,
+  },
+  bottomActionButtons: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "stretch",
+  },
+  kpiRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  tableCodeText: {
+    color: driverCanvasTheme.accent,
+    fontFamily: driverCanvasTheme.monoFamily,
+    fontSize: 11.5,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  bulletList: {
+    marginTop: 12,
+    gap: 8,
+  },
+  bulletRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "flex-start",
+  },
+  bulletDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     marginTop: 6,
+    backgroundColor: driverCanvasTheme.accent,
   },
-  tripStatusCalloutText: {
-    ...Tokens.type.body,
+  bulletText: {
     flex: 1,
-  },
-  tripLockCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: Tokens.spacing.sm,
-    borderRadius: Tokens.radius.lg,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    backgroundColor: Tokens.colors.bgRaised,
-    padding: Tokens.spacing.md,
-  },
-  tripLockCopy: {
-    flex: 1,
-    gap: Tokens.spacing.xs,
-  },
-  tripLockTitle: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
-  },
-  tripLockDetail: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
-  },
-  routeLockedBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: Tokens.spacing.sm,
-    paddingVertical: 5,
-    borderRadius: Tokens.radius.pill,
-    backgroundColor: Tokens.colors.warningBg,
-    borderWidth: 1,
-    borderColor: `${Tokens.colors.warning}33`,
-  },
-  routeLockedBadgeText: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.warning,
-  },
-  infoTileRow: {
-    flexDirection: "row",
-    gap: Tokens.spacing.md,
-  },
-  sectionCard: {
-    borderRadius: Tokens.radius.xl,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    backgroundColor: Tokens.colors.bgRaised,
-    padding: Tokens.spacing.lg,
-    gap: Tokens.spacing.sm,
-    ...Tokens.shadows.sm,
-  },
-  sectionHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: Tokens.spacing.sm,
-  },
-  sectionEyebrow: {
-    ...Tokens.type.micro,
-    color: Tokens.colors.textDim,
-  },
-  sectionTitle: {
-    ...Tokens.type.sectionTitle,
-    color: Tokens.colors.textStrong,
-  },
-  sectionBody: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textMuted,
-  },
-  sectionListItem: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textBody,
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: driverCanvasTheme.text,
+    fontFamily: driverCanvasTheme.fontFamily,
   },
   inlineActionRow: {
     flexDirection: "row",
-    gap: Tokens.spacing.sm,
     flexWrap: "wrap",
+    gap: 10,
+    marginTop: 12,
   },
-  complianceList: {
-    gap: Tokens.spacing.sm,
+  fieldStack: {
+    gap: 10,
+    marginTop: 12,
   },
-  complianceGate: {
-    borderWidth: 1,
-    borderRadius: Tokens.radius.lg,
-    padding: Tokens.spacing.md,
-    gap: Tokens.spacing.xs,
-  },
-  complianceGateHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: Tokens.spacing.sm,
-  },
-  complianceGateTitle: {
-    ...Tokens.type.label,
-    flex: 1,
-  },
-  complianceGateState: {
-    ...Tokens.type.micro,
-  },
-  complianceGateAction: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textBody,
-  },
-  complianceGateMeta: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textDim,
-  },
-  requirementNote: {
-    ...Tokens.type.small,
-    color: Tokens.colors.warning,
-  },
-  requirementCard: {
-    backgroundColor: Tokens.colors.surfaceLo,
-    borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    borderRadius: Tokens.radius.lg,
-    padding: Tokens.spacing.md,
-    gap: Tokens.spacing.xs,
-  },
-  requirementCardTitle: {
-    ...Tokens.type.label,
-    color: Tokens.colors.textStrong,
-  },
-  requirementCardHint: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+  fieldFeedbackText: {
+    fontSize: 11.5,
+    lineHeight: 16,
+    color: driverCanvasTheme.textMuted,
+    fontFamily: driverCanvasTheme.fontFamily,
   },
   photoGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: Tokens.spacing.md,
+    gap: 12,
+    marginTop: 12,
   },
   photoCard: {
     width: "47%",
-    backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.lg,
-    padding: Tokens.spacing.sm,
+    backgroundColor: driverCanvasTheme.surfaceLo,
+    borderRadius: 10,
+    padding: 10,
     borderWidth: 1,
-    borderColor: Tokens.colors.border,
-    gap: Tokens.spacing.sm,
+    borderColor: driverCanvasTheme.border,
+    gap: 10,
   },
   photoPreview: {
     width: "100%",
     aspectRatio: 1.2,
-    borderRadius: Tokens.radius.md,
-    backgroundColor: Tokens.colors.surfaceMuted,
+    borderRadius: 8,
+    backgroundColor: driverCanvasTheme.bgRaised,
   },
   photoMeta: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
+    fontSize: 11.5,
+    lineHeight: 16,
+    color: driverCanvasTheme.textMuted,
     textAlign: "center",
+    fontFamily: driverCanvasTheme.monoFamily,
   },
-  compactEmptyState: {
-    paddingHorizontal: 0,
-    paddingVertical: Tokens.spacing.lg,
-  },
-  forwardedOutcomePanel: {
-    borderRadius: Tokens.radius.lg,
+  emptyPhotoState: {
+    marginTop: 12,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    borderRadius: 10,
     borderWidth: 1,
-    padding: Tokens.spacing.md,
-    gap: Tokens.spacing.xs,
-  },
-  forwardedOutcomeHeader: {
-    flexDirection: "row",
+    borderStyle: "dashed",
+    borderColor: driverCanvasTheme.border,
     alignItems: "center",
-    gap: Tokens.spacing.sm,
+    gap: 8,
   },
-  forwardedOutcomeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: Tokens.radius.full,
+  emptyPhotoTitle: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: "700",
+    color: driverCanvasTheme.text,
+    fontFamily: driverCanvasTheme.fontFamily,
   },
-  forwardedOutcomeTitle: {
-    ...Tokens.type.label,
+  emptyPhotoBody: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: driverCanvasTheme.textMuted,
+    textAlign: "center",
+    fontFamily: driverCanvasTheme.fontFamily,
   },
-  forwardedOutcomeDetail: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textBody,
+  emptyTitle: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: driverCanvasTheme.text,
+    fontFamily: driverCanvasTheme.fontFamily,
   },
-  forwardedOutcomeMeta: {
-    ...Tokens.type.small,
-    color: Tokens.colors.textMuted,
-  },
-  sosCard: {
-    padding: Tokens.spacing.lg,
-    borderRadius: Tokens.radius.xl,
-    backgroundColor: Tokens.colors.dangerBg,
-    borderWidth: 1,
-    borderColor: `${Tokens.colors.danger}22`,
-    gap: Tokens.spacing.sm,
-  },
-  sosTitle: {
-    ...Tokens.type.sectionTitle,
-    color: Tokens.colors.danger,
-  },
-  sosNote: {
-    ...Tokens.type.body,
-    color: Tokens.colors.textBody,
-  },
-  sosButton: {
-    marginTop: Tokens.spacing.xs,
+  emptyBody: {
+    marginTop: 6,
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: driverCanvasTheme.textMuted,
+    fontFamily: driverCanvasTheme.fontFamily,
   },
 });
