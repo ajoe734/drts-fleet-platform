@@ -48,14 +48,23 @@ function formatUpdated(value: string | null | undefined) {
   return dateTimeFormatter.format(parsed);
 }
 
+const ROLE_CANVAS_LABEL: Record<string, string> = {
+  tenant_admin: "tenant_admin",
+  tenant_ops_admin: "operator",
+  tenant_finance_admin: "approver",
+  tenant_viewer: "viewer",
+};
+
+function getRoleLabel(roleCode: string) {
+  return ROLE_CANVAS_LABEL[roleCode] ?? roleCode;
+}
+
 function getRoleTone(roleCode: string): CanvasTone {
   return roleCode === "tenant_admin" ? "accent" : "info";
 }
 
 function getStateTone(status: TenantUserRoleRecord["status"]): CanvasTone {
-  if (status === "active") return "success";
-  if (status === "invited") return "info";
-  return "neutral";
+  return status === "active" ? "success" : "neutral";
 }
 
 function getStateLabel(status: TenantUserRoleRecord["status"]) {
@@ -129,7 +138,7 @@ export default async function UsersPage() {
       mono: true,
       r: (row) => (
         <CanvasPill theme={th} tone={getRoleTone(row.roleCode)}>
-          {row.roleCode}
+          {getRoleLabel(row.roleCode)}
         </CanvasPill>
       ),
     },
