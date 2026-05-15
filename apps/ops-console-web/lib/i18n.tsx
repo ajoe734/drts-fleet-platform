@@ -19,13 +19,13 @@ interface LanguageContextValue {
 }
 
 const LanguageContext = createContext<LanguageContextValue>({
-  locale: "en",
+  locale: "zh",
   setLocale: () => {},
 });
 
 export function LanguageProvider({
   children,
-  defaultLocale = "en",
+  defaultLocale = "zh",
 }: {
   children: ReactNode;
   defaultLocale?: Locale;

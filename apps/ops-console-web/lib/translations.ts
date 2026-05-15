@@ -2,21 +2,21 @@ export type Locale = "en" | "zh";
 
 const en = {
   // ── App ──
-  "app.name": "DRTS",
-  "app.sub": "Ops Console",
-  "app.env": "Staging Environment",
-  "app.lang.toggle": "中文",
+  "app.name": "DRTS OPS CONSOLE",
+  "app.sub": "dispatch command center",
+  "app.env": "ops.drts.io · staging",
+  "app.lang.toggle": "繁中",
 
   // ── Navigation ──
-  "nav.dashboard": "Dashboard",
+  "nav.dashboard": "Operations Overview",
   "nav.dispatch": "Dispatch",
-  "nav.complaints": "Complaints",
+  "nav.complaints": "Complaint Center",
   "nav.callcenter": "Call Center",
   "nav.reports": "Reports",
-  "nav.revenue": "Revenue",
-  "nav.attendance": "Attendance",
+  "nav.revenue": "Revenue Review",
+  "nav.attendance": "Shift Attendance",
   "nav.incidents": "Incidents",
-  "nav.maintenance": "Maintenance",
+  "nav.maintenance": "Vehicle Maintenance",
   "nav.vehicles": "Vehicles",
   "nav.drivers": "Drivers",
   "nav.contracts": "Contracts",
@@ -1486,21 +1486,21 @@ const en = {
 
 const zh: Record<keyof typeof en, string> = {
   // ── App ──
-  "app.name": "DRTS",
-  "app.sub": "Ops Console",
-  "app.env": "測試環境",
-  "app.lang.toggle": "English",
+  "app.name": "DRTS OPS CONSOLE",
+  "app.sub": "即時營運指揮台",
+  "app.env": "ops.drts.io · 測試環境",
+  "app.lang.toggle": "EN",
 
   // ── Navigation ──
-  "nav.dashboard": "儀表板",
-  "nav.dispatch": "派車調度",
-  "nav.complaints": "客訴管理",
+  "nav.dashboard": "營運總覽",
+  "nav.dispatch": "派遣",
+  "nav.complaints": "客訴",
   "nav.callcenter": "客服中心",
   "nav.reports": "報表",
-  "nav.revenue": "收益",
-  "nav.attendance": "出勤",
-  "nav.incidents": "事故管理",
-  "nav.maintenance": "維修保養",
+  "nav.revenue": "收益審視",
+  "nav.attendance": "班次出勤",
+  "nav.incidents": "事故",
+  "nav.maintenance": "車輛保修",
   "nav.vehicles": "車輛",
   "nav.drivers": "司機",
   "nav.contracts": "合約",

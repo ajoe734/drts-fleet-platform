@@ -1,12 +1,12 @@
 @import "tailwindcss";
 
 @theme {
-  --color-sidebar: #020617;
-  --color-sidebar-hover: #0f172a;
-  --color-sidebar-active: #6366f1;
-  --color-surface: #0f172a;
-  --color-surface-muted: #111827;
-  --color-page: #020617;
+  --color-sidebar: #08111f;
+  --color-sidebar-hover: #122033;
+  --color-sidebar-active: #0ea5e9;
+  --color-surface: #111b2b;
+  --color-surface-muted: #0f1726;
+  --color-page: #07111f;
   --color-text-strong: #f8fafc;
   --color-text: #e2e8f0;
   --color-text-muted: #94a3b8;
@@ -17,11 +17,163 @@
   box-sizing: border-box;
 }
 
-html,
+html {
+  color-scheme: dark;
+  background:
+    radial-gradient(circle at top, rgba(14, 165, 233, 0.18), transparent 34%),
+    linear-gradient(180deg, #101827 0%, #07111f 100%);
+}
+
 body {
   margin: 0;
+  min-height: 100vh;
   font-family: var(--font-sans);
-  background-color: #020617;
+  background:
+    radial-gradient(circle at top, rgba(14, 165, 233, 0.18), transparent 34%),
+    linear-gradient(180deg, #101827 0%, #07111f 100%);
   color: #e2e8f0;
   color-scheme: dark;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(14, 165, 233, 0.22);
+  color: #ffffff;
+}
+
+.ops-console-window {
+  --ops-console-pad: clamp(10px, 2.4vw, 24px);
+  --ops-console-toolbar-height: 52px;
+  min-height: 100dvh;
+  padding: var(--ops-console-pad);
+}
+
+.ops-console-window__frame {
+  min-height: calc(100dvh - var(--ops-console-pad) - var(--ops-console-pad));
+  border-radius: 28px;
+  overflow: hidden;
+  border: 1px solid rgba(125, 211, 252, 0.14);
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.28), rgba(2, 6, 23, 0)),
+    rgba(2, 6, 23, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(8, 15, 28, 0.3),
+    0 30px 90px rgba(2, 6, 23, 0.58);
+  backdrop-filter: blur(24px) saturate(145%);
+}
+
+.ops-console-window__toolbar {
+  height: var(--ops-console-toolbar-height);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 0 clamp(14px, 2.2vw, 20px);
+  border-bottom: 1px solid rgba(125, 211, 252, 0.1);
+  background:
+    linear-gradient(180deg, rgba(14, 165, 233, 0.14), rgba(15, 23, 42, 0.9)),
+    rgba(15, 23, 42, 0.88);
+}
+
+.ops-console-window__traffic-lights {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.ops-console-window__traffic-light {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 0.5px solid rgba(15, 23, 42, 0.25);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.ops-console-window__traffic-light--close {
+  background: #ff6b63;
+}
+
+.ops-console-window__traffic-light--minimize {
+  background: #f8bf24;
+}
+
+.ops-console-window__traffic-light--maximize {
+  background: #2bdc58;
+}
+
+.ops-console-window__title-stack {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+}
+
+.ops-console-window__title {
+  display: block;
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ops-console-window__url {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ops-console-window__meta {
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(34, 211, 238, 0.24);
+  background: rgba(8, 145, 178, 0.14);
+  color: #a5f3fc;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 960px) {
+  .ops-console-window__toolbar {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .ops-console-window__meta {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .ops-console-window {
+    --ops-console-pad: 8px;
+  }
+
+  .ops-console-window__toolbar {
+    gap: 10px;
+    padding: 0 12px;
+  }
+
+  .ops-console-window__url {
+    display: none;
+  }
 }

@@ -8,9 +8,9 @@ import { Sidebar } from "@/components/sidebar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Operations Console",
+  title: "DRTS OPS CONSOLE",
   description:
-    "Protected operations workspace for dispatch, reporting, revenue, and registry workflows.",
+    "Dark-theme dispatch command center for realtime operations, case handling, monitoring, and master data workflows.",
 };
 
 export const dynamic = "force-dynamic";
