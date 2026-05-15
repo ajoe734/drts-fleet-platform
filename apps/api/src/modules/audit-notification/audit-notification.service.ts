@@ -342,6 +342,10 @@ export class AuditNotificationService implements OnModuleInit {
     return items.map((auditLog) => cloneAuditLog(auditLog));
   }
 
+  getAuditLogsSnapshot() {
+    return this.auditLogs.map((auditLog) => cloneAuditLog(auditLog));
+  }
+
   getEvidenceGovernanceCatalog() {
     return getEvidenceGovernanceCatalog();
   }

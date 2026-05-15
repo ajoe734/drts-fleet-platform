@@ -148,7 +148,9 @@ export function evaluateTenantApprovalRules(
         rule?.fallbackPolicyOverride ??
         input.tenantDefaultFallbackPolicy ??
         "escalate_to_tenant_admin",
-      escalationTarget: null,
+      escalationTarget: rule?.escalationTarget
+        ? { ...rule.escalationTarget }
+        : null,
     };
   }
 

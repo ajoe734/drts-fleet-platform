@@ -16,6 +16,7 @@ import {
 } from "@nestjs/common";
 
 import type {
+  AcknowledgeOpsApprovalRequestBreachCommand,
   AuditLogRecord,
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
@@ -47,7 +48,10 @@ import type {
   SendTestWebhookCommand,
   DisableTenantCostCenterCommand,
   EvaluateTenantApprovalRuleCommand,
+  ListOpsPendingApprovalRequestsQuery,
   ListTenantBookingApprovalRequestsQuery,
+  NudgeOpsApprovalRequestCommand,
+  OpsPendingApprovalRequestRecord,
   ListTenantCostCentersQuery,
   ListTenantApprovalRulesQuery,
   RejectTenantBookingApprovalRequestCommand,
@@ -273,6 +277,14 @@ const TENANT_GOVERNANCE_METRIC_NAMESPACE = "tenant_governance";
 const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
 const APPROVAL_NOTIFICATION_POLL_INTERVAL_MS = 60 * 1000;
 const APPROVAL_NOTIFICATION_TIMEOUT_LEAD_MS = 12 * 60 * 60 * 1000;
+const OPS_APPROVAL_REQUEST_NUDGE_ACTION =
+  "booking.approval_request.nudged_by_ops";
+const OPS_APPROVAL_REQUEST_SLA_ACK_ACTION =
+  "booking.approval_request.sla_breach_acknowledged_by_ops";
+const OPS_APPROVAL_QUEUE_ACTOR_TYPES = new Set<AuditLogRecord["actorType"]>([
+  "ops_user",
+  "platform_admin",
+]);
 
 const DEFAULT_PARTNER_ELIGIBILITY_RETRY_POLICY: PartnerEligibilityRetryPolicyRecord =
   {
@@ -1758,6 +1770,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         command.fallbackPolicyOverride ??
         existing?.fallbackPolicyOverride ??
         null,
+      escalationTarget:
+        command.action === "require_approval" ||
+        command.action === "flag_manual_review"
+          ? command.escalationTarget
+            ? { ...command.escalationTarget }
+            : existing?.escalationTarget
+              ? { ...existing.escalationTarget }
+              : null
+          : null,
       disabledAt:
         command.activeFlag === false ? (existing?.disabledAt ?? now) : null,
       disabledReason:
@@ -1987,6 +2008,28 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         query.bookingId ? request.bookingId === query.bookingId : true,
       )
       .map((request) => this.cloneApprovalRequest(request));
+  }
+
+  listOpsPendingApprovalRequests(
+    query: ListOpsPendingApprovalRequestsQuery = {},
+    _requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    this.requireOpsApprovalQueueIdentity(identity ?? null);
+
+    return this.approvalRequests
+      .filter((request) =>
+        query.tenantId ? request.tenantId === query.tenantId : true,
+      )
+      .filter((request) =>
+        query.status
+          ? request.status === query.status
+          : request.status === "pending",
+      )
+      .filter((request) =>
+        query.expiresBefore ? request.timeoutAt <= query.expiresBefore : true,
+      )
+      .map((request) => this.buildOpsPendingApprovalRequestRecord(request));
   }
 
   getApprovalRequest(tenantId: string, approvalRequestId: string) {
@@ -2286,6 +2329,62 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       reasonNote: this.normalizeNullableText(input.command.reasonNote),
       ...(input.requestId ? { requestId: input.requestId } : {}),
     });
+  }
+
+  async nudgeOpsApprovalRequest(
+    approvalRequestId: string,
+    command: NudgeOpsApprovalRequestCommand,
+    identity: IdentityContext | null,
+    requestId?: string,
+  ) {
+    const actor = this.requireOpsApprovalQueueIdentity(identity);
+    const request = this.requirePendingApprovalRequestById(approvalRequestId);
+    this.recordTenantAudit(
+      {
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        tenantId: request.tenantId,
+        moduleName: "tenant-partner",
+        actionName: OPS_APPROVAL_REQUEST_NUDGE_ACTION,
+        resourceType: "tenant_approval_request",
+        resourceId: request.approvalRequestId,
+        newValuesSummary: {
+          bookingId: request.bookingId,
+          orderId: request.orderId,
+          reasonNote: this.normalizeNullableText(command.reasonNote),
+        },
+      },
+      requestId,
+    );
+    return this.buildOpsPendingApprovalRequestRecord(request);
+  }
+
+  async acknowledgeOpsApprovalRequestBreach(
+    approvalRequestId: string,
+    command: AcknowledgeOpsApprovalRequestBreachCommand,
+    identity: IdentityContext | null,
+    requestId?: string,
+  ) {
+    const actor = this.requireOpsApprovalQueueIdentity(identity);
+    const request = this.requirePendingApprovalRequestById(approvalRequestId);
+    this.recordTenantAudit(
+      {
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        tenantId: request.tenantId,
+        moduleName: "tenant-partner",
+        actionName: OPS_APPROVAL_REQUEST_SLA_ACK_ACTION,
+        resourceType: "tenant_approval_request",
+        resourceId: request.approvalRequestId,
+        newValuesSummary: {
+          bookingId: request.bookingId,
+          orderId: request.orderId,
+          reasonNote: this.normalizeNullableText(command.reasonNote),
+        },
+      },
+      requestId,
+    );
+    return this.buildOpsPendingApprovalRequestRecord(request);
   }
 
   summarizeCostCenterCoverage(
@@ -6090,6 +6189,95 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return request;
   }
 
+  private requirePendingApprovalRequestById(approvalRequestId: string) {
+    const request = this.approvalRequests.find(
+      (candidate) => candidate.approvalRequestId === approvalRequestId,
+    );
+    if (!request) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "APPROVAL_REQUEST_NOT_FOUND",
+        "The approval request could not be found.",
+        {
+          approvalRequestId,
+        },
+      );
+    }
+    if (request.status !== "pending") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "APPROVAL_REQUEST_NOT_PENDING",
+        "The approval request is no longer pending.",
+        {
+          approvalRequestId,
+          status: request.status,
+        },
+      );
+    }
+    return request;
+  }
+
+  private requireOpsApprovalQueueIdentity(identity: IdentityContext | null) {
+    const actorType = identity?.actorType;
+    if (
+      !identity?.actorId ||
+      !actorType ||
+      !OPS_APPROVAL_QUEUE_ACTOR_TYPES.has(
+        actorType as AuditLogRecord["actorType"],
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "APPROVAL_NOT_AUTHORIZED",
+        "The caller is not authorized to manage ops approval requests.",
+      );
+    }
+    return {
+      actorId: identity.actorId,
+      actorType: actorType as Extract<
+        AuditLogRecord["actorType"],
+        "ops_user" | "platform_admin"
+      >,
+    };
+  }
+
+  private buildOpsPendingApprovalRequestRecord(
+    request: TenantBookingApprovalRequestRecord,
+  ): OpsPendingApprovalRequestRecord {
+    const auditLogs = this.auditNotificationService
+      .getAuditLogsSnapshot()
+      .filter(
+        (auditLog) =>
+          auditLog.moduleName === "tenant-partner" &&
+          auditLog.resourceType === "tenant_approval_request" &&
+          auditLog.resourceId === request.approvalRequestId,
+      );
+    const lastNudge = [...auditLogs]
+      .filter(
+        (auditLog) => auditLog.actionName === OPS_APPROVAL_REQUEST_NUDGE_ACTION,
+      )
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+    const lastAck = [...auditLogs]
+      .filter(
+        (auditLog) =>
+          auditLog.actionName === OPS_APPROVAL_REQUEST_SLA_ACK_ACTION,
+      )
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+
+    return {
+      ...this.cloneApprovalRequest(request),
+      slaBreached: Date.parse(request.timeoutAt) <= Date.now(),
+      lastNudgedAt: lastNudge?.createdAt ?? null,
+      lastNudgedByActorId: lastNudge?.actorId ?? null,
+      lastNudgedByActorType: (lastNudge?.actorType ??
+        null) as OpsPendingApprovalRequestRecord["lastNudgedByActorType"],
+      opsSlaAcknowledgedAt: lastAck?.createdAt ?? null,
+      opsSlaAcknowledgedByActorId: lastAck?.actorId ?? null,
+      opsSlaAcknowledgedByActorType: (lastAck?.actorType ??
+        null) as OpsPendingApprovalRequestRecord["opsSlaAcknowledgedByActorType"],
+    };
+  }
+
   private replaceApprovalRequest(request: TenantBookingApprovalRequestRecord) {
     this.approvalRequests = [
       this.cloneApprovalRequest(request),
@@ -7023,6 +7211,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return {
       ...rule,
       approvers: rule.approvers.map((approver) => ({ ...approver })),
+      escalationTarget: rule.escalationTarget
+        ? { ...rule.escalationTarget }
+        : null,
       conditions: rule.conditions.map((condition) => ({
         ...condition,
         ...(Array.isArray(condition.values)
@@ -7076,8 +7267,16 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       conditionFields: rule.conditions.map((condition) => condition.field),
       timeoutHoursOverride: rule.timeoutHoursOverride ?? null,
       fallbackPolicyOverride: rule.fallbackPolicyOverride ?? null,
+      escalationTargetKind: rule.escalationTarget?.kind ?? null,
       ruleVersionSnapshot: this.getApprovalRuleVersionSnapshot(rule.tenantId),
     };
+  }
+
+  private computeQuotaPercentUsed(remainingPercent: number | null) {
+    if (remainingPercent === null || Number.isNaN(remainingPercent)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(100, 100 - remainingPercent));
   }
 
   private requireQuotaPeriodKey(reservationWindowStart: string) {

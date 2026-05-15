@@ -12,6 +12,7 @@ import {
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  AcknowledgeOpsApprovalRequestBreachCommand,
   ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   IdentityContext,
@@ -21,6 +22,7 @@ import type {
   CreateTenantWebhookEndpointCommand,
   DisableTenantCostCenterCommand,
   EvaluateTenantApprovalRuleCommand,
+  ListOpsPendingApprovalRequestsQuery,
   TenantBookingQuotaImpactPreview,
   TenantBookingQuotaImpactQuery,
   TenantCostCenterCoverageReport,
@@ -28,6 +30,8 @@ import type {
   ListTenantBookingApprovalRequestsQuery,
   ListTenantApprovalRulesQuery,
   ListTenantCostCentersQuery,
+  NudgeOpsApprovalRequestCommand,
+  OpsPendingApprovalRequestRecord,
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
   PartnerChannelEntryRecord,
@@ -334,6 +338,61 @@ export class TenantPartnerController {
         identity,
       );
     return toApiSuccessEnvelope(resolution, requestId);
+  }
+
+  @Get("ops/approval-requests")
+  @RequireRealms("platform", "ops")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listOpsPendingApprovalRequests(
+    @Query() query: ListOpsPendingApprovalRequestsQuery,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: OpsPendingApprovalRequestRecord[] =
+      this.tenantPartnerService.listOpsPendingApprovalRequests(
+        query,
+        requestId,
+        identity,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Post("ops/approval-requests/:approvalRequestId/nudge")
+  @RequireRealms("platform", "ops")
+  async nudgeOpsApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: NudgeOpsApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.nudgeOpsApprovalRequest(
+        approvalRequestId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("ops/approval-requests/:approvalRequestId/acknowledge-breach")
+  @RequireRealms("platform", "ops")
+  async acknowledgeOpsApprovalRequestBreach(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: AcknowledgeOpsApprovalRequestBreachCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.acknowledgeOpsApprovalRequestBreach(
+        approvalRequestId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
   }
 
   @Get("tenant/passengers")
