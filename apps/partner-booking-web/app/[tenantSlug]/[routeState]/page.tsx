@@ -1333,7 +1333,7 @@ function PartnerLandingWorkspace({
         breadcrumb={[brand.displayName, "Partner Booking", "入口"]}
         topRight={
           <CanvasPill theme={theme} tone="accent" dot>
-            {brand.host}
+            EXCLUSIVE
           </CanvasPill>
         }
         env="partner"
@@ -1345,9 +1345,12 @@ function PartnerLandingWorkspace({
           theme={theme}
           sticky={false}
           title="禮賓接送 Concierge"
-          subtitle={`${brand.programName} 卡友專屬 · 全年免費 ${totalBenefits} 趟 · ${brand.tagline}`}
+          subtitle={`${brand.programName} 卡友專屬 · 全年免費 ${totalBenefits} 趟`}
           actions={
             <>
+              <CanvasPill theme={theme} tone="info">
+                {brand.host}
+              </CanvasPill>
               <CanvasBtn theme={theme} variant="secondary" icon="reports">
                 查看歷史趟次
               </CanvasBtn>
