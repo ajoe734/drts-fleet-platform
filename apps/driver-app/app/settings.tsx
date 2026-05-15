@@ -44,6 +44,7 @@ import {
   type SaveState,
   type SettingsFormValues,
 } from "@/lib/settings-form";
+import { driverSaveStatusLabels, driverStrings } from "@/lib/strings";
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -70,15 +71,15 @@ interface SaveStatusDescriptor {
 function describeSaveStatus(state: SaveState): SaveStatusDescriptor {
   switch (state) {
     case "saving":
-      return { label: "儲存中…", variant: "info" };
+      return driverSaveStatusLabels.saving;
     case "dirty":
-      return { label: "尚有未儲存變更", variant: "warning" };
+      return driverSaveStatusLabels.dirty;
     case "saved":
-      return { label: "已儲存", variant: "success" };
+      return driverSaveStatusLabels.saved;
     case "error":
-      return { label: "儲存失敗", variant: "danger" };
+      return driverSaveStatusLabels.error;
     default:
-      return { label: "尚未變更", variant: "default" };
+      return driverSaveStatusLabels.idle;
   }
 }
 
@@ -415,7 +416,7 @@ export default function SettingsScreen() {
   if (!isProvisioned) {
     return (
       <AppScreen scrollable={false}>
-        <PageHeader title="設定" />
+        <PageHeader title={driverStrings.settings.title} />
         <EmptyState
           title="尚未完成裝置配置"
           description="此裝置尚未分配司機身份，無法載入設定。"
@@ -431,7 +432,7 @@ export default function SettingsScreen() {
   if (loading) {
     return (
       <AppScreen scrollable={false}>
-        <PageHeader title="設定" />
+        <PageHeader title={driverStrings.settings.title} />
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Tokens.colors.primary} />
           <Text style={styles.loadingLabel}>載入設定中…</Text>

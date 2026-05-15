@@ -78,6 +78,7 @@ import {
   type TripExperienceState,
   type TripPrimaryActionKey,
 } from "@/lib/trip-workflow";
+import { driverStrings, driverTripActionSuccessLabels } from "@/lib/strings";
 import { usePendingCompletionReplay } from "@/lib/use-pending-completion-replay";
 
 function ActionButton({
@@ -143,7 +144,9 @@ function RouteLockedBadge() {
         size={12}
         color={Tokens.colors.warning}
       />
-      <Text style={styles.routeLockedBadgeText}>路線鎖定</Text>
+      <Text style={styles.routeLockedBadgeText}>
+        {driverStrings.trip.routeLocked}
+      </Text>
     </View>
   );
 }
@@ -153,18 +156,7 @@ function isForwardedTask(task: DriverTaskRecord | null): boolean {
 }
 
 function formatTripActionSuccessLabel(action: TripPrimaryActionKey): string {
-  switch (action) {
-    case "accept":
-      return "接受任務";
-    case "depart":
-      return "前往接送點";
-    case "arrived":
-      return "抵達上車點";
-    case "start":
-      return "開始行程";
-    case "complete":
-      return "完成行程";
-  }
+  return driverTripActionSuccessLabels[action];
 }
 
 function getErrorMessage(error: unknown): string {
@@ -1355,7 +1347,10 @@ export default function TripScreen() {
   if (loading) {
     return (
       <AppScreen scrollable={false}>
-        <PageHeader title="行程作業台" subtitle="同步目前指派的行程與狀態" />
+        <PageHeader
+          title={driverStrings.trip.title}
+          subtitle={driverStrings.trip.subtitle}
+        />
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color={Tokens.colors.brand} />
           <Text style={styles.loadingLabel}>載入行程中…</Text>
@@ -1371,7 +1366,7 @@ export default function TripScreen() {
         backgroundColor={Tokens.colors.appBg}
       >
         <PageHeader
-          title="行程作業台"
+          title={driverStrings.trip.title}
           subtitle={headerSubtitle}
           rightElement={
             <IconButton
@@ -1609,7 +1604,9 @@ export default function TripScreen() {
 
             <View style={styles.sectionCard}>
               <Text style={styles.sectionEyebrow}>Workflow Boundaries</Text>
-              <Text style={styles.sectionTitle}>可用操作與邊界</Text>
+              <Text style={styles.sectionTitle}>
+                {driverStrings.trip.sections.availableActions}
+              </Text>
               {tripCapabilityItems.map((item) => (
                 <Text key={item} style={styles.sectionListItem}>
                   • {item}
@@ -1625,7 +1622,9 @@ export default function TripScreen() {
 
             <View style={styles.sectionCard}>
               <Text style={styles.sectionEyebrow}>Trip Health</Text>
-              <Text style={styles.sectionTitle}>行程狀態與度量</Text>
+              <Text style={styles.sectionTitle}>
+                {driverStrings.trip.sections.statusMetrics}
+              </Text>
               <View style={styles.infoTileRow}>
                 <InfoTile
                   label="距離"
@@ -1673,7 +1672,9 @@ export default function TripScreen() {
             {complianceGates.length > 0 ? (
               <View style={styles.sectionCard}>
                 <Text style={styles.sectionEyebrow}>Compliance</Text>
-                <Text style={styles.sectionTitle}>合規檢查</Text>
+                <Text style={styles.sectionTitle}>
+                  {driverStrings.trip.sections.compliance}
+                </Text>
                 <View style={styles.complianceList}>
                   {complianceGates.map((gate) => {
                     const tone = getComplianceTone(gate.state);
@@ -1725,7 +1726,9 @@ export default function TripScreen() {
               <View style={styles.sectionCard}>
                 <Text style={styles.sectionEyebrow}>Completion Proof</Text>
                 <View style={styles.sectionHeaderRow}>
-                  <Text style={styles.sectionTitle}>完單佐證</Text>
+                  <Text style={styles.sectionTitle}>
+                    {driverStrings.trip.sections.completionProof}
+                  </Text>
                   <StatusChip
                     label={`已附加 ${proofPhotos.length}/${MAX_COMPLETION_PROOF_PHOTOS}`}
                     variant="default"

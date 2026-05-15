@@ -31,6 +31,7 @@ import { PlatformBadge } from "@/components/ui/PlatformBadge";
 import { StatusChip, type StatusChipVariant } from "@/components/ui/StatusChip";
 import { Tokens } from "@/components/ui/tokens";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
+import { driverStrings } from "@/lib/strings";
 
 type EnrichedPresence = {
   record: PlatformPresenceRecord;
@@ -43,12 +44,12 @@ function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim();
   }
-  return "要求失敗";
+  return driverStrings.common.requestFailed;
 }
 
 function formatCompactDateTime(value: string | null): string {
   if (!value) {
-    return "尚無更新";
+    return driverStrings.common.notUpdatedYet;
   }
 
   const parsed = new Date(value);
@@ -197,7 +198,7 @@ function isOwnedPlatform(record: PlatformPresenceRecord): boolean {
 
 function getPlatformDisplayName(record: PlatformPresenceRecord): string {
   if (isOwnedPlatform(record)) {
-    return "自營派單";
+    return driverStrings.platformPresence.managedByDrts;
   }
 
   return (
@@ -548,7 +549,10 @@ export default function PlatformPresenceScreen() {
   if (loading) {
     return (
       <View style={styles.container}>
-        <PageHeader title="平台連線" subtitle="檢查可接單平台狀態" />
+        <PageHeader
+          title={driverStrings.platformPresence.title}
+          subtitle={driverStrings.platformPresence.subtitle}
+        />
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Tokens.colors.primary} />
           <Text style={styles.hintText}>載入平台連線資料中…</Text>
@@ -560,7 +564,10 @@ export default function PlatformPresenceScreen() {
   if (!isProvisioned) {
     return (
       <View style={styles.container}>
-        <PageHeader title="平台連線" subtitle="檢查可接單平台狀態" />
+        <PageHeader
+          title={driverStrings.platformPresence.title}
+          subtitle={driverStrings.platformPresence.subtitle}
+        />
         <View style={styles.center}>
           <EmptyState
             title="裝置尚未配置"
@@ -576,7 +583,7 @@ export default function PlatformPresenceScreen() {
     return (
       <View style={styles.container}>
         <PageHeader
-          title="平台連線"
+          title={driverStrings.platformPresence.title}
           subtitle="暫時無法取得平台資料"
           rightElement={
             <IconButton
@@ -647,7 +654,7 @@ export default function PlatformPresenceScreen() {
   return (
     <View style={styles.container}>
       <PageHeader
-        title="平台連線"
+        title={driverStrings.platformPresence.title}
         subtitle={headerSubtitle}
         rightElement={
           <IconButton
@@ -689,7 +696,7 @@ export default function PlatformPresenceScreen() {
                   </Text>
                 </View>
                 <ActionButton
-                  title="管理綁定"
+                  title={driverStrings.platformPresence.bindAction}
                   variant="secondary"
                   icon="settings-outline"
                   onPress={() => router.push("/settings")}
@@ -699,17 +706,17 @@ export default function PlatformPresenceScreen() {
 
               <View style={styles.kpiRow}>
                 <KpiCard
-                  label="可接單"
+                  label={driverStrings.platformPresence.kpis.available}
                   value={String(readyCount)}
                   tone="success"
                 />
                 <KpiCard
-                  label="上線中"
+                  label={driverStrings.platformPresence.kpis.online}
                   value={String(onlineCount)}
                   tone="brand"
                 />
                 <KpiCard
-                  label="需動作"
+                  label={driverStrings.platformPresence.kpis.attention}
                   value={String(attentionCount)}
                   tone={attentionCount > 0 ? "warning" : "default"}
                 />
@@ -724,7 +731,9 @@ export default function PlatformPresenceScreen() {
                     size={16}
                     color={Tokens.colors.info}
                   />
-                  <Text style={styles.notesTitle}>同步說明</Text>
+                  <Text style={styles.notesTitle}>
+                    {driverStrings.platformPresence.notesTitle}
+                  </Text>
                 </View>
                 {summary.notes.map((note) => (
                   <Text key={note} style={styles.noteLine}>
@@ -744,7 +753,9 @@ export default function PlatformPresenceScreen() {
                 style={styles.emptyState}
               />
             ) : (
-              <Text style={styles.sectionLabel}>逐平台狀態</Text>
+              <Text style={styles.sectionLabel}>
+                {driverStrings.platformPresence.sectionTitle}
+              </Text>
             )}
           </View>
         }
