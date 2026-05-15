@@ -4,6 +4,57 @@ export { DataTable, Tr, Td } from "./data-table";
 export { StatCard } from "./stat-card";
 export { PageHeader } from "./page-header";
 export type { PageHeaderProps } from "./page-header";
+export * as CanvasPrimitives from "./canvas-primitives";
+export {
+  Banner as CanvasBanner,
+  Btn as CanvasBtn,
+  CanvasIcon,
+  Card as CanvasCard,
+  DL as CanvasDL,
+  Field as CanvasField,
+  Input as CanvasInput,
+  KPI as CanvasKPI,
+  PageHeader as CanvasPageHeader,
+  Pill as CanvasPill,
+  Select as CanvasSelect,
+  Shell as CanvasShell,
+  Table as CanvasTable,
+  TrafficLights as CanvasTrafficLights,
+  WindowChrome as CanvasWindowChrome,
+} from "./canvas-primitives";
+export type {
+  BannerProps as CanvasBannerProps,
+  BtnProps as CanvasBtnProps,
+  CardProps as CanvasCardProps,
+  DLItem as CanvasDLItem,
+  DLProps as CanvasDLProps,
+  FieldProps as CanvasFieldProps,
+  InputProps as CanvasInputProps,
+  KPIProps as CanvasKPIProps,
+  PageHeaderProps as CanvasPageHeaderProps,
+  PillProps as CanvasPillProps,
+  SelectProps as CanvasSelectProps,
+  ShellNavItem as CanvasShellNavItem,
+  ShellProps as CanvasShellProps,
+  TableColumn as CanvasTableColumn,
+  TableProps as CanvasTableProps,
+  WindowChromeProps as CanvasWindowChromeProps,
+} from "./canvas-primitives";
+export {
+  buildCanvasTheme,
+  CANVAS_DARK_NAVY_PALETTE,
+  CANVAS_DENSITY,
+  CANVAS_LIGHT_PALETTE,
+  CANVAS_SURFACE_ACCENTS,
+  CANVAS_TYPE,
+} from "./canvas-tokens";
+export type {
+  CanvasDensity,
+  CanvasMode,
+  CanvasSurface,
+  CanvasTheme,
+  CanvasTone,
+} from "./canvas-tokens";
 export { AppShellCard } from "./app-shell-card";
 export { AppSidebar } from "./app-sidebar";
 export type { AppSidebarProps, SidebarNavItem } from "./app-sidebar";
