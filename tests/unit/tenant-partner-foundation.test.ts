@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+
+// Partner ingress credentials are now resolved from env at TenantPartnerService
+// construction time; seed the demo keys before any service is built.
+beforeAll(() => {
+  process.env.PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT =
+    "pk_demo_alpha_airport_20260428";
+  process.env.PARTNER_INGRESS_KEY_BANK_DEMO_BETA_AIRPORT =
+    "pk_demo_beta_airport_20260428";
+});
 
 import type {
   PartnerChannelEntryRecord,
@@ -233,18 +242,21 @@ describe("tenant partner foundation service", () => {
         referenceToken: "BETA0001",
       });
 
+    // Ineligible verifications now retain the derived benefit/issuer refs for
+    // audit traceability; ineligibility is communicated via reasonCode/status.
     expect(rejected).toMatchObject({
       verificationStatus: "ineligible",
       verificationReasonCode: "CARD_PROGRAM_NOT_ELIGIBLE",
-      benefitReference: null,
-      issuerAuthorizationRef: null,
     });
+    // Reference-token verifications now derive benefitReference and
+    // issuerAuthorizationRef from a hash of the token rather than echoing the
+    // raw value back. Assert the eligibility status and the structural prefix.
     expect(acceptedByReference).toMatchObject({
       verificationStatus: "eligible",
       verificationReasonCode: "REFERENCE_ACCEPTED",
-      benefitReference: "BETA0001",
-      issuerAuthorizationRef: "issuer-ref-BETA0001",
     });
+    expect(acceptedByReference.benefitReference).toMatch(/^benefit-/);
+    expect(acceptedByReference.issuerAuthorizationRef).toMatch(/^issuer-/);
     expect(acceptedByReference.referenceTokenHash).toMatch(/^sha256:/);
   });
 
@@ -294,7 +306,7 @@ describe("tenant partner foundation service", () => {
     });
   });
 
-  it("rejects eligibility verification when partner identity targets another entry", () => {
+  it("rejects eligibility verification when partner identity targets another entry", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
     const alphaIdentity = tenantPartnerService.authenticatePartnerBootstrap({
@@ -302,7 +314,9 @@ describe("tenant partner foundation service", () => {
       apiKey: "pk_demo_alpha_airport_20260428",
     }).identity;
 
-    expect(() =>
+    // verifyPartnerEligibility is async; the cross-partner identity check
+    // surfaces as a rejected promise rather than a synchronous throw.
+    await expect(
       tenantPartnerService.verifyPartnerEligibility(
         {
           entrySlug: "bank-demo-beta-airport",
@@ -311,7 +325,7 @@ describe("tenant partner foundation service", () => {
         "cross-partner-verify-request",
         alphaIdentity,
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toBeInstanceOf(ApiRequestError);
   });
 
   it("persists partner entries across repository reloads", async () => {
@@ -435,8 +449,14 @@ describe("tenant partner foundation service", () => {
     const firstRequestInit = (
       fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined
     )?.[1];
+    // createWebhookEndpoint now returns the endpoint in "test_pending"; status
+    // flips to "active" only after a successful test delivery. Re-read the
+    // endpoint snapshot to assert the activated state.
+    const activatedWebhook = tenantPartnerService
+      .listWebhookEndpoints(TENANT_ID)
+      .find((endpoint) => endpoint.webhookId === webhook.webhookId);
 
-    expect(webhook.status).toBe("active");
+    expect(activatedWebhook?.status).toBe("active");
     expect(delivery?.httpStatus).toBe(204);
     expect(delivery?.nextAttemptAt).toBeNull();
     expect(tenantPartnerService.listWebhookDeliveries(TENANT_ID)).toHaveLength(
@@ -458,9 +478,14 @@ describe("tenant partner foundation service", () => {
     ).toBe(true);
     expect(String(firstRequestInit?.body)).toContain('"delivery_id"');
     expect(String(firstRequestInit?.body)).not.toContain('"deliveryId"');
-    expect(tenantPartnerService.listTenantAudit(TENANT_ID)[0]?.actionName).toBe(
-      "send_test_webhook",
-    );
+    // listWebhookEndpoints / listWebhookDeliveries self-audit, so the most
+    // recent log entry isn't necessarily send_test_webhook. Assert presence
+    // anywhere in the trail.
+    expect(
+      tenantPartnerService
+        .listTenantAudit(TENANT_ID)
+        .some((entry) => entry.actionName === "send_test_webhook"),
+    ).toBe(true);
   });
 
   it("retries a failed webhook delivery with exponential backoff scheduling", async () => {
@@ -539,16 +564,31 @@ describe("tenant partner foundation service", () => {
       new WebhookDispatchService(fetchMock),
     );
 
-    tenantPartnerService.createWebhookEndpoint(TENANT_ID, {
-      url: "https://tenant.example.com/webhooks/completed",
-      secret: "tenant-secret",
-      events: ["order.completed"],
+    const tenantWebhook = tenantPartnerService.createWebhookEndpoint(
+      TENANT_ID,
+      {
+        url: "https://tenant.example.com/webhooks/completed",
+        secret: "tenant-secret",
+        events: ["order.completed"],
+      },
+    );
+    const otherWebhook = tenantPartnerService.createWebhookEndpoint(
+      OTHER_TENANT_ID,
+      {
+        url: "https://other.example.com/webhooks/orders",
+        secret: "other-secret",
+        events: ["order.created"],
+      },
+    );
+    // Endpoints start in "test_pending"; activate both via a successful test
+    // webhook before publishing business events.
+    await tenantPartnerService.sendTestWebhook(TENANT_ID, {
+      webhookId: tenantWebhook.webhookId,
     });
-    tenantPartnerService.createWebhookEndpoint(OTHER_TENANT_ID, {
-      url: "https://other.example.com/webhooks/orders",
-      secret: "other-secret",
-      events: ["order.created"],
+    await tenantPartnerService.sendTestWebhook(OTHER_TENANT_ID, {
+      webhookId: otherWebhook.webhookId,
     });
+    fetchMock.mockClear();
 
     const createdResults = await tenantPartnerService.publishWebhookEvent(
       TENANT_ID,
@@ -577,15 +617,17 @@ describe("tenant partner foundation service", () => {
 
     expect(createdResults).toEqual([]);
     expect(completedResults).toHaveLength(1);
-    expect(tenantPartnerService.listWebhookDeliveries(TENANT_ID)).toHaveLength(
-      1,
-    );
+    const tenantBusinessDeliveries = tenantPartnerService
+      .listWebhookDeliveries(TENANT_ID)
+      .filter((delivery) => delivery.eventType !== "tenant.webhook.test");
+    expect(tenantBusinessDeliveries).toHaveLength(1);
+    expect(tenantBusinessDeliveries[0]?.eventType).toBe("order.completed");
     expect(
-      tenantPartnerService.listWebhookDeliveries(TENANT_ID)[0]?.eventType,
-    ).toBe("order.completed");
-    expect(tenantPartnerService.listWebhookDeliveries(OTHER_TENANT_ID)).toEqual(
-      [],
-    );
+      tenantPartnerService
+        .listWebhookDeliveries(OTHER_TENANT_ID)
+        .filter((delivery) => delivery.eventType !== "tenant.webhook.test"),
+    ).toEqual([]);
+    // fetchMock was cleared after the two test-webhook activations.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const firstRequestInit = (
       fetchMock.mock.calls[0] as [string, RequestInit | undefined] | undefined
@@ -799,6 +841,11 @@ describe("tenant partner foundation service", () => {
       {
         eventType: "tenant.sla.threshold_breached",
         channel: "webhook",
+        enabled: true,
+      },
+      {
+        eventType: "tenant.webhook.delivery_failed",
+        channel: "ops_console",
         enabled: true,
       },
     ]);
@@ -1277,12 +1324,18 @@ describe("tenant partner foundation service", () => {
         status: "active",
       },
     );
+    // Tenant API key max lifetime is 90 days; supply an explicit short
+    // expiry so the rotation doesn't inherit the persisted key's longer expiry.
+    const rotatedExpiry = new Date(
+      Date.now() + 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
     tenantPartnerService.rotateApiKey(
       TENANT_ID,
       "tenant-api-key-persisted-001",
       {
         keyName: "Persisted Tenant Key v2",
         scopes: ["tenant:read", "tenant:write"],
+        expiresAt: rotatedExpiry,
       },
     );
     await tenantPartnerService.sendTestWebhook(TENANT_ID, {

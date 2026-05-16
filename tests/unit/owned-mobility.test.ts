@@ -100,6 +100,7 @@ function createMemoryTenantPartnerRepository(): TenantPartnerRepository {
     ),
     loadQuotaPoliciesForUpdate: vi.fn(async () => []),
     loadQuotaMonthlySnapshotsForUpdate: vi.fn(async () => []),
+    ensureQuotaMonthlySnapshots: vi.fn(async () => {}),
     persistQuotaReservation: vi.fn(async () => {}),
     persistApprovalWorkflow: vi.fn(async () => {}),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
@@ -394,6 +395,8 @@ describe("owned mobility service", () => {
       expect(getErrorCode(error)).toBe("FLIGHT_NO_REQUIRED");
     }
 
+    // Tenant booking channels no longer accept quotedFare directly — pricing
+    // is now resolved through the platform pricing rule pipeline.
     const booking = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
@@ -411,10 +414,6 @@ describe("owned mobility service", () => {
         },
         signoffRequired: true,
         minPhotoCount: 1,
-        quotedFare: {
-          currency: "NTD",
-          amountMinor: 150000,
-        },
       },
       TENANT_ACME,
     );
@@ -972,16 +971,32 @@ describe("owned mobility service", () => {
         new WebhookDispatchService(fetchMock),
       );
 
-      tenantPartnerService.createWebhookEndpoint(TENANT_ACME, {
-        url: "https://acme.example.com/webhooks/orders",
-        secret: "acme-secret",
-        events: ["order.created", "order.cancelled"],
+      const acmeEndpoint = tenantPartnerService.createWebhookEndpoint(
+        TENANT_ACME,
+        {
+          url: "https://acme.example.com/webhooks/orders",
+          secret: "acme-secret",
+          events: ["order.created", "order.cancelled"],
+        },
+      );
+      const newcoEndpoint = tenantPartnerService.createWebhookEndpoint(
+        TENANT_NEWCO,
+        {
+          url: "https://newco.example.com/webhooks/orders",
+          secret: "newco-secret",
+          events: ["order.completed"],
+        },
+      );
+
+      // Endpoints are created in "test_pending"; a successful test webhook
+      // flips them to "active" so subsequent business events get dispatched.
+      await tenantPartnerService.sendTestWebhook(TENANT_ACME, {
+        webhookId: acmeEndpoint.webhookId,
       });
-      tenantPartnerService.createWebhookEndpoint(TENANT_NEWCO, {
-        url: "https://newco.example.com/webhooks/orders",
-        secret: "newco-secret",
-        events: ["order.completed"],
+      await tenantPartnerService.sendTestWebhook(TENANT_NEWCO, {
+        webhookId: newcoEndpoint.webhookId,
       });
+      fetchMock.mockClear();
 
       const { ownedMobilityService } = createService(
         undefined,
@@ -1011,6 +1026,7 @@ describe("owned mobility service", () => {
       expect(
         tenantPartnerService
           .listWebhookDeliveries(TENANT_ACME)
+          .filter((delivery) => delivery.eventType !== "tenant.webhook.test")
           .map((delivery) => ({
             eventType: delivery.eventType,
             status: delivery.status,
@@ -1021,9 +1037,11 @@ describe("owned mobility service", () => {
           status: "delivered",
         },
       ]);
-      expect(tenantPartnerService.listWebhookDeliveries(TENANT_NEWCO)).toEqual(
-        [],
-      );
+      expect(
+        tenantPartnerService
+          .listWebhookDeliveries(TENANT_NEWCO)
+          .filter((delivery) => delivery.eventType !== "tenant.webhook.test"),
+      ).toEqual([]);
 
       ownedMobilityService.cancelTenantBooking(
         TENANT_ACME,
@@ -1037,6 +1055,7 @@ describe("owned mobility service", () => {
       expect(
         tenantPartnerService
           .listWebhookDeliveries(TENANT_ACME)
+          .filter((delivery) => delivery.eventType !== "tenant.webhook.test")
           .map((delivery) => delivery.eventType),
       ).toEqual(["order.cancelled", "order.created"]);
 
@@ -1098,8 +1117,11 @@ describe("owned mobility service", () => {
       expect(
         tenantPartnerService
           .listWebhookDeliveries(TENANT_NEWCO)
+          .filter((delivery) => delivery.eventType !== "tenant.webhook.test")
           .map((delivery) => delivery.eventType),
       ).toEqual(["order.completed"]);
+      // fetchMock was cleared after the two test-webhook activations, so this
+      // count covers only the three business event deliveries that follow.
       expect(fetchMock).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
@@ -1377,6 +1399,12 @@ describe("owned mobility service", () => {
             orderNo: "O-20260410-000099",
             orderSource: "app",
             orderDomain: "owned",
+            tenantId: null,
+            partnerId: null,
+            partnerProgramId: null,
+            partnerEntrySlug: null,
+            eligibilityVerificationId: null,
+            issuerAuthorizationRef: null,
             serviceBucket: "standard_taxi",
             dispatchSemantics: "realtime",
             businessDispatchSubtype: null,
@@ -1416,17 +1444,27 @@ describe("owned mobility service", () => {
             notes: null,
             fixedPrice: false,
             quotedFare: null,
+            quotedFareSource: null,
+            quotedFareRuleVersion: null,
+            manualFareOverride: null,
+            exceptionHold: null,
             proofRequirements: {
               minPhotoCount: 0,
               signoffRequired: false,
               expenseProofRequired: false,
             },
+            approvalState: "not_required",
+            approvalRequestIds: [],
             complianceFlags: [],
             cancelledAt: null,
             cancelReason: null,
             reservationHoldStatus: "none",
             reservationHoldId: null,
             reservationHoldExpiresAt: null,
+            dispatchAttemptCount: 0,
+            lastDispatchFailureReason: null,
+            noSupplyEscalation: null,
+            dispatchTimeout: null,
             createdAt: "2026-04-10T09:00:00Z",
             updatedAt: "2026-04-10T09:00:00Z",
           },

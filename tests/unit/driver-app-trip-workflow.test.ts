@@ -9,8 +9,9 @@ import {
 function buildTask(
   status: DriverTaskStatus,
   sourcePlatform: string | null = null,
+  forwardedStatus: string | null = sourcePlatform ? "accept_pending" : null,
 ): DriverTaskRecord {
-  return {
+  const base: DriverTaskRecord = {
     taskId: "task-001",
     orderId: "order-001",
     dispatchJobId: "job-001",
@@ -31,6 +32,10 @@ function buildTask(
     fare: null,
     proof: null,
   };
+  if (forwardedStatus) {
+    return { ...base, forwardedStatus } as DriverTaskRecord;
+  }
+  return base;
 }
 
 describe("driver-app trip workflow helpers", () => {
