@@ -402,8 +402,16 @@ export class ApiClient {
 
   // ── Feature Flags ──
 
-  async getFeatureFlags(): Promise<FeatureFlagSummary> {
-    return this.get<FeatureFlagSummary>("/api/admin/flags");
+  async getFeatureFlags(query?: {
+    tenantId?: string;
+  }): Promise<FeatureFlagSummary> {
+    const searchParams = new URLSearchParams();
+    if (query?.tenantId) {
+      searchParams.set("tenantId", query.tenantId);
+    }
+    const qs = searchParams.toString();
+    const path = qs ? `/api/admin/flags?${qs}` : "/api/admin/flags";
+    return this.get<FeatureFlagSummary>(path);
   }
 
   async getFeatureFlag(key: string): Promise<FeatureFlag> {
