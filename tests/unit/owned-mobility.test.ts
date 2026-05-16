@@ -95,6 +95,13 @@ function createMemoryTenantPartnerRepository(): TenantPartnerRepository {
   return {
     isEnabled: () => true,
     loadState: vi.fn(async () => clonePartnerState(state)),
+    withTransaction: vi.fn(async <T>(work: (executor: unknown) => Promise<T>) =>
+      work({}),
+    ),
+    loadQuotaPoliciesForUpdate: vi.fn(async () => []),
+    loadQuotaMonthlySnapshotsForUpdate: vi.fn(async () => []),
+    persistQuotaReservation: vi.fn(async () => {}),
+    persistApprovalWorkflow: vi.fn(async () => {}),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
       if (changes.notificationPreferences) {
         state.notificationPreferences = mergeUniqueByKey(
