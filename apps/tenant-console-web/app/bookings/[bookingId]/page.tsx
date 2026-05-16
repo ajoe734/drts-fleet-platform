@@ -133,8 +133,21 @@ export default async function BookingDetailPage({
                 <dt>Fulfillment path</dt>
                 <dd>{source.summary}</dd>
               </div>
+              <div>
+                <dt>Authority owner</dt>
+                <dd>{source.badge}</dd>
+              </div>
             </dl>
             <p className="muted-copy">{source.detail}</p>
+            {source.domain === "forwarded_authority" ? (
+              <CalloutPanel
+                title="Forwarded-authority boundary"
+                description={source.statusBoundary}
+                tone="warning"
+              >
+                <p>{source.escalationHint}</p>
+              </CalloutPanel>
+            ) : null}
           </div>
         </SurfaceCard>
 
@@ -216,6 +229,10 @@ export default async function BookingDetailPage({
                   ? `${booking.manualFareOverride.actorType} · ${booking.manualFareOverride.reason}`
                   : "None"}
               </dd>
+            </div>
+            <div>
+              <dt>Finance authority</dt>
+              <dd>{source.financeAuthority}</dd>
             </div>
           </dl>
           {relatedInvoices.length > 0 ? (

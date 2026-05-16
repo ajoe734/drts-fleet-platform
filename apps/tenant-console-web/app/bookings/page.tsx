@@ -29,6 +29,10 @@ export default async function BookingsPage({
   const query = parseBookingListQuery(await searchParams);
   const bookings = await client.listTenantBookings();
   const result = applyBookingListQuery(bookings, query);
+  const hasForwardedAuthority = result.items.some(
+    (booking) =>
+      getBookingSourceVisibility(booking).domain === "forwarded_authority",
+  );
 
   return (
     <div className="page-shell">
@@ -136,6 +140,19 @@ export default async function BookingsPage({
         title={`Showing ${result.items.length} of ${result.total} booking row(s)`}
         description="The list remains a read surface over `/api/tenant/bookings`; mutate actions stay on supported commands only, and deeper fulfillment trace belongs in detail."
       >
+        {hasForwardedAuthority ? (
+          <CalloutPanel
+            title="Forwarded bookings keep external-platform authority"
+            description="Tenant booking oversight keeps the business record readable, but adapter-native lifecycle states and platform recovery still belong to ops and driver routes."
+            tone="warning"
+          >
+            <p>
+              `accept_pending`, `confirmed_by_platform`, `lost_race`,
+              `cancelled_by_platform`, and `sync_failed` do not become tenant
+              workflow actions on this surface.
+            </p>
+          </CalloutPanel>
+        ) : null}
         <div className="table-wrap">
           <table className="data-grid">
             <thead>
