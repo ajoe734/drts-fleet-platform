@@ -36,10 +36,11 @@ describe("platform admin service", () => {
         .listPublicInfoVersions()
         .filter((version) => version.status === "published"),
     ).toHaveLength(1);
-    expect(auditService.listAuditLogs()[0]?.actionName).toBe(
+    const auditLogsFirstCall = auditService.listAuditLogs();
+    expect(auditLogsFirstCall[0]?.actionName).toBe(
       "publish_public_info_version",
     );
-    expect(auditService.listAuditLogs()[0]?.newValuesSummary).toEqual(
+    expect(auditLogsFirstCall[0]?.newValuesSummary).toEqual(
       expect.objectContaining({
         newVersionId: draftVersion.versionId,
       }),
@@ -66,12 +67,13 @@ describe("platform admin service", () => {
     );
 
     expect(publishedVersion.publishedBy).toBe("platform-admin-jwt-007");
-    expect(auditService.listAuditLogs()[0]).toEqual(
+    const auditLogsSnapshot = auditService.listAuditLogs();
+    expect(auditLogsSnapshot[0]).toEqual(
       expect.objectContaining({
         actorId: "platform-admin-jwt-007",
       }),
     );
-    expect(auditService.listAuditLogs()[0]?.newValuesSummary).toEqual(
+    expect(auditLogsSnapshot[0]?.newValuesSummary).toEqual(
       expect.objectContaining({
         newVersionId: draftVersion.versionId,
         publishedBy: "platform-admin-jwt-007",
