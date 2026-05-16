@@ -64,8 +64,15 @@ function createMemoryTenantPartnerRepository(): TenantPartnerRepository {
     partnerEntries: [],
     partnerIngressCredentials: [],
     partnerEligibilityVerifications: [],
+    approvalRules: [],
+    approvalRequests: [],
+    approvalDecisions: [],
     passengers: [],
     addresses: [],
+    costCenters: [],
+    quotaPolicies: [],
+    quotaLedger: [],
+    quotaMonthlySnapshots: [],
     userRoles: [],
     apiKeys: [],
   };
@@ -184,7 +191,7 @@ async function flushWebhookDispatch() {
 }
 
 describe("owned mobility service", () => {
-  it("runs the standard taxi dispatch and driver-task loop to completion", () => {
+  it("runs the standard taxi dispatch and driver-task loop to completion", async () => {
     const { auditService, ownedMobilityService } = createService();
     const order = ownedMobilityService.createPassengerOrder({
       pickup: {
@@ -258,7 +265,7 @@ describe("owned mobility service", () => {
     ).toBe(true);
   });
 
-  it("creates a phone order without recording_id and binds it later", () => {
+  it("creates a phone order without recording_id and binds it later", async () => {
     const { callcenterService, ownedMobilityService } = createService();
     const order = ownedMobilityService.createCallCenterOrder({
       callId: "CALL-20260410-000120",
@@ -310,7 +317,7 @@ describe("owned mobility service", () => {
     ).toEqual(["recording_bound"]);
   });
 
-  it("prevents trip start before arrived_pickup", () => {
+  it("prevents trip start before arrived_pickup", async () => {
     const { ownedMobilityService } = createService();
     const order = ownedMobilityService.createPassengerOrder({
       pickup: {
@@ -352,7 +359,7 @@ describe("owned mobility service", () => {
     }
   });
 
-  it("enforces airport flight number and business proof rules", () => {
+  it("enforces airport flight number and business proof rules", async () => {
     const { ownedMobilityService } = createService();
 
     try {
@@ -380,7 +387,7 @@ describe("owned mobility service", () => {
       expect(getErrorCode(error)).toBe("FLIGHT_NO_REQUIRED");
     }
 
-    const booking = ownedMobilityService.createTenantBooking(
+    const booking = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: {
@@ -505,7 +512,7 @@ describe("owned mobility service", () => {
       PARTNER_TENANT,
     );
 
-    const booking = ownedMobilityService.getTenantBooking(
+    const booking = await ownedMobilityService.getTenantBooking(
       PARTNER_TENANT,
       created.bookingId,
     );
@@ -600,7 +607,7 @@ describe("owned mobility service", () => {
     });
   });
 
-  it("requires eligibility verification for partner airport-transfer entries", () => {
+  it("requires eligibility verification for partner airport-transfer entries", async () => {
     const tenantPartnerService = new TenantPartnerService(
       new AuditNotificationService(),
     );
@@ -639,9 +646,9 @@ describe("owned mobility service", () => {
     }
   });
 
-  it("rejects completion proof payloads that exceed photo count or size limits", () => {
+  it("rejects completion proof payloads that exceed photo count or size limits", async () => {
     const { ownedMobilityService } = createService();
-    const booking = ownedMobilityService.createTenantBooking(
+    const booking = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: {
@@ -719,12 +726,12 @@ describe("owned mobility service", () => {
     }
   });
 
-  it("lists, updates, and cancels tenant bookings within the SLA windows", () => {
+  it("lists, updates, and cancels tenant bookings within the SLA windows", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-14T08:00:00Z"));
 
     const { ownedMobilityService } = createService();
-    const created = ownedMobilityService.createTenantBooking(
+    const created = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: {
@@ -754,7 +761,7 @@ describe("owned mobility service", () => {
       TENANT_ACME,
     );
 
-    const updated = ownedMobilityService.updateTenantBooking(
+    const updated = await ownedMobilityService.updateTenantBooking(
       TENANT_ACME,
       created.bookingId,
       {
@@ -769,7 +776,7 @@ describe("owned mobility service", () => {
     expect(updated.costCenter).toBe("OPS-02");
     expect(updated.notes).toBe("改到十一點出發");
 
-    const cancelled = ownedMobilityService.cancelTenantBooking(
+    const cancelled = await ownedMobilityService.cancelTenantBooking(
       TENANT_ACME,
       created.bookingId,
       {
@@ -784,9 +791,9 @@ describe("owned mobility service", () => {
     vi.useRealTimers();
   });
 
-  it("enforces tenant isolation for booking list, detail, update, and cancel", () => {
+  it("enforces tenant isolation for booking list, detail, update, and cancel", async () => {
     const { ownedMobilityService } = createService();
-    const acmeBooking = ownedMobilityService.createTenantBooking(
+    const acmeBooking = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: {
@@ -804,7 +811,7 @@ describe("owned mobility service", () => {
       },
       TENANT_ACME,
     );
-    const newcoBooking = ownedMobilityService.createTenantBooking(
+    const newcoBooking = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: {
@@ -876,9 +883,9 @@ describe("owned mobility service", () => {
     );
   });
 
-  it("projects completed tenant bookings as completed after the driver lifecycle closes", () => {
+  it("projects completed tenant bookings as completed after the driver lifecycle closes", async () => {
     const { ownedMobilityService } = createService();
-    const booking = ownedMobilityService.createTenantBooking(
+    const booking = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: {
@@ -933,7 +940,7 @@ describe("owned mobility service", () => {
       },
     });
 
-    const completedBooking = ownedMobilityService.getTenantBooking(
+    const completedBooking = await ownedMobilityService.getTenantBooking(
       TENANT_ACME,
       booking.bookingId,
     );
@@ -974,7 +981,7 @@ describe("owned mobility service", () => {
         tenantPartnerService,
       );
 
-      const acmeBooking = ownedMobilityService.createTenantBooking(
+      const acmeBooking = await ownedMobilityService.createTenantBooking(
         {
           businessDispatchSubtype: "enterprise_dispatch",
           pickup: {
@@ -1026,7 +1033,7 @@ describe("owned mobility service", () => {
           .map((delivery) => delivery.eventType),
       ).toEqual(["order.cancelled", "order.created"]);
 
-      const newcoBooking = ownedMobilityService.createTenantBooking(
+      const newcoBooking = await ownedMobilityService.createTenantBooking(
         {
           businessDispatchSubtype: "enterprise_dispatch",
           pickup: {
@@ -1092,9 +1099,9 @@ describe("owned mobility service", () => {
     }
   });
 
-  it("requires an explicit dispatch step before reservation bookings appear in the dispatch queue", () => {
+  it("requires an explicit dispatch step before reservation bookings appear in the dispatch queue", async () => {
     const { ownedMobilityService } = createService();
-    const booking = ownedMobilityService.createTenantBooking(
+    const booking = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: {
@@ -1130,12 +1137,12 @@ describe("owned mobility service", () => {
     );
   });
 
-  it("rejects tenant booking changes after modifiable_until", () => {
+  it("rejects tenant booking changes after modifiable_until", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-15T08:00:00Z"));
 
     const { ownedMobilityService } = createService();
-    const created = ownedMobilityService.createTenantBooking(
+    const created = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: {
@@ -1168,7 +1175,7 @@ describe("owned mobility service", () => {
     vi.useRealTimers();
   });
 
-  it("routes reservation failures into redispatch queue or exception_hold", () => {
+  it("routes reservation failures into redispatch queue or exception_hold", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-15T06:00:00Z"));
 
@@ -1183,7 +1190,7 @@ describe("owned mobility service", () => {
         ["ops_notice", "tenant_sla"].includes(notification.channel),
       ).length;
 
-    const queuedBooking = ownedMobilityService.createTenantBooking(
+    const queuedBooking = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: {
@@ -1213,7 +1220,7 @@ describe("owned mobility service", () => {
       "redispatch_required",
     );
 
-    const holdBooking = ownedMobilityService.createTenantBooking(
+    const holdBooking = await ownedMobilityService.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         pickup: {
@@ -1253,7 +1260,7 @@ describe("owned mobility service", () => {
     vi.useRealTimers();
   });
 
-  it("cancels assigned standard taxi orders and closes active dispatch state", () => {
+  it("cancels assigned standard taxi orders and closes active dispatch state", async () => {
     const { ownedMobilityService } = createService();
     const order = ownedMobilityService.createPassengerOrder({
       pickup: {
