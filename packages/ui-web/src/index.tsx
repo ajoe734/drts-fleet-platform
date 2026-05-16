@@ -70,11 +70,6 @@ export type {
   ManagementTopbarProps,
   ManagementTopbarUser,
 } from "./management-topbar";
-export { ManagementShell, ManagementPageStack } from "./management-shell";
-export type {
-  ManagementShellProps,
-  ManagementPageStackProps,
-} from "./management-shell";
 export {
   MANAGEMENT_COLORS,
   MANAGEMENT_RADIUS,
