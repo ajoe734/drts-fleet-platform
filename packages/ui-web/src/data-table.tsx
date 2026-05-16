@@ -1,26 +1,53 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Children, type ReactNode } from "react";
+import { MANAGEMENT_COLORS } from "./management-theme";
+import type { ManagementTone } from "./management-theme";
 
-interface Column {
+export interface Column {
   label: string;
   width?: string;
+  align?: "left" | "center" | "right";
 }
 
 interface DataTableProps {
   columns: Column[];
   children: ReactNode;
   empty?: string;
+  density?: "comfortable" | "compact";
+  minWidth?: number | string;
+  tone?: ManagementTone;
 }
 
-export function DataTable({ columns, children, empty }: DataTableProps) {
+const TABLE_TONE_HEADER: Record<ManagementTone, string> = {
+  neutral: "#f8fafc",
+  info: "#eff6ff",
+  success: "#f0fdf4",
+  warning: "#fff7ed",
+  danger: "#fef2f2",
+  accent: "#f5f3ff",
+};
+
+export function DataTable({
+  columns,
+  children,
+  empty,
+  density = "comfortable",
+  minWidth = 720,
+  tone = "neutral",
+}: DataTableProps) {
+  const hasRows = Children.count(children) > 0;
+  const headBackground = TABLE_TONE_HEADER[tone];
+  const padding = density === "compact" ? "9px 12px" : "10px 16px";
+
   return (
     <div style={{ overflowX: "auto" }}>
       <table
         style={{
+          minWidth,
           width: "100%",
           borderCollapse: "collapse",
-          fontSize: "13.5px",
+          fontSize: density === "compact" ? "13px" : "13.5px",
         }}
       >
         <thead>
@@ -29,14 +56,14 @@ export function DataTable({ columns, children, empty }: DataTableProps) {
               <th
                 key={col.label}
                 style={{
-                  padding: "10px 16px",
-                  textAlign: "left",
+                  padding,
+                  textAlign: col.align ?? "left",
                   fontSize: "11.5px",
                   fontWeight: 600,
                   color: "#64748b",
                   textTransform: "uppercase",
                   letterSpacing: "0.05em",
-                  background: "#f8fafc",
+                  background: headBackground,
                   borderBottom: "1px solid #e2e8f0",
                   width: col.width,
                   whiteSpace: "nowrap",
@@ -49,12 +76,12 @@ export function DataTable({ columns, children, empty }: DataTableProps) {
         </thead>
         <tbody>{children}</tbody>
       </table>
-      {!children && empty && (
+      {!hasRows && empty && (
         <p
           style={{
             textAlign: "center",
             padding: "32px 0",
-            color: "#94a3b8",
+            color: MANAGEMENT_COLORS.textDim,
             fontSize: "14px",
           }}
         >
@@ -65,16 +92,26 @@ export function DataTable({ columns, children, empty }: DataTableProps) {
   );
 }
 
-export function Tr({ children }: { children: ReactNode }) {
+export function Tr({
+  children,
+  highlighted = false,
+}: {
+  children: ReactNode;
+  highlighted?: boolean;
+}) {
   return (
     <tr
-      style={{ borderBottom: "1px solid #f1f5f9" }}
+      style={{
+        borderBottom: "1px solid #f1f5f9",
+        background: highlighted ? "#fffbeb" : "transparent",
+      }}
       onMouseEnter={(e) => {
         (e.currentTarget as HTMLTableRowElement).style.background = "#f8fafc";
       }}
       onMouseLeave={(e) => {
-        (e.currentTarget as HTMLTableRowElement).style.background =
-          "transparent";
+        (e.currentTarget as HTMLTableRowElement).style.background = highlighted
+          ? "#fffbeb"
+          : "transparent";
       }}
     >
       {children}
@@ -86,16 +123,26 @@ interface TdProps {
   children: ReactNode;
   muted?: boolean;
   mono?: boolean;
+  align?: "left" | "center" | "right";
+  density?: "comfortable" | "compact";
 }
 
-export function Td({ children, muted, mono }: TdProps) {
+export function Td({
+  children,
+  muted,
+  mono,
+  align,
+  density = "comfortable",
+}: TdProps) {
   return (
     <td
       style={{
-        padding: "12px 16px",
+        padding: density === "compact" ? "10px 12px" : "12px 16px",
         color: muted ? "#64748b" : "#0f172a",
         fontFamily: mono ? "monospace" : undefined,
         fontSize: mono ? "12px" : undefined,
+        textAlign: align,
+        verticalAlign: "top",
       }}
     >
       {children}

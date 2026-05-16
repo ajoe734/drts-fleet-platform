@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import React, { useEffect, useState, useTransition, useMemo } from "react";
 import { PageHeader } from "@drts/ui-web";
 import type {
   CreateReportJobCommand,
@@ -192,6 +192,15 @@ export default function ReportsPage() {
     }
   }
 
+  // FilingPackageListRecord does not carry scope metadata, so summarize by package type.
+  const packageTypeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    packages.forEach((pkg) => {
+      counts[pkg.packageType] = (counts[pkg.packageType] || 0) + 1;
+    });
+    return counts;
+  }, [packages]);
+
   async function inspectReportJob(jobId: string) {
     setDetailLoadingKey(`job:${jobId}`);
     setError(null);
@@ -320,6 +329,24 @@ export default function ReportsPage() {
             </div>
           ))}
         </section>
+
+        {Object.keys(packageTypeCounts).length > 0 && (
+          <section className="summary-grid">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">Filing Packages by Type</p>
+                <h3>Filing Packages by Type</h3>
+              </div>
+            </div>
+            {Object.entries(packageTypeCounts).map(([packageType, count]) => (
+              <div key={packageType} className="summary-card">
+                <span>{formatOpsCodeLabel(locale, packageType)}</span>
+                <strong>{count}</strong>
+                <small>Filing Packages</small>
+              </div>
+            ))}
+          </section>
+        )}
 
         <section className="form-stack">
           <form className="panel" onSubmit={handleReportSubmit}>
