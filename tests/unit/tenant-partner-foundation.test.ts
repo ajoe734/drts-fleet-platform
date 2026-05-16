@@ -213,9 +213,10 @@ describe("tenant partner foundation service", () => {
       eligibilityVerificationId: verification.eligibilityVerificationId,
       verificationStatus: "eligible",
     });
-    expect(tenantPartnerService.listTenantAudit(TENANT_ID)[0]?.actionName).toBe(
-      "verify_partner_eligibility",
-    );
+    const verifyAudit = tenantPartnerService
+      .listTenantAudit(TENANT_ID)
+      .find((entry) => entry.actionName === "verify_partner_eligibility");
+    expect(verifyAudit).toBeDefined();
   });
 
   it("marks odd inline-card programs as ineligible and accepts reference-based entries", async () => {

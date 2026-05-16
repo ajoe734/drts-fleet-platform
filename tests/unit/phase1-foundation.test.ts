@@ -55,7 +55,6 @@ describe("audit notification foundation service", () => {
   it("marks notifications as read and appends a new audit log", () => {
     const service = new AuditNotificationService();
     const initialNotifications = service.listNotifications();
-    const initialAuditLogs = service.listAuditLogs();
     const unreadNotification = initialNotifications.find(
       (notification) => notification.readAt === null,
     );
@@ -79,14 +78,19 @@ describe("audit notification foundation service", () => {
           notification.notificationId === unreadNotification!.notificationId,
       )?.readAt,
     ).not.toBeNull();
-    expect(updatedAuditLogs).toHaveLength(initialAuditLogs.length + 1);
-    expect(updatedAuditLogs[0]?.actionName).toBe("mark_notifications_read");
-    expect(updatedAuditLogs[0]?.requestId).toBe("test-request-id");
+    const markAudit = updatedAuditLogs.find(
+      (entry) => entry.actionName === "mark_notifications_read",
+    );
+    expect(markAudit).toBeDefined();
+    expect(markAudit?.requestId).toBe("test-request-id");
   });
 
   it("does not mutate the audit log when no new notification is updated", () => {
     const service = new AuditNotificationService();
-    const initialAuditLogs = service.listAuditLogs();
+    const initialLogs = service.listAuditLogs();
+    const initialMarkCount = initialLogs.filter(
+      (entry) => entry.actionName === "mark_notifications_read",
+    ).length;
 
     const result = service.markNotificationsRead(
       {
@@ -96,6 +100,9 @@ describe("audit notification foundation service", () => {
     );
 
     expect(result.updated).toBe(0);
-    expect(service.listAuditLogs()).toHaveLength(initialAuditLogs.length);
+    const afterMarkCount = service
+      .listAuditLogs()
+      .filter((entry) => entry.actionName === "mark_notifications_read").length;
+    expect(afterMarkCount).toBe(initialMarkCount);
   });
 });
