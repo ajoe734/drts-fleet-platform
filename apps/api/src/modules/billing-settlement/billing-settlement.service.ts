@@ -118,6 +118,7 @@ const PARTNER_SPONSOR_MISMATCH_SEED: ReconciliationIssueRecord[] = [
     linkedReconciliationJobId: null,
     linkedInvoiceId: "invoice-demo-partner-airport-202603",
     linkedReimbursementBatchId: "reimbursement-demo-partner-airport-202603",
+    forwardedFinanceContext: null,
     resolutionCode: null,
     resolutionSummary: null,
     resolvedAt: null,
@@ -924,6 +925,7 @@ export class BillingSettlementService implements OnModuleInit {
         command.linkedReconciliationJobId?.trim() || null,
       linkedInvoiceId: null,
       linkedReimbursementBatchId: null,
+      forwardedFinanceContext: null,
       resolutionCode: null,
       resolutionSummary: null,
       resolvedAt: null,
@@ -1824,6 +1826,9 @@ export class BillingSettlementService implements OnModuleInit {
   ): ReconciliationIssueRecord {
     return {
       ...issue,
+      forwardedFinanceContext: issue.forwardedFinanceContext
+        ? { ...issue.forwardedFinanceContext }
+        : null,
       evidenceArtifactIds: [...issue.evidenceArtifactIds],
       comments: issue.comments.map((comment) => ({
         ...comment,
@@ -1929,6 +1934,22 @@ export class BillingSettlementService implements OnModuleInit {
         linkedInvoiceId: existingIssue?.linkedInvoiceId ?? null,
         linkedReimbursementBatchId:
           existingIssue?.linkedReimbursementBatchId ?? null,
+        forwardedFinanceContext: {
+          platformCode: forwarderIssue.platformCode,
+          reconciliationReason: forwarderIssue.reconciliationJob.reason,
+          fareAuthority: forwarderIssue.financeContext.fareAuthority,
+          settlementAuthority:
+            forwarderIssue.financeContext.settlementAuthority,
+          driverPayoutAuthority:
+            forwarderIssue.financeContext.driverPayoutAuthority ??
+            "external_platform",
+          localLedgerMode: forwarderIssue.financeContext.localLedgerMode,
+          note:
+            forwarderIssue.reconciliationJob.notes ??
+            forwarderIssue.manualFallback.notes ??
+            forwarderIssue.lastSyncError?.message ??
+            null,
+        },
         resolutionCode: null,
         resolutionSummary: null,
         resolvedAt: null,

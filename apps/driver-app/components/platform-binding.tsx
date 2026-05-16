@@ -1,19 +1,28 @@
 import React, { useEffect, useState } from "react";
+import { ActivityIndicator, Alert, StyleSheet, Text, View } from "react-native";
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  ActivityIndicator,
-  Alert,
-} from "react-native";
-import {
+  PLATFORM_CODE_REGISTRY,
   PLATFORM_CODES,
   type PlatformCode,
   type PlatformPresenceRecord,
+  type PlatformPresenceSummary,
 } from "@drts/contracts";
+import {
+  PlatformStatusCard,
+  assessPlatformHealth,
+  getPlatformHealthSeverity,
+  type PlatformStatusAction,
+} from "@/components/platform-status-card";
+import { ActionButton } from "@/components/ui/ActionButton";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { FormField } from "@/components/ui/FormField";
+import { StatusChip } from "@/components/ui/StatusChip";
+import { Tokens } from "@/components/ui/tokens";
 import { getDriverClient } from "@/lib/api-client";
+
+interface PlatformBindingProps {
+  showSectionTitle?: boolean;
+}
 
 type BindForm =
   | {
@@ -31,106 +40,93 @@ function isPlatformCode(value: string): value is PlatformCode {
   return PLATFORM_CODES.includes(value as PlatformCode);
 }
 
-function PlatformCard({
-  record,
-  onUnbind,
-  onReauth,
-}: {
-  record: PlatformPresenceRecord;
-  onUnbind: (platformCode: PlatformCode) => void;
-  onReauth: (platformCode: PlatformCode) => void;
-}) {
-  return (
-    <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.platformInfo}>
-          <View
-            style={[
-              styles.statusDot,
-              {
-                backgroundColor:
-                  record.status === "online" ? "#4caf50" : "#9e9e9e",
-              },
-            ]}
-          />
-          <Text style={styles.platformCode}>{record.platformCode}</Text>
-        </View>
-        <View style={styles.cardActions}>
-          {record.reauthRequired && (
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.reauthBtn]}
-              onPress={() => onReauth(record.platformCode)}
-            >
-              <Text style={styles.actionBtnText}>Re-auth</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[styles.actionBtn, styles.unbindBtn]}
-            onPress={() => onUnbind(record.platformCode)}
-          >
-            <Text style={styles.actionBtnText}>Unbind</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {record.reauthRequired && (
-        <Text style={styles.reauthWarning}>Re-authentication required</Text>
-      )}
-
-      {record.tokenExpiresAt && (
-        <Text style={styles.meta}>
-          Token expires: {new Date(record.tokenExpiresAt).toLocaleString()}
-        </Text>
-      )}
-
-      {record.accountId && (
-        <Text style={styles.meta}>Account: {record.accountId}</Text>
-      )}
-    </View>
-  );
+function normalizePlatformCode(value: string): string {
+  return value.trim().toLowerCase();
 }
 
-export function PlatformBinding() {
+function getPlatformDisplayName(platformCode: PlatformCode): string {
+  return PLATFORM_CODE_REGISTRY[platformCode].displayName;
+}
+
+function getPlatformOptionLabel(platformCode: PlatformCode): string {
+  return `${getPlatformDisplayName(platformCode)}（${platformCode}）`;
+}
+
+const SUPPORTED_PLATFORM_HINT = PLATFORM_CODES.map(getPlatformOptionLabel).join(
+  "、",
+);
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+  return "要求失敗";
+}
+
+export function PlatformBinding({
+  showSectionTitle = true,
+}: PlatformBindingProps) {
   const [presences, setPresences] = useState<PlatformPresenceRecord[]>([]);
+  const [adapterStatuses, setAdapterStatuses] = useState<
+    PlatformPresenceSummary["adapterStatuses"]
+  >([]);
+  const [notes, setNotes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [form, setForm] = useState<BindForm | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [busyPlatform, setBusyPlatform] = useState<string | null>(null);
 
-  const loadPresences = async () => {
+  const loadPresences = async ({
+    silent = false,
+  }: { silent?: boolean } = {}) => {
     try {
       const client = getDriverClient();
       const summary = await client.getPlatformPresence();
       setPresences(summary.presences);
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
+      setAdapterStatuses(summary.adapterStatuses ?? []);
+      setNotes(summary.notes ?? []);
+      setLoadError(null);
+    } catch (loadError) {
+      const message = toErrorMessage(loadError);
+      setLoadError(`平台綁定資料同步失敗：${message}`);
+      if (!silent) {
+        Alert.alert("無法載入平台綁定", message);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadPresences();
+    void loadPresences({ silent: true });
   }, []);
 
   const handleSubmitForm = async () => {
-    if (!form) return;
-    if (form.mode === "bind" && !form.platformCode.trim()) {
-      Alert.alert("Validation", "Platform code is required.");
+    if (!form) {
       return;
     }
+
     let platformCode: PlatformCode;
     if (form.mode === "bind") {
-      if (!isPlatformCode(form.platformCode)) {
+      const normalizedCode = normalizePlatformCode(form.platformCode);
+      if (!normalizedCode) {
+        Alert.alert("欄位未完成", "請先輸入平台代碼。");
+        return;
+      }
+      if (!isPlatformCode(normalizedCode)) {
         Alert.alert(
-          "Validation",
-          `Platform code must be one of: ${PLATFORM_CODES.join(", ")}.`,
+          "平台代碼無效",
+          `平台代碼必須是：${SUPPORTED_PLATFORM_HINT}。`,
         );
         return;
       }
-      platformCode = form.platformCode;
+      platformCode = normalizedCode;
     } else {
       platformCode = form.platformCode;
     }
+
+    const platformName = getPlatformDisplayName(platformCode);
     setSubmitting(true);
     try {
       const client = getDriverClient();
@@ -139,41 +135,41 @@ export function PlatformBinding() {
         tokenExpiresAt: form.tokenExpiresAt.trim() || null,
       });
       setForm(null);
-      await loadPresences();
+      await loadPresences({ silent: true });
       Alert.alert(
-        "Success",
+        "平台綁定已更新",
         form.mode === "reauth"
-          ? `Re-authentication successful for "${form.platformCode}".`
-          : `Platform "${form.platformCode}" bound successfully.`,
+          ? `「${platformName}」已重新送出驗證。`
+          : `已完成「${platformName}」平台綁定。`,
       );
-    } catch (e: any) {
-      Alert.alert("Error", e.message);
+    } catch (submitError) {
+      Alert.alert("無法更新平台綁定", toErrorMessage(submitError));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleUnbind = (platformCode: PlatformCode) => {
-    Alert.alert(
-      "Unbind Platform",
-      `Remove account binding for "${platformCode}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Unbind",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const client = getDriverClient();
-              await client.setPlatformOffline({ platformCode });
-              await loadPresences();
-            } catch (e: any) {
-              Alert.alert("Error", e.message);
-            }
-          },
+    const platformName = getPlatformDisplayName(platformCode);
+    Alert.alert("解除平台綁定", `要解除「${platformName}」的帳號綁定嗎？`, [
+      { text: "取消", style: "cancel" },
+      {
+        text: "確認解除",
+        style: "destructive",
+        onPress: async () => {
+          setBusyPlatform(platformCode);
+          try {
+            const client = getDriverClient();
+            await client.setPlatformOffline({ platformCode });
+            await loadPresences({ silent: true });
+          } catch (unbindError) {
+            Alert.alert("無法解除綁定", toErrorMessage(unbindError));
+          } finally {
+            setBusyPlatform(null);
+          }
         },
-      ],
-    );
+      },
+    ]);
   };
 
   const handleOpenReauth = (platformCode: PlatformCode) => {
@@ -184,92 +180,176 @@ export function PlatformBinding() {
     setForm({ mode: "bind", platformCode: "", tokenExpiresAt: "" });
   };
 
+  const buildActions = (
+    record: PlatformPresenceRecord,
+  ): PlatformStatusAction[] => {
+    const actions: PlatformStatusAction[] = [];
+
+    if (record.reauthRequired) {
+      actions.push({
+        key: "reauth",
+        icon: "refresh",
+        label: "重新驗證",
+        onPress: () => handleOpenReauth(record.platformCode),
+        tone: "warning",
+        disabled: busyPlatform === record.platformCode,
+      });
+    }
+
+    actions.push({
+      key: "unbind",
+      icon: "unlink",
+      label: "解除綁定",
+      onPress: () => handleUnbind(record.platformCode),
+      tone: "danger",
+      disabled: busyPlatform === record.platformCode,
+    });
+
+    return actions;
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingRow}>
         <ActivityIndicator size="small" />
-        <Text style={styles.loadingText}>Loading platform accounts...</Text>
+        <Text style={styles.loadingText}>載入平台綁定中…</Text>
       </View>
     );
   }
 
+  const adapterStatusMap = new Map(
+    (adapterStatuses ?? []).map((item) => [item.platformCode, item]),
+  );
+  const enrichedPresences = [...presences]
+    .map((record) => ({
+      record,
+      assessment: assessPlatformHealth(
+        record,
+        adapterStatusMap.get(record.platformCode),
+      ),
+    }))
+    .sort((left, right) => {
+      const severityDelta =
+        getPlatformHealthSeverity(right.assessment) -
+        getPlatformHealthSeverity(left.assessment);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+      return left.record.platformCode.localeCompare(right.record.platformCode);
+    });
+  const readyCount = enrichedPresences.filter(
+    (item) => item.assessment.canReceiveOrders,
+  ).length;
+  const attentionCount = enrichedPresences.filter(
+    (item) => item.assessment.statusTone === "warning",
+  ).length;
+  const blockedCount = enrichedPresences.filter(
+    (item) => item.assessment.statusTone === "danger",
+  ).length;
+
   return (
     <View>
-      <Text style={styles.sectionTitle}>Platform Accounts</Text>
+      {showSectionTitle ? (
+        <Text style={styles.sectionTitle}>平台帳號綁定</Text>
+      ) : null}
+      <Text style={styles.sectionDescription}>
+        已綁定 {presences.length}{" "}
+        個平台，可在此檢視綁定、重新驗證、平台憑證與接單資格狀態，與「平台健康中心」即時同步。
+      </Text>
 
-      {presences.length === 0 ? (
-        <Text style={styles.empty}>No platforms bound yet.</Text>
+      {enrichedPresences.length > 0 ? (
+        <View style={styles.summaryChips}>
+          <StatusChip label={`可接單 ${readyCount}`} variant="success" />
+          <StatusChip label={`需處理 ${attentionCount}`} variant="warning" />
+          <StatusChip label={`已阻塞 ${blockedCount}`} variant="danger" />
+        </View>
+      ) : null}
+
+      {loadError ? (
+        <ErrorBanner message={loadError} style={styles.errorBanner} />
+      ) : null}
+
+      {notes.length > 0 ? (
+        <View style={styles.notesCard}>
+          <Text style={styles.notesTitle}>同步說明</Text>
+          {notes.map((note) => (
+            <Text key={note} style={styles.noteLine}>
+              • {note}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+
+      {enrichedPresences.length === 0 ? (
+        <Text style={styles.emptyText}>目前尚未綁定任何平台帳號。</Text>
       ) : (
-        presences.map((p) => (
-          <PlatformCard
-            key={p.platformCode}
-            record={p}
-            onUnbind={handleUnbind}
-            onReauth={handleOpenReauth}
+        enrichedPresences.map(({ record }) => (
+          <PlatformStatusCard
+            key={record.platformCode}
+            record={record}
+            actions={buildActions(record)}
+            adapterStatus={adapterStatusMap.get(record.platformCode)}
           />
         ))
       )}
 
       {form === null ? (
-        <TouchableOpacity
-          style={[styles.actionBtn, styles.bindBtn]}
+        <ActionButton
+          title="新增平台綁定"
+          icon="add-circle-outline"
           onPress={handleOpenBind}
-        >
-          <Text style={styles.actionBtnText}>+ Bind New Platform</Text>
-        </TouchableOpacity>
+          style={styles.addButton}
+        />
       ) : (
         <View style={styles.form}>
           <Text style={styles.formTitle}>
             {form.mode === "reauth"
-              ? `Re-authenticate: ${form.platformCode}`
-              : "Bind Platform Account"}
+              ? `重新驗證 ${getPlatformDisplayName(form.platformCode)}`
+              : "新增平台綁定"}
           </Text>
 
-          {form.mode === "bind" && (
-            <TextInput
-              style={styles.input}
-              placeholder="Platform code (e.g. grab, gojek)"
+          {form.mode === "bind" ? (
+            <FormField
+              label="平台代碼"
+              placeholder="請輸入平台代碼"
               value={form.platformCode}
-              onChangeText={(v) => setForm({ ...form, platformCode: v })}
+              onChangeText={(value) =>
+                setForm({ ...form, platformCode: value })
+              }
               autoCapitalize="none"
               autoCorrect={false}
+              editable={!submitting}
+              helpText={`可輸入：${SUPPORTED_PLATFORM_HINT}`}
             />
-          )}
+          ) : null}
 
-          <TextInput
-            style={styles.input}
-            placeholder="Token expiry — ISO date (optional)"
+          <FormField
+            label="平台憑證到期時間（選填）"
+            placeholder="例如 2026-05-06T08:30:00Z"
             value={form.tokenExpiresAt}
-            onChangeText={(v) => setForm({ ...form, tokenExpiresAt: v })}
+            onChangeText={(value) =>
+              setForm({ ...form, tokenExpiresAt: value })
+            }
             autoCapitalize="none"
             autoCorrect={false}
+            editable={!submitting}
+            helpText="請使用完整時間格式；留白則代表暫不設定到期時間。"
           />
 
           <View style={styles.formActions}>
-            <TouchableOpacity
-              style={[styles.actionBtn, styles.cancelBtn]}
+            <ActionButton
+              title="取消"
+              variant="secondary"
               onPress={() => setForm(null)}
               disabled={submitting}
-            >
-              <Text style={styles.actionBtnText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.actionBtn,
-                styles.bindBtn,
-                submitting && styles.btnDisabled,
-              ]}
+              style={styles.formActionButton}
+            />
+            <ActionButton
+              title={form.mode === "reauth" ? "送出驗證" : "完成綁定"}
               onPress={handleSubmitForm}
-              disabled={submitting}
-            >
-              <Text style={styles.actionBtnText}>
-                {submitting
-                  ? "..."
-                  : form.mode === "reauth"
-                    ? "Update Token"
-                    : "Bind"}
-              </Text>
-            </TouchableOpacity>
+              loading={submitting}
+              style={styles.formActionButton}
+            />
           </View>
         </View>
       )}
@@ -279,81 +359,78 @@ export function PlatformBinding() {
 
 const styles = StyleSheet.create({
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 12,
-    color: "#333",
+    ...Tokens.type.sectionTitle,
+    color: Tokens.colors.textStrong,
+    marginBottom: Tokens.spacing.xs,
+  },
+  sectionDescription: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    marginBottom: Tokens.spacing.md,
+  },
+  summaryChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
+    marginBottom: Tokens.spacing.md,
+  },
+  notesCard: {
+    padding: Tokens.spacing.md,
+    borderRadius: Tokens.radius.md,
+    backgroundColor: Tokens.colors.bgRaised,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    gap: Tokens.spacing.xs,
+    marginBottom: Tokens.spacing.md,
+  },
+  notesTitle: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textStrong,
+  },
+  noteLine: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
   },
   loadingRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 8,
+    paddingVertical: Tokens.spacing.sm,
   },
-  loadingText: { marginLeft: 8, color: "#666", fontSize: 14 },
-  empty: { color: "#999", fontSize: 14, marginBottom: 12 },
-  card: {
-    padding: 12,
-    marginBottom: 10,
-    backgroundColor: "#fafafa",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
+  errorBanner: {
+    marginBottom: Tokens.spacing.md,
   },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 6,
+  loadingText: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textMuted,
+    marginLeft: Tokens.spacing.sm,
   },
-  platformInfo: { flexDirection: "row", alignItems: "center" },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
+  emptyText: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textMuted,
+    marginBottom: Tokens.spacing.md,
   },
-  platformCode: { fontSize: 15, fontWeight: "600" },
-  cardActions: { flexDirection: "row", gap: 6 },
-  reauthWarning: { color: "#f44336", fontSize: 12, marginBottom: 4 },
-  meta: { color: "#666", fontSize: 12, marginTop: 2 },
-  actionBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
+  addButton: {
+    marginTop: Tokens.spacing.xs,
   },
-  actionBtnText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-  reauthBtn: { backgroundColor: "#ff9800" },
-  unbindBtn: { backgroundColor: "#f44336" },
-  bindBtn: { backgroundColor: "#1976d2", marginTop: 8 },
-  cancelBtn: { backgroundColor: "#757575" },
-  btnDisabled: { opacity: 0.5 },
   form: {
-    marginTop: 12,
-    padding: 12,
-    backgroundColor: "#f5f5f5",
-    borderRadius: 8,
+    marginTop: Tokens.spacing.md,
+    padding: Tokens.spacing.lg,
+    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.md,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
+    borderColor: Tokens.colors.border,
   },
   formTitle: {
-    fontSize: 15,
-    fontWeight: "600",
-    marginBottom: 10,
-    color: "#333",
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 6,
-    padding: 8,
-    fontSize: 14,
-    backgroundColor: "#fff",
-    marginBottom: 8,
+    ...Tokens.type.body,
+    color: Tokens.colors.textStrong,
+    fontWeight: "700",
+    marginBottom: Tokens.spacing.md,
   },
   formActions: {
     flexDirection: "row",
     justifyContent: "flex-end",
-    gap: 8,
-    marginTop: 4,
+    gap: Tokens.spacing.sm,
+    marginTop: Tokens.spacing.sm,
   },
+  formActionButton: { flex: 1 },
 });

@@ -10,13 +10,21 @@ export default async function SlaPage() {
     <main className="app-grid">
       <AppShellCard
         title="SLA Profile"
-        description="View and update SLA thresholds for wait, arrival, and completion times."
+        description="View and update SLA thresholds for wait, arrival, and completion times across DRTS-operated and externally fulfilled bookings."
       >
         {fetchError && (
           <div className="error-banner">
             <strong>Error loading SLA profile:</strong> {fetchError}
           </div>
         )}
+
+        <div className="source-guidance">
+          <strong>How to read these thresholds:</strong> DRTS-operated bookings
+          measure dispatch and trip delay inside the platform. Externally
+          fulfilled bookings still surface here, but tenant-facing delay can
+          come from the external fulfillment handoff rather than a DRTS dispatch
+          queue alone.
+        </div>
 
         {profile && <SlaProfileTable profile={profile} />}
 

@@ -30,6 +30,8 @@ import type {
   CreateDriverMasterCommand,
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
+  DriverForwardedOrderAcceptCommand,
+  DriverForwardedOrderRejectCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
   IssuePartnerIngressCredentialCommand,
@@ -61,6 +63,7 @@ import type {
   DriverArrivedPickupCommand,
   DriverDeviceProvisioningSession,
   DriverEtaResponse,
+  DriverLocationSnapshot,
   DriverDepartTaskCommand,
   DriverFeePlanRecord,
   DriverLocationHeartbeatCommand,
@@ -70,6 +73,8 @@ import type {
   DriverStartTaskCommand,
   DriverStatementRecord,
   DriverTaskRecord,
+  UnifiedDriverTaskView,
+  ForwardedDriverActionResponse,
   EvidenceDeletionExceptionRecord,
   EvidenceGovernanceCatalog,
   EvidenceLegalHoldRecord,
@@ -148,11 +153,14 @@ import type {
   SetPlatformTenantRolloutStageCommand,
   SetPlatformOfflineCommand,
   SetPlatformOnlineCommand,
+  PlatformAdapter,
+  UpdatePlatformAdapterCommand,
   SettlementMatrixRecord,
   ShiftRecord,
   TenantAddressRecord,
   TenantAddressExportViewRecord,
   TenantApiKeyRecord,
+  TenantBillingProfile,
   TenantBootstrapSession,
   TenantIntegrationGovernancePackage,
   TenantInvoiceRecord,
@@ -167,6 +175,7 @@ import type {
   SubmitExclusivityReviewCommand,
   ApproveExclusivityCommand,
   UpdateDriverMasterLifecycleCommand,
+  UpdateDriverWorkStateCommand,
   UpdateDriverProfileCommand,
   UpdateIncidentCommand,
   UpdateMaintenanceRecordCommand,
@@ -669,6 +678,51 @@ export class ApiClient {
     return this.getList<DriverTaskRecord>("/api/driver/tasks");
   }
 
+  async listUnifiedDriverTasks(filters?: {
+    driverId?: string;
+  }): Promise<UnifiedDriverTaskView[]> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/task-views?${query}`
+      : "/api/driver/task-views";
+    return this.getList<UnifiedDriverTaskView>(url);
+  }
+
+  async getUnifiedDriverTask(
+    taskId: string,
+    filters?: { driverId?: string },
+  ): Promise<UnifiedDriverTaskView> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/driver/task-views/${taskId}?${query}`
+      : `/api/driver/task-views/${taskId}`;
+    return this.get<UnifiedDriverTaskView>(url);
+  }
+
+  async acceptForwardedOrder(
+    taskId: string,
+    command: DriverForwardedOrderAcceptCommand = {},
+  ): Promise<ForwardedDriverActionResponse> {
+    return this.post<ForwardedDriverActionResponse>(
+      `/api/driver/forwarded-orders/${taskId}/accept`,
+      { body: command },
+    );
+  }
+
+  async rejectForwardedOrder(
+    taskId: string,
+    command: DriverForwardedOrderRejectCommand = {},
+  ): Promise<ForwardedDriverActionResponse> {
+    return this.post<ForwardedDriverActionResponse>(
+      `/api/driver/forwarded-orders/${taskId}/reject`,
+      { body: command },
+    );
+  }
+
   async acceptTask(taskId: string, command: DriverAcceptTaskCommand) {
     return this.post(`/api/driver/tasks/${taskId}/accept`, { body: command });
   }
@@ -905,8 +959,8 @@ export class ApiClient {
 
   // ── Billing ──
 
-  async getBillingProfile() {
-    return this.get("/api/tenant/billing/profile");
+  async getBillingProfile(): Promise<TenantBillingProfile> {
+    return this.get<TenantBillingProfile>("/api/tenant/billing/profile");
   }
 
   async listInvoices(): Promise<TenantInvoiceRecord[]> {
@@ -1049,22 +1103,44 @@ export class ApiClient {
 
   // ── Platform Presence ──
 
-  async getPlatformPresence(): Promise<PlatformPresenceSummary> {
-    return this.get<PlatformPresenceSummary>("/api/platform-presence");
+  async getPlatformPresence(filters?: {
+    driverId?: string;
+  }): Promise<PlatformPresenceSummary> {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/platform-presence?${query}`
+      : "/api/platform-presence";
+    return this.get<PlatformPresenceSummary>(url);
   }
 
   async setPlatformOnline(
     command: SetPlatformOnlineCommand,
+    filters?: { driverId?: string },
   ): Promise<PlatformPresenceRecord> {
-    return this.post<PlatformPresenceRecord>("/api/platform-presence/online", {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/platform-presence/online?${query}`
+      : "/api/platform-presence/online";
+    return this.post<PlatformPresenceRecord>(url, {
       body: command,
     });
   }
 
   async setPlatformOffline(
     command: SetPlatformOfflineCommand,
+    filters?: { driverId?: string },
   ): Promise<PlatformPresenceRecord> {
-    return this.post<PlatformPresenceRecord>("/api/platform-presence/offline", {
+    const params = new URLSearchParams();
+    if (filters?.driverId) params.set("driverId", filters.driverId);
+    const query = params.toString();
+    const url = query
+      ? `/api/platform-presence/offline?${query}`
+      : "/api/platform-presence/offline";
+    return this.post<PlatformPresenceRecord>(url, {
       body: command,
     });
   }
@@ -1714,6 +1790,25 @@ export class ApiClient {
     );
   }
 
+  // ── Platform Adapters ──
+
+  async listPlatformAdapters(): Promise<PlatformAdapter[]> {
+    return this.getList<PlatformAdapter>("/api/platform-admin/adapters");
+  }
+
+  async getPlatformAdapter(id: string): Promise<PlatformAdapter> {
+    return this.get<PlatformAdapter>(`/api/platform-admin/adapters/${id}`);
+  }
+
+  async updatePlatformAdapter(
+    id: string,
+    command: UpdatePlatformAdapterCommand,
+  ): Promise<PlatformAdapter> {
+    return this.patch<PlatformAdapter>(`/api/platform-admin/adapters/${id}`, {
+      body: command,
+    });
+  }
+
   // ── Regulatory Registry ──
 
   async listVehicles(): Promise<VehicleRegistryRecord[]> {
@@ -1725,6 +1820,12 @@ export class ApiClient {
   async listDrivers(): Promise<DriverRegistryRecord[]> {
     return this.getList<DriverRegistryRecord>(
       "/api/regulatory-registry/drivers",
+    );
+  }
+
+  async listDriverLocations(): Promise<DriverLocationSnapshot[]> {
+    return this.getList<DriverLocationSnapshot>(
+      "/api/regulatory-registry/driver-locations",
     );
   }
 
@@ -1742,6 +1843,18 @@ export class ApiClient {
   ): Promise<DriverRegistryRecord> {
     return this.post<DriverRegistryRecord>(
       `/api/regulatory-registry/drivers/${driverId}/lifecycle`,
+      {
+        body: command,
+      },
+    );
+  }
+
+  async updateDriverWorkState(
+    driverId: string,
+    command: UpdateDriverWorkStateCommand,
+  ): Promise<DriverRegistryRecord> {
+    return this.post<DriverRegistryRecord>(
+      `/api/regulatory-registry/drivers/${driverId}/work-state`,
       {
         body: command,
       },

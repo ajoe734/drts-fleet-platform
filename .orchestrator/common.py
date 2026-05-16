@@ -207,7 +207,25 @@ def run_command(
 
 
 def command_exists(name: str) -> str | None:
-    return shutil.which(name)
+    candidate = str(name or "").strip()
+    if not candidate:
+        return None
+    if os.path.sep in candidate:
+        path = Path(os.path.expanduser(os.path.expandvars(candidate)))
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+        return None
+    resolved = shutil.which(candidate)
+    if resolved:
+        return resolved
+    local_candidates = [
+        ROOT / ".orchestrator" / "bin" / "node_modules" / ".bin" / candidate,
+        ROOT / ".orchestrator" / "bin" / candidate,
+    ]
+    for path in local_candidates:
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    return None
 
 
 def runtime_env_overrides(runtime: dict[str, Any] | None) -> dict[str, str]:

@@ -1,28 +1,96 @@
 import { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TextInput,
-  Alert,
-  ActivityIndicator,
-  ScrollView,
-} from "react-native";
+import { View, Text, StyleSheet, Alert, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import type { ShiftRecord } from "@drts/contracts";
-import { getDriverClient } from "@/lib/api-client";
+import {
+  getDriverClient,
+  getDriverId,
+  isDriverIdentityProvisioned,
+} from "@/lib/api-client";
+import { AppScreen } from "@/components/ui/AppScreen";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { FormField } from "@/components/ui/FormField";
+import { ActionButton } from "@/components/ui/ActionButton";
+import { BottomActionBar } from "@/components/ui/BottomActionBar";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { IconButton } from "@/components/ui/IconButton";
+import { StatusChip } from "@/components/ui/StatusChip";
+import { Tokens } from "@/components/ui/tokens";
+
+const ODOMETER_PATTERN = /^\d+$/;
+
+function getOdometerValidationMessage(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (!ODOMETER_PATTERN.test(trimmed)) {
+    return "里程表只能輸入 0-9 整數。";
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isSafeInteger(parsed)) {
+    return "里程數值過大，請重新確認。";
+  }
+
+  return null;
+}
+
+function formatShiftDateTime(value: string): string {
+  return new Date(value).toLocaleString("zh-TW");
+}
+
+function formatOdometer(value: number | null): string {
+  if (value == null) {
+    return "未填寫";
+  }
+
+  return `${value.toLocaleString("zh-TW")} km`;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  return fallback;
+}
+
+function ShiftDetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value}</Text>
+    </View>
+  );
+}
 
 export default function ShiftScreen() {
+  const router = useRouter();
+  const isProvisioned = isDriverIdentityProvisioned();
+
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [activeShift, setActiveShift] = useState<ShiftRecord | null>(null);
   const [vehicleId, setVehicleId] = useState("");
   const [location, setLocation] = useState("");
   const [odometer, setOdometer] = useState("");
   const [shiftEnabled, setShiftEnabled] = useState<boolean | null>(null);
-  const router = useRouter();
+  const [screenError, setScreenError] = useState<string | null>(null);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+
+  const odometerError = getOdometerValidationMessage(odometer);
+  const hasValidationError = Boolean(odometerError);
 
   useEffect(() => {
+    if (!isProvisioned) {
+      setLoading(false);
+      return;
+    }
+
     const client = getDriverClient();
 
     client
@@ -30,64 +98,111 @@ export default function ShiftScreen() {
       .then((enabled) => {
         setShiftEnabled(enabled);
         if (enabled) {
-          loadShifts();
+          void loadShifts();
         } else {
           setLoading(false);
         }
       })
       .catch(() => {
-        loadShifts();
+        // Fallback to loading shifts if feature flag check fails
+        void loadShifts();
       });
-  }, []);
+  }, [isProvisioned]);
 
-  const loadShifts = async () => {
+  const loadShifts = async ({ manual = false }: { manual?: boolean } = {}) => {
+    if (!isProvisioned) return;
+
+    if (manual) {
+      setRefreshing(true);
+    }
+
     const client = getDriverClient();
+    const driverId = getDriverId();
     try {
-      const shifts = await client.listShifts("driver-demo-001");
+      const shifts = await client.listShifts(driverId);
       const active = shifts.find((shift) => shift.status === "active");
       setActiveShift(active ?? null);
-    } catch {
-      // No shifts
+      setScreenError(null);
+    } catch (error: unknown) {
+      setScreenError(getErrorMessage(error, "班次資料載入失敗，請稍後再試。"));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
+  // Guard clause for unprovisioned user
+  if (!isProvisioned) {
+    return (
+      <AppScreen scrollable={false}>
+        <PageHeader title="班表與出勤" />
+        <EmptyState
+          title="尚未完成裝置配置"
+          description="完成裝置綁定後，才能查看班表與進行上下線打卡。"
+          icon="lock-closed-outline"
+          actionTitle="前往配置裝置"
+          onAction={() => router.push("/onboarding")}
+          style={styles.fillState}
+        />
+      </AppScreen>
+    );
+  }
+
   const handleClockIn = async () => {
+    if (odometerError) {
+      Alert.alert("輸入錯誤", odometerError);
+      return;
+    }
+
+    const trimmedOdometer = odometer.trim();
     setSubmitting(true);
+    setSubmissionError(null);
     const client = getDriverClient();
+    const driverId = getDriverId();
     try {
       const result = await client.clockIn({
-        driverId: "driver-demo-001",
-        vehicleId: vehicleId || undefined,
-        location: location || undefined,
-        odometer: odometer ? Number(odometer) : undefined,
+        driverId,
+        vehicleId: vehicleId.trim() || undefined,
+        location: location.trim() || undefined,
+        odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
       });
       setActiveShift(result);
+      setScreenError(null);
       Alert.alert("成功", "已完成上線打卡。");
       setVehicleId("");
       setLocation("");
       setOdometer("");
-    } catch (e: any) {
-      Alert.alert("錯誤", e.message);
+    } catch (error: unknown) {
+      setSubmissionError(getErrorMessage(error, "上線打卡失敗，請稍後再試。"));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleClockOut = async () => {
+    if (odometerError) {
+      Alert.alert("輸入錯誤", odometerError);
+      return;
+    }
+
+    const trimmedOdometer = odometer.trim();
     setSubmitting(true);
+    setSubmissionError(null);
     const client = getDriverClient();
+    const driverId = getDriverId();
     try {
       await client.clockOut({
-        driverId: "driver-demo-001",
-        location: location || undefined,
-        odometer: odometer ? Number(odometer) : undefined,
+        driverId,
+        location: location.trim() || undefined,
+        odometer: trimmedOdometer ? Number(trimmedOdometer) : undefined,
       });
       setActiveShift(null);
+      setScreenError(null);
       Alert.alert("成功", "已完成下線打卡。");
-    } catch (e: any) {
-      Alert.alert("錯誤", e.message);
+      setLocation("");
+      setOdometer("");
+    } catch (error: unknown) {
+      setSubmissionError(getErrorMessage(error, "下線打卡失敗，請稍後再試。"));
     } finally {
       setSubmitting(false);
     }
@@ -95,147 +210,253 @@ export default function ShiftScreen() {
 
   if (loading) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" />
-        <Text style={styles.label}>載入班表資料中…</Text>
-      </View>
+      <AppScreen scrollable={false}>
+        <PageHeader title="班表與出勤" />
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={Tokens.colors.primary} />
+          <Text style={styles.label}>載入班表資料中…</Text>
+        </View>
+      </AppScreen>
     );
   }
 
-  if (shiftEnabled === null || !shiftEnabled) {
+  if (shiftEnabled === false) {
     return (
-      <View style={styles.center}>
-        <Text style={styles.title}>班表追蹤暫停提供</Text>
-        <Text style={styles.empty}>此功能目前未啟用。</Text>
-      </View>
+      <AppScreen scrollable={false}>
+        <PageHeader title="班表與出勤" />
+        <EmptyState
+          title="班表追蹤暫停提供"
+          description="此功能目前未啟用，請稍後再試或先返回工作台。"
+          icon="calendar-outline"
+          actionTitle="返回工作台"
+          onAction={() => router.push("/onboarding")}
+          style={styles.fillState}
+        />
+      </AppScreen>
+    );
+  }
+
+  if (screenError && !activeShift && !refreshing) {
+    return (
+      <AppScreen scrollable={false}>
+        <PageHeader
+          title="班表與出勤"
+          rightElement={
+            <IconButton
+              icon="refresh"
+              onPress={() => {
+                setLoading(true);
+                void loadShifts();
+              }}
+              accessibilityLabel="重新整理班次資料"
+            />
+          }
+        />
+        <EmptyState
+          title="班次資料暫時無法載入"
+          description={screenError}
+          icon="alert-circle-outline"
+          actionTitle="重新整理"
+          onAction={() => {
+            setLoading(true);
+            void loadShifts();
+          }}
+          style={styles.fillState}
+        />
+      </AppScreen>
     );
   }
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.title}>班表與出勤</Text>
-      <Text style={styles.subtitle}>
-        {activeShift
-          ? `本班次開始時間：${new Date(activeShift.clockedInAt).toLocaleTimeString()}`
-          : "請先上線打卡以開始班次。"}
-      </Text>
+    <View style={{ flex: 1 }}>
+      <AppScreen>
+        <PageHeader
+          title="班表與出勤"
+          subtitle={activeShift ? "執勤中" : "準備開始班次"}
+          rightElement={
+            <IconButton
+              icon="refresh"
+              onPress={() => void loadShifts({ manual: true })}
+              disabled={loading || submitting || refreshing}
+              accessibilityLabel="重新整理班次資料"
+            />
+          }
+        />
 
-      {activeShift && (
-        <View style={styles.activeCard}>
-          <Text style={styles.activeTitle}>🟢 執勤中</Text>
-          <Text style={styles.activeDetail}>
-            車輛：{activeShift.vehicleId ?? "尚未指派"}
-          </Text>
-          <Text style={styles.activeDetail}>
-            開始時間：{new Date(activeShift.clockedInAt).toLocaleString()}
-          </Text>
+        <View style={styles.content}>
+          {screenError ? (
+            <ErrorBanner message={`資料同步異常：${screenError}`} />
+          ) : null}
+          {submissionError ? <ErrorBanner message={submissionError} /> : null}
+
+          {activeShift ? (
+            <View style={styles.activeCard}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>目前班次</Text>
+                <StatusChip label="執勤中" variant="success" />
+              </View>
+
+              <ShiftDetailRow
+                label="車輛"
+                value={activeShift.vehicleId ?? "尚未指派"}
+              />
+              <ShiftDetailRow
+                label="開始時間"
+                value={formatShiftDateTime(activeShift.clockedInAt)}
+              />
+              <ShiftDetailRow
+                label="起始位置"
+                value={activeShift.startLocation ?? "未填寫"}
+              />
+              <ShiftDetailRow
+                label="起始里程"
+                value={formatOdometer(activeShift.startOdometer)}
+              />
+
+              <View style={styles.formSeparator} />
+
+              <FormField
+                label="目前里程表（選填）"
+                value={odometer}
+                onChangeText={setOdometer}
+                placeholder="例如 50000"
+                keyboardType="numeric"
+                helpText="若需更新里程請於下線前填寫"
+                error={odometerError ?? undefined}
+              />
+
+              <FormField
+                label="目前位置（選填）"
+                value={location}
+                onChangeText={setLocation}
+                placeholder="例如 營運據點 B"
+              />
+            </View>
+          ) : (
+            <View style={styles.activeCard}>
+              <View style={styles.cardHeader}>
+                <Text style={styles.cardTitle}>目前狀態</Text>
+                <StatusChip label="待上線" variant="default" />
+              </View>
+              <Text style={styles.instruction}>
+                完成上線打卡後，系統會開始追蹤本班次的出勤與里程資訊。
+              </Text>
+
+              <View style={styles.formSeparator} />
+
+              <FormField
+                label="車輛編號（選填）"
+                value={vehicleId}
+                onChangeText={setVehicleId}
+                placeholder="例如 ABC-1234"
+              />
+
+              <FormField
+                label="位置（選填）"
+                value={location}
+                onChangeText={setLocation}
+                placeholder="例如 營運據點 A"
+              />
+
+              <FormField
+                label="里程表（選填）"
+                value={odometer}
+                onChangeText={setOdometer}
+                placeholder="例如 50000"
+                keyboardType="numeric"
+                helpText="僅接受整數數字，留白則不送出里程資料。"
+                error={odometerError ?? undefined}
+              />
+            </View>
+          )}
         </View>
-      )}
+      </AppScreen>
 
-      {!activeShift && (
-        <View style={styles.form}>
-          <Text style={styles.fieldLabel}>車輛編號（選填）</Text>
-          <TextInput
-            style={styles.input}
-            value={vehicleId}
-            onChangeText={setVehicleId}
-            placeholder="例如 ABC-1234"
+      <BottomActionBar>
+        {activeShift ? (
+          <ActionButton
+            title="下線打卡"
+            onPress={handleClockOut}
+            variant="danger"
+            loading={submitting}
+            disabled={hasValidationError}
+            style={{ flex: 1 }}
           />
-
-          <Text style={styles.fieldLabel}>位置（選填）</Text>
-          <TextInput
-            style={styles.input}
-            value={location}
-            onChangeText={setLocation}
-            placeholder="例如 營運據點 A"
+        ) : (
+          <ActionButton
+            title="上線打卡"
+            onPress={handleClockIn}
+            variant="primary"
+            loading={submitting}
+            disabled={hasValidationError}
+            style={{ flex: 1 }}
           />
-
-          <Text style={styles.fieldLabel}>里程表（選填）</Text>
-          <TextInput
-            style={styles.input}
-            value={odometer}
-            onChangeText={setOdometer}
-            placeholder="例如 50000"
-            keyboardType="numeric"
-          />
-        </View>
-      )}
-
-      {activeShift ? (
-        <Text
-          style={[styles.btn, styles.btnRed, submitting && styles.btnDisabled]}
-          onPress={handleClockOut}
-        >
-          {submitting ? "處理中…" : "下線打卡"}
-        </Text>
-      ) : (
-        <Text
-          style={[
-            styles.btn,
-            styles.btnGreen,
-            submitting && styles.btnDisabled,
-          ]}
-          onPress={handleClockIn}
-        >
-          {submitting ? "處理中…" : "上線打卡"}
-        </Text>
-      )}
-
-      <View style={styles.footer}>
-        <Text style={styles.link} onPress={() => router.push("/earnings")}>
-          查看收入 →
-        </Text>
-      </View>
-    </ScrollView>
+        )}
+      </BottomActionBar>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 16, backgroundColor: "#fff" },
-  center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  title: { fontSize: 24, fontWeight: "bold", marginBottom: 4 },
-  subtitle: { fontSize: 14, color: "#666", marginBottom: 16 },
+  center: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: Tokens.spacing.xl,
+  },
+  fillState: {
+    flex: 1,
+  },
+  content: { paddingVertical: Tokens.spacing.lg },
+  title: { ...Tokens.type.sectionTitle, marginBottom: 4 },
+  instruction: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textMuted,
+    marginBottom: Tokens.spacing.md,
+  },
   activeCard: {
-    backgroundColor: "#f0fff0",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-  },
-  activeTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 8,
-    color: "#2a7",
-  },
-  activeDetail: { fontSize: 14, color: "#666", marginBottom: 4 },
-  form: { marginBottom: 16 },
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    marginBottom: 4,
-    marginTop: 12,
-    color: "#333",
-  },
-  input: {
+    backgroundColor: Tokens.colors.surface,
+    padding: Tokens.spacing.lg,
+    borderRadius: Tokens.radius.md,
     borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
+    borderColor: Tokens.colors.border,
   },
-  btn: {
+  cardHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: Tokens.spacing.lg,
+  },
+  cardTitle: {
+    ...Tokens.type.label,
+    fontWeight: "bold",
+    color: Tokens.colors.textStrong,
+  },
+  detailRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  detailLabel: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textMuted,
+  },
+  detailValue: {
+    ...Tokens.type.body,
+    color: Tokens.colors.textStrong,
+    fontWeight: "500",
+    flex: 1,
+    textAlign: "right",
+  },
+  formSeparator: {
+    height: 1,
+    backgroundColor: Tokens.colors.border,
+    marginVertical: Tokens.spacing.xl,
+  },
+  label: { marginTop: 8, color: Tokens.colors.textMuted },
+  empty: {
     textAlign: "center",
-    padding: 14,
-    borderRadius: 8,
-    fontSize: 16,
-    fontWeight: "600",
-    marginVertical: 8,
+    color: Tokens.colors.textMuted,
+    ...Tokens.type.body,
   },
-  btnGreen: { backgroundColor: "#34C759", color: "#fff" },
-  btnRed: { backgroundColor: "#FF3B30", color: "#fff" },
-  btnDisabled: { opacity: 0.6 },
-  footer: { marginTop: 24, alignItems: "center" },
-  link: { color: "#007AFF", fontSize: 16 },
-  label: { marginTop: 8, color: "#666" },
-  empty: { textAlign: "center", color: "#999", marginTop: 32 },
 });

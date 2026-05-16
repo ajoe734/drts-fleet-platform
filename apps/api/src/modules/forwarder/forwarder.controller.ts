@@ -1,8 +1,19 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+} from "@nestjs/common";
 
 import type {
   BroadcastForwardedOrderCommand,
   CompleteForwarderReconciliationCommand,
+  DriverForwardedOrderAcceptCommand,
+  DriverForwardedOrderRejectCommand,
   EngageForwarderManualFallbackCommand,
   IngestExternalOrderCommand,
   ReportForwarderSyncFailureCommand,
@@ -10,12 +21,37 @@ import type {
   SyncForwardedOrderStatusCommand,
 } from "@drts/contracts";
 
-import { toApiSuccessEnvelope } from "../../common/api-envelope";
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
+import { CurrentIdentity } from "../../common/auth";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { ForwarderService } from "./forwarder.service";
 
 @Controller()
 export class ForwarderController {
   constructor(private readonly forwarderService: ForwarderService) {}
+
+  private resolveDriverId(
+    identity: BootstrapRequestIdentity | null,
+    requestedDriverId?: string,
+  ) {
+    if (identity?.actorType === "driver_user" && identity.actorId) {
+      return identity.actorId;
+    }
+
+    const normalizedDriverId = requestedDriverId?.trim();
+    if (normalizedDriverId) {
+      return normalizedDriverId;
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.BAD_REQUEST,
+      "DRIVER_ID_REQUIRED",
+      "driverId query is required when the caller is not a driver bootstrap identity.",
+    );
+  }
 
   @Post("forwarder/orders/inbound")
   ingestInboundOrder(
@@ -29,12 +65,17 @@ export class ForwarderController {
   }
 
   @Post("forwarder/webhooks/grab-taiwan")
-  ingestGrabTaiwanWebhook(
+  async ingestGrabTaiwanWebhook(
     @Body() payload: Record<string, unknown>,
+    @Headers() headers: Record<string, string | string[] | undefined>,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.forwarderService.ingestGrabTaiwanWebhook(payload, requestId),
+      await this.forwarderService.ingestGrabTaiwanWebhook(
+        payload,
+        headers,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -45,6 +86,72 @@ export class ForwarderController {
       {
         items: this.forwarderService.listOrders(),
       },
+      requestId,
+    );
+  }
+
+  @Get("driver/task-views")
+  listDriverTaskViews(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Query("driverId") requestedDriverId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverId(identity, requestedDriverId);
+    return toApiSuccessEnvelope(
+      {
+        items: this.forwarderService.listDriverTaskViews(driverId),
+      },
+      requestId,
+    );
+  }
+
+  @Get("driver/task-views/:taskId")
+  getDriverTaskView(
+    @Param("taskId") taskId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Query("driverId") requestedDriverId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverId(identity, requestedDriverId);
+    return toApiSuccessEnvelope(
+      this.forwarderService.getDriverTaskView(driverId, taskId),
+      requestId,
+    );
+  }
+
+  @Post("driver/forwarded-orders/:taskId/accept")
+  async acceptForwardedOrder(
+    @Param("taskId") taskId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: DriverForwardedOrderAcceptCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverId(identity, command.driverId);
+    return toApiSuccessEnvelope(
+      await this.forwarderService.acceptForwardedOrder(
+        taskId,
+        driverId,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("driver/forwarded-orders/:taskId/reject")
+  rejectForwardedOrder(
+    @Param("taskId") taskId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Body() command: DriverForwardedOrderRejectCommand,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const driverId = this.resolveDriverId(identity, command.driverId);
+    return toApiSuccessEnvelope(
+      this.forwarderService.rejectForwardedOrder(
+        taskId,
+        driverId,
+        command.reason,
+        requestId,
+      ),
       requestId,
     );
   }

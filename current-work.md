@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-01T09:02:17Z
+Last updated: 2026-05-06T03:11:30Z
 
 ## Objective
 
@@ -83,38 +83,38 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Completion Evidence (last 10)
 
-| Task           | Commit                                   | Subject                                                           | LLM Agent | Reviewer | Recorded At          |
-| -------------- | ---------------------------------------- | ----------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `SYNC-001`     | 6d4b7f1a99f76a260837e67bc1e80d8da70db9b3 | SYNC-001: record status dashboard sync review                     | Gemini2   | Codex    | 2026-05-01T07:52:06Z |
-| `SYNC-002`     | 6c5ba6865af075f1b2cde9a69f37eac9d141caba | SYNC-002: reconcile workflow release gates                        | Gemini2   | Codex    | 2026-05-01T08:17:45Z |
-| `SYNC-003`     | 0ee6948cded997b07b0cae009a83f30f9ff7aade | SYNC-003: reclassify UAT evidence gates                           | Gemini2   | Codex    | 2026-05-01T08:26:17Z |
-| `XREPO-001`    | c74f82cd87c5b774286a9740c3f49a229504ed1d | chore(status): approve cross-repo closeout                        | Gemini2   | Codex    | 2026-05-01T08:14:24Z |
-| `DEPLOY-001`   | 394c3e2201dc26a9f83ff2b78ddaa3ef7626bd01 | chore(closeout): review proof gates and stabilize chairman triage | Gemini2   | Codex    | 2026-05-01T08:14:32Z |
-| `EXT-001`      | 8a92c1f78b2c10d34ddf6cfe964facbccd3bd985 | EXT-001: record issuer eligibility external gate                  | Gemini2   | Codex    | 2026-05-01T08:32:05Z |
-| `EXT-002`      | 137cac133a9a7b341f01264ff908fb3876330d14 | EXT-002: record forwarder adapter proof gate                      | Gemini2   | Codex    | 2026-05-01T08:38:58Z |
-| `EXT-003`      | 5ed2f8adc5699de90ad894a53c6fecea89d3a861 | EXT-003: record mobile distribution gate                          | Gemini2   | Codex    | 2026-05-01T08:44:11Z |
-| `EXT-004`      | 0afd14413725f046fb1320fecb21a57fbf6a24b0 | EXT-004: record CTI recording filing gate                         | Gemini2   | Codex    | 2026-05-01T08:54:13Z |
-| `BDX-CLOSEOUT` | f7f3e7c1808363ef600cb3aacb8b1de8bc112850 | BDX-CLOSEOUT: finalize blueprint delta closeout                   | Gemini2   | Codex    | 2026-05-01T09:02:16Z |
+| Task                             | Commit                                   | Subject                                                  | LLM Agent | Reviewer | Recorded At          |
+| -------------------------------- | ---------------------------------------- | -------------------------------------------------------- | --------- | -------- | -------------------- |
+| `DRV-MAT-007`                    | b7e14a4                                  | DRV-MAT-007 unify driver platform status UX              | Codex2    | Codex    | 2026-05-05T02:04:06Z |
+| `DRV-MAT-008`                    | e4edb8621201f5c8aaec38d8304ad2b52994f006 | feat(DRV-MAT-008): materialize driver earnings dashboard | Codex2    | Codex    | 2026-05-05T12:25:14Z |
+| `DRV-MAT-009`                    | c13cbf41b260cbf39a022a229eb29e2b86641773 | feat(DRV-MAT-009): materialize driver settings           | Codex2    | Codex    | 2026-05-05T03:02:16Z |
+| `DRV-MAT-010`                    | 23f9ef4d0519b1fa8e7912f420e385a28f49c7dc | DRV-MAT-010: driver app productization verification pack | Claude2   | Codex    | 2026-05-05T12:55:19Z |
+| `DRV-MAT-001-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                       | Codex2    | Gemini2  | 2026-05-05T01:30:48Z |
+| `DRV-MAT-001-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                       | Codex2    | Gemini   | 2026-05-05T00:45:36Z |
+| `DRV-MAT-006-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                       | Codex2    | Claude2  | 2026-05-05T02:38:09Z |
+| `DRV-MAT-008-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                       | Codex2    | Codex    | 2026-05-05T12:08:13Z |
+| `DRV-MAT-009-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                       | Codex2    | Codex    | 2026-05-05T12:16:40Z |
+| `DRV-MAT-010-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                       | Codex     | Claude2  | 2026-05-05T13:02:37Z |
 
 ## Latest Checkpoints
 
-- 2026-05-01T08:42:59Z Codex: `EXT-003` Review passed after correction: EXT-003 has explicit blocker records EXT-003-BLK-001..007, links existing EAS evidence, names build profiles/tester groups, and blocks repo-local mobile distribution overclaim.
-- 2026-05-01T08:44:11Z Gemini2: `EXT-003` Done: mobile distribution gate committed and pushed; EXT-003-BLK-001..007 now track Expo account, Android signing, Apple team, tester groups, EAS secret policy, release channel ownership, and install evidence blockers.
-- 2026-05-01T08:45:11Z Orchestrator: `EXT-003` Background worker process exited after advancing the task to `done`.
-- 2026-05-01T08:45:12Z Orchestrator: `EXT-004` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-01T08:45:12Z Orchestrator: `EXT-004` Worker started via gemini: owned_ready_dispatch
-- 2026-05-01T08:45:32Z Gemini2: `EXT-004` Starting work on EXT-004: Setting up CTI/recording/filing activation gate.
-- 2026-05-01T08:46:00Z Gemini2: `EXT-004` Analyzing CTI callback and filing job mechanisms in callcenter and reporting-filing modules.
-- 2026-05-01T08:46:13Z Gemini2: `EXT-004` Defining CTI callback and filing job activation gate criteria and outlining simulation steps.
-- 2026-05-01T08:51:57Z Gemini2: `EXT-004` Reviewer correction in progress: CTI recording filing gate packet created; updating UAT, workflow, and retention anchors.
-- 2026-05-01T08:52:56Z Gemini2: `EXT-004` Handoff to Codex: CTI recording filing gate packet created and anchors updated: EXT-004-BLK-001..008 now define CTI callback, recording export, filing package, retention, and E2E-003 proof requirements; checks: prettier, ai_status doc-sync audit, git diff --check.
-- 2026-05-01T08:53:09Z Codex: `EXT-004` Review approved: EXT-004 gate packet is concrete, anchored, and avoids live-proof overclaim.
-- 2026-05-01T08:54:13Z Gemini2: `EXT-004` Done: CTI recording filing activation gate committed and pushed; EXT-004-BLK-001..008 now track missing CTI, callback, filing, export, retention, and E2E evidence.
-- 2026-05-01T08:55:15Z Orchestrator: `EXT-004` Background worker process exited after advancing the task to `done`.
-- 2026-05-01T08:55:15Z Orchestrator: `BDX-CLOSEOUT` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-01T08:55:15Z Orchestrator: `BDX-CLOSEOUT` Worker started via gemini: owned_ready_dispatch
-- 2026-05-01T08:55:33Z Gemini2: `BDX-CLOSEOUT` Starting final blueprint delta closeout narrative for BDX-CLOSEOUT
-- 2026-05-01T08:59:28Z Gemini2: `BDX-CLOSEOUT` Reviewer correction in progress: Gemini2 worker exited after start-only output; final closeout narrative is being written into audit, checklist, and execution packet with external/pilot/production gate language.
-- 2026-05-01T09:00:56Z Gemini2: `BDX-CLOSEOUT` Handoff to Codex: Final blueprint delta closeout narrative is ready: audit, master checklist, and execution packet now distinguish repo-local done from external-gated, pilot-gated, and production-gated status; stale audit-time ORX/dashboard/tenant-dirty claims are replaced with closeout results. Checks: prettier check, ai_status doc-sync audit, git diff --check.
-- 2026-05-01T09:01:10Z Codex: `BDX-CLOSEOUT` Review approved: final closeout narrative is concrete, current, and keeps external/pilot/production gates explicit.
-- 2026-05-01T09:02:16Z Gemini2: `BDX-CLOSEOUT` Done: final blueprint delta closeout narrative committed and pushed; repo-local done is separated from external-gated, pilot-gated, and production-gated status.
+- 2026-05-05T15:01:44Z Orchestrator: SessionStart: SessionStart
+- 2026-05-05T15:01:44Z Orchestrator: SessionStart: SessionStart
+- 2026-05-05T15:01:46Z Orchestrator: SessionEnd: SessionEnd
+- 2026-05-05T15:01:48Z Orchestrator: Stop: Stop
+- 2026-05-05T15:01:48Z Orchestrator: SessionEnd: SessionEnd
+- 2026-05-05T15:10:24Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T15:25:25Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T15:40:28Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T15:55:37Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T16:10:40Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T16:25:50Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T16:40:57Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T16:56:01Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T17:11:09Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T17:26:14Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T17:41:14Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T17:56:20Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T18:11:20Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-05T18:26:26Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback
+- 2026-05-06T03:09:26Z Orchestrator: underutilized but no sidecar candidates matched the catalog or dynamic fallback

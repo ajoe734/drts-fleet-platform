@@ -196,6 +196,15 @@ describe("BillingSettlementService settlement matrix", () => {
       mirrorOrderId: "mirror-order-001",
       externalOrderId: "grab-ext-001",
       linkedReconciliationJobId: "recon-job-forwarder-001",
+      forwardedFinanceContext: {
+        platformCode: "grab_taiwan",
+        reconciliationReason: "sync_failed",
+        fareAuthority: "external_platform",
+        settlementAuthority: "external_platform",
+        driverPayoutAuthority: "external_platform",
+        localLedgerMode: "shadow_only",
+        note: "Mirror status diverged from upstream platform.",
+      },
     });
   });
 

@@ -1,40 +1,9 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
-
-/**
- * PlatformTaskBadge
- * Renders a small pill badge with the human-readable platform name.
- * When platformCode is null, shows the owned/direct label.
- */
-export function PlatformTaskBadge({
-  platformCode,
-}: {
-  platformCode: string | null;
-}) {
-  const { label, bgColor, textColor } = getBadgeStyle(platformCode);
-  return (
-    <View style={[styles.badge, { backgroundColor: bgColor }]}>
-      <Text style={[styles.badgeText, { color: textColor }]}>{label}</Text>
-    </View>
-  );
-}
-
-function getBadgeStyle(platformCode: string | null) {
-  const code = (platformCode ?? "direct").toLowerCase();
-  const label = PLATFORM_LABELS[code] ?? code;
-  // Owned/direct vs external colors
-  const isExternal = code !== "direct" && code !== "owned";
-  return {
-    label,
-    bgColor: isExternal ? "rgb(224, 247, 250)" : "rgb(232, 245, 233)",
-    textColor: isExternal ? "rgb(0, 96, 100)" : "rgb(27, 94, 32)",
-  };
-}
+import { AuthorityBanner, PlatformBadge } from "@/components/ui";
 
 const PLATFORM_LABELS: Record<string, string> = {
-  direct: "Direct",
-  owned: "Direct",
-  // Common 3P platforms
+  direct: "自營派單",
+  owned: "自營派單",
   uber: "Uber",
   lyft: "Lyft",
   grab: "Grab",
@@ -43,14 +12,77 @@ const PLATFORM_LABELS: Record<string, string> = {
   didi: "DiDi",
 };
 
-const styles = StyleSheet.create({
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-    marginLeft: 8,
-  },
-  badgeText: { fontSize: 11, fontWeight: "600" },
-});
+function humanizePlatformCode(platformCode: string) {
+  return platformCode
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+export function normalizePlatformCode(platformCode: string | null | undefined) {
+  const normalizedCode = platformCode?.trim().toLowerCase() ?? "owned";
+  return normalizedCode.length > 0 ? normalizedCode : "owned";
+}
+
+export function isOwnedPlatformCode(code: string) {
+  return code === "owned" || code === "direct";
+}
+
+export function getPlatformDisplayLabel(
+  platformCode: string | null | undefined,
+) {
+  const code = normalizePlatformCode(platformCode);
+  return PLATFORM_LABELS[code] ?? humanizePlatformCode(code);
+}
+
+export function PlatformTaskBadge({
+  platformCode,
+}: {
+  platformCode: string | null;
+}) {
+  const code = normalizePlatformCode(platformCode);
+  const label = getPlatformDisplayLabel(code);
+
+  return (
+    <PlatformBadge
+      code={code}
+      name={label}
+      forwarded={!isOwnedPlatformCode(code)}
+      size="sm"
+    />
+  );
+}
+
+export function PlatformAuthorityBanner({
+  platformCode,
+  description,
+}: {
+  platformCode: string | null;
+  description: string;
+}) {
+  const code = normalizePlatformCode(platformCode);
+  const label = getPlatformDisplayLabel(code);
+
+  if (isOwnedPlatformCode(code)) {
+    return (
+      <AuthorityBanner
+        title="自營派單 · DRTS"
+        authorityLabel="本地可操作"
+        description={description}
+        tone="owned"
+        icon="shield-checkmark"
+      />
+    );
+  }
+
+  return (
+    <AuthorityBanner
+      title={`平台主導 · ${label}`}
+      authorityLabel="來源平台規則生效"
+      description={description}
+      tone="platform"
+      icon="swap-horizontal"
+    />
+  );
+}
 
 export default PlatformTaskBadge;

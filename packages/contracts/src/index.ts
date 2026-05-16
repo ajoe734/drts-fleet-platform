@@ -1,3 +1,4 @@
+import { PLATFORM_CODES } from "./platform-codes";
 import type { PlatformCode } from "./platform-codes";
 
 export const ORDER_DOMAINS = ["owned", "forwarded"] as const;
@@ -1981,6 +1982,61 @@ export interface DriverTaskStreamEventEnvelope extends DomainEventEnvelope<Drive
   eventType: DriverTaskStreamEventType;
 }
 
+export const DRIVER_TASK_VIEW_SOURCES = ["drts", ...PLATFORM_CODES] as const;
+export type DriverTaskViewSource = (typeof DRIVER_TASK_VIEW_SOURCES)[number];
+
+export const DRIVER_TASK_ACTIONS = [
+  "accept",
+  "reject",
+  "depart",
+  "arrived_pickup",
+  "start",
+  "complete",
+] as const;
+export type DriverTaskAction = (typeof DRIVER_TASK_ACTIONS)[number];
+
+export const DRIVER_TASK_ACTION_STATES = [
+  "action_required",
+  "awaiting_platform",
+  "in_progress",
+  "blocked",
+  "completed",
+  "read_only",
+] as const;
+export type DriverTaskActionState = (typeof DRIVER_TASK_ACTION_STATES)[number];
+
+export const DRIVER_TASK_AUTHORITY_MODES = [
+  "drts",
+  "external_platform",
+] as const;
+export type DriverTaskAuthorityMode =
+  (typeof DRIVER_TASK_AUTHORITY_MODES)[number];
+
+export interface UnifiedDriverTaskView {
+  taskId: string;
+  orderId: string;
+  orderDomain: OrderDomain;
+  sourcePlatform: DriverTaskViewSource;
+  platformDisplayName: string;
+  externalOrderId: string | null;
+  nativeStatus: string | null;
+  localStatus: DriverTaskStatus | ForwardedOrderStatus;
+  driverActionState: DriverTaskActionState;
+  allowedActions: DriverTaskAction[];
+  routeLocked: boolean;
+  fareAuthority: DriverTaskAuthorityMode;
+  settlementAuthority: DriverTaskAuthorityMode;
+  driverPayoutAuthority: DriverTaskAuthorityMode;
+  requiresManualFallback: boolean;
+  requiresReauth: boolean;
+  syncIssueSummary: string | null;
+  blockingReason: string | null;
+  pickupSummary: string | null;
+  dropoffSummary: string | null;
+  deadlineAt: string | null;
+  updatedAt: string;
+}
+
 export type OpsDispatchStreamEventType =
   | "order_created"
   | "order_updated"
@@ -2984,6 +3040,16 @@ export interface ReopenReconciliationIssueCommand {
   artifactIds?: string[];
 }
 
+export interface ReconciliationIssueForwardedFinanceContext {
+  platformCode: PlatformCode;
+  reconciliationReason: "sync_failed" | "manual_fallback";
+  fareAuthority: DriverTaskAuthorityMode;
+  settlementAuthority: DriverTaskAuthorityMode;
+  driverPayoutAuthority: DriverTaskAuthorityMode;
+  localLedgerMode: "shadow_only";
+  note: string | null;
+}
+
 export interface ReconciliationIssueRecord {
   issueId: string;
   issueType: ReconciliationIssueType;
@@ -3003,6 +3069,7 @@ export interface ReconciliationIssueRecord {
   linkedReconciliationJobId: string | null;
   linkedInvoiceId: string | null;
   linkedReimbursementBatchId: string | null;
+  forwardedFinanceContext: ReconciliationIssueForwardedFinanceContext | null;
   resolutionCode: ReconciliationIssueResolutionCode | null;
   resolutionSummary: string | null;
   resolvedAt: string | null;
@@ -3238,6 +3305,82 @@ export type ForwardedOrderStatus = (typeof FORWARDED_ORDER_STATUSES)[number];
 export const ADAPTER_HEALTH_STATUSES = ["healthy", "degraded", "down"] as const;
 export type AdapterHealthStatus = (typeof ADAPTER_HEALTH_STATUSES)[number];
 
+export const ADAPTER_HEALTH_REASONS = [
+  "none",
+  "platform",
+  "auth",
+  "webhook",
+  "rate_limit",
+  "credential",
+  "stub",
+] as const;
+export type AdapterHealthReason = (typeof ADAPTER_HEALTH_REASONS)[number];
+
+export const ADAPTER_CREDENTIAL_STATUSES = [
+  "unknown",
+  "valid",
+  "invalid",
+  "expired",
+  "not_configured",
+  "stub",
+] as const;
+export type AdapterCredentialStatus =
+  (typeof ADAPTER_CREDENTIAL_STATUSES)[number];
+
+export const ADAPTER_AUTH_STATUSES = [
+  "unknown",
+  "authenticated",
+  "reauth_required",
+  "invalid",
+  "stub",
+] as const;
+export type AdapterAuthStatus = (typeof ADAPTER_AUTH_STATUSES)[number];
+
+export const ADAPTER_WEBHOOK_STATUSES = [
+  "not_applicable",
+  "unknown",
+  "healthy",
+  "failing",
+  "not_configured",
+  "stub",
+] as const;
+export type AdapterWebhookStatus = (typeof ADAPTER_WEBHOOK_STATUSES)[number];
+
+export const ADAPTER_RATE_LIMIT_STATUSES = [
+  "unknown",
+  "ok",
+  "limited",
+  "cooldown",
+  "stub",
+] as const;
+export type AdapterRateLimitStatus =
+  (typeof ADAPTER_RATE_LIMIT_STATUSES)[number];
+
+export const FORWARDER_ADAPTER_MODES = [
+  "stub",
+  "api",
+  "webhook",
+  "hybrid",
+] as const;
+export type ForwarderAdapterMode = (typeof FORWARDER_ADAPTER_MODES)[number];
+
+export const FORWARDER_ADAPTER_PRODUCTION_STATUSES = [
+  "stub",
+  "configuration_required",
+  "production_ready",
+] as const;
+export type ForwarderAdapterProductionStatus =
+  (typeof FORWARDER_ADAPTER_PRODUCTION_STATUSES)[number];
+
+export interface ForwarderAdapterCapabilitySummary {
+  mode: ForwarderAdapterMode;
+  productionStatus: ForwarderAdapterProductionStatus;
+  supportsInboundWebhook: boolean;
+  supportsOutboundActions: boolean;
+  supportedWebhookEvents: string[];
+  notes: string[];
+}
+
 export interface IngestExternalOrderCommand {
   platformCode: PlatformCode;
   externalOrderId: string;
@@ -3250,6 +3393,20 @@ export interface BroadcastForwardedOrderCommand {
 
 export interface RelayDriverAcceptCommand {
   driverId: string;
+}
+
+export interface DriverForwardedOrderAcceptCommand {
+  driverId?: string;
+}
+
+export interface RelayDriverRejectCommand {
+  driverId: string;
+  reason?: string | null;
+}
+
+export interface DriverForwardedOrderRejectCommand {
+  driverId?: string;
+  reason?: string | null;
 }
 
 export interface SyncForwardedOrderStatusCommand {
@@ -3323,11 +3480,44 @@ export interface ForwardedOrderRecord {
   updatedAt: string;
 }
 
+export const FORWARDED_DRIVER_ACTION_OUTCOMES = [
+  "accept_pending",
+  "confirmed_by_platform",
+  "lost_race",
+  "cancelled_by_platform",
+  "sync_failed",
+  "rejected",
+] as const;
+export type ForwardedDriverActionOutcome =
+  (typeof FORWARDED_DRIVER_ACTION_OUTCOMES)[number];
+
+export interface ForwardedDriverActionCorrelationIds {
+  mirrorOrderId: string;
+  reconciliationJobId: string | null;
+}
+
+export interface ForwardedDriverActionResponse {
+  action: Extract<DriverTaskAction, "accept" | "reject">;
+  outcome: ForwardedDriverActionOutcome;
+  driverMessage: string;
+  taskView: UnifiedDriverTaskView | null;
+  managementCorrelationIds: ForwardedDriverActionCorrelationIds;
+}
+
 export interface AdapterHealthRecord {
   platformCode: PlatformCode;
   status: AdapterHealthStatus;
+  reason: AdapterHealthReason;
+  capabilitySummary: ForwarderAdapterCapabilitySummary;
+  credentialStatus: AdapterCredentialStatus;
+  authStatus: AdapterAuthStatus;
+  webhookStatus: AdapterWebhookStatus;
+  rateLimitStatus: AdapterRateLimitStatus;
   lastCheckedAt: string;
   lastError: string | null;
+  lastWebhookReceivedAt: string | null;
+  lastRateLimitAt: string | null;
+  lastAuthFailureAt: string | null;
 }
 
 export interface ReconciliationJobRecord {
@@ -3364,8 +3554,6 @@ export interface ForwarderReconciliationIssue {
 // trigger background / async jobs. The HTTP response body carries only the
 // allocated job identifier and the initial status ("queued"), allowing the
 // caller to poll the GET endpoint for completion.
-//
-// Wire format (after SnakeCaseInterceptor): job_id / package_id / status
 // ---------------------------------------------------------------------------
 
 export interface ReportJobAccepted {
@@ -3963,6 +4151,7 @@ export const OPERATIONAL_ALERT_KEYS = [
   "driver_state_lag",
   "webhook_failure_burst",
   "eligibility_review_backlog",
+  "adapter_degradation",
 ] as const;
 export type OperationalAlertKey = (typeof OPERATIONAL_ALERT_KEYS)[number];
 
@@ -4054,6 +4243,34 @@ export interface OperationalAdapterMetrics {
   downAdapters: number;
 }
 
+export interface OperationalForwarderOpsMetrics {
+  totalForwardedOrders: number;
+  syncFailedOrders: number;
+  acceptPendingOrders: number;
+  manualFallbackQueue: number;
+  reconciliationQueue: number;
+  oldestSyncFailedLagMinutes: number | null;
+  oldestAcceptPendingLagMinutes: number | null;
+  oldestManualFallbackLagMinutes: number | null;
+  oldestReconciliationLagMinutes: number | null;
+}
+
+export interface OperationalAdapterDetailRecord {
+  platformCode: PlatformCode;
+  status: AdapterHealthStatus;
+  reason: AdapterHealthReason;
+  credentialStatus: AdapterCredentialStatus;
+  authStatus: AdapterAuthStatus;
+  webhookStatus: AdapterWebhookStatus;
+  rateLimitStatus: AdapterRateLimitStatus;
+  capabilitySummary: ForwarderAdapterCapabilitySummary;
+  lastCheckedAt: string;
+  lastError: string | null;
+  lastWebhookReceivedAt: string | null;
+  lastRateLimitAt: string | null;
+  lastAuthFailureAt: string | null;
+}
+
 export interface OperationalRoleView {
   route: OperationalAlertRoute;
   alertKeys: OperationalAlertKey[];
@@ -4065,6 +4282,7 @@ export interface OperationalRoleView {
     | "eligibility"
     | "reporting"
     | "adapters"
+    | "forwarder_ops"
   >;
 }
 
@@ -4078,6 +4296,8 @@ export interface OperationalObservabilitySnapshot {
   eligibility: OperationalEligibilityMetrics;
   reporting: OperationalReportingMetrics;
   adapters: OperationalAdapterMetrics;
+  forwarderOps: OperationalForwarderOpsMetrics;
+  adapterDetails: OperationalAdapterDetailRecord[];
   roleViews: OperationalRoleView[];
 }
 
@@ -4120,3 +4340,4 @@ export interface SetTenantStatusCommand {
 }
 
 export * from "./platform-codes";
+export * from "./platform-adapter-registry";

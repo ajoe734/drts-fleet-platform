@@ -12,6 +12,7 @@ type DriverHeartbeatAssignment = {
 } | null;
 
 type DriverIdentityBootstrapDeps = {
+  allowUnprovisionedRoute?: boolean;
   cancelled?: () => boolean;
   getDriverIdentityIssue: () => string | null;
   initializeDriverIdentity: () => Promise<void>;
@@ -28,25 +29,32 @@ type DriverIdentityBootstrapDeps = {
 export async function syncDriverIdentityBootstrap(
   deps: DriverIdentityBootstrapDeps,
 ): Promise<"synced" | "routed"> {
-  const routeToOnboardingIfIdentityInvalid = async () => {
-    if (
-      deps.cancelled?.() ||
-      deps.isDriverIdentityProvisioned() ||
-      !deps.getDriverIdentityIssue()
-    ) {
-      return false;
+  const handleUnprovisionedIdentity = async (): Promise<
+    "continue" | "hold" | "routed"
+  > => {
+    if (deps.cancelled?.() || deps.isDriverIdentityProvisioned()) {
+      return "continue";
     }
 
     await deps.syncDriverLocationHeartbeat(null);
+
+    if (deps.allowUnprovisionedRoute) {
+      return "hold";
+    }
+
     deps.resetDriverAppToOnboarding(deps.router);
-    return true;
+    return "routed";
   };
 
   try {
     await deps.initializeDriverIdentity();
 
-    if (await routeToOnboardingIfIdentityInvalid()) {
+    const unprovisionedIdentityResult = await handleUnprovisionedIdentity();
+    if (unprovisionedIdentityResult === "routed") {
       return "routed";
+    }
+    if (unprovisionedIdentityResult === "hold") {
+      return "synced";
     }
 
     const tasks = await deps.listDriverTasks();
@@ -65,8 +73,12 @@ export async function syncDriverIdentityBootstrap(
     );
     return "synced";
   } catch (error) {
-    if (await routeToOnboardingIfIdentityInvalid()) {
+    const unprovisionedIdentityResult = await handleUnprovisionedIdentity();
+    if (unprovisionedIdentityResult === "routed") {
       return "routed";
+    }
+    if (unprovisionedIdentityResult === "hold") {
+      return "synced";
     }
 
     deps.onWarning?.(error);

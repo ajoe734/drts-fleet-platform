@@ -23,6 +23,7 @@
   "dependencies": {
     "@drts/api-client": "workspace:*",
     "@drts/contracts": "workspace:*",
+    "@drts/ui-tokens": "workspace:*",
     "@expo/vector-icons": "^15.0.3",
     "@react-navigation/native": "^7.1.8",
     "expo": "~54.0.33",

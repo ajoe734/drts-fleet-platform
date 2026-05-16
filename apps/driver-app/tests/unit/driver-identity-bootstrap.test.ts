@@ -11,6 +11,49 @@ function createRouter() {
 }
 
 describe("syncDriverIdentityBootstrap", () => {
+  it("routes fresh unprovisioned deep links back to onboarding before loading tasks", async () => {
+    const syncDriverLocationHeartbeat = vi.fn().mockResolvedValue(undefined);
+    const resetDriverAppToOnboarding = vi.fn();
+    const listDriverTasks = vi.fn();
+
+    const result = await syncDriverIdentityBootstrap({
+      getDriverIdentityIssue: () => null,
+      initializeDriverIdentity: async () => {},
+      isDriverIdentityProvisioned: () => false,
+      listDriverTasks,
+      resetDriverAppToOnboarding,
+      router: createRouter(),
+      syncDriverLocationHeartbeat,
+    });
+
+    expect(result).toBe("routed");
+    expect(syncDriverLocationHeartbeat).toHaveBeenCalledWith(null);
+    expect(resetDriverAppToOnboarding).toHaveBeenCalledTimes(1);
+    expect(listDriverTasks).not.toHaveBeenCalled();
+  });
+
+  it("keeps onboarding mounted while an unprovisioned device waits for registration", async () => {
+    const syncDriverLocationHeartbeat = vi.fn().mockResolvedValue(undefined);
+    const resetDriverAppToOnboarding = vi.fn();
+    const listDriverTasks = vi.fn();
+
+    const result = await syncDriverIdentityBootstrap({
+      allowUnprovisionedRoute: true,
+      getDriverIdentityIssue: () => null,
+      initializeDriverIdentity: async () => {},
+      isDriverIdentityProvisioned: () => false,
+      listDriverTasks,
+      resetDriverAppToOnboarding,
+      router: createRouter(),
+      syncDriverLocationHeartbeat,
+    });
+
+    expect(result).toBe("synced");
+    expect(syncDriverLocationHeartbeat).toHaveBeenCalledWith(null);
+    expect(resetDriverAppToOnboarding).not.toHaveBeenCalled();
+    expect(listDriverTasks).not.toHaveBeenCalled();
+  });
+
   it("routes revoked bindings back to onboarding after revalidation clears the session", async () => {
     const syncDriverLocationHeartbeat = vi.fn().mockResolvedValue(undefined);
     const resetDriverAppToOnboarding = vi.fn();

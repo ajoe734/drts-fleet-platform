@@ -89,6 +89,18 @@ function createFallbackObservabilitySnapshot(
       degradedAdapters: 0,
       downAdapters: 0,
     },
+    forwarderOps: {
+      totalForwardedOrders: 0,
+      syncFailedOrders: 0,
+      acceptPendingOrders: 0,
+      manualFallbackQueue: 0,
+      reconciliationQueue: 0,
+      oldestSyncFailedLagMinutes: null,
+      oldestAcceptPendingLagMinutes: null,
+      oldestManualFallbackLagMinutes: null,
+      oldestReconciliationLagMinutes: null,
+    },
+    adapterDetails: [],
     roleViews: [],
   };
 }

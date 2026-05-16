@@ -1,5 +1,8 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { PLATFORM_CODE_GRAB_TAIWAN } from "@drts/contracts";
+import {
+  PLATFORM_CODE_GRAB_TAIWAN,
+  type ForwarderAdapterCapabilitySummary,
+} from "@drts/contracts";
 
 import type {
   ForwarderAdapterAcceptInput,
@@ -7,10 +10,12 @@ import type {
   ForwarderAdapterCompleteInput,
   ForwarderAdapterEarningsResult,
   ForwarderAdapterFetchEarningsInput,
+  ForwarderAdapterHealthSnapshot,
   ForwarderAdapterHeartbeatInput,
   ForwarderAdapterHeartbeatResult,
   ForwarderAdapterInterface,
   ForwarderAdapterRejectInput,
+  ForwarderAdapterWebhookVerificationResult,
 } from "./forwarder-adapter.interface";
 
 export const GRAB_TAIWAN_PLATFORM_CODE = PLATFORM_CODE_GRAB_TAIWAN;
@@ -18,6 +23,22 @@ export const GRAB_TAIWAN_PLATFORM_CODE = PLATFORM_CODE_GRAB_TAIWAN;
 @Injectable()
 export class GrabTaiwanAdapter implements ForwarderAdapterInterface {
   readonly platformCode = GRAB_TAIWAN_PLATFORM_CODE;
+  readonly capabilitySummary: ForwarderAdapterCapabilitySummary = {
+    mode: "stub",
+    productionStatus: "stub",
+    supportsInboundWebhook: true,
+    supportsOutboundActions: true,
+    supportedWebhookEvents: [
+      "forwarder.order.received",
+      "forwarder.order.accept_pending",
+      "forwarder.order.confirmed_by_platform",
+      "forwarder.order.sync_failed",
+    ],
+    notes: [
+      "Stub-only adapter for local integration scaffolding.",
+      "Not approved for production auth, webhook verification, or rate-limit governance.",
+    ],
+  };
 
   private readonly logger = new Logger(GrabTaiwanAdapter.name);
 
@@ -85,6 +106,29 @@ export class GrabTaiwanAdapter implements ForwarderAdapterInterface {
       currency: "TWD",
       totalAmount: 0,
       asOf: new Date().toISOString(),
+    };
+  }
+
+  async verifyWebhook(): Promise<ForwarderAdapterWebhookVerificationResult> {
+    return {
+      accepted: true,
+      detail: "grab_taiwan_webhook_stub",
+      credentialStatus: "stub",
+      authStatus: "stub",
+      webhookStatus: "stub",
+    };
+  }
+
+  async getHealthSnapshot(): Promise<ForwarderAdapterHealthSnapshot> {
+    return {
+      status: "healthy",
+      reason: "stub",
+      credentialStatus: "stub",
+      authStatus: "stub",
+      webhookStatus: "stub",
+      rateLimitStatus: "stub",
+      message: "Grab Taiwan adapter is stub-only and not production approved.",
+      checkedAt: new Date().toISOString(),
     };
   }
 }

@@ -88,6 +88,49 @@ def _gemini_include_directories(config: dict, gemini_settings: dict) -> list[str
     return result
 
 
+def _string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    values = value if isinstance(value, list) else [value]
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        parts = str(item).split(",")
+        for part in parts:
+            text = part.strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            result.append(text)
+    return result
+
+
+def _truthy_setting(value: object, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _gemini_allowed_tools(gemini_settings: dict) -> list[str]:
+    tools = _string_list(gemini_settings.get("allowed_tools") or gemini_settings.get("allowedTools"))
+    if _truthy_setting(gemini_settings.get("enable_shell_tool"), default=True) and "run_shell_command" not in tools:
+        tools.append("run_shell_command")
+    return tools
+
+
+def _gemini_policy_paths(config: dict, gemini_settings: dict) -> list[str]:
+    repo_root = config_path(config, "status_file").parents[0]
+    paths: list[str] = []
+    for value in _string_list(gemini_settings.get("policy_paths") or gemini_settings.get("policyPaths")):
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = repo_root / path
+        paths.append(str(path))
+    return paths
+
+
 def _gemini_selected_auth_type(runtime: dict | None = None, env: dict[str, str] | None = None) -> str | None:
     if _truthy_env("GOOGLE_GENAI_USE_GCA", env):
         return "oauth-personal"
@@ -183,13 +226,21 @@ class GeminiAdapter(BaseAdapter):
         gemini_settings = provider.get("gemini", {})
         approval = provider.get("approval", {})
         cli = gemini_settings.get("cli") or "gemini"
-        command = [cli, "--prompt", request.message, "--output-format", "json"]
+        output_format = str(gemini_settings.get("output_format") or "json").strip() or "json"
+        command = [cli, "--prompt", request.message, "--output-format", output_format]
         model = str(request.metadata.get("model_preference") or gemini_settings.get("model") or "").strip()
         if model:
             command.extend(["--model", model])
         approval_mode = approval.get("default_approval_mode")
         if approval_mode:
             command.extend(["--approval-mode", approval_mode])
+        if _truthy_setting(gemini_settings.get("skip_trust"), default=True):
+            command.append("--skip-trust")
+        allowed_tools = _gemini_allowed_tools(gemini_settings)
+        if allowed_tools:
+            command.extend(["--allowed-tools", ",".join(allowed_tools)])
+        for policy_path in _gemini_policy_paths(self.config, gemini_settings):
+            command.extend(["--policy", policy_path])
         for directory in _gemini_include_directories(self.config, gemini_settings):
             command.extend(["--include-directories", directory])
 

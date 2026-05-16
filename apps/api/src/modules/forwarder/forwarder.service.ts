@@ -8,23 +8,32 @@ import {
   OnModuleInit,
   Optional,
 } from "@nestjs/common";
-import { FORWARDER_ROUTING_SERVICE_BUCKETS } from "@drts/contracts";
+import {
+  FORWARDER_ROUTING_SERVICE_BUCKETS,
+  PLATFORM_CODE_REGISTRY,
+} from "@drts/contracts";
 
 import type {
   AdapterHealthRecord,
   AuditLogRecord,
   BroadcastForwardedOrderCommand,
+  DriverTaskAction,
+  DriverTaskRecord,
   CompleteForwarderReconciliationCommand,
   EngageForwarderManualFallbackCommand,
+  ForwardedDriverActionOutcome,
+  ForwardedDriverActionResponse,
   ForwardedOrderRecord,
   ForwardedOrderFinanceContext,
   ForwarderSyncErrorRecord,
   IngestExternalOrderCommand,
+  OwnedOrderRecord,
   PlatformCode,
   ReconciliationJobRecord,
   ReportForwarderSyncFailureCommand,
   RelayDriverAcceptCommand,
   SyncForwardedOrderStatusCommand,
+  UnifiedDriverTaskView,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -33,6 +42,7 @@ import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import {
   FORWARDER_ADAPTERS,
+  type ForwarderAdapterHealthSnapshot,
   type ForwarderAdapterInterface,
 } from "./forwarder-adapter.interface";
 import {
@@ -62,6 +72,20 @@ const DEFAULT_FORWARDED_ORDER_FINANCE_CONTEXT: ForwardedOrderFinanceContext = {
   localLedgerMode: "shadow_only",
 };
 
+const DRTS_PLATFORM_DISPLAY_NAME = "DRTS";
+
+const DRIVER_TASK_VIEW_PRIORITY: Record<
+  UnifiedDriverTaskView["driverActionState"],
+  number
+> = {
+  action_required: 0,
+  blocked: 1,
+  awaiting_platform: 2,
+  in_progress: 3,
+  read_only: 4,
+  completed: 5,
+};
+
 @Injectable()
 export class ForwarderService implements OnModuleInit {
   private readonly logger = new Logger(ForwarderService.name);
@@ -82,7 +106,7 @@ export class ForwarderService implements OnModuleInit {
 
   async onModuleInit() {
     if (!this.forwarderRepository) {
-      this.seedRegisteredAdapters();
+      await this.seedRegisteredAdapters();
       return;
     }
 
@@ -97,14 +121,14 @@ export class ForwarderService implements OnModuleInit {
           order.platformCode,
         );
       }
-      this.adapterHealth = persistedState.adapterHealth.map((adapter) => ({
-        ...adapter,
-      }));
+      this.adapterHealth = persistedState.adapterHealth.map((adapter) =>
+        this.normalizeAdapterHealthRecord(adapter),
+      );
     } catch (error) {
       this.forwarderRepository.reportPersistenceFailure(error, "module init");
     }
 
-    this.seedRegisteredAdapters();
+    await this.seedRegisteredAdapters();
   }
 
   ingestExternalOrder(command: IngestExternalOrderCommand, requestId?: string) {
@@ -162,8 +186,7 @@ export class ForwarderService implements OnModuleInit {
     );
     const adapterHealth = this.updateAdapterHealth(
       command.platformCode,
-      "healthy",
-      null,
+      this.buildHealthyAdapterHealthPatch(command.platformCode),
     );
     this.persistChanges(
       {
@@ -193,15 +216,16 @@ export class ForwarderService implements OnModuleInit {
     return this.cloneOrder(forwardedOrder);
   }
 
-  ingestGrabTaiwanWebhook(
+  async ingestGrabTaiwanWebhook(
     payload: Record<string, unknown>,
+    headers: Record<string, string | string[] | undefined> = {},
     requestId?: string,
   ) {
     this.logger.log("Received stub Grab Taiwan webhook payload.");
 
     const adapter = this.findAdapter(GRAB_TAIWAN_PLATFORM_CODE);
     if (adapter) {
-      this.updateAdapterHealth(adapter.platformCode, "healthy", null);
+      await this.verifyIncomingWebhook(adapter, payload, headers);
     }
 
     return this.ingestExternalOrder(
@@ -216,6 +240,204 @@ export class ForwarderService implements OnModuleInit {
 
   listOrders() {
     return this.forwardedOrders.map((order) => this.cloneOrder(order));
+  }
+
+  getOrder(orderId: string) {
+    return this.cloneOrder(this.requireOrder(orderId));
+  }
+
+  listDriverTaskViews(driverId: string) {
+    this.assertNonBlank(driverId, "driverId");
+
+    const ownedTasks = this.ownedMobilityService?.listDriverTasks() ?? [];
+    const ownedOrders = new Map(
+      (this.ownedMobilityService?.listOrders() ?? []).map((order) => [
+        order.orderId,
+        order,
+      ]),
+    );
+
+    const ownedViews = ownedTasks
+      .filter((task) => task.driverId === driverId)
+      .map((task) =>
+        this.mapOwnedTaskToView(task, ownedOrders.get(task.orderId) ?? null),
+      );
+
+    const forwardedViews = this.forwardedOrders
+      .filter((order) => this.isForwardedOrderVisibleToDriver(order, driverId))
+      .map((order) => this.mapForwardedOrderToView(order));
+
+    return [...ownedViews, ...forwardedViews].sort((left, right) =>
+      this.compareDriverTaskViews(left, right),
+    );
+  }
+
+  getDriverTaskView(driverId: string, taskId: string) {
+    this.assertNonBlank(driverId, "driverId");
+
+    const ownedTask = this.ownedMobilityService
+      ?.listDriverTasks()
+      .find((task) => task.taskId === taskId);
+    if (ownedTask) {
+      if (ownedTask.driverId !== driverId) {
+        throw this.driverTaskViewNotFound(taskId);
+      }
+      const ownedOrder = this.ownedMobilityService
+        ?.listOrders()
+        .find((order) => order.orderId === ownedTask.orderId);
+      return this.mapOwnedTaskToView(ownedTask, ownedOrder ?? null);
+    }
+
+    const forwardedOrder = this.forwardedOrders.find(
+      (order) => order.mirrorOrderId === taskId,
+    );
+    if (forwardedOrder) {
+      if (!this.isForwardedOrderVisibleToDriver(forwardedOrder, driverId)) {
+        throw this.driverTaskViewNotFound(taskId);
+      }
+      return this.mapForwardedOrderToView(forwardedOrder);
+    }
+
+    throw this.driverTaskViewNotFound(taskId);
+  }
+
+  private driverTaskViewNotFound(taskId: string) {
+    return new ApiRequestError(
+      HttpStatus.NOT_FOUND,
+      "DRIVER_TASK_VIEW_NOT_FOUND",
+      "Driver task view was not found.",
+      { taskId },
+    );
+  }
+
+  private isForwardedOrderVisibleToDriver(
+    order: ForwardedOrderRecord,
+    driverId: string,
+  ): boolean {
+    switch (order.status) {
+      case "received":
+        return false;
+      case "broadcasted":
+        return order.candidateDriverIds.includes(driverId);
+      case "accept_pending":
+      case "confirmed_by_platform":
+      case "lost_race":
+      case "cancelled_by_platform":
+      case "sync_failed":
+        return order.acceptedDriverId === driverId;
+      default:
+        return false;
+    }
+  }
+
+  async acceptForwardedOrder(
+    taskId: string,
+    driverId: string,
+    requestId?: string,
+  ): Promise<ForwardedDriverActionResponse> {
+    this.assertNonBlank(driverId, "driverId");
+
+    let forwardedOrder = this.requireOrder(taskId);
+    if (!this.isForwardedOrderVisibleToDriver(forwardedOrder, driverId)) {
+      throw this.driverTaskViewNotFound(taskId);
+    }
+
+    if (forwardedOrder.status === "broadcasted") {
+      try {
+        await this.relayDriverAccept(taskId, { driverId }, requestId);
+      } catch (error) {
+        forwardedOrder = this.requireOrder(taskId);
+        if (
+          forwardedOrder.status === "sync_failed" &&
+          forwardedOrder.acceptedDriverId === driverId
+        ) {
+          return this.buildForwardedDriverActionResponse(
+            "accept",
+            "sync_failed",
+            forwardedOrder,
+          );
+        }
+        throw error;
+      }
+
+      return this.buildForwardedDriverActionResponse(
+        "accept",
+        "accept_pending",
+        this.requireOrder(taskId),
+      );
+    }
+
+    if (forwardedOrder.acceptedDriverId !== driverId) {
+      throw this.driverTaskViewNotFound(taskId);
+    }
+
+    return this.buildForwardedDriverActionResponse(
+      "accept",
+      this.resolveForwardedOutcomeFromStatus(forwardedOrder.status),
+      forwardedOrder,
+    );
+  }
+
+  rejectForwardedOrder(
+    taskId: string,
+    driverId: string,
+    reason?: string | null,
+    requestId?: string,
+  ): ForwardedDriverActionResponse {
+    this.assertNonBlank(driverId, "driverId");
+
+    const forwardedOrder = this.requireOrder(taskId);
+    if (forwardedOrder.status !== "broadcasted") {
+      if (!this.isForwardedOrderVisibleToDriver(forwardedOrder, driverId)) {
+        throw this.driverTaskViewNotFound(taskId);
+      }
+      return this.buildForwardedDriverActionResponse(
+        "reject",
+        this.resolveForwardedOutcomeFromStatus(forwardedOrder.status),
+        forwardedOrder,
+      );
+    }
+
+    if (!forwardedOrder.candidateDriverIds.includes(driverId)) {
+      throw this.driverTaskViewNotFound(taskId);
+    }
+
+    forwardedOrder.candidateDriverIds =
+      forwardedOrder.candidateDriverIds.filter(
+        (candidateDriverId) => candidateDriverId !== driverId,
+      );
+    forwardedOrder.updatedAt = new Date().toISOString();
+    this.persistChanges(
+      {
+        forwardedOrders: [this.cloneOrder(forwardedOrder)],
+      },
+      "reject_forwarded_order",
+    );
+    this.recordAudit(
+      {
+        actorId: driverId,
+        actorType: "ops_user",
+        tenantId: null,
+        moduleName: "forwarder",
+        actionName: "reject_forwarded_order",
+        resourceType: "forwarded_order",
+        resourceId: forwardedOrder.mirrorOrderId,
+        ...(reason?.trim()
+          ? { oldValuesSummary: { reason: reason.trim() } }
+          : {}),
+        newValuesSummary: {
+          status: forwardedOrder.status,
+          candidateDriverIds: forwardedOrder.candidateDriverIds,
+        },
+      },
+      requestId,
+    );
+
+    return this.buildForwardedDriverActionResponse(
+      "reject",
+      "rejected",
+      forwardedOrder,
+    );
   }
 
   broadcastOrder(
@@ -256,8 +478,7 @@ export class ForwarderService implements OnModuleInit {
     forwardedOrder.updatedAt = new Date().toISOString();
     const adapterHealth = this.updateAdapterHealth(
       forwardedOrder.platformCode,
-      "healthy",
-      null,
+      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
     );
     this.persistChanges(
       {
@@ -400,8 +621,11 @@ export class ForwarderService implements OnModuleInit {
     forwardedOrder.updatedAt = new Date().toISOString();
     const adapterHealth = this.updateAdapterHealth(
       forwardedOrder.platformCode,
-      "healthy",
-      null,
+      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode, {
+        credentialStatus: "valid",
+        authStatus: "authenticated",
+        rateLimitStatus: "ok",
+      }),
     );
     this.persistChanges(
       {
@@ -542,8 +766,7 @@ export class ForwarderService implements OnModuleInit {
     }
     const adapterHealth = this.updateAdapterHealth(
       forwardedOrder.platformCode,
-      "healthy",
-      null,
+      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
     );
     this.persistChanges(
       {
@@ -620,8 +843,7 @@ export class ForwarderService implements OnModuleInit {
     forwardedOrder.updatedAt = completedAt;
     const adapterHealth = this.updateAdapterHealth(
       forwardedOrder.platformCode,
-      "healthy",
-      null,
+      this.buildHealthyAdapterHealthPatch(forwardedOrder.platformCode),
     );
     this.persistChanges(
       {
@@ -701,7 +923,9 @@ export class ForwarderService implements OnModuleInit {
   }
 
   listAdapterHealth() {
-    return this.adapterHealth.map((adapter) => ({ ...adapter }));
+    return this.adapterHealth.map((adapter) =>
+      this.cloneAdapterHealth(adapter),
+    );
   }
 
   hasAdapter(platformCode: PlatformCode) {
@@ -772,17 +996,26 @@ export class ForwarderService implements OnModuleInit {
       : "standard_taxi";
   }
 
-  private seedRegisteredAdapters() {
-    const seededHealth = this.adapters
-      .filter(
-        (adapter) =>
-          !this.adapterHealth.some(
-            (record) => record.platformCode === adapter.platformCode,
-          ),
-      )
-      .map((adapter) =>
-        this.updateAdapterHealth(adapter.platformCode, "healthy", null),
+  private async seedRegisteredAdapters() {
+    const seededHealth: AdapterHealthRecord[] = [];
+
+    for (const adapter of this.adapters) {
+      if (
+        this.adapterHealth.some(
+          (record) => record.platformCode === adapter.platformCode,
+        )
+      ) {
+        continue;
+      }
+
+      const snapshot = await this.safeGetHealthSnapshot(adapter);
+      seededHealth.push(
+        this.updateAdapterHealth(adapter.platformCode, {
+          ...this.buildAdapterHealthBaseline(adapter.platformCode, adapter),
+          ...this.buildHealthSnapshotPatch(snapshot),
+        }),
       );
+    }
 
     if (seededHealth.length > 0) {
       this.persistChanges(
@@ -878,8 +1111,11 @@ export class ForwarderService implements OnModuleInit {
     forwardedOrder.updatedAt = failedAt;
     const adapterHealth = this.updateAdapterHealth(
       forwardedOrder.platformCode,
-      command.retryable ? "degraded" : "down",
-      `${command.errorCode}: ${command.errorMessage}`,
+      this.buildFailureAdapterHealthPatch(
+        forwardedOrder.platformCode,
+        command,
+        failedAt,
+      ),
     );
     this.persistChanges(
       {
@@ -911,28 +1147,396 @@ export class ForwarderService implements OnModuleInit {
 
   private updateAdapterHealth(
     platformCode: PlatformCode,
-    status: AdapterHealthRecord["status"],
-    lastError: string | null,
+    patch: Partial<AdapterHealthRecord> = {},
   ) {
+    const adapter = this.findAdapter(platformCode);
     const existing = this.adapterHealth.find(
       (adapter) => adapter.platformCode === platformCode,
     );
+    const baseline = existing
+      ? this.normalizeAdapterHealthRecord(existing)
+      : this.buildAdapterHealthBaseline(platformCode, adapter);
     const next: AdapterHealthRecord = {
+      ...baseline,
+      ...patch,
       platformCode,
-      status,
-      lastCheckedAt: new Date().toISOString(),
-      lastError,
+      capabilitySummary: this.cloneCapabilitySummary(
+        patch.capabilitySummary ?? baseline.capabilitySummary,
+      ),
+      lastCheckedAt: patch.lastCheckedAt ?? new Date().toISOString(),
     };
 
     if (!existing) {
       this.adapterHealth = [next, ...this.adapterHealth];
-      return next;
+      return this.cloneAdapterHealth(next);
     }
 
-    existing.status = next.status;
-    existing.lastCheckedAt = next.lastCheckedAt;
-    existing.lastError = next.lastError;
-    return { ...existing };
+    Object.assign(existing, next);
+    return this.cloneAdapterHealth(existing);
+  }
+
+  private buildAdapterHealthBaseline(
+    platformCode: PlatformCode,
+    adapter?: ForwarderAdapterInterface,
+  ): AdapterHealthRecord {
+    const capabilitySummary = this.cloneCapabilitySummary(
+      adapter?.capabilitySummary ??
+        this.buildFallbackCapabilitySummary(platformCode),
+    );
+    const isStub = capabilitySummary.productionStatus === "stub";
+    const configurationRequired =
+      capabilitySummary.productionStatus === "configuration_required";
+    const now = new Date().toISOString();
+
+    return {
+      platformCode,
+      status: isStub
+        ? "healthy"
+        : configurationRequired
+          ? "degraded"
+          : "healthy",
+      reason: isStub ? "stub" : configurationRequired ? "credential" : "none",
+      capabilitySummary,
+      credentialStatus: isStub
+        ? "stub"
+        : configurationRequired
+          ? "not_configured"
+          : "unknown",
+      authStatus: isStub ? "stub" : "unknown",
+      webhookStatus: isStub
+        ? "stub"
+        : capabilitySummary.supportsInboundWebhook
+          ? "not_configured"
+          : "not_applicable",
+      rateLimitStatus: isStub ? "stub" : "unknown",
+      lastCheckedAt: now,
+      lastError: null,
+      lastWebhookReceivedAt: null,
+      lastRateLimitAt: null,
+      lastAuthFailureAt: null,
+    };
+  }
+
+  private buildFallbackCapabilitySummary(platformCode: PlatformCode) {
+    const registryEntry = PLATFORM_CODE_REGISTRY[platformCode];
+    if (registryEntry?.status === "forwarder_stub") {
+      return {
+        mode: "stub" as const,
+        productionStatus: "stub" as const,
+        supportsInboundWebhook: true,
+        supportsOutboundActions: true,
+        supportedWebhookEvents: [],
+        notes: [
+          `${registryEntry.displayName} is currently a stub-only forwarder adapter.`,
+        ],
+      };
+    }
+
+    return {
+      mode: "api" as const,
+      productionStatus: "configuration_required" as const,
+      supportsInboundWebhook: false,
+      supportsOutboundActions: false,
+      supportedWebhookEvents: [],
+      notes: [
+        registryEntry
+          ? `No runtime forwarder adapter is registered for ${registryEntry.displayName}.`
+          : "No runtime forwarder adapter is registered for this platform.",
+      ],
+    };
+  }
+
+  private cloneCapabilitySummary(
+    capabilitySummary: AdapterHealthRecord["capabilitySummary"],
+  ) {
+    return {
+      ...capabilitySummary,
+      supportedWebhookEvents: [...capabilitySummary.supportedWebhookEvents],
+      notes: [...capabilitySummary.notes],
+    };
+  }
+
+  private cloneAdapterHealth(
+    adapter: AdapterHealthRecord,
+  ): AdapterHealthRecord {
+    return {
+      ...adapter,
+      capabilitySummary: this.cloneCapabilitySummary(adapter.capabilitySummary),
+    };
+  }
+
+  private normalizeAdapterHealthRecord(record: Partial<AdapterHealthRecord>) {
+    const baseline = this.buildAdapterHealthBaseline(
+      record.platformCode as PlatformCode,
+      this.findAdapter(record.platformCode as PlatformCode),
+    );
+
+    return {
+      ...baseline,
+      ...record,
+      platformCode: record.platformCode ?? baseline.platformCode,
+      capabilitySummary: this.cloneCapabilitySummary(
+        record.capabilitySummary ?? baseline.capabilitySummary,
+      ),
+      lastWebhookReceivedAt: record.lastWebhookReceivedAt ?? null,
+      lastRateLimitAt: record.lastRateLimitAt ?? null,
+      lastAuthFailureAt: record.lastAuthFailureAt ?? null,
+    };
+  }
+
+  private async safeGetHealthSnapshot(adapter: ForwarderAdapterInterface) {
+    if (!adapter.getHealthSnapshot) {
+      return null;
+    }
+
+    try {
+      return await adapter.getHealthSnapshot();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return {
+        status: "degraded",
+        reason: "platform",
+        credentialStatus: "unknown",
+        authStatus: "unknown",
+        webhookStatus: adapter.capabilitySummary.supportsInboundWebhook
+          ? "unknown"
+          : "not_applicable",
+        rateLimitStatus: "unknown",
+        message: `health snapshot failed: ${detail}`,
+      } satisfies ForwarderAdapterHealthSnapshot;
+    }
+  }
+
+  private buildHealthSnapshotPatch(
+    snapshot: ForwarderAdapterHealthSnapshot | null,
+  ): Partial<AdapterHealthRecord> {
+    if (!snapshot) {
+      return {};
+    }
+
+    return {
+      status: snapshot.status,
+      reason: snapshot.reason,
+      credentialStatus: snapshot.credentialStatus,
+      authStatus: snapshot.authStatus,
+      webhookStatus: snapshot.webhookStatus,
+      rateLimitStatus: snapshot.rateLimitStatus,
+      lastCheckedAt: snapshot.checkedAt ?? new Date().toISOString(),
+      lastError: snapshot.message ?? null,
+    };
+  }
+
+  private buildHealthyAdapterHealthPatch(
+    platformCode: PlatformCode,
+    patch: Partial<AdapterHealthRecord> = {},
+  ): Partial<AdapterHealthRecord> {
+    const baseline = this.buildAdapterHealthBaseline(
+      platformCode,
+      this.findAdapter(platformCode),
+    );
+
+    return {
+      status: "healthy",
+      reason: baseline.reason,
+      lastCheckedAt: new Date().toISOString(),
+      lastError: null,
+      ...patch,
+    };
+  }
+
+  private buildFailureAdapterHealthPatch(
+    platformCode: PlatformCode,
+    command: ReportForwarderSyncFailureCommand,
+    failedAt: string,
+  ): Partial<AdapterHealthRecord> {
+    const baseline = this.buildAdapterHealthBaseline(
+      platformCode,
+      this.findAdapter(platformCode),
+    );
+    const signals =
+      `${command.errorCode} ${command.errorMessage} ${command.nativeStatus ?? ""}`.toLowerCase();
+    const patch: Partial<AdapterHealthRecord> = {
+      status: command.retryable ? "degraded" : "down",
+      reason: "platform",
+      credentialStatus: baseline.credentialStatus,
+      authStatus: baseline.authStatus,
+      webhookStatus: baseline.webhookStatus,
+      rateLimitStatus: baseline.rateLimitStatus,
+      lastCheckedAt: failedAt,
+      lastError: `${command.errorCode}: ${command.errorMessage}`,
+    };
+
+    if (signals.includes("429") || signals.includes("rate limit")) {
+      patch.reason = "rate_limit";
+      if (baseline.rateLimitStatus !== "stub") {
+        patch.rateLimitStatus = "limited";
+        patch.lastRateLimitAt = failedAt;
+      }
+      return patch;
+    }
+
+    if (signals.includes("webhook") || signals.includes("signature")) {
+      patch.reason = "webhook";
+      if (baseline.webhookStatus !== "stub") {
+        patch.webhookStatus = "failing";
+      }
+      return patch;
+    }
+
+    if (signals.includes("credential") || signals.includes("secret")) {
+      patch.reason = "credential";
+      if (baseline.credentialStatus !== "stub") {
+        patch.credentialStatus = signals.includes("expired")
+          ? "expired"
+          : "invalid";
+      }
+      if (baseline.authStatus !== "stub") {
+        patch.authStatus = "invalid";
+        patch.lastAuthFailureAt = failedAt;
+      }
+      return patch;
+    }
+
+    if (
+      signals.includes("reauth") ||
+      signals.includes("token expired") ||
+      signals.includes("unauthor") ||
+      signals.includes("forbidden") ||
+      signals.includes("401") ||
+      signals.includes("403")
+    ) {
+      patch.reason = "auth";
+      if (baseline.authStatus !== "stub") {
+        patch.authStatus =
+          signals.includes("reauth") || signals.includes("expired")
+            ? "reauth_required"
+            : "invalid";
+        patch.lastAuthFailureAt = failedAt;
+      }
+      if (signals.includes("expired") && baseline.credentialStatus !== "stub") {
+        patch.credentialStatus = "expired";
+      }
+    }
+
+    return patch;
+  }
+
+  private async verifyIncomingWebhook(
+    adapter: ForwarderAdapterInterface,
+    payload: Record<string, unknown>,
+    headers: Record<string, string | string[] | undefined>,
+  ) {
+    const verifiedAt = new Date().toISOString();
+
+    if (!adapter.verifyWebhook) {
+      const adapterHealth = this.updateAdapterHealth(
+        adapter.platformCode,
+        this.buildHealthyAdapterHealthPatch(adapter.platformCode, {
+          webhookStatus: adapter.capabilitySummary.supportsInboundWebhook
+            ? "healthy"
+            : "not_applicable",
+          lastWebhookReceivedAt: verifiedAt,
+        }),
+      );
+      this.persistChanges(
+        {
+          adapterHealth: [adapterHealth],
+        },
+        "verify_forwarder_webhook",
+      );
+      return;
+    }
+
+    try {
+      const verification = await adapter.verifyWebhook({
+        headers,
+        payload,
+      });
+      if (!verification.accepted) {
+        const adapterHealth = this.updateAdapterHealth(adapter.platformCode, {
+          status: "degraded",
+          reason: "webhook",
+          credentialStatus:
+            verification.credentialStatus ??
+            this.buildAdapterHealthBaseline(adapter.platformCode, adapter)
+              .credentialStatus,
+          authStatus:
+            verification.authStatus ??
+            this.buildAdapterHealthBaseline(adapter.platformCode, adapter)
+              .authStatus,
+          webhookStatus: verification.webhookStatus ?? "failing",
+          lastCheckedAt: verifiedAt,
+          lastError:
+            verification.detail ?? "Webhook signature verification failed.",
+        });
+        this.persistChanges(
+          {
+            adapterHealth: [adapterHealth],
+          },
+          "verify_forwarder_webhook",
+        );
+        throw new ApiRequestError(
+          HttpStatus.UNAUTHORIZED,
+          "FORWARDER_WEBHOOK_VERIFICATION_FAILED",
+          "Forwarder webhook verification failed.",
+          {
+            platformCode: adapter.platformCode,
+          },
+        );
+      }
+
+      const verifiedHealthPatch: Partial<AdapterHealthRecord> = {
+        webhookStatus: verification.webhookStatus ?? "healthy",
+        lastWebhookReceivedAt: verifiedAt,
+      };
+      if (verification.credentialStatus) {
+        verifiedHealthPatch.credentialStatus = verification.credentialStatus;
+      }
+      if (verification.authStatus) {
+        verifiedHealthPatch.authStatus = verification.authStatus;
+      }
+
+      const adapterHealth = this.updateAdapterHealth(
+        adapter.platformCode,
+        this.buildHealthyAdapterHealthPatch(
+          adapter.platformCode,
+          verifiedHealthPatch,
+        ),
+      );
+      this.persistChanges(
+        {
+          adapterHealth: [adapterHealth],
+        },
+        "verify_forwarder_webhook",
+      );
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        throw error;
+      }
+
+      const detail = error instanceof Error ? error.message : String(error);
+      const adapterHealth = this.updateAdapterHealth(adapter.platformCode, {
+        status: "degraded",
+        reason: "webhook",
+        webhookStatus: "failing",
+        lastCheckedAt: verifiedAt,
+        lastError: detail,
+      });
+      this.persistChanges(
+        {
+          adapterHealth: [adapterHealth],
+        },
+        "verify_forwarder_webhook",
+      );
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "FORWARDER_WEBHOOK_VERIFICATION_FAILED",
+        "Forwarder webhook verification failed.",
+        {
+          platformCode: adapter.platformCode,
+        },
+      );
+    }
   }
 
   private requireOrder(orderId: string) {
@@ -1000,6 +1604,343 @@ export class ForwarderService implements OnModuleInit {
         ? { ...order.reconciliationJob }
         : null,
     };
+  }
+
+  private compareDriverTaskViews(
+    left: UnifiedDriverTaskView,
+    right: UnifiedDriverTaskView,
+  ) {
+    const priorityDiff =
+      DRIVER_TASK_VIEW_PRIORITY[left.driverActionState] -
+      DRIVER_TASK_VIEW_PRIORITY[right.driverActionState];
+    if (priorityDiff !== 0) {
+      return priorityDiff;
+    }
+
+    return right.updatedAt.localeCompare(left.updatedAt);
+  }
+
+  private mapOwnedTaskToView(
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord | null,
+  ): UnifiedDriverTaskView {
+    const blockingReason = this.resolveOwnedBlockingReason(task);
+
+    return {
+      taskId: task.taskId,
+      orderId: task.orderId,
+      orderDomain: "owned",
+      sourcePlatform: "drts",
+      platformDisplayName: DRTS_PLATFORM_DISPLAY_NAME,
+      externalOrderId: null,
+      nativeStatus: null,
+      localStatus: task.status,
+      driverActionState: this.resolveOwnedDriverActionState(task),
+      allowedActions: this.resolveOwnedAllowedActions(task),
+      routeLocked: false,
+      fareAuthority: "drts",
+      settlementAuthority: "drts",
+      driverPayoutAuthority: "drts",
+      requiresManualFallback: false,
+      requiresReauth: false,
+      syncIssueSummary: null,
+      blockingReason,
+      pickupSummary: order?.pickup.address ?? null,
+      dropoffSummary: order?.dropoff.address ?? null,
+      deadlineAt:
+        order?.dispatchTimeout?.timeoutAt ??
+        order?.reservationWindowStart ??
+        null,
+      updatedAt: order?.updatedAt ?? this.resolveOwnedTaskUpdatedAt(task),
+    };
+  }
+
+  private mapForwardedOrderToView(
+    order: ForwardedOrderRecord,
+  ): UnifiedDriverTaskView {
+    const syncIssueSummary = this.resolveForwardedSyncIssueSummary(order);
+    const requiresReauth = this.resolveForwardedRequiresReauth(order);
+    const blockingReason =
+      this.resolveForwardedBlockingReason(order) ??
+      (requiresReauth
+        ? "Platform re-authentication is required before driver actions can resume."
+        : null);
+
+    return {
+      taskId: order.mirrorOrderId,
+      orderId: order.mirrorOrderId,
+      orderDomain: "forwarded",
+      sourcePlatform: order.platformCode,
+      platformDisplayName: this.resolvePlatformDisplayName(order.platformCode),
+      externalOrderId: order.externalOrderId,
+      nativeStatus: order.lastNativeStatus,
+      localStatus: order.status,
+      driverActionState: this.resolveForwardedDriverActionState(order),
+      allowedActions: this.resolveForwardedAllowedActions(order),
+      routeLocked: true,
+      fareAuthority: "external_platform",
+      settlementAuthority: "external_platform",
+      driverPayoutAuthority: "external_platform",
+      requiresManualFallback: order.manualFallback.required,
+      requiresReauth,
+      syncIssueSummary,
+      blockingReason,
+      pickupSummary: this.extractForwardedSummary(order, [
+        "pickupSummary",
+        "pickupAddress",
+        "pickup.address",
+      ]),
+      dropoffSummary: this.extractForwardedSummary(order, [
+        "dropoffSummary",
+        "dropoffAddress",
+        "dropoff.address",
+      ]),
+      deadlineAt: order.reconciliationJob?.createdAt ?? null,
+      updatedAt: order.updatedAt,
+    };
+  }
+
+  private resolveOwnedDriverActionState(
+    task: DriverTaskRecord,
+  ): UnifiedDriverTaskView["driverActionState"] {
+    switch (task.status) {
+      case "pending_acceptance":
+        return "action_required";
+      case "accepted":
+      case "enroute_pickup":
+      case "arrived_pickup":
+      case "on_trip":
+        return "in_progress";
+      case "proof_pending":
+        return "blocked";
+      case "completed":
+        return "completed";
+      case "rejected":
+      case "cancelled":
+        return "read_only";
+    }
+  }
+
+  private resolveOwnedAllowedActions(
+    task: DriverTaskRecord,
+  ): DriverTaskAction[] {
+    switch (task.status) {
+      case "pending_acceptance":
+        return ["accept", "reject"];
+      case "accepted":
+        return ["depart"];
+      case "enroute_pickup":
+        return ["arrived_pickup"];
+      case "arrived_pickup":
+        return ["start"];
+      case "on_trip":
+        return ["complete"];
+      default:
+        return [];
+    }
+  }
+
+  private resolveOwnedBlockingReason(task: DriverTaskRecord) {
+    const gate = task.complianceGates?.find(
+      (candidate) => candidate.blocking || candidate.state !== "clear",
+    );
+    if (gate) {
+      return gate.nextAction;
+    }
+    if (task.status === "proof_pending") {
+      return "Completion proof must be submitted before the trip can close.";
+    }
+    return null;
+  }
+
+  private resolveOwnedTaskUpdatedAt(task: DriverTaskRecord) {
+    return (
+      task.completedAt ??
+      task.startedAt ??
+      task.arrivedPickupAt ??
+      task.departedAt ??
+      task.acceptedAt ??
+      new Date(0).toISOString()
+    );
+  }
+
+  private resolveForwardedDriverActionState(
+    order: ForwardedOrderRecord,
+  ): UnifiedDriverTaskView["driverActionState"] {
+    if (order.manualFallback.required || order.status === "sync_failed") {
+      return "blocked";
+    }
+
+    switch (order.status) {
+      case "received":
+      case "broadcasted":
+        return "action_required";
+      case "accept_pending":
+        return "awaiting_platform";
+      case "confirmed_by_platform":
+        return "in_progress";
+      case "lost_race":
+      case "cancelled_by_platform":
+        return "read_only";
+      default:
+        return "completed";
+    }
+  }
+
+  private resolveForwardedAllowedActions(
+    order: ForwardedOrderRecord,
+  ): DriverTaskAction[] {
+    if (order.status === "broadcasted") {
+      return ["accept", "reject"];
+    }
+
+    return [];
+  }
+
+  private resolveForwardedOutcomeFromStatus(
+    status: ForwardedOrderRecord["status"],
+  ): Exclude<ForwardedDriverActionOutcome, "rejected"> {
+    switch (status) {
+      case "accept_pending":
+      case "confirmed_by_platform":
+      case "lost_race":
+      case "cancelled_by_platform":
+      case "sync_failed":
+        return status;
+      case "broadcasted":
+        return "accept_pending";
+      case "received":
+        return "sync_failed";
+    }
+  }
+
+  private buildForwardedDriverActionResponse(
+    action: Extract<DriverTaskAction, "accept" | "reject">,
+    outcome: ForwardedDriverActionOutcome,
+    order: ForwardedOrderRecord,
+  ): ForwardedDriverActionResponse {
+    return {
+      action,
+      outcome,
+      driverMessage: this.resolveForwardedDriverActionMessage(outcome, order),
+      taskView:
+        outcome === "rejected" ? null : this.mapForwardedOrderToView(order),
+      managementCorrelationIds: {
+        mirrorOrderId: order.mirrorOrderId,
+        reconciliationJobId:
+          order.reconciliationJob?.reconciliationJobId ?? null,
+      },
+    };
+  }
+
+  private resolveForwardedDriverActionMessage(
+    outcome: ForwardedDriverActionOutcome,
+    order: ForwardedOrderRecord,
+  ) {
+    switch (outcome) {
+      case "accept_pending":
+        return "Waiting for platform confirmation.";
+      case "confirmed_by_platform":
+        return "Platform confirmed this order.";
+      case "lost_race":
+        return "Another driver was confirmed by the platform.";
+      case "cancelled_by_platform":
+        return "The external platform cancelled this order.";
+      case "sync_failed":
+        return (
+          order.manualFallback.reason ??
+          "Dispatch is verifying the platform result before more driver actions."
+        );
+      case "rejected":
+        return "Offer declined.";
+    }
+  }
+
+  private resolveForwardedSyncIssueSummary(order: ForwardedOrderRecord) {
+    if (order.manualFallback.required) {
+      return order.manualFallback.reason ?? "Dispatch follow-up is required.";
+    }
+    if (order.lastSyncError) {
+      return order.lastSyncError.retryable
+        ? "Platform sync failed and is waiting for dispatch follow-up."
+        : "Platform sync failed and requires manual dispatch resolution.";
+    }
+    if (order.reconciliationJob?.status === "queued") {
+      return "Order is waiting for reconciliation with the platform.";
+    }
+    return null;
+  }
+
+  private resolveForwardedBlockingReason(order: ForwardedOrderRecord) {
+    if (order.manualFallback.required) {
+      return order.manualFallback.reason ?? "Manual fallback has been engaged.";
+    }
+    if (order.status === "lost_race") {
+      return "Another driver was confirmed by the platform.";
+    }
+    if (order.status === "cancelled_by_platform") {
+      return "The external platform cancelled this order.";
+    }
+    if (order.status === "sync_failed") {
+      return "Dispatch must verify platform confirmation before continuing.";
+    }
+    return null;
+  }
+
+  private resolveForwardedRequiresReauth(order: ForwardedOrderRecord) {
+    const authSignals = [
+      order.lastSyncError?.code,
+      order.lastSyncError?.message,
+      order.manualFallback.reason,
+      typeof order.authoritativeSnapshot.authStatus === "string"
+        ? order.authoritativeSnapshot.authStatus
+        : null,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.toLowerCase());
+
+    return authSignals.some(
+      (value) =>
+        value.includes("reauth") ||
+        value.includes("auth") ||
+        value.includes("token expired"),
+    );
+  }
+
+  private resolvePlatformDisplayName(platformCode: PlatformCode) {
+    return PLATFORM_CODE_REGISTRY[platformCode]?.displayName ?? platformCode;
+  }
+
+  private extractForwardedSummary(
+    order: ForwardedOrderRecord,
+    keys: readonly string[],
+  ) {
+    for (const key of keys) {
+      const value =
+        this.readStringPath(order.authoritativeSnapshot, key) ??
+        this.readStringPath(order.payload, key);
+      if (value) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private readStringPath(
+    source: Record<string, unknown>,
+    path: string,
+  ): string | null {
+    const parts = path.split(".");
+    let cursor: unknown = source;
+
+    for (const part of parts) {
+      if (!cursor || typeof cursor !== "object" || !(part in cursor)) {
+        return null;
+      }
+      cursor = (cursor as Record<string, unknown>)[part];
+    }
+
+    return typeof cursor === "string" && cursor.trim() ? cursor : null;
   }
 
   private assertNonBlank(value: string, field: string) {

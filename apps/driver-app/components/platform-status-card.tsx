@@ -1,19 +1,53 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
-import type { PlatformPresenceRecord } from "@drts/contracts";
-import { getDriverClient } from "@/lib/api-client";
+import { Ionicons } from "@expo/vector-icons";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  PLATFORM_CODE_REGISTRY,
+  type PlatformPresenceAdapterStatusRecord,
+  type PlatformPresenceRecord,
+} from "@drts/contracts";
+import {
+  PlatformHealthCard,
+  type PlatformHealthFact,
+  PlatformBadge,
+  StatusChip,
+  Tokens,
+} from "@/components/ui";
 
-/**
- * Calculates token expiry urgency and display label.
- * Returns countdown info with urgency level.
- */
-function getTokenExpiryInfo(tokenExpiresAt: string | null): {
+type TokenExpiryInfo = {
   label: string;
   urgency: "expired" | "urgent" | "warning" | "safe";
-  isExpiring: boolean;
-} {
+};
+
+export interface PlatformStatusAction {
+  key: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  tone?: "primary" | "warning" | "danger" | "neutral";
+  disabled?: boolean;
+}
+
+export interface PlatformHealthAssessment {
+  canReceiveOrders: boolean;
+  blockers: string[];
+  statusLabel: string;
+  statusTone: "healthy" | "warning" | "danger" | "neutral";
+  adapterLabel: string;
+  adapterTone: "healthy" | "warning" | "danger" | "neutral";
+  readinessLabel: string;
+  tokenInfo: TokenExpiryInfo;
+}
+
+interface PlatformStatusCardProps {
+  record: PlatformPresenceRecord;
+  actions?: PlatformStatusAction[];
+  adapterStatus?: PlatformPresenceAdapterStatusRecord | null;
+}
+
+function getTokenExpiryInfo(tokenExpiresAt: string | null): TokenExpiryInfo {
   if (!tokenExpiresAt) {
-    return { label: "No expiry set", urgency: "safe", isExpiring: false };
+    return { label: "未設定到期時間", urgency: "safe" };
   }
 
   const now = new Date().getTime();
@@ -21,291 +55,469 @@ function getTokenExpiryInfo(tokenExpiresAt: string | null): {
   const remainingMs = expiresAt - now;
 
   if (remainingMs <= 0) {
-    return { label: "Expired", urgency: "expired", isExpiring: true };
+    return { label: "已到期", urgency: "expired" };
   }
 
-  const remainingMinutes = Math.floor(remainingMs / 60000);
+  const remainingMinutes = Math.max(0, Math.floor(remainingMs / 60000));
   const remainingHours = Math.floor(remainingMinutes / 60);
 
   if (remainingHours < 1) {
-    return {
-      label: `${remainingMinutes}m remaining`,
-      urgency: "urgent",
-      isExpiring: true,
-    };
+    return { label: `剩餘 ${remainingMinutes} 分鐘`, urgency: "urgent" };
   }
 
   if (remainingHours < 24) {
     return {
-      label: `${remainingHours}h ${remainingMinutes % 60}m remaining`,
+      label: `剩餘 ${remainingHours} 小時 ${remainingMinutes % 60} 分鐘`,
       urgency: "warning",
-      isExpiring: true,
     };
   }
 
   const remainingDays = Math.floor(remainingHours / 24);
   return {
-    label: `${remainingDays}d ${remainingHours % 24}h remaining`,
+    label: `剩餘 ${remainingDays} 天 ${remainingHours % 24} 小時`,
     urgency: "safe",
-    isExpiring: false,
   };
 }
 
-interface PlatformStatusCardProps {
-  record: PlatformPresenceRecord;
-  onStatusChange?: () => void;
+function formatTimestamp(value: string | null): string {
+  if (!value) {
+    return "尚無資料";
+  }
+  return new Date(value).toLocaleString();
 }
 
-/**
- * PlatformStatusCard - Displays a single platform's presence status
- * with online/offline toggle, token expiry countdown, re-auth trigger,
- * and eligibility display.
- */
+function getStatusText(status: PlatformPresenceRecord["status"]) {
+  return status === "online" ? "已上線" : "未上線";
+}
+
+function getEligibilityText(
+  eligibility: PlatformPresenceRecord["eligibility"],
+) {
+  switch (eligibility) {
+    case "eligible":
+      return "可接單";
+    case "pending":
+      return "審核中";
+    default:
+      return "不可用";
+  }
+}
+
+function getAdapterLabel(
+  adapterStatus?: PlatformPresenceAdapterStatusRecord | null,
+) {
+  if (!adapterStatus || adapterStatus.status === "unknown") {
+    return "尚未取得健康狀態";
+  }
+
+  switch (adapterStatus.status) {
+    case "healthy":
+      return "連線正常";
+    case "degraded":
+      return adapterStatus.blockingReason ?? "平台連線異常";
+    default:
+      return adapterStatus.blockingReason ?? "平台轉接服務中斷";
+  }
+}
+
+function getAdapterTone(
+  adapterStatus?: PlatformPresenceAdapterStatusRecord | null,
+): "healthy" | "warning" | "danger" | "neutral" {
+  if (!adapterStatus || adapterStatus.status === "unknown") {
+    return "neutral";
+  }
+
+  switch (adapterStatus.status) {
+    case "healthy":
+      return "healthy";
+    case "degraded":
+      return "warning";
+    default:
+      return "danger";
+  }
+}
+
+export function assessPlatformHealth(
+  record: PlatformPresenceRecord,
+  adapterStatus?: PlatformPresenceAdapterStatusRecord | null,
+): PlatformHealthAssessment {
+  const tokenInfo = getTokenExpiryInfo(record.tokenExpiresAt);
+  const blockers: string[] = [];
+
+  if (!record.accountId) {
+    blockers.push("尚未綁定帳號");
+  }
+  if (record.status !== "online") {
+    blockers.push("目前為離線狀態");
+  }
+  if (tokenInfo.urgency === "expired") {
+    blockers.push("平台憑證已到期");
+  }
+  if (record.reauthRequired) {
+    blockers.push("需要重新驗證");
+  }
+  if (record.eligibility === "pending") {
+    blockers.push("資格仍在審核");
+  }
+  if (record.eligibility === "ineligible") {
+    blockers.push("資格已被限制");
+  }
+  if (adapterStatus?.status === "degraded") {
+    blockers.push("平台轉接器降級");
+  }
+  if (adapterStatus?.status === "down") {
+    blockers.push("平台轉接器中斷");
+  }
+
+  const canReceiveOrders = blockers.length === 0;
+  const attentionOnly =
+    !canReceiveOrders &&
+    blockers.every((reason) =>
+      ["需要重新驗證", "資格仍在審核", "平台轉接器降級"].includes(reason),
+    );
+
+  const statusTone = canReceiveOrders
+    ? tokenInfo.urgency === "warning" || tokenInfo.urgency === "urgent"
+      ? "warning"
+      : "healthy"
+    : attentionOnly
+      ? "warning"
+      : "danger";
+
+  return {
+    canReceiveOrders,
+    blockers,
+    statusLabel: canReceiveOrders
+      ? "可接單"
+      : attentionOnly
+        ? "需要處理"
+        : "不可接單",
+    statusTone,
+    adapterLabel: getAdapterLabel(adapterStatus),
+    adapterTone: getAdapterTone(adapterStatus),
+    readinessLabel: canReceiveOrders
+      ? "目前可以接收該平台訂單"
+      : `目前無法接單：${blockers.join("、")}`,
+    tokenInfo,
+  };
+}
+
+function getActionToneStyles(tone: PlatformStatusAction["tone"] = "neutral") {
+  switch (tone) {
+    case "primary":
+      return {
+        backgroundColor: "#E8F1FF",
+        borderColor: "#B7D1F6",
+        iconColor: Tokens.colors.primary,
+        textColor: Tokens.colors.primary,
+      };
+    case "warning":
+      return {
+        backgroundColor: Tokens.colors.surfaceWarning,
+        borderColor: "#F5C26B",
+        iconColor: Tokens.colors.warning,
+        textColor: Tokens.colors.warning,
+      };
+    case "danger":
+      return {
+        backgroundColor: Tokens.colors.surfaceDanger,
+        borderColor: "#F0A7AF",
+        iconColor: Tokens.colors.danger,
+        textColor: Tokens.colors.danger,
+      };
+    default:
+      return {
+        backgroundColor: Tokens.colors.surfaceMuted,
+        borderColor: Tokens.colors.border,
+        iconColor: Tokens.colors.textBody,
+        textColor: Tokens.colors.textBody,
+      };
+  }
+}
+
+export function getPlatformHealthSeverity(
+  assessment: PlatformHealthAssessment,
+): number {
+  switch (assessment.statusTone) {
+    case "danger":
+      return 3;
+    case "warning":
+      return 2;
+    case "healthy":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
 export function PlatformStatusCard({
   record,
-  onStatusChange,
+  actions = [],
+  adapterStatus,
 }: PlatformStatusCardProps) {
-  const client = getDriverClient();
-  const [toggling, setToggling] = useState(false);
-  const [expiryInfo, setExpiryInfo] = useState(() =>
-    getTokenExpiryInfo(record.tokenExpiresAt),
+  const [assessment, setAssessment] = useState(() =>
+    assessPlatformHealth(record, adapterStatus),
   );
+  const platformLabel =
+    PLATFORM_CODE_REGISTRY[record.platformCode]?.displayName ??
+    record.platformCode;
 
-  // Update countdown every minute
   useEffect(() => {
-    const interval = setInterval(() => {
-      setExpiryInfo(getTokenExpiryInfo(record.tokenExpiresAt));
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [record.tokenExpiresAt]);
+    setAssessment(assessPlatformHealth(record, adapterStatus));
 
-  const handleToggle = async () => {
-    setToggling(true);
-    try {
-      if (record.status === "online") {
-        await client.setPlatformOffline({ platformCode: record.platformCode });
-      } else {
-        await client.setPlatformOnline({ platformCode: record.platformCode });
-      }
-      onStatusChange?.();
-    } catch (e: any) {
-      console.error("Failed to toggle platform presence:", e.message);
-      Alert.alert(
-        "Error",
-        `Failed to toggle ${record.platformCode}: ${e.message}`,
-      );
-    } finally {
-      setToggling(false);
+    if (!record.tokenExpiresAt) {
+      return;
     }
-  };
 
-  const handleReauth = () => {
-    Alert.alert(
-      "Re-authenticate Platform",
-      `Start re-authentication for "${record.platformCode}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Continue",
-          onPress: async () => {
-            try {
-              await client.setPlatformOnline({
-                platformCode: record.platformCode,
-                tokenExpiresAt: null,
-              });
-              onStatusChange?.();
-              Alert.alert(
-                "Re-auth Started",
-                `Complete authentication for ${record.platformCode}.`,
-              );
-            } catch (e: any) {
-              Alert.alert("Error", e.message);
-            }
-          },
-        },
-      ],
-    );
-  };
+    const interval = setInterval(() => {
+      setAssessment(assessPlatformHealth(record, adapterStatus));
+    }, 60000);
 
-  const eligibilityColor =
-    record.eligibility === "eligible"
-      ? "#4caf50"
-      : record.eligibility === "pending"
-        ? "#ff9800"
-        : "#f44336";
+    return () => clearInterval(interval);
+  }, [adapterStatus, record]);
 
-  const expiryColor =
-    expiryInfo.urgency === "expired"
-      ? "#f44336"
-      : expiryInfo.urgency === "urgent"
-        ? "#ff5722"
-        : expiryInfo.urgency === "warning"
-          ? "#ff9800"
-          : "#666";
+  const statusColor =
+    record.status === "online"
+      ? Tokens.colors.success
+      : Tokens.colors.borderStrong;
+  const facts: PlatformHealthFact[] = [
+    {
+      label: "接單資格",
+      value: getEligibilityText(record.eligibility),
+      tone:
+        record.eligibility === "eligible"
+          ? "healthy"
+          : record.eligibility === "pending"
+            ? "warning"
+            : "danger",
+    },
+    {
+      label: "可否接單",
+      value: assessment.canReceiveOrders ? "可以" : "暫不可",
+      tone: assessment.canReceiveOrders ? "healthy" : assessment.statusTone,
+    },
+    {
+      label: "平台憑證",
+      value: assessment.tokenInfo.label,
+      tone:
+        assessment.tokenInfo.urgency === "safe"
+          ? "healthy"
+          : assessment.tokenInfo.urgency === "warning" ||
+              assessment.tokenInfo.urgency === "urgent"
+            ? "warning"
+            : "danger",
+    },
+    {
+      label: "平台轉接器",
+      value: assessment.adapterLabel,
+      tone: assessment.adapterTone,
+    },
+    {
+      label: "綁定帳號",
+      value: record.accountId ?? "尚未綁定",
+      tone: record.accountId ? "neutral" : "danger",
+    },
+    {
+      label: "最近同步",
+      value: formatTimestamp(adapterStatus?.lastSyncAt ?? null),
+      tone: assessment.adapterTone,
+    },
+  ];
+
+  if (record.lastOnlineAt || record.lastOfflineAt) {
+    facts.push({
+      label: record.status === "online" ? "最近上線" : "最近離線",
+      value: formatTimestamp(
+        record.status === "online" ? record.lastOnlineAt : record.lastOfflineAt,
+      ),
+    });
+  }
 
   return (
-    <View style={styles.card}>
-      {/* Header with platform code and toggle */}
-      <View style={styles.header}>
-        <View style={styles.platformRow}>
-          <View
-            style={[
-              styles.statusDot,
-              {
-                backgroundColor:
-                  record.status === "online" ? "#4caf50" : "#9e9e9e",
-              },
-            ]}
-          />
-          <Text style={styles.platformCode}>{record.platformCode}</Text>
-        </View>
+    <PlatformHealthCard
+      title={platformLabel}
+      subtitle={`${getStatusText(record.status)} · ${record.platformCode}`}
+      statusLabel={assessment.statusLabel}
+      statusTone={assessment.statusTone}
+      facts={facts}
+      footer={
+        <>
+          <View style={styles.badgeRow}>
+            <PlatformBadge
+              code={record.platformCode}
+              name={platformLabel}
+              forwarded
+              size="sm"
+            />
+            <StatusChip
+              label={assessment.adapterLabel}
+              variant={
+                assessment.adapterTone === "healthy"
+                  ? "success"
+                  : assessment.adapterTone === "warning"
+                    ? "warning"
+                    : assessment.adapterTone === "danger"
+                      ? "danger"
+                      : "default"
+              }
+            />
+          </View>
 
-        <View style={styles.actions}>
-          {record.reauthRequired && (
-            <TouchableOpacity
-              style={[styles.iconBtn, styles.reauthIconBtn]}
-              onPress={handleReauth}
-              accessibilityLabel="Re-authenticate platform"
+          <View style={styles.platformRow}>
+            <View
+              style={[styles.statusDot, { backgroundColor: statusColor }]}
+            />
+            <Text style={styles.statusText}>{assessment.readinessLabel}</Text>
+          </View>
+
+          {assessment.blockers.length > 0 ? (
+            <View
+              style={[
+                styles.noticeBanner,
+                assessment.statusTone === "danger"
+                  ? styles.noticeBannerDanger
+                  : styles.noticeBannerWarning,
+              ]}
             >
-              <Text style={styles.iconBtnText}>🔄</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={[
-              styles.toggleBtn,
-              record.status === "online"
-                ? styles.goOfflineBtn
-                : styles.goOnlineBtn,
-              toggling && styles.toggleBtnDisabled,
-            ]}
-            onPress={handleToggle}
-            disabled={toggling}
-            accessibilityLabel={
-              record.status === "online" ? "Go offline" : "Go online"
-            }
-          >
-            <Text style={styles.toggleBtnText}>
-              {toggling
-                ? "..."
-                : record.status === "online"
-                  ? "Offline"
-                  : "Online"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+              <Ionicons
+                name={
+                  assessment.statusTone === "danger"
+                    ? "close-circle"
+                    : "alert-circle"
+                }
+                size={16}
+                color={
+                  assessment.statusTone === "danger"
+                    ? Tokens.colors.danger
+                    : Tokens.colors.warning
+                }
+              />
+              <Text
+                style={[
+                  styles.noticeText,
+                  {
+                    color:
+                      assessment.statusTone === "danger"
+                        ? Tokens.colors.danger
+                        : Tokens.colors.warning,
+                  },
+                ]}
+              >
+                阻塞原因：{assessment.blockers.join("、")}
+              </Text>
+            </View>
+          ) : null}
 
-      {/* Eligibility status */}
-      <View style={styles.infoRow}>
-        <Text style={styles.label}>Eligibility:</Text>
-        <Text style={[styles.value, { color: eligibilityColor }]}>
-          {record.eligibility}
-        </Text>
-      </View>
-
-      {/* Token expiry with countdown */}
-      {record.tokenExpiresAt && (
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Token:</Text>
-          <Text style={[styles.value, { color: expiryColor }]}>
-            {expiryInfo.label}
-          </Text>
-        </View>
-      )}
-
-      {/* Re-auth warning banner */}
-      {record.reauthRequired && (
-        <TouchableOpacity style={styles.warningBanner} onPress={handleReauth}>
-          <Text style={styles.warningText}>⚠️ Re-authentication required</Text>
-        </TouchableOpacity>
-      )}
-
-      {/* Last online timestamp */}
-      {record.lastOnlineAt && (
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Last online:</Text>
-          <Text style={styles.value}>
-            {new Date(record.lastOnlineAt).toLocaleString()}
-          </Text>
-        </View>
-      )}
-
-      {/* Account ID if present */}
-      {record.accountId && (
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>Account:</Text>
-          <Text style={styles.value}>{record.accountId}</Text>
-        </View>
-      )}
-    </View>
+          {actions.length > 0 ? (
+            <View style={styles.actions}>
+              {actions.map((action) => {
+                const toneStyles = getActionToneStyles(action.tone);
+                return (
+                  <TouchableOpacity
+                    key={action.key}
+                    style={[
+                      styles.actionButton,
+                      {
+                        backgroundColor: toneStyles.backgroundColor,
+                        borderColor: toneStyles.borderColor,
+                      },
+                      action.disabled && styles.actionButtonDisabled,
+                    ]}
+                    onPress={action.onPress}
+                    disabled={action.disabled}
+                    accessibilityRole="button"
+                    accessibilityLabel={action.label}
+                  >
+                    <Ionicons
+                      name={action.icon}
+                      size={16}
+                      color={toneStyles.iconColor}
+                    />
+                    <Text
+                      style={[
+                        styles.actionLabel,
+                        { color: toneStyles.textColor },
+                      ]}
+                    >
+                      {action.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
+        </>
+      }
+      style={styles.card}
+    />
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    padding: 14,
-    marginBottom: 10,
-    backgroundColor: "#fafafa",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#e0e0e0",
+    marginBottom: Tokens.spacing.md,
   },
-  header: {
+  badgeRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
   },
-  platformRow: { flexDirection: "row", alignItems: "center" },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
+  actions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Tokens.spacing.sm,
   },
-  platformCode: { fontSize: 16, fontWeight: "600", color: "#333" },
-  actions: { flexDirection: "row", alignItems: "center", gap: 8 },
-  iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    backgroundColor: "#fff",
+  actionButton: {
+    minHeight: 38,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#e0e0e0",
+    alignItems: "center",
     justifyContent: "center",
-    alignItems: "center",
-  },
-  reauthIconBtn: { backgroundColor: "#fff3e0", borderColor: "#ff9800" },
-  iconBtnText: { fontSize: 16 },
-  toggleBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 6,
-  },
-  goOnlineBtn: { backgroundColor: "#4caf50" },
-  goOfflineBtn: { backgroundColor: "#f44336" },
-  toggleBtnDisabled: { opacity: 0.5 },
-  toggleBtnText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-  infoRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 6,
+    paddingHorizontal: Tokens.spacing.md,
+    gap: Tokens.spacing.xs,
   },
-  label: { fontSize: 12, color: "#666" },
-  value: { fontSize: 12, fontWeight: "500", color: "#333" },
-  warningBanner: {
-    marginTop: 8,
-    padding: 10,
-    backgroundColor: "#fff3e0",
-    borderRadius: 6,
+  actionLabel: {
+    ...Tokens.type.label,
+  },
+  actionButtonDisabled: {
+    opacity: 0.45,
+  },
+  platformRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
+  },
+  statusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: Tokens.radius.full,
+  },
+  statusText: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+    flex: 1,
+  },
+  noticeBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Tokens.spacing.sm,
+    paddingHorizontal: Tokens.spacing.sm,
+    paddingVertical: Tokens.spacing.sm,
+    borderRadius: Tokens.radius.sm,
     borderWidth: 1,
-    borderColor: "#ff9800",
   },
-  warningText: {
-    color: "#e65100",
-    fontSize: 12,
-    fontWeight: "600",
-    textAlign: "center",
+  noticeBannerWarning: {
+    backgroundColor: Tokens.colors.surfaceWarning,
+    borderColor: "#F5C26B",
+  },
+  noticeBannerDanger: {
+    backgroundColor: Tokens.colors.surfaceDanger,
+    borderColor: "#F0A7AF",
+  },
+  noticeText: {
+    ...Tokens.type.label,
+    flex: 1,
   },
 });
 
