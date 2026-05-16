@@ -42,6 +42,7 @@ import {
   isOwnedUnifiedTask,
   summarizeWorkspaceTasks,
 } from "@/lib/driver-workspace-cockpit";
+import { driverActivationSteps, driverStrings } from "@/lib/strings";
 
 type WorkspaceRoute =
   | "/jobs"
@@ -60,23 +61,7 @@ type ActivationStep = {
   state: StepState;
 };
 
-const ACTIVATION_STEPS: ReadonlyArray<ActivationStep> = [
-  {
-    title: "裝置註冊",
-    description: "產生車隊識別碼",
-    state: "active",
-  },
-  {
-    title: "駕駛身份驗證",
-    description: "綁定駕駛帳號",
-    state: "pending",
-  },
-  {
-    title: "平台帳號連線",
-    description: "外部平台待綁定",
-    state: "pending",
-  },
-];
+const ACTIVATION_STEPS: ReadonlyArray<ActivationStep> = driverActivationSteps;
 
 const DEFAULT_TEST_REGISTRATION_CODE =
   process.env.EXPO_PUBLIC_DRIVER_TEST_REGISTRATION_CODE ?? "driver-demo-001";
@@ -87,8 +72,11 @@ function LoadingState({ label }: { label: string }) {
   return (
     <AppScreen scrollable={false}>
       <View style={styles.loadingState}>
-        <ActivityIndicator color={tokens.colors.primary} size="large" />
-        <Text style={styles.loadingLabel}>{label}</Text>
+        <BrandTile />
+        <View style={styles.loadingPanel}>
+          <ActivityIndicator color={tokens.colors.primary} size="large" />
+          <Text style={styles.loadingLabel}>{label}</Text>
+        </View>
       </View>
     </AppScreen>
   );
@@ -219,9 +207,12 @@ function HeroCard({
 }) {
   return (
     <View style={styles.heroCard}>
+      <View pointerEvents="none" style={styles.heroGlow} />
       <View style={styles.heroEyebrowRow}>
         <View style={styles.heroEyebrowDot} />
-        <Text style={styles.heroEyebrowText}>下一步動作</Text>
+        <Text style={styles.heroEyebrowText}>
+          {driverStrings.onboarding.heroEyebrow}
+        </Text>
       </View>
       <Text style={styles.heroTitle}>{title}</Text>
       <Text style={styles.heroMeta}>{meta}</Text>
@@ -1193,20 +1184,25 @@ export default function OnboardingScreen() {
   if (!provisioned) {
     return (
       <AppScreen contentContainerStyle={styles.provisionContent}>
-        <View style={styles.provisionHeader}>
-          <BrandTile />
-          <Text style={styles.provisionTitle}>裝置啟用</Text>
-          <Text style={styles.provisionLead}>
-            連線車隊管理系統。啟用後此裝置可接收派單與外部平台訂單。
-          </Text>
-          {hasDriverDevOverride() ? (
-            <View style={styles.devOverrideTag}>
-              <StatusChip label="開發覆寫" variant="info" />
-            </View>
-          ) : null}
+        <View style={styles.provisionHero}>
+          <View style={styles.provisionHeroGlow} />
+          <View style={styles.provisionHeader}>
+            <BrandTile />
+            <Text style={styles.provisionTitle}>裝置啟用</Text>
+            <Text style={styles.provisionLead}>
+              連線車隊管理系統，啟用後此裝置可接收派單與平台訂單。
+            </Text>
+            {hasDriverDevOverride() ? (
+              <View style={styles.devOverrideTag}>
+                <StatusChip label="開發覆寫" variant="info" />
+              </View>
+            ) : null}
+          </View>
         </View>
 
-        <StepTimeline steps={ACTIVATION_STEPS} />
+        <View style={styles.stepPanel}>
+          <StepTimeline steps={ACTIVATION_STEPS} />
+        </View>
 
         <View style={styles.formCard}>
           {provisioningError ? (
@@ -1252,9 +1248,20 @@ export default function OnboardingScreen() {
   if (!flagsOk || !identityOk) {
     return (
       <AppScreen contentContainerStyle={styles.degradeContent}>
-        <View style={styles.degradeHeader}>
-          <Text style={styles.degradeTitle}>工作台暫時降級</Text>
-          <Text style={styles.degradeSubtitle}>身份或功能設定尚未完成同步</Text>
+        <View style={styles.degradeHero}>
+          <View style={styles.degradeHeroIcon}>
+            <Ionicons
+              name="cloud-offline-outline"
+              size={18}
+              color={tokens.colors.warning}
+            />
+          </View>
+          <View style={styles.degradeHeader}>
+            <Text style={styles.degradeTitle}>工作台暫時降級</Text>
+            <Text style={styles.degradeSubtitle}>
+              身份或功能設定尚未完成同步
+            </Text>
+          </View>
           <View style={styles.degradeChipRow}>
             <StatusChip
               label={identityOk ? "身份正常" : "身份失敗"}
@@ -1267,7 +1274,7 @@ export default function OnboardingScreen() {
           </View>
         </View>
 
-        <View style={styles.formCard}>
+        <View style={styles.degradePanel}>
           {workspaceIssue ? <ErrorBanner message={workspaceIssue} /> : null}
           <ActionButton
             icon="refresh-outline"
@@ -1300,6 +1307,7 @@ export default function OnboardingScreen() {
     <AppScreen contentContainerStyle={styles.cockpitContent}>
       <View style={styles.cockpitHeader}>
         <View style={styles.cockpitGreetingBlock}>
+          <Text style={styles.cockpitGreetingEyebrow}>早安，司機</Text>
           <Text style={styles.cockpitGreetingLabel}>工作台</Text>
           <View style={styles.cockpitStatusRow}>
             <View
@@ -1342,20 +1350,20 @@ export default function OnboardingScreen() {
 
       <View style={styles.kpiRow}>
         <KpiTile
+          iconName="alert-circle-outline"
+          label="待處理"
+          tone={notificationCount > 0 ? "warning" : "brand"}
+          value={String(notificationCount)}
+        />
+        <KpiTile
           iconName="time-outline"
           label="班次"
           tone={isDriverOnShift ? "success" : "neutral"}
           value={shiftKpiValue}
         />
         <KpiTile
-          iconName="alert-circle-outline"
-          label="急件"
-          tone={notificationCount > 0 ? "warning" : "neutral"}
-          value={String(notificationCount)}
-        />
-        <KpiTile
           iconName="swap-horizontal-outline"
-          label="外部可接單"
+          label="已上線"
           tone={readyExternalCount > 0 ? "success" : "neutral"}
           unit={
             externalPresences.length > 0
@@ -1450,7 +1458,14 @@ export default function OnboardingScreen() {
 
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>平台就緒狀態</Text>
+          <View>
+            <Text style={styles.sectionEyebrow}>
+              {driverStrings.onboarding.platformSectionEyebrow}
+            </Text>
+            <Text style={styles.sectionTitle}>
+              {driverStrings.onboarding.platformSectionTitle}
+            </Text>
+          </View>
           <Pressable
             accessibilityRole="button"
             onPress={navigate("/platform-presence")}
@@ -1493,49 +1508,61 @@ export default function OnboardingScreen() {
         <Text style={styles.helperHintText}>{helperHint}</Text>
       </View>
 
-      <View style={styles.quickGrid}>
-        <QuickTile
-          helper={`${pendingValue} 筆未完成`}
-          iconName="briefcase-outline"
-          label="任務"
-          tone="brand"
-          onPress={navigate("/jobs")}
-        />
-        <QuickTile
-          helper="目前行程"
-          iconName="navigate-outline"
-          label="行程"
-          tone="brand"
-          onPress={navigate("/trip")}
-        />
-        <QuickTile
-          helper="平台健康中心"
-          iconName="swap-horizontal-outline"
-          label="平台"
-          tone="brand"
-          onPress={navigate("/platform-presence")}
-        />
-        <QuickTile
-          helper="班次與出勤"
-          iconName="time-outline"
-          label="班次"
-          tone="brand"
-          onPress={navigate("/shift")}
-        />
-        <QuickTile
-          helper="今日收益"
-          iconName="cash-outline"
-          label="收入"
-          tone="brand"
-          onPress={navigate("/earnings")}
-        />
-        <QuickTile
-          helper="帳號與綁定"
-          iconName="settings-outline"
-          label="設定"
-          tone="brand"
-          onPress={navigate("/settings")}
-        />
+      <View style={styles.quickSection}>
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.sectionEyebrow}>
+              {driverStrings.onboarding.quickLinksEyebrow}
+            </Text>
+            <Text style={styles.sectionTitle}>
+              {driverStrings.onboarding.quickLinksTitle}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.quickGrid}>
+          <QuickTile
+            helper={`${pendingValue} 筆未完成`}
+            iconName="briefcase-outline"
+            label="任務"
+            tone="brand"
+            onPress={navigate("/jobs")}
+          />
+          <QuickTile
+            helper="目前行程"
+            iconName="navigate-outline"
+            label="行程"
+            tone="brand"
+            onPress={navigate("/trip")}
+          />
+          <QuickTile
+            helper="平台健康中心"
+            iconName="swap-horizontal-outline"
+            label="平台"
+            tone="brand"
+            onPress={navigate("/platform-presence")}
+          />
+          <QuickTile
+            helper="班次與出勤"
+            iconName="time-outline"
+            label="班次"
+            tone="brand"
+            onPress={navigate("/shift")}
+          />
+          <QuickTile
+            helper="今日收益"
+            iconName="cash-outline"
+            label="收入"
+            tone="brand"
+            onPress={navigate("/earnings")}
+          />
+          <QuickTile
+            helper="帳號與綁定"
+            iconName="settings-outline"
+            label="設定"
+            tone="brand"
+            onPress={navigate("/settings")}
+          />
+        </View>
       </View>
 
       <View style={styles.footerLinks}>
@@ -1552,7 +1579,9 @@ export default function OnboardingScreen() {
             size={14}
             color={tokens.colors.textMuted}
           />
-          <Text style={styles.footerLinkText}>安全求援</Text>
+          <Text style={styles.footerLinkText}>
+            {driverStrings.onboarding.footerActions.sos}
+          </Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -1567,7 +1596,9 @@ export default function OnboardingScreen() {
             size={14}
             color={tokens.colors.textMuted}
           />
-          <Text style={styles.footerLinkText}>重新整理</Text>
+          <Text style={styles.footerLinkText}>
+            {driverStrings.onboarding.footerActions.refresh}
+          </Text>
         </Pressable>
       </View>
     </AppScreen>
@@ -1580,21 +1611,53 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: tokens.spacing[24],
+    gap: tokens.spacing[16],
+  },
+  loadingPanel: {
+    minWidth: 220,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: tokens.spacing[20],
+    paddingVertical: tokens.spacing[24],
+    gap: tokens.spacing[12],
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: tokens.radius.xl,
+    ...tokens.shadows.sm,
   },
   loadingLabel: {
     ...tokens.type.body,
     color: tokens.colors.textBody,
-    marginTop: tokens.spacing[12],
     textAlign: "center",
   },
 
   // Provisioning screen
   provisionContent: {
-    paddingTop: tokens.spacing[20],
+    paddingTop: tokens.spacing[12],
     gap: tokens.spacing[20],
   },
+  provisionHero: {
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: 24,
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    ...tokens.shadows.sm,
+  },
+  provisionHeroGlow: {
+    position: "absolute",
+    top: -48,
+    right: -40,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: tokens.colors.brandBg,
+  },
   provisionHeader: {
-    paddingHorizontal: tokens.spacing[4],
+    paddingHorizontal: tokens.spacing[20],
+    paddingVertical: tokens.spacing[20],
     gap: tokens.spacing[8],
   },
   provisionTitle: {
@@ -1611,6 +1674,15 @@ const styles = StyleSheet.create({
   devOverrideTag: {
     marginTop: tokens.spacing[4],
     flexDirection: "row",
+  },
+  stepPanel: {
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: tokens.radius.xl,
+    paddingHorizontal: tokens.spacing[16],
+    paddingVertical: tokens.spacing[16],
+    ...tokens.shadows.sm,
   },
   brandTile: {
     width: 44,
@@ -1736,10 +1808,15 @@ const styles = StyleSheet.create({
   cockpitGreetingBlock: {
     flex: 1,
   },
+  cockpitGreetingEyebrow: {
+    ...tokens.type.label,
+    color: tokens.colors.textMuted,
+  },
   cockpitGreetingLabel: {
     ...tokens.type.display,
     fontSize: 26,
     color: tokens.colors.textStrong,
+    marginTop: 2,
   },
   cockpitStatusRow: {
     flexDirection: "row",
@@ -1785,6 +1862,16 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: tokens.spacing[16],
     overflow: "hidden",
+    ...tokens.shadows.md,
+  },
+  heroGlow: {
+    position: "absolute",
+    top: -30,
+    right: -20,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "rgba(255,255,255,0.07)",
   },
   heroEyebrowRow: {
     flexDirection: "row",
@@ -1952,12 +2039,18 @@ const styles = StyleSheet.create({
     borderColor: tokens.colors.border,
     borderRadius: 14,
     padding: tokens.spacing[16],
+    ...tokens.shadows.sm,
   },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: tokens.spacing[12],
+  },
+  sectionEyebrow: {
+    ...tokens.type.micro,
+    color: tokens.colors.textMuted,
+    marginBottom: 4,
   },
   sectionTitle: {
     ...tokens.type.sectionTitle,
@@ -2026,6 +2119,14 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: tokens.spacing[8],
   },
+  quickSection: {
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: 14,
+    padding: tokens.spacing[16],
+    ...tokens.shadows.sm,
+  },
   quickTile: {
     flexBasis: "48%",
     flexGrow: 1,
@@ -2091,6 +2192,23 @@ const styles = StyleSheet.create({
     paddingTop: tokens.spacing[16],
     gap: tokens.spacing[16],
   },
+  degradeHero: {
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: 20,
+    padding: tokens.spacing[16],
+    gap: tokens.spacing[12],
+    ...tokens.shadows.sm,
+  },
+  degradeHeroIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: tokens.colors.warningBg,
+  },
   degradeHeader: {
     gap: tokens.spacing[8],
   },
@@ -2105,10 +2223,18 @@ const styles = StyleSheet.create({
   degradeChipRow: {
     flexDirection: "row",
     gap: tokens.spacing[8],
-    marginTop: tokens.spacing[8],
     flexWrap: "wrap",
   },
+  degradePanel: {
+    backgroundColor: tokens.colors.surface,
+    borderWidth: 1,
+    borderColor: tokens.colors.border,
+    borderRadius: 20,
+    padding: tokens.spacing[16],
+    gap: tokens.spacing[12],
+    ...tokens.shadows.sm,
+  },
   degradeSecondaryAction: {
-    marginTop: tokens.spacing[8],
+    marginTop: 0,
   },
 });

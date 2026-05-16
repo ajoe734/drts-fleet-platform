@@ -28,7 +28,10 @@ export const AppScreen: React.FC<AppScreenProps> = ({
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={backgroundColor} />
+      <StatusBar
+        barStyle={Tokens.mode === "dark" ? "light-content" : "dark-content"}
+        backgroundColor={backgroundColor}
+      />
       <Container
         style={[styles.container, style]}
         contentContainerStyle={

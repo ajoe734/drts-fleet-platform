@@ -1,8 +1,9 @@
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  FlatList,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -25,24 +26,19 @@ import {
   EmptyState,
   ErrorBanner,
   IconButton,
-  InfoTile,
-  ListCard,
   PageHeader,
   SegmentedControl,
   StatusChip,
   Tokens,
 } from "@/components/ui";
 import { getDriverClient, isDriverIdentityProvisioned } from "@/lib/api-client";
-import { formatMoney, sumMoneyAmounts } from "@/lib/money";
+import { driverEarningsPeriodOptions, driverStrings } from "@/lib/strings";
+import { formatMoney, getCurrencyLabel, sumMoneyAmounts } from "@/lib/money";
 import { formatDriverPayoutStatusLabel } from "@/lib/operational-labels";
 
 type PeriodKey = "today" | "week" | "month";
 
-const PERIOD_OPTIONS = [
-  { label: "今日", value: "today" },
-  { label: "本週", value: "week" },
-  { label: "本月", value: "month" },
-] as const;
+const PERIOD_OPTIONS = driverEarningsPeriodOptions;
 
 const DEFAULT_CURRENCY = "TWD";
 
@@ -53,30 +49,41 @@ function toErrorMessage(error: unknown): string {
   return "資料載入失敗，請稍後再試。";
 }
 
-function sumPlatformNet(
-  items: Array<{ netAmount: MoneyAmount; platformCode: string }>,
-  predicate: (item: {
+function sumPlatformAmounts(
+  items: Array<{
+    grossEarning: MoneyAmount;
+    serviceFee: MoneyAmount;
+    subsidy: MoneyAmount;
     netAmount: MoneyAmount;
     platformCode: string;
-  }) => boolean,
+  }>,
+  key: "grossEarning" | "serviceFee" | "subsidy" | "netAmount",
+  predicate: (item: {
+    grossEarning: MoneyAmount;
+    serviceFee: MoneyAmount;
+    subsidy: MoneyAmount;
+    netAmount: MoneyAmount;
+    platformCode: string;
+  }) => boolean = () => true,
   currency = DEFAULT_CURRENCY,
 ): MoneyAmount {
   return sumMoneyAmounts(
-    items.filter(predicate).map((item) => item.netAmount),
+    items.filter(predicate).map((item) => item[key]),
     currency,
   );
 }
 
-function sumStatementNet(
+function sumStatementAmounts(
   statements: DriverStatementRecord[],
-  predicate: (statement: DriverStatementRecord) => boolean,
+  key: "grossEarning" | "serviceFee" | "subsidy" | "netAmount",
+  predicate: (statement: DriverStatementRecord) => boolean = () => true,
 ): MoneyAmount {
   const currency =
     statements[0]?.netAmount.currency ??
     statements[0]?.grossEarning.currency ??
     DEFAULT_CURRENCY;
   return sumMoneyAmounts(
-    statements.filter(predicate).map((statement) => statement.netAmount),
+    statements.filter(predicate).map((statement) => statement[key]),
     currency,
   );
 }
@@ -127,7 +134,7 @@ function getPeriodDescription(
       : "顯示最近一次可用的月結收益與對帳資料。";
   }
 
-  return "今日與本週會顯示平台收益彙整；對帳單仍以月結資料提供，請切換到本月查看最新結算明細。";
+  return "今日與本週顯示平台收益切片；月結對帳單仍以本月檢視提供。";
 }
 
 function getEmptyPeriodTitle(period: PeriodKey): string {
@@ -140,6 +147,70 @@ function getEmptyPeriodTitle(period: PeriodKey): string {
   }
 
   return "這個月份還沒有收益資料";
+}
+
+function getHeroLabel(period: PeriodKey, latestStatementMonth: string | null) {
+  if (period === "today") {
+    return "淨收入 · 今日";
+  }
+
+  if (period === "week") {
+    return "淨收入 · 本週";
+  }
+
+  return latestStatementMonth
+    ? `淨收入 · ${latestStatementMonth}`
+    : "淨收入 · 本月";
+}
+
+function SectionCard({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+}) {
+  return (
+    <View style={styles.sectionCard}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>{title}</Text>
+        {subtitle ? (
+          <Text style={styles.sectionSubtitle}>{subtitle}</Text>
+        ) : null}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function MetricColumn({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "danger" | "warning";
+}) {
+  return (
+    <View style={styles.metricColumn}>
+      <Text style={styles.metricLabel}>{label}</Text>
+      <Text
+        style={[
+          styles.metricValue,
+          tone === "danger"
+            ? styles.metricValueDanger
+            : tone === "warning"
+              ? styles.metricValueWarning
+              : null,
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
+  );
 }
 
 function StatementSectionEmpty({
@@ -162,7 +233,7 @@ function StatementSectionEmpty({
       icon="document-text-outline"
       actionTitle={isMonth ? "重新整理" : "切換到本月"}
       onAction={onResetPeriod}
-      style={styles.sectionEmptyState}
+      style={styles.inlineEmptyState}
     />
   );
 }
@@ -240,7 +311,10 @@ export default function EarningsScreen() {
   if (loading) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="收益儀表板" />
+        <PageHeader
+          title={driverStrings.earnings.title}
+          subtitle={driverStrings.earnings.loadingSubtitle}
+        />
         <View style={styles.centerState}>
           <ActivityIndicator size="large" color={Tokens.colors.primary} />
           <Text style={styles.loadingLabel}>載入收益資料中…</Text>
@@ -252,7 +326,10 @@ export default function EarningsScreen() {
   if (!isProvisioned) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="收益儀表板" />
+        <PageHeader
+          title={driverStrings.earnings.title}
+          subtitle="需要完成裝置綁定"
+        />
         <EmptyState
           title="裝置尚未綁定司機身份"
           description="完成裝置註冊後，才能查看平台收益與對帳資料。"
@@ -266,7 +343,10 @@ export default function EarningsScreen() {
   if (!earningsEnabled) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="收益儀表板" />
+        <PageHeader
+          title={driverStrings.earnings.title}
+          subtitle="收益功能未啟用"
+        />
         <EmptyState
           title="收益儀表板暫停提供"
           description="此功能目前未啟用，請稍後再試或改從設定頁確認帳務通知。"
@@ -278,49 +358,74 @@ export default function EarningsScreen() {
   }
 
   const baseCurrency =
-    summary?.totalNet.currency ??
     platformItems[0]?.netAmount.currency ??
     statements[0]?.netAmount.currency ??
+    summary?.totalNet.currency ??
     DEFAULT_CURRENCY;
+  const currencyLabel = getCurrencyLabel(baseCurrency);
   const latestStatementMonth = getLatestStatementMonth(statements);
-  const monthlyStatements = filterStatementsForPeriod(statements, "month");
   const displayedStatements =
-    selectedPeriod === "month" ? monthlyStatements : [];
+    selectedPeriod === "month"
+      ? filterStatementsForPeriod(statements, "month")
+      : [];
   const displayedPlatformItems = platformItems;
-  const drtsStatementAmount = sumStatementNet(displayedStatements, () => true);
+  const grossAmount = sumPlatformAmounts(
+    displayedPlatformItems,
+    "grossEarning",
+    () => true,
+    baseCurrency,
+  );
+  const feeAmount = sumPlatformAmounts(
+    displayedPlatformItems,
+    "serviceFee",
+    () => true,
+    baseCurrency,
+  );
+  const netAmount = sumPlatformAmounts(
+    displayedPlatformItems,
+    "netAmount",
+    () => true,
+    baseCurrency,
+  );
+  const drtsStatementAmount = sumStatementAmounts(
+    displayedStatements,
+    "netAmount",
+  );
   const forwardedPlatformItems = displayedPlatformItems.filter(
     (item) => !isOwnedPlatformCode(item.platformCode),
   );
   const shadowOnlyPlatformItems = displayedPlatformItems.filter((item) =>
     isShadowOnlyPlatformCode(item.platformCode),
   );
-  const externalPlatformAmount = sumPlatformNet(
+  const externalPlatformAmount = sumPlatformAmounts(
     displayedPlatformItems,
+    "netAmount",
     (item) =>
       !isOwnedPlatformCode(item.platformCode) &&
       !isShadowOnlyPlatformCode(item.platformCode),
     baseCurrency,
   );
-  const shadowOnlyAmount = sumPlatformNet(
-    displayedPlatformItems,
-    (item) => isShadowOnlyPlatformCode(item.platformCode),
-    baseCurrency,
-  );
-  const paidPayoutAmount = sumStatementNet(
+  const pendingPayoutAmount = sumStatementAmounts(
     displayedStatements,
-    (statement) => statement.payoutStatus === "paid",
-  );
-  const pendingPayoutAmount = sumStatementNet(
-    displayedStatements,
+    "netAmount",
     (statement) => statement.payoutStatus !== "paid",
   );
+  const paidPayoutAmount = sumStatementAmounts(
+    displayedStatements,
+    "netAmount",
+    (statement) => statement.payoutStatus === "paid",
+  );
+  const summaryNotes = summary?.notes ?? [];
   const hasAnyData =
     displayedPlatformItems.length > 0 || displayedStatements.length > 0;
 
   if (error && !hasAnyData) {
     return (
       <View style={styles.screen}>
-        <PageHeader title="收益儀表板" />
+        <PageHeader
+          title={driverStrings.earnings.title}
+          subtitle="收益資料同步失敗"
+        />
         <View style={styles.errorState}>
           <ErrorBanner message={`收益資料同步失敗：${error}`} />
           <ActionButton
@@ -337,12 +442,8 @@ export default function EarningsScreen() {
   return (
     <View style={styles.screen}>
       <PageHeader
-        title="收益儀表板"
-        subtitle={
-          latestStatementMonth
-            ? `最新月結週期 ${latestStatementMonth}`
-            : "查看平台收益與對帳單彙整"
-        }
+        title={driverStrings.earnings.title}
+        subtitle={getPeriodDescription(selectedPeriod, latestStatementMonth)}
         rightElement={
           <IconButton
             icon="refresh"
@@ -353,124 +454,140 @@ export default function EarningsScreen() {
         }
       />
 
-      <FlatList
-        data={displayedStatements}
-        keyExtractor={(item) => item.statementId}
-        renderItem={({ item }) => (
-          <ListCard
-            title={item.receiptNo}
-            subtitle={`${item.periodMonth} · ${item.feePlanVersion}`}
-            meta={`${item.lines.length} 筆行程 · 實拿 ${formatMoney(item.netAmount)}`}
-            statusElement={
-              <StatusChip
-                label={formatDriverPayoutStatusLabel(item.payoutStatus)}
-                variant={getStatementStatusVariant(item.payoutStatus)}
-              />
-            }
-            style={styles.statementCard}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={Tokens.colors.primary}
           />
-        )}
-        contentContainerStyle={styles.listContent}
-        ListHeaderComponent={
-          <View style={styles.listHeader}>
-            {error ? (
-              <ErrorBanner message={`資料可能不是最新：${error}`} />
-            ) : null}
-
-            <View style={styles.periodCard}>
-              <Text style={styles.sectionEyebrow}>結算期間</Text>
-              <SegmentedControl
-                options={PERIOD_OPTIONS.map((option) => ({
-                  label: option.label,
-                  value: option.value,
-                }))}
-                selectedValue={selectedPeriod}
-                onValueChange={(value) => setSelectedPeriod(value as PeriodKey)}
-              />
-              <Text style={styles.periodDescription}>
-                {getPeriodDescription(selectedPeriod, latestStatementMonth)}
-              </Text>
-            </View>
-
-            <View style={styles.summaryGrid}>
-              <View style={styles.summaryRow}>
-                <InfoTile
-                  label="DRTS 對帳金額"
-                  value={formatMoney(drtsStatementAmount)}
-                />
-                <InfoTile
-                  label="外部平台結算"
-                  value={formatMoney(externalPlatformAmount)}
-                />
-              </View>
-              <View style={styles.summaryRow}>
-                <InfoTile
-                  label="Shadow-only 鏡像"
-                  value={formatMoney(shadowOnlyAmount)}
-                />
-                <InfoTile
-                  label="已撥款"
-                  value={formatMoney(paidPayoutAmount)}
-                />
-              </View>
-              <View style={styles.summaryRow}>
-                <InfoTile
-                  label="待撥款"
-                  value={formatMoney(pendingPayoutAmount)}
-                />
-              </View>
-            </View>
-
-            <View style={styles.authorityStack}>
-              <AuthorityBanner
-                title="DRTS 對帳與撥款"
-                authorityLabel={
-                  displayedStatements.length > 0
-                    ? `${displayedStatements.length} 筆 DRTS 對帳單`
-                    : "本期尚無 DRTS 對帳單"
-                }
-                description="只有進入 DRTS 對帳單的金額才會出現在待撥款與已撥款狀態追蹤。"
-                tone="owned"
-                icon="wallet"
-              />
-              <AuthorityBanner
-                title="外部平台 finance authority"
-                authorityLabel={
-                  shadowOnlyPlatformItems.length > 0
-                    ? `${shadowOnlyPlatformItems.length} 個 shadow-only 平台 / ${forwardedPlatformItems.length} 個 external-platform 平台`
-                    : `${forwardedPlatformItems.length} 個 external-platform 平台`
-                }
-                description="Platform earnings contract 內的已登錄平台項目視為 external-platform finance authority；其中 shadow-only 鏡像只供對帳檢視，不列入 DRTS 待撥款。"
-                tone="platform"
-                icon="swap-horizontal"
-              />
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>平台收益</Text>
-              <EarningsByPlatform items={displayedPlatformItems} />
-            </View>
-
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>對帳單</Text>
-              <Text style={styles.sectionMeta}>
-                {displayedStatements.length} 筆
-              </Text>
-            </View>
-          </View>
         }
-        ListEmptyComponent={
-          selectedPeriod === "month" &&
-          displayedPlatformItems.length === 0 &&
-          !error ? (
-            <EmptyState
-              title={getEmptyPeriodTitle(selectedPeriod)}
-              description="本期尚未生成收益或對帳資料，請稍後重新整理。"
-              icon="cash-outline"
-              actionTitle="重新整理"
-              onAction={onRefresh}
-              style={styles.fillEmptyState}
+      >
+        {error ? <ErrorBanner message={`資料可能不是最新：${error}`} /> : null}
+
+        <View style={styles.periodCard}>
+          <Text style={styles.periodEyebrow}>
+            {driverStrings.earnings.periodEyebrow}
+          </Text>
+          <SegmentedControl
+            options={PERIOD_OPTIONS.map((option) => ({
+              label: option.label,
+              value: option.value,
+            }))}
+            selectedValue={selectedPeriod}
+            onValueChange={(value) => setSelectedPeriod(value as PeriodKey)}
+          />
+          <Text style={styles.periodDescription}>
+            {getPeriodDescription(selectedPeriod, latestStatementMonth)}
+          </Text>
+        </View>
+
+        <View style={styles.heroCard}>
+          <Text style={styles.heroEyebrow}>
+            {getHeroLabel(selectedPeriod, latestStatementMonth)}
+          </Text>
+          <View style={styles.heroValueRow}>
+            <Text style={styles.heroValue}>{formatMoney(netAmount)}</Text>
+            <Text style={styles.heroUnit}>{currencyLabel}</Text>
+          </View>
+          <Text style={styles.heroNote}>
+            {selectedPeriod === "month"
+              ? "月結視圖會同時顯示 DRTS 對帳金額與外部平台參考收益。"
+              : "此檢視顯示平台收益切片；實際月結請切換到本月查看。"}
+          </Text>
+
+          <View style={styles.heroMetricsRow}>
+            <MetricColumn label="毛收" value={formatMoney(grossAmount)} />
+            <MetricColumn
+              label="平台抽成"
+              value={formatMoney(feeAmount)}
+              tone="danger"
             />
+            <MetricColumn
+              label={selectedPeriod === "month" ? "待撥款" : "外部平台"}
+              value={
+                selectedPeriod === "month"
+                  ? formatMoney(pendingPayoutAmount)
+                  : formatMoney(externalPlatformAmount)
+              }
+              tone="warning"
+            />
+          </View>
+        </View>
+
+        <View style={styles.bannerStack}>
+          <AuthorityBanner
+            title="DRTS 對帳與撥款"
+            authorityLabel={
+              displayedStatements.length > 0
+                ? `${displayedStatements.length} 筆 DRTS 對帳單`
+                : "本期尚無 DRTS 對帳單"
+            }
+            description="只有進入 DRTS 對帳單的金額，才會出現在待撥款與已撥款追蹤。"
+            tone="owned"
+            icon="wallet"
+          />
+          <AuthorityBanner
+            title="外部平台 finance authority"
+            authorityLabel={
+              shadowOnlyPlatformItems.length > 0
+                ? `${shadowOnlyPlatformItems.length} 個 shadow-only 平台 / ${forwardedPlatformItems.length} 個 external-platform 平台`
+                : `${forwardedPlatformItems.length} 個 external-platform 平台`
+            }
+            description="外部平台與 shadow-only 鏡像金額僅供比對；不會自動進入 DRTS 待撥款。"
+            tone="platform"
+            icon="swap-horizontal"
+          />
+        </View>
+
+        <SectionCard
+          title="平台分項"
+          subtitle="不同平台有不同的結算權威；外部平台金額為參考值。"
+        >
+          <EarningsByPlatform items={displayedPlatformItems} />
+        </SectionCard>
+
+        <SectionCard
+          title="月結報表"
+          subtitle={
+            selectedPeriod === "month"
+              ? latestStatementMonth
+                ? `最新週期 ${latestStatementMonth}`
+                : "等待最新月結資料"
+              : "切換到本月可查看最新 DRTS 對帳單"
+          }
+        >
+          {displayedStatements.length > 0 ? (
+            <View style={styles.statementList}>
+              {displayedStatements.map((item) => (
+                <View key={item.statementId} style={styles.statementCard}>
+                  <View style={styles.statementHeader}>
+                    <View style={styles.statementTextBlock}>
+                      <Text style={styles.statementTitle}>
+                        {item.periodMonth} 月結
+                      </Text>
+                      <Text style={styles.statementSubtitle}>
+                        {item.lines.length} 筆行程 · {item.receiptNo}
+                      </Text>
+                    </View>
+                    <StatusChip
+                      label={formatDriverPayoutStatusLabel(item.payoutStatus)}
+                      variant={getStatementStatusVariant(item.payoutStatus)}
+                    />
+                  </View>
+
+                  <View style={styles.statementMetaRow}>
+                    <Text style={styles.statementMeta}>
+                      費率版本 {item.feePlanVersion}
+                    </Text>
+                    <Text style={styles.statementAmount}>
+                      {formatMoney(item.netAmount)}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
           ) : (
             <StatementSectionEmpty
               selectedPeriod={selectedPeriod}
@@ -480,16 +597,53 @@ export default function EarningsScreen() {
                   : () => setSelectedPeriod("month")
               }
             />
-          )
-        }
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={Tokens.colors.primary}
+          )}
+        </SectionCard>
+
+        {!hasAnyData && !error ? (
+          <EmptyState
+            title={getEmptyPeriodTitle(selectedPeriod)}
+            description="本期尚未生成收益或對帳資料，請稍後重新整理。"
+            icon="cash-outline"
+            actionTitle="重新整理"
+            onAction={onRefresh}
+            style={styles.fillEmptyState}
           />
-        }
-      />
+        ) : null}
+
+        {selectedPeriod === "month" ? (
+          <View style={styles.footerSummaryCard}>
+            <View style={styles.footerSummaryRow}>
+              <Text style={styles.footerSummaryLabel}>DRTS 對帳金額</Text>
+              <Text style={styles.footerSummaryValue}>
+                {formatMoney(drtsStatementAmount)}
+              </Text>
+            </View>
+            <View style={styles.footerSummaryRow}>
+              <Text style={styles.footerSummaryLabel}>外部平台結算</Text>
+              <Text style={styles.footerSummaryValue}>
+                {formatMoney(externalPlatformAmount)}
+              </Text>
+            </View>
+            <View style={styles.footerSummaryRow}>
+              <Text style={styles.footerSummaryLabel}>已撥款</Text>
+              <Text style={styles.footerSummaryValue}>
+                {formatMoney(paidPayoutAmount)}
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {summaryNotes.length > 0 ? (
+          <View style={styles.notesCard}>
+            {summaryNotes.map((note) => (
+              <Text key={note} style={styles.noteText}>
+                • {note}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+      </ScrollView>
     </View>
   );
 }
@@ -499,6 +653,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Tokens.colors.appBg,
   },
+  scrollContent: {
+    padding: Tokens.layout.pagePadding,
+    paddingBottom: Tokens.spacing["4xl"],
+    gap: Tokens.spacing.md,
+  },
   centerState: {
     flex: 1,
     alignItems: "center",
@@ -507,6 +666,17 @@ const styles = StyleSheet.create({
   },
   fillState: {
     flex: 1,
+  },
+  fillEmptyState: {
+    minHeight: 220,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    borderRadius: Tokens.radius.lg,
+    backgroundColor: Tokens.colors.surface,
+  },
+  inlineEmptyState: {
+    flex: 0,
+    minHeight: 180,
   },
   loadingLabel: {
     ...Tokens.type.label,
@@ -520,70 +690,187 @@ const styles = StyleSheet.create({
   retryButton: {
     alignSelf: "flex-start",
   },
-  listContent: {
-    paddingHorizontal: Tokens.layout.pagePadding,
-    paddingTop: Tokens.spacing.md,
-    paddingBottom: Tokens.spacing.lg,
-    flexGrow: 1,
-  },
-  listHeader: {
-    gap: Tokens.spacing.md,
-    marginBottom: Tokens.spacing.sm,
-  },
   periodCard: {
     backgroundColor: Tokens.colors.surface,
-    borderRadius: Tokens.radius.md,
+    borderRadius: Tokens.radius.lg,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
-    padding: Tokens.spacing.md,
+    padding: Tokens.spacing.lg,
     gap: Tokens.spacing.sm,
   },
-  sectionEyebrow: {
+  periodEyebrow: {
     ...Tokens.type.micro,
     color: Tokens.colors.textMuted,
   },
   periodDescription: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+  },
+  heroCard: {
+    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.xl,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.xl,
+    gap: Tokens.spacing.sm,
+    ...Tokens.shadows.md,
+  },
+  heroEyebrow: {
     ...Tokens.type.micro,
     color: Tokens.colors.textMuted,
   },
-  summaryGrid: {
-    gap: Tokens.spacing.sm,
-  },
-  summaryRow: {
+  heroValueRow: {
     flexDirection: "row",
+    alignItems: "flex-end",
     gap: Tokens.spacing.sm,
   },
-  authorityStack: {
+  heroValue: {
+    fontSize: 34,
+    lineHeight: 38,
+    fontWeight: "700",
+    color: Tokens.colors.textStrong,
+    letterSpacing: -1,
+    fontFamily: Tokens.fonts.mono,
+  },
+  heroUnit: {
+    ...Tokens.type.label,
+    color: Tokens.colors.textMuted,
+    marginBottom: 5,
+  },
+  heroNote: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+  },
+  heroMetricsRow: {
+    flexDirection: "row",
+    gap: Tokens.spacing.md,
+    paddingTop: Tokens.spacing.md,
+    marginTop: Tokens.spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: Tokens.colors.border,
+  },
+  metricColumn: {
+    flex: 1,
+    gap: 2,
+  },
+  metricLabel: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+  },
+  metricValue: {
+    ...Tokens.type.title,
+    color: Tokens.colors.textStrong,
+    fontFamily: Tokens.fonts.mono,
+  },
+  metricValueDanger: {
+    color: Tokens.colors.danger,
+  },
+  metricValueWarning: {
+    color: Tokens.colors.warning,
+  },
+  bannerStack: {
     gap: Tokens.spacing.sm,
   },
-  section: {
-    gap: Tokens.spacing.sm,
+  sectionCard: {
+    backgroundColor: Tokens.colors.bgRaised,
+    borderRadius: Tokens.radius.xl,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.lg,
+    gap: Tokens.spacing.md,
   },
   sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: Tokens.spacing.xs,
+    gap: 2,
   },
   sectionTitle: {
     ...Tokens.type.sectionTitle,
     color: Tokens.colors.textStrong,
   },
-  sectionMeta: {
-    ...Tokens.type.micro,
+  sectionSubtitle: {
+    ...Tokens.type.small,
     color: Tokens.colors.textMuted,
   },
-  statementCard: {
-    marginBottom: 0,
+  statementList: {
+    gap: Tokens.spacing.sm,
   },
-  sectionEmptyState: {
-    flex: 0,
+  statementCard: {
+    backgroundColor: Tokens.colors.surface,
     borderWidth: 1,
     borderColor: Tokens.colors.border,
-    borderRadius: Tokens.radius.md,
-    backgroundColor: Tokens.colors.surface,
+    borderRadius: Tokens.radius.lg,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.md,
   },
-  fillEmptyState: {
+  statementHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: Tokens.spacing.sm,
+  },
+  statementTextBlock: {
     flex: 1,
+    gap: 2,
+  },
+  statementTitle: {
+    ...Tokens.type.title,
+    color: Tokens.colors.textStrong,
+  },
+  statementSubtitle: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textBody,
+  },
+  statementMetaRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "baseline",
+    gap: Tokens.spacing.md,
+    paddingTop: Tokens.spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: Tokens.colors.border,
+  },
+  statementMeta: {
+    ...Tokens.type.micro,
+    color: Tokens.colors.textMuted,
+    flex: 1,
+  },
+  statementAmount: {
+    ...Tokens.type.title,
+    color: Tokens.colors.textStrong,
+    fontFamily: Tokens.fonts.mono,
+  },
+  footerSummaryCard: {
+    backgroundColor: Tokens.colors.surfaceLo,
+    borderRadius: Tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.lg,
+    gap: Tokens.spacing.sm,
+  },
+  footerSummaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: Tokens.spacing.md,
+  },
+  footerSummaryLabel: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
+  },
+  footerSummaryValue: {
+    ...Tokens.type.bodyStrong,
+    color: Tokens.colors.textStrong,
+    fontFamily: Tokens.fonts.mono,
+  },
+  notesCard: {
+    backgroundColor: Tokens.colors.surfaceLo,
+    borderRadius: Tokens.radius.lg,
+    borderWidth: 1,
+    borderColor: Tokens.colors.border,
+    padding: Tokens.spacing.md,
+    gap: Tokens.spacing.xs,
+  },
+  noteText: {
+    ...Tokens.type.small,
+    color: Tokens.colors.textMuted,
   },
 });
