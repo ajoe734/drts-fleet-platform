@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
+import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryController } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.controller";
 import { RegulatoryRegistryRepository } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
@@ -10,8 +12,11 @@ import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory
 function createRegulatoryRegistryService(
   repository?: RegulatoryRegistryRepository,
 ) {
+  const auditService = new AuditNotificationService();
   return new RegulatoryRegistryService(
     new OpsDispatchEventsService(new EventEmitter() as never),
+    auditService,
+    new DriverProfileService(auditService),
     repository,
   );
 }

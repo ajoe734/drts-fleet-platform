@@ -8,6 +8,7 @@ import {
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OpsDispatchEventsService } from "../../apps/api/src/common/ops-dispatch-events.service";
 import { CallcenterService } from "../../apps/api/src/modules/callcenter/callcenter.service";
+import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { ForwarderRepository } from "../../apps/api/src/modules/forwarder/forwarder.repository";
 import { ForwarderService } from "../../apps/api/src/modules/forwarder/forwarder.service";
 import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
@@ -18,6 +19,8 @@ function createServices() {
   const auditService = new AuditNotificationService();
   const regulatoryRegistryService = new RegulatoryRegistryService(
     new OpsDispatchEventsService(new EventEmitter() as never),
+    auditService,
+    new DriverProfileService(auditService),
   );
   const callcenterService = new CallcenterService(auditService);
   const ownedMobilityService = new OwnedMobilityService(
@@ -40,7 +43,7 @@ function createServices() {
 }
 
 describe("forwarder service", () => {
-  it("covers SC-015 with local accept, confirmed_by_platform, and no owned assignment creation", () => {
+  it("covers SC-015 with local accept, confirmed_by_platform, and no owned assignment creation", async () => {
     const { auditService, ownedMobilityService, forwarderService } =
       createServices();
 
@@ -63,7 +66,7 @@ describe("forwarder service", () => {
       },
       "forwarder-broadcast-001",
     );
-    const accepted = forwarderService.relayDriverAccept(
+    const accepted = await forwarderService.relayDriverAccept(
       inbound.mirrorOrderId,
       {
         driverId: "drv-demo-001",
@@ -164,6 +167,8 @@ describe("forwarder service", () => {
     const auditService = new AuditNotificationService();
     const regulatoryRegistryService = new RegulatoryRegistryService(
       new OpsDispatchEventsService(new EventEmitter() as never),
+      auditService,
+      new DriverProfileService(auditService),
     );
     const persistChanges = vi.fn(async () => undefined);
     const repository = {

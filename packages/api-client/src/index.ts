@@ -1868,11 +1868,11 @@ export class ApiClient {
   }
 
   async createIncident(command: CreateIncidentCommand) {
-    return this.post("/api/incidents", { body: command });
+    return this.post<IncidentRecord>("/api/incidents", { body: command });
   }
 
   async getIncident(incidentId: string) {
-    return this.get(`/api/incidents/${incidentId}`);
+    return this.get<IncidentRecord>(`/api/incidents/${incidentId}`);
   }
 
   async getIncidentTimeline(

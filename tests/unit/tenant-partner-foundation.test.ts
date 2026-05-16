@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -31,6 +33,7 @@ function createEmptyPartnerState(): TenantPartnerState {
     webhookDeliveries: [],
     slaProfiles: [],
     partnerEntries: [],
+    partnerIngressCredentials: [],
     partnerEligibilityVerifications: [],
     passengers: [],
     addresses: [],
@@ -173,11 +176,11 @@ describe("tenant partner foundation service", () => {
     });
   });
 
-  it("verifies partner eligibility and stores provenance for eligible partner entries", () => {
+  it("verifies partner eligibility and stores provenance for eligible partner entries", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const verification = tenantPartnerService.verifyPartnerEligibility(
+    const verification = await tenantPartnerService.verifyPartnerEligibility(
       {
         entrySlug: "bank-demo-alpha-airport",
         cardLast4: "2468",
@@ -208,18 +211,19 @@ describe("tenant partner foundation service", () => {
     );
   });
 
-  it("marks odd inline-card programs as ineligible and accepts reference-based entries", () => {
+  it("marks odd inline-card programs as ineligible and accepts reference-based entries", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const rejected = tenantPartnerService.verifyPartnerEligibility({
+    const rejected = await tenantPartnerService.verifyPartnerEligibility({
       entrySlug: "bank-demo-alpha-airport",
       cardLast4: "1357",
     });
-    const acceptedByReference = tenantPartnerService.verifyPartnerEligibility({
-      entrySlug: "bank-demo-beta-airport",
-      referenceToken: "BETA0001",
-    });
+    const acceptedByReference =
+      await tenantPartnerService.verifyPartnerEligibility({
+        entrySlug: "bank-demo-beta-airport",
+        referenceToken: "BETA0001",
+      });
 
     expect(rejected).toMatchObject({
       verificationStatus: "ineligible",
@@ -332,7 +336,7 @@ describe("tenant partner foundation service", () => {
     );
 
     await firstService.onModuleInit();
-    const verification = firstService.verifyPartnerEligibility(
+    const verification = await firstService.verifyPartnerEligibility(
       {
         entrySlug: "bank-demo-alpha-airport",
         cardLast4: "2468",
@@ -837,8 +841,12 @@ describe("tenant partner foundation service", () => {
         supportEmail: "other@bank-demo.example",
         supportPhone: "0800-000-333",
       },
+      eligibilityContract: null,
       status: "active",
       activeFlag: true,
+      revokedAt: null,
+      revokedBy: null,
+      revokeReason: null,
       createdAt: "2026-04-28T00:00:00.000Z",
       updatedAt: "2026-04-28T00:00:00.000Z",
       auditMetadata: {
@@ -857,17 +865,23 @@ describe("tenant partner foundation service", () => {
         {
           entrySlug: "bank-demo-alpha-airport",
           keyId: "partner-key-alpha-demo",
-          plaintextApiKey: "pk_demo_alpha_airport_20260428",
+          apiKeyHash: createHash("sha256")
+            .update("pk_demo_alpha_airport_20260428")
+            .digest("hex"),
         },
         {
           entrySlug: "bank-demo-beta-airport",
           keyId: "partner-key-beta-demo",
-          plaintextApiKey: "pk_demo_beta_airport_20260428",
+          apiKeyHash: createHash("sha256")
+            .update("pk_demo_beta_airport_20260428")
+            .digest("hex"),
         },
         {
           entrySlug: "bank-demo-other-airport",
           keyId: "partner-key-other-demo",
-          plaintextApiKey: "pk_demo_other_airport_20260428",
+          apiKeyHash: createHash("sha256")
+            .update("pk_demo_other_airport_20260428")
+            .digest("hex"),
         },
       ],
     );
@@ -881,17 +895,19 @@ describe("tenant partner foundation service", () => {
       entrySlug: "bank-demo-alpha-airport",
       apiKey: "pk_demo_alpha_airport_20260428",
     }).identity;
-    const otherVerification = tenantPartnerService.verifyPartnerEligibility(
-      {
-        entrySlug: "bank-demo-other-airport",
-        referenceToken: "OTHER0001",
-      },
-      "other-tenant-verify-request",
-    );
+    const otherVerification =
+      await tenantPartnerService.verifyPartnerEligibility(
+        {
+          entrySlug: "bank-demo-other-airport",
+          referenceToken: "OTHER0001",
+        },
+        "other-tenant-verify-request",
+      );
 
     expect(() =>
       tenantPartnerService.getPartnerEligibilityVerification(
         otherVerification.eligibilityVerificationId,
+        undefined,
         alphaIdentity,
       ),
     ).toThrowError(ApiRequestError);
@@ -915,8 +931,12 @@ describe("tenant partner foundation service", () => {
       entryPath: "/partner/bank-demo-inactive-airport",
       themeAccent: "#868e96",
       brandingMetadata: null,
+      eligibilityContract: null,
       status: "inactive",
       activeFlag: false,
+      revokedAt: null,
+      revokedBy: null,
+      revokeReason: null,
       createdAt: "2026-04-28T00:00:00.000Z",
       updatedAt: "2026-04-28T00:00:00.000Z",
       auditMetadata: {
@@ -934,7 +954,9 @@ describe("tenant partner foundation service", () => {
         {
           entrySlug: "bank-demo-inactive-airport",
           keyId: "partner-key-inactive-demo",
-          plaintextApiKey: "pk_demo_inactive_airport_20260428",
+          apiKeyHash: createHash("sha256")
+            .update("pk_demo_inactive_airport_20260428")
+            .digest("hex"),
         },
       ],
     );
@@ -1082,8 +1104,11 @@ describe("tenant partner foundation service", () => {
         failedDeliveryCount: 0,
         lastAttemptAt: null,
         lastDeliveredAt: null,
+        lastValidatedAt: null,
         nextAttemptAt: null,
         lastSignaturePreview: null,
+        disabledAt: null,
+        disableReason: null,
         retryPolicy: {
           maxAttempts: 5,
           initialBackoffSeconds: 30,

@@ -215,6 +215,7 @@ describe("multi-tenant header controller routing", () => {
       requestId,
     );
     const deliveriesEnvelope = controller.listWebhookDeliveries(
+      null,
       headerTenantId,
       requestId,
     );
