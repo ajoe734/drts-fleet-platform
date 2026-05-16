@@ -17,6 +17,7 @@ import {
   BarChart3,
   DollarSign,
   AlertTriangle,
+  ShieldAlert,
   Wrench,
   Languages,
 } from "lucide-react";
@@ -57,6 +58,11 @@ export function Sidebar() {
       href: "/attendance",
       label: t("nav.attendance"),
       icon: <Clock size={16} />,
+    },
+    {
+      href: "/approval-requests",
+      label: t("nav.approvalRequests"),
+      icon: <ShieldAlert size={16} />,
     },
     {
       href: "/incidents",
