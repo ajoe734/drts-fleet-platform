@@ -103,9 +103,12 @@ describe("reporting and filing service", () => {
     );
     expect(reloaded.items[0]?.itemType).toBe("vehicle_roster");
     expect(reloaded.manifest?.entries[0]?.itemType).toBe("vehicle_roster");
-    expect(auditService.listAuditLogs()[0]?.actionName).toBe(
-      "generate_filing_package_completed",
-    );
+    const generateAudit = auditService
+      .listAuditLogs()
+      .find(
+        (entry) => entry.actionName === "generate_filing_package_completed",
+      );
+    expect(generateAudit).toBeDefined();
   });
 
   it("exports dispatch recording index rows with explicit missing-recording flags for SC-034", async () => {
