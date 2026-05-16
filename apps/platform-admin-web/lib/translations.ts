@@ -9,6 +9,7 @@ const en = {
 
   // ── Nav ──
   "nav.home": "Home",
+  "nav.tenantGovernance": "Tenant Governance",
   "nav.tenants": "Tenants",
   "nav.partners": "Partners",
   "nav.users": "Users",
@@ -788,6 +789,7 @@ const zh: typeof en = {
 
   // ── Nav ──
   "nav.home": "首頁",
+  "nav.tenantGovernance": "租戶治理總覽",
   "nav.tenants": "租戶管理",
   "nav.partners": "合作方案",
   "nav.users": "使用者",
