@@ -1,6 +1,6 @@
-# tenant-commute-hub 前端邊界規則 (Boundary Contract)
+# tenant-facing console 前端邊界規則 (Boundary Contract)
 
-Status: canonical boundary contract for tenant-commute-hub  
+Status: canonical boundary contract for `tenant-commute-hub` and any in-repo tenant console consumer of `/api/tenant/*`
 Task: WA-005 — tenant-commute-hub authority boundary document  
 Owner: Claude • Reviewer: Codex  
 Created: 2026-04-14  
@@ -19,14 +19,29 @@ Primary citations:
 
 ## 0. 文件用途
 
-本文件作為 `tenant-commute-hub`（前端 repo）的唯一邊界參考。它明確列出：
+本文件作為 tenant-facing UI consumer 的 canonical boundary contract。它目前直接適用於：
+
+- 外部 `tenant-commute-hub`
+- `TEN-UI-001` 決定中規劃的 in-repo target `apps/tenant-console-web`
+
+它明確列出：
 
 1. 前端可以做什麼（**Allowed**）
 2. 前端絕對不可以做什麼（**Forbidden**）
 
 分為五個面向：**Schema**、**API Naming**、**Domain Authority**、**Webhook / Billing / Audit**，以及通用的 **Consumer Obligations**。
 
-> `tenant-commute-hub` 是純 UI consumer。所有業務規則、狀態機、真值由 `drts-fleet-platform` 後端擁有並強制執行。
+> `tenant-commute-hub` 與規劃中的 `apps/tenant-console-web` 都是純 UI consumer。所有業務規則、狀態機、真值由 `drts-fleet-platform` 後端擁有並強制執行。
+
+### 0.1 Topology note after TEN-UI-001
+
+- current production tenant UI 仍是外部 `tenant-commute-hub`
+- 本 repo 若正式產品化 tenant console，其 landing zone 是規劃中的
+  `apps/tenant-console-web`
+- `apps/tenant-portal-web` 仍是 sunset reference shell，不適用於新的 tenant
+  product work
+- partner booking mode 若與 tenant admin mode 共用同一 app，必須維持 route group、
+  nav、以及 auth scope 的顯式隔離
 
 ---
 
@@ -129,20 +144,20 @@ Primary citations:
 
 前端 repo 必須始終滿足下列基準：
 
-| 項目                           | 說明                                                                                                                                                                                                                                                                                                          | 引用                                                                                                               |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| **Auth context**               | 目前 tenant portal 走 email-only bootstrap -> server-issued Bearer session 模式：tenant user / role / scopes 由 `drts-fleet-platform` 決定，repo B 不得自行推導 `roleCode`、`fullName`、fallback role catalog，或建立第二套 backend authority。若未來再切到更嚴格的 OIDC / IAP 模式，必須連同本文件一起更新。 | `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`; `packages/api-client/src/index.ts`; `RGX-010` |
-| **X-Request-Id**               | 每個 request 帶唯一 request id（用於追蹤）                                                                                                                                                                                                                                                                    | dev-pack §3.2.2                                                                                                    |
-| **Idempotency-Key**            | 所有 POST command 帶 key                                                                                                                                                                                                                                                                                      | dev-pack §3.2.2, §3.2.6                                                                                            |
-| **snake_case wire**            | 所有送出的 JSON body 和收到的 JSON response 以 `snake_case` 為準                                                                                                                                                                                                                                              | dev-pack §3.18; conventions §5.4.2                                                                                 |
-| **Envelope handling**          | page code 不得各自發明另一套 unwrap 規則；success / list contract handling 應集中在 shared client，而不是在 repo B 內分散複製與漂移。                                                                                                                                                                         | dev-pack §§3.2.3–3.2.5; `RGX-010`                                                                                  |
-| **Runtime normalization**      | JSON wire 仍以 `snake_case` 為準，但前端 runtime object 可由 shared `@drts/api-client` 集中轉成 `camelCase`；page code 不得各自再做私有 fallback mapper。                                                                                                                                                     | dev-pack §3.18; `packages/api-client/src/index.ts`; `RGX-010`                                                      |
-| **Shared package portability** | 本機雙 repo 協作可優先 alias live `drts-fleet-platform` shared packages；若為 Lovable / standalone build，`@drts/contracts` fallback 必須使用從 core repo 同步出的受控 snapshot，而不是手工維護第二份 contracts truth。                                                                                       | `tenant-commute-hub/vite.config.ts`; `tenant-commute-hub/src/lib/drts-shim/contracts.ts`; `RGX-010`                |
-| **Contract lifecycle**         | 任何 shared contract 變更都必須先改 core repo，再刷新 `tenant-commute-hub` snapshot；若屬 breaking / behavior-tightening consumer impact，必須附 compatibility note，不能靠 repo B 手工 patch fallback types 過關。                                                                                           | `RGP-003`; `tenant-commute-hub/scripts/sync-drts-contract-snapshot.mjs`                                            |
-| **Error envelope**             | 失敗回傳使用 `error.code` / `error.message` / `error.retryable` 處理；不得靜默吞掉錯誤或假設 HTTP status 就能判斷原因                                                                                                                                                                                         | dev-pack §3.2.4                                                                                                    |
-| **Enum passthrough**           | 收到的 enum 值不做 display-text transform 再送回後端；只送 canonical snake_case value                                                                                                                                                                                                                         | dev-pack §3.18                                                                                                     |
-| **Auth scope**                 | 前端 request 必須攜帶對應 realm/scope；後端 RBAC 為最終守門人                                                                                                                                                                                                                                                 | service contracts §3.1; W7-001B                                                                                    |
-| **Signed download**            | 下載 artifact/invoice 必須使用後端下發的短效 signed URL；不可長期快取或 bypass                                                                                                                                                                                                                                | dev-pack §3.16; conventions §5.5                                                                                   |
+| 項目                           | 說明                                                                                                                                                                                                                                                                                                                                               | 引用                                                                                                               |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Auth context**               | 目前 live production tenant UI 走 email-only bootstrap -> server-issued Bearer session 模式：tenant user / role / scopes 由 `drts-fleet-platform` 決定，consumer 不得自行推導 `roleCode`、`fullName`、fallback role catalog，或建立第二套 backend authority。若未來 tenant-facing console 再切到更嚴格的 OIDC / IAP 模式，必須連同本文件一起更新。 | `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`; `packages/api-client/src/index.ts`; `RGX-010` |
+| **X-Request-Id**               | 每個 request 帶唯一 request id（用於追蹤）                                                                                                                                                                                                                                                                                                         | dev-pack §3.2.2                                                                                                    |
+| **Idempotency-Key**            | 所有 POST command 帶 key                                                                                                                                                                                                                                                                                                                           | dev-pack §3.2.2, §3.2.6                                                                                            |
+| **snake_case wire**            | 所有送出的 JSON body 和收到的 JSON response 以 `snake_case` 為準                                                                                                                                                                                                                                                                                   | dev-pack §3.18; conventions §5.4.2                                                                                 |
+| **Envelope handling**          | page code 不得各自發明另一套 unwrap 規則；success / list contract handling 應集中在 shared client，而不是在 repo B 內分散複製與漂移。                                                                                                                                                                                                              | dev-pack §§3.2.3–3.2.5; `RGX-010`                                                                                  |
+| **Runtime normalization**      | JSON wire 仍以 `snake_case` 為準，但前端 runtime object 可由 shared `@drts/api-client` 集中轉成 `camelCase`；page code 不得各自再做私有 fallback mapper。                                                                                                                                                                                          | dev-pack §3.18; `packages/api-client/src/index.ts`; `RGX-010`                                                      |
+| **Shared package portability** | 本機雙 repo 協作可優先 alias live `drts-fleet-platform` shared packages；若為 Lovable / standalone build，`@drts/contracts` fallback 必須使用從 core repo 同步出的受控 snapshot，而不是手工維護第二份 contracts truth。                                                                                                                            | `tenant-commute-hub/vite.config.ts`; `tenant-commute-hub/src/lib/drts-shim/contracts.ts`; `RGX-010`                |
+| **Contract lifecycle**         | 任何 shared contract 變更都必須先改 core repo，再刷新 `tenant-commute-hub` snapshot；若屬 breaking / behavior-tightening consumer impact，必須附 compatibility note，不能靠 repo B 手工 patch fallback types 過關。                                                                                                                                | `RGP-003`; `tenant-commute-hub/scripts/sync-drts-contract-snapshot.mjs`                                            |
+| **Error envelope**             | 失敗回傳使用 `error.code` / `error.message` / `error.retryable` 處理；不得靜默吞掉錯誤或假設 HTTP status 就能判斷原因                                                                                                                                                                                                                              | dev-pack §3.2.4                                                                                                    |
+| **Enum passthrough**           | 收到的 enum 值不做 display-text transform 再送回後端；只送 canonical snake_case value                                                                                                                                                                                                                                                              | dev-pack §3.18                                                                                                     |
+| **Auth scope**                 | 前端 request 必須攜帶對應 realm/scope；後端 RBAC 為最終守門人                                                                                                                                                                                                                                                                                      | service contracts §3.1; W7-001B                                                                                    |
+| **Signed download**            | 下載 artifact/invoice 必須使用後端下發的短效 signed URL；不可長期快取或 bypass                                                                                                                                                                                                                                                                     | dev-pack §3.16; conventions §5.5                                                                                   |
 
 Current reading of the annex evidence:
 
@@ -206,6 +221,6 @@ Webhook / Billing / Audit:
 
 - 本文件由 `drts-fleet-platform` 的 Claude（governance/architecture 角色）維護。
 - Reviewer: Codex（contracts/schema 角色）。
-- 更新觸發條件：新增跨 repo API 面向、調整 domain authority 分配、接入新外部整合方。
+- 更新觸發條件：新增跨 repo API 面向、調整 domain authority 分配、接入新外部整合方、或新增新的 tenant-facing UI consumer。
 - 更新流程：對本文件提 diff → 引用 L1/L2 文件或新 consensus packet → 由 supervisor 路由進入 discussion → 人工確認後方可更新。
 - 本文件不覆蓋也不取代 `docs/02-architecture/authority/rgp-002-authority-map.md`（Producer/Consumer 矩陣詳表）。兩者互相引用。

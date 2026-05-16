@@ -1,21 +1,44 @@
 import Link from "next/link";
 import { getAuditLogs } from "./actions";
-import { getCurrentRole } from "@/lib/rbac";
+import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
 import { AppShellCard } from "@drts/ui-web";
 
 export default async function AuditPage() {
   const { logs, error } = await getAuditLogs();
-  const role = await getCurrentRole();
+  const roleSnapshot = await getTenantRoleSnapshot();
+  const combinedError = [error, roleSnapshot.identityError]
+    .filter(Boolean)
+    .join(" | ");
 
   return (
     <main className="app-grid">
       <AppShellCard
         title="Audit Trail"
-        description={`Viewing as ${role}. Audit logs for actions taken within this tenant.`}
+        description={`Viewing as ${describeRoleSnapshot(roleSnapshot)}. Audit logs stay tenant-scoped, while user-management and integration actions remain attributable to the current authority context.`}
       >
-        {error && (
+        <div className="callout-panel">
+          <strong>Formal governance framing</strong>
+          <p>
+            Tenant admin, operator, finance / analyst, integration manager, and
+            viewer all need an auditable history. Current backend authority
+            still emits the catalog-backed tenant role codes shown below.
+          </p>
+          <div className="chip-row">
+            {roleSnapshot.roleCatalogBackedLabels.length > 0 ? (
+              roleSnapshot.roleCatalogBackedLabels.map((roleLabel) => (
+                <span className="status-chip" key={roleLabel}>
+                  {roleLabel}
+                </span>
+              ))
+            ) : (
+              <span className="status-chip">authority unavailable</span>
+            )}
+          </div>
+        </div>
+
+        {combinedError && (
           <div className="error-banner">
-            <strong>Error:</strong> {error}
+            <strong>Error:</strong> {combinedError}
           </div>
         )}
 
@@ -66,6 +89,11 @@ export default async function AuditPage() {
         <Link className="route-link" href="/" style={{ marginTop: "1rem" }}>
           <strong>Back to home</strong>
           Return to the tenant portal overview.
+        </Link>
+        <Link className="route-link" href="/settings">
+          <strong>Settings lane</strong>
+          Review the tenant settings summary for SLA, notifications, and
+          capability guardrails.
         </Link>
       </AppShellCard>
     </main>

@@ -7,9 +7,11 @@ import {
   getReportJobSourceSummary,
   getSourceToneClassName,
 } from "@/lib/source-domain";
+import { describeRoleSnapshot, getTenantRoleSnapshot } from "@/lib/rbac";
 
 export default async function ReportsPage() {
-  const client = getTenantClient();
+  const client = await getTenantClient();
+  const roleSnapshot = await getTenantRoleSnapshot();
 
   let jobs: ReportJobRecord[] = [];
   let error: string | null = null;
@@ -25,7 +27,14 @@ export default async function ReportsPage() {
 
   return (
     <main className="app-grid">
-      <AppShellCard title="Reports" description={desc}>
+      <AppShellCard
+        title="Reports"
+        description={
+          roleSnapshot.capabilities.canWriteReports
+            ? desc
+            : `${desc} Viewing as ${describeRoleSnapshot(roleSnapshot)} with read-only report access.`
+        }
+      >
         {error && (
           <div className="error-banner">
             <strong>Error:</strong> {error}
@@ -66,7 +75,12 @@ export default async function ReportsPage() {
             <option value="pdf">pdf</option>
             <option value="zip">zip</option>
           </select>
-          <button type="submit">Create Job</button>
+          <button
+            type="submit"
+            disabled={!roleSnapshot.capabilities.canWriteReports}
+          >
+            Create Job
+          </button>
           <button
             type="submit"
             formAction={refreshReports}

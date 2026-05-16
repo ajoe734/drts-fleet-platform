@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import type {
   TenantPassengerRecord,
   UpsertTenantPassengerCommand,
 } from "@drts/contracts";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
+import { getTenantRoleSnapshot, requireCapability } from "@/lib/rbac";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 
 export default async function PassengersPage({
@@ -13,7 +15,7 @@ export default async function PassengersPage({
 }: {
   searchParams?: { edit?: string; error?: string };
 }) {
-  const client = getTenantClient();
+  const client = await getTenantClient();
 
   let passengers: TenantPassengerRecord[] = [];
   let error: string | null = null;
@@ -235,7 +237,12 @@ function PassengerList({
 
 async function createPassenger(formData: FormData) {
   "use server";
-  const client = getTenantClient();
+  const snapshot = await getTenantRoleSnapshot();
+  requireCapability(
+    snapshot.capabilities.canWriteTenant,
+    "Tenant write authority required to manage passengers.",
+  );
+  const client = await getTenantClient();
 
   const command: UpsertTenantPassengerCommand = {
     fullName: formData.get("fullName") as string,
@@ -257,7 +264,12 @@ async function createPassenger(formData: FormData) {
 
 async function updatePassenger(formData: FormData) {
   "use server";
-  const client = getTenantClient();
+  const snapshot = await getTenantRoleSnapshot();
+  requireCapability(
+    snapshot.capabilities.canWriteTenant,
+    "Tenant write authority required to manage passengers.",
+  );
+  const client = await getTenantClient();
 
   const command: UpsertTenantPassengerCommand = {
     passengerId: formData.get("passengerId") as string,
@@ -282,7 +294,12 @@ async function updatePassenger(formData: FormData) {
 
 async function deletePassenger(formData: FormData) {
   "use server";
-  const client = getTenantClient();
+  const snapshot = await getTenantRoleSnapshot();
+  requireCapability(
+    snapshot.capabilities.canWriteTenant,
+    "Tenant write authority required to manage passengers.",
+  );
+  const client = await getTenantClient();
 
   const passengerId = formData.get("passengerId") as string;
 
@@ -300,9 +317,4 @@ async function deletePassenger(formData: FormData) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     redirect(`/passengers?error=${encodeURIComponent(msg)}`);
   }
-}
-
-function redirect(path: string) {
-  // Dynamic import to avoid bundling in client code
-  import("next/navigation").then(({ redirect }) => redirect(path));
 }

@@ -1,15 +1,19 @@
 import Link from "next/link";
 import type { TenantRoleCatalogRecord } from "@drts/contracts";
 import { getUsers, inviteUser, updateUserRole } from "./actions";
-import { getCurrentRole, isAdmin } from "@/lib/rbac";
+import {
+  FORMAL_TENANT_ROLE_FRAMING,
+  describeRoleSnapshot,
+  getTenantRoleSnapshot,
+} from "@/lib/rbac";
 import { AppShellCard } from "@drts/ui-web";
 import { getTenantClient } from "@/lib/api-client";
 
 export default async function UsersPage() {
   const { users, error } = await getUsers();
-  const client = getTenantClient();
-  const role = await getCurrentRole();
-  const adminAccess = isAdmin(role);
+  const client = await getTenantClient();
+  const roleSnapshot = await getTenantRoleSnapshot();
+  const adminAccess = roleSnapshot.capabilities.canManageUsers;
   let roleCatalog: TenantRoleCatalogRecord[] = [];
   let roleCatalogError: string | null = null;
 
@@ -19,7 +23,9 @@ export default async function UsersPage() {
     roleCatalogError = e instanceof Error ? e.message : "Unknown error";
   }
 
-  const combinedError = [error, roleCatalogError].filter(Boolean).join(" | ");
+  const combinedError = [error, roleCatalogError, roleSnapshot.identityError]
+    .filter(Boolean)
+    .join(" | ");
   const roleLookup = new Map(
     roleCatalog.map((catalogEntry) => [
       catalogEntry.roleCode,
@@ -33,10 +39,38 @@ export default async function UsersPage() {
         title="User Management"
         description={
           adminAccess
-            ? "Invite users and manage their roles within this tenant."
-            : `Viewing as ${role}. Admin access required to manage users.`
+            ? "Invite users and manage tenant access with formal role framing anchored to server-issued authority."
+            : `Viewing as ${describeRoleSnapshot(roleSnapshot)}. Tenant admin authority is required to manage users.`
         }
       >
+        <div className="panel-stack">
+          <p className="muted-copy">
+            Current authority roles:{" "}
+            {roleSnapshot.roleCatalogBackedLabels.length > 0
+              ? roleSnapshot.roleCatalogBackedLabels.join(", ")
+              : "unavailable"}
+          </p>
+          <div className="surface-grid">
+            {FORMAL_TENANT_ROLE_FRAMING.map((roleFrame) => {
+              const active = roleSnapshot.activeFormalRoles.includes(
+                roleFrame.key,
+              );
+
+              return (
+                <article className="surface-card" key={roleFrame.key}>
+                  <span className="surface-kicker">
+                    {active
+                      ? "Active in current identity"
+                      : "Prototype framing"}
+                  </span>
+                  <h3>{roleFrame.label}</h3>
+                  <p>{roleFrame.summary}</p>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+
         {combinedError && (
           <div className="error-banner">
             <strong>Error:</strong> {combinedError}
@@ -97,6 +131,11 @@ export default async function UsersPage() {
         <Link className="route-link" href="/" style={{ marginTop: "1rem" }}>
           <strong>Back to home</strong>
           Return to the tenant portal overview.
+        </Link>
+        <Link className="route-link" href="/settings">
+          <strong>Settings lane</strong>
+          Review the tenant capability and governance summary that backs these
+          role assumptions.
         </Link>
       </AppShellCard>
     </main>
