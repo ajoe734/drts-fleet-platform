@@ -18,10 +18,10 @@ type DriverPlatformActionsProps = {
 };
 
 const buttonStyle: React.CSSProperties = {
-  border: "1px solid #cbd5e1",
+  border: "1px solid #bfdbfe",
   borderRadius: "999px",
-  background: "#fff",
-  color: "#0f172a",
+  background: "#eff6ff",
+  color: "#1d4ed8",
   padding: "0.45rem 0.8rem",
   fontSize: "0.82rem",
   fontWeight: 600,

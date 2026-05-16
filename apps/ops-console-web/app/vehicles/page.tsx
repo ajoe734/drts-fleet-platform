@@ -3,13 +3,18 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
-import { PageHeader } from "@drts/ui-web";
-import { Card } from "@drts/ui-web";
-import { DataTable, Tr, Td } from "@drts/ui-web";
-import { Badge } from "@drts/ui-web";
+import {
+  DataCellStack,
+  DataTable,
+  DataViewCard,
+  PageHeader,
+  StatusChip,
+  Td,
+  Tr,
+} from "@drts/ui-web";
 
-function lifecycleBadgeVariant(status: string) {
-  if (status === "active") return "green" as const;
+function lifecycleTone(status: string) {
+  if (status === "active") return "success" as const;
   if (
     status === "expired" ||
     status === "terminated" ||
@@ -17,9 +22,9 @@ function lifecycleBadgeVariant(status: string) {
     status === "rejected" ||
     status === "completed"
   ) {
-    return "red" as const;
+    return "danger" as const;
   }
-  return "yellow" as const;
+  return "warning" as const;
 }
 
 export default async function VehiclesPage() {
@@ -39,6 +44,16 @@ export default async function VehiclesPage() {
   const warningVehicles = vehicles.filter(
     (vehicle) => vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
   );
+  const dispatchableCount = vehicles.filter(
+    (vehicle) => vehicle.dispatchableFlag,
+  ).length;
+  const offboardingCount = vehicles.filter(
+    (vehicle) => vehicle.supplyLifecycle.offboarding.status !== "none",
+  ).length;
+  const debrandingPendingCount = vehicles.filter(
+    (vehicle) =>
+      vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending",
+  ).length;
 
   return (
     <>
@@ -63,119 +78,131 @@ export default async function VehiclesPage() {
         </div>
       )}
 
-      {warningVehicles.length > 0 && (
-        <Card style={{ marginBottom: "20px" }}>
-          <div style={{ display: "grid", gap: "10px" }}>
-            <strong>{t("vehicles.warningTitle", locale)}</strong>
-            {warningVehicles.map((vehicle) => (
-              <div key={vehicle.vehicleId} style={{ fontSize: "13.5px" }}>
-                <strong>{vehicle.vehicleId}</strong>:{" "}
-                {vehicle.supplyLifecycle.dispatch.blockedReasons
-                  .map((reason) => formatOpsCodeLabel(locale, reason))
-                  .join(" / ")}
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      <Card>
+      <DataViewCard
+        title={t("vehicles.title", locale)}
+        subtitle={t("vehicles.subtitle", locale, { count: vehicles.length })}
+        tone="info"
+        density="compact"
+        summary={t("vehicles.registrySummary", locale, {
+          dispatchable: dispatchableCount,
+          blocked: warningVehicles.length,
+          offboarding: offboardingCount,
+          debranding: debrandingPendingCount,
+        })}
+      >
         <DataTable
+          density="compact"
+          tone="info"
           columns={[
-            { label: t("vehicles.col.vehicleId", locale) },
-            { label: t("vehicles.col.plate", locale) },
-            { label: t("vehicles.col.operatingArea", locale) },
-            { label: t("vehicles.col.contract", locale) },
-            { label: t("vehicles.col.insurance", locale) },
-            { label: t("vehicles.col.exclusivity", locale) },
-            { label: t("vehicles.col.offboarding", locale) },
-            { label: t("vehicles.col.dispatchable", locale) },
-            { label: t("vehicles.col.blockedBy", locale) },
+            { label: t("vehicles.col.vehicleId", locale), width: "220px" },
+            { label: t("vehicles.col.operatingArea", locale), width: "160px" },
+            { label: t("vehicles.lifecycle", locale), width: "280px" },
+            { label: t("vehicles.col.dispatchable", locale), width: "220px" },
             { label: t("vehicles.col.lastChange", locale) },
           ]}
           empty={t("vehicles.empty", locale)}
         >
-          {vehicles.map((v) => (
-            <Tr key={v.vehicleId}>
-              <Td mono>{v.vehicleId}</Td>
-              <Td>{v.plateNo}</Td>
-              <Td>{v.operatingArea}</Td>
-              <Td>
-                <Badge
-                  variant={lifecycleBadgeVariant(
-                    v.supplyLifecycle.contract.lifecycleStatus,
-                  )}
-                >
-                  {formatOpsCodeLabel(
-                    locale,
-                    v.supplyLifecycle.contract.lifecycleStatus,
-                  )}
-                </Badge>
+          {vehicles.map((vehicle) => (
+            <Tr key={vehicle.vehicleId}>
+              <Td density="compact">
+                <DataCellStack
+                  primary={<strong>{vehicle.vehicleId}</strong>}
+                  secondary={vehicle.plateNo}
+                  tertiary={vehicle.supportedServiceBuckets.join(" · ")}
+                />
               </Td>
-              <Td>
-                <Badge
-                  variant={lifecycleBadgeVariant(
-                    v.supplyLifecycle.insurance.lifecycleStatus,
-                  )}
-                >
-                  {formatOpsCodeLabel(
-                    locale,
-                    v.supplyLifecycle.insurance.lifecycleStatus,
-                  )}
-                </Badge>
+              <Td density="compact">
+                <DataCellStack
+                  primary={vehicle.operatingArea}
+                  secondary={
+                    vehicle.exclusivityApproved
+                      ? t("vehicles.exclusivityApproved", locale)
+                      : t("vehicles.exclusivityPending", locale)
+                  }
+                />
               </Td>
-              <Td>
-                <Badge
-                  variant={lifecycleBadgeVariant(
-                    v.supplyLifecycle.exclusivity.lifecycleStatus,
-                  )}
-                >
-                  {formatOpsCodeLabel(
-                    locale,
-                    v.supplyLifecycle.exclusivity.lifecycleStatus,
-                  )}
-                </Badge>
+              <Td density="compact">
+                <div style={{ display: "grid", gap: "0.35rem" }}>
+                  <StatusChip
+                    tone={lifecycleTone(
+                      vehicle.supplyLifecycle.contract.lifecycleStatus,
+                    )}
+                    authorityLabel={locale === "zh" ? "合約" : "contract"}
+                    label={formatOpsCodeLabel(
+                      locale,
+                      vehicle.supplyLifecycle.contract.lifecycleStatus,
+                    )}
+                  />
+                  <StatusChip
+                    tone={lifecycleTone(
+                      vehicle.supplyLifecycle.insurance.lifecycleStatus,
+                    )}
+                    authorityLabel={locale === "zh" ? "保險" : "insurance"}
+                    label={formatOpsCodeLabel(
+                      locale,
+                      vehicle.supplyLifecycle.insurance.lifecycleStatus,
+                    )}
+                  />
+                  <StatusChip
+                    tone={lifecycleTone(
+                      vehicle.supplyLifecycle.offboarding.status,
+                    )}
+                    authorityLabel={locale === "zh" ? "退場" : "offboarding"}
+                    label={formatOpsCodeLabel(
+                      locale,
+                      vehicle.supplyLifecycle.offboarding.status,
+                    )}
+                  />
+                </div>
               </Td>
-              <Td>
-                <Badge
-                  variant={lifecycleBadgeVariant(
-                    v.supplyLifecycle.offboarding.status,
-                  )}
-                >
-                  {formatOpsCodeLabel(
-                    locale,
-                    v.supplyLifecycle.offboarding.status,
-                  )}
-                </Badge>
+              <Td density="compact">
+                <DataCellStack
+                  primary={
+                    <StatusChip
+                      tone={vehicle.dispatchableFlag ? "success" : "warning"}
+                      authorityLabel={locale === "zh" ? "派遣" : "dispatch"}
+                      label={
+                        vehicle.dispatchableFlag
+                          ? t("common.yes", locale)
+                          : t("common.no", locale)
+                      }
+                    />
+                  }
+                  secondary={
+                    vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0
+                      ? vehicle.supplyLifecycle.dispatch.blockedReasons
+                          .map((reason) => formatOpsCodeLabel(locale, reason))
+                          .join(" / ")
+                      : t("vehicles.noneBlocked", locale)
+                  }
+                  tertiary={
+                    vehicle.supplyLifecycle.offboarding.debrandingStatus ===
+                    "pending"
+                      ? t("vehicles.debrandingPending", locale)
+                      : undefined
+                  }
+                />
               </Td>
-              <Td>
-                <Badge variant={v.dispatchableFlag ? "green" : "gray"}>
-                  {v.dispatchableFlag
-                    ? t("common.yes", locale)
-                    : t("common.no", locale)}
-                </Badge>
-              </Td>
-              <Td>
-                {v.supplyLifecycle.dispatch.blockedReasons.length > 0
-                  ? v.supplyLifecycle.dispatch.blockedReasons
-                      .map((reason) => formatOpsCodeLabel(locale, reason))
-                      .join(" / ")
-                  : t("vehicles.noneBlocked", locale)}
-              </Td>
-              <Td>
-                {v.supplyLifecycle.lastTrace
-                  ? `${v.supplyLifecycle.lastTrace.message} (${new Date(
-                      v.supplyLifecycle.lastTrace.occurredAt,
-                    ).toLocaleString()})`
-                  : t("vehicles.lastChangeNone", locale)}
-                {v.supplyLifecycle.offboarding.debrandingStatus === "pending"
-                  ? ` · ${t("vehicles.debrandingPending", locale)}`
-                  : ""}
+              <Td density="compact">
+                <DataCellStack
+                  primary={
+                    vehicle.supplyLifecycle.lastTrace
+                      ? vehicle.supplyLifecycle.lastTrace.message
+                      : t("vehicles.lastChangeNone", locale)
+                  }
+                  secondary={
+                    vehicle.supplyLifecycle.lastTrace
+                      ? new Date(
+                          vehicle.supplyLifecycle.lastTrace.occurredAt,
+                        ).toLocaleString(locale === "zh" ? "zh-TW" : "en-US")
+                      : undefined
+                  }
+                />
               </Td>
             </Tr>
           ))}
         </DataTable>
-      </Card>
+      </DataViewCard>
     </>
   );
 }

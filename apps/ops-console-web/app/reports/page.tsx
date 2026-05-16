@@ -129,6 +129,17 @@ function jobCategory(jobType: string) {
     : "Operational";
 }
 
+function expiresSoon(value: string | null | undefined, hours = 12) {
+  if (!value) return false;
+  const expiresAt = new Date(value).getTime();
+  if (Number.isNaN(expiresAt)) return false;
+  return expiresAt - Date.now() <= hours * 60 * 60 * 1000;
+}
+
+function copyText(locale: "en" | "zh", en: string, zh: string) {
+  return locale === "zh" ? zh : en;
+}
+
 export default function ReportsPage() {
   const { t, locale } = useTranslation();
   const [jobs, setJobs] = useState<ReportJobRecord[]>([]);
@@ -284,8 +295,16 @@ export default function ReportsPage() {
   const completedPackages = packages.filter(
     (pkg) => pkg.status === "completed",
   ).length;
+  const failedReports = jobs.filter((job) => job.status === "failed").length;
+  const runningReports = jobs.filter((job) => job.status === "running").length;
   const regulatoryJobs = jobs.filter((job) =>
     REGULATORY_JOB_TYPE_SET.has(job.jobType as ReportJobType),
+  ).length;
+  const expiringArtifacts = jobs.filter((job) =>
+    expiresSoon(job.artifact?.expiresAt),
+  ).length;
+  const immutablePackages = packages.filter(
+    (pkg) => pkg.immutable ?? true,
   ).length;
   const activePresetCategory = jobCategory(jobType);
 
@@ -321,6 +340,15 @@ export default function ReportsPage() {
               value: readyArtifacts + completedPackages,
               note: t("reports.artifactsReadySub"),
             },
+            {
+              label: copyText(locale, "Expiring access", "即將過期的存取"),
+              value: expiringArtifacts,
+              note: copyText(
+                locale,
+                "Signed URLs expiring within 12 hours",
+                "12 小時內到期的簽名網址",
+              ),
+            },
           ].map((card) => (
             <div key={card.label} className="summary-card">
               <span>{card.label}</span>
@@ -347,6 +375,112 @@ export default function ReportsPage() {
             ))}
           </section>
         )}
+
+        <section className="detail-grid">
+          <div className="panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">
+                  {copyText(locale, "Queue posture", "佇列狀態")}
+                </p>
+                <h3>
+                  {copyText(locale, "Report job supervision", "報表工作監控")}
+                </h3>
+              </div>
+            </div>
+            <div className="detail-card-grid">
+              {[
+                {
+                  label: copyText(locale, "Queued", "排隊中"),
+                  value: queuedReports,
+                  note: copyText(
+                    locale,
+                    "Waiting for worker pickup",
+                    "等待背景工作者接手",
+                  ),
+                },
+                {
+                  label: copyText(locale, "Running", "執行中"),
+                  value: runningReports,
+                  note: copyText(
+                    locale,
+                    "Background execution in progress",
+                    "背景執行中",
+                  ),
+                },
+                {
+                  label: copyText(locale, "Failed", "失敗"),
+                  value: failedReports,
+                  note: copyText(
+                    locale,
+                    "Needs operator review or rerun",
+                    "需要人工檢視或重新執行",
+                  ),
+                },
+              ].map((item) => (
+                <div key={item.label} className="detail-card">
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <small>{item.note}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-head">
+              <div>
+                <p className="eyebrow">
+                  {copyText(locale, "Access rules", "存取規則")}
+                </p>
+                <h3>
+                  {copyText(
+                    locale,
+                    "Artifact and filing controls",
+                    "產物與申報控制",
+                  )}
+                </h3>
+              </div>
+            </div>
+            <div className="detail-card-grid">
+              {[
+                {
+                  label: copyText(locale, "Immutable packages", "不可變申報包"),
+                  value: immutablePackages,
+                  note: copyText(
+                    locale,
+                    "Filing bundles stay append-only once generated",
+                    "申報包生成後維持不可變",
+                  ),
+                },
+                {
+                  label: copyText(locale, "Regulatory jobs", "監管類工作"),
+                  value: regulatoryJobs,
+                  note: copyText(
+                    locale,
+                    "Compliance-facing outputs under signed access",
+                    "面向合規的產物走簽名下載",
+                  ),
+                },
+                {
+                  label: copyText(locale, "Expiring URLs", "即將過期的網址"),
+                  value: expiringArtifacts,
+                  note: copyText(
+                    locale,
+                    "Refresh signed links before download handoff",
+                    "交付下載前請更新簽名連結",
+                  ),
+                },
+              ].map((item) => (
+                <div key={item.label} className="detail-card">
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <small>{item.note}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
         <section className="form-stack">
           <form className="panel" onSubmit={handleReportSubmit}>
@@ -881,6 +1015,7 @@ export default function ReportsPage() {
                   <th>{t("reports.col.status")}</th>
                   <th>{t("reports.col.filters")}</th>
                   <th>{t("reports.col.artifact")}</th>
+                  <th>{copyText(locale, "Access", "存取")}</th>
                   <th>{t("reports.col.actions")}</th>
                 </tr>
               </thead>
@@ -948,6 +1083,37 @@ export default function ReportsPage() {
                         )}
                       </td>
                       <td>
+                        {job.artifact ? (
+                          <div className="access-stack">
+                            <span
+                              className={
+                                expiresSoon(job.artifact.expiresAt)
+                                  ? "access-chip access-chip-warning"
+                                  : "access-chip"
+                              }
+                            >
+                              {copyText(locale, "Expires", "到期")}{" "}
+                              {formatDateTime(job.artifact.expiresAt)}
+                            </span>
+                            <span className="cell-subcopy">
+                              {copyText(
+                                locale,
+                                "Signed download only",
+                                "僅可透過簽名下載",
+                              )}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="cell-subcopy">
+                            {copyText(
+                              locale,
+                              "No signed URL yet",
+                              "尚未產生簽名網址",
+                            )}
+                          </span>
+                        )}
+                      </td>
+                      <td>
                         <button
                           className="btn"
                           type="button"
@@ -963,7 +1129,7 @@ export default function ReportsPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6}>{t("reports.noJobs")}</td>
+                    <td colSpan={7}>{t("reports.noJobs")}</td>
                   </tr>
                 )}
               </tbody>
@@ -993,6 +1159,7 @@ export default function ReportsPage() {
                   <th>{t("reports.col.items")}</th>
                   <th>{t("reports.col.generated")}</th>
                   <th>{t("reports.col.artifacts")}</th>
+                  <th>{copyText(locale, "Controls", "控制")}</th>
                   <th>{t("reports.col.actions")}</th>
                 </tr>
               </thead>
@@ -1056,6 +1223,30 @@ export default function ReportsPage() {
                         </div>
                       </td>
                       <td>
+                        <div className="access-stack">
+                          <span className="access-chip">
+                            {copyText(
+                              locale,
+                              (pkg.immutable ?? true) ? "Immutable" : "Mutable",
+                              (pkg.immutable ?? true) ? "不可變" : "可變",
+                            )}
+                          </span>
+                          <span className="cell-subcopy">
+                            {pkg.artifactZipUrl || pkg.artifactPdfUrl
+                              ? copyText(
+                                  locale,
+                                  "Short-lived download surfaces",
+                                  "短時效下載介面",
+                                )
+                              : copyText(
+                                  locale,
+                                  "Awaiting signed package links",
+                                  "等待簽名申報包連結",
+                                )}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
                         <button
                           className="btn"
                           type="button"
@@ -1075,7 +1266,7 @@ export default function ReportsPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7}>{t("reports.noPackages")}</td>
+                    <td colSpan={8}>{t("reports.noPackages")}</td>
                   </tr>
                 )}
               </tbody>
@@ -1234,6 +1425,23 @@ export default function ReportsPage() {
             gap: 0.75rem;
             flex-wrap: wrap;
             align-items: center;
+          }
+          .access-stack {
+            display: grid;
+            gap: 0.35rem;
+          }
+          .access-chip {
+            display: inline-flex;
+            width: fit-content;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-size: 0.78rem;
+          }
+          .access-chip-warning {
+            background: #fff7ed;
+            color: #c2410c;
           }
           .error-banner {
             margin-bottom: 1rem;

@@ -149,6 +149,17 @@ const en = {
   "dashboard.platformOps.signal.reason": "Reason",
   "dashboard.platformOps.signal.lastChecked": "Last checked",
   "dashboard.platformOps.signal.lastError": "Last error",
+  "dashboard.dispatchBoards.title": "Dispatch Command",
+  "dashboard.dispatchBoards.subtitle":
+    "Split owned dispatch execution from forwarded mirror-order triage.",
+  "dashboard.dispatchBoards.queueDepth": "matching + queued jobs",
+  "dashboard.dispatchBoards.attentionQueue": "attention queue",
+  "dashboard.dispatchBoards.ownedSummary":
+    "{redispatch} redispatch / timeout · {exceptions} exception or no-supply",
+  "dashboard.dispatchBoards.forwardedSummary":
+    "{syncFailed} sync failed · {reconciliation} reconciliation pending",
+  "dashboard.dispatchBoards.openOwned": "Open owned workflow",
+  "dashboard.dispatchBoards.openForwarded": "Open forwarded board",
 
   // ── Vehicles ──
   "vehicles.title": "Vehicles Registry",
@@ -165,6 +176,11 @@ const en = {
   "vehicles.col.lastChange": "Last Change",
   "vehicles.warningTitle": "Dispatchability warnings",
   "vehicles.debrandingPending": "Debranding still pending",
+  "vehicles.exclusivityApproved": "Exclusivity approved",
+  "vehicles.exclusivityPending": "Exclusivity review pending",
+  "vehicles.lifecycle": "Lifecycle Coverage",
+  "vehicles.registrySummary":
+    "{dispatchable} dispatchable · {blocked} blocked · {offboarding} offboarding · {debranding} debranding pending",
   "vehicles.noneBlocked": "Ready",
   "vehicles.lastChangeNone": "No lifecycle change recorded",
   "vehicles.empty": "No vehicles registered.",
@@ -189,6 +205,10 @@ const en = {
   "drivers.list.locationStale": "Stale",
   "drivers.list.locationMissing": "No sample",
   "drivers.list.locationUnknown": "Unknown",
+  "drivers.registrySummary":
+    "{eligible} dispatch eligible · {blocked} blocked · {live} live location · {stale} stale location",
+  "drivers.registryFooter":
+    "Platform eligibility actions stay in driver detail so list views remain read-first.",
 
   // ── Driver Detail (Eligibility Management) ──
   "driverDetail.title": "Driver Eligibility Management",
@@ -291,6 +311,10 @@ const en = {
   "contracts.reviewContext.cardLast4": "Card ••••{value}",
   "contracts.reviewContext.flightNo": "Flight {value}",
   "contracts.reviewContext.none": "No extra request context",
+  "contracts.reviewRegistrySummary":
+    "{total} cases in queue · {manual} still waiting manual review",
+  "contracts.registrySummary":
+    "{active} active · {draft} draft · {attention} partner eligibility cases need attention",
   "contracts.empty": "No contracts registered.",
 
   // ── Feature Flags ──
@@ -299,6 +323,9 @@ const en = {
   "flags.col.key": "Key",
   "flags.col.status": "Status",
   "flags.col.description": "Description",
+  "flags.registrySummary": "{enabled} enabled · {disabled} disabled",
+  "flags.registryFooter":
+    "Feature flags stay read-only here and mirror the shared management registry table pattern.",
   "flags.empty": "No flags found.",
 
   // ── Attendance ──
@@ -352,13 +379,33 @@ const en = {
   "dispatch.workflow.showing": "Showing {visible} order(s) from {total} total.",
   "dispatch.workflow.col.order": "Order",
   "dispatch.workflow.col.product": "Product",
-  "dispatch.workflow.col.queue": "Queue",
+  "dispatch.workflow.col.queue": "Queue / state",
   "dispatch.workflow.col.dispatch": "Dispatch",
+  "dispatch.workflow.col.authority": "Authority",
   "dispatch.workflow.col.compliance": "Compliance",
   "dispatch.workflow.col.revenue": "Revenue",
   "dispatch.workflow.col.eta": "ETA",
   "dispatch.workflow.col.candidates": "Candidates",
   "dispatch.workflow.col.actions": "Actions",
+  "dispatch.workflow.boardTitle": "Owned dispatch board",
+  "dispatch.workflow.boardSubtitle":
+    "Local queue authority, candidate assignment, and exception workflow remain inside the fleet dispatch lane.",
+  "dispatch.workflow.schema.localQueue": "Local queue",
+  "dispatch.workflow.schema.localQueueHint":
+    "{count} orders are actively waiting for owned dispatch handling.",
+  "dispatch.workflow.schema.activeAssignment": "Assignment lane",
+  "dispatch.workflow.schema.activeAssignmentHint":
+    "{count} owned dispatch jobs currently carry active candidate or assignment work.",
+  "dispatch.workflow.schema.exceptionDesk": "Exception desk",
+  "dispatch.workflow.schema.exceptionDeskHint":
+    "{count} owned orders require timeout, no-supply, or exception review.",
+  "dispatch.workflow.authority.local": "Local dispatch authority",
+  "dispatch.workflow.authority.assignment": "Assignment in progress",
+  "dispatch.workflow.authority.reservation": "Reservation queue",
+  "dispatch.workflow.authority.exception": "Ops review required",
+  "dispatch.workflow.boardState.active": "Active trip",
+  "dispatch.workflow.boardState.closed": "Closed history",
+  "dispatch.workflow.boardState.intake": "Pre-dispatch intake",
   "dispatch.workflow.noComplianceGate": "No active gate",
   "dispatch.workflow.gate.recording": "Recording",
   "dispatch.workflow.gate.proof": "Proof",
@@ -461,6 +508,58 @@ const en = {
     "{count} visible order(s) are still missing pickup coordinates.",
   "dispatch.workflow.map.autoLoadHint":
     "Candidate supply locations are auto-loaded for visible dispatch jobs when available.",
+  "dispatch.workflow.detail.title": "Dispatch detail workspace",
+  "dispatch.workflow.detail.selectedOrder": "{orderNo} workflow focus",
+  "dispatch.workflow.detail.emptyTitle": "No order selected",
+  "dispatch.workflow.detail.emptyBody":
+    "Pick an order from the map or table to review dispatch, compliance, and rider context together.",
+  "dispatch.workflow.detail.summary": "Workflow summary",
+  "dispatch.workflow.detail.orderStatus": "Order status",
+  "dispatch.workflow.detail.dispatchStatus": "Dispatch status",
+  "dispatch.workflow.detail.reservationWindow": "Service window",
+  "dispatch.workflow.detail.immediateQueue": "Immediate queue",
+  "dispatch.workflow.detail.passenger": "Passenger",
+  "dispatch.workflow.detail.contact": "Onsite contact",
+  "dispatch.workflow.detail.lastUpdated": "Last updated",
+  "dispatch.workflow.detail.route": "Route context",
+  "dispatch.workflow.detail.pickup": "Pickup",
+  "dispatch.workflow.detail.dropoff": "Dropoff",
+  "dispatch.workflow.detail.notes": "Ops notes",
+  "dispatch.workflow.detail.actionPanel": "Action panel",
+  "dispatch.workflow.detail.actionPanelHint":
+    "Use this workspace to record assignment, override, redispatch, and exception decisions with audit context.",
+  "dispatch.workflow.detail.ownedAuthorityHint":
+    "Assignment authority stays in the owned dispatch console for this order.",
+  "dispatch.workflow.detail.forwardedAuthorityHint":
+    "This order keeps owned queue visibility, but forwarded follow-up must stay authority-safe and continue on the external platform board.",
+  "dispatch.workflow.detail.compliance": "Compliance gates",
+  "dispatch.workflow.detail.noComplianceIssues":
+    "No active compliance blocker or review gate on this order.",
+  "dispatch.workflow.detail.nextStep": "Next step",
+  "dispatch.workflow.detail.candidates": "Candidate lane",
+  "dispatch.workflow.detail.candidateHint":
+    "Choose a candidate here to unlock assignment and reassignment actions in the action panel.",
+  "dispatch.workflow.detail.chooseCandidate": "Choose",
+  "dispatch.workflow.detail.selectedCandidate": "Selected",
+  "dispatch.workflow.detail.selectedCandidateReady":
+    "Selected candidate is ready for assignment from the action panel.",
+  "dispatch.workflow.detail.locationStatus": "Location status",
+  "dispatch.workflow.detail.timeline": "Dispatch timeline",
+  "dispatch.workflow.detail.timelineEvents": "Timeline events",
+  "dispatch.workflow.detail.timelineLatest": "Latest event",
+  "dispatch.workflow.detail.timelineHint":
+    "The timeline keeps the operator-facing audit trail in the same workspace as actions and gate decisions.",
+  "dispatch.workflow.detail.timelineEmpty":
+    "No dispatch trace entries are available for this order yet.",
+  "dispatch.workflow.detail.workflowCues": "Workflow cues",
+  "dispatch.workflow.detail.workflowCuesHint":
+    "Keep queue authority, dispatch semantics, and compliance ownership visible before taking action.",
+  "dispatch.workflow.detail.dispatchSemantic": "Dispatch semantic",
+  "dispatch.workflow.detail.queueState": "Queue state",
+  "dispatch.workflow.detail.openWorkspace": "Open workspace",
+  "dispatch.workflow.detail.activeWorkspace": "Workspace active",
+  "dispatch.workflow.detail.selectCandidateHint":
+    "Pick a candidate in this row, then complete assignment from the detail workspace.",
   "dispatch.workflow.candidateLocation.live": "Live location",
   "dispatch.workflow.candidateLocation.stale": "Stale location",
   "dispatch.workflow.candidateLocation.no_location": "No location",
@@ -469,7 +568,143 @@ const en = {
   "dispatch.workflow.loadCandidatesFailed": "Failed to fetch candidates",
   "dispatch.workflow.refreshFailed": "Failed to refresh dispatch board",
   "dispatch.workflow.actionFailed": "Dispatch action failed",
+  "dispatch.workflow.traceLoadFailed": "Dispatch trace could not be loaded.",
   "dispatch.workflow.eventFailed": "Failed to process dispatch event",
+  "dispatch.view.forwarded": "Forwarded Board",
+  "dispatch.view.owned": "Owned Dispatch",
+  "dispatch.view.revenue": "Revenue / Recon",
+  "dispatch.view.contracts": "Manual Review",
+  "dispatch.page.ownedHeadline":
+    "Owned board stays inside local dispatch authority.",
+  "dispatch.page.ownedSummary":
+    "{count} exception-hold / no-supply orders need workflow review alongside live candidate context.",
+  "dispatch.page.ownedAuthority": "Ops-owned dispatch lane",
+  "dispatch.page.forwardedHeadline":
+    "Forwarded work stays in mirror-order triage and reconciliation lanes.",
+  "dispatch.page.forwardedSummary":
+    "{count} forwarded sync failures are currently visible from the owned console.",
+  "dispatch.page.forwardedAuthority": "Platform-owned mirror lane",
+  "dispatch.forwarded.title": "External Platform Orders",
+  "dispatch.forwarded.subtitle":
+    "Mirror-order board for platform sync, manual fallback, and reconciliation",
+  "dispatch.forwarded.roleBoundaryText":
+    "Ops may sync mirror status, flag sync failures, and engage manual fallback. Fare, settlement, and payout authority remain with the external platform.",
+  "dispatch.forwarded.kpi.active": "Active mirrors",
+  "dispatch.forwarded.kpi.broadcasted": "Broadcasted",
+  "dispatch.forwarded.kpi.awaitingPlatform": "Awaiting platform",
+  "dispatch.forwarded.kpi.syncFailed": "Sync failed",
+  "dispatch.forwarded.kpi.reconciliation": "Open reconciliation",
+  "dispatch.forwarded.kpi.manualFallback": "Manual fallback",
+  "dispatch.forwarded.table.title": "Last 30 min mirror orders",
+  "dispatch.forwarded.showing": "Showing {visible} of {total} mirror order(s).",
+  "dispatch.forwarded.search":
+    "Search mirror ID, external ID, platform, driver, or native status",
+  "dispatch.forwarded.filter.all": "All",
+  "dispatch.forwarded.filter.attention": "Needs attention",
+  "dispatch.forwarded.filter.broadcasted": "Broadcasted",
+  "dispatch.forwarded.filter.accept_pending": "Awaiting platform",
+  "dispatch.forwarded.filter.sync_failed": "Sync failed",
+  "dispatch.forwarded.filter.terminal": "Terminal",
+  "dispatch.forwarded.table.col.mirror": "Mirror",
+  "dispatch.forwarded.table.col.platform": "Platform",
+  "dispatch.forwarded.table.col.external": "External ID",
+  "dispatch.forwarded.table.col.status": "Status",
+  "dispatch.forwarded.table.col.nativeStatus": "Native status",
+  "dispatch.forwarded.table.col.candidates": "Candidates / accepted",
+  "dispatch.forwarded.table.col.error": "Error",
+  "dispatch.forwarded.table.col.updated": "Updated",
+  "dispatch.forwarded.table.candidateSummary": "{count} candidate(s)",
+  "dispatch.forwarded.empty":
+    "No forwarded mirror orders match the current filter.",
+  "dispatch.forwarded.detail.title": "Order detail",
+  "dispatch.forwarded.detail.selectHint":
+    "Select a mirror order to inspect status authority and fallback actions.",
+  "dispatch.forwarded.detail.manualFallbackTitle": "Manual fallback engaged",
+  "dispatch.forwarded.detail.manualFallbackRequested":
+    "Ops review is required before continuing the external-platform flow.",
+  "dispatch.forwarded.detail.summary": "Mirror authority snapshot",
+  "dispatch.forwarded.detail.localStatus": "Mirror status",
+  "dispatch.forwarded.detail.nativeStatus": "Native status",
+  "dispatch.forwarded.detail.candidates": "Candidate drivers",
+  "dispatch.forwarded.detail.acceptedDriver": "Accepted driver",
+  "dispatch.forwarded.detail.fareAuthority": "Fare authority",
+  "dispatch.forwarded.detail.settlementAuthority": "Settlement authority",
+  "dispatch.forwarded.detail.ledgerMode": "Ledger mode",
+  "dispatch.forwarded.detail.reconciliation": "Reconciliation",
+  "dispatch.forwarded.detail.updatedAt": "Updated at",
+  "dispatch.forwarded.detail.externalPlatform": "External platform",
+  "dispatch.forwarded.detail.shadowOnly": "Shadow only",
+  "dispatch.forwarded.detail.none": "None",
+  "dispatch.forwarded.detail.lastSyncError": "Last sync error",
+  "dispatch.forwarded.detail.retryable": "Retryable",
+  "dispatch.forwarded.detail.notRetryable": "Not retryable",
+  "dispatch.forwarded.action.title": "Operator actions",
+  "dispatch.forwarded.action.subtitle":
+    "Keep mirror status aligned without claiming external platform authority.",
+  "dispatch.forwarded.action.refresh": "Refresh board",
+  "dispatch.forwarded.action.refreshing": "Refreshing...",
+  "dispatch.forwarded.action.syncStatus": "Force sync native status",
+  "dispatch.forwarded.action.manualFallback": "Engage manual fallback",
+  "dispatch.forwarded.action.markSyncFailed": "Mark sync failed",
+  "dispatch.forwarded.action.completeReconciliation": "Complete reconciliation",
+  "dispatch.forwarded.action.submitting": "Submitting...",
+  "dispatch.forwarded.form.nativeStatus": "Native status",
+  "dispatch.forwarded.form.payloadJson": "Snapshot payload JSON",
+  "dispatch.forwarded.form.reason": "Fallback reason",
+  "dispatch.forwarded.form.requestedBy": "Requested by",
+  "dispatch.forwarded.form.notes": "Notes",
+  "dispatch.forwarded.form.errorCode": "Error code",
+  "dispatch.forwarded.form.errorMessage": "Error message",
+  "dispatch.forwarded.form.retryable": "Retryable",
+  "dispatch.forwarded.form.manualFallbackReason": "Manual fallback reason",
+  "dispatch.forwarded.form.mismatchCount": "Mismatch count",
+  "dispatch.forwarded.form.submit": "Submit",
+  "dispatch.forwarded.form.cancel": "Cancel",
+  "dispatch.forwarded.form.nativeStatusRequired": "Native status is required.",
+  "dispatch.forwarded.form.reasonRequired": "Fallback reason is required.",
+  "dispatch.forwarded.form.syncFailureRequired":
+    "Error code and error message are required.",
+  "dispatch.forwarded.form.mismatchCountRequired":
+    "Mismatch count must be zero or greater.",
+  "dispatch.forwarded.form.jsonInvalid": "Payload JSON must be a valid object.",
+  "dispatch.forwarded.message.refreshFailed":
+    "Failed to refresh forwarded-order board.",
+  "dispatch.forwarded.message.actionFailed": "Forwarded-order action failed.",
+  "dispatch.forwarded.message.syncSuccess":
+    "Mirror order synced to the latest native status.",
+  "dispatch.forwarded.message.fallbackSuccess":
+    "Manual fallback is now active for this mirror order.",
+  "dispatch.forwarded.message.syncFailedSuccess":
+    "Mirror order marked as sync failed and queued for reconciliation.",
+  "dispatch.forwarded.message.reconciliationSuccess":
+    "Reconciliation completed and mirror status refreshed.",
+  "dispatch.forwarded.health.title": "Adapter health",
+  "dispatch.forwarded.health.subtitle":
+    "Forwarder connectivity and latest error state",
+  "dispatch.forwarded.health.col.platform": "Platform",
+  "dispatch.forwarded.health.col.status": "Health",
+  "dispatch.forwarded.health.col.checkedAt": "Last checked",
+  "dispatch.forwarded.health.col.error": "Last error",
+  "dispatch.forwarded.health.status.healthy": "Healthy",
+  "dispatch.forwarded.health.status.degraded": "Degraded",
+  "dispatch.forwarded.health.status.down": "Down",
+  "dispatch.forwarded.health.empty": "No adapter health records.",
+  "dispatch.forwarded.reconciliation.title": "Open reconciliation queue",
+  "dispatch.forwarded.reconciliation.subtitle":
+    "Mirror orders still waiting for operational closeout",
+  "dispatch.forwarded.reconciliation.col.mirror": "Mirror",
+  "dispatch.forwarded.reconciliation.col.reason": "Reason",
+  "dispatch.forwarded.reconciliation.col.status": "Status",
+  "dispatch.forwarded.reconciliation.col.fallback": "Fallback",
+  "dispatch.forwarded.reconciliation.empty":
+    "No open forwarded-order reconciliation issues.",
+  "dispatch.forwarded.status.received": "Received",
+  "dispatch.forwarded.status.broadcasted": "Broadcasted",
+  "dispatch.forwarded.status.accept_pending": "Awaiting platform confirmation",
+  "dispatch.forwarded.status.confirmed_by_platform": "Confirmed by platform",
+  "dispatch.forwarded.status.lost_race": "Lost race",
+  "dispatch.forwarded.status.cancelled_by_platform": "Cancelled by platform",
+  "dispatch.forwarded.status.sync_failed": "Sync failed",
 
   // ── Maintenance ──
   "maintenance.title": "Vehicle Maintenance",
@@ -1356,6 +1591,17 @@ const zh: Record<keyof typeof en, string> = {
   "dashboard.platformOps.subtitle":
     "彙整 {count} 筆 forwarded 訂單的 adapter 健康、sync error 與 reconciliation backlog",
   "dashboard.platformOps.empty": "目前尚無 adapter 健康快照。",
+  "dashboard.dispatchBoards.title": "派車指揮台",
+  "dashboard.dispatchBoards.subtitle":
+    "把本地派車執行與 forwarded 鏡像訂單分流處理。",
+  "dashboard.dispatchBoards.queueDepth": "matching + queued 任務",
+  "dashboard.dispatchBoards.attentionQueue": "注意佇列",
+  "dashboard.dispatchBoards.ownedSummary":
+    "{redispatch} 筆重派 / 逾時 · {exceptions} 筆例外或無供給",
+  "dashboard.dispatchBoards.forwardedSummary":
+    "{syncFailed} 筆同步失敗 · {reconciliation} 筆待對帳",
+  "dashboard.dispatchBoards.openOwned": "打開本地派車流程",
+  "dashboard.dispatchBoards.openForwarded": "打開 forwarded 看板",
   "dashboard.platformOps.degradedBanner":
     "{count} 個 adapter 需要關注。請先檢查 auth、webhook 與 rate-limit 訊號，避免鏡像派單積壓擴大。",
   "dashboard.platformOps.openDispatch": "開啟 forwarded 派單處置台",
@@ -1393,6 +1639,11 @@ const zh: Record<keyof typeof en, string> = {
   "vehicles.col.lastChange": "最近變更",
   "vehicles.warningTitle": "派車風險警示",
   "vehicles.debrandingPending": "除標識尚未完成",
+  "vehicles.exclusivityApproved": "排他委託已核准",
+  "vehicles.exclusivityPending": "排他委託待審",
+  "vehicles.lifecycle": "Lifecycle 覆蓋",
+  "vehicles.registrySummary":
+    "{dispatchable} 輛可派遣 · {blocked} 輛受阻 · {offboarding} 輛退場中 · {debranding} 輛待除標識",
   "vehicles.noneBlocked": "可派",
   "vehicles.lastChangeNone": "尚無 lifecycle 變更紀錄",
   "vehicles.empty": "尚未登記車輛。",
@@ -1417,6 +1668,10 @@ const zh: Record<keyof typeof en, string> = {
   "drivers.list.locationStale": "過期",
   "drivers.list.locationMissing": "無回傳",
   "drivers.list.locationUnknown": "未知",
+  "drivers.registrySummary":
+    "{eligible} 位可派遣 · {blocked} 位受阻 · {live} 位即時定位 · {stale} 位定位過期",
+  "drivers.registryFooter":
+    "平台 eligibility 操作保留在司機明細，列表頁維持以讀取與判斷為主。",
 
   // ── Driver Detail (Eligibility Management) ──
   "driverDetail.title": "司機平台 eligibility 管理",
@@ -1512,6 +1767,10 @@ const zh: Record<keyof typeof en, string> = {
   "contracts.reviewContext.cardLast4": "卡號末四碼 ••••{value}",
   "contracts.reviewContext.flightNo": "航班 {value}",
   "contracts.reviewContext.none": "無額外請求上下文",
+  "contracts.reviewRegistrySummary":
+    "{total} 筆佇列案例 · {manual} 筆仍待人工審查",
+  "contracts.registrySummary":
+    "{active} 份生效中 · {draft} 份草稿 · {attention} 筆合作夥伴 eligibility 案例待關注",
   "contracts.col.status": "狀態",
   "contracts.empty": "尚未登記合約。",
 
@@ -1521,6 +1780,9 @@ const zh: Record<keyof typeof en, string> = {
   "flags.col.key": "鍵名",
   "flags.col.status": "狀態",
   "flags.col.description": "說明",
+  "flags.registrySummary": "{enabled} 個已啟用 · {disabled} 個已停用",
+  "flags.registryFooter":
+    "此處維持唯讀檢視，並與共享 management registry table pattern 對齊。",
   "flags.empty": "未找到旗標。",
 
   // ── Attendance ──
@@ -1572,13 +1834,33 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.showing": "顯示 {visible} 筆，共 {total} 筆訂單。",
   "dispatch.workflow.col.order": "訂單",
   "dispatch.workflow.col.product": "產品",
-  "dispatch.workflow.col.queue": "排隊",
+  "dispatch.workflow.col.queue": "佇列 / 狀態",
   "dispatch.workflow.col.dispatch": "派車",
+  "dispatch.workflow.col.authority": "權責",
   "dispatch.workflow.col.compliance": "合規",
   "dispatch.workflow.col.revenue": "收益",
   "dispatch.workflow.col.eta": "ETA",
   "dispatch.workflow.col.candidates": "候選人",
   "dispatch.workflow.col.actions": "操作",
+  "dispatch.workflow.boardTitle": "本地派車看板",
+  "dispatch.workflow.boardSubtitle":
+    "本地佇列權責、候選供給指派與例外流程都維持在 fleet dispatch lane 內處理。",
+  "dispatch.workflow.schema.localQueue": "本地佇列",
+  "dispatch.workflow.schema.localQueueHint":
+    "目前有 {count} 筆訂單正在等待本地派車處理。",
+  "dispatch.workflow.schema.activeAssignment": "指派處理",
+  "dispatch.workflow.schema.activeAssignmentHint":
+    "目前有 {count} 筆本地 dispatch job 正在進行候選人或指派作業。",
+  "dispatch.workflow.schema.exceptionDesk": "例外處理桌",
+  "dispatch.workflow.schema.exceptionDeskHint":
+    "目前有 {count} 筆本地訂單需要 timeout、無供給或例外審查。",
+  "dispatch.workflow.authority.local": "本地派車權責",
+  "dispatch.workflow.authority.assignment": "指派進行中",
+  "dispatch.workflow.authority.reservation": "預約佇列",
+  "dispatch.workflow.authority.exception": "需營運審查",
+  "dispatch.workflow.boardState.active": "進行中行程",
+  "dispatch.workflow.boardState.closed": "已結束歷史",
+  "dispatch.workflow.boardState.intake": "派車前受理",
   "dispatch.workflow.noComplianceGate": "目前無啟用 gate",
   "dispatch.workflow.gate.recording": "錄音",
   "dispatch.workflow.gate.proof": "存證",
@@ -1676,6 +1958,58 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.map.missingCoords": "{count} 筆可見訂單仍缺少上車座標。",
   "dispatch.workflow.map.autoLoadHint":
     "可見派車任務若提供候選供給位置，系統會自動載入。",
+  "dispatch.workflow.detail.title": "派車明細工作區",
+  "dispatch.workflow.detail.selectedOrder": "{orderNo} 工作流焦點",
+  "dispatch.workflow.detail.emptyTitle": "尚未選取訂單",
+  "dispatch.workflow.detail.emptyBody":
+    "請從地圖或表格選一筆訂單，把派車、compliance 與乘客資訊一起檢視。",
+  "dispatch.workflow.detail.summary": "工作流摘要",
+  "dispatch.workflow.detail.orderStatus": "訂單狀態",
+  "dispatch.workflow.detail.dispatchStatus": "派車狀態",
+  "dispatch.workflow.detail.reservationWindow": "服務時窗",
+  "dispatch.workflow.detail.immediateQueue": "即時派車佇列",
+  "dispatch.workflow.detail.passenger": "乘客",
+  "dispatch.workflow.detail.contact": "現場聯絡人",
+  "dispatch.workflow.detail.lastUpdated": "最後更新",
+  "dispatch.workflow.detail.route": "路線資訊",
+  "dispatch.workflow.detail.pickup": "上車",
+  "dispatch.workflow.detail.dropoff": "下車",
+  "dispatch.workflow.detail.notes": "營運備註",
+  "dispatch.workflow.detail.actionPanel": "操作面板",
+  "dispatch.workflow.detail.actionPanelHint":
+    "在此工作區完成指派、override、重派與例外決策，並留下稽核脈絡。",
+  "dispatch.workflow.detail.ownedAuthorityHint":
+    "這筆訂單的指派權責維持在本地派車工作區內處理。",
+  "dispatch.workflow.detail.forwardedAuthorityHint":
+    "此單仍保留本地佇列可視性，但若進入 forwarded follow-up，後續操作必須維持權責安全並回到外部平台看板。",
+  "dispatch.workflow.detail.compliance": "Compliance gate",
+  "dispatch.workflow.detail.noComplianceIssues":
+    "這筆訂單目前沒有啟用中的 compliance blocker 或 review gate。",
+  "dispatch.workflow.detail.nextStep": "下一步",
+  "dispatch.workflow.detail.candidates": "候選供給",
+  "dispatch.workflow.detail.candidateHint":
+    "先在這裡選定候選人，再到操作面板完成指派或重派。",
+  "dispatch.workflow.detail.chooseCandidate": "選取",
+  "dispatch.workflow.detail.selectedCandidate": "已選取",
+  "dispatch.workflow.detail.selectedCandidateReady":
+    "已選定候選人，可直接在操作面板完成指派。",
+  "dispatch.workflow.detail.locationStatus": "位置狀態",
+  "dispatch.workflow.detail.timeline": "派車時間軸",
+  "dispatch.workflow.detail.timelineEvents": "時間軸事件",
+  "dispatch.workflow.detail.timelineLatest": "最新事件",
+  "dispatch.workflow.detail.timelineHint":
+    "時間軸把操作、gate 決策與稽核紀錄維持在同一個工作區內。",
+  "dispatch.workflow.detail.timelineEmpty":
+    "此訂單目前尚無可顯示的 dispatch trace。",
+  "dispatch.workflow.detail.workflowCues": "工作流提示",
+  "dispatch.workflow.detail.workflowCuesHint":
+    "執行操作前，持續看見佇列權責、派車語意與 compliance ownership。",
+  "dispatch.workflow.detail.dispatchSemantic": "派車語意",
+  "dispatch.workflow.detail.queueState": "佇列狀態",
+  "dispatch.workflow.detail.openWorkspace": "開啟工作區",
+  "dispatch.workflow.detail.activeWorkspace": "工作區焦點",
+  "dispatch.workflow.detail.selectCandidateHint":
+    "先在列表挑選候選人，再回到明細工作區完成指派。",
   "dispatch.workflow.loadCandidatesFailed": "載入候選人失敗",
   "dispatch.workflow.refreshFailed": "重新整理派車看板失敗",
   "dispatch.workflow.candidateLocation.live": "即時位置",
@@ -1684,7 +2018,133 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.workflow.candidateLocationSummary":
     "目前有 {count} 位候選人屬於 {state}。",
   "dispatch.workflow.actionFailed": "派車操作失敗",
+  "dispatch.workflow.traceLoadFailed": "無法載入 dispatch trace。",
   "dispatch.workflow.eventFailed": "處理派車事件失敗",
+  "dispatch.view.forwarded": "外部平台看板",
+  "dispatch.view.owned": "本地派車",
+  "dispatch.view.revenue": "收益 / 對帳",
+  "dispatch.view.contracts": "人工審查",
+  "dispatch.page.ownedHeadline":
+    "本地派車看板維持在本地 dispatch authority 內處理。",
+  "dispatch.page.ownedSummary":
+    "{count} 筆例外保留 / 無供給訂單需要搭配即時候選供給一起檢查。",
+  "dispatch.page.ownedAuthority": "營運自有派車 lane",
+  "dispatch.page.forwardedHeadline":
+    "Forwarded 工作維持在鏡像訂單分流與 reconciliation 流程中。",
+  "dispatch.page.forwardedSummary":
+    "目前從本地 console 可見 {count} 筆 forwarded sync failure。",
+  "dispatch.page.forwardedAuthority": "平台鏡像派單 lane",
+  "dispatch.forwarded.title": "外部平台訂單",
+  "dispatch.forwarded.subtitle": "鏡像訂單看板、人工 fallback 與對帳處理",
+  "dispatch.forwarded.roleBoundaryText":
+    "營運可同步鏡像狀態、標記同步失敗並啟用人工 fallback；車資、結算與司機 payout 權威仍屬外部平台。",
+  "dispatch.forwarded.kpi.active": "進行中鏡像",
+  "dispatch.forwarded.kpi.broadcasted": "已廣播",
+  "dispatch.forwarded.kpi.awaitingPlatform": "等待平台確認",
+  "dispatch.forwarded.kpi.syncFailed": "同步失敗",
+  "dispatch.forwarded.kpi.reconciliation": "待對帳",
+  "dispatch.forwarded.kpi.manualFallback": "人工 fallback",
+  "dispatch.forwarded.table.title": "近 30 分鏡像訂單",
+  "dispatch.forwarded.showing": "顯示 {visible} 筆，共 {total} 筆鏡像訂單。",
+  "dispatch.forwarded.search": "依鏡像 ID、外部 ID、平台、司機或原生狀態搜尋",
+  "dispatch.forwarded.filter.all": "全部",
+  "dispatch.forwarded.filter.attention": "需注意",
+  "dispatch.forwarded.filter.broadcasted": "已廣播",
+  "dispatch.forwarded.filter.accept_pending": "待平台確認",
+  "dispatch.forwarded.filter.sync_failed": "同步失敗",
+  "dispatch.forwarded.filter.terminal": "已結束",
+  "dispatch.forwarded.table.col.mirror": "鏡像",
+  "dispatch.forwarded.table.col.platform": "平台",
+  "dispatch.forwarded.table.col.external": "外部 ID",
+  "dispatch.forwarded.table.col.status": "狀態",
+  "dispatch.forwarded.table.col.nativeStatus": "原生狀態",
+  "dispatch.forwarded.table.col.candidates": "候選 / 接受",
+  "dispatch.forwarded.table.col.error": "錯誤",
+  "dispatch.forwarded.table.col.updated": "更新",
+  "dispatch.forwarded.table.candidateSummary": "{count} 位候選人",
+  "dispatch.forwarded.empty": "目前沒有符合篩選條件的鏡像訂單。",
+  "dispatch.forwarded.detail.title": "訂單明細",
+  "dispatch.forwarded.detail.selectHint":
+    "選擇一筆鏡像訂單，檢視狀態權威與 fallback 操作。",
+  "dispatch.forwarded.detail.manualFallbackTitle": "已啟用人工 fallback",
+  "dispatch.forwarded.detail.manualFallbackRequested":
+    "在外部平台流程繼續前，需先由營運人工確認。",
+  "dispatch.forwarded.detail.summary": "鏡像權威快照",
+  "dispatch.forwarded.detail.localStatus": "鏡像狀態",
+  "dispatch.forwarded.detail.nativeStatus": "原生狀態",
+  "dispatch.forwarded.detail.candidates": "候選司機",
+  "dispatch.forwarded.detail.acceptedDriver": "接單司機",
+  "dispatch.forwarded.detail.fareAuthority": "車資權威",
+  "dispatch.forwarded.detail.settlementAuthority": "結算權威",
+  "dispatch.forwarded.detail.ledgerMode": "帳簿模式",
+  "dispatch.forwarded.detail.reconciliation": "對帳",
+  "dispatch.forwarded.detail.updatedAt": "最後更新",
+  "dispatch.forwarded.detail.externalPlatform": "外部平台",
+  "dispatch.forwarded.detail.shadowOnly": "僅鏡像",
+  "dispatch.forwarded.detail.none": "無",
+  "dispatch.forwarded.detail.lastSyncError": "最近同步錯誤",
+  "dispatch.forwarded.detail.retryable": "可重試",
+  "dispatch.forwarded.detail.notRetryable": "不可重試",
+  "dispatch.forwarded.action.title": "營運操作",
+  "dispatch.forwarded.action.subtitle":
+    "維持鏡像狀態對齊，但不主張外部平台權威。",
+  "dispatch.forwarded.action.refresh": "重新整理看板",
+  "dispatch.forwarded.action.refreshing": "重新整理中...",
+  "dispatch.forwarded.action.syncStatus": "強制同步原生狀態",
+  "dispatch.forwarded.action.manualFallback": "啟用人工 fallback",
+  "dispatch.forwarded.action.markSyncFailed": "標記同步失敗",
+  "dispatch.forwarded.action.completeReconciliation": "完成對帳",
+  "dispatch.forwarded.action.submitting": "送出中...",
+  "dispatch.forwarded.form.nativeStatus": "原生狀態",
+  "dispatch.forwarded.form.payloadJson": "快照 payload JSON",
+  "dispatch.forwarded.form.reason": "fallback 原因",
+  "dispatch.forwarded.form.requestedBy": "提出人",
+  "dispatch.forwarded.form.notes": "備註",
+  "dispatch.forwarded.form.errorCode": "錯誤代碼",
+  "dispatch.forwarded.form.errorMessage": "錯誤訊息",
+  "dispatch.forwarded.form.retryable": "可重試",
+  "dispatch.forwarded.form.manualFallbackReason": "人工 fallback 原因",
+  "dispatch.forwarded.form.mismatchCount": "差異筆數",
+  "dispatch.forwarded.form.submit": "送出",
+  "dispatch.forwarded.form.cancel": "取消",
+  "dispatch.forwarded.form.nativeStatusRequired": "原生狀態為必填。",
+  "dispatch.forwarded.form.reasonRequired": "fallback 原因為必填。",
+  "dispatch.forwarded.form.syncFailureRequired": "錯誤代碼與錯誤訊息皆為必填。",
+  "dispatch.forwarded.form.mismatchCountRequired": "差異筆數必須為零或更大。",
+  "dispatch.forwarded.form.jsonInvalid": "Payload JSON 必須是合法的物件。",
+  "dispatch.forwarded.message.refreshFailed": "重新整理外部平台看板失敗。",
+  "dispatch.forwarded.message.actionFailed": "外部平台訂單操作失敗。",
+  "dispatch.forwarded.message.syncSuccess": "鏡像訂單已同步到最新原生狀態。",
+  "dispatch.forwarded.message.fallbackSuccess":
+    "此鏡像訂單已啟用人工 fallback。",
+  "dispatch.forwarded.message.syncFailedSuccess":
+    "鏡像訂單已標記同步失敗，並送入對帳佇列。",
+  "dispatch.forwarded.message.reconciliationSuccess":
+    "對帳完成，鏡像狀態已更新。",
+  "dispatch.forwarded.health.title": "轉接器健康度",
+  "dispatch.forwarded.health.subtitle": "forwarder 連線與最新錯誤狀態",
+  "dispatch.forwarded.health.col.platform": "平台",
+  "dispatch.forwarded.health.col.status": "健康度",
+  "dispatch.forwarded.health.col.checkedAt": "最後檢查",
+  "dispatch.forwarded.health.col.error": "最後錯誤",
+  "dispatch.forwarded.health.status.healthy": "健康",
+  "dispatch.forwarded.health.status.degraded": "降級",
+  "dispatch.forwarded.health.status.down": "中斷",
+  "dispatch.forwarded.health.empty": "目前沒有轉接器健康記錄。",
+  "dispatch.forwarded.reconciliation.title": "待處理對帳佇列",
+  "dispatch.forwarded.reconciliation.subtitle": "仍待營運結案的鏡像訂單",
+  "dispatch.forwarded.reconciliation.col.mirror": "鏡像",
+  "dispatch.forwarded.reconciliation.col.reason": "原因",
+  "dispatch.forwarded.reconciliation.col.status": "狀態",
+  "dispatch.forwarded.reconciliation.col.fallback": "fallback",
+  "dispatch.forwarded.reconciliation.empty": "目前沒有待處理的鏡像對帳問題。",
+  "dispatch.forwarded.status.received": "已接收",
+  "dispatch.forwarded.status.broadcasted": "已廣播",
+  "dispatch.forwarded.status.accept_pending": "等待平台確認",
+  "dispatch.forwarded.status.confirmed_by_platform": "平台已確認",
+  "dispatch.forwarded.status.lost_race": "失去訂單",
+  "dispatch.forwarded.status.cancelled_by_platform": "平台取消",
+  "dispatch.forwarded.status.sync_failed": "同步失敗",
 
   // ── Maintenance ──
   "maintenance.title": "維修保養",

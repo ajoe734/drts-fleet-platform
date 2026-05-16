@@ -658,6 +658,8 @@ export interface BtnProps {
   icon?: CanvasIconName | ReactNode;
   children: ReactNode;
   danger?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
   style?: CSSProperties;
 }
 
@@ -668,6 +670,8 @@ export function Btn({
   icon,
   children,
   danger = false,
+  disabled = false,
+  onClick,
   style,
 }: BtnProps) {
   const theme = resolveTheme(providedTheme);
@@ -703,6 +707,8 @@ export function Btn({
   return (
     <button
       type="button"
+      disabled={disabled}
+      onClick={onClick}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -715,7 +721,8 @@ export function Btn({
         color: styles.fg,
         border: `1px solid ${styles.bd}`,
         borderRadius: 7,
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.55 : 1,
         boxShadow: styles.shadow,
         lineHeight: 1,
         fontFamily: theme.fontFamily,

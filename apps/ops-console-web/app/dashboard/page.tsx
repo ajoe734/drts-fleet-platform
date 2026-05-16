@@ -512,6 +512,181 @@ export default async function DashboardPage() {
         />
       </div>
 
+      <Card style={{ marginBottom: "24px" }}>
+        <CardHeader>
+          <div
+            style={{
+              fontSize: "11px",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "#64748b",
+              marginBottom: "2px",
+            }}
+          >
+            {t("dashboard.dispatchBoards.title", locale)}
+          </div>
+          <div style={{ fontWeight: 600, fontSize: "15px", color: "#0f172a" }}>
+            {t("dashboard.dispatchBoards.subtitle", locale)}
+          </div>
+        </CardHeader>
+        <CardBody>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: "16px",
+            }}
+          >
+            <div
+              style={{
+                border: "1px solid #dbeafe",
+                borderRadius: "16px",
+                padding: "16px",
+                background:
+                  "linear-gradient(180deg, rgba(239,246,255,0.9), rgba(248,250,252,1))",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  marginBottom: "12px",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "#1d4ed8",
+                    }}
+                  >
+                    {t("dispatch.view.owned", locale)}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "18px",
+                      fontWeight: 700,
+                      color: "#0f172a",
+                    }}
+                  >
+                    {formatCompactNumber(dispatch.queueDepth)}
+                  </div>
+                </div>
+                <div style={{ fontSize: "12px", color: "#475569" }}>
+                  {t("dashboard.dispatchBoards.queueDepth", locale)}
+                </div>
+              </div>
+              <div
+                style={{
+                  fontSize: "13px",
+                  color: "#475569",
+                  marginBottom: "12px",
+                }}
+              >
+                {t("dashboard.dispatchBoards.ownedSummary", locale, {
+                  redispatch: dispatch.redispatchOrders,
+                  exceptions: dispatch.exceptionOrders,
+                })}
+              </div>
+              <Link
+                href="/dispatch?view=owned"
+                style={{
+                  display: "inline-block",
+                  padding: "10px 14px",
+                  borderRadius: "10px",
+                  background: "#0f172a",
+                  color: "#ffffff",
+                  textDecoration: "none",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                }}
+              >
+                {t("dashboard.dispatchBoards.openOwned", locale)} →
+              </Link>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #fde68a",
+                borderRadius: "16px",
+                padding: "16px",
+                background:
+                  "linear-gradient(180deg, rgba(255,251,235,0.95), rgba(255,255,255,1))",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  marginBottom: "12px",
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "#b45309",
+                    }}
+                  >
+                    {t("dispatch.view.forwarded", locale)}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "18px",
+                      fontWeight: 700,
+                      color: "#0f172a",
+                    }}
+                  >
+                    {formatCompactNumber(
+                      observability.forwarderOps.syncFailedOrders +
+                        observability.forwarderOps.acceptPendingOrders,
+                    )}
+                  </div>
+                </div>
+                <div style={{ fontSize: "12px", color: "#78350f" }}>
+                  {t("dashboard.dispatchBoards.attentionQueue", locale)}
+                </div>
+              </div>
+              <div
+                style={{
+                  fontSize: "13px",
+                  color: "#78350f",
+                  marginBottom: "12px",
+                }}
+              >
+                {t("dashboard.dispatchBoards.forwardedSummary", locale, {
+                  syncFailed: observability.forwarderOps.syncFailedOrders,
+                  reconciliation:
+                    observability.forwarderOps.reconciliationQueue,
+                })}
+              </div>
+              <Link
+                href="/dispatch"
+                style={{
+                  display: "inline-block",
+                  padding: "10px 14px",
+                  borderRadius: "10px",
+                  background: "#fff7ed",
+                  border: "1px solid #fdba74",
+                  color: "#9a3412",
+                  textDecoration: "none",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                }}
+              >
+                {t("dashboard.dispatchBoards.openForwarded", locale)} →
+              </Link>
+            </div>
+          </div>
+        </CardBody>
+      </Card>
+
       <Card>
         <CardHeader>
           <div

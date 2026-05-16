@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "@drts/ui-web";
 import type {
@@ -38,8 +39,81 @@ function formatDateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : "-";
 }
 
+function isComplaintActive(status: ComplaintCaseStatus) {
+  return ["new", "assigned", "under_investigation", "reopened"].includes(
+    status,
+  );
+}
+
+function compareComplaintPriority(
+  a: ComplaintCaseRecord,
+  b: ComplaintCaseRecord,
+) {
+  if (a.slaBreach !== b.slaBreach) {
+    return a.slaBreach ? -1 : 1;
+  }
+
+  if (a.relatedIncidentId !== b.relatedIncidentId) {
+    return a.relatedIncidentId ? 1 : -1;
+  }
+
+  if (a.severity !== b.severity) {
+    return a.severity === "high" ? -1 : 1;
+  }
+
+  if (isComplaintActive(a.status) !== isComplaintActive(b.status)) {
+    return isComplaintActive(a.status) ? -1 : 1;
+  }
+
+  return (
+    new Date(a.slaDueAt).getTime() - new Date(b.slaDueAt).getTime() ||
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+}
+
+function formatRelativeSla(value: string, locale: "en" | "zh") {
+  const deltaMinutes = Math.round(
+    (new Date(value).getTime() - Date.now()) / (1000 * 60),
+  );
+
+  if (deltaMinutes >= 0) {
+    return locale === "en"
+      ? `SLA due in ${deltaMinutes} min`
+      : `SLA 還有 ${deltaMinutes} 分鐘`;
+  }
+
+  return locale === "en"
+    ? `SLA breached by ${Math.abs(deltaMinutes)} min`
+    : `SLA 已逾期 ${Math.abs(deltaMinutes)} 分鐘`;
+}
+
+function getComplaintQueueTone(record: ComplaintCaseRecord) {
+  if (record.slaBreach) {
+    return "queue-badge badge-danger";
+  }
+  if (record.severity === "high") {
+    return "queue-badge badge-warning";
+  }
+  return "queue-badge";
+}
+
+function resolveSelectedComplaintCaseNo(
+  records: ComplaintCaseRecord[],
+  preferredCaseNo: string | null,
+) {
+  if (
+    preferredCaseNo &&
+    records.some((record) => record.caseNo === preferredCaseNo)
+  ) {
+    return preferredCaseNo;
+  }
+
+  return records[0]?.caseNo ?? null;
+}
+
 export default function ComplaintsPage() {
   const { t, locale } = useTranslation();
+  const searchParams = useSearchParams();
   const resolveErrorMessage = (error: unknown) =>
     error instanceof Error ? error.message : t("common.unknown");
   const [records, setRecords] = useState<ComplaintCaseRecord[]>([]);
@@ -71,6 +145,7 @@ export default function ComplaintsPage() {
   const [escalateReason, setEscalateReason] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
+  const caseNoFromQuery = searchParams.get("caseNo");
 
   const selectedRecord = useMemo(
     () => records.find((record) => record.caseNo === selectedCaseNo) ?? null,
@@ -97,8 +172,12 @@ export default function ComplaintsPage() {
   }, [selectedRecord, validResolutionCodes]);
 
   useEffect(() => {
-    void loadRecords();
-  }, []);
+    if (caseNoFromQuery) {
+      setSelectedCaseNo(caseNoFromQuery);
+    }
+
+    void loadRecords(caseNoFromQuery ?? undefined);
+  }, [caseNoFromQuery]);
 
   useEffect(() => {
     if (!selectedCaseNo) {
@@ -138,11 +217,10 @@ export default function ComplaintsPage() {
     try {
       const nextRecords = await getOpsClient().listComplaints();
       setRecords(nextRecords);
-      const nextSelected =
-        preferredCaseNo ??
-        (nextRecords.some((record) => record.caseNo === selectedCaseNo)
-          ? selectedCaseNo
-          : (nextRecords[0]?.caseNo ?? null));
+      const nextSelected = resolveSelectedComplaintCaseNo(
+        nextRecords,
+        preferredCaseNo ?? caseNoFromQuery ?? selectedCaseNo,
+      );
       setSelectedCaseNo(nextSelected);
       setError(null);
     } catch (nextError) {
@@ -164,40 +242,68 @@ export default function ComplaintsPage() {
     }
   }
 
-  const filteredRecords = records.filter((record) => {
-    if (statusFilter !== "all" && record.status !== statusFilter) {
-      return false;
-    }
-    if (categoryFilter !== "all" && record.category !== categoryFilter) {
-      return false;
-    }
-    if (!deferredQuery) {
-      return true;
-    }
-    const haystack = [
-      record.caseNo,
-      record.category,
-      record.description,
-      record.status,
-      record.assigneeId ?? "",
-      record.relatedOrderId ?? "",
-      record.relatedCallId ?? "",
-    ]
-      .join(" ")
-      .toLowerCase();
-    return haystack.includes(deferredQuery);
-  });
+  const filteredRecords = records
+    .filter((record) => {
+      if (statusFilter !== "all" && record.status !== statusFilter) {
+        return false;
+      }
+      if (categoryFilter !== "all" && record.category !== categoryFilter) {
+        return false;
+      }
+      if (!deferredQuery) {
+        return true;
+      }
+      const haystack = [
+        record.caseNo,
+        record.category,
+        record.description,
+        record.status,
+        record.assigneeId ?? "",
+        record.relatedOrderId ?? "",
+        record.relatedCallId ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(deferredQuery);
+    })
+    .sort(compareComplaintPriority);
 
   const activeCases = records.filter((record) =>
-    ["new", "assigned", "under_investigation", "reopened"].includes(
-      record.status,
-    ),
+    isComplaintActive(record.status),
   ).length;
   const hotlineLinked = records.filter((record) => record.relatedCallId).length;
   const slaBreached = records.filter((record) => record.slaBreach).length;
   const readyForAudit = records.filter(
     (record) => record.status === "closed",
   ).length;
+  const escalationReadyCases = records
+    .filter(
+      (record) =>
+        !record.relatedIncidentId &&
+        (record.slaBreach || record.severity === "high"),
+    )
+    .sort(compareComplaintPriority);
+  const unassignedCases = records.filter(
+    (record) => isComplaintActive(record.status) && !record.assigneeId,
+  ).length;
+  const workspaceHeadline = selectedRecord
+    ? locale === "en"
+      ? `${selectedRecord.caseNo} is active in the complaints workspace.`
+      : `${selectedRecord.caseNo} 已進入客訴 workspace。`
+    : locale === "en"
+      ? "Select a complaint to triage SLA, assignee state, and incident escalation."
+      : "選擇客訴案件，處理 SLA、負責人狀態與 incident escalation。";
+  const complaintGuardrails = [
+    locale === "en"
+      ? "Complaint ownership stays in ops until the audit-export packet is ready."
+      : "客訴在 audit-export packet 就緒前，owner 仍維持在 ops。",
+    locale === "en"
+      ? "Escalate to incidents only when safety, operational outage, or service recovery coordination crosses the complaint boundary."
+      : "只有在安全、營運中斷或 service recovery 需跨出客訴邊界時，才升級到 incidents。",
+    locale === "en"
+      ? "SLA breach marking is a control signal and should not replace timeline notes or assignee updates."
+      : "SLA breach 是控制訊號，不可取代 timeline note 與 assignee 更新。",
+  ];
 
   return (
     <>
@@ -211,6 +317,40 @@ export default function ComplaintsPage() {
             <strong>{getOpsLabel(locale, "error")}:</strong> {error}
           </div>
         )}
+
+        <section className="workspace-hero">
+          <div>
+            <p className="eyebrow">
+              {locale === "en" ? "Complaint workspace" : "Complaint Workspace"}
+            </p>
+            <h3>
+              {selectedRecord
+                ? `${selectedRecord.caseNo} · ${formatOpsCodeLabel(
+                    locale,
+                    selectedRecord.category,
+                  )}`
+                : t("complaints.caseDetail")}
+            </h3>
+            <p>{workspaceHeadline}</p>
+          </div>
+          <div className="hero-chip-row">
+            <span className="hero-chip hero-chip-critical">
+              {locale === "en"
+                ? `${slaBreached} breached SLA case(s)`
+                : `${slaBreached} 筆 SLA 違規案件`}
+            </span>
+            <span className="hero-chip">
+              {locale === "en"
+                ? `${escalationReadyCases.length} escalation-ready`
+                : `${escalationReadyCases.length} 筆可升級 incident`}
+            </span>
+            <span className="hero-chip">
+              {locale === "en"
+                ? `${unassignedCases} unassigned active case(s)`
+                : `${unassignedCases} 筆活躍案件未指派`}
+            </span>
+          </div>
+        </section>
 
         <section className="summary-grid">
           {[
@@ -241,6 +381,77 @@ export default function ComplaintsPage() {
               <small>{card.note}</small>
             </div>
           ))}
+        </section>
+
+        <section className="assumption-panel">
+          <strong>
+            {locale === "en"
+              ? "Authority and escalation guardrails"
+              : "權限與 escalation guardrails"}
+          </strong>
+          <ul className="assumption-list">
+            {complaintGuardrails.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="priority-queue">
+          <div className="panel-head">
+            <div>
+              <p className="eyebrow">
+                {locale === "en"
+                  ? "SLA + escalation queue"
+                  : "SLA / escalation 佇列"}
+              </p>
+              <h3>
+                {locale === "en"
+                  ? "Immediate complaints requiring ops attention"
+                  : "需立即處理的客訴案件"}
+              </h3>
+            </div>
+            <span className="panel-note">
+              {locale === "en"
+                ? `${Math.min(escalationReadyCases.length, 4)} shown`
+                : `顯示 ${Math.min(escalationReadyCases.length, 4)} 筆`}
+            </span>
+          </div>
+          {escalationReadyCases.length > 0 ? (
+            <div className="queue-grid">
+              {escalationReadyCases.slice(0, 4).map((record) => (
+                <button
+                  key={record.caseNo}
+                  className="queue-card"
+                  type="button"
+                  onClick={() => setSelectedCaseNo(record.caseNo)}
+                >
+                  <div className="queue-card-head">
+                    <strong>{record.caseNo}</strong>
+                    <span className={getComplaintQueueTone(record)}>
+                      {record.slaBreach
+                        ? locale === "en"
+                          ? "SLA breach"
+                          : "SLA 違規"
+                        : formatOpsCodeLabel(locale, record.severity)}
+                    </span>
+                  </div>
+                  <div className="queue-card-subcopy">
+                    {formatOpsCodeLabel(locale, record.category)} ·{" "}
+                    {record.assigneeId ??
+                      (locale === "en" ? "Unassigned" : "未指派")}
+                  </div>
+                  <p>{record.description}</p>
+                  <small>{formatRelativeSla(record.slaDueAt, locale)}</small>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="empty-state">
+              {locale === "en"
+                ? "No complaint currently needs immediate incident escalation."
+                : "目前沒有需要立即升級 incident 的客訴案件。"}
+            </p>
+          )}
         </section>
 
         <div className="toolbar">
@@ -469,15 +680,24 @@ export default function ComplaintsPage() {
                       >
                         <td>{record.caseNo}</td>
                         <td>{formatOpsCodeLabel(locale, record.category)}</td>
-                        <td>{formatOpsCodeLabel(locale, record.status)}</td>
+                        <td>
+                          <div>{formatOpsCodeLabel(locale, record.status)}</div>
+                          <div className="table-subcopy">
+                            {formatOpsCodeLabel(locale, record.severity)}
+                          </div>
+                        </td>
                         <td>{record.assigneeId ?? "-"}</td>
                         <td>{record.relatedOrderId ?? "-"}</td>
                         <td>{record.relatedCallId ?? "-"}</td>
                         <td>
                           {record.slaBreach ? (
-                            <span className="sla-badge">BREACH</span>
+                            <span className="sla-badge">
+                              {locale === "en" ? "BREACH" : "違規"}
+                            </span>
                           ) : (
-                            "-"
+                            <span className="table-subcopy">
+                              {formatRelativeSla(record.slaDueAt, locale)}
+                            </span>
                           )}
                         </td>
                         <td>{formatDateTime(record.createdAt)}</td>
@@ -501,6 +721,27 @@ export default function ComplaintsPage() {
               {selectedRecord ? (
                 <div className="details-stack">
                   <section className="detail-card">
+                    <div className="detail-status-row">
+                      <span className={getComplaintQueueTone(selectedRecord)}>
+                        {selectedRecord.slaBreach
+                          ? locale === "en"
+                            ? "SLA breach"
+                            : "SLA 違規"
+                          : formatOpsCodeLabel(locale, selectedRecord.severity)}
+                      </span>
+                      {!selectedRecord.relatedIncidentId &&
+                        (selectedRecord.slaBreach ||
+                          selectedRecord.severity === "high") && (
+                          <Link
+                            className="inline-link quick-link"
+                            href={`/incidents?create=1&complaintCaseNo=${encodeURIComponent(selectedRecord.caseNo)}&title=${encodeURIComponent(selectedRecord.caseNo)}&description=${encodeURIComponent(selectedRecord.description)}&severity=${encodeURIComponent(selectedRecord.slaBreach ? "high" : "medium")}${selectedRecord.relatedOrderId ? `&relatedOrderId=${encodeURIComponent(selectedRecord.relatedOrderId)}` : ""}`}
+                          >
+                            {locale === "en"
+                              ? "Prepare incident handoff"
+                              : "準備 incident handoff"}
+                          </Link>
+                        )}
+                    </div>
                     <div className="detail-grid">
                       <div>
                         <span className="label">{t("common.status")}</span>
@@ -564,7 +805,12 @@ export default function ComplaintsPage() {
                           {t("complaints.detail.linkedIncident")}
                         </span>
                         {selectedRecord.relatedIncidentId ? (
-                          <Link className="inline-link" href="/incidents">
+                          <Link
+                            className="inline-link"
+                            href={`/incidents?incidentId=${encodeURIComponent(
+                              selectedRecord.relatedIncidentId,
+                            )}`}
+                          >
                             <strong>{selectedRecord.relatedIncidentId}</strong>
                           </Link>
                         ) : (
@@ -905,23 +1151,84 @@ export default function ComplaintsPage() {
           .content-grid,
           .form-grid,
           .detail-grid,
-          .detail-subgrid {
+          .detail-subgrid,
+          .queue-grid {
             display: grid;
             gap: 0.9rem;
           }
-          .summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .summary-card,
+          .workspace-hero,
+          .priority-queue,
+          .assumption-panel,
           .panel,
           .detail-card {
             border: 1px solid #dbe4f0;
             border-radius: 1rem;
             background: #fff;
           }
+          .workspace-hero,
+          .priority-queue,
+          .assumption-panel {
+            padding: 1rem;
+            margin-bottom: 1rem;
+          }
+          .workspace-hero {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: start;
+            background: linear-gradient(135deg, #fff7ed, #fff1f2 65%, #ffffff);
+          }
+          .hero-chip-row,
+          .detail-status-row {
+            display: flex;
+            gap: 0.65rem;
+            flex-wrap: wrap;
+            align-items: center;
+          }
+          .hero-chip,
+          .queue-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.22rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+          }
+          .hero-chip {
+            background: rgba(255, 255, 255, 0.86);
+            border: 1px solid #fdba74;
+            color: #9a3412;
+          }
+          .hero-chip-critical,
+          .badge-danger {
+            background: #fee2e2;
+            border: 1px solid #fca5a5;
+            color: #b91c1c;
+          }
+          .queue-badge,
+          .badge-warning {
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            color: #a16207;
+          }
+          .assumption-panel strong {
+            display: block;
+            margin-bottom: 0.55rem;
+          }
+          .assumption-list {
+            margin: 0;
+            padding-left: 1.1rem;
+            color: #475569;
+          }
+          .summary-grid {
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            margin-bottom: 1rem;
+          }
           .summary-card {
             padding: 0.95rem 1rem;
+            border: 1px solid #dbe4f0;
+            border-radius: 1rem;
+            background: #fff;
           }
           .summary-card strong {
             display: block;
@@ -937,6 +1244,35 @@ export default function ComplaintsPage() {
           }
           .toolbar {
             margin-bottom: 1rem;
+          }
+          .queue-grid {
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          }
+          .queue-card {
+            display: grid;
+            gap: 0.5rem;
+            padding: 0.9rem 1rem;
+            border-radius: 0.95rem;
+            border: 1px solid #fed7aa;
+            background: #fffbeb;
+            text-align: left;
+            cursor: pointer;
+          }
+          .queue-card-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+          }
+          .queue-card p {
+            margin: 0;
+            color: #334155;
+          }
+          .queue-card-subcopy,
+          .table-subcopy {
+            color: #64748b;
+            font-size: 0.82rem;
           }
           .search-input,
           input,
@@ -1012,6 +1348,10 @@ export default function ComplaintsPage() {
             display: grid;
             gap: 0.8rem;
           }
+          .quick-link {
+            font-size: 0.88rem;
+            font-weight: 600;
+          }
           .detail-grid {
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
           }
@@ -1048,7 +1388,7 @@ export default function ComplaintsPage() {
             grid-column: 1 / -1;
           }
           .sla-badge {
-            display: inline-block;
+            display: inline-flex;
             margin-top: 0.3rem;
             padding: 0.2rem 0.6rem;
             border-radius: 999px;
@@ -1063,6 +1403,7 @@ export default function ComplaintsPage() {
             color: #64748b;
           }
           @media (max-width: 960px) {
+            .workspace-hero,
             .content-grid {
               grid-template-columns: 1fr;
             }
