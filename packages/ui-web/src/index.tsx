@@ -82,6 +82,11 @@ export {
 } from "./management-theme";
 export type { ManagementDensity, ManagementTone } from "./management-theme";
 export {
+  ManagementThemeProvider,
+  useTheme as useManagementTheme,
+} from "./management-theme-context";
+export type { ManagementThemeProviderProps } from "./management-theme-context";
+export {
   AuthorityBadge,
   CalloutBanner,
   DataCellStack,

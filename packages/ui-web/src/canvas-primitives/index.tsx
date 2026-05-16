@@ -100,14 +100,19 @@ export interface ShellProps {
   nav: ShellNavItem[];
   active?: string;
   title?: ReactNode;
+  brandLabel?: ReactNode;
+  brandSubLabel?: ReactNode;
+  brandMark?: ReactNode;
   breadcrumb?: ReactNode[];
   topRight?: ReactNode;
   env?: string;
+  versionLabel?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   hideEnv?: boolean;
   currentPath?: string;
   searchPlaceholder?: string;
+  searchWidth?: number;
   avatarLabel?: ReactNode;
   style?: CSSProperties;
 }
@@ -254,18 +259,28 @@ export function Shell({
   nav,
   active,
   title,
+  brandLabel,
+  brandSubLabel,
+  brandMark,
   breadcrumb = [],
   topRight,
   env = "production",
+  versionLabel,
   children,
   footer,
   hideEnv = false,
   currentPath,
   searchPlaceholder,
+  searchWidth = 220,
   avatarLabel = "YL",
   style,
 }: ShellProps) {
   const theme = resolveTheme(providedTheme);
+  const resolvedBrandLabel = brandLabel ?? "DRTS";
+  const resolvedBrandSubLabel =
+    brandSubLabel === undefined ? theme.surfaceName : brandSubLabel;
+  const resolvedBrandMark = brandMark ?? "D";
+  const resolvedVersionLabel = versionLabel ?? "v2.14.3";
 
   return (
     <div
@@ -319,7 +334,7 @@ export function Shell({
               letterSpacing: -0.4,
             }}
           >
-            D
+            {resolvedBrandMark}
           </div>
           <div
             style={{ display: "flex", flexDirection: "column", minWidth: 0 }}
@@ -333,22 +348,24 @@ export function Shell({
                 letterSpacing: -0.2,
               }}
             >
-              DRTS
+              {resolvedBrandLabel}
             </div>
-            <div
-              style={{
-                fontSize: 10,
-                color: theme.textMuted,
-                letterSpacing: 0.3,
-                lineHeight: 1.1,
-                textTransform: "uppercase",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {theme.surfaceName}
-            </div>
+            {resolvedBrandSubLabel ? (
+              <div
+                style={{
+                  fontSize: 10,
+                  color: theme.textMuted,
+                  letterSpacing: 0.3,
+                  lineHeight: 1.1,
+                  textTransform: "uppercase",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {resolvedBrandSubLabel}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -425,7 +442,7 @@ export function Shell({
               {env}
             </span>
             <span style={{ marginLeft: "auto", color: theme.textDim }}>
-              v2.14.3
+              {resolvedVersionLabel}
             </span>
           </div>
         ) : null}
@@ -490,6 +507,7 @@ export function Shell({
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <SearchBox
             theme={theme}
+            width={searchWidth}
             placeholder={searchPlaceholder ?? "搜尋訂單、租戶、司機…"}
           />
           <Kbd theme={theme}>⌘K</Kbd>
