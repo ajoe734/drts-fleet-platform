@@ -234,6 +234,8 @@ describe("multi-tenant header controller routing", () => {
     ).toHaveBeenCalledWith("tenant-alpha", notificationCommand, requestId);
     expect(tenantPartnerService.listWebhookDeliveries).toHaveBeenCalledWith(
       "tenant-alpha",
+      requestId,
+      null,
     );
     expect(passengersEnvelope.data.items).toEqual([
       expect.objectContaining({ tenantId: "tenant-alpha" }),

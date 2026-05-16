@@ -15,6 +15,50 @@ import { OwnedMobilityTaskEventsService } from "../../apps/api/src/modules/owned
 import { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 
+function createStubAdapter(platformCode: typeof PLATFORM_CODE_UBER) {
+  return {
+    platformCode,
+    capabilitySummary: {
+      mode: "stub" as const,
+      productionStatus: "stub" as const,
+      supportsInboundWebhook: false,
+      supportsOutboundActions: true,
+      supportedWebhookEvents: [],
+      supportedActions: ["accept", "reject", "complete"],
+      requiresManualFallback: false,
+      lastVerifiedAt: null,
+      adapterVersion: "test-stub-1.0.0",
+      notes: [],
+    },
+    accept: vi.fn(async (input: { externalOrderId: string }) => ({
+      acknowledged: true,
+      platformCode,
+      externalOrderId: input.externalOrderId,
+    })),
+    reject: vi.fn(async (input: { externalOrderId: string }) => ({
+      acknowledged: true,
+      platformCode,
+      externalOrderId: input.externalOrderId,
+    })),
+    complete: vi.fn(async (input: { externalOrderId: string }) => ({
+      acknowledged: true,
+      platformCode,
+      externalOrderId: input.externalOrderId,
+    })),
+    heartbeat: vi.fn(async () => ({
+      acknowledged: true,
+      platformCode,
+      checkedAt: new Date().toISOString(),
+    })),
+    fetchEarnings: vi.fn(async () => ({
+      platformCode,
+      currency: "TWD",
+      totalAmount: 0,
+      asOf: new Date().toISOString(),
+    })),
+  };
+}
+
 function createServices() {
   const auditService = new AuditNotificationService();
   const regulatoryRegistryService = new RegulatoryRegistryService(
@@ -33,6 +77,7 @@ function createServices() {
   const forwarderService = new ForwarderService(
     regulatoryRegistryService,
     auditService,
+    [createStubAdapter(PLATFORM_CODE_UBER) as never],
   );
 
   return {
@@ -100,7 +145,7 @@ describe("forwarder service", () => {
     );
   });
 
-  it("covers SC-016 lost_race after a local accept while preserving authoritative snapshot", () => {
+  it("covers SC-016 lost_race after a local accept while preserving authoritative snapshot", async () => {
     const { forwarderService, ownedMobilityService } = createServices();
 
     const inbound = forwarderService.ingestExternalOrder({
@@ -114,7 +159,7 @@ describe("forwarder service", () => {
     forwarderService.broadcastOrder(inbound.mirrorOrderId, {
       candidateDriverIds: ["drv-demo-001"],
     });
-    forwarderService.relayDriverAccept(inbound.mirrorOrderId, {
+    await forwarderService.relayDriverAccept(inbound.mirrorOrderId, {
       driverId: "drv-demo-001",
     });
     const synced = forwarderService.syncNativeStatus(inbound.mirrorOrderId, {
