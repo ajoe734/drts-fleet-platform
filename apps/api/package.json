@@ -8,6 +8,7 @@
     "dev": "node --watch -r ts-node/register src/main.ts",
     "lint": "eslint src --max-warnings=0",
     "start": "node dist/main.js",
+    "seed:tenant-governance": "tsx --tsconfig tsconfig.seed.json seed/tenant-governance-default.ts",
     "test": "vitest run --passWithNoTests",
     "typecheck": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json --noEmit"
   },

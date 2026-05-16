@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
@@ -11,7 +14,9 @@ import type {
   PersistTenantPartnerChanges,
   StoredPartnerIngressCredentialRecord,
   TenantPartnerState,
+  TenantPartnerQueryExecutor,
 } from "../../src/modules/tenant-partner/tenant-partner.repository";
+import { createEmptyTenantQuotaUsage } from "../../src/modules/tenant-partner/tenant-quota-ledger";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../src/modules/tenant-partner/webhook-dispatch.service";
 
@@ -28,8 +33,13 @@ function createEmptyRepositoryState(): TenantPartnerState {
     partnerEntries: [],
     partnerIngressCredentials: [],
     partnerEligibilityVerifications: [],
+    approvalRules: [],
     passengers: [],
     addresses: [],
+    costCenters: [],
+    quotaPolicies: [],
+    quotaLedger: [],
+    quotaMonthlySnapshots: [],
     userRoles: [],
     apiKeys: [],
   };
@@ -91,6 +101,11 @@ function createInMemoryTenantPartnerRepository(
           changes.partnerEligibilityVerifications,
           (value) => value.eligibilityVerificationId,
         ),
+        approvalRules: mergeByKey(
+          state.approvalRules,
+          changes.approvalRules,
+          (value) => value.ruleId,
+        ),
         passengers: mergeByKey(
           state.passengers,
           changes.passengers,
@@ -100,6 +115,28 @@ function createInMemoryTenantPartnerRepository(
           state.addresses,
           changes.addresses,
           (value) => value.addressId,
+        ),
+        costCenters: mergeByKey(
+          state.costCenters,
+          changes.costCenters,
+          (value) => `${value.tenantId}:${value.code}`,
+        ),
+        quotaPolicies: mergeByKey(
+          state.quotaPolicies,
+          changes.quotaPolicies,
+          (value) =>
+            `${value.tenantId}:${value.costCenterCode ?? "~"}:${value.period}`,
+        ),
+        quotaLedger: mergeByKey(
+          state.quotaLedger,
+          changes.quotaLedger,
+          (value) => value.ledgerEntryId,
+        ),
+        quotaMonthlySnapshots: mergeByKey(
+          state.quotaMonthlySnapshots,
+          changes.quotaMonthlySnapshots,
+          (value) =>
+            `${value.tenantId}:${value.costCenterCode ?? "~"}:${value.period}:${value.periodKey}`,
         ),
         userRoles: mergeByKey(
           state.userRoles,
@@ -116,6 +153,65 @@ function createInMemoryTenantPartnerRepository(
     reportPersistenceFailure: vi.fn(),
     getState: () => cloneState(state),
   };
+}
+
+function createDatabaseQuotaRepository(options?: {
+  bookingCountLimit?: number | null;
+  amountMinorLimit?: number | null;
+  enforcementMode?: "hard_block" | "require_approval" | "warn_only";
+}) {
+  const limit = {
+    bookingCountLimit: options?.bookingCountLimit ?? 1,
+    amountMinorLimit: options?.amountMinorLimit ?? null,
+    currency: "TWD",
+    enforcementMode: options?.enforcementMode ?? "hard_block",
+  } as const;
+  const executor: TenantPartnerQueryExecutor = {
+    query: vi.fn(async () => ({ rows: [] })) as never,
+  };
+  const repository = {
+    isEnabled: vi.fn(() => true),
+    loadState: vi.fn(async () => createEmptyRepositoryState()),
+    persistChanges: vi.fn(async () => {}),
+    reportPersistenceFailure: vi.fn(),
+    withTransaction: vi.fn(
+      async <T>(work: (tx: TenantPartnerQueryExecutor) => Promise<T>) =>
+        work(executor),
+    ),
+    loadQuotaPoliciesForUpdate: vi.fn(async () => [
+      {
+        tenantId: "tenant-demo-001",
+        costCenterCode: null,
+        period: "monthly",
+        limit: { ...limit },
+        inheritedFromTenant: false,
+        createdAt: "2026-05-13T10:00:00.000Z",
+        updatedAt: "2026-05-13T10:05:00.000Z",
+      },
+    ]),
+    ensureQuotaMonthlySnapshots: vi.fn(async () => {}),
+    loadQuotaMonthlySnapshotsForUpdate: vi.fn(
+      async (
+        _tx: TenantPartnerQueryExecutor,
+        tenantId: string,
+        _costCenterCode: string | null,
+        periodKey: string,
+      ) => [
+        {
+          tenantId,
+          costCenterCode: null,
+          period: "monthly",
+          periodKey,
+          limit: { ...limit },
+          usage: createEmptyTenantQuotaUsage(limit),
+          refreshedAt: "2026-05-13T10:10:00.000Z",
+        },
+      ],
+    ),
+    persistQuotaReservation: vi.fn(async () => {}),
+  };
+
+  return { repository, executor };
 }
 
 describe("TenantPartnerService sensitive-data governance", () => {
@@ -714,6 +810,259 @@ describe("TenantPartnerService sensitive-data governance", () => {
       qualityIssues: ["missing_geocode"],
     });
     expect(exportView.maskedAddressText).not.toContain("100 號 12 樓");
+  });
+
+  it("lists, upserts, and disables tenant cost centers with owner resolution", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
+
+    const seeded = service.listCostCenters("tenant-demo-001", {
+      activeOnly: true,
+    });
+    expect(seeded.some((costCenter) => costCenter.code === "CC-FIN-04")).toBe(
+      true,
+    );
+
+    const created = service.upsertCostCenter(
+      "tenant-demo-001",
+      {
+        code: "cc-rd-12",
+        name: "R&D Fab18",
+        description: "Airport and overnight engineering travel",
+        ownerUserId: "tenant-user-demo-002",
+      },
+      "req-cost-center-create-001",
+    );
+
+    expect(created).toMatchObject({
+      code: "CC-RD-12",
+      name: "R&D Fab18",
+      ownerUserId: "tenant-user-demo-002",
+      ownerName: "Acme Tenant Ops",
+      activeFlag: true,
+      disabledAt: null,
+    });
+
+    const detail = service.getCostCenter("tenant-demo-001", "cc-rd-12");
+    expect(detail.code).toBe("CC-RD-12");
+
+    const filtered = service.listCostCenters("tenant-demo-001", {
+      search: "fab18",
+      ownerUserId: "tenant-user-demo-002",
+    });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.code).toBe("CC-RD-12");
+
+    const disabled = service.disableCostCenter(
+      "tenant-demo-001",
+      {
+        code: "cc-rd-12",
+        reason: "department sunset",
+      },
+      "req-cost-center-disable-001",
+    );
+
+    expect(disabled).toMatchObject({
+      code: "CC-RD-12",
+      activeFlag: false,
+      disabledReason: "department sunset",
+      disabledAt: expect.any(String),
+    });
+    expect(
+      service.listCostCenters("tenant-demo-001", {
+        activeOnly: true,
+        search: "fab18",
+      }),
+    ).toEqual([]);
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "upsert_cost_center",
+          resourceType: "tenant_cost_center",
+          resourceId: "CC-RD-12",
+        }),
+        expect.objectContaining({
+          actionName: "disable_cost_center",
+          resourceType: "tenant_cost_center",
+          resourceId: "CC-RD-12",
+        }),
+      ]),
+    );
+  });
+
+  it("persists tenant cost-center lifecycle changes through the repository", async () => {
+    const repository = createInMemoryTenantPartnerRepository();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await service.onModuleInit();
+
+    service.upsertCostCenter("tenant-demo-001", {
+      code: "CC-BD-09",
+      name: "業務開發",
+      ownerName: "Regional GM",
+    });
+    service.disableCostCenter("tenant-demo-001", {
+      code: "CC-BD-09",
+      reason: "merged into ops",
+    });
+
+    const reloaded = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    await reloaded.onModuleInit();
+
+    expect(reloaded.getCostCenter("tenant-demo-001", "CC-BD-09")).toMatchObject(
+      {
+        code: "CC-BD-09",
+        name: "業務開發",
+        ownerName: "Regional GM",
+        activeFlag: false,
+        disabledReason: "merged into ops",
+      },
+    );
+  });
+
+  it("allows duplicate cost-center codes across different tenants", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const otherTenantCostCenter = service.upsertCostCenter("tenant-demo-002", {
+      code: "cc-fin-04",
+      name: "Shared Finance Code",
+      description: "Scoped to a different tenant",
+    });
+
+    expect(otherTenantCostCenter).toMatchObject({
+      tenantId: "tenant-demo-002",
+      code: "CC-FIN-04",
+      name: "Shared Finance Code",
+      description: "Scoped to a different tenant",
+      activeFlag: true,
+    });
+
+    expect(service.getCostCenter("tenant-demo-001", "cc-fin-04")).toMatchObject(
+      {
+        tenantId: "tenant-demo-001",
+        code: "CC-FIN-04",
+        name: "財務處",
+      },
+    );
+    expect(service.getCostCenter("tenant-demo-002", "cc-fin-04")).toMatchObject(
+      {
+        tenantId: "tenant-demo-002",
+        code: "CC-FIN-04",
+        name: "Shared Finance Code",
+      },
+    );
+  });
+
+  it("validateBookingCostCenter accepts canonical active codes and rejects unknown, disabled, or malformed entries", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    // Seeded tenant has CC-FIN-04 active by default.
+    const seededResult = service.validateBookingCostCenter(
+      "tenant-demo-001",
+      "cc-fin-04",
+    );
+    expect(seededResult).toEqual({
+      value: "CC-FIN-04",
+      matchedDirectory: true,
+    });
+
+    // Null/blank inputs short-circuit to null without consulting the directory.
+    expect(service.validateBookingCostCenter("tenant-demo-001", null)).toEqual({
+      value: null,
+      matchedDirectory: false,
+    });
+    expect(service.validateBookingCostCenter("tenant-demo-001", "   ")).toEqual(
+      { value: null, matchedDirectory: false },
+    );
+
+    // Unknown code for a tenant whose directory is populated must throw.
+    try {
+      service.validateBookingCostCenter("tenant-demo-001", "CC-DOES-NOT-EXIST");
+      throw new Error("Expected BOOKING_COST_CENTER_UNKNOWN to throw.");
+    } catch (error) {
+      expect(
+        (
+          error as { getResponse: () => { error: { code: string } } }
+        ).getResponse().error.code,
+      ).toBe("BOOKING_COST_CENTER_UNKNOWN");
+    }
+
+    // Malformed code (spaces / lowercase punctuation) rejected as INVALID.
+    try {
+      service.validateBookingCostCenter("tenant-demo-001", "bad code!");
+      throw new Error("Expected BOOKING_COST_CENTER_INVALID to throw.");
+    } catch (error) {
+      expect(
+        (
+          error as { getResponse: () => { error: { code: string } } }
+        ).getResponse().error.code,
+      ).toBe("BOOKING_COST_CENTER_INVALID");
+    }
+
+    // Disabled code rejected with the dedicated error code.
+    service.disableCostCenter("tenant-demo-001", {
+      code: "CC-OPS-02",
+      reason: "sunset",
+    });
+    try {
+      service.validateBookingCostCenter("tenant-demo-001", "cc-ops-02");
+      throw new Error("Expected BOOKING_COST_CENTER_DISABLED to throw.");
+    } catch (error) {
+      expect(
+        (
+          error as { getResponse: () => { error: { code: string } } }
+        ).getResponse().error.code,
+      ).toBe("BOOKING_COST_CENTER_DISABLED");
+    }
+  });
+
+  it("validateBookingCostCenter grandfathers tenants whose directory is empty and isolates lookups by tenant", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    // Tenant with no cost centers: free-text accepted, no normalization to
+    // avoid breaking historical bookings before tenant_admin onboards the
+    // directory.
+    const grandfather = service.validateBookingCostCenter(
+      "tenant-no-directory-001",
+      "Legacy / cost text",
+    );
+    expect(grandfather).toEqual({
+      value: "Legacy / cost text",
+      matchedDirectory: false,
+    });
+
+    // Seeded fixture tenant gets canonical validation.
+    expect(
+      service.validateBookingCostCenter("tenant-demo-001", "cc-fin-04"),
+    ).toEqual({ value: "CC-FIN-04", matchedDirectory: true });
+
+    // After tenant B onboards CC-X, tenant A still cannot use CC-X.
+    service.upsertCostCenter("tenant-demo-002", {
+      code: "CC-X",
+      name: "Tenant B Special",
+    });
+    try {
+      service.validateBookingCostCenter("tenant-demo-001", "CC-X");
+      throw new Error(
+        "Expected cross-tenant lookup to throw BOOKING_COST_CENTER_UNKNOWN.",
+      );
+    } catch (error) {
+      expect(
+        (
+          error as { getResponse: () => { error: { code: string } } }
+        ).getResponse().error.code,
+      ).toBe("BOOKING_COST_CENTER_UNKNOWN");
+    }
+    expect(
+      service.validateBookingCostCenter("tenant-demo-002", "cc-x"),
+    ).toEqual({ value: "CC-X", matchedDirectory: true });
   });
 
   it("normalizes tenant API key scopes and enforces the rotation window", () => {
@@ -1382,6 +1731,425 @@ describe("TenantPartnerService sensitive-data governance", () => {
           }),
         }),
       ]),
+    );
+  });
+});
+
+describe("TenantPartnerService approval rules", () => {
+  it("creates, reorders, disables, and evaluates approval rules with audit events", () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
+
+    const created = service.upsertApprovalRule(
+      "tenant-demo-001",
+      {
+        ruleName: "High-value approval",
+        priority: 20,
+        conditions: [
+          {
+            field: "booking.amount_minor",
+            op: "gte",
+            value: 100_000,
+          },
+        ],
+        action: "require_approval",
+        approvers: [{ kind: "tenant_admin" }],
+      },
+      "req-approval-rule-create-001",
+    );
+
+    const second = service.upsertApprovalRule(
+      "tenant-demo-001",
+      {
+        ruleName: "Manual review passenger",
+        priority: 30,
+        conditions: [
+          {
+            field: "booking.passenger.role",
+            op: "eq",
+            value: "guest",
+          },
+        ],
+        action: "flag_manual_review",
+        approvers: [{ kind: "tenant_role", roleCode: "finance_admin" }],
+      },
+      "req-approval-rule-create-002",
+    );
+
+    const reordered = service.reorderApprovalRules(
+      "tenant-demo-001",
+      {
+        orderedRuleIds: [second.ruleId, created.ruleId],
+      },
+      "req-approval-rule-reorder-001",
+    );
+
+    const disabled = service.disableApprovalRule(
+      "tenant-demo-001",
+      created.ruleId,
+      "req-approval-rule-disable-001",
+    );
+
+    const evaluation = service.evaluateApprovalRules(
+      "tenant-demo-001",
+      {
+        subject: {
+          subjectType: "booking",
+          bookingId: "booking-001",
+          draftId: null,
+          operation: "dry_run",
+        },
+        inputSnapshot: {
+          costCenterCode: "CC-FIN-04",
+          businessDispatchSubtype: "enterprise_dispatch",
+          reservationWindowStart: "2026-05-13T10:00:00.000Z",
+          passengerId: "passenger-001",
+          passengerRole: "guest",
+          amountMinor: 300_000,
+          currency: "TWD",
+          vehiclePreference: "standard_taxi",
+        },
+      },
+      "req-approval-rule-evaluate-001",
+    );
+
+    expect(reordered.map((rule) => rule.priority)).toEqual([10, 20]);
+    expect(disabled.activeFlag).toBe(false);
+    expect(evaluation.outcome?.decision).toBe("manual_review");
+
+    expect(auditNotificationService.listAuditLogs()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionName: "tenant.approval_rule.created",
+          resourceId: created.ruleId,
+        }),
+        expect.objectContaining({
+          actionName: "tenant.approval_rule.reordered",
+          resourceId: "tenant-demo-001",
+        }),
+        expect.objectContaining({
+          actionName: "tenant.approval_rule.disabled",
+          resourceId: created.ruleId,
+        }),
+        expect.objectContaining({
+          actionName: "booking.approval_rules.evaluated",
+          resourceId: "tenant-demo-001",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects duplicate orderedRuleIds when reordering approval rules", () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    const first = service.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "Rule one",
+      priority: 10,
+      conditions: [{ field: "booking.amount_minor", op: "gte", value: 1 }],
+      action: "warn",
+    });
+    const second = service.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "Rule two",
+      priority: 20,
+      conditions: [{ field: "booking.amount_minor", op: "gte", value: 2 }],
+      action: "warn",
+    });
+
+    expect(() =>
+      service.reorderApprovalRules("tenant-demo-001", {
+        orderedRuleIds: [second.ruleId, second.ruleId],
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "TENANT_APPROVAL_RULE_REORDER_DUPLICATE_IDS",
+          }),
+        }),
+      }),
+    );
+
+    expect(
+      service.listApprovalRules("tenant-demo-001").map((rule) => rule.ruleId),
+    ).toEqual([first.ruleId, second.ruleId]);
+  });
+
+  it("persists approval rule changes into the repository contract state", async () => {
+    const repository = createInMemoryTenantPartnerRepository();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await service.onModuleInit();
+    const created = service.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "Persisted approval",
+      priority: 10,
+      conditions: [
+        {
+          field: "booking.amount_minor",
+          op: "gte",
+          value: 1,
+        },
+      ],
+      action: "require_approval",
+      approvers: [{ kind: "tenant_admin" }],
+    });
+
+    expect(repository.persistChanges).toHaveBeenCalled();
+    expect(repository.getState().approvalRules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ruleId: created.ruleId,
+          tenantId: "tenant-demo-001",
+        }),
+      ]),
+    );
+  });
+
+  it("records tenant quota policies and previews cost-center impacts", async () => {
+    const repository = createInMemoryTenantPartnerRepository();
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await service.onModuleInit();
+    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+      period: "monthly",
+      limit: {
+        bookingCountLimit: 2,
+        amountMinorLimit: 200_000,
+        currency: "twd",
+        enforcementMode: "require_approval",
+      },
+    });
+
+    const preview = service.previewBookingQuotaImpact("tenant-demo-001", {
+      costCenterCode: "CC-FIN-04",
+      estimatedAmountMinor: 80_000,
+      reservationWindowStart: "2026-05-31T15:30:00.000Z",
+    });
+
+    expect(preview.periodKey).toBe("2026-05");
+    expect(preview.impacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scope: "tenant",
+          dimension: "booking_count",
+          remainingBefore: 2,
+          remainingAfter: 1,
+        }),
+        expect.objectContaining({
+          scope: "cost_center",
+          costCenterCode: "CC-FIN-04",
+          dimension: "amount_minor",
+          remainingBefore: 200_000,
+          remainingAfter: 120_000,
+        }),
+      ]),
+    );
+    expect(repository.getState().quotaPolicies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tenantId: "tenant-demo-001",
+          costCenterCode: null,
+          period: "monthly",
+        }),
+      ]),
+    );
+  });
+
+  it("throws QUOTA_INSUFFICIENT_AT_COMMIT when a hard-block reserve exceeds the limit", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+      period: "monthly",
+      limit: {
+        bookingCountLimit: 0,
+        amountMinorLimit: null,
+        currency: "TWD",
+        enforcementMode: "hard_block",
+      },
+    });
+
+    await expect(
+      service.reserveTenantQuota(null, {
+        tenantId: "tenant-demo-001",
+        bookingId: "booking-over-limit",
+        evaluationId: "eval-over-limit",
+        reservationWindowStart: "2026-05-13T10:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "QUOTA_INSUFFICIENT_AT_COMMIT",
+        },
+      },
+    });
+  });
+
+  it("uses the caller transaction for database-backed quota reservations", async () => {
+    const { repository } = createDatabaseQuotaRepository({
+      bookingCountLimit: 1,
+    });
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+    const tx: TenantPartnerQueryExecutor = {
+      query: vi.fn(async () => ({ rows: [] })) as never,
+    };
+
+    const result = await service.reserveTenantQuota(tx, {
+      tenantId: "tenant-demo-001",
+      bookingId: "booking-db-tx-001",
+      evaluationId: "eval-db-tx-001",
+      reservationWindowStart: "2026-05-13T10:00:00.000Z",
+    });
+
+    expect(repository.withTransaction).not.toHaveBeenCalled();
+    expect(repository.loadQuotaPoliciesForUpdate).toHaveBeenCalledWith(
+      tx,
+      "tenant-demo-001",
+      null,
+    );
+    expect(repository.loadQuotaMonthlySnapshotsForUpdate).toHaveBeenCalledWith(
+      tx,
+      "tenant-demo-001",
+      null,
+      "2026-05",
+    );
+    expect(repository.persistQuotaReservation).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        quotaLedger: [
+          expect.objectContaining({
+            bookingId: "booking-db-tx-001",
+            dimension: "booking_count",
+            entryType: "reserve",
+            periodKey: "2026-05",
+          }),
+        ],
+      }),
+    );
+    expect(result.ledgerEntries).toHaveLength(1);
+  });
+
+  it("blocks over-limit reservations on the database path before persisting ledger rows", async () => {
+    const { repository } = createDatabaseQuotaRepository({
+      bookingCountLimit: 0,
+    });
+    const service = new TenantPartnerService(
+      new AuditNotificationService(),
+      repository as never,
+    );
+
+    await expect(
+      service.reserveTenantQuota(null, {
+        tenantId: "tenant-demo-001",
+        bookingId: "booking-db-block-001",
+        evaluationId: "eval-db-block-001",
+        reservationWindowStart: "2026-05-13T10:00:00.000Z",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "QUOTA_INSUFFICIENT_AT_COMMIT",
+        },
+      },
+    });
+
+    expect(repository.withTransaction).toHaveBeenCalledTimes(1);
+    expect(repository.persistQuotaReservation).not.toHaveBeenCalled();
+  });
+
+  it("serializes concurrent reserve calls so only one claimant gets the last quota unit", async () => {
+    const service = new TenantPartnerService(new AuditNotificationService());
+
+    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+      period: "monthly",
+      limit: {
+        bookingCountLimit: 1,
+        amountMinorLimit: null,
+        currency: "TWD",
+        enforcementMode: "hard_block",
+      },
+    });
+
+    const results = await Promise.allSettled([
+      service.reserveTenantQuota(null, {
+        tenantId: "tenant-demo-001",
+        bookingId: "booking-race-1",
+        evaluationId: "eval-race-1",
+        reservationWindowStart: "2026-05-13T10:00:00.000Z",
+      }),
+      service.reserveTenantQuota(null, {
+        tenantId: "tenant-demo-001",
+        bookingId: "booking-race-2",
+        evaluationId: "eval-race-2",
+        reservationWindowStart: "2026-05-13T10:00:00.000Z",
+      }),
+    ]);
+
+    expect(
+      results.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      results.filter((result) => result.status === "rejected"),
+    ).toHaveLength(1);
+    expect(
+      service.getTenantQuotaSummary("tenant-demo-001").usage
+        .pendingReservedBookingCount,
+    ).toBe(1);
+  });
+
+  it("ships a tenant governance dashboard with the required panels and metric bindings", () => {
+    const dashboard = JSON.parse(
+      readFileSync(
+        resolve(
+          process.cwd(),
+          "..",
+          "..",
+          "infra/grafana/dashboards/tenant-governance.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      panels: Array<{ title?: string; targets?: Array<{ expr?: string }> }>;
+    };
+    const panelTitles = dashboard.panels.map((panel) => panel.title);
+    const allExpressions = dashboard.panels.flatMap((panel) =>
+      (panel.targets ?? []).map((target) => target.expr ?? ""),
+    );
+
+    expect(panelTitles).toEqual(
+      expect.arrayContaining([
+        "Pending Approvals + P95 Age",
+        "Quota Usage By Tenant",
+        "Evaluator Latency P50/P95/P99",
+        "Ledger Writes / Sec",
+        "Race Failures / Min",
+        "Validation Rejects / Min",
+      ]),
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_approval_pending_count",
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_quota_usage_percent",
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_approval_evaluator_latency_ms",
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_quota_ledger_write_total",
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_quota_race_failure_total",
+    );
+    expect(allExpressions.join("\n")).toContain(
+      "tenant_governance_cost_center_validation_reject_total",
     );
   });
 });

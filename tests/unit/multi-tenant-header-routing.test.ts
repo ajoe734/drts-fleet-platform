@@ -152,7 +152,10 @@ describe("multi-tenant header controller routing", () => {
     const tenantPartnerService = {
       listPassengers: vi.fn(),
     } as unknown as TenantPartnerService;
-    const controller = new TenantPartnerController(tenantPartnerService);
+    const controller = new TenantPartnerController(
+      tenantPartnerService,
+      {} as never,
+    );
 
     let thrown: unknown;
     try {
@@ -192,7 +195,10 @@ describe("multi-tenant header controller routing", () => {
         },
       ]),
     } as unknown as TenantPartnerService;
-    const controller = new TenantPartnerController(tenantPartnerService);
+    const controller = new TenantPartnerController(
+      tenantPartnerService,
+      {} as never,
+    );
     const requestId = "req-tenant-partner-alpha";
     const headerTenantId = " tenant-alpha ";
     const notificationCommand: UpdateTenantNotificationsCommand = {

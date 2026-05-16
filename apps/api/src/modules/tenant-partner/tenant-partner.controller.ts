@@ -1,21 +1,37 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
   Post,
-  Delete,
+  Put,
+  Query,
 } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 
 import type {
+  AcknowledgeOpsApprovalRequestBreachCommand,
+  ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   IdentityContext,
+  EscalateTenantBookingApprovalRequestCommand,
   IssuePartnerIngressCredentialCommand,
   CreateTenantUserCommand,
   CreateTenantWebhookEndpointCommand,
+  DisableTenantCostCenterCommand,
+  EvaluateTenantApprovalRuleCommand,
+  ListOpsPendingApprovalRequestsQuery,
+  TenantBookingQuotaImpactPreview,
+  TenantBookingQuotaImpactQuery,
+  TenantCostCenterCoverageReport,
   IssueTenantApiKeyCommand,
+  ListTenantBookingApprovalRequestsQuery,
+  ListTenantApprovalRulesQuery,
+  ListTenantCostCentersQuery,
+  NudgeOpsApprovalRequestCommand,
+  OpsPendingApprovalRequestRecord,
   PartnerIngressCredentialIssued,
   PartnerIngressCredentialRecord,
   PartnerChannelEntryRecord,
@@ -26,16 +42,28 @@ import type {
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
+  TenantBookingApprovalRequestRecord,
   TenantAddressExportViewRecord,
+  TenantCostCenterRecord,
+  TenantCostCenterQuotaSummary,
   TenantIntegrationGovernancePackage,
   TenantPartnerSummary,
+  TenantQuotaLedgerEntry,
+  TenantQuotaSummary,
+  TenantApprovalEvaluationResult,
+  TenantApprovalRuleRecord,
   UpdatePartnerChannelEntryCommand,
   UpdateTenantWebhookEndpointCommand,
   UpdateTenantNotificationsCommand,
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
   UpsertTenantAddressCommand,
+  UpsertTenantApprovalRuleCommand,
+  UpsertTenantCostCenterCommand,
   UpsertTenantPassengerCommand,
+  UpsertTenantQuotaPolicyCommand,
+  ReorderTenantApprovalRulesCommand,
+  RejectTenantBookingApprovalRequestCommand,
   VerifyPartnerEligibilityCommand,
 } from "@drts/contracts";
 
@@ -46,11 +74,15 @@ import {
 } from "../../common/api-envelope";
 import { CurrentIdentity, OpenRoute, RequireRealms } from "../../common/auth";
 import { READ_HEAVY_RATE_LIMIT } from "../../common/throttling/rate-limit.constants";
+import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { TenantPartnerService } from "./tenant-partner.service";
 
 @Controller()
 export class TenantPartnerController {
-  constructor(private readonly tenantPartnerService: TenantPartnerService) {}
+  constructor(
+    private readonly tenantPartnerService: TenantPartnerService,
+    private readonly ownedMobilityService: OwnedMobilityService,
+  ) {}
 
   private requireTenantId(tenantId?: string) {
     const normalizedTenantId = tenantId?.trim();
@@ -63,6 +95,23 @@ export class TenantPartnerController {
     }
 
     return normalizedTenantId;
+  }
+
+  private requireTenantActorUserId(identity: IdentityContext | null) {
+    const actorUserId = identity?.actorId?.trim();
+    if (!actorUserId) {
+      throw new ApiRequestError(
+        401,
+        "TENANT_USER_REQUIRED",
+        "Authenticated tenant user identity is required for this approval action.",
+      );
+    }
+
+    return actorUserId;
+  }
+
+  private resolveTenantActorRoleCode(identity: IdentityContext | null) {
+    return identity?.roles?.[0] ?? null;
   }
 
   @Get("tenant-partner/summary")
@@ -291,6 +340,61 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(resolution, requestId);
   }
 
+  @Get("ops/approval-requests")
+  @RequireRealms("platform", "ops")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listOpsPendingApprovalRequests(
+    @Query() query: ListOpsPendingApprovalRequestsQuery,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: OpsPendingApprovalRequestRecord[] =
+      this.tenantPartnerService.listOpsPendingApprovalRequests(
+        query,
+        requestId,
+        identity,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Post("ops/approval-requests/:approvalRequestId/nudge")
+  @RequireRealms("platform", "ops")
+  async nudgeOpsApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: NudgeOpsApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.nudgeOpsApprovalRequest(
+        approvalRequestId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("ops/approval-requests/:approvalRequestId/acknowledge-breach")
+  @RequireRealms("platform", "ops")
+  async acknowledgeOpsApprovalRequestBreach(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: AcknowledgeOpsApprovalRequestBreachCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.tenantPartnerService.acknowledgeOpsApprovalRequestBreach(
+        approvalRequestId,
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Get("tenant/passengers")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listPassengers(
@@ -329,6 +433,387 @@ export class TenantPartnerController {
       this.requireTenantId(tenantId),
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/cost-centers")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listCostCenters(
+    @Query("activeOnly") activeOnly?: string,
+    @Query("ownerUserId") ownerUserId?: string,
+    @Query("search") search?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const query: ListTenantCostCentersQuery = {};
+    if (activeOnly === "true") {
+      query.activeOnly = true;
+    }
+    if (ownerUserId?.trim()) {
+      query.ownerUserId = ownerUserId;
+    }
+    if (search?.trim()) {
+      query.search = search;
+    }
+    const items = this.tenantPartnerService.listCostCenters(
+      this.requireTenantId(tenantId),
+      query,
+    );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/cost-centers/coverage")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getCostCenterCoverage(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const report: TenantCostCenterCoverageReport =
+      this.tenantPartnerService.summarizeCostCenterCoverage(
+        this.requireTenantId(tenantId),
+        requestId,
+      );
+    return toApiSuccessEnvelope(report, requestId);
+  }
+
+  @Get("tenant/cost-centers/:code")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getCostCenter(
+    @Param("code") code: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const record: TenantCostCenterRecord =
+      this.tenantPartnerService.getCostCenter(
+        this.requireTenantId(tenantId),
+        code,
+      );
+    return toApiSuccessEnvelope(record, requestId);
+  }
+
+  @Post("tenant/cost-centers")
+  upsertCostCenter(
+    @Body() command: UpsertTenantCostCenterCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.upsertCostCenter(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/cost-centers/disable")
+  disableCostCenter(
+    @Body() command: DisableTenantCostCenterCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.disableCostCenter(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("tenant/quotas")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getTenantQuotaSummary(
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const summary: TenantQuotaSummary =
+      this.tenantPartnerService.getTenantQuotaSummary(
+        this.requireTenantId(tenantId),
+      );
+    return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Get("tenant/cost-centers/:code/quota")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getCostCenterQuotaSummary(
+    @Param("code") code: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const summary: TenantCostCenterQuotaSummary =
+      this.tenantPartnerService.getCostCenterQuotaSummary(
+        this.requireTenantId(tenantId),
+        code,
+      );
+    return toApiSuccessEnvelope(summary, requestId);
+  }
+
+  @Post("tenant/quotas/policies")
+  upsertTenantQuotaPolicy(
+    @Body() command: UpsertTenantQuotaPolicyCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.upsertTenantQuotaPolicy(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/quotas/preview")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  previewTenantBookingQuotaImpact(
+    @Body() query: TenantBookingQuotaImpactQuery,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const preview: TenantBookingQuotaImpactPreview =
+      this.tenantPartnerService.previewBookingQuotaImpact(
+        this.requireTenantId(tenantId),
+        query,
+      );
+    return toApiSuccessEnvelope(preview, requestId);
+  }
+
+  @Get("tenant/quotas/ledger")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listTenantQuotaLedger(
+    @Query("periodKey") periodKey?: string,
+    @Query("costCenterCode") costCenterCode?: string,
+    @Query("bookingId") bookingId?: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantQuotaLedgerEntry[] =
+      this.tenantPartnerService.listTenantQuotaLedger(
+        this.requireTenantId(tenantId),
+        {
+          ...(periodKey ? { periodKey } : {}),
+          ...(costCenterCode ? { costCenterCode } : {}),
+          ...(bookingId ? { bookingId } : {}),
+        },
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/approval-rules")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listApprovalRules(
+    @Query() query: ListTenantApprovalRulesQuery,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantApprovalRuleRecord[] =
+      this.tenantPartnerService.listApprovalRules(
+        this.requireTenantId(tenantId),
+        query,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/approval-rules/:ruleId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getApprovalRule(
+    @Param("ruleId") ruleId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getApprovalRule(
+        this.requireTenantId(tenantId),
+        ruleId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-rules")
+  upsertApprovalRule(
+    @Body() command: UpsertTenantApprovalRuleCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.upsertApprovalRule(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Put("tenant/approval-rules/:ruleId")
+  updateApprovalRule(
+    @Param("ruleId") ruleId: string,
+    @Body() command: UpsertTenantApprovalRuleCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.upsertApprovalRule(
+        this.requireTenantId(tenantId),
+        { ...command, ruleId },
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-rules/:ruleId/disable")
+  disableApprovalRule(
+    @Param("ruleId") ruleId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.disableApprovalRule(
+        this.requireTenantId(tenantId),
+        ruleId,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-rules/reorder")
+  reorderApprovalRules(
+    @Body() command: ReorderTenantApprovalRulesCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.reorderApprovalRules(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-rules/evaluate")
+  evaluateApprovalRules(
+    @Body() command: EvaluateTenantApprovalRuleCommand,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const evaluation: TenantApprovalEvaluationResult =
+      this.tenantPartnerService.evaluateApprovalRules(
+        this.requireTenantId(tenantId),
+        command,
+        requestId,
+      );
+    return toApiSuccessEnvelope(evaluation, requestId);
+  }
+
+  @Get("tenant/approval-requests")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  listApprovalRequests(
+    @Query() query: ListTenantBookingApprovalRequestsQuery,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const items: TenantBookingApprovalRequestRecord[] =
+      this.tenantPartnerService.listApprovalRequests(
+        this.requireTenantId(tenantId),
+        query,
+      );
+    return toApiSuccessEnvelope(toApiListData(items), requestId);
+  }
+
+  @Get("tenant/approval-requests/:approvalRequestId")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  getApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.tenantPartnerService.getApprovalRequest(
+        this.requireTenantId(tenantId),
+        approvalRequestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-requests/:approvalRequestId/approve")
+  async approveApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: ApproveTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.approveTenantBookingApprovalRequest(
+        this.requireTenantId(tenantId),
+        approvalRequestId,
+        this.requireTenantActorUserId(identity),
+        this.resolveTenantActorRoleCode(identity),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-requests/:approvalRequestId/reject")
+  async rejectApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: RejectTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.rejectTenantBookingApprovalRequest(
+        this.requireTenantId(tenantId),
+        approvalRequestId,
+        this.requireTenantActorUserId(identity),
+        this.resolveTenantActorRoleCode(identity),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-requests/:approvalRequestId/escalate")
+  async escalateApprovalRequest(
+    @Param("approvalRequestId") approvalRequestId: string,
+    @Body() command: EscalateTenantBookingApprovalRequestCommand,
+    @CurrentIdentity() identity: IdentityContext | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.escalateTenantBookingApprovalRequest(
+        this.requireTenantId(tenantId),
+        approvalRequestId,
+        this.requireTenantActorUserId(identity),
+        this.resolveTenantActorRoleCode(identity),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("tenant/approval-requests/process-timeouts")
+  runApprovalTimeoutCronStub() {
+    throw new ApiRequestError(
+      501,
+      "APPROVAL_TIMEOUT_AUTOMATION_DEFERRED",
+      "Automated approval timeout escalation is deferred to Phase 2. Use the manual escalate route in Phase 1.",
+    );
   }
 
   @Get("tenant/addresses/export-view")

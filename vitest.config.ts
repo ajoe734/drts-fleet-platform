@@ -13,6 +13,6 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
-    include: ["tests/unit/**/*.test.ts"],
+    include: ["tests/unit/**/*.test.ts", "tests/load/**/*.test.ts"],
   },
 });

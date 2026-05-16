@@ -9,17 +9,21 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  Logger,
   OnModuleDestroy,
   OnModuleInit,
   Optional,
 } from "@nestjs/common";
 
 import type {
+  AcknowledgeOpsApprovalRequestBreachCommand,
   AuditLogRecord,
+  ApproveTenantBookingApprovalRequestCommand,
   CreatePartnerChannelEntryCommand,
   CreatePartnerBootstrapSessionCommand,
   PartnerEntryBrandingMetadata,
   CreateTenantUserCommand,
+  EscalateTenantBookingApprovalRequestCommand,
   IdentityContext,
   CreateTenantWebhookEndpointCommand,
   IssueTenantApiKeyCommand,
@@ -42,17 +46,43 @@ import type {
   RevokePartnerIngressCredentialCommand,
   RotateTenantApiKeyCommand,
   SendTestWebhookCommand,
+  DisableTenantCostCenterCommand,
+  EvaluateTenantApprovalRuleCommand,
+  ListOpsPendingApprovalRequestsQuery,
+  ListTenantBookingApprovalRequestsQuery,
+  NudgeOpsApprovalRequestCommand,
+  OpsPendingApprovalRequestRecord,
+  ListTenantCostCentersQuery,
+  ListTenantApprovalRulesQuery,
+  RejectTenantBookingApprovalRequestCommand,
   TenantAddressExportViewRecord,
   TenantAddressGeocodeSource,
   TenantAddressQualityIssue,
   TenantAddressRecord,
+  TenantBookingApprovalDecisionRecord,
+  TenantBookingApprovalRequestRecord,
+  TenantApprovalEvaluationResult,
+  TenantApprovalRuleRecord,
   TenantApiKeyGovernancePolicy,
   TenantApiKeyIssued,
+  OwnedOrderRecord,
+  ReorderTenantApprovalRulesCommand,
+  TenantBookingQuotaImpactPreview,
+  TenantBookingQuotaImpactQuery,
+  TenantBookingQuotaImpactResult,
+  TenantCostCenterRecord,
+  TenantCostCenterCoverageReport,
+  TenantCostCenterCoverageSample,
+  TenantCostCenterQuotaSummary,
   TenantNotificationPreferences,
   TenantPassengerMasterRole,
   TenantPassengerQualityIssue,
   TenantPassengerRecord,
   TenantIntegrationGovernancePackage,
+  TenantQuotaLedgerEntry,
+  TenantQuotaLimit,
+  TenantQuotaPolicyRecord,
+  TenantQuotaSummary,
   TenantRoleCatalogRecord,
   TenantSlaProfile,
   TenantUserRoleRecord,
@@ -68,7 +98,10 @@ import type {
   UpdateTenantRoleCommand,
   UpdateTenantSlaProfileCommand,
   UpsertTenantAddressCommand,
+  UpsertTenantApprovalRuleCommand,
+  UpsertTenantCostCenterCommand,
   UpsertTenantPassengerCommand,
+  UpsertTenantQuotaPolicyCommand,
   VerifyPartnerEligibilityCommand,
   WebhookEventPayload,
   WebhookDeliveryRecord,
@@ -87,7 +120,11 @@ import {
   maskPhone,
   previewOpaqueValue,
 } from "../../common/sensitive-data-policy";
-import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import {
+  AuditNotificationService,
+  type ApprovalNotificationRecipient,
+} from "../audit-notification/audit-notification.service";
+import type { ApprovalNotificationTemplateKey } from "../audit-notification/templates/approval-notification.templates";
 import {
   BANK_CARD_INLINE_ELIGIBILITY_ADAPTER_CODE,
   BankCardInlineEligibilityAdapter,
@@ -108,13 +145,31 @@ import {
   type PersistTenantPartnerChanges,
   type StoredPartnerIngressCredentialRecord,
   type StoredTenantApiKeyRecord,
+  type TenantPartnerQueryExecutor,
+  type TenantQuotaMonthlySnapshotRecord,
   type StoredWebhookDeliveryRecord,
   type StoredWebhookEndpointRecord,
 } from "./tenant-partner.repository";
 import {
+  APPROVAL_REEVALUATION_FIELDS,
+  computeApprovalRequestStatus,
+  hasActorDecidedApprovalRequest,
+  resolveApprovalApproverUserIds,
+  shouldReevaluateTenantBookingApproval,
+  type ApprovalApproverFallbackRecord,
+} from "./tenant-approval-workflow";
+import {
+  applyLedgerEntryToUsage,
+  buildQuotaImpact,
+  createEmptyTenantQuotaUsage,
+  materializeUsage,
+  toTenantQuotaPeriodKey,
+} from "./tenant-quota-ledger";
+import {
   WebhookDispatchService,
   type WebhookRetryPolicy,
 } from "./webhook-dispatch.service";
+import { evaluateTenantApprovalRules } from "./tenant-approval-rule-evaluator";
 
 const DEMO_TENANT_ID = "tenant-demo-001";
 
@@ -186,6 +241,29 @@ type PartnerEligibilityExecutionResult = {
   adapterVersion: string;
 };
 
+type OrderFeedProvider = () => OwnedOrderRecord[];
+
+type MaybePromise<T> = T | Promise<T>;
+
+type TenantGovernanceMetricUnit =
+  | "count"
+  | "hours"
+  | "milliseconds"
+  | "percent";
+
+type TenantGovernanceMetricSample = {
+  name: string;
+  labels: Record<string, string>;
+  value: number;
+  unit: TenantGovernanceMetricUnit;
+};
+
+type TenantGovernanceMetricsSnapshot = {
+  generatedAt: string;
+  namespace: "tenant_governance";
+  samples: TenantGovernanceMetricSample[];
+};
+
 const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
   maxAttempts: 5,
   initialBackoffSeconds: 30,
@@ -195,6 +273,18 @@ const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
 };
 
 const PARTNER_ELIGIBILITY_DECISION_TTL_SECONDS = 30 * 60;
+const TENANT_GOVERNANCE_METRIC_NAMESPACE = "tenant_governance";
+const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
+const APPROVAL_NOTIFICATION_POLL_INTERVAL_MS = 60 * 1000;
+const APPROVAL_NOTIFICATION_TIMEOUT_LEAD_MS = 12 * 60 * 60 * 1000;
+const OPS_APPROVAL_REQUEST_NUDGE_ACTION =
+  "booking.approval_request.nudged_by_ops";
+const OPS_APPROVAL_REQUEST_SLA_ACK_ACTION =
+  "booking.approval_request.sla_breach_acknowledged_by_ops";
+const OPS_APPROVAL_QUEUE_ACTOR_TYPES = new Set<AuditLogRecord["actorType"]>([
+  "ops_user",
+  "platform_admin",
+]);
 
 const DEFAULT_PARTNER_ELIGIBILITY_RETRY_POLICY: PartnerEligibilityRetryPolicyRecord =
   {
@@ -325,6 +415,48 @@ const ADDRESS_SEED: TenantAddressRecord[] = [
   },
 ];
 
+const COST_CENTER_SEED: TenantCostCenterRecord[] = [
+  {
+    tenantId: DEMO_TENANT_ID,
+    code: "CC-FIN-04",
+    name: "財務處",
+    description: "財務與季度稽核差旅",
+    ownerUserId: "tenant-user-demo-003",
+    ownerName: "財務管理員",
+    activeFlag: true,
+    disabledAt: null,
+    disabledReason: null,
+    createdAt: "2026-04-10T00:00:00.000Z",
+    updatedAt: "2026-04-10T00:00:00.000Z",
+  },
+  {
+    tenantId: DEMO_TENANT_ID,
+    code: "CC-OPS-02",
+    name: "營運處",
+    description: "營運調度與站點巡檢",
+    ownerUserId: "tenant-user-demo-002",
+    ownerName: "營運管理員",
+    activeFlag: true,
+    disabledAt: null,
+    disabledReason: null,
+    createdAt: "2026-04-10T00:05:00.000Z",
+    updatedAt: "2026-04-10T00:05:00.000Z",
+  },
+  {
+    tenantId: DEMO_TENANT_ID,
+    code: "CC-EXEC-01",
+    name: "高階主管",
+    description: "總經理室與高階接待",
+    ownerUserId: null,
+    ownerName: "CEO Office",
+    activeFlag: true,
+    disabledAt: null,
+    disabledReason: null,
+    createdAt: "2026-04-10T00:10:00.000Z",
+    updatedAt: "2026-04-10T00:10:00.000Z",
+  },
+];
+
 const USER_ROLE_SEED: TenantUserRoleRecord[] = [
   {
     userId: "tenant-user-demo-001",
@@ -333,6 +465,7 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     displayName: "Acme Tenant Admin",
     roleCode: "tenant_admin",
     status: "active",
+    approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:00:00.000Z",
     updatedAt: "2026-04-10T00:00:00.000Z",
   },
@@ -343,6 +476,7 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     displayName: "Acme Tenant Ops",
     roleCode: "tenant_ops_admin",
     status: "active",
+    approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:10:00.000Z",
     updatedAt: "2026-04-10T00:10:00.000Z",
   },
@@ -353,6 +487,7 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     displayName: "Acme Tenant Finance",
     roleCode: "tenant_finance_admin",
     status: "active",
+    approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:20:00.000Z",
     updatedAt: "2026-04-10T00:20:00.000Z",
   },
@@ -363,6 +498,7 @@ const USER_ROLE_SEED: TenantUserRoleRecord[] = [
     displayName: "Acme Tenant Viewer",
     roleCode: "tenant_viewer",
     status: "active",
+    approvalNotificationOptOut: false,
     invitedAt: "2026-04-10T00:30:00.000Z",
     updatedAt: "2026-04-10T00:30:00.000Z",
   },
@@ -549,6 +685,8 @@ function createBootstrapPartnerIngressCredential(
 
 @Injectable()
 export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(TenantPartnerService.name);
+
   private notificationPreferences = new Map<
     string,
     TenantNotificationPreferences
@@ -569,6 +707,31 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   );
 
   private addresses = ADDRESS_SEED.map((address) => this.cloneAddress(address));
+
+  private costCenters = COST_CENTER_SEED.map((costCenter) =>
+    this.cloneCostCenter(costCenter),
+  );
+
+  private approvalRules: TenantApprovalRuleRecord[] = [];
+
+  private approvalRuleVersions = new Map<string, number>();
+
+  private approvalRequests: TenantBookingApprovalRequestRecord[] = [];
+
+  private approvalDecisions: TenantBookingApprovalDecisionRecord[] = [];
+
+  private quotaPolicies = new Map<string, TenantQuotaPolicyRecord>();
+
+  private quotaLedger: TenantQuotaLedgerEntry[] = [];
+
+  private quotaMonthlySnapshots = new Map<
+    string,
+    TenantQuotaMonthlySnapshotRecord
+  >();
+
+  private quotaReservationLocks = new Map<string, Promise<void>>();
+
+  private orderFeedProvider: OrderFeedProvider = () => [];
 
   private userRoles = USER_ROLE_SEED.map((userRole) =>
     this.cloneUserRole(userRole),
@@ -595,6 +758,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     ReturnType<typeof setTimeout>
   >();
 
+  private approvalNotificationPollTimer: ReturnType<typeof setInterval> | null =
+    null;
+
+  private approvalNotificationPollInFlight = false;
+
   constructor(
     private readonly auditNotificationService: AuditNotificationService,
     @Optional()
@@ -612,6 +780,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.partnerIngressCredentials = this.partnerIngressCredentialSeeds.map(
       (seed) => createBootstrapPartnerIngressCredential(seed),
     );
+    this.startApprovalNotificationPolling();
   }
 
   async onModuleInit() {
@@ -631,8 +800,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         persistedState.partnerIngressCredentials ?? [];
       const partnerEligibilityVerifications =
         persistedState.partnerEligibilityVerifications ?? [];
+      const approvalRules = persistedState.approvalRules ?? [];
+      const approvalRequests = persistedState.approvalRequests ?? [];
+      const approvalDecisions = persistedState.approvalDecisions ?? [];
       const passengers = persistedState.passengers ?? [];
       const addresses = persistedState.addresses ?? [];
+      const costCenters = persistedState.costCenters ?? [];
+      const quotaPolicies = persistedState.quotaPolicies ?? [];
+      const quotaLedger = persistedState.quotaLedger ?? [];
+      const quotaMonthlySnapshots = persistedState.quotaMonthlySnapshots ?? [];
       const userRoles = persistedState.userRoles ?? [];
       const apiKeys = persistedState.apiKeys ?? [];
       const hasPersistedState =
@@ -643,8 +819,15 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         partnerEntries.length > 0 ||
         partnerIngressCredentials.length > 0 ||
         partnerEligibilityVerifications.length > 0 ||
+        approvalRules.length > 0 ||
+        approvalRequests.length > 0 ||
+        approvalDecisions.length > 0 ||
         passengers.length > 0 ||
         addresses.length > 0 ||
+        costCenters.length > 0 ||
+        quotaPolicies.length > 0 ||
+        quotaLedger.length > 0 ||
+        quotaMonthlySnapshots.length > 0 ||
         userRoles.length > 0 ||
         apiKeys.length > 0;
 
@@ -670,6 +853,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             ),
             addresses: this.addresses.map((address) =>
               this.cloneAddress(address),
+            ),
+            costCenters: this.costCenters.map((costCenter) =>
+              this.cloneCostCenter(costCenter),
             ),
             userRoles: this.userRoles.map((userRole) =>
               this.cloneUserRole(userRole),
@@ -714,6 +900,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           this.clonePartnerEligibilityVerification(verification),
         ]),
       );
+      this.approvalRules = approvalRules.map((rule) =>
+        this.cloneApprovalRule(rule),
+      );
+      this.approvalRuleVersions = approvalRules.reduce((versions, rule) => {
+        versions.set(
+          rule.tenantId,
+          Math.max(versions.get(rule.tenantId) ?? 0, 1),
+        );
+        return versions;
+      }, new Map<string, number>());
+      this.approvalDecisions = approvalDecisions.map((decision) =>
+        this.cloneApprovalDecision(decision),
+      );
+      this.approvalRequests = approvalRequests.map((request) =>
+        this.cloneApprovalRequest(
+          this.mergeApprovalRequestDecisions(
+            request,
+            this.approvalDecisions.filter(
+              (decision) =>
+                decision.approvalRequestId === request.approvalRequestId,
+            ),
+          ),
+        ),
+      );
       this.webhookEndpoints = webhookEndpoints.map((endpoint) =>
         this.cloneStoredWebhookEndpoint(endpoint),
       );
@@ -724,6 +934,36 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         this.clonePassenger(passenger),
       );
       this.addresses = addresses.map((address) => this.cloneAddress(address));
+      this.costCenters =
+        costCenters.length > 0
+          ? costCenters.map((costCenter) => this.cloneCostCenter(costCenter))
+          : COST_CENTER_SEED.map((costCenter) =>
+              this.cloneCostCenter(costCenter),
+            );
+      this.quotaPolicies = new Map(
+        quotaPolicies.map((policy) => [
+          this.buildQuotaPolicyKey(
+            policy.tenantId,
+            policy.costCenterCode,
+            policy.period,
+          ),
+          this.cloneQuotaPolicy(policy),
+        ]),
+      );
+      this.quotaLedger = quotaLedger.map((entry) =>
+        this.cloneQuotaLedgerEntry(entry),
+      );
+      this.quotaMonthlySnapshots = new Map(
+        quotaMonthlySnapshots.map((snapshot) => [
+          this.buildQuotaSnapshotKey(
+            snapshot.tenantId,
+            snapshot.costCenterCode,
+            snapshot.period,
+            snapshot.periodKey,
+          ),
+          this.cloneQuotaMonthlySnapshot(snapshot),
+        ]),
+      );
       this.userRoles = userRoles.map((userRole) =>
         this.cloneUserRole(userRole),
       );
@@ -749,7 +989,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           "module init partner ingress credential bootstrap",
         );
       }
+      if (costCenters.length === 0) {
+        this.persistChanges(
+          {
+            costCenters: this.costCenters.map((costCenter) =>
+              this.cloneCostCenter(costCenter),
+            ),
+          },
+          "module init tenant cost-center bootstrap",
+        );
+      }
       this.schedulePersistedWebhookRetries();
+      void this.pollPendingApprovalTimeoutNotifications();
     } catch (error) {
       this.tenantPartnerRepository.reportPersistenceFailure(
         error,
@@ -758,11 +1009,23 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  registerOrderFeedProvider(provider: OrderFeedProvider) {
+    this.orderFeedProvider = provider;
+  }
+
+  isPersistenceEnabled() {
+    return this.tenantPartnerRepository?.isEnabled() ?? false;
+  }
+
   onModuleDestroy() {
     for (const timer of this.retryTimers.values()) {
       clearTimeout(timer);
     }
     this.retryTimers.clear();
+    if (this.approvalNotificationPollTimer) {
+      clearInterval(this.approvalNotificationPollTimer);
+      this.approvalNotificationPollTimer = null;
+    }
   }
 
   getNotificationPreferences(tenantId: string) {
@@ -1156,6 +1419,1295 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.cloneAddress(address);
   }
 
+  listCostCenters(tenantId: string, query: ListTenantCostCentersQuery = {}) {
+    const search = this.normalizeNullableText(query.search)?.toLowerCase();
+    const ownerUserId = this.normalizeNullableText(query.ownerUserId);
+
+    return this.costCenters
+      .filter((costCenter) => costCenter.tenantId === tenantId)
+      .filter((costCenter) => {
+        if (query.activeOnly && !costCenter.activeFlag) {
+          return false;
+        }
+        if (ownerUserId && costCenter.ownerUserId !== ownerUserId) {
+          return false;
+        }
+        if (!search) {
+          return true;
+        }
+        return [costCenter.code, costCenter.name, costCenter.description]
+          .filter((value): value is string => Boolean(value))
+          .some((value) => value.toLowerCase().includes(search));
+      })
+      .map((costCenter) => this.cloneCostCenter(costCenter));
+  }
+
+  getCostCenter(tenantId: string, code: string) {
+    const normalizedCode = this.normalizeCostCenterCode(code);
+    const costCenter = this.costCenters.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.code === normalizedCode,
+    );
+
+    if (!costCenter) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "COST_CENTER_NOT_FOUND",
+        "The tenant cost center could not be found.",
+        {
+          code: normalizedCode,
+        },
+      );
+    }
+
+    return this.cloneCostCenter(costCenter);
+  }
+
+  findCostCenter(tenantId: string, code: string) {
+    return this.findCostCenterRecord(tenantId, code);
+  }
+
+  listQuotaPolicies(tenantId: string) {
+    return [...this.quotaPolicies.values()]
+      .filter((policy) => policy.tenantId === tenantId)
+      .sort((left, right) => {
+        const leftScope = left.costCenterCode ?? "";
+        const rightScope = right.costCenterCode ?? "";
+        if (leftScope !== rightScope) {
+          return leftScope.localeCompare(rightScope);
+        }
+        return left.period.localeCompare(right.period);
+      })
+      .map((policy) => this.cloneQuotaPolicy(policy));
+  }
+
+  getTenantQuotaSummary(
+    tenantId: string,
+    reservationWindowStart = new Date().toISOString(),
+  ): TenantQuotaSummary {
+    const periodKey = this.requireQuotaPeriodKey(reservationWindowStart);
+    const policy = this.resolveQuotaPolicy(tenantId, null);
+    const snapshot = this.getOrCreateQuotaSnapshot(
+      tenantId,
+      null,
+      periodKey,
+      policy.limit,
+    );
+
+    return {
+      tenantId,
+      period: policy.period,
+      periodKey,
+      limit: { ...policy.limit },
+      usage: { ...snapshot.usage },
+      refreshedAt: snapshot.refreshedAt,
+    };
+  }
+
+  getCostCenterQuotaSummary(
+    tenantId: string,
+    code: string,
+    reservationWindowStart = new Date().toISOString(),
+  ): TenantCostCenterQuotaSummary {
+    const costCenter = this.getCostCenter(tenantId, code);
+    const periodKey = this.requireQuotaPeriodKey(reservationWindowStart);
+    const policy = this.resolveQuotaPolicy(tenantId, costCenter.code);
+    const snapshot = this.getOrCreateQuotaSnapshot(
+      tenantId,
+      costCenter.code,
+      periodKey,
+      policy.limit,
+    );
+
+    return {
+      tenantId,
+      costCenterCode: costCenter.code,
+      period: policy.period,
+      periodKey,
+      limit: { ...policy.limit },
+      usage: { ...snapshot.usage },
+      inheritedFromTenant: policy.inheritedFromTenant,
+      refreshedAt: snapshot.refreshedAt,
+    };
+  }
+
+  upsertTenantQuotaPolicy(
+    tenantId: string,
+    command: UpsertTenantQuotaPolicyCommand,
+    requestId?: string,
+  ) {
+    const now = new Date().toISOString();
+    const costCenterCode = command.costCenterCode
+      ? this.getCostCenter(tenantId, command.costCenterCode).code
+      : null;
+    const existing = this.quotaPolicies.get(
+      this.buildQuotaPolicyKey(tenantId, costCenterCode, command.period),
+    );
+
+    const record: TenantQuotaPolicyRecord = {
+      tenantId,
+      costCenterCode,
+      period: command.period,
+      limit: this.normalizeQuotaLimit(command.limit),
+      inheritedFromTenant: false,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    this.quotaPolicies.set(
+      this.buildQuotaPolicyKey(tenantId, costCenterCode, command.period),
+      this.cloneQuotaPolicy(record),
+    );
+    this.persistChanges(
+      {
+        quotaPolicies: [this.cloneQuotaPolicy(record)],
+      },
+      "upsert tenant quota policy",
+    );
+    this.auditNotificationService.recordAuditLog({
+      actorId: null,
+      actorType: "system",
+      tenantId,
+      moduleName: "tenant-partner",
+      actionName: "tenant.quota_policy.updated",
+      resourceType: "tenant_quota_policy",
+      resourceId: costCenterCode ?? tenantId,
+      newValuesSummary: {
+        costCenterCode,
+        period: command.period,
+        enforcementMode: record.limit.enforcementMode,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
+
+    return this.cloneQuotaPolicy(record);
+  }
+
+  previewBookingQuotaImpact(
+    tenantId: string,
+    query: TenantBookingQuotaImpactQuery,
+  ): TenantBookingQuotaImpactPreview {
+    const normalized = this.normalizeQuotaImpactQuery(tenantId, query);
+    return this.buildQuotaImpactPreview(tenantId, normalized);
+  }
+
+  listTenantQuotaLedger(
+    tenantId: string,
+    query: {
+      periodKey?: string;
+      costCenterCode?: string | null;
+      bookingId?: string | null;
+    } = {},
+  ) {
+    const normalizedCostCenterCode = query.costCenterCode
+      ? this.normalizeCostCenterCode(query.costCenterCode)
+      : null;
+    return this.quotaLedger
+      .filter((entry) => entry.tenantId === tenantId)
+      .filter((entry) =>
+        query.periodKey ? entry.periodKey === query.periodKey : true,
+      )
+      .filter((entry) =>
+        normalizedCostCenterCode === null
+          ? true
+          : entry.costCenterCode === normalizedCostCenterCode,
+      )
+      .filter((entry) =>
+        query.bookingId ? entry.bookingId === query.bookingId : true,
+      )
+      .map((entry) => this.cloneQuotaLedgerEntry(entry));
+  }
+
+  reserveTenantQuota(
+    tx: TenantPartnerQueryExecutor | null,
+    input: {
+      tenantId: string;
+      bookingId: string;
+      evaluationId: string;
+      reservationWindowStart: string;
+      costCenterCode?: string | null;
+      estimatedAmountMinor?: number | null;
+      currency?: string;
+    },
+  ): Promise<{
+    ledgerEntries: TenantQuotaLedgerEntry[];
+    impacts: TenantBookingQuotaImpactResult[];
+  }>;
+  reserveTenantQuota(input: {
+    tenantId: string;
+    bookingId: string;
+    evaluationId: string;
+    reservationWindowStart: string;
+    costCenterCode?: string | null;
+    estimatedAmountMinor?: number | null;
+    currency?: string;
+  }): Promise<{
+    ledgerEntries: TenantQuotaLedgerEntry[];
+    impacts: TenantBookingQuotaImpactResult[];
+  }>;
+  async reserveTenantQuota(
+    txOrInput:
+      | TenantPartnerQueryExecutor
+      | {
+          tenantId: string;
+          bookingId: string;
+          evaluationId: string;
+          reservationWindowStart: string;
+          costCenterCode?: string | null;
+          estimatedAmountMinor?: number | null;
+          currency?: string;
+        }
+      | null,
+    maybeInput?: {
+      tenantId: string;
+      bookingId: string;
+      evaluationId: string;
+      reservationWindowStart: string;
+      costCenterCode?: string | null;
+      estimatedAmountMinor?: number | null;
+      currency?: string;
+    },
+  ) {
+    const tx = maybeInput
+      ? (txOrInput as TenantPartnerQueryExecutor | null)
+      : null;
+    const input = maybeInput ?? (txOrInput as NonNullable<typeof maybeInput>);
+    const normalized = this.normalizeQuotaImpactQuery(input.tenantId, {
+      bookingId: input.bookingId,
+      costCenterCode: input.costCenterCode ?? null,
+      estimatedAmountMinor: input.estimatedAmountMinor ?? null,
+      ...(input.currency ? { currency: input.currency } : {}),
+      reservationWindowStart: input.reservationWindowStart,
+    });
+
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      return this.reserveTenantQuotaWithDatabase(tx, input, normalized);
+    }
+
+    return this.reserveTenantQuotaInMemory(input, normalized);
+  }
+
+  listApprovalRules(
+    tenantId: string,
+    query: ListTenantApprovalRulesQuery = {},
+  ) {
+    const search = this.normalizeNullableText(query.search)?.toLowerCase();
+    return this.approvalRules
+      .filter((rule) => rule.tenantId === tenantId)
+      .filter((rule) => (query.activeOnly ? rule.activeFlag : true))
+      .filter((rule) => (query.action ? rule.action === query.action : true))
+      .filter((rule) => {
+        if (!search) {
+          return true;
+        }
+        return (rule.ruleName ?? rule.name ?? "")
+          .toLowerCase()
+          .includes(search);
+      })
+      .sort((left, right) => left.priority - right.priority)
+      .map((rule) => this.cloneApprovalRule(rule));
+  }
+
+  getApprovalRule(tenantId: string, ruleId: string) {
+    return this.cloneApprovalRule(this.requireApprovalRule(tenantId, ruleId));
+  }
+
+  upsertApprovalRule(
+    tenantId: string,
+    command: UpsertTenantApprovalRuleCommand,
+    requestId?: string,
+  ) {
+    const now = new Date().toISOString();
+    const ruleName = this.requireNonBlank(
+      command.ruleName ?? command.name ?? "",
+      "ruleName",
+    );
+    const existing = command.ruleId
+      ? (this.approvalRules.find(
+          (rule) =>
+            rule.tenantId === tenantId && rule.ruleId === command.ruleId,
+        ) ?? null)
+      : null;
+
+    const record: TenantApprovalRuleRecord = {
+      ruleId: existing?.ruleId ?? `rule-${randomUUID()}`,
+      tenantId,
+      ruleName,
+      name: ruleName,
+      description: this.normalizeNullableText(command.description),
+      priority: Math.trunc(command.priority),
+      activeFlag: command.activeFlag ?? existing?.activeFlag ?? true,
+      effectiveFrom: command.effectiveFrom ?? existing?.effectiveFrom ?? null,
+      effectiveUntil:
+        command.effectiveUntil ?? existing?.effectiveUntil ?? null,
+      conditions: (command.conditions ?? []).map((condition) => ({
+        ...condition,
+        ...(Array.isArray(condition.values)
+          ? { values: [...condition.values] }
+          : {}),
+        ...(Array.isArray(condition.value)
+          ? { value: [...condition.value] }
+          : {}),
+      })),
+      action: command.action,
+      approvalMode:
+        command.action === "require_approval" ||
+        command.action === "flag_manual_review"
+          ? (command.approvalMode ?? existing?.approvalMode ?? "any_of")
+          : null,
+      approvers:
+        command.action === "require_approval" ||
+        command.action === "flag_manual_review"
+          ? (command.approvers ?? existing?.approvers ?? []).map(
+              (approver) => ({
+                ...approver,
+              }),
+            )
+          : [],
+      timeoutHoursOverride:
+        command.timeoutHoursOverride ?? existing?.timeoutHoursOverride ?? null,
+      fallbackPolicyOverride:
+        command.fallbackPolicyOverride ??
+        existing?.fallbackPolicyOverride ??
+        null,
+      escalationTarget:
+        command.action === "require_approval" ||
+        command.action === "flag_manual_review"
+          ? command.escalationTarget
+            ? { ...command.escalationTarget }
+            : existing?.escalationTarget
+              ? { ...existing.escalationTarget }
+              : null
+          : null,
+      disabledAt:
+        command.activeFlag === false ? (existing?.disabledAt ?? now) : null,
+      disabledReason:
+        command.activeFlag === false
+          ? (command.disabledReason ??
+            existing?.disabledReason ??
+            "disabled_via_upsert")
+          : null,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    this.approvalRules = [
+      record,
+      ...this.approvalRules.filter((rule) => rule.ruleId !== record.ruleId),
+    ];
+    this.bumpApprovalRuleVersion(tenantId);
+    this.persistChanges(
+      { approvalRules: [this.cloneApprovalRule(record)] },
+      "tenant approval rule upsert",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: existing
+          ? "tenant.approval_rule.updated"
+          : "tenant.approval_rule.created",
+        resourceType: "tenant_approval_rule",
+        resourceId: record.ruleId,
+        newValuesSummary: this.buildApprovalRuleAuditSummary(record),
+      },
+      requestId,
+    );
+    return this.cloneApprovalRule(record);
+  }
+
+  reorderApprovalRules(
+    tenantId: string,
+    command: ReorderTenantApprovalRulesCommand,
+    requestId?: string,
+  ) {
+    const orderedRuleIds = command.orderedRuleIds ?? command.ruleIds ?? [];
+    const tenantRules = this.listApprovalRules(tenantId);
+    if (orderedRuleIds.length !== tenantRules.length) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_APPROVAL_RULE_REORDER_INCOMPLETE",
+        "orderedRuleIds must contain the full tenant rule list.",
+      );
+    }
+    if (new Set(orderedRuleIds).size !== orderedRuleIds.length) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_APPROVAL_RULE_REORDER_DUPLICATE_IDS",
+        "orderedRuleIds must not contain duplicate values.",
+      );
+    }
+
+    const byId = new Map(tenantRules.map((rule) => [rule.ruleId, rule]));
+    const now = new Date().toISOString();
+    const reordered = orderedRuleIds.map((ruleId, index) => {
+      const rule = byId.get(ruleId);
+      if (!rule) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "TENANT_APPROVAL_RULE_NOT_FOUND",
+          "orderedRuleIds contains an unknown ruleId.",
+          { ruleId },
+        );
+      }
+      return {
+        ...rule,
+        priority: (index + 1) * 10,
+        updatedAt: now,
+      };
+    });
+
+    this.approvalRules = [
+      ...this.approvalRules.filter((rule) => rule.tenantId !== tenantId),
+      ...reordered,
+    ];
+    this.bumpApprovalRuleVersion(tenantId);
+    this.persistChanges(
+      { approvalRules: reordered.map((rule) => this.cloneApprovalRule(rule)) },
+      "tenant approval rule reorder",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.approval_rule.reordered",
+        resourceType: "tenant_approval_rule_set",
+        resourceId: tenantId,
+        newValuesSummary: { orderedRuleIds },
+      },
+      requestId,
+    );
+    return reordered.map((rule) => this.cloneApprovalRule(rule));
+  }
+
+  disableApprovalRule(tenantId: string, ruleId: string, requestId?: string) {
+    const existing = this.requireApprovalRule(tenantId, ruleId);
+    const disabled: TenantApprovalRuleRecord = {
+      ...existing,
+      activeFlag: false,
+      disabledAt: existing.disabledAt ?? new Date().toISOString(),
+      disabledReason: existing.disabledReason ?? "disabled_by_tenant_admin",
+      updatedAt: new Date().toISOString(),
+    };
+    this.approvalRules = this.approvalRules.map((rule) =>
+      rule.ruleId === ruleId ? disabled : rule,
+    );
+    this.bumpApprovalRuleVersion(tenantId);
+    this.persistChanges(
+      { approvalRules: [this.cloneApprovalRule(disabled)] },
+      "tenant approval rule disable",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.approval_rule.disabled",
+        resourceType: "tenant_approval_rule",
+        resourceId: ruleId,
+        newValuesSummary: this.buildApprovalRuleAuditSummary(disabled),
+      },
+      requestId,
+    );
+    return this.cloneApprovalRule(disabled);
+  }
+
+  evaluateApprovalRules(
+    tenantId: string,
+    command: EvaluateTenantApprovalRuleCommand,
+    requestId?: string,
+  ): TenantApprovalEvaluationResult {
+    const evaluationStartedAtMs = Date.now();
+    const inputSnapshot = command.inputSnapshot ?? {
+      costCenterCode: command.sampleBooking?.costCenterCode ?? null,
+      businessDispatchSubtype:
+        command.sampleBooking?.businessDispatchSubtype ?? null,
+      reservationWindowStart:
+        command.sampleBooking?.reservationWindowStart ?? null,
+      passengerId: command.sampleBooking?.passengerId ?? null,
+      passengerRole: command.sampleBooking?.passengerRole ?? null,
+      amountMinor: command.sampleBooking?.amountMinor ?? null,
+      currency: null,
+      vehiclePreference: command.sampleBooking?.vehiclePreference ?? null,
+      direction: command.sampleBooking?.direction ?? null,
+      flightNoPresent: command.sampleBooking?.flightNoPresent ?? null,
+      flightNo: command.sampleBooking?.flightNo ?? null,
+    };
+    const result = evaluateTenantApprovalRules({
+      tenantId,
+      subject: command.subject ?? {
+        subjectType: "booking",
+        bookingId: null,
+        draftId: null,
+        operation: "dry_run",
+      },
+      inputSnapshot,
+      rules: this.listApprovalRules(tenantId, {
+        activeOnly: command.includeInactive ? false : true,
+      }),
+      quotaImpacts: command.quotaImpacts ?? [],
+      ruleVersionSnapshot: this.getApprovalRuleVersionSnapshot(tenantId),
+      tenantDefaultTimeoutHours: 24,
+      tenantDefaultFallbackPolicy: "escalate_to_tenant_admin",
+    });
+    const evaluationLatencyMs = Math.max(0, Date.now() - evaluationStartedAtMs);
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "booking.approval_rules.evaluated",
+        resourceType: "tenant_approval_rule_set",
+        resourceId: tenantId,
+        newValuesSummary: {
+          subject: result.subject,
+          decision: result.outcome?.decision ?? null,
+          matchedRuleIds: result.matchedRules.map((rule) => rule.ruleId),
+          matchedRuleCount: result.matchedRules.length,
+          evaluationLatencyMs,
+          approvalRequired: result.outcome?.approvalRequired ?? false,
+        },
+      },
+      requestId,
+    );
+    return result;
+  }
+
+  listApprovalReevaluationFields() {
+    return [...APPROVAL_REEVALUATION_FIELDS];
+  }
+
+  needsApprovalReevaluation(
+    previousSnapshot: Parameters<
+      typeof shouldReevaluateTenantBookingApproval
+    >[0],
+    nextSnapshot: Parameters<typeof shouldReevaluateTenantBookingApproval>[1],
+  ) {
+    return shouldReevaluateTenantBookingApproval(
+      previousSnapshot,
+      nextSnapshot,
+    );
+  }
+
+  listApprovalRequests(
+    tenantId: string,
+    query: ListTenantBookingApprovalRequestsQuery = {},
+  ) {
+    return this.approvalRequests
+      .filter((request) => request.tenantId === tenantId)
+      .filter((request) =>
+        query.status ? request.status === query.status : true,
+      )
+      .filter((request) =>
+        query.bookingId ? request.bookingId === query.bookingId : true,
+      )
+      .map((request) => this.cloneApprovalRequest(request));
+  }
+
+  listOpsPendingApprovalRequests(
+    query: ListOpsPendingApprovalRequestsQuery = {},
+    _requestId?: string,
+    identity?: IdentityContext | null,
+  ) {
+    this.requireOpsApprovalQueueIdentity(identity ?? null);
+
+    return this.approvalRequests
+      .filter((request) =>
+        query.tenantId ? request.tenantId === query.tenantId : true,
+      )
+      .filter((request) =>
+        query.status
+          ? request.status === query.status
+          : request.status === "pending",
+      )
+      .filter((request) =>
+        query.expiresBefore ? request.timeoutAt <= query.expiresBefore : true,
+      )
+      .map((request) => this.buildOpsPendingApprovalRequestRecord(request));
+  }
+
+  getApprovalRequest(tenantId: string, approvalRequestId: string) {
+    return this.cloneApprovalRequest(
+      this.requireApprovalRequest(tenantId, approvalRequestId),
+    );
+  }
+
+  listPendingApprovalRequestsForBooking(tenantId: string, bookingId: string) {
+    return this.approvalRequests
+      .filter(
+        (request) =>
+          request.tenantId === tenantId &&
+          request.bookingId === bookingId &&
+          request.status === "pending",
+      )
+      .map((request) => this.cloneApprovalRequest(request));
+  }
+
+  createBookingApprovalRequest(params: {
+    tx?: TenantPartnerQueryExecutor | null;
+    tenantId: string;
+    bookingId: string;
+    orderId: string;
+    evaluationSnapshot: TenantApprovalEvaluationResult;
+    requestId?: string;
+  }) {
+    if (
+      !params.evaluationSnapshot.outcome?.approvalRequired ||
+      !params.evaluationSnapshot.approvalPlan
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "APPROVAL_NOT_REQUIRED",
+        "The booking evaluation does not require approval.",
+        {
+          bookingId: params.bookingId,
+          evaluationId: params.evaluationSnapshot.evaluationId ?? null,
+        },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const escalationTarget = params.evaluationSnapshot.approvalPlan
+      .escalationTarget ?? {
+      kind: "tenant_admin" as const,
+      displayName: "Tenant Admin",
+    };
+    const resolution = resolveApprovalApproverUserIds(
+      {
+        approvers: params.evaluationSnapshot.approvalPlan.approvers,
+        escalationTarget,
+        bookingCostCenterCode:
+          params.evaluationSnapshot.inputSnapshot?.costCenterCode ?? null,
+      },
+      {
+        hasUser: (userId) =>
+          this.findActiveTenantUser(params.tenantId, userId) !== null,
+        listUserIdsByRole: (roleCode) =>
+          this.listActiveTenantUsersByRole(params.tenantId, roleCode).map(
+            (userRole) => userRole.userId,
+          ),
+        getCostCenterOwnerUserId: (costCenterCode) =>
+          this.getActiveCostCenterOwnerUserId(params.tenantId, costCenterCode),
+      },
+    );
+    if (resolution.resolvedApproverUserIds.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "APPROVAL_NO_RESOLVABLE_APPROVERS",
+        "The approval request has no resolvable approvers.",
+        {
+          bookingId: params.bookingId,
+          orderId: params.orderId,
+          evaluationId: params.evaluationSnapshot.evaluationId ?? null,
+          approvers: params.evaluationSnapshot.approvalPlan.approvers,
+        },
+      );
+    }
+
+    const request: TenantBookingApprovalRequestRecord = {
+      approvalRequestId: `approval-request-${randomUUID()}`,
+      tenantId: params.tenantId,
+      bookingId: params.bookingId,
+      orderId: params.orderId,
+      evaluationId:
+        params.evaluationSnapshot.evaluationId ??
+        `approval-eval-${randomUUID()}`,
+      ruleIds: params.evaluationSnapshot.matchedRules.map(
+        (rule) => rule.ruleId,
+      ),
+      status: "pending",
+      approvalMode: params.evaluationSnapshot.approvalPlan.approvalMode,
+      approvers: params.evaluationSnapshot.approvalPlan.approvers.map(
+        (approver) => this.clonePrincipalRef(approver),
+      ),
+      resolvedApproverUserIds: [...resolution.resolvedApproverUserIds],
+      previousApprovers: [],
+      decisions: [],
+      evaluationSnapshot: this.cloneTenantApprovalEvaluationResult(
+        params.evaluationSnapshot,
+      ),
+      timeoutAt: new Date(
+        Date.parse(now) +
+          params.evaluationSnapshot.approvalPlan.timeoutHours * 60 * 60 * 1000,
+      ).toISOString(),
+      escalatedAt: null,
+      fallbackPolicy: params.evaluationSnapshot.approvalPlan.fallbackPolicy,
+      escalationTarget: this.clonePrincipalRef(escalationTarget),
+      createdAt: now,
+      resolvedAt: null,
+    };
+
+    this.approvalRequests = [
+      this.cloneApprovalRequest(request),
+      ...this.approvalRequests.filter(
+        (candidate) =>
+          candidate.approvalRequestId !== request.approvalRequestId,
+      ),
+    ];
+    const persisted = this.persistApprovalWorkflow({
+      tx: params.tx ?? null,
+      approvalRequests: [request],
+      context: "create booking approval request",
+    });
+    const onSuccess = async () => {
+      this.recordApprovalFallbackAudits(
+        params.tenantId,
+        params.bookingId,
+        resolution.fallbackRecords,
+        params.requestId,
+      );
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId: params.tenantId,
+          moduleName: "tenant-partner",
+          actionName: "booking.approval_request.created",
+          resourceType: "booking",
+          resourceId: request.bookingId,
+          newValuesSummary: {
+            approvalRequestId: request.approvalRequestId,
+            bookingId: request.bookingId,
+            orderId: request.orderId,
+            evaluationId: request.evaluationId,
+            approvalMode: request.approvalMode,
+            resolvedApproverUserIds: request.resolvedApproverUserIds,
+            timeoutAt: request.timeoutAt,
+            fallbackPolicy: request.fallbackPolicy,
+          },
+        },
+        params.requestId,
+      );
+      await this.dispatchApprovalNotifications(
+        "new_request",
+        request,
+        params.requestId ? { requestId: params.requestId } : undefined,
+      );
+      void this.pollPendingApprovalTimeoutNotifications();
+      return this.cloneApprovalRequest(request);
+    };
+
+    if (persisted instanceof Promise) {
+      return persisted.then(onSuccess);
+    }
+    return onSuccess();
+  }
+
+  cancelApprovalRequestsForReevaluation(params: {
+    tx?: TenantPartnerQueryExecutor | null;
+    tenantId: string;
+    bookingId: string;
+    requestId?: string;
+  }) {
+    const now = new Date().toISOString();
+    const cancelled = this.approvalRequests
+      .filter(
+        (request) =>
+          request.tenantId === params.tenantId &&
+          request.bookingId === params.bookingId &&
+          request.status === "pending",
+      )
+      .map((request) => ({
+        ...request,
+        status: "cancelled_by_re_evaluation" as const,
+        resolvedAt: now,
+      }));
+
+    if (cancelled.length === 0) {
+      return [];
+    }
+
+    const cancelledIds = new Set(
+      cancelled.map((request) => request.approvalRequestId),
+    );
+    this.approvalRequests = [
+      ...cancelled.map((request) => this.cloneApprovalRequest(request)),
+      ...this.approvalRequests.filter(
+        (request) => !cancelledIds.has(request.approvalRequestId),
+      ),
+    ];
+    const persisted = this.persistApprovalWorkflow({
+      tx: params.tx ?? null,
+      approvalRequests: cancelled,
+      context: "cancel approval requests for reevaluation",
+    });
+    return this.afterPersistence(persisted, () => {
+      cancelled.forEach((request) =>
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId: params.tenantId,
+            moduleName: "tenant-partner",
+            actionName: "booking.approval_request.cancelled_by_re_evaluation",
+            resourceType: "tenant_approval_request",
+            resourceId: request.approvalRequestId,
+            newValuesSummary: {
+              bookingId: request.bookingId,
+              orderId: request.orderId,
+              evaluationId: request.evaluationId,
+            },
+          },
+          params.requestId,
+        ),
+      );
+      return cancelled.map((request) => this.cloneApprovalRequest(request));
+    });
+  }
+
+  async approveApprovalRequest(input: {
+    tenantId: string;
+    approvalRequestId: string;
+    actorUserId: string;
+    actorRoleCode?: string | null;
+    command: ApproveTenantBookingApprovalRequestCommand;
+    requestId?: string;
+  }) {
+    return this.recordApprovalDecision({
+      tenantId: input.tenantId,
+      approvalRequestId: input.approvalRequestId,
+      actorUserId: input.actorUserId,
+      actorRoleCode: input.actorRoleCode ?? null,
+      decision: "approve",
+      reasonCode: null,
+      reasonNote: this.normalizeNullableText(input.command.reasonNote),
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    });
+  }
+
+  async rejectApprovalRequest(input: {
+    tenantId: string;
+    approvalRequestId: string;
+    actorUserId: string;
+    actorRoleCode?: string | null;
+    command: RejectTenantBookingApprovalRequestCommand;
+    requestId?: string;
+  }) {
+    return this.recordApprovalDecision({
+      tenantId: input.tenantId,
+      approvalRequestId: input.approvalRequestId,
+      actorUserId: input.actorUserId,
+      actorRoleCode: input.actorRoleCode ?? null,
+      decision: "reject",
+      reasonCode: this.requireNonBlank(input.command.reasonCode, "reasonCode"),
+      reasonNote: this.normalizeNullableText(input.command.reasonNote),
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    });
+  }
+
+  async escalateApprovalRequest(input: {
+    tenantId: string;
+    approvalRequestId: string;
+    actorUserId: string;
+    actorRoleCode?: string | null;
+    command: EscalateTenantBookingApprovalRequestCommand;
+    requestId?: string;
+  }) {
+    const actor = this.findActiveTenantUser(input.tenantId, input.actorUserId);
+    const actorRoleCode = input.actorRoleCode ?? actor?.roleCode ?? null;
+    if (actorRoleCode !== "tenant_admin") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "APPROVAL_NOT_AUTHORIZED",
+        "Only tenant_admin can escalate approval requests.",
+        {
+          approvalRequestId: input.approvalRequestId,
+          actorUserId: input.actorUserId,
+        },
+      );
+    }
+    return this.escalateApprovalRequestInternal({
+      tenantId: input.tenantId,
+      approvalRequestId: input.approvalRequestId,
+      actorUserId: input.actorUserId,
+      reasonNote: this.normalizeNullableText(input.command.reasonNote),
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    });
+  }
+
+  async nudgeOpsApprovalRequest(
+    approvalRequestId: string,
+    command: NudgeOpsApprovalRequestCommand,
+    identity: IdentityContext | null,
+    requestId?: string,
+  ) {
+    const actor = this.requireOpsApprovalQueueIdentity(identity);
+    const request = this.requirePendingApprovalRequestById(approvalRequestId);
+    this.recordTenantAudit(
+      {
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        tenantId: request.tenantId,
+        moduleName: "tenant-partner",
+        actionName: OPS_APPROVAL_REQUEST_NUDGE_ACTION,
+        resourceType: "tenant_approval_request",
+        resourceId: request.approvalRequestId,
+        newValuesSummary: {
+          bookingId: request.bookingId,
+          orderId: request.orderId,
+          reasonNote: this.normalizeNullableText(command.reasonNote),
+        },
+      },
+      requestId,
+    );
+    return this.buildOpsPendingApprovalRequestRecord(request);
+  }
+
+  async acknowledgeOpsApprovalRequestBreach(
+    approvalRequestId: string,
+    command: AcknowledgeOpsApprovalRequestBreachCommand,
+    identity: IdentityContext | null,
+    requestId?: string,
+  ) {
+    const actor = this.requireOpsApprovalQueueIdentity(identity);
+    const request = this.requirePendingApprovalRequestById(approvalRequestId);
+    this.recordTenantAudit(
+      {
+        actorId: actor.actorId,
+        actorType: actor.actorType,
+        tenantId: request.tenantId,
+        moduleName: "tenant-partner",
+        actionName: OPS_APPROVAL_REQUEST_SLA_ACK_ACTION,
+        resourceType: "tenant_approval_request",
+        resourceId: request.approvalRequestId,
+        newValuesSummary: {
+          bookingId: request.bookingId,
+          orderId: request.orderId,
+          reasonNote: this.normalizeNullableText(command.reasonNote),
+        },
+      },
+      requestId,
+    );
+    return this.buildOpsPendingApprovalRequestRecord(request);
+  }
+
+  summarizeCostCenterCoverage(
+    tenantId: string,
+    requestId?: string,
+  ): TenantCostCenterCoverageReport {
+    const generatedAt = new Date().toISOString();
+    const tenantOrders = this.orderFeedProvider().filter(
+      (order) =>
+        order.tenantId === tenantId &&
+        order.serviceBucket === "business_dispatch" &&
+        this.normalizeNullableText(order.costCenter) !== null,
+    );
+    const directory = this.costCenters.filter(
+      (candidate) => candidate.tenantId === tenantId,
+    );
+    const directoryByCode = new Map(
+      directory.map((costCenter) => [costCenter.code, costCenter]),
+    );
+    const unresolvedSamples = new Map<string, TenantCostCenterCoverageSample>();
+    let resolvedCount = 0;
+    let unresolvedCount = 0;
+    let disabledHits = 0;
+
+    for (const order of tenantOrders) {
+      const rawCostCenter = this.normalizeNullableText(order.costCenter);
+      if (rawCostCenter === null) {
+        continue;
+      }
+
+      const normalizedCode = rawCostCenter.toUpperCase();
+      const matched = directoryByCode.get(normalizedCode) ?? null;
+
+      if (matched) {
+        if (matched.activeFlag) {
+          resolvedCount += 1;
+        } else {
+          unresolvedCount += 1;
+          disabledHits += 1;
+          this.recordCoverageSample(
+            unresolvedSamples,
+            rawCostCenter,
+            matched.code,
+          );
+        }
+        continue;
+      }
+
+      unresolvedCount += 1;
+      this.recordCoverageSample(
+        unresolvedSamples,
+        rawCostCenter,
+        this.suggestCoverageCostCenter(rawCostCenter, directory),
+      );
+    }
+
+    const report: TenantCostCenterCoverageReport = {
+      tenantId,
+      generatedAt,
+      totalBookings: tenantOrders.length,
+      resolvedCount,
+      unresolvedCount,
+      disabledHits,
+      unresolvedSamples: Array.from(unresolvedSamples.values()).sort(
+        (left, right) =>
+          right.occurrences - left.occurrences ||
+          left.rawCostCenter.localeCompare(right.rawCostCenter),
+      ),
+    };
+
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "list_cost_center_coverage",
+        resourceType: "tenant_cost_center_coverage_report",
+        resourceId: tenantId,
+        newValuesSummary: {
+          totalBookings: report.totalBookings,
+          resolvedCount: report.resolvedCount,
+          unresolvedCount: report.unresolvedCount,
+          disabledHits: report.disabledHits,
+        },
+      },
+      requestId,
+    );
+
+    return report;
+  }
+
+  upsertCostCenter(
+    tenantId: string,
+    command: UpsertTenantCostCenterCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.code, "code");
+    this.assertNonBlank(command.name, "name");
+
+    const code = this.normalizeCostCenterCode(command.code);
+    const existing = this.costCenters.find(
+      (candidate) => candidate.tenantId === tenantId && candidate.code === code,
+    );
+
+    const hasOwnerUserId = Object.prototype.hasOwnProperty.call(
+      command,
+      "ownerUserId",
+    );
+    const hasOwnerName = Object.prototype.hasOwnProperty.call(
+      command,
+      "ownerName",
+    );
+    const normalizedOwnerUserId = hasOwnerUserId
+      ? this.normalizeNullableText(command.ownerUserId)
+      : (existing?.ownerUserId ?? null);
+    const ownerUser =
+      normalizedOwnerUserId === null
+        ? null
+        : this.requireTenantUser(tenantId, normalizedOwnerUserId);
+    const ownerName = hasOwnerName
+      ? this.normalizeNullableText(command.ownerName)
+      : hasOwnerUserId
+        ? (ownerUser?.displayName ?? null)
+        : (existing?.ownerName ?? null);
+
+    const now = new Date().toISOString();
+    const activeFlag = command.activeFlag ?? existing?.activeFlag ?? true;
+    const disabledAt = activeFlag ? null : (existing?.disabledAt ?? now);
+    const disabledReason = activeFlag
+      ? null
+      : (existing?.disabledReason ?? "disabled_via_upsert");
+
+    const costCenter: TenantCostCenterRecord = existing
+      ? {
+          ...existing,
+          code,
+          name: command.name.trim(),
+          description: this.normalizeNullableText(
+            command.description ?? existing.description,
+          ),
+          ownerUserId: normalizedOwnerUserId,
+          ownerName,
+          activeFlag,
+          disabledAt,
+          disabledReason,
+          updatedAt: now,
+        }
+      : {
+          tenantId,
+          code,
+          name: command.name.trim(),
+          description: this.normalizeNullableText(command.description),
+          ownerUserId: normalizedOwnerUserId,
+          ownerName,
+          activeFlag,
+          disabledAt,
+          disabledReason,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+    this.costCenters = [
+      this.cloneCostCenter(costCenter),
+      ...this.costCenters.filter(
+        (candidate) =>
+          !(
+            candidate.tenantId === tenantId &&
+            candidate.code === costCenter.code
+          ),
+      ),
+    ];
+    this.persistChanges(
+      {
+        costCenters: [this.cloneCostCenter(costCenter)],
+      },
+      "upsert_cost_center",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "upsert_cost_center",
+        resourceType: "tenant_cost_center",
+        resourceId: costCenter.code,
+        newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
+      },
+      requestId,
+    );
+
+    return this.cloneCostCenter(costCenter);
+  }
+
+  disableCostCenter(
+    tenantId: string,
+    command: DisableTenantCostCenterCommand,
+    requestId?: string,
+  ) {
+    this.assertNonBlank(command.code, "code");
+    const existing = this.getCostCenter(tenantId, command.code);
+    const now = new Date().toISOString();
+    const costCenter: TenantCostCenterRecord = {
+      ...existing,
+      activeFlag: false,
+      disabledAt: now,
+      disabledReason:
+        this.normalizeNullableText(command.reason) ??
+        "disabled_by_tenant_admin",
+      updatedAt: now,
+    };
+
+    this.costCenters = [
+      this.cloneCostCenter(costCenter),
+      ...this.costCenters.filter(
+        (candidate) =>
+          !(
+            candidate.tenantId === tenantId &&
+            candidate.code === costCenter.code
+          ),
+      ),
+    ];
+    this.persistChanges(
+      {
+        costCenters: [this.cloneCostCenter(costCenter)],
+      },
+      "disable_cost_center",
+    );
+    this.recordTenantAudit(
+      {
+        actorId: null,
+        actorType: "tenant_admin",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "disable_cost_center",
+        resourceType: "tenant_cost_center",
+        resourceId: costCenter.code,
+        newValuesSummary: this.buildCostCenterAuditSummary(costCenter),
+      },
+      requestId,
+    );
+
+    return this.cloneCostCenter(costCenter);
+  }
+
+  validateBookingCostCenter(
+    tenantId: string,
+    rawCode: string | null | undefined,
+  ): { value: string | null; matchedDirectory: boolean } {
+    const trimmed = this.normalizeNullableText(rawCode);
+    if (trimmed === null) {
+      return { value: null, matchedDirectory: false };
+    }
+    const tenantDirectory = this.costCenters.filter(
+      (candidate) => candidate.tenantId === tenantId,
+    );
+    // Grandfather tenants that have not yet seeded a cost-center directory:
+    // booking continues to accept the legacy free-text value so existing flows
+    // do not break before the tenant_admin onboards cost centers.
+    if (tenantDirectory.length === 0) {
+      return { value: trimmed, matchedDirectory: false };
+    }
+    const normalized = trimmed.toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9-]*$/.test(normalized)) {
+      this.recordCostCenterValidationRejectedAudit(
+        tenantId,
+        "BOOKING_COST_CENTER_INVALID",
+        {
+          costCenter: trimmed,
+        },
+      );
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BOOKING_COST_CENTER_INVALID",
+        "costCenter must reference a tenant cost-center code (uppercase letters, numbers, or hyphens).",
+        {
+          costCenter: trimmed,
+        },
+      );
+    }
+    const match = tenantDirectory.find(
+      (candidate) => candidate.code === normalized,
+    );
+    if (!match) {
+      this.recordCostCenterValidationRejectedAudit(
+        tenantId,
+        "BOOKING_COST_CENTER_UNKNOWN",
+        {
+          costCenter: trimmed,
+          normalized,
+        },
+      );
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BOOKING_COST_CENTER_UNKNOWN",
+        "costCenter does not match any tenant cost-center directory entry.",
+        {
+          costCenter: trimmed,
+          normalized,
+        },
+      );
+    }
+    if (!match.activeFlag) {
+      this.recordCostCenterValidationRejectedAudit(
+        tenantId,
+        "BOOKING_COST_CENTER_DISABLED",
+        {
+          costCenter: normalized,
+        },
+      );
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "BOOKING_COST_CENTER_DISABLED",
+        "costCenter references a disabled tenant cost-center.",
+        {
+          costCenter: normalized,
+        },
+      );
+    }
+    return { value: normalized, matchedDirectory: true };
+  }
+
   listTenantUsers(tenantId: string) {
     return this.userRoles
       .filter((userRole) => userRole.tenantId === tenantId)
@@ -1178,6 +2730,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
     const userRole = this.userRoles.find(
       (candidate) => candidate.email === normalizedEmail,
+    );
+    return userRole ? this.cloneUserRole(userRole) : null;
+  }
+
+  findTenantUser(tenantId: string, userId: string) {
+    const userRole = this.userRoles.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.userId === userId,
     );
     return userRole ? this.cloneUserRole(userRole) : null;
   }
@@ -2509,6 +4069,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       displayName: command.displayName.trim(),
       roleCode: command.roleCode.trim(),
       status: "invited",
+      approvalNotificationOptOut: false,
       invitedAt: now,
       updatedAt: now,
     };
@@ -2549,6 +4110,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const userRole = this.requireTenantUser(tenantId, userId);
     userRole.roleCode = command.roleCode.trim();
     userRole.status = command.status ?? userRole.status;
+    userRole.approvalNotificationOptOut =
+      command.approvalNotificationOptOut ?? userRole.approvalNotificationOptOut;
     userRole.updatedAt = new Date().toISOString();
 
     this.persistChanges(
@@ -3303,6 +4866,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
       this.auditNotificationService.recordNotification({
         tenantId: endpoint.tenantId,
+        recipientUserId: null,
         channel: "ops_notice",
         title: "Tenant webhook disabled after repeated delivery failures",
         message: [
@@ -3909,6 +5473,22 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private buildCostCenterAuditSummary(costCenter: TenantCostCenterRecord) {
+    return {
+      tenantId: costCenter.tenantId,
+      code: costCenter.code,
+      name: costCenter.name,
+      description: costCenter.description,
+      ownerUserId: costCenter.ownerUserId,
+      ownerName: costCenter.ownerName,
+      activeFlag: costCenter.activeFlag,
+      disabledAt: costCenter.disabledAt,
+      disabledReason: costCenter.disabledReason,
+      createdAt: costCenter.createdAt,
+      updatedAt: costCenter.updatedAt,
+    };
+  }
+
   private buildTenantUserAuditSummary(userRole: TenantUserRoleRecord) {
     return {
       userId: userRole.userId,
@@ -3917,6 +5497,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       displayName: maskName(userRole.displayName),
       roleCode: userRole.roleCode,
       status: userRole.status,
+      approvalNotificationOptOut: userRole.approvalNotificationOptOut,
       invitedAt: userRole.invitedAt,
       updatedAt: userRole.updatedAt,
     };
@@ -3953,6 +5534,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ...address,
       qualityIssues: [...(address.qualityIssues ?? [])],
       tags: [...address.tags],
+    };
+  }
+
+  private cloneCostCenter(
+    costCenter: TenantCostCenterRecord,
+  ): TenantCostCenterRecord {
+    return {
+      ...costCenter,
     };
   }
 
@@ -4562,6 +6151,736 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return endpoint;
   }
 
+  private requireApprovalRequest(tenantId: string, approvalRequestId: string) {
+    const request = this.approvalRequests.find(
+      (candidate) =>
+        candidate.tenantId === tenantId &&
+        candidate.approvalRequestId === approvalRequestId,
+    );
+    if (!request) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "APPROVAL_REQUEST_NOT_FOUND",
+        "The approval request could not be found.",
+        {
+          approvalRequestId,
+        },
+      );
+    }
+    return request;
+  }
+
+  private requirePendingApprovalRequest(
+    tenantId: string,
+    approvalRequestId: string,
+  ) {
+    const request = this.requireApprovalRequest(tenantId, approvalRequestId);
+    if (request.status !== "pending") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "APPROVAL_REQUEST_NOT_PENDING",
+        "The approval request is no longer pending.",
+        {
+          approvalRequestId,
+          status: request.status,
+        },
+      );
+    }
+    return request;
+  }
+
+  private requirePendingApprovalRequestById(approvalRequestId: string) {
+    const request = this.approvalRequests.find(
+      (candidate) => candidate.approvalRequestId === approvalRequestId,
+    );
+    if (!request) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "APPROVAL_REQUEST_NOT_FOUND",
+        "The approval request could not be found.",
+        {
+          approvalRequestId,
+        },
+      );
+    }
+    if (request.status !== "pending") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "APPROVAL_REQUEST_NOT_PENDING",
+        "The approval request is no longer pending.",
+        {
+          approvalRequestId,
+          status: request.status,
+        },
+      );
+    }
+    return request;
+  }
+
+  private requireOpsApprovalQueueIdentity(identity: IdentityContext | null) {
+    const actorType = identity?.actorType;
+    if (
+      !identity?.actorId ||
+      !actorType ||
+      !OPS_APPROVAL_QUEUE_ACTOR_TYPES.has(
+        actorType as AuditLogRecord["actorType"],
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "APPROVAL_NOT_AUTHORIZED",
+        "The caller is not authorized to manage ops approval requests.",
+      );
+    }
+    return {
+      actorId: identity.actorId,
+      actorType: actorType as Extract<
+        AuditLogRecord["actorType"],
+        "ops_user" | "platform_admin"
+      >,
+    };
+  }
+
+  private buildOpsPendingApprovalRequestRecord(
+    request: TenantBookingApprovalRequestRecord,
+  ): OpsPendingApprovalRequestRecord {
+    const auditLogs = this.auditNotificationService
+      .getAuditLogsSnapshot()
+      .filter(
+        (auditLog) =>
+          auditLog.moduleName === "tenant-partner" &&
+          auditLog.resourceType === "tenant_approval_request" &&
+          auditLog.resourceId === request.approvalRequestId,
+      );
+    const lastNudge = [...auditLogs]
+      .filter(
+        (auditLog) => auditLog.actionName === OPS_APPROVAL_REQUEST_NUDGE_ACTION,
+      )
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+    const lastAck = [...auditLogs]
+      .filter(
+        (auditLog) =>
+          auditLog.actionName === OPS_APPROVAL_REQUEST_SLA_ACK_ACTION,
+      )
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+
+    return {
+      ...this.cloneApprovalRequest(request),
+      slaBreached: Date.parse(request.timeoutAt) <= Date.now(),
+      lastNudgedAt: lastNudge?.createdAt ?? null,
+      lastNudgedByActorId: lastNudge?.actorId ?? null,
+      lastNudgedByActorType: (lastNudge?.actorType ??
+        null) as OpsPendingApprovalRequestRecord["lastNudgedByActorType"],
+      opsSlaAcknowledgedAt: lastAck?.createdAt ?? null,
+      opsSlaAcknowledgedByActorId: lastAck?.actorId ?? null,
+      opsSlaAcknowledgedByActorType: (lastAck?.actorType ??
+        null) as OpsPendingApprovalRequestRecord["opsSlaAcknowledgedByActorType"],
+    };
+  }
+
+  private replaceApprovalRequest(request: TenantBookingApprovalRequestRecord) {
+    this.approvalRequests = [
+      this.cloneApprovalRequest(request),
+      ...this.approvalRequests.filter(
+        (candidate) =>
+          candidate.approvalRequestId !== request.approvalRequestId,
+      ),
+    ];
+  }
+
+  private mergeApprovalRequestDecisions(
+    request: TenantBookingApprovalRequestRecord,
+    decisions: readonly TenantBookingApprovalDecisionRecord[],
+  ) {
+    const merged = new Map<string, TenantBookingApprovalDecisionRecord>();
+    for (const decision of request.decisions ?? []) {
+      merged.set(decision.decisionId, this.cloneApprovalDecision(decision));
+    }
+    for (const decision of decisions) {
+      merged.set(decision.decisionId, this.cloneApprovalDecision(decision));
+    }
+    return {
+      ...request,
+      decisions: [...merged.values()].sort((left, right) =>
+        left.decidedAt.localeCompare(right.decidedAt),
+      ),
+    };
+  }
+
+  private findActiveTenantUser(tenantId: string, userId: string) {
+    const normalizedUserId = userId.trim();
+    if (!normalizedUserId) {
+      return null;
+    }
+    const userRole = this.userRoles.find(
+      (candidate) =>
+        candidate.tenantId === tenantId &&
+        candidate.userId === normalizedUserId &&
+        candidate.status === "active",
+    );
+    return userRole ? this.cloneUserRole(userRole) : null;
+  }
+
+  private listActiveTenantUsersByRole(tenantId: string, roleCode: string) {
+    return this.userRoles
+      .filter(
+        (candidate) =>
+          candidate.tenantId === tenantId &&
+          candidate.roleCode === roleCode &&
+          candidate.status === "active",
+      )
+      .map((userRole) => this.cloneUserRole(userRole));
+  }
+
+  private getActiveCostCenterOwnerUserId(
+    tenantId: string,
+    costCenterCode: string,
+  ) {
+    const costCenter = this.costCenters.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.code === costCenterCode,
+    );
+    if (!costCenter?.ownerUserId) {
+      return null;
+    }
+    return this.findActiveTenantUser(tenantId, costCenter.ownerUserId)
+      ? costCenter.ownerUserId
+      : null;
+  }
+
+  private resolveApprovalNotificationRecipients(
+    tenantId: string,
+    userIds: readonly string[],
+  ): ApprovalNotificationRecipient[] {
+    const recipients = new Map<string, ApprovalNotificationRecipient>();
+
+    for (const userId of userIds) {
+      const user = this.findActiveTenantUser(tenantId, userId);
+      if (!user || recipients.has(user.userId)) {
+        continue;
+      }
+      recipients.set(user.userId, {
+        userId: user.userId,
+        email: user.email,
+        displayName: user.displayName,
+        approvalNotificationOptOut: user.approvalNotificationOptOut,
+      });
+    }
+
+    return [...recipients.values()];
+  }
+
+  private toApprovalNotificationEventType(
+    templateKey: ApprovalNotificationTemplateKey,
+  ) {
+    switch (templateKey) {
+      case "new_request":
+        return "booking.approval_request.created";
+      case "approaching_timeout":
+        return "booking.approval_request.approaching_timeout";
+      case "escalated":
+        return "booking.approval_request.timeout_escalated";
+      case "approved":
+        return "booking.approval_request.approved";
+      case "rejected":
+        return "booking.approval_request.rejected";
+    }
+  }
+
+  private startApprovalNotificationPolling() {
+    if (this.approvalNotificationPollTimer) {
+      return;
+    }
+    this.approvalNotificationPollTimer = setInterval(() => {
+      void this.pollPendingApprovalTimeoutNotifications();
+    }, APPROVAL_NOTIFICATION_POLL_INTERVAL_MS);
+    this.approvalNotificationPollTimer.unref?.();
+  }
+
+  private async pollPendingApprovalTimeoutNotifications() {
+    if (this.approvalNotificationPollInFlight) {
+      return;
+    }
+
+    this.approvalNotificationPollInFlight = true;
+    try {
+      const now = Date.now();
+      const eligibleRequests = this.approvalRequests.filter((request) => {
+        if (request.status !== "pending" || request.escalatedAt) {
+          return false;
+        }
+
+        const timeoutAtMs = Date.parse(request.timeoutAt);
+        if (!Number.isFinite(timeoutAtMs) || timeoutAtMs <= now) {
+          return false;
+        }
+
+        return (
+          timeoutAtMs - APPROVAL_NOTIFICATION_TIMEOUT_LEAD_MS <= now &&
+          !this.auditNotificationService.hasApprovalNotificationDispatch(
+            request.approvalRequestId,
+            "approaching_timeout",
+          )
+        );
+      });
+
+      for (const request of eligibleRequests) {
+        await this.dispatchApprovalNotifications(
+          "approaching_timeout",
+          request,
+        );
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "unknown polling failure";
+      this.logger.error(
+        `Failed to poll pending approval timeout notifications: ${message}`,
+      );
+    } finally {
+      this.approvalNotificationPollInFlight = false;
+    }
+  }
+
+  private async dispatchApprovalNotifications(
+    templateKey: ApprovalNotificationTemplateKey,
+    request: TenantBookingApprovalRequestRecord,
+    options?: {
+      requestId?: string;
+      actorUserId?: string | null;
+      decidedAt?: string | null;
+      reasonCode?: string | null;
+      reasonNote?: string | null;
+      recipientUserIds?: readonly string[];
+    },
+  ) {
+    const recipientUserIds =
+      options?.recipientUserIds ?? request.resolvedApproverUserIds;
+    const recipients = this.resolveApprovalNotificationRecipients(
+      request.tenantId,
+      recipientUserIds,
+    );
+    const dispatchResult =
+      await this.auditNotificationService.dispatchApprovalNotification({
+        templateKey,
+        tenantId: request.tenantId,
+        approvalRequestId: request.approvalRequestId,
+        bookingId: request.bookingId,
+        orderId: request.orderId,
+        timeoutAt: request.timeoutAt,
+        recipients,
+        escalatedAt: request.escalatedAt ?? null,
+        decidedAt: options?.decidedAt ?? request.resolvedAt ?? null,
+        actorUserId: options?.actorUserId ?? null,
+        reasonCode: options?.reasonCode ?? null,
+        reasonNote: options?.reasonNote ?? null,
+        ...(options?.requestId ? { requestId: options.requestId } : {}),
+      });
+
+    if (dispatchResult.deduplicated) {
+      return dispatchResult;
+    }
+
+    await this.publishWebhookEvent(request.tenantId, {
+      eventType: this.toApprovalNotificationEventType(templateKey),
+      data: {
+        approvalRequestId: request.approvalRequestId,
+        bookingId: request.bookingId,
+        orderId: request.orderId,
+        status: request.status,
+        resolvedApproverUserIds: [...request.resolvedApproverUserIds],
+        timeoutAt: request.timeoutAt,
+        escalatedAt: request.escalatedAt,
+        resolvedAt: request.resolvedAt,
+        actorUserId: options?.actorUserId ?? null,
+        reasonCode: options?.reasonCode ?? null,
+        reasonNote: options?.reasonNote ?? null,
+      },
+      occurredAt:
+        request.resolvedAt ?? request.escalatedAt ?? new Date().toISOString(),
+    });
+
+    return dispatchResult;
+  }
+
+  private async escalateApprovalRequestInternal(input: {
+    tenantId: string;
+    approvalRequestId: string;
+    actorUserId: string;
+    reasonNote: string | null;
+    requestId?: string;
+  }) {
+    const request = this.requirePendingApprovalRequest(
+      input.tenantId,
+      input.approvalRequestId,
+    );
+    const escalationTarget = request.escalationTarget ?? {
+      kind: "tenant_admin" as const,
+      displayName: "Tenant Admin",
+    };
+    const resolvedApproverUserIds = resolveApprovalApproverUserIds(
+      {
+        approvers: [escalationTarget],
+        escalationTarget,
+        bookingCostCenterCode:
+          request.evaluationSnapshot.inputSnapshot?.costCenterCode ?? null,
+      },
+      {
+        hasUser: (userId) =>
+          this.findActiveTenantUser(input.tenantId, userId) !== null,
+        listUserIdsByRole: (roleCode) =>
+          this.listActiveTenantUsersByRole(input.tenantId, roleCode).map(
+            (userRole) => userRole.userId,
+          ),
+        getCostCenterOwnerUserId: (costCenterCode) =>
+          this.getActiveCostCenterOwnerUserId(input.tenantId, costCenterCode),
+      },
+    ).resolvedApproverUserIds;
+    const now = new Date().toISOString();
+    // P1 manual escalation rotates approvers to the escalation target but keeps
+    // the request actionable so the booking is not stranded in approvalState=pending
+    // with an empty approvalRequestIds. Auto-terminal escalation is deferred to P2.
+    const escalated: TenantBookingApprovalRequestRecord = {
+      ...request,
+      status: "pending",
+      previousApprovers: request.approvers.map((approver) =>
+        this.clonePrincipalRef(approver),
+      ),
+      approvers: [this.clonePrincipalRef(escalationTarget)],
+      resolvedApproverUserIds,
+      decisions: [],
+      escalatedAt: now,
+      resolvedAt: null,
+    };
+
+    this.replaceApprovalRequest(escalated);
+    await this.persistApprovalWorkflow({
+      approvalRequests: [escalated],
+      context: "escalate approval request",
+    });
+    this.recordTenantAudit(
+      {
+        actorId: input.actorUserId,
+        actorType: "tenant_admin",
+        tenantId: input.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "booking.approval_request.timeout_escalated",
+        resourceType: "booking",
+        resourceId: escalated.bookingId,
+        newValuesSummary: {
+          approvalRequestId: input.approvalRequestId,
+          bookingId: escalated.bookingId,
+          orderId: escalated.orderId,
+          previousApprovers: escalated.previousApprovers,
+          escalationTarget: escalated.escalationTarget,
+          reasonNote: input.reasonNote,
+        },
+      },
+      input.requestId,
+    );
+    await this.dispatchApprovalNotifications("escalated", escalated, {
+      actorUserId: input.actorUserId,
+      reasonNote: input.reasonNote,
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    });
+    return this.cloneApprovalRequest(escalated);
+  }
+
+  private async recordApprovalDecision(input: {
+    tenantId: string;
+    approvalRequestId: string;
+    actorUserId: string;
+    actorRoleCode: string | null;
+    decision: "approve" | "reject";
+    reasonCode: string | null;
+    reasonNote: string | null;
+    requestId?: string;
+  }) {
+    const request = this.requirePendingApprovalRequest(
+      input.tenantId,
+      input.approvalRequestId,
+    );
+    if (!request.resolvedApproverUserIds.includes(input.actorUserId)) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "APPROVAL_NOT_AUTHORIZED",
+        "The caller is not authorized to act on this approval request.",
+        {
+          approvalRequestId: input.approvalRequestId,
+          actorUserId: input.actorUserId,
+        },
+      );
+    }
+    if (hasActorDecidedApprovalRequest(request.decisions, input.actorUserId)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "APPROVAL_DECISION_ALREADY_RECORDED",
+        "The caller has already decided this approval request.",
+        {
+          approvalRequestId: input.approvalRequestId,
+          actorUserId: input.actorUserId,
+        },
+      );
+    }
+
+    const actor =
+      this.findActiveTenantUser(input.tenantId, input.actorUserId) ?? null;
+    const decision: TenantBookingApprovalDecisionRecord = {
+      decisionId: `approval-decision-${randomUUID()}`,
+      approvalRequestId: request.approvalRequestId,
+      actorUserId: input.actorUserId,
+      actorRoleCode: input.actorRoleCode ?? actor?.roleCode ?? null,
+      decision: input.decision,
+      reasonCode: input.reasonCode,
+      reasonNote: input.reasonNote,
+      decidedAt: new Date().toISOString(),
+    };
+    const nextRequest = this.mergeApprovalRequestDecisions(
+      {
+        ...request,
+        decisions: [...request.decisions, this.cloneApprovalDecision(decision)],
+      },
+      [],
+    );
+    const nextStatus = computeApprovalRequestStatus({
+      approvalMode: request.approvalMode,
+      resolvedApproverUserIds: request.resolvedApproverUserIds,
+      decisions: nextRequest.decisions,
+    });
+    const persistedRequest: TenantBookingApprovalRequestRecord = {
+      ...nextRequest,
+      status: nextStatus.status,
+      resolvedAt: nextStatus.resolved ? decision.decidedAt : null,
+    };
+
+    this.approvalDecisions = [
+      this.cloneApprovalDecision(decision),
+      ...this.approvalDecisions.filter(
+        (candidate) => candidate.decisionId !== decision.decisionId,
+      ),
+    ];
+    this.replaceApprovalRequest(persistedRequest);
+    await this.persistApprovalWorkflow({
+      approvalRequests: [persistedRequest],
+      approvalDecisions: [decision],
+      context: "record approval decision",
+    });
+
+    if (persistedRequest.status !== "pending") {
+      this.recordTenantAudit(
+        {
+          actorId: input.actorUserId,
+          actorType: "tenant_admin",
+          tenantId: input.tenantId,
+          moduleName: "tenant-partner",
+          actionName:
+            persistedRequest.status === "approved"
+              ? "booking.approval_request.approved"
+              : "booking.approval_request.rejected",
+          resourceType: "booking",
+          resourceId: persistedRequest.bookingId,
+          newValuesSummary: {
+            approvalRequestId: input.approvalRequestId,
+            bookingId: persistedRequest.bookingId,
+            orderId: persistedRequest.orderId,
+            decision: input.decision,
+            reasonCode: input.reasonCode,
+          },
+        },
+        input.requestId,
+      );
+      await this.dispatchApprovalNotifications(
+        persistedRequest.status === "approved" ? "approved" : "rejected",
+        persistedRequest,
+        {
+          actorUserId: input.actorUserId,
+          decidedAt: decision.decidedAt,
+          reasonCode: input.reasonCode,
+          reasonNote: input.reasonNote,
+          ...(input.requestId ? { requestId: input.requestId } : {}),
+        },
+      );
+    }
+
+    return this.cloneApprovalRequest(persistedRequest);
+  }
+
+  private recordApprovalFallbackAudits(
+    tenantId: string,
+    bookingId: string,
+    fallbackRecords: readonly ApprovalApproverFallbackRecord[],
+    requestId?: string,
+  ) {
+    fallbackRecords.forEach((record) =>
+      this.recordTenantAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "tenant-partner",
+          actionName: "approver_fallback_used",
+          resourceType: "booking",
+          resourceId: bookingId,
+          newValuesSummary: {
+            descriptor: record.descriptor,
+            fallbackDescriptor: record.fallbackDescriptor,
+            reasonCode: record.reasonCode,
+          },
+        },
+        requestId,
+      ),
+    );
+  }
+
+  private persistApprovalWorkflow(params: {
+    tx?: TenantPartnerQueryExecutor | null;
+    approvalRequests?: readonly TenantBookingApprovalRequestRecord[];
+    approvalDecisions?: readonly TenantBookingApprovalDecisionRecord[];
+    context: string;
+  }): MaybePromise<void> {
+    if (!this.tenantPartnerRepository) {
+      return;
+    }
+
+    const approvalRequests = (params.approvalRequests ?? []).map((request) =>
+      this.cloneApprovalRequest(request),
+    );
+    const approvalDecisions = (params.approvalDecisions ?? []).map((decision) =>
+      this.cloneApprovalDecision(decision),
+    );
+
+    try {
+      if (params.tx) {
+        return this.tenantPartnerRepository.persistApprovalWorkflow(params.tx, {
+          approvalRequests,
+          approvalDecisions,
+        });
+      }
+
+      return this.tenantPartnerRepository.persistChanges({
+        approvalRequests,
+        approvalDecisions,
+      });
+    } catch (error) {
+      this.tenantPartnerRepository.reportPersistenceFailure(
+        error,
+        params.context,
+      );
+      throw error;
+    }
+  }
+
+  private afterPersistence<T>(
+    persisted: MaybePromise<void>,
+    onSuccess: () => T,
+  ): MaybePromise<T> {
+    if (persisted instanceof Promise) {
+      return persisted.then(() => onSuccess());
+    }
+    return onSuccess();
+  }
+
+  private clonePrincipalRef(
+    principal: TenantBookingApprovalRequestRecord["approvers"][number],
+  ) {
+    return { ...principal };
+  }
+
+  private cloneApprovalDecision(
+    decision: TenantBookingApprovalDecisionRecord,
+  ): TenantBookingApprovalDecisionRecord {
+    return {
+      ...decision,
+      reasonCode: decision.reasonCode ?? null,
+      reasonNote: decision.reasonNote ?? null,
+    };
+  }
+
+  private cloneApprovalRequest(
+    request: TenantBookingApprovalRequestRecord,
+  ): TenantBookingApprovalRequestRecord {
+    return {
+      ...request,
+      approvers: request.approvers.map((approver) =>
+        this.clonePrincipalRef(approver),
+      ),
+      resolvedApproverUserIds: [...request.resolvedApproverUserIds],
+      previousApprovers: request.previousApprovers.map((approver) =>
+        this.clonePrincipalRef(approver),
+      ),
+      decisions: request.decisions.map((decision) =>
+        this.cloneApprovalDecision(decision),
+      ),
+      evaluationSnapshot: this.cloneTenantApprovalEvaluationResult(
+        request.evaluationSnapshot,
+      ),
+      escalationTarget: request.escalationTarget
+        ? this.clonePrincipalRef(request.escalationTarget)
+        : null,
+    };
+  }
+
+  private cloneTenantApprovalEvaluationResult(
+    result: TenantApprovalEvaluationResult,
+  ): TenantApprovalEvaluationResult {
+    return {
+      ...result,
+      matchedRules: result.matchedRules.map((rule) => ({
+        ...rule,
+        approvers: rule.approvers.map((approver) =>
+          this.clonePrincipalRef(approver),
+        ),
+        matchedConditions: rule.matchedConditions.map((condition) => ({
+          ...condition,
+          ...(Array.isArray(condition.values)
+            ? { values: [...condition.values] }
+            : {}),
+          ...(Array.isArray(condition.value)
+            ? { value: [...condition.value] }
+            : {}),
+        })),
+      })),
+      ...(result.subject ? { subject: { ...result.subject } } : {}),
+      ...(result.inputSnapshot
+        ? { inputSnapshot: { ...result.inputSnapshot } }
+        : {}),
+      ...(result.quotaImpacts
+        ? { quotaImpacts: result.quotaImpacts.map((impact) => ({ ...impact })) }
+        : {}),
+      ...(result.outcome
+        ? {
+            outcome: {
+              ...result.outcome,
+              warnings: result.outcome.warnings.map((warning) => ({
+                ...warning,
+              })),
+              reasonCodes: [...result.outcome.reasonCodes],
+            },
+          }
+        : {}),
+      ...(result.approvalPlan === null
+        ? { approvalPlan: null }
+        : result.approvalPlan
+          ? {
+              approvalPlan: {
+                ...result.approvalPlan,
+                approvers: result.approvalPlan.approvers.map((approver) =>
+                  this.clonePrincipalRef(approver),
+                ),
+                escalationTarget: result.approvalPlan.escalationTarget
+                  ? this.clonePrincipalRef(result.approvalPlan.escalationTarget)
+                  : null,
+              },
+            }
+          : {}),
+      ...(result.auditSummary
+        ? { auditSummary: { ...result.auditSummary } }
+        : {}),
+      ...(result.warnings
+        ? { warnings: result.warnings.map((warning) => ({ ...warning })) }
+        : {}),
+    };
+  }
+
   private recordTenantAudit(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
@@ -4578,6 +6897,164 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       auditLogInput.requestId = requestId;
     }
     this.auditNotificationService.recordAuditLog(auditLogInput);
+  }
+
+  getTenantGovernanceMetricsSnapshot(
+    referenceDate = new Date(),
+  ): TenantGovernanceMetricsSnapshot {
+    const referenceTimeMs = referenceDate.getTime();
+    const auditLogs = this.auditNotificationService
+      .getAuditLogsSnapshot()
+      .filter(
+        (auditLog) =>
+          auditLog.moduleName === "tenant-partner" &&
+          typeof auditLog.tenantId === "string" &&
+          auditLog.tenantId.length > 0,
+      );
+    const tenantIds = new Set<string>([
+      ...auditLogs
+        .map((auditLog) => auditLog.tenantId)
+        .filter((tenantId): tenantId is string => Boolean(tenantId)),
+      ...this.approvalRequests.map((request) => request.tenantId),
+      ...this.costCenters.map((costCenter) => costCenter.tenantId),
+      ...Array.from(this.quotaPolicies.values()).map(
+        (policy) => policy.tenantId,
+      ),
+    ]);
+    const samples: TenantGovernanceMetricSample[] = [];
+
+    for (const tenantId of [...tenantIds].sort((left, right) =>
+      left.localeCompare(right),
+    )) {
+      const pendingApprovalAgesHours = this.approvalRequests
+        .filter(
+          (request) =>
+            request.tenantId === tenantId && request.status === "pending",
+        )
+        .map((request) =>
+          Math.max(
+            0,
+            (referenceTimeMs - Date.parse(request.createdAt)) /
+              (60 * 60 * 1000),
+          ),
+        );
+      const tenantAuditLogs = auditLogs.filter(
+        (auditLog) => auditLog.tenantId === tenantId,
+      );
+      const evaluatorLatenciesMs = tenantAuditLogs
+        .filter(
+          (auditLog) =>
+            auditLog.actionName === "booking.approval_rules.evaluated",
+        )
+        .map((auditLog) =>
+          this.readNumericSummaryValue(
+            auditLog.newValuesSummary,
+            "evaluationLatencyMs",
+          ),
+        )
+        .filter((value): value is number => value !== null);
+      const validationRejectCounts =
+        this.countCostCenterValidationRejectsByCode(tenantAuditLogs);
+      const quotaUsagePercent = this.computeQuotaPercentUsed(
+        this.getTenantQuotaSummary(tenantId).usage.remainingPercent,
+      );
+
+      samples.push(
+        this.buildTenantGovernanceMetricSample(
+          "approval.pending_count",
+          { tenant_id: tenantId },
+          pendingApprovalAgesHours.length,
+          "count",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "approval.pending_age_hours",
+          { tenant_id: tenantId, quantile: "p95" },
+          this.computePercentile(pendingApprovalAgesHours, 0.95),
+          "hours",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "approval.pending_age_hours",
+          { tenant_id: tenantId, quantile: "max" },
+          this.computePercentile(pendingApprovalAgesHours, 1),
+          "hours",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "quota.usage_percent",
+          { tenant_id: tenantId },
+          quotaUsagePercent,
+          "percent",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "quota.ledger_write_total",
+          { tenant_id: tenantId },
+          tenantAuditLogs.filter(
+            (auditLog) =>
+              auditLog.actionName === "tenant.quota_ledger.entry_added",
+          ).length,
+          "count",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "quota.ledger_write_per_second",
+          { tenant_id: tenantId },
+          this.countAuditEventsWithinWindow(
+            tenantAuditLogs,
+            "tenant.quota_ledger.entry_added",
+            FIVE_MINUTES_IN_MS,
+            referenceTimeMs,
+          ) /
+            (FIVE_MINUTES_IN_MS / 1000),
+          "count",
+        ),
+        this.buildTenantGovernanceMetricSample(
+          "quota.race_failure_total",
+          {
+            tenant_id: tenantId,
+            error_code: "QUOTA_INSUFFICIENT_AT_COMMIT",
+          },
+          tenantAuditLogs.filter(
+            (auditLog) =>
+              auditLog.actionName === "tenant.quota_reservation.blocked" &&
+              auditLog.newValuesSummary?.errorCode ===
+                "QUOTA_INSUFFICIENT_AT_COMMIT",
+          ).length,
+          "count",
+        ),
+      );
+
+      for (const [label, quantile] of [
+        ["p50", 0.5],
+        ["p95", 0.95],
+        ["p99", 0.99],
+      ] as const) {
+        samples.push(
+          this.buildTenantGovernanceMetricSample(
+            "approval.evaluator_latency_ms",
+            { tenant_id: tenantId, quantile: label },
+            this.computePercentile(evaluatorLatenciesMs, quantile),
+            "milliseconds",
+          ),
+        );
+      }
+
+      for (const [errorCode, count] of [
+        ...validationRejectCounts.entries(),
+      ].sort(([left], [right]) => left.localeCompare(right))) {
+        samples.push(
+          this.buildTenantGovernanceMetricSample(
+            "cost_center.validation_reject_total",
+            { tenant_id: tenantId, error_code: errorCode },
+            count,
+            "count",
+          ),
+        );
+      }
+    }
+
+    return {
+      generatedAt: referenceDate.toISOString(),
+      namespace: TENANT_GOVERNANCE_METRIC_NAMESPACE,
+      samples,
+    };
   }
 
   private recordPartnerIngressAttempt(
@@ -4711,6 +7188,1179 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       issues.push("duplicate_normalized_address");
     }
     return issues;
+  }
+
+  private normalizeCostCenterCode(value: string) {
+    const normalized = this.requireNonBlank(value, "code").toUpperCase();
+    if (!/^[A-Z0-9][A-Z0-9-]*$/.test(normalized)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "COST_CENTER_CODE_INVALID",
+        "code must use uppercase letters, numbers, or hyphens.",
+        {
+          code: value,
+        },
+      );
+    }
+    return normalized;
+  }
+
+  private cloneApprovalRule(
+    rule: TenantApprovalRuleRecord,
+  ): TenantApprovalRuleRecord {
+    return {
+      ...rule,
+      approvers: rule.approvers.map((approver) => ({ ...approver })),
+      escalationTarget: rule.escalationTarget
+        ? { ...rule.escalationTarget }
+        : null,
+      conditions: rule.conditions.map((condition) => ({
+        ...condition,
+        ...(Array.isArray(condition.values)
+          ? { values: [...condition.values] }
+          : {}),
+        ...(Array.isArray(condition.value)
+          ? { value: [...condition.value] }
+          : {}),
+      })),
+    };
+  }
+
+  private requireApprovalRule(tenantId: string, ruleId: string) {
+    const rule = this.approvalRules.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.ruleId === ruleId,
+    );
+    if (!rule) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "TENANT_APPROVAL_RULE_NOT_FOUND",
+        "The tenant approval rule could not be found.",
+        { ruleId },
+      );
+    }
+    return rule;
+  }
+
+  private bumpApprovalRuleVersion(tenantId: string) {
+    this.approvalRuleVersions.set(
+      tenantId,
+      (this.approvalRuleVersions.get(tenantId) ?? 0) + 1,
+    );
+  }
+
+  private getApprovalRuleVersionSnapshot(tenantId: string) {
+    return String(this.approvalRuleVersions.get(tenantId) ?? 0);
+  }
+
+  private buildApprovalRuleAuditSummary(rule: TenantApprovalRuleRecord) {
+    return {
+      ruleId: rule.ruleId,
+      ruleName: rule.ruleName ?? rule.name ?? rule.ruleId,
+      priority: rule.priority,
+      activeFlag: rule.activeFlag,
+      action: rule.action,
+      approvalMode: rule.approvalMode,
+      effectiveFrom: rule.effectiveFrom ?? null,
+      effectiveUntil: rule.effectiveUntil ?? null,
+      approverKinds: rule.approvers.map((approver) => approver.kind),
+      conditionFields: rule.conditions.map((condition) => condition.field),
+      timeoutHoursOverride: rule.timeoutHoursOverride ?? null,
+      fallbackPolicyOverride: rule.fallbackPolicyOverride ?? null,
+      escalationTargetKind: rule.escalationTarget?.kind ?? null,
+      ruleVersionSnapshot: this.getApprovalRuleVersionSnapshot(rule.tenantId),
+    };
+  }
+
+  private computeQuotaPercentUsed(remainingPercent: number | null) {
+    if (remainingPercent === null || Number.isNaN(remainingPercent)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(100, 100 - remainingPercent));
+  }
+
+  private requireQuotaPeriodKey(reservationWindowStart: string) {
+    try {
+      return toTenantQuotaPeriodKey(reservationWindowStart);
+    } catch {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_QUOTA_RESERVATION_WINDOW_START_INVALID",
+        "reservationWindowStart must be a valid ISO-8601 datetime.",
+        {
+          reservationWindowStart,
+        },
+      );
+    }
+  }
+
+  private normalizeQuotaAmountMinor(value: number | null | undefined) {
+    if (value == null) {
+      return 0;
+    }
+    if (!Number.isInteger(value) || value < 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_QUOTA_AMOUNT_MINOR_INVALID",
+        "estimatedAmountMinor must be a non-negative integer minor-unit amount.",
+        {
+          estimatedAmountMinor: value,
+        },
+      );
+    }
+
+    return value;
+  }
+
+  private normalizeQuotaLimit(limit: TenantQuotaLimit): TenantQuotaLimit {
+    const bookingCountLimit =
+      limit.bookingCountLimit == null
+        ? null
+        : Math.trunc(limit.bookingCountLimit);
+    const amountMinorLimit =
+      limit.amountMinorLimit == null
+        ? null
+        : Math.trunc(limit.amountMinorLimit);
+    if (bookingCountLimit !== null && bookingCountLimit < 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_QUOTA_BOOKING_COUNT_LIMIT_INVALID",
+        "bookingCountLimit must be a non-negative integer or null.",
+      );
+    }
+    if (amountMinorLimit !== null && amountMinorLimit < 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_QUOTA_AMOUNT_LIMIT_INVALID",
+        "amountMinorLimit must be a non-negative integer or null.",
+      );
+    }
+
+    return {
+      bookingCountLimit,
+      amountMinorLimit,
+      currency: this.normalizeQuotaCurrency(limit.currency),
+      enforcementMode: limit.enforcementMode,
+    };
+  }
+
+  private normalizeQuotaCurrency(currency: string | null | undefined) {
+    const normalized = this.requireNonBlank(
+      currency ?? "TWD",
+      "currency",
+    ).toUpperCase();
+    if (!/^[A-Z]{3}$/.test(normalized)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "TENANT_QUOTA_CURRENCY_INVALID",
+        "currency must be a 3-letter ISO code.",
+        {
+          currency,
+        },
+      );
+    }
+    return normalized;
+  }
+
+  private normalizeQuotaImpactQuery(
+    tenantId: string,
+    query: TenantBookingQuotaImpactQuery,
+  ) {
+    const reservationWindowStart = this.requireNonBlank(
+      query.reservationWindowStart ?? query.tripStartsAt ?? "",
+      "reservationWindowStart",
+    );
+    const periodKey = this.requireQuotaPeriodKey(reservationWindowStart);
+    const costCenterCode =
+      (query.costCenterCode ?? query.costCenter)
+        ? this.normalizeCostCenterCode(
+            query.costCenterCode ?? query.costCenter ?? "",
+          )
+        : null;
+    return {
+      bookingId: this.normalizeNullableText(query.bookingId),
+      costCenterCode,
+      estimatedAmountMinor: this.normalizeQuotaAmountMinor(
+        query.estimatedAmountMinor ?? query.amountMinor,
+      ),
+      currency: this.normalizeQuotaCurrency(query.currency ?? "TWD"),
+      reservationWindowStart,
+      periodKey,
+    };
+  }
+
+  private buildQuotaImpactPreview(
+    tenantId: string,
+    query: {
+      bookingId: string | null;
+      costCenterCode: string | null;
+      estimatedAmountMinor: number;
+      currency: string;
+      reservationWindowStart: string;
+      periodKey: string;
+    },
+  ): TenantBookingQuotaImpactPreview {
+    const tenantPolicy = this.resolveQuotaPolicy(tenantId, null);
+    const tenantSnapshot = this.getOrCreateQuotaSnapshot(
+      tenantId,
+      null,
+      query.periodKey,
+      tenantPolicy.limit,
+    );
+    const costCenterPolicy = query.costCenterCode
+      ? this.resolveQuotaPolicy(tenantId, query.costCenterCode)
+      : null;
+    const costCenterSnapshot =
+      query.costCenterCode && costCenterPolicy
+        ? this.getOrCreateQuotaSnapshot(
+            tenantId,
+            query.costCenterCode,
+            query.periodKey,
+            costCenterPolicy.limit,
+          )
+        : null;
+
+    return this.buildQuotaImpactPreviewFromResolvedState({
+      query,
+      tenantPolicy,
+      tenantSnapshot,
+      costCenterPolicy,
+      costCenterSnapshot,
+    });
+  }
+
+  private combineQuotaTriggered(
+    impacts: readonly TenantBookingQuotaImpactResult[],
+  ) {
+    if (impacts.some((impact) => impact.triggered === "block")) {
+      return "block";
+    }
+    if (impacts.some((impact) => impact.triggered === "approval")) {
+      return "approval";
+    }
+    if (impacts.some((impact) => impact.triggered === "warn")) {
+      return "warn";
+    }
+    return "none";
+  }
+
+  private reserveTenantQuotaInMemory(
+    input: {
+      tenantId: string;
+      bookingId: string;
+      evaluationId: string;
+      reservationWindowStart: string;
+      costCenterCode?: string | null;
+      estimatedAmountMinor?: number | null;
+      currency?: string;
+    },
+    normalized: {
+      bookingId: string | null;
+      costCenterCode: string | null;
+      estimatedAmountMinor: number;
+      currency: string;
+      reservationWindowStart: string;
+      periodKey: string;
+    },
+  ) {
+    const preview = this.buildQuotaImpactPreview(input.tenantId, normalized);
+    this.throwIfQuotaReservationBlocked(preview.impacts, {
+      tenantId: input.tenantId,
+      bookingId: input.bookingId,
+      evaluationId: input.evaluationId,
+    });
+
+    const now = new Date().toISOString();
+    const entries = preview.impacts
+      .filter((impact) => impact.delta !== 0)
+      .map((impact) =>
+        this.createQuotaLedgerEntry({
+          tenantId: input.tenantId,
+          bookingId: input.bookingId,
+          evaluationId: input.evaluationId,
+          costCenterCode: impact.costCenterCode,
+          periodKey: impact.periodKey,
+          dimension: impact.dimension,
+          amount: impact.delta,
+          entryType: "reserve",
+          createdAt: now,
+        }),
+      );
+
+    const updatedSnapshots = this.applyQuotaLedgerEntries(
+      input.tenantId,
+      entries,
+    );
+    this.applyQuotaReservationCommit(entries, updatedSnapshots);
+    this.persistChanges(
+      {
+        quotaLedger: entries.map((entry) => this.cloneQuotaLedgerEntry(entry)),
+        quotaMonthlySnapshots: updatedSnapshots.map((snapshot) =>
+          this.cloneQuotaMonthlySnapshot(snapshot),
+        ),
+      },
+      "reserve tenant quota",
+    );
+    this.recordQuotaReservationAudits(
+      input.tenantId,
+      entries,
+      updatedSnapshots,
+    );
+
+    return {
+      ledgerEntries: entries.map((entry) => this.cloneQuotaLedgerEntry(entry)),
+      impacts: preview.impacts.map((impact) => ({ ...impact })),
+    };
+  }
+
+  private async reserveTenantQuotaWithDatabase(
+    tx: TenantPartnerQueryExecutor | null,
+    input: {
+      tenantId: string;
+      bookingId: string;
+      evaluationId: string;
+      reservationWindowStart: string;
+      costCenterCode?: string | null;
+      estimatedAmountMinor?: number | null;
+      currency?: string;
+    },
+    normalized: {
+      bookingId: string | null;
+      costCenterCode: string | null;
+      estimatedAmountMinor: number;
+      currency: string;
+      reservationWindowStart: string;
+      periodKey: string;
+    },
+  ) {
+    const work = async (executor: TenantPartnerQueryExecutor) => {
+      const policyRecords =
+        await this.tenantPartnerRepository!.loadQuotaPoliciesForUpdate(
+          executor,
+          input.tenantId,
+          normalized.costCenterCode,
+        );
+      const { tenantPolicy, costCenterPolicy } =
+        this.resolveQuotaPolicySetFromRecords(
+          input.tenantId,
+          normalized.costCenterCode,
+          policyRecords,
+        );
+      const snapshotSeeds = [
+        this.createQuotaSnapshotRecord(
+          input.tenantId,
+          null,
+          normalized.periodKey,
+          tenantPolicy.limit,
+        ),
+      ];
+      if (costCenterPolicy && normalized.costCenterCode) {
+        snapshotSeeds.push(
+          this.createQuotaSnapshotRecord(
+            input.tenantId,
+            normalized.costCenterCode,
+            normalized.periodKey,
+            costCenterPolicy.limit,
+          ),
+        );
+      }
+      await this.tenantPartnerRepository!.ensureQuotaMonthlySnapshots(
+        executor,
+        snapshotSeeds,
+      );
+
+      const lockedSnapshots =
+        await this.tenantPartnerRepository!.loadQuotaMonthlySnapshotsForUpdate(
+          executor,
+          input.tenantId,
+          normalized.costCenterCode,
+          normalized.periodKey,
+        );
+      const lockedSnapshotMap = new Map(
+        lockedSnapshots.map((snapshot) => [
+          this.buildQuotaSnapshotKey(
+            snapshot.tenantId,
+            snapshot.costCenterCode,
+            snapshot.period,
+            snapshot.periodKey,
+          ),
+          this.cloneQuotaMonthlySnapshot(snapshot),
+        ]),
+      );
+      const tenantSnapshot = this.materializeQuotaSnapshotRecord(
+        lockedSnapshotMap.get(
+          this.buildQuotaSnapshotKey(
+            input.tenantId,
+            null,
+            tenantPolicy.period,
+            normalized.periodKey,
+          ),
+        ) ?? null,
+        input.tenantId,
+        null,
+        normalized.periodKey,
+        tenantPolicy.limit,
+      );
+      lockedSnapshotMap.set(
+        this.buildQuotaSnapshotKey(
+          tenantSnapshot.tenantId,
+          tenantSnapshot.costCenterCode,
+          tenantSnapshot.period,
+          tenantSnapshot.periodKey,
+        ),
+        tenantSnapshot,
+      );
+
+      const costCenterSnapshot =
+        costCenterPolicy && normalized.costCenterCode
+          ? this.materializeQuotaSnapshotRecord(
+              lockedSnapshotMap.get(
+                this.buildQuotaSnapshotKey(
+                  input.tenantId,
+                  normalized.costCenterCode,
+                  costCenterPolicy.period,
+                  normalized.periodKey,
+                ),
+              ) ?? null,
+              input.tenantId,
+              normalized.costCenterCode,
+              normalized.periodKey,
+              costCenterPolicy.limit,
+            )
+          : null;
+      if (costCenterSnapshot) {
+        lockedSnapshotMap.set(
+          this.buildQuotaSnapshotKey(
+            costCenterSnapshot.tenantId,
+            costCenterSnapshot.costCenterCode,
+            costCenterSnapshot.period,
+            costCenterSnapshot.periodKey,
+          ),
+          costCenterSnapshot,
+        );
+      }
+
+      const preview = this.buildQuotaImpactPreviewFromResolvedState({
+        query: normalized,
+        tenantPolicy,
+        tenantSnapshot,
+        costCenterPolicy,
+        costCenterSnapshot,
+      });
+      this.throwIfQuotaReservationBlocked(preview.impacts, {
+        tenantId: input.tenantId,
+        bookingId: input.bookingId,
+        evaluationId: input.evaluationId,
+      });
+
+      const now = new Date().toISOString();
+      const entries = preview.impacts
+        .filter((impact) => impact.delta !== 0)
+        .map((impact) =>
+          this.createQuotaLedgerEntry({
+            tenantId: input.tenantId,
+            bookingId: input.bookingId,
+            evaluationId: input.evaluationId,
+            costCenterCode: impact.costCenterCode,
+            periodKey: impact.periodKey,
+            dimension: impact.dimension,
+            amount: impact.delta,
+            entryType: "reserve",
+            createdAt: now,
+          }),
+        );
+      const updatedSnapshots = this.applyQuotaLedgerEntriesToSnapshots(
+        input.tenantId,
+        entries,
+        [...lockedSnapshotMap.values()],
+        (costCenterCode) =>
+          costCenterCode === null
+            ? tenantPolicy
+            : this.cloneQuotaPolicy(
+                costCenterPolicy ??
+                  this.buildDefaultQuotaPolicy(input.tenantId, costCenterCode),
+              ),
+      );
+
+      await this.tenantPartnerRepository!.persistQuotaReservation(executor, {
+        quotaLedger: entries,
+        quotaMonthlySnapshots: updatedSnapshots,
+      });
+      this.applyQuotaReservationCommit(entries, updatedSnapshots);
+      this.recordQuotaReservationAudits(
+        input.tenantId,
+        entries,
+        updatedSnapshots,
+      );
+
+      return {
+        ledgerEntries: entries.map((entry) =>
+          this.cloneQuotaLedgerEntry(entry),
+        ),
+        impacts: preview.impacts.map((impact) => ({ ...impact })),
+      };
+    };
+
+    if (tx) {
+      return work(tx);
+    }
+
+    return this.tenantPartnerRepository!.withTransaction(work);
+  }
+
+  private buildQuotaImpactPreviewFromResolvedState(params: {
+    query: {
+      bookingId: string | null;
+      costCenterCode: string | null;
+      estimatedAmountMinor: number;
+      currency: string;
+      reservationWindowStart: string;
+      periodKey: string;
+    };
+    tenantPolicy: TenantQuotaPolicyRecord;
+    tenantSnapshot: TenantQuotaMonthlySnapshotRecord;
+    costCenterPolicy: TenantQuotaPolicyRecord | null;
+    costCenterSnapshot: TenantQuotaMonthlySnapshotRecord | null;
+  }): TenantBookingQuotaImpactPreview {
+    const impacts: TenantBookingQuotaImpactResult[] = [
+      buildQuotaImpact({
+        scope: "tenant",
+        costCenterCode: null,
+        periodKey: params.query.periodKey,
+        dimension: "booking_count",
+        delta: 1,
+        limit: params.tenantPolicy.limit,
+        usage: params.tenantSnapshot.usage,
+      }),
+      buildQuotaImpact({
+        scope: "tenant",
+        costCenterCode: null,
+        periodKey: params.query.periodKey,
+        dimension: "amount_minor",
+        delta: params.query.estimatedAmountMinor,
+        limit: params.tenantPolicy.limit,
+        usage: params.tenantSnapshot.usage,
+      }),
+    ];
+
+    if (
+      params.query.costCenterCode &&
+      params.costCenterPolicy &&
+      params.costCenterSnapshot
+    ) {
+      impacts.push(
+        buildQuotaImpact({
+          scope: "cost_center",
+          costCenterCode: params.query.costCenterCode,
+          periodKey: params.query.periodKey,
+          dimension: "booking_count",
+          delta: 1,
+          limit: params.costCenterPolicy.limit,
+          usage: params.costCenterSnapshot.usage,
+        }),
+        buildQuotaImpact({
+          scope: "cost_center",
+          costCenterCode: params.query.costCenterCode,
+          periodKey: params.query.periodKey,
+          dimension: "amount_minor",
+          delta: params.query.estimatedAmountMinor,
+          limit: params.costCenterPolicy.limit,
+          usage: params.costCenterSnapshot.usage,
+        }),
+      );
+    }
+
+    return {
+      evaluationId: `quota-preview-${randomUUID()}`,
+      periodKey: params.query.periodKey,
+      impacts,
+      combinedTriggered: this.combineQuotaTriggered(impacts),
+    };
+  }
+
+  private throwIfQuotaReservationBlocked(
+    impacts: readonly TenantBookingQuotaImpactResult[],
+    context?: {
+      tenantId: string;
+      bookingId: string;
+      evaluationId: string;
+    },
+  ) {
+    const blockingImpact = impacts.find(
+      (impact) => impact.triggered === "block",
+    );
+    if (!blockingImpact) {
+      return;
+    }
+
+    if (context) {
+      this.recordTenantAudit({
+        actorId: null,
+        actorType: "system",
+        tenantId: context.tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.quota_reservation.blocked",
+        resourceType: "booking",
+        resourceId: context.bookingId,
+        newValuesSummary: {
+          errorCode: "QUOTA_INSUFFICIENT_AT_COMMIT",
+          bookingId: context.bookingId,
+          evaluationId: context.evaluationId,
+          periodKey: blockingImpact.periodKey,
+          costCenterCode: blockingImpact.costCenterCode,
+          dimension: blockingImpact.dimension,
+        },
+      });
+    }
+
+    throw new ApiRequestError(
+      HttpStatus.CONFLICT,
+      "QUOTA_INSUFFICIENT_AT_COMMIT",
+      "Tenant quota exceeded at commit time.",
+      {
+        periodKey: blockingImpact.periodKey,
+        costCenterCode: blockingImpact.costCenterCode,
+        dimension: blockingImpact.dimension,
+      },
+    );
+  }
+
+  private resolveQuotaPolicy(
+    tenantId: string,
+    costCenterCode: string | null,
+  ): TenantQuotaPolicyRecord {
+    const exact = costCenterCode
+      ? this.quotaPolicies.get(
+          this.buildQuotaPolicyKey(tenantId, costCenterCode, "monthly"),
+        )
+      : null;
+    if (exact) {
+      return this.cloneQuotaPolicy(exact);
+    }
+
+    const tenantPolicy =
+      this.quotaPolicies.get(
+        this.buildQuotaPolicyKey(tenantId, null, "monthly"),
+      ) ?? null;
+    if (tenantPolicy) {
+      return {
+        ...this.cloneQuotaPolicy(tenantPolicy),
+        costCenterCode,
+        inheritedFromTenant: costCenterCode !== null,
+      };
+    }
+
+    return this.buildDefaultQuotaPolicy(tenantId, costCenterCode);
+  }
+
+  private resolveQuotaPolicySetFromRecords(
+    tenantId: string,
+    costCenterCode: string | null,
+    records: readonly TenantQuotaPolicyRecord[],
+  ) {
+    const hasTenantPolicy = records.some(
+      (record) => record.costCenterCode === null,
+    );
+    const tenantPolicy =
+      records.find((record) => record.costCenterCode === null) ??
+      this.buildDefaultQuotaPolicy(tenantId, null);
+    const exactCostCenterPolicy =
+      costCenterCode === null
+        ? null
+        : (records.find((record) => record.costCenterCode === costCenterCode) ??
+          null);
+
+    return {
+      tenantPolicy: this.cloneQuotaPolicy(tenantPolicy),
+      costCenterPolicy:
+        costCenterCode === null
+          ? null
+          : exactCostCenterPolicy
+            ? this.cloneQuotaPolicy(exactCostCenterPolicy)
+            : {
+                ...this.cloneQuotaPolicy(tenantPolicy),
+                costCenterCode,
+                inheritedFromTenant: hasTenantPolicy,
+              },
+    };
+  }
+
+  private buildDefaultQuotaPolicy(
+    tenantId: string,
+    costCenterCode: string | null,
+  ): TenantQuotaPolicyRecord {
+    return {
+      tenantId,
+      costCenterCode,
+      period: "monthly",
+      limit: {
+        bookingCountLimit: null,
+        amountMinorLimit: null,
+        currency: "TWD",
+        enforcementMode: "warn_only",
+      },
+      inheritedFromTenant: false,
+      createdAt: "2026-05-13T00:00:00.000Z",
+      updatedAt: "2026-05-13T00:00:00.000Z",
+    };
+  }
+
+  private getOrCreateQuotaSnapshot(
+    tenantId: string,
+    costCenterCode: string | null,
+    periodKey: string,
+    limit: TenantQuotaLimit,
+  ) {
+    const key = this.buildQuotaSnapshotKey(
+      tenantId,
+      costCenterCode,
+      "monthly",
+      periodKey,
+    );
+    const snapshot = this.materializeQuotaSnapshotRecord(
+      this.quotaMonthlySnapshots.get(key) ?? null,
+      tenantId,
+      costCenterCode,
+      periodKey,
+      limit,
+    );
+    this.quotaMonthlySnapshots.set(key, snapshot);
+    return snapshot;
+  }
+
+  private applyQuotaLedgerEntries(
+    tenantId: string,
+    entries: readonly TenantQuotaLedgerEntry[],
+  ) {
+    const updatedSnapshots = this.applyQuotaLedgerEntriesToSnapshots(
+      tenantId,
+      entries,
+      Array.from(this.quotaMonthlySnapshots.values()),
+      (costCenterCode) => this.resolveQuotaPolicy(tenantId, costCenterCode),
+    );
+
+    for (const snapshot of updatedSnapshots) {
+      this.quotaMonthlySnapshots.set(
+        this.buildQuotaSnapshotKey(
+          snapshot.tenantId,
+          snapshot.costCenterCode,
+          snapshot.period,
+          snapshot.periodKey,
+        ),
+        this.cloneQuotaMonthlySnapshot(snapshot),
+      );
+    }
+
+    return updatedSnapshots;
+  }
+
+  private applyQuotaLedgerEntriesToSnapshots(
+    tenantId: string,
+    entries: readonly TenantQuotaLedgerEntry[],
+    snapshots: readonly TenantQuotaMonthlySnapshotRecord[],
+    resolvePolicy: (costCenterCode: string | null) => TenantQuotaPolicyRecord,
+  ) {
+    const snapshotMap = new Map(
+      snapshots.map((snapshot) => [
+        this.buildQuotaSnapshotKey(
+          snapshot.tenantId,
+          snapshot.costCenterCode,
+          snapshot.period,
+          snapshot.periodKey,
+        ),
+        this.cloneQuotaMonthlySnapshot(snapshot),
+      ]),
+    );
+    const touched = new Map<string, TenantQuotaMonthlySnapshotRecord>();
+
+    for (const entry of entries) {
+      const policy = resolvePolicy(entry.costCenterCode);
+      const key = this.buildQuotaSnapshotKey(
+        tenantId,
+        entry.costCenterCode,
+        policy.period,
+        entry.periodKey,
+      );
+      const snapshot = this.materializeQuotaSnapshotRecord(
+        snapshotMap.get(key) ?? null,
+        tenantId,
+        entry.costCenterCode,
+        entry.periodKey,
+        policy.limit,
+      );
+      snapshot.usage = applyLedgerEntryToUsage(
+        snapshot.usage,
+        policy.limit,
+        entry,
+      );
+      snapshot.refreshedAt = entry.createdAt;
+      snapshotMap.set(key, snapshot);
+      touched.set(key, snapshot);
+    }
+
+    return [...touched.values()].map((snapshot) =>
+      this.cloneQuotaMonthlySnapshot(snapshot),
+    );
+  }
+
+  private createQuotaLedgerEntry(input: {
+    tenantId: string;
+    costCenterCode: string | null;
+    periodKey: string;
+    dimension: TenantQuotaLedgerEntry["dimension"];
+    amount: number;
+    entryType: TenantQuotaLedgerEntry["entryType"];
+    bookingId: string;
+    evaluationId: string;
+    createdAt: string;
+  }): TenantQuotaLedgerEntry {
+    return {
+      ledgerEntryId: `quota-ledger-${randomUUID()}`,
+      tenantId: input.tenantId,
+      costCenterCode: input.costCenterCode,
+      periodKey: input.periodKey,
+      dimension: input.dimension,
+      amount: input.amount,
+      entryType: input.entryType,
+      bookingId: input.bookingId,
+      evaluationId: input.evaluationId,
+      createdAt: input.createdAt,
+    };
+  }
+
+  private buildQuotaPolicyKey(
+    tenantId: string,
+    costCenterCode: string | null,
+    period: "monthly",
+  ) {
+    return `${tenantId}:${costCenterCode ?? "~"}:${period}`;
+  }
+
+  private buildQuotaSnapshotKey(
+    tenantId: string,
+    costCenterCode: string | null,
+    period: "monthly",
+    periodKey: string,
+  ) {
+    return `${tenantId}:${costCenterCode ?? "~"}:${period}:${periodKey}`;
+  }
+
+  private cloneQuotaPolicy(
+    policy: TenantQuotaPolicyRecord,
+  ): TenantQuotaPolicyRecord {
+    return {
+      ...policy,
+      limit: { ...policy.limit },
+    };
+  }
+
+  private cloneQuotaLedgerEntry(
+    entry: TenantQuotaLedgerEntry,
+  ): TenantQuotaLedgerEntry {
+    return {
+      ...entry,
+    };
+  }
+
+  private cloneQuotaMonthlySnapshot(
+    snapshot: TenantQuotaMonthlySnapshotRecord,
+  ): TenantQuotaMonthlySnapshotRecord {
+    return {
+      ...snapshot,
+      limit: { ...snapshot.limit },
+      usage: { ...snapshot.usage },
+    };
+  }
+
+  private materializeQuotaSnapshotRecord(
+    snapshot: TenantQuotaMonthlySnapshotRecord | null,
+    tenantId: string,
+    costCenterCode: string | null,
+    periodKey: string,
+    limit: TenantQuotaLimit,
+  ): TenantQuotaMonthlySnapshotRecord {
+    if (!snapshot) {
+      return this.createQuotaSnapshotRecord(
+        tenantId,
+        costCenterCode,
+        periodKey,
+        limit,
+      );
+    }
+
+    const materialized = this.cloneQuotaMonthlySnapshot(snapshot);
+    if (JSON.stringify(materialized.limit) !== JSON.stringify(limit)) {
+      materialized.limit = { ...limit };
+      materialized.usage = materializeUsage(limit, materialized.usage);
+    }
+    return materialized;
+  }
+
+  private createQuotaSnapshotRecord(
+    tenantId: string,
+    costCenterCode: string | null,
+    periodKey: string,
+    limit: TenantQuotaLimit,
+  ): TenantQuotaMonthlySnapshotRecord {
+    return {
+      tenantId,
+      costCenterCode,
+      period: "monthly",
+      periodKey,
+      limit: { ...limit },
+      usage: createEmptyTenantQuotaUsage(limit),
+      refreshedAt: new Date().toISOString(),
+    };
+  }
+
+  private applyQuotaReservationCommit(
+    entries: readonly TenantQuotaLedgerEntry[],
+    updatedSnapshots: readonly TenantQuotaMonthlySnapshotRecord[],
+  ) {
+    this.quotaLedger = [
+      ...entries.map((entry) => this.cloneQuotaLedgerEntry(entry)),
+      ...this.quotaLedger,
+    ];
+    for (const snapshot of updatedSnapshots) {
+      this.quotaMonthlySnapshots.set(
+        this.buildQuotaSnapshotKey(
+          snapshot.tenantId,
+          snapshot.costCenterCode,
+          snapshot.period,
+          snapshot.periodKey,
+        ),
+        this.cloneQuotaMonthlySnapshot(snapshot),
+      );
+    }
+  }
+
+  private recordQuotaReservationAudits(
+    tenantId: string,
+    entries: readonly TenantQuotaLedgerEntry[],
+    updatedSnapshots: readonly TenantQuotaMonthlySnapshotRecord[],
+  ) {
+    for (const entry of entries) {
+      this.auditNotificationService.recordAuditLog({
+        actorId: null,
+        actorType: "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.quota_ledger.entry_added",
+        resourceType: "tenant_quota_ledger",
+        resourceId: entry.ledgerEntryId,
+        newValuesSummary: {
+          bookingId: entry.bookingId,
+          costCenterCode: entry.costCenterCode,
+          periodKey: entry.periodKey,
+          dimension: entry.dimension,
+          entryType: entry.entryType,
+          amount: entry.amount,
+        },
+      });
+    }
+    for (const snapshot of updatedSnapshots) {
+      this.auditNotificationService.recordAuditLog({
+        actorId: null,
+        actorType: "system",
+        tenantId,
+        moduleName: "tenant-partner",
+        actionName: "tenant.quota_snapshot.refreshed",
+        resourceType: "tenant_quota_snapshot",
+        resourceId: this.buildQuotaSnapshotKey(
+          snapshot.tenantId,
+          snapshot.costCenterCode,
+          snapshot.period,
+          snapshot.periodKey,
+        ),
+        newValuesSummary: {
+          costCenterCode: snapshot.costCenterCode,
+          periodKey: snapshot.periodKey,
+          usage: snapshot.usage,
+        },
+      });
+    }
+  }
+
+  private recordCostCenterValidationRejectedAudit(
+    tenantId: string,
+    errorCode:
+      | "BOOKING_COST_CENTER_INVALID"
+      | "BOOKING_COST_CENTER_UNKNOWN"
+      | "BOOKING_COST_CENTER_DISABLED",
+    details: Record<string, unknown>,
+  ) {
+    this.recordTenantAudit({
+      actorId: null,
+      actorType: "tenant_admin",
+      tenantId,
+      moduleName: "tenant-partner",
+      actionName: "booking.cost_center.validation_rejected",
+      resourceType: "tenant_cost_center",
+      resourceId: null,
+      newValuesSummary: {
+        errorCode,
+        ...details,
+      },
+    });
+  }
+
+  private buildTenantGovernanceMetricSample(
+    metric: string,
+    labels: Record<string, string>,
+    value: number,
+    unit: TenantGovernanceMetricUnit,
+  ): TenantGovernanceMetricSample {
+    return {
+      name: `${TENANT_GOVERNANCE_METRIC_NAMESPACE}.${metric}`,
+      labels,
+      value: Number.isFinite(value) ? value : 0,
+      unit,
+    };
+  }
+
+  private readNumericSummaryValue(
+    summary: Record<string, unknown> | undefined,
+    key: string,
+  ) {
+    const value = summary?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+
+  private computePercentile(values: readonly number[], quantile: number) {
+    if (values.length === 0) {
+      return 0;
+    }
+    const sorted = [...values].sort((left, right) => left - right);
+    const index = Math.min(
+      sorted.length - 1,
+      Math.max(0, Math.ceil(sorted.length * quantile) - 1),
+    );
+    return sorted[index] ?? 0;
+  }
+
+  private countAuditEventsWithinWindow(
+    auditLogs: readonly AuditLogRecord[],
+    actionName: string,
+    windowMs: number,
+    referenceTimeMs: number,
+  ) {
+    return auditLogs.filter((auditLog) => {
+      if (auditLog.actionName !== actionName) {
+        return false;
+      }
+      const createdAtMs = Date.parse(auditLog.createdAt);
+      return (
+        Number.isFinite(createdAtMs) &&
+        createdAtMs >= referenceTimeMs - windowMs &&
+        createdAtMs <= referenceTimeMs
+      );
+    }).length;
+  }
+
+  private countCostCenterValidationRejectsByCode(
+    auditLogs: readonly AuditLogRecord[],
+  ) {
+    const counts = new Map<string, number>();
+    auditLogs
+      .filter(
+        (auditLog) =>
+          auditLog.actionName === "booking.cost_center.validation_rejected",
+      )
+      .forEach((auditLog) => {
+        const errorCode = auditLog.newValuesSummary?.errorCode;
+        if (typeof errorCode !== "string" || errorCode.length === 0) {
+          return;
+        }
+        counts.set(errorCode, (counts.get(errorCode) ?? 0) + 1);
+      });
+    return counts;
+  }
+
+  private withQuotaReservationLock<T>(
+    tenantId: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const previous =
+      this.quotaReservationLocks.get(tenantId) ?? Promise.resolve();
+    let release: (() => void) | null = null;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.quotaReservationLocks.set(
+      tenantId,
+      previous.then(() => current),
+    );
+
+    return previous.then(async () => {
+      try {
+        return await work();
+      } finally {
+        release?.();
+        if (this.quotaReservationLocks.get(tenantId) === current) {
+          this.quotaReservationLocks.delete(tenantId);
+        }
+      }
+    });
+  }
+
+  private findCostCenterRecord(tenantId: string, code: string) {
+    const normalizedCode = this.normalizeCostCenterCode(code);
+    const costCenter = this.costCenters.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.code === normalizedCode,
+    );
+
+    return costCenter ? this.cloneCostCenter(costCenter) : null;
+  }
+
+  private recordCoverageSample(
+    samples: Map<string, TenantCostCenterCoverageSample>,
+    rawCostCenter: string,
+    suggestion: string | null,
+  ) {
+    const existing = samples.get(rawCostCenter);
+    if (existing) {
+      existing.occurrences += 1;
+      if (existing.suggestion === null && suggestion) {
+        existing.suggestion = suggestion;
+      }
+      return;
+    }
+
+    samples.set(rawCostCenter, {
+      rawCostCenter,
+      occurrences: 1,
+      suggestion,
+    });
+  }
+
+  private suggestCoverageCostCenter(
+    rawCostCenter: string,
+    directory: TenantCostCenterRecord[],
+  ) {
+    const normalized = rawCostCenter.trim().toUpperCase();
+    const exactCode = directory.find(
+      (candidate) => candidate.code.toUpperCase() === normalized,
+    );
+    if (exactCode) {
+      return exactCode.code;
+    }
+
+    const normalizedLabel = rawCostCenter
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+    if (!normalizedLabel) {
+      return null;
+    }
+
+    const matches = directory.filter((candidate) => {
+      const code = candidate.code.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+      const name = candidate.name.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+      return code === normalizedLabel || name === normalizedLabel;
+    });
+
+    return matches.length === 1 ? matches[0]!.code : null;
   }
 
   private normalizePartnerCode(value: string) {

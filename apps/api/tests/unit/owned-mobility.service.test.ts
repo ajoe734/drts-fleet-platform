@@ -137,7 +137,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("resolves tenant booking passenger and addresses from governed master data", () => {
+  it("resolves tenant booking passenger and addresses from governed master data", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
     const tenantPartnerService = new TenantPartnerService(
@@ -180,7 +180,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       tenantPartnerService,
     });
 
-    const booking = service.createTenantBooking(
+    const booking = await service.createTenantBooking(
       {
         businessDispatchSubtype: "enterprise_dispatch",
         passengerId: passenger.passengerId,
@@ -231,7 +231,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         roles: ["vip", "passenger"],
       },
     );
-    const updated = service.updateTenantBooking(
+    const updated = await service.updateTenantBooking(
       "tenant-demo-001",
       booking.bookingId,
       {
@@ -252,6 +252,461 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       addressName: "Manual Override",
       address: "台北市中山區南京東路 100 號",
     });
+  });
+
+  it("validates costCenter against the tenant cost-center directory on create and update", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-13T12:00:00.000Z"));
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    });
+
+    const booking = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T14:00:00.000Z",
+        reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+        costCenter: "cc-fin-04",
+      },
+      "tenant-demo-001",
+    );
+    expect(
+      service.getTenantBooking("tenant-demo-001", booking.bookingId).costCenter,
+    ).toBe("CC-FIN-04");
+
+    try {
+      service.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          reservationWindowStart: "2026-05-13T14:00:00.000Z",
+          reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+          pickup: { address: "Pickup" },
+          dropoff: { address: "Dropoff" },
+          passenger: { name: "Rider One", phone: "0912000000" },
+          costCenter: "CC-DOES-NOT-EXIST",
+        },
+        "tenant-demo-001",
+      );
+      throw new Error("Expected booking create to reject unknown cost center.");
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: { code: "BOOKING_COST_CENTER_UNKNOWN" },
+      });
+    }
+
+    tenantPartnerService.disableCostCenter("tenant-demo-001", {
+      code: "CC-FIN-04",
+      reason: "sunset",
+    });
+    try {
+      service.updateTenantBooking("tenant-demo-001", booking.bookingId, {
+        costCenter: "CC-FIN-04",
+      });
+      throw new Error(
+        "Expected booking update to reject disabled cost center.",
+      );
+    } catch (error) {
+      expect((error as ApiRequestError).getResponse()).toMatchObject({
+        error: { code: "BOOKING_COST_CENTER_DISABLED" },
+      });
+    }
+
+    // Clearing the cost center is always allowed.
+    const cleared = await service.updateTenantBooking(
+      "tenant-demo-001",
+      booking.bookingId,
+      { costCenter: null },
+    );
+    expect(cleared.costCenter).toBeNull();
+  });
+
+  it("creates and resolves any_of approval requests on the first approval", async () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    tenantPartnerService.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "High-value approval",
+      priority: 10,
+      conditions: [
+        {
+          field: "booking.amount_minor",
+          op: "gte",
+          value: 100_000,
+        },
+      ],
+      action: "require_approval",
+      approvalMode: "any_of",
+      approvers: [{ kind: "tenant_admin" }, { kind: "tenant_finance_admin" }],
+    });
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    });
+
+    const created = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T14:00:00.000Z",
+        reservationWindowEnd: "2026-05-13T15:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider One", phone: "0912000000" },
+      },
+      "tenant-demo-001",
+    );
+    const pendingBooking = service.getTenantBooking(
+      "tenant-demo-001",
+      created.bookingId,
+    );
+    const request = tenantPartnerService.listApprovalRequests(
+      "tenant-demo-001",
+      {
+        bookingId: created.bookingId,
+      },
+    )[0]!;
+
+    expect(pendingBooking.approvalState).toBe("pending");
+    expect(request.resolvedApproverUserIds).toEqual([
+      "tenant-user-demo-001",
+      "tenant-user-demo-003",
+    ]);
+
+    const approved = await service.approveTenantBookingApprovalRequest(
+      "tenant-demo-001",
+      request.approvalRequestId,
+      "tenant-user-demo-003",
+      null,
+      {},
+    );
+    const approvedBooking = service.getTenantBooking(
+      "tenant-demo-001",
+      created.bookingId,
+    );
+
+    expect(approved.status).toBe("approved");
+    expect(approvedBooking.approvalState).toBe("approved");
+    expect(approvedBooking.approvalRequestIds).toEqual([]);
+  });
+
+  it("enforces approver authorization and all_of_parallel rejection semantics", async () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    tenantPartnerService.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "Dual control",
+      priority: 10,
+      conditions: [
+        {
+          field: "booking.amount_minor",
+          op: "gte",
+          value: 100_000,
+        },
+      ],
+      action: "require_approval",
+      approvalMode: "all_of_parallel",
+      approvers: [{ kind: "tenant_admin" }, { kind: "tenant_finance_admin" }],
+    });
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    });
+
+    const created = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T16:00:00.000Z",
+        reservationWindowEnd: "2026-05-13T17:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider Two", phone: "0912000001" },
+      },
+      "tenant-demo-001",
+    );
+    const request = tenantPartnerService.listApprovalRequests(
+      "tenant-demo-001",
+      {
+        bookingId: created.bookingId,
+      },
+    )[0]!;
+
+    await expect(
+      service.approveTenantBookingApprovalRequest(
+        "tenant-demo-001",
+        request.approvalRequestId,
+        "tenant-user-demo-004",
+        null,
+        {},
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "APPROVAL_NOT_AUTHORIZED",
+        },
+      },
+    });
+
+    const pending = await service.approveTenantBookingApprovalRequest(
+      "tenant-demo-001",
+      request.approvalRequestId,
+      "tenant-user-demo-001",
+      null,
+      {},
+    );
+    expect(pending.status).toBe("pending");
+    expect(
+      service.getTenantBooking("tenant-demo-001", created.bookingId)
+        .approvalState,
+    ).toBe("pending");
+
+    const rejected = await service.rejectTenantBookingApprovalRequest(
+      "tenant-demo-001",
+      request.approvalRequestId,
+      "tenant-user-demo-003",
+      null,
+      {
+        reasonCode: "finance_reject",
+      },
+    );
+    const rejectedBooking = service.getTenantBooking(
+      "tenant-demo-001",
+      created.bookingId,
+    );
+
+    expect(rejected.status).toBe("rejected");
+    expect(rejectedBooking.approvalState).toBe("rejected");
+    expect(rejectedBooking.orderStatus).toBe("cancelled");
+  });
+
+  it("falls back from cost-center owner to tenant_admin and audits the fallback", async () => {
+    const approvalAudit = {
+      recordAuditLog: vi.fn(),
+      recordNotification: vi.fn(),
+      dispatchApprovalNotification: vi.fn(async () => ({
+        deduplicated: false,
+        deliveredToUserIds: [],
+        skippedUserIds: [],
+      })),
+    };
+    const tenantPartnerService = new TenantPartnerService(
+      approvalAudit as never,
+    );
+    tenantPartnerService.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "Exec office approval",
+      priority: 10,
+      conditions: [
+        {
+          field: "cost_center.code",
+          op: "eq",
+          value: "CC-EXEC-01",
+        },
+      ],
+      action: "require_approval",
+      approvers: [{ kind: "cost_center_owner" }],
+    });
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    });
+
+    const created = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T18:00:00.000Z",
+        reservationWindowEnd: "2026-05-13T19:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Exec Rider", phone: "0912000002" },
+        costCenter: "CC-EXEC-01",
+      },
+      "tenant-demo-001",
+    );
+    const request = tenantPartnerService.listApprovalRequests(
+      "tenant-demo-001",
+      {
+        bookingId: created.bookingId,
+      },
+    )[0]!;
+
+    expect(request.resolvedApproverUserIds).toEqual(["tenant-user-demo-001"]);
+    expect(approvalAudit.recordAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actionName: "approver_fallback_used",
+      }),
+    );
+  });
+
+  it("cancels pending approvals on re-evaluation, but ignores note-only updates", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-13T18:00:00.000Z"));
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    tenantPartnerService.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "Cost-center approval",
+      priority: 10,
+      conditions: [
+        {
+          field: "cost_center.code",
+          op: "eq",
+          value: "CC-FIN-04",
+        },
+      ],
+      action: "require_approval",
+      approvers: [{ kind: "tenant_admin" }],
+    });
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    });
+
+    const created = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T20:00:00.000Z",
+        reservationWindowEnd: "2026-05-13T21:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Rider Three", phone: "0912000003" },
+        costCenter: "CC-FIN-04",
+      },
+      "tenant-demo-001",
+    );
+    const initialBooking = service.getTenantBooking(
+      "tenant-demo-001",
+      created.bookingId,
+    );
+    const initialRequestId = initialBooking.approvalRequestIds[0]!;
+
+    const notesOnly = await service.updateTenantBooking(
+      "tenant-demo-001",
+      created.bookingId,
+      { notes: "Driver prefers gate B" },
+    );
+    expect(notesOnly.approvalRequestIds).toEqual([initialRequestId]);
+
+    const reevaluated = await service.updateTenantBooking(
+      "tenant-demo-001",
+      created.bookingId,
+      { costCenter: null },
+    );
+    const requests = tenantPartnerService.listApprovalRequests(
+      "tenant-demo-001",
+      {
+        bookingId: created.bookingId,
+      },
+    );
+
+    expect(reevaluated.approvalState).toBe("not_required");
+    expect(reevaluated.approvalRequestIds).toEqual([]);
+    expect(requests[0]!.status).toBe("cancelled_by_re_evaluation");
+  });
+
+  it("supports manual escalate and fails closed when no approvers are resolvable", async () => {
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+    );
+    tenantPartnerService.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "Missing approver rule",
+      priority: 10,
+      conditions: [
+        {
+          field: "booking.amount_minor",
+          op: "gte",
+          value: 100_000,
+        },
+      ],
+      action: "require_approval",
+      approvers: [{ kind: "tenant_role", roleCode: "tenant_missing_role" }],
+    });
+    const { service } = createOwnedMobilityService({
+      candidates: [],
+      tenantPartnerService,
+    });
+
+    await expect(
+      service.createTenantBooking(
+        {
+          businessDispatchSubtype: "enterprise_dispatch",
+          reservationWindowStart: "2026-05-13T22:00:00.000Z",
+          reservationWindowEnd: "2026-05-13T23:00:00.000Z",
+          pickup: { address: "Pickup" },
+          dropoff: { address: "Dropoff" },
+          passenger: { name: "Blocked Rider", phone: "0912000004" },
+        },
+        "tenant-demo-001",
+      ),
+    ).rejects.toMatchObject({
+      response: {
+        error: {
+          code: "APPROVAL_NO_RESOLVABLE_APPROVERS",
+        },
+      },
+    });
+    expect(service.listTenantBookings("tenant-demo-001").items).toHaveLength(0);
+
+    tenantPartnerService.disableApprovalRule(
+      "tenant-demo-001",
+      tenantPartnerService.listApprovalRules("tenant-demo-001")[0]!.ruleId,
+    );
+    tenantPartnerService.upsertApprovalRule("tenant-demo-001", {
+      ruleName: "Escalate me",
+      priority: 10,
+      conditions: [
+        {
+          field: "booking.amount_minor",
+          op: "gte",
+          value: 100_000,
+        },
+      ],
+      action: "require_approval",
+      approvers: [{ kind: "tenant_admin" }],
+    });
+
+    const created = await service.createTenantBooking(
+      {
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-14T00:00:00.000Z",
+        reservationWindowEnd: "2026-05-14T01:00:00.000Z",
+        pickup: { address: "Pickup" },
+        dropoff: { address: "Dropoff" },
+        passenger: { name: "Escalation Rider", phone: "0912000005" },
+      },
+      "tenant-demo-001",
+    );
+    const request = tenantPartnerService.listApprovalRequests(
+      "tenant-demo-001",
+      {
+        bookingId: created.bookingId,
+      },
+    )[0]!;
+
+    const escalated = await service.escalateTenantBookingApprovalRequest(
+      "tenant-demo-001",
+      request.approvalRequestId,
+      "tenant-user-demo-001",
+      "tenant_admin",
+      {},
+    );
+
+    expect(escalated.status).toBe("pending");
+    expect(escalated.escalatedAt).not.toBeNull();
+    expect(escalated.previousApprovers).toEqual(request.approvers);
+    expect(escalated.resolvedApproverUserIds).toContain("tenant-user-demo-001");
+    const escalatedBooking = service.getTenantBooking(
+      "tenant-demo-001",
+      created.bookingId,
+    );
+    expect(escalatedBooking.approvalState).toBe("pending");
+    expect(escalatedBooking.approvalRequestIds).toEqual([
+      request.approvalRequestId,
+    ]);
   });
 
   it("rejects tenant attempts to set quoted fare through booking channels", () => {
@@ -1841,6 +2296,19 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
 
   it("replays duplicate completion requests idempotently when the request id matches", () => {
     const tenantPartnerService = {
+      previewBookingQuotaImpact: vi.fn(() => ({
+        impacts: [],
+      })),
+      evaluateApprovalRules: vi.fn(() => ({
+        outcome: {
+          blocked: false,
+          approvalRequired: false,
+        },
+      })),
+      reserveTenantQuota: vi.fn(() => ({
+        ledgerEntries: [],
+        impacts: [],
+      })),
       publishWebhookEvent: vi.fn(async () => undefined),
     } as unknown as TenantPartnerService;
     const { service, auditNotificationService } = createOwnedMobilityService({
