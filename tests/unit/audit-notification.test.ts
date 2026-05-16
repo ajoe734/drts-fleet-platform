@@ -93,7 +93,9 @@ describe("audit notification persistence baseline", () => {
       loadRecent: vi.fn(async () => {
         throw new Error("db unavailable");
       }),
+      loadEvidenceGovernanceTrail: vi.fn(async () => []),
       reportPersistenceFailure,
+      append: vi.fn(async () => {}),
     } as unknown as AuditLogRepository;
 
     const service = new AuditNotificationService(repository);
@@ -151,6 +153,9 @@ describe("audit notification persistence baseline", () => {
       loadRecent: vi.fn(async () =>
         Array.from({ length: 1002 }, (_, index) => makeStoredAuditLog(index)),
       ),
+      loadEvidenceGovernanceTrail: vi.fn(async () => []),
+      reportPersistenceFailure: vi.fn(),
+      append: vi.fn(async () => {}),
     } as unknown as AuditLogRepository;
 
     const service = new AuditNotificationService(repository);
