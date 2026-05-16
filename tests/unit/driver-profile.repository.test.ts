@@ -16,7 +16,6 @@ describe("driver profile repository", () => {
       bankAccount: null,
       deviceBindings: [],
       updatedAt: "2026-04-17T14:30:00.000Z",
-      deviceBindings: [], // Added missing property
     };
     const query = vi.fn().mockResolvedValue({
       rows: [{ record: profile }],
@@ -48,7 +47,6 @@ describe("driver profile repository", () => {
       bankAccount: null,
       deviceBindings: [],
       updatedAt: "2026-04-17T14:31:00.000Z",
-      deviceBindings: [], // Added missing property
     };
 
     await repository.upsert(profile);
