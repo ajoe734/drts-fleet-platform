@@ -145,7 +145,8 @@ describe("audit notification persistence baseline", () => {
         (record) => record.auditId === BOOTSTRAP_AUDIT_LOG.auditId,
       ),
     ).toBe(false);
-    expect(appended).toHaveLength(1005);
+    // 1005 explicit records + 1 self-audit emitted by listAuditLogs() above.
+    expect(appended).toHaveLength(1006);
   });
 
   it("trims repository-loaded audit logs down to the 1000 newest records on module init", async () => {

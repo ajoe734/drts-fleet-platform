@@ -205,10 +205,12 @@ describe("reporting and filing service", () => {
       (row) => row.orderId === recordingBoundOrder.orderId,
     );
 
+    // Recording-index rows mask sensitive identifiers (callId / recordingId)
+    // via maskOpaqueToken(value, 8, 4) — "<first8>...<last4>".
     expect(missingRow).toEqual(
       expect.objectContaining({
         orderNo: missingRecordingOrder.orderNo,
-        callId: "CALL-20260411-000100",
+        callId: "CALL-202...0100",
         recordingId: null,
         missingRecording: true,
       }),
@@ -216,14 +218,16 @@ describe("reporting and filing service", () => {
     expect(boundRow).toEqual(
       expect.objectContaining({
         orderNo: recordingBoundOrder.orderNo,
-        callId: "CALL-20260411-000101",
-        recordingId: "REC-20260411-000101",
+        callId: "CALL-202...0101",
+        recordingId: "REC-2026...0101",
         missingRecording: false,
       }),
     );
-    expect(auditService.listAuditLogs()[0]?.actionName).toBe(
-      "complete_report_job",
-    );
+    expect(
+      auditService
+        .listAuditLogs()
+        .some((entry) => entry.actionName === "complete_report_job"),
+    ).toBe(true);
   });
 
   it("exports partner benefit revenue rows for airport-transfer review", async () => {
@@ -296,6 +300,8 @@ describe("reporting and filing service", () => {
 
     const job = reportingFilingService.getReportJob(accepted.jobId);
     expect(job.status).toBe("completed");
+    // Revenue rows mask issuerAuthorizationRef / benefitReference via
+    // maskOpaqueToken(value, 8, 4) — "<first8>...<last4>".
     expect(job.partnerRevenueRows).toEqual([
       expect.objectContaining({
         orderId: created.orderId,
@@ -303,8 +309,8 @@ describe("reporting and filing service", () => {
         partnerProgramId: "program-airport-alpha",
         partnerEntrySlug: "bank-demo-alpha-airport",
         eligibilityVerificationId: verification.eligibilityVerificationId,
-        issuerAuthorizationRef: "issuer-auth-bank_demo_alpha-2468",
-        benefitReference: "benefit-bank_demo_alpha-2468",
+        issuerAuthorizationRef: "issuer-a...2468",
+        benefitReference: "benefit-...2468",
         businessDispatchSubtype: "credit_card_airport_transfer",
       }),
     ]);
