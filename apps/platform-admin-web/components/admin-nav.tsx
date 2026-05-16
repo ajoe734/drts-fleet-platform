@@ -31,6 +31,7 @@ export function AdminNav() {
       ? {
           home: "Governance Home",
           health: "Platform Health",
+          tenantGovernance: "Tenant Governance",
           tenants: "Tenants",
           partners: "Partner Entry",
           users: "Platform Staff",
@@ -46,6 +47,7 @@ export function AdminNav() {
       : {
           home: "工作首頁",
           health: "平台健康",
+          tenantGovernance: "租戶治理總覽",
           tenants: "租戶",
           partners: "合作夥伴 entry",
           users: "平台人員",
@@ -62,6 +64,11 @@ export function AdminNav() {
   const NAV_ITEMS = [
     { href: "/", label: labels.home, icon: <LayoutDashboard size={16} /> },
     { href: "/health", label: labels.health, icon: <Activity size={16} /> },
+    {
+      href: "/tenant-governance",
+      label: labels.tenantGovernance,
+      icon: <ShieldCheck size={16} />,
+    },
     { href: "/tenants", label: labels.tenants, icon: <Shield size={16} /> },
     {
       href: "/partners",

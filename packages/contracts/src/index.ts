@@ -101,6 +101,18 @@ export interface ApiSuccessEnvelope<T> {
   };
 }
 
+export interface ApiPageInfo {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+export interface ApiListData<T> {
+  items: T[];
+  pageInfo: ApiPageInfo;
+}
+
 export interface ApiErrorEnvelope {
   error: {
     code: string;
@@ -4571,6 +4583,33 @@ export interface PlatformAdminTenantRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface PlatformTenantGovernanceSummaryQuery {
+  page?: number;
+  pageSize?: number;
+}
+
+export type PlatformTenantGovernanceAlertFlag =
+  | "no_approvers_configured"
+  | "quota_above_95_percent"
+  | "pending_approval_over_48h";
+
+export interface PlatformTenantGovernanceSummaryRow {
+  tenantId: string;
+  tenantCode: string;
+  tenantName: string;
+  tenantStatus: PlatformAdminTenantRecord["status"];
+  tenantRolloutStage: PlatformTenantRolloutStage;
+  costCenterCount: number;
+  activeRuleCount: number;
+  monthlyQuotaPercentUsed: number;
+  pendingApprovalCount: number;
+  oldestPendingApprovalAgeHours: number | null;
+  alertFlags: PlatformTenantGovernanceAlertFlag[];
+}
+
+export type PlatformTenantGovernanceSummaryResponse =
+  ApiListData<PlatformTenantGovernanceSummaryRow>;
 
 export interface CreatePlatformTenantCommand {
   name: string;

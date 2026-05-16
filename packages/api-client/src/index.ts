@@ -121,6 +121,8 @@ import type {
   PlatformEarningsSummary,
   PlatformMaintenanceModeRecord,
   PlatformNoticeRecord,
+  PlatformTenantGovernanceSummaryQuery,
+  PlatformTenantGovernanceSummaryResponse,
   PlatformPresenceRecord,
   PlatformPresenceSummary,
   PlatformPricingRuleRecord,
@@ -1857,6 +1859,24 @@ export class ApiClient {
   async listPlatformTenants(): Promise<PlatformAdminTenantRecord[]> {
     return this.getList<PlatformAdminTenantRecord>(
       "/api/platform-admin/tenants",
+    );
+  }
+
+  async getPlatformTenantGovernanceSummary(
+    query: PlatformTenantGovernanceSummaryQuery = {},
+  ): Promise<PlatformTenantGovernanceSummaryResponse> {
+    const params = new URLSearchParams();
+
+    if (typeof query.page === "number") {
+      params.set("page", String(query.page));
+    }
+    if (typeof query.pageSize === "number") {
+      params.set("pageSize", String(query.pageSize));
+    }
+
+    const search = params.size > 0 ? `?${params.toString()}` : "";
+    return this.get<PlatformTenantGovernanceSummaryResponse>(
+      `/api/admin/tenant-governance/summary${search}`,
     );
   }
 
