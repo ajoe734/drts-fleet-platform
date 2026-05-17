@@ -221,7 +221,116 @@ v3 long-lived branches stay reachable in git history; they're deleted from origi
 
 ---
 
-## 11. References
+## 11. Anchor commit protocol (worker hygiene)
+
+In a multi-worker repo, the working tree is a fragile asset. Supervisor reassignments, agent crashes, and parallel edits on the same file (e.g. `supervisor.py` routing) routinely cause in-session diffs to be lost or to require manual reconciliation. The protocol below treats branch + commit, not the working tree, as the unit of progress. In v4 every worker PRs against the single `dev` trunk, so the protocol is uniform across backend / frontend / docs.
+
+### 11.1 When to anchor commit
+
+Anchor commit at the first describable middle state — do not wait for completion — when **any** of the following hold:
+
+- The change touches a **fragile surface**: `.orchestrator/supervisor.py` (esp. routing/dispatch), `.orchestrator/skills/*.md`, `.orchestrator/templates/*`, `.orchestrator/config*.json`, `.orchestrator/branch_routing.py`, `docs/ops/branch-strategy.md`, `docs/**`, `.github/workflows/**`, `.husky/*`.
+- The change spans **more than one file** with shared design intent.
+- The change is expected to take **more than one supervisor cycle** to land.
+- The worker is **about to yield** to another task (planned reassignment, blocker, end-of-shift).
+
+If any answer is yes and there is no branch yet, **stop editing and create the branch first**:
+
+```bash
+git switch -c <lane>/<task-id-kebab> origin/dev
+```
+
+Then commit the first describable state:
+
+```bash
+git add <task-owned files only>
+git commit -m "wip(<TASK-ID>): anchor <scope>" \
+  -m "LLM-Agent: <lane>" -m "Task-ID: <TASK-ID>" -m "Reviewer: <reviewer>"
+```
+
+The anchor commit is **not the deliverable**; it is a flag that says "this lane has a claim on this surface." Closeout still requires the formal commit per [`task-closeout-finalization.md`](../../.orchestrator/skills/task-closeout-finalization.md).
+
+### 11.2 Do not stash design-intent diffs
+
+`git stash` is acceptable **only** for tiny, throwaway, no-design-intent edits (e.g. a `console.log` you forgot to remove). Any diff touching the fragile surfaces in §11.1 must become a commit, never a stash. Reason: stash entries are anonymous, unreviewable, and almost always require manual rework once mainline advances.
+
+If the supervisor reassigns a worker that has design-intent diffs in flight, the worker must anchor-commit **before** yielding. The supervisor's `worker_tree_guard` config (added by OPS-GIT-WORKFLOW-006) will block dispatch if a fragile-surface diff is uncommitted.
+
+### 11.3 Same-file parallel designers — declare the layer in the commit body
+
+When two lanes touch the same file at different layers (e.g. one lane edits `supervisor.py` routing, another lane edits `supervisor.py` chair-review), the anchor commit body must declare which slice is claimed. Template:
+
+```
+wip(<TASK-ID>): anchor <scope>
+
+Touches <file>: <slice>.
+Does not change <other slices>.
+Intended to compose with <PR# or task-id> on <other-slice>.
+
+LLM-Agent: <lane>
+Task-ID: <TASK-ID>
+Reviewer: <reviewer>
+```
+
+The body lets the other lane (and future reviewers) tell at a glance whether the two patches are compatible.
+
+### 11.4 `dev` advances → rebase the branch, never `git stash pop` on top
+
+When `dev` has advanced while a lane was paused:
+
+```bash
+git fetch origin
+git rebase origin/dev
+```
+
+Do **not** rely on `git stash pop` to recover paused work; the stash blob has no patch identity and almost always requires manual fixups against the moved trunk.
+
+### 11.5 doc / skill / config — always branch + PR, never park in session
+
+The three surface classes most often overwritten by parallel lanes are:
+
+| Surface class | Examples | Why fragile |
+| --- | --- | --- |
+| `docs/**` | `docs/ops/branch-strategy.md`, `docs/03-runbooks/**` | chair-review and supervisor lanes both edit them |
+| `.orchestrator/skills/**` | `task-closeout-finalization.md`, `chairman-operational-review.md` | supervisor/chair changes touch these |
+| `.orchestrator/config*.json`, schema files | `config.example.json`, provider/capability schema | enabled-flag toggles by many lanes |
+
+For these, **never** keep edits in the working tree across more than one supervisor cycle. The required flow:
+
+```bash
+git switch -c <lane>/<topic> origin/dev
+# edit
+git add <files>
+git commit -m "<TASK-ID>: <summary>" \
+  -m "LLM-Agent: <lane>" -m "Task-ID: <TASK-ID>" -m "Reviewer: <reviewer>"
+git push -u origin <lane>/<topic>
+gh pr create --base dev --title "<TASK-ID>: <summary>" ...
+```
+
+### 11.6 Trigger checklist (before each significant save)
+
+Worker prompts (wakeup + closeout skill) carry this checklist; it is reproduced here for human reference:
+
+1. Am I touching a fragile surface from §11.1?
+2. Will this take more than one supervisor cycle?
+3. Am I about to yield (reassignment, blocker, planned pause)?
+4. Is this a doc / skill / config change per §11.5?
+
+If **any** answer is yes and the current branch is not `<lane>/<task-id-kebab>`, stop editing and:
+
+```bash
+git switch -c <lane>/<task-id-kebab> origin/dev
+```
+
+### 11.7 Related artifacts
+
+- [`.orchestrator/skills/worker-anchor-commit.md`](../../.orchestrator/skills/worker-anchor-commit.md) — worker-facing operational skill for anchor commits (companion to closeout skill)
+- [`.orchestrator/templates/wakeup.txt`](../../.orchestrator/templates/wakeup.txt) — supervisor wakeup template that injects branch context (target of OPS-GIT-WORKFLOW-005)
+- [`.orchestrator/supervisor.py`](../../.orchestrator/supervisor.py) `worker_tree_guard` — dispatch guard against dirty fragile-surface trees (target of OPS-GIT-WORKFLOW-006, opt-in)
+
+---
+
+## 12. References
 
 - `.github/workflows/ci.yml` — the 3 PR gates
 - `.github/workflows/ci-integ.yml` — heavier CI on push to `dev`
