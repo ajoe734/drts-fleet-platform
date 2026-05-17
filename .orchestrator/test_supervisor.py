@@ -1874,7 +1874,7 @@ class PollWorkersRecoveryTests(unittest.TestCase):
                     "status": "running",
                     "queue_event_id": "evt-1",
                     "pid": 12345,
-                    "last_event_at": "2026-04-06T09:00:00Z",
+                    "last_event_at": "2999-01-01T00:00:00Z",
                     "request_snapshot": {"reason": "owned_ready_dispatch"},
                 }
             },
@@ -1905,6 +1905,131 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
         terminate_worker_pid.assert_called_once_with(12345)
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_superseded")
+
+    def test_lower_priority_worker_kept_when_lane_capacity_available(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {
+                "active_worker_statuses": ["running", "started", "waiting_approval", "manual_pending", "retry_backoff", "suspended_approval", "stalled", "fallback"],
+                "finalize_statuses": ["review_approved"],
+                "dependency_done_statuses": ["done"],
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"codex2": 3},
+            },
+            "providers": {},
+            "agents": {
+                "codex2": {"id": "codex2", "display_name": "Codex2"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+            },
+        }
+        state = {
+            "queue": {
+                "events": {
+                    "evt-low": {"status": "started"},
+                    "evt-high": {"status": "started"},
+                }
+            },
+            "workers": {
+                "run-low": {
+                    "run_id": "run-low",
+                    "task_id": "PBK-UI-004",
+                    "provider": "codex2",
+                    "agent_id": "codex2",
+                    "status": "running",
+                    "queue_event_id": "evt-low",
+                    "pid": 12345,
+                    "last_event_at": "2999-01-01T00:00:00Z",
+                    "request_snapshot": {"reason": "owned_ready_dispatch"},
+                },
+                "run-high": {
+                    "run_id": "run-high",
+                    "task_id": "PBK-UI-003-SIDECAR-REVIEW",
+                    "provider": "codex2",
+                    "agent_id": "codex2",
+                    "status": "running",
+                    "queue_event_id": "evt-high",
+                    "pid": 12346,
+                    "last_event_at": "2999-01-01T00:00:00Z",
+                    "request_snapshot": {"reason": "owned_finalize_dispatch"},
+                },
+            },
+        }
+        status = {
+            "tasks": [
+                {"id": "PBK-UI-003-SIDECAR-REVIEW", "status": "review_approved", "owner": "Codex2", "reviewer": "Claude2", "depends_on": []},
+                {"id": "PBK-UI-004", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": ["PBK-UI-003"]},
+                {"id": "PBK-UI-003", "status": "done", "owner": "Claude2", "reviewer": "Codex", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+            mock.patch.object(supervisor, "terminate_worker_pid") as terminate_worker_pid,
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "utc_now", return_value="2026-04-06T09:01:00Z"),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            supervisor.poll_workers(config, state)
+
+        self.assertEqual(state["workers"]["run-low"]["status"], "running")
+        self.assertEqual(state["workers"]["run-high"]["status"], "running")
+        terminate_worker_pid.assert_not_called()
+
+    def test_covered_higher_priority_worker_does_not_supersede_full_lane(self) -> None:
+        config = {
+            "ready_dispatcher": {
+                "active_worker_statuses": ["running"],
+                "finalize_statuses": ["review_approved"],
+                "dependency_done_statuses": ["done"],
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"codex2": 2},
+            },
+            "agents": {"codex2": {"id": "codex2", "display_name": "Codex2"}},
+        }
+        low_worker = {
+            "task_id": "PBK-UI-004",
+            "provider": "codex2",
+            "agent_id": "codex2",
+            "status": "running",
+            "request_snapshot": {"reason": "owned_ready_dispatch"},
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "run-low": low_worker,
+                "run-high": {
+                    "task_id": "PBK-UI-003-SIDECAR-REVIEW",
+                    "provider": "codex2",
+                    "agent_id": "codex2",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_finalize_dispatch"},
+                },
+            },
+        }
+        task_map = {
+            "PBK-UI-003-SIDECAR-REVIEW": {"id": "PBK-UI-003-SIDECAR-REVIEW", "status": "review_approved", "owner": "Codex2", "reviewer": "Claude2", "depends_on": []},
+            "PBK-UI-004": {"id": "PBK-UI-004", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+        }
+
+        self.assertFalse(
+            supervisor.higher_priority_ready_task_exists(
+                config,
+                low_worker,
+                task_map,
+                state=state,
+                active_statuses={"running"},
+            )
+        )
 
     def test_dead_worker_for_open_task_is_marked_failed_not_completed(self) -> None:
         config = {

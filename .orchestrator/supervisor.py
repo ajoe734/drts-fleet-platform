@@ -3071,7 +3071,7 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             worker.get("queue_event_id")
             and current_mode == "execution"
             and worker.get("status") in active_worker_statuses
-            and higher_priority_ready_task_exists(config, worker, task_map)
+            and higher_priority_ready_task_exists(config, worker, task_map, state=state, active_statuses=active_worker_statuses)
         ):
             if alive:
                 terminate_worker_pid(worker.get("pid"))
@@ -4327,12 +4327,16 @@ def higher_priority_ready_task_exists(
     config: dict[str, Any],
     worker: dict[str, Any],
     task_map: dict[str, dict[str, Any]],
+    *,
+    state: dict[str, Any] | None = None,
+    active_statuses: set[str] | None = None,
 ) -> bool:
     current_priority = dispatch_reason_priority(worker.get("request_snapshot", {}).get("reason"))
     if current_priority is None:
         return False
 
-    agent_name = display_name_for(config, str(worker.get("agent_id") or ""))
+    agent_id = normalize_agent_id(str(worker.get("agent_id") or worker.get("provider") or ""))
+    agent_name = display_name_for(config, agent_id)
     current_task_id = str(worker.get("task_id") or "")
     settings = ready_dispatch_settings(config)
     review_statuses = {str(value).lower() for value in settings.get("review_statuses", ["review"])}
@@ -4341,9 +4345,29 @@ def higher_priority_ready_task_exists(
     schema = config.get("schema", {})
     owner_field = schema.get("assignee_field", "owner")
     reviewer_field = schema.get("reviewer_field", "reviewer")
+    active_task_agents: set[tuple[str, str]] = set()
+    pending_task_agents: set[tuple[str, str]] = set()
+    if state is not None:
+        normalized_active_statuses = active_statuses or {
+            str(value) for value in settings.get("active_worker_statuses", [])
+        }
+        active_agent_counts = active_worker_agent_counts(state, normalized_active_statuses)
+        try:
+            pending_agent_counts = outstanding_delivery_agent_counts(config, state)
+            _pending_agents, pending_task_agents, _pending_event_keys = outstanding_delivery_indexes(config, state)
+        except (KeyError, OSError):
+            pending_agent_counts = {}
+            pending_task_agents = set()
+        lane_capacity = max_tasks_per_agent_for_lane(settings, agent_id)
+        lane_load = active_agent_counts.get(agent_id, 0) + pending_agent_counts.get(agent_id, 0)
+        if lane_load < lane_capacity:
+            return False
+        _active_agents, active_task_agents = active_worker_indexes(state, normalized_active_statuses)
 
     for task_id, task in task_map.items():
         if task_id == current_task_id:
+            continue
+        if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
             continue
         task_status = str(task.get("status") or "").lower()
         candidate_priority = None
