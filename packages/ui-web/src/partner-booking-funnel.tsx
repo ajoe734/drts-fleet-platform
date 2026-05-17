@@ -13,11 +13,42 @@ export const partnerBookingScreens = [
 
 export type PartnerBookingScreenId = (typeof partnerBookingScreens)[number];
 
+export const partnerBookingStateScreens = [
+  "eligible",
+  "ineligible",
+  "manual_review",
+  "inactive",
+  "eligibility_required",
+] as const;
+
+export type PartnerBookingStateScreenId =
+  (typeof partnerBookingStateScreens)[number];
+
 type ScreenMeta = {
   id: PartnerBookingScreenId;
   label: string;
   eyebrow: string;
   summary: string;
+};
+
+type StateScreenMeta = {
+  id: PartnerBookingStateScreenId;
+  routeSegment: string;
+  label: string;
+  eyebrow: string;
+  title: string;
+  summary: string;
+  tone: TripItem["tone"];
+  guidance: string;
+  primaryAction: {
+    label: string;
+    href: string;
+  };
+  secondaryAction: {
+    label: string;
+    href: string;
+  };
+  bullets: readonly string[];
 };
 
 type TripItem = {
@@ -84,6 +115,136 @@ const serviceItems = [
 const screenMetaById = Object.fromEntries(
   screenMeta.map((item) => [item.id, item]),
 ) as Record<PartnerBookingScreenId, ScreenMeta>;
+
+const stateScreenMeta: ReadonlyArray<StateScreenMeta> = [
+  {
+    id: "eligible",
+    routeSegment: "eligible",
+    label: "資格通過",
+    eyebrow: "PBK Gate",
+    title: "Eligibility approved",
+    summary: "The partner benefit check passed and booking create may proceed.",
+    tone: "success",
+    guidance:
+      "This route is explicit so a verified rider lands on a dedicated gate instead of being redirected silently into booking creation.",
+    primaryAction: {
+      label: "Continue to booking",
+      href: "/book",
+    },
+    secondaryAction: {
+      label: "Review eligibility step",
+      href: "/eligibility",
+    },
+    bullets: [
+      "Use the verification record to stamp partner provenance on the booking.",
+      "Free-benefit or discounted-lane rules stay backend-owned.",
+      "This route is safe to deep-link from a partner bootstrap or callback flow.",
+    ],
+  },
+  {
+    id: "ineligible",
+    routeSegment: "ineligible",
+    label: "資格不符",
+    eyebrow: "PBK Gate",
+    title: "Benefit eligibility denied",
+    summary: "The issuer or partner rule rejected this rider for benefit use.",
+    tone: "accent",
+    guidance:
+      "Booking creation remains blocked. The user must fix the partner reference or continue outside the sponsored benefit lane.",
+    primaryAction: {
+      label: "Retry eligibility",
+      href: "/eligibility",
+    },
+    secondaryAction: {
+      label: "Contact support",
+      href: "/help",
+    },
+    bullets: [
+      "Do not fall through into booking create with an ineligible result.",
+      "Show issuer or partner denial context on the dedicated gate.",
+      "Support can redirect the rider to a non-benefit flow if policy allows.",
+    ],
+  },
+  {
+    id: "manual_review",
+    routeSegment: "manual_review",
+    label: "人工審查",
+    eyebrow: "PBK Gate",
+    title: "Manual review required",
+    summary:
+      "The eligibility adapter could not grant a clean pass and queued manual review.",
+    tone: "primary",
+    guidance:
+      "Partner booking is paused until ops or sponsor review resolves the verification outcome. This is a hard stop, not a soft warning.",
+    primaryAction: {
+      label: "Open support options",
+      href: "/help",
+    },
+    secondaryAction: {
+      label: "Back to entry",
+      href: "/",
+    },
+    bullets: [
+      "Treat adapter timeout and offline sponsor confirmation as review work, not success.",
+      "Do not present booking create actions while the review queue is unresolved.",
+      "Use explicit queue language so the rider knows follow-up is pending.",
+    ],
+  },
+  {
+    id: "inactive",
+    routeSegment: "inactive",
+    label: "入口停用",
+    eyebrow: "PBK Gate",
+    title: "Partner entry inactive",
+    summary:
+      "This partner entry is not active, so benefit-sponsored booking is unavailable.",
+    tone: "neutral",
+    guidance:
+      "The route stays visible as an explicit inactive state. It must never render live booking actions or an unbranded fallback.",
+    primaryAction: {
+      label: "Return to landing",
+      href: "/",
+    },
+    secondaryAction: {
+      label: "Call partner hotline",
+      href: "/help",
+    },
+    bullets: [
+      "Inactive entry means platform admin action is required before service resumes.",
+      "Rollback and coexistence flows may deep-link here during cutover windows.",
+      "The white-label frame remains intact so support can verify the intended partner.",
+    ],
+  },
+  {
+    id: "eligibility_required",
+    routeSegment: "eligibility-required",
+    label: "需要驗證",
+    eyebrow: "PBK Gate",
+    title: "Eligibility verification required",
+    summary:
+      "This partner program requires eligibility confirmation before booking create is unlocked.",
+    tone: "primary",
+    guidance:
+      "Use this dedicated route when a rider reaches booking create without the required verification context.",
+    primaryAction: {
+      label: "Verify eligibility",
+      href: "/eligibility",
+    },
+    secondaryAction: {
+      label: "Return to landing",
+      href: "/",
+    },
+    bullets: [
+      "Keep the gate explicit instead of auto-starting a booking attempt.",
+      "Only an eligible decision unlocks the booking create route.",
+      "This keeps partner entry authority aligned with legacy tenant-console behavior.",
+    ],
+  },
+] as const;
+
+const stateScreenMetaById = Object.fromEntries(
+  stateScreenMeta.map((item) => [item.id, item]),
+) as Record<PartnerBookingStateScreenId, StateScreenMeta>;
 
 const phoneScreenStyle: CSSProperties = {
   width: "100%",
@@ -443,6 +604,19 @@ export function getPartnerBookingArtboardAnchor(
   screen: PartnerBookingScreenId,
 ): string {
   return screen;
+}
+
+export function getPartnerBookingStateScreenMeta(
+  screen: PartnerBookingStateScreenId,
+): StateScreenMeta {
+  return stateScreenMetaById[screen];
+}
+
+export function getPartnerBookingStateHref(
+  basePath: string,
+  screen: PartnerBookingStateScreenId,
+): string {
+  return `${basePath}/${getPartnerBookingStateScreenMeta(screen).routeSegment}`;
 }
 
 export function PartnerBookingPhoneScreen({
@@ -1653,6 +1827,208 @@ export function PartnerBookingReferenceFunnel({
 
         <div style={{ justifySelf: "center" }}>
           <PartnerBookingPhoneScreen brand={brand} screen={activeScreen} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export function PartnerBookingStateGate({
+  brand,
+  state,
+  basePath,
+}: {
+  brand: PartnerBrandTemplate;
+  state: PartnerBookingStateScreenId;
+  basePath: string;
+}) {
+  const meta = getPartnerBookingStateScreenMeta(state);
+
+  return (
+    <div style={pageStackStyle}>
+      <section
+        style={{
+          ...sectionCardStyle,
+          padding: "24px",
+          background: `linear-gradient(135deg, ${brand.surface.bg} 0%, #ffffff 58%)`,
+        }}
+      >
+        <div style={{ display: "grid", gap: "10px" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              color: brand.primary,
+              fontWeight: 800,
+            }}
+          >
+            {brand.displayName}
+          </div>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "30px",
+              lineHeight: 1.15,
+              color: "#0e1424",
+            }}
+          >
+            {meta.title}
+          </h1>
+          <p
+            style={{
+              margin: 0,
+              maxWidth: "760px",
+              fontSize: "14px",
+              lineHeight: 1.7,
+              color: "#56657f",
+            }}
+          >
+            {meta.guidance}
+          </p>
+        </div>
+      </section>
+
+      <section
+        style={{
+          display: "grid",
+          gap: "20px",
+          gridTemplateColumns: "minmax(0, 1.2fr) minmax(390px, 420px)",
+          alignItems: "start",
+        }}
+      >
+        <div style={{ display: "grid", gap: "20px" }}>
+          <section style={{ ...sectionCardStyle, padding: "22px" }}>
+            <div
+              style={{
+                display: "grid",
+                gap: "8px",
+                marginBottom: "18px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "12px",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                  color: "#64748b",
+                  fontWeight: 700,
+                }}
+              >
+                {meta.eyebrow}
+              </div>
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "22px",
+                  lineHeight: 1.25,
+                  color: "#0e1424",
+                }}
+              >
+                {meta.label}
+              </h2>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "14px",
+                  lineHeight: 1.7,
+                  color: "#56657f",
+                }}
+              >
+                {meta.summary}
+              </p>
+            </div>
+
+            <div style={{ display: "grid", gap: "12px" }}>
+              <PhoneCard>
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: "12px" }}
+                >
+                  <Chip
+                    brand={brand}
+                    tone={meta.tone}
+                    label={meta.routeSegment}
+                  />
+                  <div style={{ fontSize: "13px", color: "#56657f" }}>
+                    Route:{" "}
+                    <code>{getPartnerBookingStateHref(basePath, state)}</code>
+                  </div>
+                </div>
+              </PhoneCard>
+
+              <PhoneCard title="Authority-safe handling">
+                {meta.bullets.map((bullet, index) => (
+                  <div
+                    key={bullet}
+                    style={{
+                      display: "flex",
+                      gap: "12px",
+                      padding: "10px 0",
+                      borderBottom:
+                        index < meta.bullets.length - 1
+                          ? "1px dashed #f1f3f8"
+                          : "1px solid transparent",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: "8px",
+                        height: "8px",
+                        marginTop: "6px",
+                        borderRadius: "999px",
+                        background: brand.primary,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <div
+                      style={{
+                        fontSize: "13px",
+                        lineHeight: 1.65,
+                        color: "#0e1424",
+                      }}
+                    >
+                      {bullet}
+                    </div>
+                  </div>
+                ))}
+              </PhoneCard>
+
+              <div
+                style={{
+                  display: "grid",
+                  gap: "10px",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                }}
+              >
+                <a
+                  href={`${basePath}${meta.primaryAction.href}`}
+                  style={{ textDecoration: "none" }}
+                >
+                  <ActionButton
+                    brand={brand}
+                    label={meta.primaryAction.label}
+                    primary
+                  />
+                </a>
+                <a
+                  href={`${basePath}${meta.secondaryAction.href}`}
+                  style={{ textDecoration: "none" }}
+                >
+                  <ActionButton
+                    brand={brand}
+                    label={meta.secondaryAction.label}
+                  />
+                </a>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div style={{ position: "sticky", top: "16px" }}>
+          <PartnerBookingPhoneScreen
+            brand={brand}
+            screen={state === "eligible" ? "eligibility" : "landing"}
+          />
         </div>
       </section>
     </div>

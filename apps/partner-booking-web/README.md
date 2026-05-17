@@ -15,7 +15,8 @@ This app now carries the PBK-UI-003 CTBC reference funnel baseline. Per
   `packages/ui-tokens/src/brands.ts` with shared CTBC / CATHAY / GRAND demo
   templates.
 - The CTBC reference funnel (7 screens) now lands in **PBK-UI-003**.
-- Authority-safe negative paths remain the follow-on **PBK-UI-004** task.
+- Authority-safe negative paths are implemented as direct gate routes in
+  **PBK-UI-004**.
 - The cutover policy between this app and the legacy
   `tenant-console-web/app/partner/` route is a **PBK-UI-005** decision doc.
 
