@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "prod-* tag produced by publish-to-master (e.g. prod-20260517-abc12345)"
+        description: "prod/v<date> tag produced by hourly-promote (e.g. prod/v2026.05.18.0)"
         required: true
         type: string
       skip_migration:
@@ -60,10 +60,10 @@ jobs:
       - name: Validate tag shape
         run: |
           tag="${{ inputs.tag }}"
-          if ! [[ "$tag" =~ ^prod-[0-9]{8}-[0-9a-f]{8}$ ]]; then
-            echo "::error::Tag '$tag' does not match prod-YYYYMMDD-<sha8>."
-            echo "::error::Prod deploys only accept tags produced by publish-to-master.yml."
-            echo "::error::Find a valid tag: gh api repos/${{ github.repository }}/tags --jq '.[].name' | grep ^prod-"
+          if ! [[ "$tag" =~ ^prod/v[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]]; then
+            echo "::error::Tag '$tag' does not match prod/v<YYYY.MM.DD>.<N>."
+            echo "::error::Prod deploys only accept tags produced by hourly-promote.yml."
+            echo "::error::Find a valid tag: gh api repos/${{ github.repository }}/tags --jq '.[].name' | grep ^prod/"
             exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_ENV"

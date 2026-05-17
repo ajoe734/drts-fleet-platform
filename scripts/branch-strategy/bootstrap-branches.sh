@@ -29,8 +29,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 BRANCHES=(
-  "backend-dev"
-  "frontend-dev"
+  "dev"
 )
 
 echo "==> Mode: $([ $APPLY -eq 1 ] && echo APPLY || echo DRY-RUN)"

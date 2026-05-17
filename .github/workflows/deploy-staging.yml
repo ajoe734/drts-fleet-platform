@@ -1,16 +1,16 @@
 name: Deploy — Staging
 
-# T10 of the v3 branch strategy: operator picks any tag / branch / SHA to
+# T10 of the v4 branch strategy: operator picks any tag / branch / SHA to
 # deploy to staging. No auto-triggering — staging deploys are deliberate
 # decisions about "what big block do I want validated end-to-end". Common
-# choices: a prod-* tag from publish-to-master, or backend-dev / frontend-dev
-# HEAD if you want to validate the latest dev integration in staging conditions.
+# choices: a release/v<date> tag (= what's in dev VM right now), a prod/v<date>
+# tag (= what could go to prod), main HEAD, or any publish/v<date> branch.
 
 on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: "Tag (e.g. prod-20260517-abc12345) OR branch (backend-dev, frontend-dev, main) OR commit SHA"
+        description: "Tag (release/v<date>, prod/v<date>) OR branch (main, dev, publish/v<date>) OR commit SHA"
         required: true
         default: "main"
         type: string

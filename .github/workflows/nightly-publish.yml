@@ -1,0 +1,124 @@
+name: Nightly publish (cut snapshot)
+
+# T4-T7 of v4 branch strategy: once per night (03:00 UTC = 11:00 Taipei), cut
+# an immutable publish/v<date> branch from dev's current HEAD AND tag it
+# release/v<date>. Pushing the publish branch triggers Deploy — Dev separately
+# so the dev VM rolls over to this snapshot.
+#
+# Idempotent: if today's first publish already exists, increment the .N suffix
+# (v2026.05.18.0 -> v2026.05.18.1).
+
+on:
+  schedule:
+    # 03:00 UTC = 11:00 Asia/Taipei = start of TW business day
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: 'Branch to snapshot (default: dev)'
+        required: false
+        default: 'dev'
+        type: string
+
+permissions:
+  contents: write   # create branch + tag
+
+concurrency:
+  group: nightly-publish
+  cancel-in-progress: false
+
+jobs:
+  cut:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SOURCE: ${{ github.event.inputs.source_branch || 'dev' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve source SHA
+        id: src
+        run: |
+          git fetch origin "$SOURCE" --quiet
+          sha=$(git rev-parse "origin/$SOURCE")
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Snapshotting $SOURCE @ $sha"
+
+      - name: Verify dev's latest ci-integ is green
+        id: green
+        run: |
+          state=$(gh api "repos/${{ github.repository }}/commits/${{ steps.src.outputs.sha }}/check-runs" \
+            --jq '[.check_runs[] | select(.name=="ci-integ")] | (if length==0 then "missing" else (.[0].conclusion // "pending") end)')
+          echo "ci-integ on dev HEAD = $state"
+          if [ "$state" != "success" ]; then
+            echo "::warning::ci-integ on dev HEAD is $state (need success). Skipping nightly publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next version
+        if: steps.green.outputs.skip != 'true'
+        id: ver
+        run: |
+          today_date=$(date -u +%Y.%m.%d)
+          # Find the highest .N already used today; default to .0 if none.
+          existing_nums=$(git ls-remote --tags origin "refs/tags/release/v${today_date}.*" \
+            | awk '{print $2}' | sed 's|refs/tags/release/v[0-9.]*\.||' | sort -n | tail -1)
+          if [ -z "$existing_nums" ]; then
+            n=0
+          else
+            n=$((existing_nums + 1))
+          fi
+          version="v${today_date}.${n}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Next publish version: $version"
+
+      - name: Check source has content delta vs latest publish
+        if: steps.green.outputs.skip != 'true'
+        id: delta
+        run: |
+          # Find latest publish/* branch on origin
+          latest_publish=$(git ls-remote --heads origin "refs/heads/publish/v*" \
+            | awk '{print $2}' | sort -V | tail -1 | sed 's|refs/heads/||')
+          if [ -z "$latest_publish" ]; then
+            echo "No previous publish branch; cutting first one."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch origin "$latest_publish" --quiet
+          if git diff --quiet "origin/$latest_publish..${{ steps.src.outputs.sha }}"; then
+            echo "::notice::No content delta between $latest_publish and dev HEAD; skipping nightly publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cut publish branch + tag
+        if: steps.green.outputs.skip != 'true' && steps.delta.outputs.skip != 'true'
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          version="${{ steps.ver.outputs.version }}"
+          sha="${{ steps.src.outputs.sha }}"
+          branch="publish/$version"
+          tag="release/$version"
+          # Push branch
+          git push origin "$sha:refs/heads/$branch"
+          echo "Created branch $branch @ $sha"
+          # Push annotated tag
+          git tag -a "$tag" "$sha" -m "Nightly publish snapshot of $SOURCE at $sha"
+          git push origin "$tag"
+          echo "Tagged $tag"
+          # Summary
+          {
+            echo "## Nightly publish: \`$version\`"
+            echo ""
+            echo "- Source: \`$SOURCE\` @ \`${sha:0:12}\`"
+            echo "- Branch: \`$branch\` (immutable snapshot)"
+            echo "- Tag:    \`$tag\` (same SHA)"
+            echo "- Next step: \`Deploy — Dev\` should fire automatically from the push to \`$branch\`."
+            echo "- Promotion to master happens via \`hourly-promote.yml\` if no \`regression:$version\` issue is opened in the next ~1 hour."
+          } >> "$GITHUB_STEP_SUMMARY"

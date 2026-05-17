@@ -64,10 +64,9 @@ EOF
   fi
 }
 
-# Per docs/ops/branch-strategy.md §6 (v3 tag-based model).
+# Per docs/ops/branch-strategy.md §6 (v4 nightly-publish / hourly-promote model).
 apply_protection "main"
-apply_protection "backend-dev"
-apply_protection "frontend-dev"
+apply_protection "dev"
 
 echo
 echo "Done."

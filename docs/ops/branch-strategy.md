@@ -1,207 +1,236 @@
-# Branch Strategy — AI-native, tag-based promotion (v3)
+# Branch Strategy — nightly publish + hourly promote (v4)
 
 **Status:** Adopted 2026-05-17  
 **Owner:** Release engineering  
-**Supersedes:** v2 (`*-staging` branches + milestone promotion). v2 used branches as the promotion unit; v3 uses **tags**, which fits AI cadence better — every green dev integration becomes a candidate, operators choose what to deploy.
+**Supersedes:** v3 (per-merge prod-* tags). v3 tagged every dev merge → tag pollution + dev VM thrashing. v4 cuts an **immutable nightly publish snapshot** that dev VM deploys to, then **hourly auto-promotes** to master with a `prod/v<date>` tag.
 
 ---
 
-## 1. Why v3
+## 1. Why v4
 
-Most work in this repo is by AI agents. Agents commit dozens of small task closures per hour. v2 still routed each closure through a branch-shaped funnel (`*-dev` → `*-staging` → `main`); operators had to remember which branches existed in which environment. v3 collapses the model:
+In v3, every dev merge auto-published to main and produced a `prod-*` tag. Two problems:
+- **Tag pollution.** 30 AI merges/hour × 24h = 720 tags/day. Git tag list becomes a SHA wall.
+- **dev VM instability.** dev VM = dev branch HEAD meant the environment shifted under testers mid-test.
 
-- **dev** = continuous auto-deploy of `*-dev` HEAD (always reflects "the latest thing the AI made")
-- **main** = publish trunk, automatically fed from `*-dev`, every merge tagged `prod-YYYYMMDD-<sha8>`
-- **staging / production** = operator picks a tag and dispatches the deploy workflow
+v4 decouples three rhythms:
+- AI cadence (continuous, per-PR merge to `dev`)
+- dev VM cadence (1 / day, at nightly publish cut)
+- prod-candidate cadence (≤ 1 / hour, hourly promote of latest stable publish)
 
-There is no `*-staging` branch. There is no "promote dev → staging" branch action. The promotion mechanism is _selecting a tag_.
+You get a stable dev VM, a small list of meaningful tags, and a clear "which version is in which environment".
 
 ---
 
 ## 2. The model
 
 ```
-   AI agents + humans → feat/codex/claude/gemini branches
-                          │ PR (0 reviewers; 3 CI gates required)
-                          ▼
-            ┌────────────────────────────────────┐
-            │  backend-dev      frontend-dev     │
-            │  continuous integration trunks      │
-            │   ─ on push: ci-integ (heavier)     │
-            │   ─ ci-integ green → Deploy — Dev   │ ← AUTO DEPLOY to dev GCP
-            │   ─ ci-integ green → publish-to-master:
-            │                  · open auto-PR → main
-            │                  · auto-merge (admin)
-            └────────────────────────────────────┘
-                                │
-                                ▼
-            ┌────────────────────────────────────┐
-            │  main (publish trunk)               │
-            │   ─ on push: tag prod-YYYYMMDD-<sha>│
-            └────────────────────────────────────┘
-                                │
-                tags accumulate: prod-20260517-abc12345
-                                 prod-20260517-def67890
-                                 …
-                                │
-       OPERATOR ACTION (workflow_dispatch):
-          gh workflow run deploy-staging.yml -f source_ref=prod-20260517-abc12345
-          gh workflow run deploy-prod.yml    -f tag=prod-20260517-abc12345
-                                │
-                                ▼
-                       staging / production GCP
+  AI agents + humans → feat/codex/claude/gemini → PR to dev (3 CI gates, 0 reviewers)
+                                                       │ auto-merge
+                                                       ▼
+                                                      dev
+                                                 (continuous,
+                                                  ci-integ on push)
+                                                       │
+                                                       │ 03:00 UTC nightly-publish.yml
+                                                       │  ─ require ci-integ green on dev HEAD
+                                                       │  ─ require content delta vs last publish
+                                                       │  ─ cut snapshot
+                                                       ▼
+                                            publish/v2026.05.18.0   (immutable branch)
+                                             + tag release/v2026.05.18.0
+                                                       │
+                                              push event → Deploy — Dev
+                                                       ▼
+                                              dev GCP env now on v2026.05.18.0
+                                              (stable for ~24h)
+                                                       │
+                                                       │ hourly-promote.yml (~15 past every hour)
+                                                       │  ─ pick latest publish/v*
+                                                       │  ─ require ≥30 min soak time
+                                                       │  ─ require no open issue labeled regression:v<date>
+                                                       │  ─ require main does not already contain it
+                                                       ▼
+                                            auto-PR  publish/v<date> → main  (auto-merge, 3 gates)
+                                                       │ on merge
+                                                       ▼
+                                                     main
+                                                       │ tag-on-merge job
+                                                       ▼
+                                              tag prod/v2026.05.18.0
+                                                       │
+                                                       ▼
+                                  Operator picks tag, dispatches deploy:
+                                    gh workflow run deploy-staging.yml -f source_ref=<any>
+                                    gh workflow run deploy-prod.yml    -f tag=prod/v<date>
 
-       hotfix/<id>  ──► PR straight to main (CI must pass, auto-merges) ──► tagged
-                  └─► cherry-pick into *-dev within 24h
+  hotfix/<id> ──► PR direct to main (3 gates + admin bypass if needed) ──► merges + tagged
+              └─► cherry-pick into dev
 ```
 
 ---
 
-## 3. Branches
+## 3. Branches and tags
 
-| Family            | Purpose                                  | Lifetime | Naming                                |
-| ----------------- | ---------------------------------------- | -------- | ------------------------------------- |
-| `feat/*`          | Human-authored feature                   | Short    | `feat/<scope>-<desc>`                 |
-| `fix/*`           | Human-authored bug fix                   | Short    | `fix/<scope>-<desc>`                  |
-| `codex/*`         | Codex agent worker output                | Short    | `codex/<task-id-kebab>`               |
-| `claude/*` `claude2/*`  | Claude agent worker output         | Short    | `claude/<task-id-kebab>`              |
-| `gemini/*` `gemini2/*`  | Gemini agent worker output         | Short    | `gemini/<task-id-kebab>`              |
-| `backend-dev`     | Backend continuous trunk                 | Permanent | exactly this name                    |
-| `frontend-dev`    | Frontend continuous trunk                | Permanent | exactly this name                    |
-| `main`            | Publish trunk + production source        | Permanent | exactly this name                    |
-| `hotfix/*`        | Emergency PR-to-main                     | Shortest | `hotfix/<incident-id>`                |
+| Name pattern              | Type      | How created                          | Mutability | Lifetime |
+| ------------------------- | --------- | ------------------------------------ | ---------- | -------- |
+| `feat/*` `fix/*` `codex/*` `claude/*` `gemini/*` | branch | human / agent | mutable | short |
+| `dev`                     | branch    | bootstrap                            | mutable (only via PR + 3 gates) | permanent |
+| `main`                    | branch    | bootstrap                            | mutable (only via PR + 3 gates) | permanent |
+| `publish/v<YYYY.MM.DD>.<N>` | branch  | `nightly-publish.yml` cron           | **immutable** | permanent (snapshot) |
+| `release/v<YYYY.MM.DD>.<N>` | tag     | `nightly-publish.yml` cron           | immutable | permanent |
+| `prod/v<YYYY.MM.DD>.<N>`  | tag       | `hourly-promote.yml` tag-on-merge    | immutable | permanent |
+| `hotfix/*`                | branch    | human / agent                        | mutable | short |
 
-> Three long-lived branches: `main`, `backend-dev`, `frontend-dev`. Everything else is disposable.
+`<N>` is the daily sequence (0-indexed). Nightly cron always cuts `.0`; if you manually re-cut the same day you get `.1`, `.2`, ...
+
+The `release/v<date>` tag and the `publish/v<date>` branch always point at **the same SHA**. The branch lets you check out + run workflows; the tag is the immutable identifier you reference in docs / commit messages / issue titles.
+
+The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges a publish into main. Its SHA is the squash-merge commit on main, **not** the publish branch's SHA — but the tree (file contents) matches.
 
 ---
 
-## 4. Task → track routing
+## 4. Workflows
 
-`.orchestrator/branch_routing.py` routes by task-ID prefix:
-
-| Track    | Task ID prefixes                                                                                          | Base branch       |
-| -------- | ---------------------------------------------------------------------------------------------------------- | ----------------- |
-| Backend  | `BE-*`, `API-*`, `SC-*`, `OBS-*`, `BE-INTEG-*`, `BE-APR-*`, `BE-CC-*`, `EVD-*`, `FWD-*`, `TCH-*`           | `backend-dev`     |
-| Frontend | `UI-*`, `*-UI-*` (e.g. `OPS-UI-*`, `TEN-UI-*`), `DRV-*`, `PA-*`, `PB-*`, `DS-*`                            | `frontend-dev`    |
-| Docs     | `DOC-*`, `DOCS-*`                                                                                          | `backend-dev` (default) |
-| Cross    | no rule matches                                                                                            | `backend-dev` (with cross-track reviewer caveat) |
-
-Worker PRs target `backend-dev` or `frontend-dev`; from there the publish + deploy chain is automatic.
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` (3 named gates) | PR to main / dev; push main | Commit trailers + Runtime mirror guard + Smoke acceptance |
+| `ci-integ.yml` | push to dev; workflow_dispatch | heavier integration suite (build, integration tests, orchestrator-tests) — prerequisite for `nightly-publish` |
+| `nightly-publish.yml` | cron `0 3 * * *`; workflow_dispatch | cut `publish/v<date>` + tag `release/v<date>` from dev HEAD |
+| `deploy-dev.yml` | push to `publish/v*`; workflow_dispatch | deploy to dev GCP (this is what makes dev VM roll) |
+| `hourly-promote.yml` (promote job) | cron `15 * * * *`; workflow_dispatch | open auto-PR `publish/v<date> → main`, auto-merge |
+| `hourly-promote.yml` (tag-on-merge job) | push to main | tag `prod/v<date>` if main's tree matches a publish snapshot |
+| `deploy-staging.yml` | workflow_dispatch only | operator picks any ref → staging |
+| `deploy-prod.yml` | workflow_dispatch only, required `prod/v<date>` tag input | operator picks a prod tag → production (currently skeleton, see §7) |
 
 ---
 
 ## 5. Promotion gates
 
-| Gate                          | Trigger                              | Required CI                                          | Approver        | Mechanism                                  |
-| ----------------------------- | ------------------------------------ | ---------------------------------------------------- | --------------- | ------------------------------------------ |
-| `feat/* → *-dev`              | PR open                              | **Commit trailers + Runtime mirror guard + Smoke acceptance** | none (CI is gate) | `ci.yml`; auto-merge once green        |
-| `*-dev push → dev deploy`     | every push (cancel-in-progress)      | `ci-integ` must pass                                 | none            | `deploy-dev.yml` via `workflow_run`        |
-| `*-dev push → publish-to-master` | every push (one in flight at a time) | `ci-integ` must pass                                 | none (CI + auto-merge) | `publish-to-master.yml` opens auto-PR `*-dev → main`, sets auto-merge |
-| `auto-PR → main`              | auto-merge when CI green             | same 3 gates as `feat → *-dev`                       | none            | GitHub auto-merge (squash)                 |
-| `main push → tag`             | every push                           | n/a                                                  | none            | `publish-to-master.yml tag-on-merge` job tags `prod-YYYYMMDD-<sha8>` |
-| **Staging deploy**            | `workflow_dispatch` (operator)       | none (just deploy)                                   | **operator**    | `deploy-staging.yml -f source_ref=<tag or branch>` |
-| **Production deploy**         | `workflow_dispatch` (operator)       | tag must match `prod-*` regex; tag must exist        | **operator**    | `deploy-prod.yml -f tag=<prod-*>`          |
-| `hotfix/* → main`             | Emergency PR                         | same 3 CI gates                                      | 0 reviewers (CI is gate) OR admin bypass | Same flow as feat; back-port via cherry-pick to `*-dev` within 24h |
+### Gate 1: feat → dev (every PR)
+- 3 named CI checks: `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance`
+- 0 reviewers required
+- `auto-merge` enabled per PR
 
-### 5.1 Why CI-only gating (0 reviewers)
+### Gate 2: dev → publish snapshot (once a day, nightly cron)
+- `ci-integ` must be green on dev HEAD (skip publish otherwise)
+- content delta vs latest publish required (skip if no real changes)
 
-AI commits at high cadence. Requiring a human approval per PR is a bottleneck the model can't sustain. The repo trusts the **3 CI gates** instead:
+### Gate 3: publish → main (hourly cron)
+- ≥30 min soak time since publish was cut (configurable)
+- no open issue with label `regression:v<date>` (humans/testers can block by opening such an issue)
+- main does not already contain this publish's content (idempotency)
+- auto-PR opens, auto-merge enabled, 3 named CI checks must pass
 
-1. **Commit trailers** — every commit must have `<TASK-ID>: <subject>` and `Task-ID:`, `LLM-Agent:`, `Reviewer:` trailers. Forces every change to be auditable.
-2. **Runtime mirror guard** — no `docs-site/*`, `*-bg.pid`, runtime logs, or other derived artifacts in the diff. Forces clean source-of-truth commits.
-3. **Smoke acceptance** — lint + typecheck + unit tests pass.
+### Gate 4: prod deploy (manual)
+- operator runs `gh workflow run deploy-prod.yml -f tag=prod/v<date>`
+- tag shape validation: `^prod/v[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$`
+- tag-existence validation against origin
+- production environment can be configured with required-reviewer for double gate
 
-If a future operator wants a human-approval layer, change `required_approving_review_count: 0` to `1` in `scripts/branch-strategy/apply-branch-protection.sh`.
-
-### 5.2 Why tag-based staging/prod (not branches)
-
-In v2, staging meant "what's in the `*-staging` branch right now". That couples one operator decision (deploy to staging) with a stateful branch ref. v3 makes the staging environment **stateless** — the GitHub deployment record + `gh run view` tells you what's deployed. Operator picks any tag for any environment at any time.
-
-This also makes rollback trivial: `gh workflow run deploy-staging.yml -f source_ref=prod-20260515-abc12345` to redeploy yesterday's tag.
+### Hotfix path
+- branch off main, PR to main, 3 gates (or admin bypass)
+- after merge, cherry-pick into dev
+- if the hotfix needs to ship immediately to prod: cut a manual publish (`gh workflow run nightly-publish.yml`), trigger hourly-promote manually, then `gh workflow run deploy-prod.yml -f tag=<new prod tag>`
 
 ---
 
-## 6. Branch protection (identical for main + backend-dev + frontend-dev)
+## 6. Branch protection
 
-| Setting                              | Value                                                  |
-| ------------------------------------ | ------------------------------------------------------ |
-| Required reviewers                   | 0                                                      |
-| Required status checks               | **Commit trailers**, **Runtime mirror guard**, **Smoke acceptance** |
-| Strict (require branch up-to-date)   | yes                                                    |
-| Required linear history              | yes (squash-only)                                      |
-| Allow force-push                     | no                                                     |
-| Allow deletion                       | no                                                     |
-| Enforce admins                       | no (admin can bypass — used for the initial cutover and emergency fixes) |
-| Direct push                          | rejected (must go through PR)                          |
+Identical settings on `main` and `dev`:
+
+| Setting | Value |
+| --- | --- |
+| Required reviewers | 0 |
+| Required status checks | `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance` |
+| Strict (up-to-date with base) | yes |
+| Linear history | yes |
+| Force-push | no |
+| Delete | no |
+| Enforce admins | no |
+
+`publish/v*` branches are **not** protected by branch protection. They are protected by convention (immutable) and by the fact that nothing in the workflows writes to them after the initial nightly cut.
 
 Applied via `scripts/branch-strategy/apply-branch-protection.sh --apply`.
 
 ---
 
-## 7. Hotfix path
+## 7. Production deploy (skeleton)
 
-```
-hotfix/<incident-id> ──(PR, 3 gates)──► main ──(tag prod-*)──► operator deploys to prod
-                  │
-                  └─► cherry-pick into backend-dev AND/OR frontend-dev within 24h
-```
+`deploy-prod.yml` validates the tag input format and existence, then calls into a build+deploy job graph that uses `PROD_*` GitHub variables and secrets that are **not yet configured**. The workflow will fail in `validate-config` with the list of missing vars/secrets.
 
-Same PR flow, same 3 gates. The only difference: hotfix branches off `main`, not `*-dev`. After landing, cherry-pick the fix back into the affected `*-dev` so the dev environment isn't behind prod.
-
----
-
-## 8. Production deploy (skeleton)
-
-`deploy-prod.yml` is structured like `deploy-staging.yml` but requires a `prod-*` tag input and uses `PROD_*` repo variables/secrets that are **not yet configured**. The first run fails in `validate-config` with the missing list. To complete the prod rail:
+To complete the prod rail:
 
 1. Provision a `prod` GCP project + Workload Identity Federation
-2. Set repo **variables** (Settings → Variables → Actions):
-   - `PROD_GCP_PROJECT_ID`, `PROD_GCP_REGION`, `PROD_GCP_CLOUDSQL_INSTANCE`, `PROD_GCP_RUNTIME_SERVICE_ACCOUNT`
-   - (optional) `PROD_ARTIFACT_PROJECT_ID`, `PROD_ARTIFACT_REGION`, `PROD_ARTIFACT_REPOSITORY`, `PROD_SECRET_PREFIX`
-3. Set repo **secrets**:
-   - `PROD_WIF_PROVIDER`, `PROD_WIF_SERVICE_ACCOUNT`
-4. Copy build-push + deploy job graph from `deploy-staging.yml` into `deploy-prod.yml`, swapping `STAGING_*` → `PROD_*` and `environment: staging` → `environment: production`.
+2. Set repo variables: `PROD_GCP_PROJECT_ID`, `PROD_GCP_REGION`, `PROD_GCP_CLOUDSQL_INSTANCE`, `PROD_GCP_RUNTIME_SERVICE_ACCOUNT` (+ optional `PROD_ARTIFACT_*`, `PROD_SECRET_PREFIX`)
+3. Set repo secrets: `PROD_WIF_PROVIDER`, `PROD_WIF_SERVICE_ACCOUNT`
+4. Copy `deploy-staging.yml`'s build-push + deploy job graph into `deploy-prod.yml`, swapping `STAGING_*` → `PROD_*` and `environment: staging` → `environment: production`
 
-The GitHub `production` environment is already created (id `15434985743`). Optional: add required reviewers for a deploy-time human gate.
+The `production` GitHub environment is already created. Add required reviewers if you want a deploy-time human gate on top of the prod tag selection.
 
 ---
 
-## 9. Migration v1 → v2 → v3 (one-time, 2026-05-17)
+## 8. How to do common things
 
-| v1 branch                          | v2 name           | v3 fate                |
-| ---------------------------------- | ----------------- | ---------------------- |
-| `merge/backend-dev-into-main`      | `backend-dev`     | kept                   |
-| `merge/frontend-dev-into-main`     | `frontend-dev`    | kept                   |
-| `backend-dev-publish`              | `backend-staging` | **deleted** (no more staging branch) |
-| `frontend-dev-publish`             | `frontend-staging`| **deleted**            |
-| `release/*`                        | removed           | n/a                    |
+```bash
+# What's the latest publish snapshot?
+git ls-remote --heads origin 'refs/heads/publish/v*' | awk '{print $2}' | sort -V | tail -1
 
-All commits remain reachable through `backend-dev` / `frontend-dev` / `main`.
+# What prod-tagged versions exist?
+git ls-remote --tags origin 'refs/tags/prod/v*' | awk '{print $2}' | sort -V
+
+# Manually cut a publish snapshot now (skips waiting for 03:00)
+gh workflow run nightly-publish.yml
+
+# Manually trigger hourly-promote (after publish is cut + soak)
+gh workflow run hourly-promote.yml
+
+# Deploy a specific prod tag to prod
+gh workflow run deploy-prod.yml -f tag=prod/v2026.05.18.0
+
+# Deploy current main HEAD to staging (no tag needed)
+gh workflow run deploy-staging.yml -f source_ref=main
+
+# Block promotion of a bad publish (humans / testers do this from the dev VM)
+gh issue create --title "regression in v2026.05.18.0: bookings page blank" --label "regression:v2026.05.18.0"
+
+# Redeploy yesterday's prod tag (rollback)
+gh workflow run deploy-prod.yml -f tag=prod/v2026.05.17.0
+```
+
+---
+
+## 9. Migration v3 → v4 (2026-05-17)
+
+| v3 | v4 |
+| --- | --- |
+| `backend-dev`, `frontend-dev` (two trunks) | `dev` (single trunk) |
+| every dev merge → main via `publish-to-master.yml` | nightly cut `publish/v<date>`; hourly promote to main |
+| `prod-YYYYMMDD-<sha8>` tag per main push | `release/v<date>` per nightly cut + `prod/v<date>` per successful promote |
+| deploy-dev triggered by ci-integ workflow_run | deploy-dev triggered by push to `publish/v*` |
+
+v3 long-lived branches stay reachable in git history; they're deleted from origin after v4 is verified.
 
 ---
 
 ## 10. Branch hygiene
 
-- **Short-lived branches** (`feat/*`, `fix/*`, `codex/*`, `claude*/*`, `gemini*/*`): auto-delete 7 days after merge (repo setting `delete_branch_on_merge: true`).
-- **Stale-branch sweep**: `scripts/branch-strategy/triage-branches.sh` reports branches with no commit in 30+ days that are unmerged.
-- **Tags**: `prod-*` tags are permanent (deployment history). No auto-pruning.
+- Short-lived branches (`feat/*`, `codex/*`, …) auto-delete on merge (GitHub setting)
+- `publish/v*` branches are kept permanently — they're cheap (ref pointers) and they're the deployment audit trail
+- `release/v*` and `prod/v*` tags are kept permanently
+- Old `prod-*` tags from v3 will linger until manually cleaned; new ones from v4 use `prod/v*` format so they don't collide
 
 ---
 
 ## 11. References
 
-- `.github/workflows/ci.yml` — the 3 PR gates (Commit trailers / Runtime mirror guard / Smoke acceptance)
-- `.github/workflows/ci-integ.yml` — heavier CI on push to `*-dev`
-- `.github/workflows/publish-to-master.yml` — auto-PR `*-dev → main` + auto-merge + tag
-- `.github/workflows/deploy-dev.yml` — auto-deploy on `*-dev` push (via workflow_run from ci-integ)
-- `.github/workflows/deploy-staging.yml` — **manual** dispatch, operator picks `source_ref`
-- `.github/workflows/deploy-prod.yml` — **manual** dispatch with required `prod-*` `tag` input
-- `.github/CODEOWNERS` — owner rules per path
-- `.orchestrator/branch_routing.py` — task → track mapping
-- `scripts/git/check_commit_trailers.py` — shared by husky `commit-msg` hook + CI
-- `scripts/git/check_staged_generated_files.py` — shared by husky `pre-commit` + CI
-- `scripts/branch-strategy/bootstrap-branches.sh` — create the 2 dev branches
-- `scripts/branch-strategy/apply-branch-protection.sh` — set protection on main + 2 dev branches
-- `scripts/branch-strategy/triage-branches.sh` — branch inventory
-- `.husky/pre-commit` — local mirror guard
-- `.husky/commit-msg` — local trailer check
+- `.github/workflows/ci.yml` — the 3 PR gates
+- `.github/workflows/ci-integ.yml` — heavier CI on push to `dev`
+- `.github/workflows/nightly-publish.yml` — 03:00 UTC cut publish snapshot
+- `.github/workflows/hourly-promote.yml` — :15 hourly promote + tag-on-merge
+- `.github/workflows/deploy-dev.yml` — push-to-publish auto deploy
+- `.github/workflows/deploy-staging.yml` — operator manual
+- `.github/workflows/deploy-prod.yml` — operator manual, requires `prod/v<date>` tag
+- `scripts/git/check_commit_trailers.py` + `check_staged_generated_files.py` — shared by husky + CI
+- `scripts/branch-strategy/bootstrap-branches.sh` + `apply-branch-protection.sh` + `triage-branches.sh`
+- `.orchestrator/branch_routing.py` — single track now; both backend + frontend → `dev`
+- `.husky/pre-commit` + `commit-msg` — local gates mirroring CI
