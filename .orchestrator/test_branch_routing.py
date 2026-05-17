@@ -11,7 +11,7 @@ class RouteTaskTests(unittest.TestCase):
         decision = branch_routing.route_task("BE-APR-NOTIFY-001")
         self.assertEqual(decision.track, "backend")
         self.assertEqual(decision.base_branch, "backend-dev")
-        self.assertEqual(decision.publish_branch, "backend-staging")
+        self.assertEqual(decision.publish_branch, "main")
         self.assertGreaterEqual(decision.matched_rule_index, 0)
 
     def test_frontend_prefix_routes_to_frontend_trunk(self) -> None:
@@ -90,8 +90,7 @@ class RouteTaskTests(unittest.TestCase):
         self.assertIn("main", branches)
         self.assertIn("backend-dev", branches)
         self.assertIn("frontend-dev", branches)
-        self.assertIn("backend-staging", branches)
-        self.assertIn("frontend-staging", branches)
+        # v3: no separate staging branches. publish_branches both map to main.
 
     def test_route_many_preserves_order(self) -> None:
         decisions = branch_routing.route_many(["BE-1", "UI-1", "DOC-1"])
