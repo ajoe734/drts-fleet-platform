@@ -22,6 +22,7 @@ on:
 
 permissions:
   contents: write   # create branch + tag
+  actions: write    # gh workflow run deploy-dev.yml from inside this workflow
 
 concurrency:
   group: nightly-publish
