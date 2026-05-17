@@ -49,6 +49,21 @@ class DetectWorkerFailureTests(unittest.TestCase):
 
         self.assertIsNone(supervisor.detect_worker_failure(worker))
 
+    def test_ignores_embedded_auth_error_from_log_context_line(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "Reviewing archived worker logs.",
+                    ".orchestrator/logs/20260430T232445367572Z-codex-codex2-b9e02e.log:1888:"
+                    '.orchestrator/evidence/codex-20260430T142635Z-221ee21d.json:11: "raw_message": '
+                    '"Failed to authenticate. API Error: 401 authentication_error"',
+                    "No live auth error was emitted by this worker.",
+                ]
+            )
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
     def test_ignores_i18n_error_label_object(self) -> None:
         worker = self._worker_for_log('error: { en: "Error", zh: "錯誤" },\n')
 
@@ -195,6 +210,22 @@ class DetectWorkerFailureTests(unittest.TestCase):
         )
 
         self.assertIn("Failed to authenticate", supervisor.detect_worker_failure(worker) or "")
+
+    def test_detects_codex_refresh_token_reuse_as_auth_failure(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "Error: Your authentication token has been invalidated. Please log out and sign in again.",
+                    "reason: refresh_token_reused",
+                ]
+            )
+            + "\n"
+        )
+
+        detected = supervisor.detect_worker_failure(worker)
+        self.assertEqual(detected, "reason: refresh_token_reused")
+        result = supervisor.classify_worker_failure({}, {"provider": "codex2"}, detected)
+        self.assertEqual(result["kind"], "auth")
 
     def test_detects_copilot_no_quota_plain_text_log(self) -> None:
         worker = self._worker_for_log("402 You have no quota (Request ID: test)\n")
