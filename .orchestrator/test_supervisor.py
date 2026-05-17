@@ -4181,5 +4181,230 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "claude", provider_report=provider_report))
 
 
+class Gate1AutoMergeTests(unittest.TestCase):
+    """Cover the opt-in `arm_gate1_auto_merge` flow."""
+
+    def _config(self, **overrides) -> dict:
+        cfg = {
+            "branch_strategy": {
+                "gate1_auto_merge": {
+                    "enabled": True,
+                    "global_min_interval_seconds": 0,
+                    "per_task_retry_seconds": 0,
+                    "max_arms_per_tick": 5,
+                }
+            }
+        }
+        cfg["branch_strategy"]["gate1_auto_merge"].update(overrides)
+        return cfg
+
+    def _status(self, tasks: list[dict]) -> dict:
+        return {"tasks": tasks}
+
+    def _gh_response(self, returncode: int, stdout: str = "", stderr: str = "") -> mock.MagicMock:
+        proc = mock.MagicMock()
+        proc.returncode = returncode
+        proc.stdout = stdout
+        proc.stderr = stderr
+        return proc
+
+    def test_disabled_flag_returns_false_and_does_not_call_gh(self) -> None:
+        cfg = self._config(enabled=False)
+        state: dict = {}
+        with mock.patch.object(supervisor, "run_gh") as gh, \
+             mock.patch.object(supervisor, "command_exists", return_value=True):
+            changed = supervisor.arm_gate1_auto_merge(
+                cfg, state, self._status([{"id": "BE-CC-001", "status": "review_approved", "owner": "Codex"}])
+            )
+        self.assertFalse(changed)
+        gh.assert_not_called()
+
+    def test_skips_non_review_approved_tasks(self) -> None:
+        cfg = self._config()
+        state: dict = {}
+        with mock.patch.object(supervisor, "run_gh") as gh, \
+             mock.patch.object(supervisor, "command_exists", return_value=True):
+            changed = supervisor.arm_gate1_auto_merge(
+                cfg, state, self._status([
+                    {"id": "BE-CC-002", "status": "in_progress", "owner": "Codex"},
+                    {"id": "BE-CC-003", "status": "review", "owner": "Codex"},
+                ])
+            )
+        self.assertFalse(changed)
+        gh.assert_not_called()
+
+    def test_skips_planning_task_ids(self) -> None:
+        cfg = self._config()
+        state: dict = {}
+        with mock.patch.object(supervisor, "run_gh") as gh, \
+             mock.patch.object(supervisor, "command_exists", return_value=True):
+            changed = supervisor.arm_gate1_auto_merge(
+                cfg, state, self._status([
+                    {"id": "PLANNING-FOO-CODEX", "status": "review_approved", "owner": "Codex"},
+                ])
+            )
+        self.assertFalse(changed)
+        gh.assert_not_called()
+
+    def test_arms_auto_merge_on_open_pr_with_correct_base(self) -> None:
+        cfg = self._config()
+        state: dict = {}
+        list_payload = json.dumps([
+            {
+                "number": 42,
+                "url": "https://github.com/x/y/pull/42",
+                "baseRefName": "merge/backend-dev-into-main",
+                "headRefName": "codex/be-cc-001",
+                "autoMergeRequest": None,
+                "title": "BE-CC-001: implement",
+            }
+        ])
+        with mock.patch.object(supervisor, "run_gh") as gh, \
+             mock.patch.object(supervisor, "command_exists", return_value=True), \
+             mock.patch.object(supervisor, "write_activity_log") as activity:
+            gh.side_effect = [
+                self._gh_response(0, stdout=list_payload),
+                self._gh_response(0, stdout="merged"),
+            ]
+            changed = supervisor.arm_gate1_auto_merge(
+                cfg, state, self._status([
+                    {"id": "BE-CC-001", "status": "review_approved", "owner": "Codex"},
+                ])
+            )
+        self.assertTrue(changed)
+        self.assertEqual(state["gate1_auto_merge"]["per_task"]["BE-CC-001"]["status"], "armed")
+        self.assertEqual(gh.call_count, 2)
+        merge_call_args = gh.call_args_list[1].args[0]
+        self.assertIn("merge", merge_call_args)
+        self.assertIn("--squash", merge_call_args)
+        self.assertIn("--auto", merge_call_args)
+        self.assertIn("42", merge_call_args)
+        activity.assert_called_once()
+        log_payload = activity.call_args.args[1]
+        self.assertEqual(log_payload["type"], "gate1_auto_merge_armed")
+
+    def test_skips_pr_that_already_has_auto_merge_armed(self) -> None:
+        cfg = self._config()
+        state: dict = {}
+        list_payload = json.dumps([
+            {
+                "number": 7,
+                "baseRefName": "merge/backend-dev-into-main",
+                "headRefName": "codex/be-cc-004",
+                "autoMergeRequest": {"enabledAt": "2026-05-17T00:00:00Z"},
+                "title": "BE-CC-004: x",
+                "url": "https://example/7",
+            }
+        ])
+        with mock.patch.object(supervisor, "run_gh") as gh, \
+             mock.patch.object(supervisor, "command_exists", return_value=True):
+            gh.return_value = self._gh_response(0, stdout=list_payload)
+            changed = supervisor.arm_gate1_auto_merge(
+                cfg, state, self._status([
+                    {"id": "BE-CC-004", "status": "review_approved", "owner": "Codex"},
+                ])
+            )
+        self.assertTrue(changed)
+        self.assertEqual(state["gate1_auto_merge"]["per_task"]["BE-CC-004"]["status"], "armed")
+        self.assertEqual(gh.call_count, 1)
+
+    def test_records_no_pr_when_branch_has_no_open_pr(self) -> None:
+        cfg = self._config()
+        state: dict = {}
+        with mock.patch.object(supervisor, "run_gh") as gh, \
+             mock.patch.object(supervisor, "command_exists", return_value=True):
+            gh.return_value = self._gh_response(0, stdout="[]")
+            changed = supervisor.arm_gate1_auto_merge(
+                cfg, state, self._status([
+                    {"id": "BE-CC-005", "status": "review_approved", "owner": "Codex"},
+                ])
+            )
+        self.assertTrue(changed)
+        self.assertEqual(state["gate1_auto_merge"]["per_task"]["BE-CC-005"]["status"], "no_pr")
+        self.assertEqual(state["gate1_auto_merge"]["per_task"]["BE-CC-005"]["expected_head"], "codex/be-cc-005")
+
+    def test_refuses_to_arm_when_base_branch_does_not_match_routing(self) -> None:
+        cfg = self._config()
+        state: dict = {}
+        list_payload = json.dumps([
+            {
+                "number": 9,
+                "baseRefName": "main",
+                "headRefName": "codex/be-cc-006",
+                "autoMergeRequest": None,
+                "title": "BE-CC-006: x",
+                "url": "https://example/9",
+            }
+        ])
+        with mock.patch.object(supervisor, "run_gh") as gh, \
+             mock.patch.object(supervisor, "command_exists", return_value=True):
+            gh.return_value = self._gh_response(0, stdout=list_payload)
+            changed = supervisor.arm_gate1_auto_merge(
+                cfg, state, self._status([
+                    {"id": "BE-CC-006", "status": "review_approved", "owner": "Codex"},
+                ])
+            )
+        self.assertTrue(changed)
+        self.assertEqual(state["gate1_auto_merge"]["per_task"]["BE-CC-006"]["status"], "wrong_base")
+        self.assertEqual(gh.call_count, 1)
+
+    def test_refuses_to_arm_when_pr_title_does_not_mention_task_id(self) -> None:
+        cfg = self._config()
+        state: dict = {}
+        list_payload = json.dumps([
+            {
+                "number": 11,
+                "baseRefName": "merge/backend-dev-into-main",
+                "headRefName": "codex/be-cc-007",
+                "autoMergeRequest": None,
+                "title": "random unrelated PR",
+                "url": "https://example/11",
+            }
+        ])
+        with mock.patch.object(supervisor, "run_gh") as gh, \
+             mock.patch.object(supervisor, "command_exists", return_value=True):
+            gh.return_value = self._gh_response(0, stdout=list_payload)
+            changed = supervisor.arm_gate1_auto_merge(
+                cfg, state, self._status([
+                    {"id": "BE-CC-007", "status": "review_approved", "owner": "Codex"},
+                ])
+            )
+        self.assertTrue(changed)
+        self.assertEqual(state["gate1_auto_merge"]["per_task"]["BE-CC-007"]["status"], "title_mismatch")
+        self.assertEqual(gh.call_count, 1)
+
+    def test_routes_frontend_task_to_frontend_trunk(self) -> None:
+        cfg = self._config()
+        state: dict = {}
+        list_payload = json.dumps([
+            {
+                "number": 50,
+                "baseRefName": "merge/frontend-dev-into-main",
+                "headRefName": "claude2/ten-ui-rd-010",
+                "autoMergeRequest": None,
+                "title": "TEN-UI-RD-010: redesign",
+                "url": "https://example/50",
+            }
+        ])
+        with mock.patch.object(supervisor, "run_gh") as gh, \
+             mock.patch.object(supervisor, "command_exists", return_value=True), \
+             mock.patch.object(supervisor, "write_activity_log"):
+            gh.side_effect = [
+                self._gh_response(0, stdout=list_payload),
+                self._gh_response(0, stdout=""),
+            ]
+            changed = supervisor.arm_gate1_auto_merge(
+                cfg, state, self._status([
+                    {"id": "TEN-UI-RD-010", "status": "review_approved", "owner": "Claude2"},
+                ])
+            )
+        self.assertTrue(changed)
+        self.assertEqual(state["gate1_auto_merge"]["per_task"]["TEN-UI-RD-010"]["status"], "armed")
+        list_args = gh.call_args_list[0].args[0]
+        self.assertIn("--head", list_args)
+        head_idx = list_args.index("--head") + 1
+        self.assertEqual(list_args[head_idx], "claude2/ten-ui-rd-010")
+
+
 if __name__ == "__main__":
     unittest.main()

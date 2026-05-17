@@ -48,7 +48,7 @@ from common import (
     write_json,
     write_activity_log,
 )
-from github_bus import sync_github_bus
+from github_bus import run_gh, sync_github_bus
 from provider_permissions import provider_capabilities as build_provider_capabilities, write_provider_capabilities
 from runtime_state import (
     clear_dispatch_pause,
@@ -5870,6 +5870,190 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
     return changed
 
 
+def _gate1_seconds_since(value: str | None, now_ts: float) -> float:
+    """Seconds elapsed since an ISO-8601 UTC timestamp, or +inf if invalid."""
+    if not value:
+        return float("inf")
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return float("inf")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return now_ts - dt.timestamp()
+
+
+def arm_gate1_auto_merge(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    status: dict[str, Any],
+) -> bool:
+    """Arm `gh pr merge --squash --auto` on PRs for `review_approved` tasks.
+
+    Opt-in via `config.branch_strategy.gate1_auto_merge.enabled`. When enabled,
+    the supervisor:
+
+    1. Iterates tasks in `review_approved`.
+    2. Derives the expected head branch (`<lane>/<task-id-kebab>`) and the
+       routed base branch via `branch_routing.route_task`.
+    3. Calls `gh pr list --head <branch>` to find the matching PR.
+    4. If the PR exists, is OPEN, targets the routed base, has the task-id
+       in the title, and does not yet have auto-merge armed, runs
+       `gh pr merge <num> --squash --auto --delete-branch`.
+
+    GitHub enforces the actual gate (no merge until required checks pass and
+    no requested changes block it). The supervisor only arms the intent.
+
+    State is recorded under `state["gate1_auto_merge"]` to throttle re-attempts.
+    Returns True iff state changed.
+    """
+    settings = (config.get("branch_strategy") or {}).get("gate1_auto_merge") or {}
+    if not bool(settings.get("enabled", False)):
+        return False
+    if not command_exists("gh"):
+        return False
+
+    global_interval = float(settings.get("global_min_interval_seconds", 60))
+    per_task_interval = float(settings.get("per_task_retry_seconds", 300))
+    max_per_tick = int(settings.get("max_arms_per_tick", 5))
+
+    bookkeeping = state.setdefault("gate1_auto_merge", {})
+    now_ts = time.time()
+    last_global = _gate1_seconds_since(bookkeeping.get("last_attempt_at"), now_ts)
+    if last_global < global_interval:
+        return False
+
+    tasks = status.get("tasks") or []
+    per_task = bookkeeping.setdefault("per_task", {})
+    changed = False
+    arms_this_tick = 0
+
+    for task in tasks:
+        if arms_this_tick >= max_per_tick:
+            break
+        if not isinstance(task, dict):
+            continue
+        if str(task.get("status") or "").lower() != "review_approved":
+            continue
+        task_id = str(task.get("id") or "").strip()
+        owner = str(task.get("owner") or "").strip()
+        if not task_id or not owner:
+            continue
+        if task_id.upper().startswith("PLANNING-"):
+            continue
+        lane = owner.lower()
+        head = f"{lane}/{task_id.lower().replace('_', '-')}"
+        try:
+            decision = route_task(task_id, config=config)
+        except Exception:
+            continue
+        base = decision.base_branch
+
+        prior = per_task.get(task_id) or {}
+        if str(prior.get("status") or "") == "armed":
+            continue
+        last_attempt_age = _gate1_seconds_since(prior.get("last_attempt_at"), now_ts)
+        if last_attempt_age < per_task_interval:
+            continue
+
+        list_proc = run_gh([
+            "pr", "list",
+            "--head", head,
+            "--state", "open",
+            "--json", "number,url,baseRefName,headRefName,autoMergeRequest,title",
+            "--limit", "5",
+        ], allow_offline=True)
+        bookkeeping["last_attempt_at"] = utc_now()
+        if list_proc.returncode != 0:
+            per_task[task_id] = {
+                "status": "list_failed",
+                "last_attempt_at": utc_now(),
+                "error": (list_proc.stderr or "").strip()[:200],
+            }
+            changed = True
+            continue
+        try:
+            prs = json.loads(list_proc.stdout or "[]")
+        except json.JSONDecodeError:
+            prs = []
+        if not prs:
+            per_task[task_id] = {"status": "no_pr", "last_attempt_at": utc_now(), "expected_head": head}
+            changed = True
+            continue
+        pr = prs[0]
+        if str(pr.get("baseRefName") or "") != base:
+            per_task[task_id] = {
+                "status": "wrong_base",
+                "last_attempt_at": utc_now(),
+                "pr_number": pr.get("number"),
+                "expected_base": base,
+                "actual_base": pr.get("baseRefName"),
+            }
+            changed = True
+            continue
+        if pr.get("autoMergeRequest"):
+            per_task[task_id] = {
+                "status": "armed",
+                "last_attempt_at": utc_now(),
+                "pr_number": pr.get("number"),
+                "pr_url": pr.get("url"),
+                "note": "already armed prior to this tick",
+            }
+            changed = True
+            continue
+
+        title = str(pr.get("title") or "")
+        if task_id not in title:
+            per_task[task_id] = {
+                "status": "title_mismatch",
+                "last_attempt_at": utc_now(),
+                "pr_number": pr.get("number"),
+                "pr_title": title,
+            }
+            changed = True
+            continue
+
+        merge_proc = run_gh([
+            "pr", "merge", str(pr["number"]),
+            "--squash", "--auto",
+            "--delete-branch",
+        ], allow_offline=True)
+        if merge_proc.returncode == 0:
+            per_task[task_id] = {
+                "status": "armed",
+                "last_attempt_at": utc_now(),
+                "pr_number": pr.get("number"),
+                "pr_url": pr.get("url"),
+            }
+            write_activity_log(
+                config,
+                {
+                    "type": "gate1_auto_merge_armed",
+                    "task_id": task_id,
+                    "pr_number": pr.get("number"),
+                    "pr_url": pr.get("url"),
+                    "base": base,
+                    "head": head,
+                    "message": f"Armed `gh pr merge --squash --auto` on PR #{pr['number']} for {task_id}.",
+                },
+            )
+            console_log(
+                f"gate1 auto-merge armed: task={task_id} pr=#{pr['number']} base={base}",
+                quiet=SUPERVISOR_LOG_QUIET,
+            )
+            arms_this_tick += 1
+        else:
+            per_task[task_id] = {
+                "status": "arm_failed",
+                "last_attempt_at": utc_now(),
+                "pr_number": pr.get("number"),
+                "error": (merge_proc.stderr or "").strip()[:400],
+            }
+        changed = True
+
+    return changed
+
+
 def run_once(
     config: dict[str, Any],
     *,
@@ -5939,6 +6123,8 @@ def run_once(
     changed = prune_completed_dispatch_pauses(state, status) or changed
     changed = prune_failure_streaks(state, status) or changed
     changed = sync_github_bus(config, state) or changed
+    if desired_focus_mode != "planning":
+        changed = arm_gate1_auto_merge(config, state, status) or changed
     trim_worker_history(state, int(config.get("supervisor", {}).get("max_worker_history", 200)))
     trim_seen_events(state, int(config.get("watcher", {}).get("max_seen_events", 2000)))
     stamp_supervisor_state(state)

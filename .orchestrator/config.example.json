@@ -98,6 +98,14 @@
   "approvals": {
     "stale_pending_seconds": 1800
   },
+  "branch_strategy": {
+    "gate1_auto_merge": {
+      "enabled": false,
+      "global_min_interval_seconds": 60,
+      "per_task_retry_seconds": 300,
+      "max_arms_per_tick": 5
+    }
+  },
   "github_bus": {
     "enabled": true,
     "command_timeout_seconds": 8,
