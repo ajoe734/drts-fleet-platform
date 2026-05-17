@@ -15,6 +15,14 @@ on:
       - 'merge/backend-dev-into-main'
       - 'merge/frontend-dev-into-main'
     types: [opened, synchronize, reopened, ready_for_review]
+  # Manual trigger for parity with ci-publish; useful when a flaky run needs
+  # rerunning without pushing or when validating a fix to the workflow itself.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or commit SHA to run against'
+        required: false
+        default: 'merge/backend-dev-into-main'
 
 permissions:
   contents: read
