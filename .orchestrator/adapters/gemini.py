@@ -131,6 +131,10 @@ def _gemini_policy_paths(config: dict, gemini_settings: dict) -> list[str]:
     return paths
 
 
+def _gemini_cli_path(gemini_settings: dict) -> str | None:
+    return command_exists(gemini_settings.get("cli") or "gemini")
+
+
 def _gemini_selected_auth_type(runtime: dict | None = None, env: dict[str, str] | None = None) -> str | None:
     if _truthy_env("GOOGLE_GENAI_USE_GCA", env):
         return "oauth-personal"
@@ -171,7 +175,7 @@ class GeminiAdapter(BaseAdapter):
 
     def capability(self, agent_id: str) -> DeliveryCapability:
         provider_key, _, gemini_settings = _gemini_provider_for_agent(self.config, agent_id)
-        cli = command_exists(gemini_settings.get("cli") or "gemini")
+        cli = _gemini_cli_path(gemini_settings)
         env = _gemini_runtime_env(gemini_settings)
         auth_ready = _gemini_auth_ready(gemini_settings, env)
         supported = bool(cli and auth_ready)
@@ -225,7 +229,31 @@ class GeminiAdapter(BaseAdapter):
         provider_key, provider, gemini_settings = _gemini_provider_for_agent(self.config, request.agent_id)
         gemini_settings = provider.get("gemini", {})
         approval = provider.get("approval", {})
-        cli = gemini_settings.get("cli") or "gemini"
+        cli = _gemini_cli_path(gemini_settings)
+        if not cli:
+            notes = "Gemini CLI was available during capability probing but is no longer resolvable before dispatch."
+            fallback = FileInboxAdapter(config=self.config, provider_capabilities=self.provider_capabilities)
+            result = fallback.deliver(request)
+            result.adapter = self.name
+            result.mode = "file_inbox"
+            result.notes = f"{result.notes}. {notes}"
+            result.error = notes
+            return DeliveryResult(
+                ok=result.ok,
+                adapter=result.adapter,
+                mode=result.mode,
+                target=result.target,
+                auto_delivered=result.auto_delivered,
+                manual_confirmation_required=result.manual_confirmation_required,
+                error=result.error,
+                notes=result.notes,
+                command=result.command,
+                log_path=result.log_path,
+                payload_path=result.payload_path,
+                pid=result.pid,
+                run_id=result.run_id,
+                metadata=result.metadata,
+            )
         output_format = str(gemini_settings.get("output_format") or "json").strip() or "json"
         command = [cli, "--prompt", request.message, "--output-format", output_format]
         model = str(request.metadata.get("model_preference") or gemini_settings.get("model") or "").strip()
