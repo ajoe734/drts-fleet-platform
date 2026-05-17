@@ -1,33 +1,41 @@
 import { notFound } from "next/navigation";
+import {
+  isPartnerBookingScreenId,
+  PartnerBookingReferenceFunnel,
+} from "@drts/ui-web";
 import { getBrandForSlug } from "@/lib/brand";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
+  searchParams: Promise<{ screen?: string | string[] }>;
 };
 
-export default async function TenantHomePage({ params }: PageProps) {
+function normalizeScreen(
+  value: string | string[] | undefined,
+): Parameters<typeof isPartnerBookingScreenId>[0] {
+  return Array.isArray(value) ? (value[0] ?? "landing") : (value ?? "landing");
+}
+
+export default async function TenantHomePage({
+  params,
+  searchParams,
+}: PageProps) {
   const { tenantSlug } = await params;
+  const { screen } = await searchParams;
   const brand = getBrandForSlug(tenantSlug);
   if (!brand) {
     notFound();
   }
 
+  const activeScreen = normalizeScreen(screen);
+
   return (
-    <section className="flex flex-col gap-6">
-      <header className="flex flex-col gap-2">
-        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[color:var(--pbk-muted)]">
-          {brand.displayName}
-        </span>
-        <h1 className="text-3xl font-semibold leading-tight text-[color:var(--pbk-fg)]">
-          {brand.tagline}
-        </h1>
-        <p className="text-sm leading-6 text-[color:var(--pbk-muted)]">
-          This is the PBK-UI-001 happy-path landing for tenant{" "}
-          <code>{tenantSlug}</code>. The CTBC reference funnel and other screens
-          land in PBK-UI-003. Authority-aware brand layering lands in
-          PBK-UI-002.
-        </p>
-      </header>
-    </section>
+    <PartnerBookingReferenceFunnel
+      brand={brand}
+      activeScreen={
+        isPartnerBookingScreenId(activeScreen) ? activeScreen : "landing"
+      }
+      basePath={`/${tenantSlug}`}
+    />
   );
 }
