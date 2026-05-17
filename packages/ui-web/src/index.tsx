@@ -108,3 +108,12 @@ export type {
   WorkflowEmptyStateProps,
   WorkflowSplitLayoutProps,
 } from "./workflow-primitives";
+export {
+  getPartnerBookingArtboardAnchor,
+  getPartnerBookingScreenMeta,
+  isPartnerBookingScreenId,
+  partnerBookingScreens,
+  PartnerBookingPhoneScreen,
+  PartnerBookingReferenceFunnel,
+} from "./partner-booking-funnel";
+export type { PartnerBookingScreenId } from "./partner-booking-funnel";

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@drts/ui-web": "workspace:*",
     "@drts/ui-tokens": "workspace:*",
     "next": "^16.2.3",
     "react": "^19.2.5",
