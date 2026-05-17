@@ -90,6 +90,9 @@ WORKER_FAILURE_PATTERNS = (
     re.compile(r"\bFailed to authenticate\b", re.IGNORECASE),
     re.compile(r"\bauthentication_error\b", re.IGNORECASE),
     re.compile(r"\bInvalid authentication credentials\b", re.IGNORECASE),
+    re.compile(r"\btoken_invalidated\b", re.IGNORECASE),
+    re.compile(r"\brefresh_token_reused\b", re.IGNORECASE),
+    re.compile(r"\bauthentication token has been invalidated\b", re.IGNORECASE),
     re.compile(r'^Error:\s*Model\s+".+"\s+from --model flag is not available\.', re.IGNORECASE),
     re.compile(r"^402\b.*\byou have no quota\b", re.IGNORECASE),
     re.compile(r"^(?:error:\s*)?\b(?:you have no quota|no quota remaining|payment required)\b", re.IGNORECASE),
@@ -105,6 +108,7 @@ JSON_WORKER_FAILURE_PATTERN = re.compile(
     r"permission denied|invalid api key|auth failed|failed to authenticate|"
     r"authentication_error|invalid authentication credentials|status:\s*401|"
     r"\[api error:\s*401\b|api error:\s*401\b|invalid access token|"
+    r"token_invalidated|refresh_token_reused|authentication token has been invalidated|"
     r"ineligibletiererror|not eligible for gemini code assist|restricted_dasher_user",
     re.IGNORECASE,
 )
@@ -1101,7 +1105,7 @@ def _ignore_embedded_failure_line(stripped: str) -> bool:
         return True
     if re.match(r"^[+-](?:\s|`|\*|$)", stripped):
         return True
-    if re.match(r"^[A-Za-z0-9_./-]+\.(?:md|json|ya?ml|ts|tsx|js|jsx|py|sql|sh):\d+[: -]", stripped):
+    if re.match(r"^[A-Za-z0-9_./-]+\.(?:md|json|jsonl|ya?ml|ts|tsx|js|jsx|py|sql|sh|log|txt):\d+[: -]", stripped):
         return True
     if stripped.startswith(("Reviewer note:", "Review Outcome:", "Impact On Consensus:", "Remaining Question:")):
         return True
@@ -1131,6 +1135,7 @@ def _extract_failure_candidate(text: str) -> str | None:
             return stripped
         if JSON_WORKER_FAILURE_PATTERN.search(stripped) and re.match(
             r"^(reason:|status:|error:|fatal:|402\b|quota_exhausted\b|resource_exhausted\b|"
+            r"token_invalidated\b|refresh_token_reused\b|"
             r"qwen oauth quota exceeded\b|you(?:'ve| have)\s+hit your limit\b|"
             r"an unexpected critical error occurred\b)",
             stripped,
@@ -1192,6 +1197,9 @@ def _is_result_level_provider_blocker(candidate: str) -> bool:
         "invalid authentication credentials",
         "auth failed",
         "invalid access token",
+        "token_invalidated",
+        "refresh_token_reused",
+        "authentication token has been invalidated",
         "[api error: 401",
         "api error: 401",
         "ineligibletiererror",
@@ -1266,6 +1274,9 @@ def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reas
         "invalid authentication credentials",
         "auth failed",
         "invalid api key",
+        "token_invalidated",
+        "refresh_token_reused",
+        "authentication token has been invalidated",
         "forbidden",
         "permission denied",
         "ineligibletiererror",
