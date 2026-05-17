@@ -121,7 +121,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Open or update promote PR + enable auto-merge
+      - name: Open promote PR
         if: steps.pick.outputs.skip != 'true' && steps.soak.outputs.skip != 'true' && steps.regression.outputs.skip != 'true' && steps.already.outputs.skip != 'true'
         id: pr
         run: |
@@ -136,8 +136,9 @@ jobs:
           - No open \`regression:$ver\` issue
           - main does not yet contain this content
 
-          On merge, \`tag-on-merge\` tags this as \`prod/$ver\`.
-          That tag is what \`deploy-prod.yml\` accepts as its required input.
+          This workflow merges the PR inline and tags \`prod/$ver\` once CI
+          is green — does not rely on GitHub auto-merge (which can't push
+          tag-on-merge downstream under the GITHUB_TOKEN anti-recursion rule).
 
           Block this promotion: open an issue labeled \`regression:$ver\`.
           EOF
@@ -152,24 +153,115 @@ jobs:
           fi
           gh pr edit "$pr_number" --add-label "automated" --add-label "auto-publish" || true
 
-          # Cycle to fire downstream CI (GITHUB_TOKEN PRs don't trigger workflows
-          # by default; close+reopen acts as a synchronize signal).
+          # Cycle to fire downstream CI on a fresh head event (GITHUB_TOKEN-
+          # created PRs don't trigger workflows; reopen acts as a synchronize-
+          # equivalent and DOES fire them).
           gh pr close "$pr_number" || true
           sleep 2
           gh pr reopen "$pr_number" || true
-          gh pr merge "$pr_number" --squash --auto || \
-            echo "::warning::Auto-merge enable failed; manual merge needed once CI green."
 
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for required CI to be green
+        if: steps.pr.outputs.pr_number != ''
+        id: wait
+        run: |
+          pr="${{ steps.pr.outputs.pr_number }}"
+          required=("Commit trailers" "Runtime mirror guard" "Smoke acceptance")
+          # Poll up to 30 min (60 × 30s). 3 named jobs typically finish in <5 min.
+          for i in $(seq 1 60); do
+            all_done=true
+            all_green=true
+            failures=()
+            checks=$(gh pr view "$pr" --json statusCheckRollup --jq '.statusCheckRollup')
+            for name in "${required[@]}"; do
+              entry=$(echo "$checks" | jq -c --arg n "$name" '.[]|select(.name==$n)')
+              if [ -z "$entry" ]; then
+                all_done=false
+                continue
+              fi
+              status=$(echo "$entry" | jq -r '.status')
+              conclusion=$(echo "$entry" | jq -r '.conclusion // ""')
+              if [ "$status" != "COMPLETED" ]; then
+                all_done=false
+              elif [ "$conclusion" != "SUCCESS" ]; then
+                all_green=false
+                failures+=("$name=$conclusion")
+              fi
+            done
+            if [ "$all_done" = "true" ]; then
+              if [ "$all_green" = "true" ]; then
+                echo "All 3 required checks green after ${i} poll(s)."
+                echo "ready=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              else
+                echo "::error::Required checks failed: ${failures[*]}"
+                exit 1
+              fi
+            fi
+            echo "[$i] still waiting for required checks..."
+            sleep 30
+          done
+          echo "::error::Timed out waiting for required checks after 30 min."
+          exit 1
+
+      - name: Merge inline
+        if: steps.wait.outputs.ready == 'true'
+        id: merge
+        run: |
+          pr="${{ steps.pr.outputs.pr_number }}"
+          gh pr merge "$pr" --squash
+          echo "Merged PR #$pr"
+          # Wait briefly for the merge to settle on origin.
+          sleep 3
+          git fetch origin main --quiet
+          sha=$(git rev-parse origin/main)
+          echo "main_sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "main HEAD is now $sha"
+
+      - name: Tag prod/v<version> inline
+        if: steps.merge.outputs.main_sha != ''
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          ver="${{ steps.pr.outputs.version }}"
+          tag="prod/$ver"
+          sha="${{ steps.merge.outputs.main_sha }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists; skipping."
+            exit 0
+          fi
+          git tag -a "$tag" "$sha" -m "Promoted from ${{ steps.pick.outputs.branch }}"
+          git push origin "$tag"
+          echo "Tagged $tag at main HEAD $sha"
+
+      - name: Summarise
+        if: steps.pr.outputs.pr_number != ''
+        run: |
+          pr="${{ steps.pr.outputs.pr_number }}"
+          ver="${{ steps.pr.outputs.version }}"
+          src="${{ steps.pick.outputs.branch }}"
+          merged_sha="${{ steps.merge.outputs.main_sha }}"
           {
-            echo "## Promote PR opened"
+            echo "## Promotion run"
             echo ""
-            echo "- PR: #$pr_number"
+            echo "- PR: #$pr"
             echo "- Version: \`$ver\`"
             echo "- Snapshot: \`$src\`"
-            echo "- Auto-merge: enabled (squash)"
-            echo "- On merge: tag-on-merge will tag \`prod/$ver\`"
+            if [ -n "$merged_sha" ]; then
+              echo "- Status: ✅ merged inline + tagged \`prod/$ver\` at main \`${merged_sha:0:12}\`"
+            else
+              echo "- Status: ⚠️ CI did not go green; PR left open. Investigate the failing required check."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Fallback tagger. The hourly `promote` job above tags prod/v<...> inline
+  # after its own inline merge — that handles the common case.
+  # This job fires on any push to main (e.g. a hotfix PR merged by a human,
+  # which DOES trigger push events because it's not a GITHUB_TOKEN action).
+  # It tags only if main's tree matches some existing publish snapshot — so
+  # hotfix commits that diverge from publish don't accidentally get tagged.
   tag-on-merge:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
