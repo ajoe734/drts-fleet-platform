@@ -112,13 +112,36 @@ jobs:
           git tag -a "$tag" "$sha" -m "Nightly publish snapshot of $SOURCE at $sha"
           git push origin "$tag"
           echo "Tagged $tag"
-          # Summary
+
+      - name: Explicitly dispatch Deploy — Dev for the new snapshot
+        if: steps.green.outputs.skip != 'true' && steps.delta.outputs.skip != 'true'
+        run: |
+          # The push of publish/v* above is by GITHUB_TOKEN, which under
+          # GitHub's anti-recursion rules does NOT trigger downstream `push`
+          # event workflows. workflow_dispatch IS allowed by the same rules,
+          # so we dispatch deploy-dev explicitly. Without this, dev VM would
+          # not roll until an operator manually triggers a deploy.
+          version="${{ steps.ver.outputs.version }}"
+          branch="publish/$version"
+          if gh workflow run deploy-dev.yml --ref "$branch" -f source_ref="$branch" 2>&1; then
+            echo "Dispatched deploy-dev.yml against $branch"
+          else
+            echo "::warning::Failed to dispatch deploy-dev.yml. Operator can run manually: gh workflow run deploy-dev.yml -f source_ref=$branch"
+          fi
+
+      - name: Summarise
+        if: steps.green.outputs.skip != 'true' && steps.delta.outputs.skip != 'true'
+        run: |
+          version="${{ steps.ver.outputs.version }}"
+          branch="publish/$version"
+          tag="release/$version"
+          sha="${{ steps.src.outputs.sha }}"
           {
             echo "## Nightly publish: \`$version\`"
             echo ""
             echo "- Source: \`$SOURCE\` @ \`${sha:0:12}\`"
             echo "- Branch: \`$branch\` (immutable snapshot)"
             echo "- Tag:    \`$tag\` (same SHA)"
-            echo "- Next step: \`Deploy — Dev\` should fire automatically from the push to \`$branch\`."
-            echo "- Promotion to master happens via \`hourly-promote.yml\` if no \`regression:$version\` issue is opened in the next ~1 hour."
+            echo "- Deploy — Dev: dispatched explicitly (push by GITHUB_TOKEN can't auto-trigger)"
+            echo "- Promotion to master: \`hourly-promote.yml\` will pick this up after the ≥30 min soak window unless a \`regression:$version\` issue is opened."
           } >> "$GITHUB_STEP_SUMMARY"
