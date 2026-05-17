@@ -1,0 +1,2 @@
+#!/usr/bin/env sh
+exec python3 "$(git rev-parse --show-toplevel)/scripts/git/check_commit_trailers.py" "$1"
