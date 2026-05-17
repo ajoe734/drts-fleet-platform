@@ -65,6 +65,7 @@ class GeminiAdapterTests(unittest.TestCase):
 
             self.assertTrue(result.ok)
             command = spawn.call_args.args[0]
+            self.assertEqual(command[0], "/usr/bin/gemini")
             self.assertIn("--skip-trust", command)
             self.assertIn("--allowed-tools", command)
             self.assertIn("run_shell_command", command[command.index("--allowed-tools") + 1])
@@ -74,6 +75,53 @@ class GeminiAdapterTests(unittest.TestCase):
                 if value == "--include-directories"
             ]
             self.assertEqual(include_values, [str(status_file.parent), str(tenant_repo)])
+
+    def test_gemini_dispatch_falls_back_when_cli_disappears_after_capability_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            status_file = tmp / "drts-fleet-platform" / "ai-status.json"
+            status_file.parent.mkdir()
+            status_file.write_text('{"tasks":[]}', encoding="utf-8")
+            config = {
+                "paths": {"status_file": str(status_file)},
+                "agents": {
+                    "gemini2": {
+                        "id": "gemini2",
+                        "display_name": "Gemini2",
+                        "provider": "gemini2",
+                        "adapter": "gemini",
+                    }
+                },
+                "providers": {
+                    "gemini2": {
+                        "delivery_mode": "gemini",
+                        "gemini": {"cli": "gemini"},
+                    }
+                },
+            }
+            request = DeliveryRequest(
+                agent_id="gemini2",
+                provider="gemini2",
+                delivery_mode="gemini",
+                message="wake up",
+                task_id="XREPO-001",
+            )
+
+            with (
+                mock.patch("adapters.gemini.command_exists", side_effect=["/usr/bin/gemini", None]),
+                mock.patch("adapters.gemini._gemini_auth_ready", return_value=True),
+                mock.patch("adapters.gemini.spawn_background_process") as spawn,
+            ):
+                result = GeminiAdapter(config=config, provider_capabilities={}).deliver(request)
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.adapter, "gemini")
+            self.assertEqual(result.mode, "file_inbox")
+            self.assertFalse(result.auto_delivered)
+            self.assertTrue(result.manual_confirmation_required)
+            self.assertIn("no longer resolvable", result.error or "")
+            self.assertTrue(Path(result.payload_path or "").exists())
+            spawn.assert_not_called()
 
 
 if __name__ == "__main__":
