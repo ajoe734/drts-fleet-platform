@@ -38,18 +38,32 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      - name: Determine base ref
-        id: base
+      - name: Determine base ref + auto-publish exception
+        id: ctx
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "${{ github.event.pull_request.base.ref }}" ]; then
-            echo "ref=origin/${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=origin/main" >> "$GITHUB_OUTPUT"
+          base="${{ github.event.pull_request.base.ref || 'main' }}"
+          echo "base=origin/$base" >> "$GITHUB_OUTPUT"
+          # Auto-publish PRs collect already-validated commits from a *-dev
+          # branch; per-commit trailer validation is redundant + would fail
+          # because GitHub's earlier squash-merges stripped trailers from
+          # what's now history. Skip the check for those PRs.
+          pr="${{ github.event.pull_request.number }}"
+          if [ -n "$pr" ]; then
+            if gh pr view "$pr" --json labels --jq '.labels[].name' 2>/dev/null | grep -qx 'auto-publish'; then
+              echo "::notice::auto-publish PR detected (#$pr); skipping per-commit trailer check."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+            fi
           fi
       - name: Validate trailers on every commit in the PR
+        if: steps.ctx.outputs.skip != 'true'
         run: |
           git fetch origin "${{ github.event.pull_request.base.ref || 'main' }}" --quiet
-          python3 scripts/git/check_commit_trailers.py --base ${{ steps.base.outputs.ref }} --head HEAD
+          python3 scripts/git/check_commit_trailers.py --base ${{ steps.ctx.outputs.base }} --head HEAD
+      - name: Auto-publish bypass acknowledged
+        if: steps.ctx.outputs.skip == 'true'
+        run: echo "Commit trailers gate bypassed for auto-publish PR. (Trailers were enforced when the source commits entered backend-dev / frontend-dev.)"
 
   runtime-mirror-guard:
     name: Runtime mirror guard
