@@ -70,9 +70,18 @@ jobs:
           ahead=$(git rev-list --count "origin/${{ matrix.track.target }}..origin/${{ matrix.track.source }}")
           echo "ahead=$ahead" >> "$GITHUB_OUTPUT"
           echo "Source is $ahead commit(s) ahead of target."
+          # Squash merges create commits-ahead without content-ahead. Only
+          # promote when there is a real content delta, otherwise nightly
+          # produces noisy no-op PRs forever once histories diverge.
+          if git diff --quiet "origin/${{ matrix.track.target }}..origin/${{ matrix.track.source }}"; then
+            echo "content_delta=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No content delta between source and target; skipping promotion (history-only divergence)."
+          else
+            echo "content_delta=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Verify source CI is green
-        if: steps.filter.outputs.skip != 'true' && steps.source-exists.outputs.ok == 'true' && steps.diff.outputs.ahead != '0'
+        if: steps.filter.outputs.skip != 'true' && steps.source-exists.outputs.ok == 'true' && steps.diff.outputs.ahead != '0' && steps.diff.outputs.content_delta == 'true'
         id: green
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
