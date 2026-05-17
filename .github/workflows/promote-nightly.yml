@@ -113,10 +113,12 @@ jobs:
             gh pr create --base "${{ matrix.track.target }}" --head "${{ matrix.track.source }}" --title "$title" --body "$body" --label "promotion,automated"
           fi
 
-  # Weekly drift check: main shouldn't be more than one commit ahead of either *-publish,
-  # otherwise we missed a hotfix back-port.
+  # Daily drift check: main shouldn't be more than one commit ahead of either
+  # *-publish branch, otherwise we missed a hotfix back-port.
+  # (The previous condition checked github.event.schedule against a Monday-only
+  # cron that didn't exist on this workflow — the job never ran.)
   hotfix-drift-check:
-    if: github.event_name == 'schedule' && contains(github.event.schedule, '0 16 * * 1')
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read

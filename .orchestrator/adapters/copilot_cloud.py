@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, DeliveryResult
+from branch_routing import route_task
 from common import (
     command_exists,
     config_path,
@@ -118,7 +119,13 @@ class CopilotCloudAdapter(BaseAdapter):
 
         gh = command_exists("gh") or "gh"
         command = [gh, "agent-task", "create", "--repo", repo]
+        # base_branch precedence:
+        #   1. explicit providers.copilot.cloud.base_branch
+        #   2. branch_routing.route_task(task_id) from the three-layer strategy
+        # See docs/ops/branch-strategy.md §4.
         base_branch = cloud.get("base_branch")
+        if not base_branch and request.task_id:
+            base_branch = route_task(request.task_id, config=self.config).base_branch
         if base_branch:
             command.extend(["--base", base_branch])
         if cloud.get("follow", False):

@@ -24,6 +24,7 @@ if str(THIS_DIR) not in sys.path:
 from adapters import build_adapter
 from approval_queue import prune_stale_approvals, resolve_approval
 from adapters.base import DeliveryRequest
+from branch_routing import route_task
 from common import (
     AI_GUIDE_PATH,
     agent_config_for,
@@ -764,6 +765,11 @@ def start_worker_for_request(
         return False, result.error or result.notes or "Worker delivery failed.", None
 
     worker_run_id = result.run_id or new_runtime_id(request.provider)
+    # Branch-strategy routing: stamp the worker record with the integration
+    # track it belongs to so the dashboard, promote-nightly workflow, and
+    # any downstream PR-creation can see where this work is supposed to land.
+    # See docs/ops/branch-strategy.md §4 and orchestrator-integration-guide.md.
+    routing = route_task(request.task_id, config=config) if request.task_id else None
     state.setdefault("workers", {})[worker_run_id] = {
         "run_id": worker_run_id,
         "provider": request.provider,
@@ -793,6 +799,11 @@ def start_worker_for_request(
         "last_error_kind": None,
         "last_error_summary": None,
         "last_evidence_ref": None,
+        "track": routing.track if routing else None,
+        "base_branch": routing.base_branch if routing else None,
+        "publish_branch": routing.publish_branch if routing else None,
+        "gate_layer": "feat" if routing else None,
+        "routing_matched_rule": routing.matched_rule_index if routing else None,
     }
     clear_dispatch_pause(state, task_id=request.task_id, worker_run_id=worker_run_id)
     write_activity_log(
