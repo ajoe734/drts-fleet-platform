@@ -1,6 +1,6 @@
 # Driver App Redesign — Wave 4 Closeout (2026-05-12)
 
-Owner: Claude · Reviewer of record (this closeout): Codex
+Owner: Claude · Reviewer of record (this closeout): Claude2
 Task: `DRV-UI-RD-009`
 Planning ref: [`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`](./drts-ui-redesign-workbreakdown-20260510.md)
 Branch: `origin/feat/claude2-ui-redesign-foundation`
@@ -190,9 +190,8 @@ reskin delta in isolation.
   all PASS. The Android emulator screenshot-vs-canvas leg is explicitly
   environment-blocked here (no `adb` / emulator) and is recorded as a
   deferred human follow-up.
-- Sidecar packets:
-  [`support/sidecars/DRV-UI-RD-008/DRV-UI-RD-008-SIDECAR-ACCEPTANCE.md`](../../support/sidecars/DRV-UI-RD-008/DRV-UI-RD-008-SIDECAR-ACCEPTANCE.md),
-  [`support/sidecars/DRV-UI-RD-008/DRV-UI-RD-008-SIDECAR-REVIEW.md`](../../support/sidecars/DRV-UI-RD-008/DRV-UI-RD-008-SIDECAR-REVIEW.md).
+- Sidecar acceptance packet:
+  [`support/sidecars/DRV-UI-RD-008/DRV-UI-RD-008-SIDECAR-ACCEPTANCE.md`](../../support/sidecars/DRV-UI-RD-008/DRV-UI-RD-008-SIDECAR-ACCEPTANCE.md).
 
 ## Wave 4 guardrails — final standing
 
@@ -231,7 +230,7 @@ None blocking Wave 4 sign-off. Items intentionally deferred:
 
 ## Reviewer signoff for DRV-UI-RD-009
 
-The reviewer (Codex) is asked to confirm only that the matrix above is
+The reviewer (Claude2) is asked to confirm only that the matrix above is
 internally consistent with `ai-status.json` and `ai-activity-log.jsonl` — i.e.
 each `(owner, reviewer, approved-at, commit_hash)` quadruple in the matrix
 matches the machine truth on this branch, the eight `commit_hash` values
