@@ -1,6 +1,6 @@
 # Driver App Redesign — Wave 4 Closeout (2026-05-12)
 
-Owner: Claude · Reviewer of record (this closeout): Claude2
+Owner: Claude · Reviewer of record (this closeout): Codex
 Task: `DRV-UI-RD-009`
 Planning ref: [`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`](./drts-ui-redesign-workbreakdown-20260510.md)
 Branch: `origin/feat/claude2-ui-redesign-foundation`
@@ -230,7 +230,7 @@ None blocking Wave 4 sign-off. Items intentionally deferred:
 
 ## Reviewer signoff for DRV-UI-RD-009
 
-The reviewer (Claude2) is asked to confirm only that the matrix above is
+The reviewer (Codex) is asked to confirm only that the matrix above is
 internally consistent with `ai-status.json` and `ai-activity-log.jsonl` — i.e.
 each `(owner, reviewer, approved-at, commit_hash)` quadruple in the matrix
 matches the machine truth on this branch, the eight `commit_hash` values
