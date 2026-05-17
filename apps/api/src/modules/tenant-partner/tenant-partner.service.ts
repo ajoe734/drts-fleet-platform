@@ -209,6 +209,10 @@ type PartnerIngressCredentialSeed = {
   apiKeyHash: string;
 };
 
+export const PARTNER_INGRESS_CREDENTIAL_SEEDS = Symbol(
+  "PARTNER_INGRESS_CREDENTIAL_SEEDS",
+);
+
 type PartnerIngressCredentialBootstrap = {
   entrySlug: string;
   keyId: string;
@@ -646,7 +650,7 @@ function hashPartnerApiKeyValue(apiKey: string) {
   return createHash("sha256").update(apiKey).digest("hex");
 }
 
-function resolvePartnerIngressCredentialsFromEnv(): readonly PartnerIngressCredentialSeed[] {
+export function resolvePartnerIngressCredentialsFromEnv(): readonly PartnerIngressCredentialSeed[] {
   return PARTNER_INGRESS_CREDENTIAL_BOOTSTRAPS.flatMap((bootstrap) => {
     const plaintextApiKey = process.env[bootstrap.envVarName]?.trim();
     if (!plaintextApiKey) {
@@ -769,6 +773,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     private readonly tenantPartnerRepository?: TenantPartnerRepository,
     @Optional()
     private readonly webhookDispatchService: WebhookDispatchService = new WebhookDispatchService(),
+    @Optional()
+    @Inject(PARTNER_INGRESS_CREDENTIAL_SEEDS)
     private readonly partnerIngressCredentialSeeds: readonly PartnerIngressCredentialSeed[] = resolvePartnerIngressCredentialsFromEnv(),
     @Optional()
     @Inject(PARTNER_ELIGIBILITY_ADAPTERS)
