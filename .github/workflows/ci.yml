@@ -1,8 +1,19 @@
 name: CI
 
+# Note: dedicated workflows handle integration trunks and publish branches.
+# See ci-integ.yml (merge/*-dev-into-main) and ci-publish.yml (*-publish).
+# This workflow runs as ci-feat — the lightweight gate on feature PRs
+# targeting any of: main, merge/*-dev-into-main, *-publish.
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+      - 'merge/backend-dev-into-main'
+      - 'merge/frontend-dev-into-main'
+      - 'backend-dev-publish'
+      - 'frontend-dev-publish'
   push:
     branches: [main]
 
