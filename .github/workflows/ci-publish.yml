@@ -1,0 +1,82 @@
+name: CI (publish staging)
+
+# Runs on backend-dev-publish and frontend-dev-publish. Re-runs the integration
+# suite plus a deploy-to-staging job. A green head here means the branch is a
+# credible candidate to be folded into release/<date>.
+
+on:
+  push:
+    branches:
+      - 'backend-dev-publish'
+      - 'frontend-dev-publish'
+  pull_request:
+    branches:
+      - 'backend-dev-publish'
+      - 'frontend-dev-publish'
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: ci-publish-${{ github.ref }}
+  cancel-in-progress: false  # don't cancel a deploy mid-flight
+
+env:
+  CI: true
+
+jobs:
+  full-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test:unit
+      - name: Integration (optional)
+        run: |
+          if pnpm run | grep -q '^  test:integration'; then
+            pnpm run test:integration
+          fi
+      - run: pnpm run build
+
+  deploy-staging:
+    needs: full-suite
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'backend-dev-publish' && 'staging-backend' || 'staging-frontend' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to staging
+        run: |
+          echo "TODO: wire actual deploy. For now, mark intent and exit clean."
+          echo "branch=${{ github.ref_name }}"
+          echo "commit=${{ github.sha }}"
+          # When wired: bash scripts/deploy/staging-${{ github.ref_name }}.sh
+
+  smoke:
+    needs: deploy-staging
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Staging smoke
+        run: |
+          echo "TODO: wire smoke checks (curl /health, key flows)."
+
+  ci-publish:
+    needs: [full-suite]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Aggregate
+        run: |
+          [ "${{ needs.full-suite.result }}" = "success" ] || { echo "Publish CI failed"; exit 1; }
+          echo "Publish CI passed."
