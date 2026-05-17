@@ -31,8 +31,6 @@ done
 BRANCHES=(
   "backend-dev"
   "frontend-dev"
-  "backend-staging"
-  "frontend-staging"
 )
 
 echo "==> Mode: $([ $APPLY -eq 1 ] && echo APPLY || echo DRY-RUN)"

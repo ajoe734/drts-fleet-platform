@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -e
+# Validate the single message file ($1) using the shared trailer checker so
+# the husky hook stays in lockstep with the CI "Commit trailers" gate.
+python3 "$(git rev-parse --show-toplevel)/scripts/git/check_commit_trailers.py" --single-commit "$1"

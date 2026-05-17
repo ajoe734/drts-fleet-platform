@@ -44,13 +44,14 @@ DEFAULTS: dict[str, Any] = {
         "backend": "backend-dev",
         "frontend": "frontend-dev",
     },
-    # *-staging are the milestone-blessed branches that auto-deploy to
-    # staging via deploy-staging.yml (workflow_run). Promotion from *-dev
-    # to *-staging is dispatch-only via promote-to-staging.yml in v2 —
-    # see docs/ops/branch-strategy.md §5.
+    # v3: no staging branches. backend-dev / frontend-dev auto-publish to
+    # `main` via publish-to-master.yml; staging + production deploys are
+    # operator-driven workflow_dispatch picks of a prod-* tag (T10/T11 in
+    # docs/ops/branch-strategy.md). `publish_branches` is kept as `main`
+    # for backwards compat with consumers that still read it.
     "publish_branches": {
-        "backend": "backend-staging",
-        "frontend": "frontend-staging",
+        "backend": "main",
+        "frontend": "main",
     },
     # Order matters: first match wins.
     "track_rules": [

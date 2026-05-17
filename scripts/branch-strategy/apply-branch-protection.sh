@@ -30,26 +30,29 @@ echo
 
 apply_protection() {
   local branch="$1"
-  local reviews="$2"
-  local checks_json="$3"
+  # v3: identical protection on main + *-dev:
+  #   - 0 approvals (CI is the gate)
+  #   - 3 required checks: Commit trailers, Runtime mirror guard, Smoke acceptance
+  #   - linear history, no force-push, no delete
+  #   - PR-only (handled by GitHub when contexts are set + no direct-push bypass)
   local payload
-  payload=$(cat <<EOF
+  payload=$(cat <<'EOF'
 {
   "required_status_checks": {
     "strict": true,
-    "contexts": $checks_json
+    "contexts": ["Commit trailers", "Runtime mirror guard", "Smoke acceptance"]
   },
   "enforce_admins": false,
   "required_pull_request_reviews": {
-    "required_approving_review_count": $reviews,
-    "require_code_owner_reviews": true,
-    "dismiss_stale_reviews": true
+    "required_approving_review_count": 0,
+    "require_code_owner_reviews": false,
+    "dismiss_stale_reviews": false
   },
   "restrictions": null,
   "required_linear_history": true,
   "allow_force_pushes": false,
   "allow_deletions": false,
-  "required_conversation_resolution": true
+  "required_conversation_resolution": false
 }
 EOF
   )
@@ -57,16 +60,14 @@ EOF
     echo "  [apply] $branch"
     echo "$payload" | gh api -X PUT "repos/$REPO/branches/$branch/protection" --input - >/dev/null
   else
-    echo "  [plan] $branch  reviews=$reviews  checks=$checks_json"
+    echo "  [plan] $branch  reviews=0  checks=[Commit trailers, Runtime mirror guard, Smoke acceptance]"
   fi
 }
 
-# Per docs/ops/branch-strategy.md §6 (v2 model).
-apply_protection "main"             2 '["ci-staging"]'
-apply_protection "backend-staging"  1 '["ci-staging"]'
-apply_protection "frontend-staging" 1 '["ci-staging"]'
-apply_protection "backend-dev"      1 '["ci-feat"]'
-apply_protection "frontend-dev"     1 '["ci-feat"]'
+# Per docs/ops/branch-strategy.md §6 (v3 tag-based model).
+apply_protection "main"
+apply_protection "backend-dev"
+apply_protection "frontend-dev"
 
 echo
 echo "Done."

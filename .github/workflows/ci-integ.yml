@@ -1,25 +1,20 @@
 name: CI (integration trunk)
 
-# Runs on the dev integration trunks: backend-dev and frontend-dev. A green
-# head here means the trunk is safe to (a) keep accepting more AI work and
-# (b) auto-deploy to the dev environment via Deploy — Dev (workflow_run).
+# Post-merge integration suite on backend-dev / frontend-dev. Triggered by
+# `push` only — PR-time gating is handled by ci.yml's 3 named checks
+# (Commit trailers / Runtime mirror guard / Smoke acceptance) so we don't
+# burn compute running everything twice.
 #
-# Heavier than ci-feat (which runs on PRs targeting these trunks): includes
-# build + integration tests so that a green head is also a credible candidate
-# for milestone promotion to *-staging.
+# A green ci-integ HEAD is the credentialing signal for two downstream
+# workflows:
+#   1. Deploy — Dev          (via workflow_run; auto-deploys dev HEAD)
+#   2. publish-to-master.yml (via workflow_run; opens auto-PR dev → main)
 
 on:
   push:
     branches:
       - 'backend-dev'
       - 'frontend-dev'
-  pull_request:
-    branches:
-      - 'backend-dev'
-      - 'frontend-dev'
-    types: [opened, synchronize, reopened, ready_for_review]
-  # Manual trigger as a safety net when a flaky run needs rerunning or when
-  # validating a fix to the workflow itself.
   workflow_dispatch:
     inputs:
       ref:

@@ -1,11 +1,12 @@
 name: CI
 
-# ci-feat — the lightweight gate on feature PRs targeting any long-lived
-# trunk. Dedicated heavier workflows take over once code reaches the trunks:
-#   - ci-integ.yml      for pushes to backend-dev / frontend-dev
-#   - ci-staging.yml    for pushes to backend-staging / frontend-staging
-#   - deploy-prod.yml   for pushes to main
-# See docs/ops/branch-strategy.md for the full model.
+# ci-feat — the 3 gates every PR must clear to merge into a protected branch.
+# Branch protection on main + backend-dev + frontend-dev requires:
+#   ① Commit trailers       — commit messages have <TASK-ID>: subject + Task-ID/LLM-Agent/Reviewer trailers
+#   ② Runtime mirror guard  — no docs-site/ / *-bg.pid / runtime-logs/ etc. in the diff
+#   ③ Smoke acceptance      — lint + typecheck + unit tests pass
+#
+# See docs/ops/branch-strategy.md §6 for the model.
 
 on:
   pull_request:
@@ -14,10 +15,9 @@ on:
       - main
       - 'backend-dev'
       - 'frontend-dev'
-      - 'backend-staging'
-      - 'frontend-staging'
   push:
     branches: [main]
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -30,80 +30,62 @@ env:
   CI: true
 
 jobs:
-  lint:
-    name: Lint
+  commit-trailers:
+    name: Commit trailers
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v4
         with:
-          version: 10.33.0
-          run_install: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Determine base ref
+        id: base
+        run: |
+          if [ -n "${{ github.event.pull_request.base.ref }}" ]; then
+            echo "ref=origin/${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=origin/main" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Validate trailers on every commit in the PR
+        run: |
+          git fetch origin "${{ github.event.pull_request.base.ref || 'main' }}" --quiet
+          python3 scripts/git/check_commit_trailers.py --base ${{ steps.base.outputs.ref }} --head HEAD
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+  runtime-mirror-guard:
+    name: Runtime mirror guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Determine base ref
+        id: base
+        run: |
+          if [ -n "${{ github.event.pull_request.base.ref }}" ]; then
+            echo "ref=origin/${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=origin/main" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Validate no runtime mirrors in PR diff
+        run: |
+          git fetch origin "${{ github.event.pull_request.base.ref || 'main' }}" --quiet
+          python3 scripts/git/check_staged_generated_files.py --range ${{ steps.base.outputs.ref }} HEAD
 
-      - name: Install dependencies
+  smoke-acceptance:
+    name: Smoke acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - name: Install
         run: pnpm install --frozen-lockfile
-
-      - name: Run lint
+      - name: Lint
         run: pnpm run lint
-
-  typecheck:
-    name: Typecheck
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.0
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run typecheck
+      - name: Typecheck
         run: pnpm run typecheck
-
-  unit:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.33.0
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run unit tests
+      - name: Unit tests
         run: pnpm run test:unit
