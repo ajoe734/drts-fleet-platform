@@ -109,7 +109,15 @@ Emergency bypass (record in `progress` why): `ALLOW_GENERATED_FILES=1 git commit
 1. Task is already in `review_approved`.
 2. Task-scoped commit created with the trailer format above.
 3. Normal non-force push to `<lane>/<task-id-kebab>` succeeded.
-4. Run with all four env present:
+4. Integration PR opened (or already open) against the routed trunk:
+
+   ```bash
+   python3 scripts/git/worker_open_pr.py --task-id "$TASK_ID" --lane "$AI_NAME_LOWER"
+   ```
+
+   Idempotent: if a PR already exists from your lane branch, prints the existing URL and exits 0. Title defaults to the latest commit subject; pass `--title` or `--body-file` to override. Refuses a dirty working tree by default (pass `--allow-dirty` only when intentional).
+
+5. Run with all four env present:
 
 ```bash
 AI_NAME=<lane> \
@@ -121,3 +129,5 @@ AI_NAME=<lane> \
 ```
 
 If a safe normal push is not possible, record a `progress` or `blocker` note. Do not mark `done` partial.
+
+If Gate-1 auto-merge is enabled in `config.json::branch_strategy.gate1_auto_merge`, the supervisor will arm `gh pr merge --squash --auto` on the PR opened in step 4; GitHub then completes the merge once required checks are green.
