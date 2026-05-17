@@ -1,0 +1,141 @@
+name: Promote merge/* -> *-publish (nightly)
+
+# Once a day, if merge/<track>-dev-into-main has commits ahead of <track>-publish
+# and the merge/* head is green, open (or update) a PR promoting it to publish.
+# Manual workflow_dispatch is also available for ad-hoc promotion.
+#
+# This workflow does NOT auto-merge the promotion PR. Approval rests with the
+# release manager via the PR's required reviews (configured in branch protection).
+
+on:
+  schedule:
+    # 16:00 UTC = 00:00 Taipei (UTC+8) — start of business day
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+    inputs:
+      track:
+        description: 'Which track to promote (backend | frontend | both)'
+        required: false
+        default: 'both'
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+  checks: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        track:
+          - { name: backend,  source: merge/backend-dev-into-main,  target: backend-dev-publish  }
+          - { name: frontend, source: merge/frontend-dev-into-main, target: frontend-dev-publish }
+    steps:
+      - name: Skip if track filter excludes this one
+        id: filter
+        run: |
+          want="${{ github.event.inputs.track || 'both' }}"
+          if [ "$want" != "both" ] && [ "$want" != "${{ matrix.track.name }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout repo
+        if: steps.filter.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check source branch exists
+        if: steps.filter.outputs.skip != 'true'
+        id: source-exists
+        run: |
+          if git ls-remote --exit-code --heads origin "${{ matrix.track.source }}" >/dev/null 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Source branch ${{ matrix.track.source }} does not exist yet — bootstrap-branches.sh has not been run."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check if source is ahead of target
+        if: steps.filter.outputs.skip != 'true' && steps.source-exists.outputs.ok == 'true'
+        id: diff
+        run: |
+          git fetch origin "${{ matrix.track.source }}" "${{ matrix.track.target }}"
+          ahead=$(git rev-list --count "origin/${{ matrix.track.target }}..origin/${{ matrix.track.source }}")
+          echo "ahead=$ahead" >> "$GITHUB_OUTPUT"
+          echo "Source is $ahead commit(s) ahead of target."
+
+      - name: Verify source CI is green
+        if: steps.filter.outputs.skip != 'true' && steps.source-exists.outputs.ok == 'true' && steps.diff.outputs.ahead != '0'
+        id: green
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha=$(git rev-parse "origin/${{ matrix.track.source }}")
+          state=$(gh api "repos/${{ github.repository }}/commits/$sha/check-runs" --jq '[.check_runs[] | select(.name=="ci-integ")] | (if length==0 then "missing" else (.[0].conclusion // "pending") end)')
+          echo "ci-integ on $sha = $state"
+          if [ "$state" = "success" ]; then
+            echo "green=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "green=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping promotion: ci-integ on source head is $state (need success)."
+          fi
+
+      - name: Open or update promotion PR
+        if: steps.green.outputs.green == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          existing=$(gh pr list --base "${{ matrix.track.target }}" --head "${{ matrix.track.source }}" --state open --json number --jq '.[0].number // empty')
+          title="Promote ${{ matrix.track.source }} -> ${{ matrix.track.target }} ($(date -u +%F))"
+          body=$(cat <<EOF
+          Automated nightly promotion.
+
+          - Source: \`${{ matrix.track.source }}\`
+          - Target: \`${{ matrix.track.target }}\`
+          - Commits ahead: ${{ steps.diff.outputs.ahead }}
+          - Source ci-integ: green
+
+          Required reviews are set by branch protection. Release manager approval
+          merges this PR; \`ci-publish\` then runs against the publish branch.
+          EOF
+          )
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body "$body"
+            echo "Updated existing promotion PR #$existing"
+          else
+            gh pr create --base "${{ matrix.track.target }}" --head "${{ matrix.track.source }}" --title "$title" --body "$body" --label "promotion,automated"
+          fi
+
+  # Daily drift check: main shouldn't be more than one commit ahead of either
+  # *-publish branch, otherwise we missed a hotfix back-port.
+  # (The previous condition checked github.event.schedule against a Monday-only
+  # cron that didn't exist on this workflow — the job never ran.)
+  hotfix-drift-check:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Check drift
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for target in backend-dev-publish frontend-dev-publish; do
+            if ! git ls-remote --exit-code --heads origin "$target" >/dev/null 2>&1; then continue; fi
+            git fetch origin main "$target" --quiet
+            drift=$(git rev-list --count "origin/$target..origin/main")
+            if [ "$drift" -gt 1 ]; then
+              body="main is $drift commits ahead of $target. Possible missing hotfix back-port. See branch-strategy.md §7."
+              gh issue create --title "Hotfix back-port drift on $target ($drift commits)" --body "$body" --label "branch-strategy,hotfix-drift" || true
+            fi
+          done

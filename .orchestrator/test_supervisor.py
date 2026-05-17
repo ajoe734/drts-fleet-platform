@@ -1443,7 +1443,10 @@ class UnderutilizationSidecarDispatchTests(unittest.TestCase):
             "id": "APP-001-SIDECAR-BFF-HANDOFF",
             "phase": "Phase 5: Persona and Application Surfaces",
             "status": "todo",
-            "owner": "Qwen",
+            # preferred_agents_for_sidecar('bff_handoff_packet') no longer
+            # includes Qwen (Qwen was retired from the active agent roster);
+            # Gemini is the next preferred idle agent in this test's state.
+            "owner": "Gemini",
             "reviewer": "Claude",
             "depends_on": [],
             "title": "Prepare APP-001 BFF and frontend handoff packet",
@@ -1474,7 +1477,7 @@ class UnderutilizationSidecarDispatchTests(unittest.TestCase):
         create_sidecar_task.assert_called_once()
         kwargs = create_sidecar_task.call_args.kwargs
         self.assertEqual(kwargs["sidecar_id"], "APP-001-SIDECAR-BFF-HANDOFF")
-        self.assertEqual(kwargs["owner"], "Qwen")
+        self.assertEqual(kwargs["owner"], "Gemini")
         self.assertEqual(kwargs["reviewer"], "Claude")
         self.assertEqual(kwargs["helper_parent"], "APP-001")
         self.assertEqual(kwargs["helper_kind"], "bff_handoff_packet")
@@ -1482,7 +1485,7 @@ class UnderutilizationSidecarDispatchTests(unittest.TestCase):
         queue_delivery_event.assert_called_once()
         queued_event = queue_delivery_event.call_args.args[1]
         self.assertEqual(queued_event["task_id"], "APP-001-SIDECAR-BFF-HANDOFF")
-        self.assertEqual(queued_event["target_agent"], "Qwen")
+        self.assertEqual(queued_event["target_agent"], "Gemini")
         self.assertEqual(queued_event["task"]["task_class"], "sidecar")
         self.assertEqual(state["underutilization"]["last_sidecar_wave_at"], "2026-04-10T00:16:05Z")
         self.assertIn("created 1 visible sidecar", state["underutilization"]["last_sidecar_wave_reason"])
@@ -3867,7 +3870,9 @@ class ChairmanFlowTests(unittest.TestCase):
                                 "agent": "Gemini2",
                                 "action": "pause",
                                 "kind": "auth",
-                                "reason": "Stalled provider-health worker; no new dispatches until verified.",
+                                # chair_provider_pause_reason_is_actionable now requires
+                                # a concrete auth marker (e.g. "status: 401") in the reason.
+                                "reason": "Provider-health worker returned status: 401 from Gemini2; pause until reauth.",
                                 "reset_seconds": None,
                             }
                         ],
