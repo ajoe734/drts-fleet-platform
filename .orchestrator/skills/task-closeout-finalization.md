@@ -20,12 +20,14 @@ Required steps:
    - Prefer `git push` when the current branch has a correct upstream.
    - Otherwise use `git push -u origin HEAD:<branch>` only when `<branch>` is the intended task branch.
    - Never use `--force`, `--force-with-lease`, `--mirror`, `--delete`, `--all`, or `--tags`.
-10. Run `scripts/ai-status.sh done <task-id> "<message>"` or `python3 scripts/ai_status.py done ...` only after commit and push are complete.
+10. Before you write any completion summary, run `git status --short` again and confirm no task-owned tracked changes remain outside the closeout commit.
+11. Run `scripts/ai-status.sh done <task-id> "<message>"` or `python3 scripts/ai_status.py done ...` only after commit and push are complete.
 
 Rules:
 
 - `review_approved` is not the finish line; it is the reviewer gate.
 - Do not mark `done` before closeout, verification, commit metadata, and push metadata are ready.
+- Do not stop with a "finished locally" message while the closeout diff is still only in the working tree. If verification passed but commit/push is not complete, the task is not closed yet.
 - If a safe normal push is not possible, record a blocker or progress note instead of marking `done`.
 
 Canonical closeout example:

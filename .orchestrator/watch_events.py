@@ -397,6 +397,8 @@ def build_branch_protocol_block(
         "立即 anchor commit：\n"
         f"  `git commit -m \"wip({task_id}): anchor <scope>\" -m \"LLM-Agent: {lane}\" "
         f"-m \"Task-ID: {task_id}\" -m \"Reviewer: <reviewer>\"`\n"
+        "- 不能把 task-owned tracked changes 留在本地未 commit 狀態就回報「修好了 / 可審查 / 完成」。"
+        "若已完成實作或驗證但要停下來，先 commit；需要 push 的情境就先 push。\n"
         "- 不要 `git stash` 帶有設計意圖的 diff。supervisor 把你切到別的 task 前，**先 commit**，不靠 stash。\n"
         f"- `{base_branch}` 前進過：`git fetch origin && git rebase origin/{base_branch}`，"
         "不要 `git stash pop` 在 moved trunk 上。\n"

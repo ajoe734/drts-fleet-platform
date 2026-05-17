@@ -1,6 +1,6 @@
 # AI Collaboration Guide
 
-Last updated: 2026-04-10
+Last updated: 2026-05-17
 Status: canonical collaboration rules for the DRTS Phase 1 multi-LLM consensus workflow
 
 ## 0. Repository Scope
@@ -246,6 +246,19 @@ For canonical implementation tasks:
 - after committing, the owner must push the task-scoped commit with a normal non-force push
 - the owner must provide `PUSH_REMOTE` and `PUSH_BRANCH` when finalizing the task
 - if a safe normal push is not possible, record a blocker/progress note and do not mark `done`
+
+### No local-only completion rule
+
+For every agent session in this repo, not just orchestrator closeout:
+
+- do not stop after implementation or verification with task-owned tracked changes left only in the local working tree
+- before you report "fixed", "implemented", "ready for review", "ready to merge", or any equivalent completion language, run `git status --short`
+- if task-owned tracked files were changed, move the work onto the correct branch first if needed, then create either:
+  - an anchor commit (`wip(...)`) for in-flight work, or
+  - a formal task-scoped closeout commit for `review_approved` work
+- for `docs/**`, `.orchestrator/skills/**`, `.orchestrator/templates/*`, `.orchestrator/config*.json`, `.github/workflows/**`, and other fragile multi-cycle surfaces, do not leave the change local-only across sessions; follow branch -> commit -> push
+- if a safe commit or normal non-force push is not possible, say so explicitly and record a blocker/progress note instead of presenting the work as complete
+- the working tree is not delivery evidence; "tests passed locally" is not a substitute for the required branch / commit / push discipline
 
 For sidecar or explicit non-canonical closeout tasks:
 

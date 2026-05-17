@@ -222,6 +222,7 @@ class RenderWakeupMessageTests(unittest.TestCase):
         self.assertIn("origin/dev", rendered)
         self.assertIn('LLM-Agent: claude', rendered)
         self.assertIn("Task-ID: BE-APR-NOTIFY-001", rendered)
+        self.assertIn("不能把 task-owned tracked changes 留在本地未 commit 狀態", rendered)
         self.assertIn(".orchestrator/skills/worker-anchor-commit.md", rendered)
         self.assertNotIn("{{branch_protocol}}", rendered)
 
@@ -270,6 +271,7 @@ class RenderWakeupMessageTests(unittest.TestCase):
         )
         self.assertIn("claude/ops-git-workflow-005", block)
         self.assertIn("origin/dev", block)
+        self.assertIn("不能把 task-owned tracked changes 留在本地未 commit 狀態", block)
         self.assertIn("worker-anchor-commit.md", block)
 
         # Missing any one fact → empty.

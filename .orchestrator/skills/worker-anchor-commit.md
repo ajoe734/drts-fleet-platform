@@ -48,7 +48,8 @@ Working tree is **not** a staging area for design intent. Stash is **not** an al
    ```bash
    git push -u origin <lane>/<task-id-kebab>
    ```
-7. Continue the task. Subsequent anchors on the same branch are allowed and encouraged; closeout will squash or keep them per `task-closeout-finalization.md` step 5a.
+7. Before you pause, hand off, or tell a human "implemented" / "ready", run `git status --short` again. If task-owned tracked changes are still uncommitted, do not stop — anchor-commit them first.
+8. Continue the task. Subsequent anchors on the same branch are allowed and encouraged; closeout will squash or keep them per `task-closeout-finalization.md` step 5a.
 
 ## Rules
 
@@ -59,6 +60,7 @@ Working tree is **not** a staging area for design intent. Stash is **not** an al
   git fetch origin
   git rebase origin/dev
   ```
+- **No local-only completion.** Do not tell a human or supervisor "fixed", "implemented", "ready for review", or equivalent completion language while task-owned tracked changes exist only in the working tree. Commit first, or explicitly report why commit/push is blocked.
 - **Anchor commits are not closeouts.** They have `wip:` prefix and do not require a `Verification:` trailer. The closeout commit (per `task-closeout-finalization.md`) is the one that satisfies the `<TASK-ID>: <summary>` subject regex required by CI.
 - **doc / skill / config changes** (per `branch-strategy.md` §11.5) always go branch → commit → push → PR. They must not accumulate in-session across supervisor cycles.
 
