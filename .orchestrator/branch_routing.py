@@ -16,12 +16,12 @@ Configuration shape (added under top-level key `branch_strategy` in
     {
       "branch_strategy": {
         "tracks": {
-          "backend":  "merge/backend-dev-into-main",
-          "frontend": "merge/frontend-dev-into-main"
+          "backend":  "backend-dev",
+          "frontend": "frontend-dev"
         },
         "publish_branches": {
-          "backend":  "backend-dev-publish",
-          "frontend": "frontend-dev-publish"
+          "backend":  "backend-staging",
+          "frontend": "frontend-staging"
         },
         "track_rules": [
           { "track": "backend",  "prefixes": ["BE-", "API-", "SC-", "OBS-", ...] },
@@ -41,12 +41,16 @@ from typing import Any, Iterable
 
 DEFAULTS: dict[str, Any] = {
     "tracks": {
-        "backend": "merge/backend-dev-into-main",
-        "frontend": "merge/frontend-dev-into-main",
+        "backend": "backend-dev",
+        "frontend": "frontend-dev",
     },
+    # *-staging are the milestone-blessed branches that auto-deploy to
+    # staging via deploy-staging.yml (workflow_run). Promotion from *-dev
+    # to *-staging is dispatch-only via promote-to-staging.yml in v2 —
+    # see docs/ops/branch-strategy.md §5.
     "publish_branches": {
-        "backend": "backend-dev-publish",
-        "frontend": "frontend-dev-publish",
+        "backend": "backend-staging",
+        "frontend": "frontend-staging",
     },
     # Order matters: first match wins.
     "track_rules": [

@@ -61,12 +61,12 @@ EOF
   fi
 }
 
-# Per docs/ops/branch-strategy.md §6.
-apply_protection "main"                          2 '["ci-publish"]'
-apply_protection "backend-dev-publish"           1 '["ci-publish"]'
-apply_protection "frontend-dev-publish"          1 '["ci-publish"]'
-apply_protection "merge/backend-dev-into-main"   1 '["ci-integ"]'
-apply_protection "merge/frontend-dev-into-main"  1 '["ci-integ"]'
+# Per docs/ops/branch-strategy.md §6 (v2 model).
+apply_protection "main"             2 '["ci-staging"]'
+apply_protection "backend-staging"  1 '["ci-staging"]'
+apply_protection "frontend-staging" 1 '["ci-staging"]'
+apply_protection "backend-dev"      1 '["ci-feat"]'
+apply_protection "frontend-dev"     1 '["ci-feat"]'
 
 echo
 echo "Done."

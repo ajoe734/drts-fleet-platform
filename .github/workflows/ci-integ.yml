@@ -1,28 +1,31 @@
 name: CI (integration trunk)
 
-# Runs on the long-lived integration trunks: merge/backend-dev-into-main
-# and merge/frontend-dev-into-main. Heavier than ci-feat (which only runs on
-# PRs into these trunks); includes build + integration tests so that a green
-# head on merge/* is a credible promotion candidate to *-publish.
+# Runs on the dev integration trunks: backend-dev and frontend-dev. A green
+# head here means the trunk is safe to (a) keep accepting more AI work and
+# (b) auto-deploy to the dev environment via Deploy — Dev (workflow_run).
+#
+# Heavier than ci-feat (which runs on PRs targeting these trunks): includes
+# build + integration tests so that a green head is also a credible candidate
+# for milestone promotion to *-staging.
 
 on:
   push:
     branches:
-      - 'merge/backend-dev-into-main'
-      - 'merge/frontend-dev-into-main'
+      - 'backend-dev'
+      - 'frontend-dev'
   pull_request:
     branches:
-      - 'merge/backend-dev-into-main'
-      - 'merge/frontend-dev-into-main'
+      - 'backend-dev'
+      - 'frontend-dev'
     types: [opened, synchronize, reopened, ready_for_review]
-  # Manual trigger for parity with ci-publish; useful when a flaky run needs
-  # rerunning without pushing or when validating a fix to the workflow itself.
+  # Manual trigger as a safety net when a flaky run needs rerunning or when
+  # validating a fix to the workflow itself.
   workflow_dispatch:
     inputs:
       ref:
         description: 'Branch or commit SHA to run against'
         required: false
-        default: 'merge/backend-dev-into-main'
+        default: 'backend-dev'
 
 permissions:
   contents: read

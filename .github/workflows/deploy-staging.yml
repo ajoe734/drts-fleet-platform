@@ -1,8 +1,18 @@
 name: Deploy — Staging
 
+# Auto-fires after a green CI (staging) on backend-staging or frontend-staging
+# (per the v2 branch strategy in docs/ops/branch-strategy.md: staging is the
+# milestone-blessed integration that humans / supervisor explicitly promoted
+# from dev). Also manually triggerable for ad-hoc redeploys.
+
 on:
   workflow_dispatch:
     inputs:
+      source_ref:
+        description: "Branch / commit SHA to deploy to staging (default: backend-staging HEAD)"
+        required: false
+        default: "backend-staging"
+        type: string
       skip_migration:
         description: "Skip DB migration step (use only if migrations already applied)"
         required: false
@@ -11,6 +21,12 @@ on:
         options:
           - "false"
           - "true"
+  workflow_run:
+    workflows: ["CI (staging)"]
+    types: [completed]
+    branches:
+      - backend-staging
+      - frontend-staging
 
 permissions:
   contents: read
@@ -44,17 +60,40 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   build-push:
     name: Build & push images
+    # On workflow_run, only proceed if the upstream CI passed. workflow_dispatch
+    # is always allowed.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
+      source_ref: ${{ steps.tag.outputs.source_ref }}
 
     steps:
+      - name: Resolve source ref
+        id: ref
+        run: |
+          # Precedence: explicit workflow_dispatch input -> workflow_run head SHA -> GITHUB_SHA
+          ref="${{ inputs.source_ref }}"
+          if [ -z "$ref" ]; then
+            ref="${{ github.event.workflow_run.head_sha }}"
+          fi
+          if [ -z "$ref" ]; then
+            ref="$GITHUB_SHA"
+          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Resolved deploy ref: $ref"
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ref.outputs.ref }}
 
       - name: Derive image tag
         id: tag
-        run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "tag=${sha:0:12}" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$sha" >> "$GITHUB_OUTPUT"
 
       - name: Validate staging GitHub config
         run: |

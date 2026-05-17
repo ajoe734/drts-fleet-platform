@@ -90,7 +90,7 @@ class CopilotCloudRoutingFallbackTests(unittest.TestCase):
         command = self._capture_command(adapter, request)
         self.assertIn("--base", command)
         idx = command.index("--base")
-        self.assertEqual(command[idx + 1], "merge/backend-dev-into-main")
+        self.assertEqual(command[idx + 1], "backend-dev")
 
     def test_falls_back_to_frontend_for_ui_tasks(self) -> None:
         adapter = self._build_adapter(base_branch=None)
@@ -105,7 +105,7 @@ class CopilotCloudRoutingFallbackTests(unittest.TestCase):
         )
         command = self._capture_command(adapter, request)
         idx = command.index("--base")
-        self.assertEqual(command[idx + 1], "merge/frontend-dev-into-main")
+        self.assertEqual(command[idx + 1], "frontend-dev")
 
     def test_explicit_config_branch_wins_over_routing(self) -> None:
         adapter = self._build_adapter(base_branch="custom-base")
