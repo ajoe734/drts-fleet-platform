@@ -10,8 +10,8 @@ class RouteTaskTests(unittest.TestCase):
     def test_backend_prefix_routes_to_backend_trunk(self) -> None:
         decision = branch_routing.route_task("BE-APR-NOTIFY-001")
         self.assertEqual(decision.track, "backend")
-        self.assertEqual(decision.base_branch, "merge/backend-dev-into-main")
-        self.assertEqual(decision.publish_branch, "backend-dev-publish")
+        self.assertEqual(decision.base_branch, "backend-dev")
+        self.assertEqual(decision.publish_branch, "backend-staging")
         self.assertGreaterEqual(decision.matched_rule_index, 0)
 
     def test_frontend_prefix_routes_to_frontend_trunk(self) -> None:
@@ -19,7 +19,7 @@ class RouteTaskTests(unittest.TestCase):
             with self.subTest(task_id=task_id):
                 decision = branch_routing.route_task(task_id)
                 self.assertEqual(decision.track, "frontend", task_id)
-                self.assertEqual(decision.base_branch, "merge/frontend-dev-into-main", task_id)
+                self.assertEqual(decision.base_branch, "frontend-dev", task_id)
 
     def test_xx_ui_regex_routes_frontend_even_without_listed_prefix(self) -> None:
         decision = branch_routing.route_task("XYZ-UI-NEW-001")
@@ -88,10 +88,10 @@ class RouteTaskTests(unittest.TestCase):
     def test_known_long_lived_branches(self) -> None:
         branches = branch_routing.known_long_lived_branches()
         self.assertIn("main", branches)
-        self.assertIn("merge/backend-dev-into-main", branches)
-        self.assertIn("merge/frontend-dev-into-main", branches)
-        self.assertIn("backend-dev-publish", branches)
-        self.assertIn("frontend-dev-publish", branches)
+        self.assertIn("backend-dev", branches)
+        self.assertIn("frontend-dev", branches)
+        self.assertIn("backend-staging", branches)
+        self.assertIn("frontend-staging", branches)
 
     def test_route_many_preserves_order(self) -> None:
         decisions = branch_routing.route_many(["BE-1", "UI-1", "DOC-1"])

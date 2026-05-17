@@ -16,8 +16,8 @@ The integration is intentionally narrow: one new module
 from branch_routing import route_task, RouteDecision
 
 decision: RouteDecision = route_task(task_id, config=config)
-decision.base_branch        # "merge/backend-dev-into-main" or "merge/frontend-dev-into-main"
-decision.publish_branch     # "backend-dev-publish" / "frontend-dev-publish"
+decision.base_branch        # "backend-dev" or "frontend-dev"
+decision.publish_branch     # "backend-staging" / "frontend-staging"
 decision.track              # "backend" / "frontend"
 decision.matched_rule_index # -1 if it fell through to the default
 decision.as_dict()          # JSON-serialisable for ai-status.json
@@ -85,7 +85,7 @@ glance which integration layer a given task is currently in.
       "owner": "Codex",
       "gate_layer": "merge",          // <-- new
       "track": "backend",             // <-- new
-      "base_branch": "merge/backend-dev-into-main"
+      "base_branch": "backend-dev"
       // ...
     }
   }
@@ -118,12 +118,12 @@ defaults from `branch_routing.DEFAULTS`):
 {
   "branch_strategy": {
     "tracks": {
-      "backend":  "merge/backend-dev-into-main",
-      "frontend": "merge/frontend-dev-into-main"
+      "backend":  "backend-dev",
+      "frontend": "frontend-dev"
     },
     "publish_branches": {
-      "backend":  "backend-dev-publish",
-      "frontend": "frontend-dev-publish"
+      "backend":  "backend-staging",
+      "frontend": "frontend-staging"
     },
     "default_track": "backend"
     // track_rules omitted → uses the defaults shipped in branch_routing.DEFAULTS
@@ -144,10 +144,10 @@ long-lived branches so that workers can push to them when authorised:
 
 ```python
 LONG_LIVED_PUSH_ALLOWED = {
-    "merge/backend-dev-into-main": ["supervisor", "release_manager"],
-    "merge/frontend-dev-into-main": ["supervisor", "release_manager"],
-    "backend-dev-publish": ["release_manager"],
-    "frontend-dev-publish": ["release_manager"],
+    "backend-dev": ["supervisor", "release_manager"],
+    "frontend-dev": ["supervisor", "release_manager"],
+    "backend-staging": ["release_manager"],
+    "frontend-staging": ["release_manager"],
 }
 ```
 
@@ -174,8 +174,8 @@ print(json.dumps(route_task('OPS-UI-APR-001').as_dict(), indent=2))
 "
 ```
 
-Expected: backend tasks → `merge/backend-dev-into-main`, frontend tasks →
-`merge/frontend-dev-into-main`. Unknown prefixes fall through to backend
+Expected: backend tasks → `backend-dev`, frontend tasks →
+`frontend-dev`. Unknown prefixes fall through to backend
 with `matched_rule_index: -1` — a signal to add a rule or rename the task.
 
 ---

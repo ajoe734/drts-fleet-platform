@@ -1,0 +1,69 @@
+name: CI (staging)
+
+# Runs on backend-staging and frontend-staging. A green head here means the
+# milestone-blessed staging trunk is ready for an actual deploy.
+#
+# Deploy itself is performed by Deploy — Staging (workflow_run trigger,
+# downstream). This workflow is the gate that determines whether the deploy
+# fires (workflow_run only proceeds on success).
+
+on:
+  push:
+    branches:
+      - 'backend-staging'
+      - 'frontend-staging'
+  pull_request:
+    branches:
+      - 'backend-staging'
+      - 'frontend-staging'
+    types: [opened, synchronize, reopened, ready_for_review]
+  # Manual trigger as a safety net if a promotion lands without ci-staging
+  # having fired (e.g. odd race), the release manager can fire from the
+  # Actions UI.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or commit SHA to run against'
+        required: false
+        default: 'backend-staging'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-staging-${{ github.ref }}
+  cancel-in-progress: false  # never cancel a staging check mid-flight
+
+env:
+  CI: true
+
+jobs:
+  full-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test:unit
+      - name: Integration (optional)
+        run: |
+          if pnpm run | grep -q '^  test:integration'; then
+            pnpm run test:integration
+          fi
+      - run: pnpm run build
+
+  # Aggregate job for branch-protection "required check" simplicity.
+  ci-staging:
+    needs: [full-suite]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Aggregate
+        run: |
+          [ "${{ needs.full-suite.result }}" = "success" ] || { echo "Staging CI failed"; exit 1; }
+          echo "Staging CI passed. Deploy — Staging will fire via workflow_run on push events."

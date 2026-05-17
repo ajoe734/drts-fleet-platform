@@ -1,5 +1,10 @@
 name: Deploy — Dev
 
+# Auto-fires after a green CI (integration trunk) on backend-dev or frontend-dev
+# (per the v2 branch strategy in docs/ops/branch-strategy.md: dev branch HEAD
+# is always continuously deployed). Also remains manually triggerable for
+# ad-hoc redeploys of any SHA.
+
 on:
   workflow_dispatch:
     inputs:
@@ -15,6 +20,12 @@ on:
         options:
           - "false"
           - "true"
+  workflow_run:
+    workflows: ["CI (integration trunk)"]
+    types: [completed]
+    branches:
+      - backend-dev
+      - frontend-dev
 
 permissions:
   contents: read
@@ -53,6 +64,9 @@ env:
 jobs:
   prepare:
     name: Prepare dev deploy
+    # When triggered by workflow_run, only proceed if the upstream CI passed.
+    # workflow_dispatch is always allowed.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       source_ref: ${{ steps.resolve.outputs.source_ref }}
@@ -81,6 +95,11 @@ jobs:
         env:
           INPUT_SOURCE_REF: ${{ inputs.source_ref }}
           INPUT_SKIP_MIGRATION: ${{ inputs.skip_migration }}
+          # When triggered via workflow_run, the upstream CI's head SHA is
+          # the real branch HEAD we want to build; GITHUB_SHA in that case
+          # is the workflow file's commit on the default branch, which is
+          # wrong for our purposes.
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
 
@@ -148,7 +167,7 @@ jobs:
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
           registry="${artifact_region}-docker.pkg.dev/${artifact_project_id}/${artifact_repository}"
 
-          source_ref="${INPUT_SOURCE_REF:-${GITHUB_SHA}}"
+          source_ref="${INPUT_SOURCE_REF:-${WORKFLOW_RUN_HEAD_SHA:-${GITHUB_SHA}}}"
 
           missing=()
           [[ -n "$project_id" ]] || missing+=("vars.DEV_GCP_PROJECT_ID")

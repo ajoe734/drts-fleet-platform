@@ -26,8 +26,8 @@ git fetch origin --prune --quiet
 now_epoch=$(date +%s)
 stale_epoch=$(( now_epoch - STALE_DAYS * 86400 ))
 
-# Keep set — branches that the new model needs.
-keep_set='^(main|merge/backend-dev-into-main|merge/frontend-dev-into-main|backend-dev-publish|frontend-dev-publish|release/.*)$'
+# Keep set — branches that the v2 model needs.
+keep_set='^(main|backend-dev|frontend-dev|backend-staging|frontend-staging)$'
 
 # Track routing prefixes (mirrors .orchestrator/branch_routing.py defaults).
 backend_re='^(be-|api-|sc-|obs-|evd-|fwd-|tch-|prt-|infra-)'
@@ -88,7 +88,7 @@ while IFS=$'\t' read -r ref last_iso author; do
   if [[ "$track" == "?" ]]; then
     emit "review" "$branch" "$last_iso" "$author" "$track" "track ambiguous; assign manually"
   else
-    emit "merge-into-track" "$branch" "$last_iso" "$author" "$track" "rebase onto merge/${track}-dev-into-main"
+    emit "merge-into-track" "$branch" "$last_iso" "$author" "$track" "rebase onto ${track}-dev"
   fi
 done < <(git for-each-ref --format='%(refname)%09%(committerdate:iso8601-strict)%09%(authorname)' refs/remotes/origin)
 

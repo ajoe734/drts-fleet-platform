@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bootstrap-branches.sh — create the four long-lived branches for the
-# three-layer integration model. Idempotent: skips any branch that
+# v2 AI-native dev/staging/prod model. Idempotent: skips any branch that
 # already exists on the remote.
 #
 # DRY-RUN BY DEFAULT. Pass --apply to actually push.
@@ -29,10 +29,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 BRANCHES=(
-  "merge/backend-dev-into-main"
-  "merge/frontend-dev-into-main"
-  "backend-dev-publish"
-  "frontend-dev-publish"
+  "backend-dev"
+  "frontend-dev"
+  "backend-staging"
+  "frontend-staging"
 )
 
 echo "==> Mode: $([ $APPLY -eq 1 ] && echo APPLY || echo DRY-RUN)"

@@ -1,0 +1,89 @@
+name: Deploy — Prod
+
+# Auto-fires on push to main (i.e. after a PR is approved + merged), per the
+# v2 branch strategy in docs/ops/branch-strategy.md. PR review on main is the
+# primary gate (2 reviewers + ci-staging green); the production GitHub env can
+# add a second reviewer gate if double-approval is desired.
+#
+# SKELETON status: the prod GCP project + WIF + secrets are not yet configured.
+# The first run will fail in `validate prod config` with a clear list of what
+# needs to be set in repo Settings → Secrets/Variables. After that, the deploy
+# logic is identical to Deploy — Staging.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branch / commit SHA to deploy to prod (default: main HEAD)"
+        required: false
+        default: "main"
+        type: string
+      skip_migration:
+        description: "Skip DB migration step (use only if migrations already applied)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  id-token: write   # required for Workload Identity Federation
+  deployments: write
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false   # serialise; never cancel a running prod migration
+
+env:
+  PROJECT_ID: ${{ vars.PROD_GCP_PROJECT_ID }}
+  REGION: ${{ vars.PROD_GCP_REGION }}
+  ARTIFACT_PROJECT_ID: ${{ vars.PROD_ARTIFACT_PROJECT_ID || vars.PROD_GCP_PROJECT_ID }}
+  ARTIFACT_REGION: ${{ vars.PROD_ARTIFACT_REGION || vars.PROD_GCP_REGION }}
+  ARTIFACT_REPOSITORY: ${{ vars.PROD_ARTIFACT_REPOSITORY || 'drts' }}
+  REGISTRY: ${{ vars.PROD_ARTIFACT_REGION || vars.PROD_GCP_REGION }}-docker.pkg.dev/${{ vars.PROD_ARTIFACT_PROJECT_ID || vars.PROD_GCP_PROJECT_ID }}/${{ vars.PROD_ARTIFACT_REPOSITORY || 'drts' }}
+  CLOUDSQL: ${{ vars.PROD_GCP_CLOUDSQL_INSTANCE }}
+  DEPLOYER_SERVICE_ACCOUNT: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
+  RUNTIME_SERVICE_ACCOUNT: ${{ vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT }}
+  WIF_PROVIDER_VALUE: ${{ secrets.PROD_WIF_PROVIDER }}
+  SECRET_PREFIX: ${{ vars.PROD_SECRET_PREFIX || 'drts-prod' }}
+
+jobs:
+  validate-config:
+    runs-on: ubuntu-latest
+    # The production GitHub environment can be configured with required
+    # reviewers; if so, this job will block here until approved.
+    environment:
+      name: production
+    steps:
+      - name: Validate prod config is wired
+        run: |
+          set -euo pipefail
+          missing=()
+          [[ -n "${PROJECT_ID:-}" ]] || missing+=("vars.PROD_GCP_PROJECT_ID")
+          [[ -n "${REGION:-}" ]] || missing+=("vars.PROD_GCP_REGION")
+          [[ -n "${CLOUDSQL:-}" ]] || missing+=("vars.PROD_GCP_CLOUDSQL_INSTANCE")
+          [[ -n "${RUNTIME_SERVICE_ACCOUNT:-}" ]] || missing+=("vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT")
+          [[ -n "${DEPLOYER_SERVICE_ACCOUNT:-}" ]] || missing+=("secrets.PROD_WIF_SERVICE_ACCOUNT")
+          [[ -n "${WIF_PROVIDER_VALUE:-}" ]] || missing+=("secrets.PROD_WIF_PROVIDER")
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::Prod deploy SKELETON — missing required GitHub config:"
+            for m in "${missing[@]}"; do echo "  - $m" >&2; done
+            echo ""
+            echo "Configure at: https://github.com/${{ github.repository }}/settings/secrets/actions"
+            echo "and          https://github.com/${{ github.repository }}/settings/variables/actions"
+            echo ""
+            echo "Then copy/adapt the build-push + deploy steps from .github/workflows/deploy-staging.yml,"
+            echo "swapping STAGING_* references for PROD_* — see docs/ops/branch-strategy.md §7."
+            exit 1
+          fi
+          echo "Prod config validated. Image build + deploy not yet implemented in this skeleton."
+          echo "::warning::deploy-prod.yml is a skeleton; implement build-push and deploy jobs once prod GCP is wired."
+
+  # Reserved for later expansion — mirrors deploy-staging.yml's job graph:
+  #   build-push  → deploy-migrate → deploy-api → deploy-platform-admin-web → deploy-ops-console-web → smoke
+  # See branch-strategy.md §7 for the contract these jobs must honour.
