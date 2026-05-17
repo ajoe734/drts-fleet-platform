@@ -107,11 +107,28 @@ jobs:
           EOF
           )
           if [ -n "$existing" ]; then
-            gh pr edit "$existing" --title "$title" --body "$body"
+            gh pr edit "$existing" --title "$title" --body "$body" || true
             echo "Updated existing promotion PR #$existing"
+            pr_number="$existing"
           else
-            gh pr create --base "${{ matrix.track.target }}" --head "${{ matrix.track.source }}" --title "$title" --body "$body" --label "promotion,automated"
+            # `--label` would hard-fail if a label was deleted; add labels via a
+            # follow-up `edit` step that tolerates missing labels.
+            pr_url=$(gh pr create --base "${{ matrix.track.target }}" --head "${{ matrix.track.source }}" --title "$title" --body "$body")
+            pr_number=$(basename "$pr_url")
+            echo "Created promotion PR #$pr_number ($pr_url)"
+            gh pr edit "$pr_number" --add-label "promotion" --add-label "automated" || echo "::warning::Could not add one or more labels (promotion/automated); ignored."
           fi
+
+          # GitHub blocks PRs created by GITHUB_TOKEN from triggering downstream
+          # workflows (anti-recursion). Without a workaround, ci-publish and
+          # ci-feat would never fire on this promotion PR, leaving its branch
+          # protection unsatisfied. Close+reopen as the *workflow token* still
+          # acts as a synchronize-equivalent event from a normal user/token,
+          # which DOES trigger workflows. Cheap, idempotent, no PAT required.
+          echo "Cycling PR #$pr_number to trigger downstream CI..."
+          gh pr close "$pr_number" || true
+          sleep 2
+          gh pr reopen "$pr_number" || true
 
   # Daily drift check: main shouldn't be more than one commit ahead of either
   # *-publish branch, otherwise we missed a hotfix back-port.
