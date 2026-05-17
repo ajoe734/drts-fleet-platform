@@ -586,6 +586,64 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(event["reason"], "owned_ready_dispatch")
         self.assertEqual(event["task_id"], "BUS-VAL-003")
 
+    def test_dispatcher_honors_codex2_lane_capacity_override(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"codex2": 3},
+                "max_dispatches_per_tick": 4,
+            },
+            "agents": {
+                "codex2": {
+                    "id": "codex2",
+                    "display_name": "Codex2",
+                    "provider": "codex2",
+                    "adapter": "codex",
+                }
+            },
+            "providers": {"codex2": {"delivery_mode": "codex"}},
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "run-active": {
+                    "run_id": "run-active",
+                    "task_id": "CODEX2-ACTIVE",
+                    "agent_id": "codex2",
+                    "provider": "codex2",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+            "seen_event_keys": {},
+        }
+        status = {
+            "tasks": [
+                {"id": "CODEX2-ACTIVE", "status": "in_progress", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-NEXT-1", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-NEXT-2", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-NEXT-3", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertTrue(changed)
+        queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
+        self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
+
     def test_prune_completed_dispatch_pauses_removes_done_task_entries(self) -> None:
         state = {
             "dispatch_pauses": [
@@ -646,6 +704,63 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
 
         self.assertTrue(changed)
         self.assertEqual(state["dispatch_pauses"], [{"task_id": "CURRENT-1", "worker_run_id": "run-2", "paused_at": "2026-04-19T16:10:43Z"}])
+
+    def test_prune_completed_dispatch_pauses_removes_recovered_taskless_auth_pause(self) -> None:
+        state = {
+            "provider_pauses": {
+                "gemini": {
+                    "kind": "quota",
+                    "reason": "quota exhausted",
+                    "paused_at": "2026-05-17T13:51:45Z",
+                    "resume_at": 9999999999,
+                }
+            },
+            "dispatch_pauses": [
+                {
+                    "provider": "codex",
+                    "task_id": None,
+                    "worker_run_id": "codex-stale-auth",
+                    "failure_kind": "auth",
+                    "summary": "auth: archived log context mentioned token_invalidated",
+                    "paused_at": "2026-05-17T15:27:57Z",
+                },
+                {
+                    "provider": "gemini",
+                    "task_id": None,
+                    "worker_run_id": "gemini-quota",
+                    "failure_kind": "quota/terminal",
+                    "summary": "quota/terminal: reason: 'QUOTA_EXHAUSTED'",
+                    "paused_at": "2026-05-17T13:51:45Z",
+                },
+            ],
+            "workers": {},
+        }
+        provider_report = {
+            "providers": {"codex": {"auth_ready": True}, "gemini": {"auth_ready": True}},
+            "agent_adapters": {"codex": {"supported": True}, "gemini": {"supported": True}},
+        }
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state,
+            {"tasks": []},
+            config=self.config,
+            provider_report=provider_report,
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(
+            state["dispatch_pauses"],
+            [
+                {
+                    "provider": "gemini",
+                    "task_id": None,
+                    "worker_run_id": "gemini-quota",
+                    "failure_kind": "quota/terminal",
+                    "summary": "quota/terminal: reason: 'QUOTA_EXHAUSTED'",
+                    "paused_at": "2026-05-17T13:51:45Z",
+                }
+            ],
+        )
 
     def test_starts_current_owned_dispatch_event(self) -> None:
         current_task = {
