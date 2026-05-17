@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import fnmatch
 import json
 import os
 import random
@@ -746,6 +747,53 @@ def start_worker_for_request(
     agent = agent_config_for(config, request.agent_id)
     if request.task_id:
         ensure_task_brief(config, task=(request.metadata or {}).get("task"), task_id=request.task_id)
+    # OPS-GIT-WORKFLOW-006: refuse dispatch when a fragile-surface diff is
+    # uncommitted, so the next dispatch cannot quietly stash design-intent
+    # work. Opt-in via `branch_strategy.worker_tree_guard.enabled`.
+    guard_block = check_worker_tree_guard(config, reason=request.reason)
+    if guard_block and not guard_block.get("log_only"):
+        offender_summary = ", ".join(
+            f"{item['path']} ~ {item['glob']}" for item in guard_block["offenders"][:5]
+        )
+        if len(guard_block["offenders"]) > 5:
+            offender_summary += f" (+{len(guard_block['offenders']) - 5} more)"
+        write_activity_log(
+            config,
+            {
+                "type": "dispatch_blocked_dirty_tree",
+                "task_id": request.task_id,
+                "target_agent": display_name_for(config, agent["id"]),
+                "reason": request.reason,
+                "queue_event_id": event_id_for_log,
+                "parent_run_id": parent_run_id,
+                "dirty_paths": guard_block["dirty_paths"],
+                "matched_globs": guard_block["matched_globs"],
+                "message": (
+                    "Worker dispatch refused: uncommitted fragile-surface diffs in working tree "
+                    "(see docs/ops/branch-strategy.md §11). Anchor-commit required before next dispatch. "
+                    f"Offenders: {offender_summary}"
+                ),
+            },
+        )
+        return False, "dispatch_blocked_dirty_tree", None
+    if guard_block and guard_block.get("log_only"):
+        write_activity_log(
+            config,
+            {
+                "type": "dispatch_dirty_tree_warning",
+                "task_id": request.task_id,
+                "target_agent": display_name_for(config, agent["id"]),
+                "reason": request.reason,
+                "queue_event_id": event_id_for_log,
+                "parent_run_id": parent_run_id,
+                "dirty_paths": guard_block["dirty_paths"],
+                "matched_globs": guard_block["matched_globs"],
+                "message": (
+                    "worker_tree_guard log_only canary: would have refused dispatch due to "
+                    f"uncommitted fragile-surface diffs ({len(guard_block['offenders'])} offenders)."
+                ),
+            },
+        )
     adapter_name = delivery_mode_override or agent.get("adapter", "file_inbox")
     adapter = build_adapter(adapter_name, config=config, provider_capabilities=provider_report)
     result = adapter.deliver(request)
@@ -1474,6 +1522,149 @@ def worker_reassignment_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("owner_fallbacks", default_fallbacks)
     settings.setdefault("reviewer_fallbacks", default_fallbacks)
     return settings
+
+
+DEFAULT_WORKER_TREE_GUARD_BLOCKING_GLOBS = [
+    ".orchestrator/supervisor.py",
+    ".orchestrator/skills/**",
+    ".orchestrator/templates/*",
+    ".orchestrator/config*.json",
+    ".orchestrator/branch_routing.py",
+    "docs/ops/branch-strategy.md",
+    "docs/**",
+    ".github/workflows/**",
+    ".husky/**",
+]
+
+# Dispatch reasons that intentionally permit a dirty tree because the worker
+# is about to convert it into a commit/push. The guard skips these.
+WORKER_TREE_GUARD_SKIP_REASONS = {
+    "owned_finalize_dispatch",
+}
+
+
+def worker_tree_guard_settings(config: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the `worker_tree_guard` config block with defaults.
+
+    Schema (under top-level `branch_strategy.worker_tree_guard`):
+        enabled: bool — opt-in, default False
+        blocking_globs: list[str] — fragile-surface globs that block dispatch
+        log_only: bool — when true, emit `dispatch_blocked_dirty_tree`
+            activity log but do not actually block (canary mode)
+
+    The guard is opt-in because the legacy worker workflow relies on
+    workers stashing their own dirty trees; flipping `enabled: true` is
+    the affirmative migration to the anchor-commit protocol codified in
+    docs/ops/branch-strategy.md §11 (OPS-GIT-WORKFLOW-004).
+    """
+    branch_strategy = dict(config.get("branch_strategy", {}) or {})
+    raw = dict(branch_strategy.get("worker_tree_guard", {}) or {})
+    raw.setdefault("enabled", False)
+    raw.setdefault("log_only", False)
+    globs = raw.get("blocking_globs")
+    if not isinstance(globs, list) or not globs:
+        globs = list(DEFAULT_WORKER_TREE_GUARD_BLOCKING_GLOBS)
+    raw["blocking_globs"] = [str(g) for g in globs]
+    return raw
+
+
+def _worker_tree_guard_porcelain(workspace_root: Path) -> tuple[bool, list[str], str]:
+    """Run `git status --porcelain` and return (ok, dirty_paths, error_text).
+
+    Failure modes (returncode != 0, git missing, not-a-repo) yield
+    `(False, [], "...")` so callers can fail open — the guard never blocks
+    on its own diagnostic errors.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(workspace_root),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+        return False, [], f"{exc.__class__.__name__}: {exc}"
+    if result.returncode != 0:
+        return False, [], (result.stderr or result.stdout or "").strip()
+    dirty: list[str] = []
+    for line in result.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        # `git status --porcelain` format: XY<space>path[ -> new_path]
+        path = line[3:]
+        # rename indicator: take the new path
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        path = path.strip().strip('"')
+        if path:
+            dirty.append(path)
+    return True, dirty, ""
+
+
+def _worker_tree_guard_matches(path: str, globs: list[str]) -> str | None:
+    """Return the first matching glob, or None.
+
+    `**` is expanded so `.orchestrator/skills/**` matches both
+    `.orchestrator/skills/foo.md` and `.orchestrator/skills/nested/bar.md`.
+    """
+    for glob in globs:
+        if "**" in glob:
+            prefix = glob.split("**", 1)[0].rstrip("/")
+            if prefix and (path == prefix or path.startswith(prefix + "/")):
+                return glob
+            if not prefix:
+                return glob
+            continue
+        if fnmatch.fnmatch(path, glob):
+            return glob
+    return None
+
+
+def check_worker_tree_guard(
+    config: dict[str, Any],
+    *,
+    reason: str | None,
+    workspace_root: Path | None = None,
+) -> dict[str, Any] | None:
+    """Return a block payload when dispatch should be refused, else None.
+
+    Returns None when:
+      - guard disabled (`enabled: false`),
+      - dispatch `reason` is in WORKER_TREE_GUARD_SKIP_REASONS
+        (e.g. `owned_finalize_dispatch` — closeout legitimately starts
+        with a dirty tree),
+      - `git status --porcelain` cannot run (fail-open on diagnostics),
+      - no dirty path matches any blocking glob.
+
+    Returns a dict with `dirty_paths`, `matched_globs`, and `log_only`
+    when the guard fires. Callers consult `log_only` to decide whether
+    to actually refuse the dispatch or only emit telemetry.
+    """
+    settings = worker_tree_guard_settings(config)
+    if not settings.get("enabled", False):
+        return None
+    if (reason or "") in WORKER_TREE_GUARD_SKIP_REASONS:
+        return None
+    root = workspace_root or THIS_DIR.parent
+    ok, dirty_paths, _ = _worker_tree_guard_porcelain(root)
+    if not ok:
+        return None
+    globs = settings["blocking_globs"]
+    offenders: list[dict[str, str]] = []
+    for path in dirty_paths:
+        match = _worker_tree_guard_matches(path, globs)
+        if match:
+            offenders.append({"path": path, "glob": match})
+    if not offenders:
+        return None
+    return {
+        "offenders": offenders,
+        "dirty_paths": [item["path"] for item in offenders],
+        "matched_globs": sorted({item["glob"] for item in offenders}),
+        "log_only": bool(settings.get("log_only", False)),
+    }
 
 
 def chair_review_settings(config: dict[str, Any]) -> dict[str, Any]:

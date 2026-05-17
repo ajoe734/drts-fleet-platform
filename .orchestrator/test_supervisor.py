@@ -4181,5 +4181,186 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "claude", provider_report=provider_report))
 
 
+class WorkerTreeGuardSettingsTests(unittest.TestCase):
+    def test_defaults_off_with_canonical_blocking_globs(self) -> None:
+        settings = supervisor.worker_tree_guard_settings({})
+        self.assertFalse(settings["enabled"])
+        self.assertFalse(settings["log_only"])
+        # All fragile surfaces from branch-strategy.md §11.1.
+        for needed in [
+            ".orchestrator/supervisor.py",
+            ".orchestrator/skills/**",
+            ".orchestrator/templates/*",
+            ".orchestrator/config*.json",
+            ".orchestrator/branch_routing.py",
+            "docs/ops/branch-strategy.md",
+            ".github/workflows/**",
+            ".husky/**",
+        ]:
+            self.assertIn(needed, settings["blocking_globs"])
+
+    def test_override_overrides_globs_completely(self) -> None:
+        config = {
+            "branch_strategy": {
+                "worker_tree_guard": {
+                    "enabled": True,
+                    "blocking_globs": ["my-special-file.txt"],
+                }
+            }
+        }
+        settings = supervisor.worker_tree_guard_settings(config)
+        self.assertTrue(settings["enabled"])
+        self.assertEqual(settings["blocking_globs"], ["my-special-file.txt"])
+
+    def test_empty_globs_list_falls_back_to_defaults(self) -> None:
+        config = {"branch_strategy": {"worker_tree_guard": {"blocking_globs": []}}}
+        settings = supervisor.worker_tree_guard_settings(config)
+        self.assertIn(".orchestrator/supervisor.py", settings["blocking_globs"])
+
+
+class WorkerTreeGuardMatchingTests(unittest.TestCase):
+    GLOBS = [
+        ".orchestrator/supervisor.py",
+        ".orchestrator/skills/**",
+        ".orchestrator/templates/*",
+        ".orchestrator/config*.json",
+        "docs/**",
+        ".husky/**",
+    ]
+
+    def test_exact_file_matches(self) -> None:
+        self.assertEqual(
+            supervisor._worker_tree_guard_matches(".orchestrator/supervisor.py", self.GLOBS),
+            ".orchestrator/supervisor.py",
+        )
+
+    def test_double_star_matches_direct_child(self) -> None:
+        self.assertEqual(
+            supervisor._worker_tree_guard_matches(".orchestrator/skills/task-closeout.md", self.GLOBS),
+            ".orchestrator/skills/**",
+        )
+
+    def test_double_star_matches_nested_child(self) -> None:
+        self.assertEqual(
+            supervisor._worker_tree_guard_matches("docs/ops/branch-strategy.md", self.GLOBS),
+            "docs/**",
+        )
+
+    def test_single_star_matches_one_level_only(self) -> None:
+        self.assertEqual(
+            supervisor._worker_tree_guard_matches(".orchestrator/templates/wakeup.txt", self.GLOBS),
+            ".orchestrator/templates/*",
+        )
+
+    def test_runtime_state_files_do_not_match(self) -> None:
+        for path in ["ai-status.json", "current-work.md", "docs-site/index.html"]:
+            with self.subTest(path=path):
+                # docs-site is outside the docs/** blocking pattern when
+                # treated as a separate top-level directory.
+                self.assertIsNone(
+                    supervisor._worker_tree_guard_matches(path, self.GLOBS)
+                )
+
+    def test_unrelated_paths_do_not_match(self) -> None:
+        self.assertIsNone(
+            supervisor._worker_tree_guard_matches("apps/driver/src/index.tsx", self.GLOBS)
+        )
+
+
+class CheckWorkerTreeGuardTests(unittest.TestCase):
+    def _enabled_config(self, log_only: bool = False) -> dict:
+        return {
+            "branch_strategy": {
+                "worker_tree_guard": {
+                    "enabled": True,
+                    "log_only": log_only,
+                    "blocking_globs": [
+                        ".orchestrator/supervisor.py",
+                        ".orchestrator/skills/**",
+                        "docs/**",
+                    ],
+                }
+            }
+        }
+
+    def _porcelain(self, paths: list[str]) -> mock.MagicMock:
+        proc = mock.MagicMock()
+        proc.returncode = 0
+        proc.stdout = "\n".join(f" M {p}" for p in paths)
+        proc.stderr = ""
+        return proc
+
+    def test_disabled_returns_none(self) -> None:
+        result = supervisor.check_worker_tree_guard({}, reason="owned_in_progress_dispatch")
+        self.assertIsNone(result)
+
+    def test_skip_reason_owned_finalize_dispatch_returns_none(self) -> None:
+        with mock.patch.object(
+            supervisor.subprocess, "run", return_value=self._porcelain([".orchestrator/supervisor.py"])
+        ):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(), reason="owned_finalize_dispatch"
+            )
+        self.assertIsNone(result)
+
+    def test_dirty_fragile_surface_returns_block_payload(self) -> None:
+        with mock.patch.object(
+            supervisor.subprocess, "run", return_value=self._porcelain([".orchestrator/skills/foo.md"])
+        ):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(), reason="owned_in_progress_dispatch"
+            )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["dirty_paths"], [".orchestrator/skills/foo.md"])
+        self.assertIn(".orchestrator/skills/**", result["matched_globs"])
+        self.assertFalse(result["log_only"])
+
+    def test_dirty_only_runtime_state_returns_none(self) -> None:
+        with mock.patch.object(
+            supervisor.subprocess,
+            "run",
+            return_value=self._porcelain(["ai-status.json", "current-work.md"]),
+        ):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(), reason="owned_in_progress_dispatch"
+            )
+        self.assertIsNone(result)
+
+    def test_log_only_mode_carries_flag_through(self) -> None:
+        with mock.patch.object(
+            supervisor.subprocess,
+            "run",
+            return_value=self._porcelain([".orchestrator/supervisor.py"]),
+        ):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(log_only=True), reason="owned_in_progress_dispatch"
+            )
+        self.assertIsNotNone(result)
+        self.assertTrue(result["log_only"])
+
+    def test_git_command_failure_fails_open(self) -> None:
+        proc = mock.MagicMock()
+        proc.returncode = 128
+        proc.stdout = ""
+        proc.stderr = "fatal: not a git repository"
+        with mock.patch.object(supervisor.subprocess, "run", return_value=proc):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(), reason="owned_in_progress_dispatch"
+            )
+        self.assertIsNone(result, "guard must not block on its own diagnostic failure")
+
+    def test_rename_porcelain_format_takes_new_path(self) -> None:
+        proc = mock.MagicMock()
+        proc.returncode = 0
+        proc.stdout = "R  old/path.md -> .orchestrator/skills/renamed.md"
+        proc.stderr = ""
+        with mock.patch.object(supervisor.subprocess, "run", return_value=proc):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(), reason="owned_in_progress_dispatch"
+            )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["dirty_paths"], [".orchestrator/skills/renamed.md"])
+
+
 if __name__ == "__main__":
     unittest.main()
