@@ -4,12 +4,21 @@ import {
   activeTaskStatuses,
   scheduleOpenTaskStatuses,
   integrationPrefixes,
-  workerStatusIcon,
   agentLabel,
   actorLabel,
 } from "./utils.js";
 
 const queuedTaskStatuses = new Set(["todo", "backlog"]);
+const ownedExecutionTaskStatuses = new Set(["backlog", "todo", "in_progress"]);
+const liveWorkerStatuses = new Set(["running", "started"]);
+const pendingWorkerStatuses = new Set([
+  "waiting_approval",
+  "suspended_approval",
+  "manual_pending",
+  "retry_backoff",
+  "stalled",
+  "fallback",
+]);
 
 // ── Task helpers ──────────────────────────────────────────────────────────────
 
@@ -39,6 +48,42 @@ export function taskBadgeChips(task) {
 export function taskBadgeRow(task, className = "task-meta") {
   const chips = taskBadgeChips(task);
   return chips ? `<div class="${className}">${chips}</div>` : "";
+}
+
+function normalizedWorkerMode(worker) {
+  return String(
+    worker?.request_snapshot?.metadata?.mode ||
+      worker?.mode_bucket ||
+      worker?.request_snapshot?.mode ||
+      "",
+  )
+    .trim()
+    .toLowerCase();
+}
+
+export function workerAssignmentPhase(worker, task) {
+  if (!task) return null;
+  const agentName = agentLabel(logicalWorkerAgentId(worker));
+  const taskStatus = String(task?.status || "").toLowerCase();
+  if (taskStatus === "review" && task?.reviewer === agentName) return "review";
+  if (taskStatus === "review_approved" && task?.owner === agentName)
+    return "finalize";
+  if (ownedExecutionTaskStatuses.has(taskStatus) && task?.owner === agentName)
+    return "owned";
+  return null;
+}
+
+export function taskDisplayStatus(task, liveWorkers = []) {
+  const taskStatus = String(task?.status || "").toLowerCase();
+  const hasRunning = liveWorkers.some((worker) => worker.bucket === "running");
+  const hasPending = liveWorkers.some((worker) => worker.bucket === "pending");
+  if (
+    ownedExecutionTaskStatuses.has(taskStatus) &&
+    (hasRunning || hasPending)
+  ) {
+    return "in_progress";
+  }
+  return task?.status;
 }
 
 // ── Worker normalization ──────────────────────────────────────────────────────
@@ -83,6 +128,10 @@ export function normalizeWorkerRecords(orchState, status) {
       const task = taskMap.get(worker?.task_id) || null;
       const taskStatus = task?.status || null;
       const logicalAgentId = logicalWorkerAgentId(worker);
+      const assignmentPhase = workerAssignmentPhase(worker, task);
+      const modeBucket = normalizedWorkerMode(worker);
+      const coordinationOnly = !task && modeBucket === "coordination";
+      const laneRelevant = Boolean(assignmentPhase);
       let bucket = "pending";
 
       if (worker?.status === "retried") {
@@ -94,19 +143,10 @@ export function normalizeWorkerRecords(orchState, status) {
         ["completed", "failed"].includes(worker?.status)
       ) {
         bucket = "completed";
-      } else if (["running", "started"].includes(worker?.status)) {
-        bucket = "running";
-      } else if (
-        [
-          "waiting_approval",
-          "suspended_approval",
-          "manual_pending",
-          "retry_backoff",
-          "stalled",
-          "fallback",
-        ].includes(worker?.status)
-      ) {
-        bucket = "pending";
+      } else if (liveWorkerStatuses.has(worker?.status)) {
+        bucket = assignmentPhase || coordinationOnly ? "running" : "completed";
+      } else if (pendingWorkerStatuses.has(worker?.status)) {
+        bucket = assignmentPhase || coordinationOnly ? "pending" : "completed";
       }
 
       return {
@@ -114,6 +154,10 @@ export function normalizeWorkerRecords(orchState, status) {
         run_id: runId,
         logical_agent_id: logicalAgentId,
         task_status: taskStatus,
+        assignment_phase: assignmentPhase,
+        mode_bucket: modeBucket || null,
+        lane_relevant: laneRelevant,
+        coordination_only: coordinationOnly,
         bucket,
         display_actor: actorLabel(logicalAgentId, worker?.provider),
       };
@@ -123,6 +167,60 @@ export function normalizeWorkerRecords(orchState, status) {
   return workers.sort((a, b) =>
     (b.last_event_at || "").localeCompare(a.last_event_at || ""),
   );
+}
+
+function openTaskPriority(task) {
+  const status = String(task?.status || "").toLowerCase();
+  if (status === "review") return 0;
+  if (status === "review_approved") return 1;
+  if (status === "in_progress") return 2;
+  if (status === "blocked") return 3;
+  if (queuedTaskStatuses.has(status)) return 4;
+  return 9;
+}
+
+function sortOpenTasks(tasks) {
+  return [...tasks].sort((a, b) => {
+    const priority = openTaskPriority(a) - openTaskPriority(b);
+    if (priority !== 0) return priority;
+    return String(b?.last_update || "").localeCompare(
+      String(a?.last_update || ""),
+    );
+  });
+}
+
+function latestWorkerByTimestamp(workers) {
+  return [...workers].sort((a, b) =>
+    String(b?.last_event_at || "").localeCompare(
+      String(a?.last_event_at || ""),
+    ),
+  )[0];
+}
+
+function setDerivedFromWorkers(state, workers, nextFallback) {
+  const latest = latestWorkerByTimestamp(workers);
+  return {
+    status: state.status,
+    taskIds: [
+      ...new Set(workers.map((worker) => worker.task_id).filter(Boolean)),
+    ],
+    next:
+      latest?.last_error ||
+      nextFallback(latest?.task_id) ||
+      state.next ||
+      "尚未指定",
+    lastUpdate: latest?.last_event_at || state.lastUpdate,
+  };
+}
+
+function setDerivedFromTasks(state, tasks) {
+  const latestTask = sortOpenTasks(tasks)[0];
+  return {
+    status: state.status,
+    taskIds: tasks.map((task) => task.id),
+    next: latestTask?.next || state.next,
+    lastUpdate: latestTask?.last_update || state.lastUpdate,
+  };
 }
 
 // ── Queue normalization ───────────────────────────────────────────────────────
@@ -236,20 +334,24 @@ export function deriveAgentState(status, orchState) {
   return (status.agents || []).map((agent) => {
     const agentId = String(agent.name || "").toLowerCase();
     const owned = allTasks.filter((task) => task.owner === agent.name);
-    const active = owned.filter((task) =>
-      ["in_progress", "review", "blocked"].includes(task.status),
-    );
-    const ownedReview = active.filter((task) => task.status === "review");
     const incomingReview = allTasks.filter(
       (task) => task.reviewer === agent.name && task.status === "review",
     );
-    const reviewTasks = [
+    const reviewTasks = sortOpenTasks([
       ...new Map(
-        [...ownedReview, ...incomingReview].map((task) => [task.id, task]),
+        [...owned.filter((task) => task.status === "review"), ...incomingReview]
+          .map((task) => [task.id, task]),
       ).values(),
-    ];
-    const approved = owned.filter((t) => t.status === "review_approved");
-    const queued = owned.filter((task) => queuedTaskStatuses.has(task.status));
+    ]);
+    const approved = sortOpenTasks(
+      owned.filter((task) => task.status === "review_approved"),
+    );
+    const activeOwned = sortOpenTasks(
+      owned.filter((task) => ["in_progress", "blocked"].includes(task.status)),
+    );
+    const queued = sortOpenTasks(
+      owned.filter((task) => queuedTaskStatuses.has(task.status)),
+    );
     const ready = queued.filter((task) =>
       (task.depends_on || []).every(
         (depId) => (taskMap.get(depId)?.status || "done") === "done",
@@ -257,14 +359,26 @@ export function deriveAgentState(status, orchState) {
     );
     const waiting = queued.filter((task) => !ready.includes(task));
 
-    const liveRunningWorkers = workers.filter(
-      (w) => w.logical_agent_id === agentId && w.bucket === "running",
+    const agentWorkers = workers.filter(
+      (worker) => worker.logical_agent_id === agentId,
     );
-    const livePendingWorkers = workers.filter(
-      (w) => w.logical_agent_id === agentId && w.bucket === "pending",
+    const liveRunningWorkers = agentWorkers.filter(
+      (worker) => worker.bucket === "running" && worker.lane_relevant,
     );
-    const liveTransitionWorkers = workers.filter(
-      (w) => w.logical_agent_id === agentId && w.bucket === "transition",
+    const livePendingWorkers = agentWorkers.filter(
+      (worker) => worker.bucket === "pending" && worker.lane_relevant,
+    );
+    const liveTransitionWorkers = agentWorkers.filter(
+      (worker) => worker.bucket === "transition",
+    );
+    const liveReviewWorkers = liveRunningWorkers.filter(
+      (worker) => worker.assignment_phase === "review",
+    );
+    const liveFinalizeWorkers = liveRunningWorkers.filter(
+      (worker) => worker.assignment_phase === "finalize",
+    );
+    const liveOwnedWorkers = liveRunningWorkers.filter(
+      (worker) => worker.assignment_phase === "owned",
     );
     const agentDispatchPauses = dispatchPauses.filter((pause) => {
       const logicalId = logicalWorkerAgentId(pause);
@@ -310,29 +424,100 @@ export function deriveAgentState(status, orchState) {
     let derivedNext = agent.next || "尚未指定";
     let derivedLastUpdate = agent.last_update || null;
 
-    if (liveRunningWorkers.length) {
-      derivedStatus = "working";
-      derivedTaskIds = liveRunningWorkers.map((w) => w.task_id).filter(Boolean);
-      const latest = [...liveRunningWorkers].sort((a, b) =>
-        (b.last_event_at || "").localeCompare(a.last_event_at || ""),
-      )[0];
-      derivedNext =
-        latest?.last_error || taskMap.get(latest?.task_id)?.next || derivedNext;
-      derivedLastUpdate = latest?.last_event_at || derivedLastUpdate;
-    } else if (active.some((t) => t.status === "blocked")) {
-      derivedStatus = "blocked";
-      derivedTaskIds = active.map((t) => t.id);
-    } else if (active.some((t) => t.status === "in_progress")) {
-      derivedStatus = "working";
-      derivedTaskIds = active.map((t) => t.id);
+    if (liveReviewWorkers.length) {
+      const nextState = setDerivedFromWorkers(
+        {
+          status: "reviewing",
+          next: derivedNext,
+          lastUpdate: derivedLastUpdate,
+        },
+        liveReviewWorkers,
+        (taskId) => taskMap.get(taskId)?.next,
+      );
+      derivedStatus = nextState.status;
+      derivedTaskIds = nextState.taskIds;
+      derivedNext = nextState.next;
+      derivedLastUpdate = nextState.lastUpdate;
     } else if (reviewTasks.length) {
-      derivedStatus = "reviewing";
-      derivedTaskIds = reviewTasks.map((t) => t.id);
+      const nextState = setDerivedFromTasks(
+        {
+          status: "reviewing",
+          next: derivedNext,
+          lastUpdate: derivedLastUpdate,
+        },
+        reviewTasks,
+      );
+      derivedStatus = nextState.status;
+      derivedTaskIds = nextState.taskIds;
+      derivedNext = nextState.next;
+      derivedLastUpdate = nextState.lastUpdate;
+    } else if (liveFinalizeWorkers.length) {
+      const nextState = setDerivedFromWorkers(
+        {
+          status: "finalize",
+          next: derivedNext,
+          lastUpdate: derivedLastUpdate,
+        },
+        liveFinalizeWorkers,
+        (taskId) => taskMap.get(taskId)?.next,
+      );
+      derivedStatus = nextState.status;
+      derivedTaskIds = nextState.taskIds;
+      derivedNext = nextState.next;
+      derivedLastUpdate = nextState.lastUpdate;
     } else if (approved.length) {
-      derivedStatus = "finalize";
-      derivedTaskIds = approved.map((t) => t.id);
-      derivedNext = approved[0].next || derivedNext;
-      derivedLastUpdate = approved[0].last_update || derivedLastUpdate;
+      const nextState = setDerivedFromTasks(
+        {
+          status: "finalize",
+          next: derivedNext,
+          lastUpdate: derivedLastUpdate,
+        },
+        approved,
+      );
+      derivedStatus = nextState.status;
+      derivedTaskIds = nextState.taskIds;
+      derivedNext = nextState.next;
+      derivedLastUpdate = nextState.lastUpdate;
+    } else if (liveOwnedWorkers.length) {
+      const nextState = setDerivedFromWorkers(
+        {
+          status: "working",
+          next: derivedNext,
+          lastUpdate: derivedLastUpdate,
+        },
+        liveOwnedWorkers,
+        (taskId) => taskMap.get(taskId)?.next,
+      );
+      derivedStatus = nextState.status;
+      derivedTaskIds = nextState.taskIds;
+      derivedNext = nextState.next;
+      derivedLastUpdate = nextState.lastUpdate;
+    } else if (activeOwned.some((task) => task.status === "in_progress")) {
+      const nextState = setDerivedFromTasks(
+        {
+          status: "working",
+          next: derivedNext,
+          lastUpdate: derivedLastUpdate,
+        },
+        activeOwned.filter((task) => task.status === "in_progress"),
+      );
+      derivedStatus = nextState.status;
+      derivedTaskIds = nextState.taskIds;
+      derivedNext = nextState.next;
+      derivedLastUpdate = nextState.lastUpdate;
+    } else if (activeOwned.some((task) => task.status === "blocked")) {
+      const nextState = setDerivedFromTasks(
+        {
+          status: "blocked",
+          next: derivedNext,
+          lastUpdate: derivedLastUpdate,
+        },
+        activeOwned.filter((task) => task.status === "blocked"),
+      );
+      derivedStatus = nextState.status;
+      derivedTaskIds = nextState.taskIds;
+      derivedNext = nextState.next;
+      derivedLastUpdate = nextState.lastUpdate;
     } else if (
       agentDispatchPauses.length ||
       agentProviderPauses.length ||
@@ -345,8 +530,8 @@ export function deriveAgentState(status, orchState) {
             latestDispatchPause?.task_id,
             latestProviderPause?.task_id,
             latestFailureStreak?.task_id,
-            ...ready.map((t) => t.id),
-            ...waiting.map((t) => t.id),
+            ...ready.map((task) => task.id),
+            ...waiting.map((task) => task.id),
           ].filter(Boolean);
       derivedNext =
         latestDispatchPause?.summary ||
@@ -363,38 +548,50 @@ export function deriveAgentState(status, orchState) {
         latestFailureStreak?.last_failure_at ||
         derivedLastUpdate;
     } else if (livePendingWorkers.length || liveTransitionWorkers.length) {
-      derivedStatus = "pending";
-      derivedTaskIds = [...livePendingWorkers, ...liveTransitionWorkers]
-        .map((w) => w.task_id)
-        .filter(Boolean);
-      const latest = [...livePendingWorkers, ...liveTransitionWorkers].sort(
-        (a, b) => (b.last_event_at || "").localeCompare(a.last_event_at || ""),
-      )[0];
-      derivedNext =
-        latest?.last_error || taskMap.get(latest?.task_id)?.next || derivedNext;
-      derivedLastUpdate = latest?.last_event_at || derivedLastUpdate;
+      const pendingWorkers = [...livePendingWorkers, ...liveTransitionWorkers];
+      const nextState = setDerivedFromWorkers(
+        {
+          status: "pending",
+          next: derivedNext,
+          lastUpdate: derivedLastUpdate,
+        },
+        pendingWorkers,
+        (taskId) => taskMap.get(taskId)?.next,
+      );
+      derivedStatus = nextState.status;
+      derivedTaskIds = nextState.taskIds;
+      derivedNext = nextState.next;
+      derivedLastUpdate = nextState.lastUpdate;
     } else if (ready.length) {
-      derivedStatus = "ready";
-      derivedTaskIds = ready.map((t) => t.id);
-      derivedNext = ready[0].next || derivedNext;
-      derivedLastUpdate = ready[0].last_update || derivedLastUpdate;
+      const nextState = setDerivedFromTasks(
+        {
+          status: "ready",
+          next: derivedNext,
+          lastUpdate: derivedLastUpdate,
+        },
+        ready,
+      );
+      derivedStatus = nextState.status;
+      derivedTaskIds = nextState.taskIds;
+      derivedNext = nextState.next;
+      derivedLastUpdate = nextState.lastUpdate;
     } else if (waiting.length) {
-      derivedStatus = "waiting";
-      derivedTaskIds = waiting.slice(0, 3).map((t) => t.id);
-      derivedNext = waiting[0].next || derivedNext;
-      derivedLastUpdate = waiting[0].last_update || derivedLastUpdate;
+      const nextState = setDerivedFromTasks(
+        {
+          status: "waiting",
+          next: derivedNext,
+          lastUpdate: derivedLastUpdate,
+        },
+        waiting,
+      );
+      derivedStatus = nextState.status;
+      derivedTaskIds = nextState.taskIds.slice(0, 3);
+      derivedNext = nextState.next;
+      derivedLastUpdate = nextState.lastUpdate;
     } else if (!owned.length && !reviewTasks.length) {
       derivedStatus = "unassigned";
       derivedTaskIds = [];
       derivedNext = "目前沒有分配給這個 lane 的 open task。";
-    }
-
-    if (!liveRunningWorkers.length && active.length) {
-      const latest = [...active].sort((a, b) =>
-        (b.last_update || "").localeCompare(a.last_update || ""),
-      )[0];
-      derivedNext = latest?.next || derivedNext;
-      derivedLastUpdate = latest?.last_update || derivedLastUpdate;
     }
 
     const queueBlocked =

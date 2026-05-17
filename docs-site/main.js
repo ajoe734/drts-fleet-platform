@@ -342,14 +342,22 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
   for (const agentId of logicalAgents) {
     const pw = workers.filter((w) => w.logical_agent_id === agentId);
     const retryHistory = pw.filter((w) => w.status === "retried").length;
-    const running = pw.filter((w) => w.bucket === "running").length;
-    const waiting = pw.filter((w) => w.bucket === "pending").length;
+    const running = pw.filter(
+      (w) => w.bucket === "running" && w.lane_relevant,
+    ).length;
+    const waiting = pw.filter(
+      (w) => w.bucket === "pending" && w.lane_relevant,
+    ).length;
+    const coordination = pw.filter(
+      (w) =>
+        ["running", "pending"].includes(w.bucket) && w.coordination_only,
+    ).length;
     const transition = pw.filter((w) => w.bucket === "transition").length;
     const failed = pw.filter((w) => w.status === "failed").length;
     const completed = pw.filter((w) => w.bucket === "completed").length;
     const agent = agentStateMap.get(agentId);
     const runningTasks = pw
-      .filter((w) => w.bucket === "running")
+      .filter((w) => w.bucket === "running" && w.lane_relevant)
       .map((w) => w.task_id)
       .filter(Boolean);
     const card = document.createElement("article");
@@ -363,6 +371,7 @@ function renderSystemStatus(status, orchState, approvalQueue, agentStates) {
         ${agent ? `<span class="status-pill status-${agent.status}">${statusLabel(agent.status)}</span>` : ""}
         <span class="chip">執行中 ${running}</span>
         <span class="chip">worker 等待 ${waiting}</span>
+        ${coordination ? `<span class="chip">協調 ${coordination}</span>` : ""}
         ${transition ? `<span class="chip">改派 ${transition}</span>` : ""}
         <span class="chip">失敗 ${failed}</span>
         <span class="chip">完成 ${completed}</span>

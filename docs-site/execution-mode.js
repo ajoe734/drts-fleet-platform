@@ -10,18 +10,15 @@ import {
   formatTime,
   timeAgo,
   boardColumns,
-  activeTaskStatuses,
 } from "./utils.js";
 import {
   normalizeWorkerRecords,
-  normalizeDispatchQueue,
   deriveAgentState,
   buildDependencySchedule,
   dependencyBatchState,
   taskDeliveryLayer,
   taskBadgeRow,
-  workerLifecycleBadge,
-  terminalTaskStatus,
+  taskDisplayStatus,
 } from "./normalize.js";
 
 function compactCopy(value, maxLen = 110) {
@@ -198,6 +195,7 @@ export function renderTaskBoard(status, orchState) {
   for (const worker of workers) {
     if (!worker.task_id) continue;
     if (!["running", "pending"].includes(worker.bucket)) continue;
+    if (!worker.lane_relevant) continue;
     if (!liveWorkersByTask.has(worker.task_id))
       liveWorkersByTask.set(worker.task_id, []);
     liveWorkersByTask.get(worker.task_id).push(worker);
@@ -205,16 +203,9 @@ export function renderTaskBoard(status, orchState) {
 
   const displayTasks = (status.tasks || []).map((task) => {
     const liveWorkers = liveWorkersByTask.get(task.id) || [];
-    const hasRunning = liveWorkers.some((w) => w.bucket === "running");
-    const hasPending = liveWorkers.some((w) => w.bucket === "pending");
-    let displayStatus = task.status;
-    if (!terminalTaskStatus(task.status) && hasRunning)
-      displayStatus = "in_progress";
-    else if (["todo", "backlog"].includes(task.status) && hasPending)
-      displayStatus = "in_progress";
     return {
       ...task,
-      display_status: displayStatus,
+      display_status: taskDisplayStatus(task, liveWorkers),
       live_workers: liveWorkers,
     };
   });
