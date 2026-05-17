@@ -26,6 +26,14 @@ This is the PBK-UI-001 bootstrap slice. Per
   bring-up.
 - Every functional surface lives under `/[tenantSlug]/...`. The dynamic
   segment is required — there is no "default tenant" in this app.
+- The PBK-UI-003 CTBC reference funnel is served as seven explicit Next.js
+  routes grouped under `app/[tenantSlug]/(public|authenticated)/...`:
+  `landing` (the tenant root), `eligibility`, and `help` sit in
+  `(public)/`; `book`, `confirmed`, `trips`, and `receipt` sit in
+  `(authenticated)/`. Each page renders the shared
+  `PartnerBookingReferenceFunnel` (`@drts/ui-web`) with a fixed
+  `activeScreen`, so the funnel navigator's hrefs map one-to-one onto
+  those routes.
 - `app/[tenantSlug]/layout.tsx` resolves the brand via `lib/brand.ts`. An
   unknown slug returns `notFound()` so we cannot accidentally render an
   unbranded experience.

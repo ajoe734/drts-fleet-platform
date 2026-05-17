@@ -108,11 +108,11 @@ const sectionCardStyle: CSSProperties = {
   boxShadow: "0 20px 40px rgba(15, 23, 42, 0.06)",
 };
 
-function buildQueryHref(
+function buildScreenHref(
   basePath: string,
   screen: PartnerBookingScreenId,
 ): string {
-  return `${basePath}?screen=${screen}`;
+  return screen === "landing" ? basePath : `${basePath}/${screen}`;
 }
 
 function screenToneStyle(
@@ -1455,7 +1455,7 @@ export function PartnerBookingReferenceFunnel({
           return (
             <a
               key={screen}
-              href={buildQueryHref(basePath, screen)}
+              href={buildScreenHref(basePath, screen)}
               style={{
                 textDecoration: "none",
                 display: "grid",
