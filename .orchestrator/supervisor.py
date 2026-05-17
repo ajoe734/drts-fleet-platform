@@ -1389,6 +1389,25 @@ def provider_info_for_agent(
     return {}
 
 
+def adapter_info_for_agent(
+    config: dict[str, Any],
+    provider_report: dict[str, Any],
+    agent_id: str,
+) -> dict[str, Any]:
+    agent = agent_config_for(config, agent_id)
+    candidates = [
+        str(agent.get("id") or "").strip(),
+        str(agent.get("provider") or "").strip(),
+        normalize_agent_id(agent_id),
+    ]
+    adapters = (provider_report.get("agent_adapters", {}) or {}) if isinstance(provider_report, dict) else {}
+    for candidate in candidates:
+        info = adapters.get(normalize_agent_id(candidate))
+        if isinstance(info, dict):
+            return info
+    return {}
+
+
 def provider_pause_registry(state: dict[str, Any]) -> dict[str, Any]:
     registry = state.setdefault("provider_pauses", {})
     quota_registry = state.setdefault("quota_paused_agents", {})
@@ -1983,10 +2002,42 @@ def ordered_idle_agent_names(idle_agent_names: list[str], agent_loads: dict[str,
     return [name for _index, name in indexed]
 
 
-def prune_completed_dispatch_pauses(state: dict[str, Any], status: dict[str, Any]) -> bool:
+def recovered_taskless_dispatch_pause(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    pause: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    if str(pause.get("task_id") or "").strip():
+        return False
+    if str(pause.get("failure_kind") or "").strip().lower() != "auth":
+        return False
+    agent_id = normalize_agent_id(str(pause.get("provider") or ""))
+    if not agent_id:
+        return False
+    if provider_pause_registry(state).get(agent_id):
+        return False
+    provider_info = provider_info_for_agent(config, provider_report, agent_id)
+    if provider_info.get("auth_ready") is False:
+        return False
+    adapter_info = adapter_info_for_agent(config, provider_report, agent_id)
+    if adapter_info and adapter_info.get("supported") is False:
+        return False
+    return True
+
+
+def prune_completed_dispatch_pauses(
+    state: dict[str, Any],
+    status: dict[str, Any],
+    *,
+    config: dict[str, Any] | None = None,
+    provider_report: dict[str, Any] | None = None,
+) -> bool:
     tasks = status.get("tasks", [])
     if not isinstance(tasks, list):
         return False
+    config = config or load_config()
+    provider_report = provider_report or load_provider_report(config)
     task_by_id = {
         str(task.get("id") or ""): task
         for task in tasks
@@ -2014,6 +2065,7 @@ def prune_completed_dispatch_pauses(state: dict[str, Any], status: dict[str, Any
         if str(task_by_id.get(str(pause.get("task_id") or ""), {}).get("status") or "").strip().lower() not in {"done", "review_approved"}
         and str(pause.get("task_id") or "") not in active_task_ids
         and not pause_is_stale_for_updated_task(pause)
+        and not recovered_taskless_dispatch_pause(config, state, pause, provider_report)
     ]
     if len(keep) == len(pauses):
         return False
@@ -3480,8 +3532,25 @@ def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
         ["running", "started", "waiting_approval", "suspended_approval", "retry_backoff", "manual_pending", "stalled", "fallback"],
     )
     settings.setdefault("max_tasks_per_agent", 1)
+    settings.setdefault("max_tasks_per_agent_by_lane", {})
     settings.setdefault("max_dispatches_per_tick", 4)
     return settings
+
+
+def max_tasks_per_agent_for_lane(settings: dict[str, Any], agent_id: str) -> int:
+    default = max(1, int(settings.get("max_tasks_per_agent", 1)))
+    raw_overrides = settings.get("max_tasks_per_agent_by_lane") or settings.get("max_tasks_per_agent_by_agent") or {}
+    if not isinstance(raw_overrides, dict):
+        return default
+    normalized_agent_id = normalize_agent_id(agent_id)
+    for key, value in raw_overrides.items():
+        if normalize_agent_id(str(key)) != normalized_agent_id:
+            continue
+        try:
+            return max(1, int(value))
+        except (TypeError, ValueError):
+            return default
+    return default
 
 
 def helper_claim_settings(config: dict[str, Any]) -> dict[str, Any]:
@@ -3943,6 +4012,17 @@ def active_worker_indexes(state: dict[str, Any], active_statuses: set[str]) -> t
     return agents, task_agents
 
 
+def active_worker_agent_counts(state: dict[str, Any], active_statuses: set[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for worker in state.get("workers", {}).values():
+        if worker.get("status") not in active_statuses:
+            continue
+        agent_id = str(worker.get("agent_id") or "")
+        if agent_id:
+            counts[agent_id] = counts.get(agent_id, 0) + 1
+    return counts
+
+
 def outstanding_delivery_indexes(config: dict[str, Any], state: dict[str, Any]) -> tuple[set[str], set[tuple[str, str]], set[str]]:
     agents: set[str] = set()
     task_agents: set[tuple[str, str]] = set()
@@ -3965,6 +4045,22 @@ def outstanding_delivery_indexes(config: dict[str, Any], state: dict[str, Any]) 
         if task_id and agent_id:
             task_agents.add((task_id, agent_id))
     return agents, task_agents, event_keys
+
+
+def outstanding_delivery_agent_counts(config: dict[str, Any], state: dict[str, Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    queue_records = state.get("queue", {}).get("events", {})
+    for event in load_event_queue(config):
+        event_id = event.get("event_id")
+        if not event_id:
+            continue
+        record = queue_records.get(event_id, {})
+        if record.get("status") in {"completed", "failed"}:
+            continue
+        agent_id = str(event.get("target_agent") or "")
+        if agent_id:
+            counts[agent_id] = counts.get(agent_id, 0) + 1
+    return counts
 
 
 def finalize_queue_event_record(config: dict[str, Any], state: dict[str, Any], worker: dict[str, Any], status: str, error: str | None = None) -> None:
@@ -5546,13 +5642,14 @@ def dispatch_ready_tasks(
     owned_statuses = [str(value).lower() for value in settings.get("owned_statuses", ["in_progress", "todo", "backlog"])]
     dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
     active_statuses = {str(value) for value in settings.get("active_worker_statuses", [])}
-    max_tasks_per_agent = max(1, int(settings.get("max_tasks_per_agent", 1)))
     max_dispatches_per_tick = max(1, int(settings.get("max_dispatches_per_tick", 4)))
     provider_report = provider_report or load_provider_report(config)
 
     agent_ids = list(config.get("agents", {}).keys())
     active_agents, active_task_agents = active_worker_indexes(state, active_statuses)
     pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
+    active_agent_counts = active_worker_agent_counts(state, active_statuses)
+    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
     active_task_ids = {task_id for task_id, _agent_id in active_task_agents if task_id}
     pending_task_ids = {task_id for task_id, _agent_id in pending_task_agents if task_id}
     agent_loads = agent_dispatch_loads(config, state, active_statuses)
@@ -5561,10 +5658,11 @@ def dispatch_ready_tasks(
     idle_agent_names: list[str] = []
     for agent_id in agent_ids:
         display_name = display_name_for(config, agent_id)
+        lane_capacity = max_tasks_per_agent_for_lane(settings, agent_id)
+        lane_load = active_agent_counts.get(agent_id, 0) + pending_agent_counts.get(agent_id, 0)
         if (
-            agent_id not in active_agents
-            and agent_id not in pending_agents
-            and display_name
+            display_name
+            and lane_load < lane_capacity
             and not display_name_is_legacy_alias(display_name)
             and not is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report)
         ):
@@ -5575,7 +5673,9 @@ def dispatch_ready_tasks(
     for agent_id in agent_ids:
         if dispatches >= max_dispatches_per_tick:
             break
-        if agent_id in active_agents or agent_id in pending_agents:
+        lane_capacity = max_tasks_per_agent_for_lane(settings, agent_id)
+        lane_load = active_agent_counts.get(agent_id, 0) + pending_agent_counts.get(agent_id, 0)
+        if lane_load >= lane_capacity:
             continue
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
@@ -5661,6 +5761,8 @@ def dispatch_ready_tasks(
                         seen[event["key"]] = utc_now()
                         pending_event_keys.add(event["key"])
                         pending_agents.add(agent_id)
+                        pending_agent_counts[agent_id] = pending_agent_counts.get(agent_id, 0) + 1
+                        lane_load += 1
                         active_task_ids.add(task_id)
                         changed = True
                         dispatches += 1
@@ -5692,11 +5794,15 @@ def dispatch_ready_tasks(
             candidates.append((priority, index, task, reason))
 
         candidates.sort(key=lambda item: (item[0], item[1]))
-        for _, _, task, reason in candidates[:max_tasks_per_agent]:
+        available_slots = max(0, lane_capacity - lane_load)
+        for _, _, task, reason in candidates[:available_slots]:
             event = build_dispatch_event(task, target_agent, reason, task_map)
             if queue_delivery_event(config, event):
                 seen[event["key"]] = utc_now()
                 pending_event_keys.add(event["key"])
+                pending_agents.add(agent_id)
+                pending_agent_counts[agent_id] = pending_agent_counts.get(agent_id, 0) + 1
+                lane_load += 1
                 changed = True
                 dispatches += 1
                 if dispatches >= max_dispatches_per_tick:
@@ -5965,6 +6071,8 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
     task_map = task_index_from_status(config, status)
     active_agents, active_task_agents = active_worker_indexes(state, active_statuses)
     pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
+    active_agent_counts = active_worker_agent_counts(state, active_statuses)
+    pending_agent_counts = outstanding_delivery_agent_counts(config, state)
     active_task_ids = {tid for tid, _ in active_task_agents}
     pending_task_ids = {tid for tid, _ in pending_task_agents}
     agent_loads = agent_dispatch_loads(config, state, active_statuses)
@@ -5976,7 +6084,9 @@ def dispatch_underutilization_main_tasks(config: dict[str, Any], state: dict[str
         if "legacy alias" in display.lower():
             continue
         normalized = normalize_agent_id(agent_id)
-        if normalized in active_agents or normalized in pending_agents:
+        lane_capacity = max_tasks_per_agent_for_lane(dispatch_settings, normalized)
+        lane_load = active_agent_counts.get(normalized, 0) + pending_agent_counts.get(normalized, 0)
+        if lane_load >= lane_capacity:
             continue
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
@@ -6122,7 +6232,7 @@ def run_once(
     changed = poll_workers(config, state) or changed
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
-    changed = prune_completed_dispatch_pauses(state, status) or changed
+    changed = prune_completed_dispatch_pauses(state, status, config=config, provider_report=provider_report) or changed
     changed = prune_failure_streaks(state, status) or changed
     changed = refresh_chair_review_state(config, state, provider_report) or changed
     status = load_status(config)
@@ -6138,7 +6248,7 @@ def run_once(
     status = load_status(config)
     changed = reconcile_queue_records(config, state) or changed
     changed = prune_event_queue(config, state) or changed
-    changed = prune_completed_dispatch_pauses(state, status) or changed
+    changed = prune_completed_dispatch_pauses(state, status, config=config, provider_report=provider_report) or changed
     changed = prune_failure_streaks(state, status) or changed
     changed = sync_github_bus(config, state) or changed
     trim_worker_history(state, int(config.get("supervisor", {}).get("max_worker_history", 200)))
