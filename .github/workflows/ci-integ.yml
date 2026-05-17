@@ -1,0 +1,113 @@
+name: CI (integration trunk)
+
+# Runs on the long-lived integration trunks: merge/backend-dev-into-main
+# and merge/frontend-dev-into-main. Heavier than ci-feat (which only runs on
+# PRs into these trunks); includes build + integration tests so that a green
+# head on merge/* is a credible promotion candidate to *-publish.
+
+on:
+  push:
+    branches:
+      - 'merge/backend-dev-into-main'
+      - 'merge/frontend-dev-into-main'
+  pull_request:
+    branches:
+      - 'merge/backend-dev-into-main'
+      - 'merge/frontend-dev-into-main'
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-integ-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:unit
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - name: Run integration tests
+        # `pnpm run test:integration` may not exist yet on every package — exit cleanly if not.
+        run: |
+          if pnpm run | grep -q '^  test:integration'; then
+            pnpm run test:integration
+          else
+            echo "test:integration script not present in root package.json; skipping."
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+
+  orchestrator-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Run orchestrator unit tests
+        working-directory: .orchestrator
+        run: python3 -m unittest discover -s . -p 'test_*.py' -v
+
+  # Aggregate job for branch-protection "required check" simplicity.
+  ci-integ:
+    needs: [lint, typecheck, unit, integration, build, orchestrator-tests]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Aggregate
+        run: |
+          for r in '${{ needs.lint.result }}' '${{ needs.typecheck.result }}' '${{ needs.unit.result }}' '${{ needs.integration.result }}' '${{ needs.build.result }}' '${{ needs.orchestrator-tests.result }}'; do
+            [ "$r" = "success" ] || { echo "Required check failed: $r"; exit 1; }
+          done
+          echo "All integration checks passed."

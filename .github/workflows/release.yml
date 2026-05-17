@@ -1,0 +1,80 @@
+name: Release (cut + deploy gate)
+
+# Triggered when a release/* branch is pushed or a release tag is created.
+# Runs full CI against the release candidate, deploys to staging if not already
+# deployed, runs smoke, then sits gated on the 'production' environment for
+# human approval. Merging the release/* PR to main happens via normal PR flow
+# (with 2 required reviews); this workflow only handles the build+deploy gate.
+
+on:
+  push:
+    branches:
+      - 'release/**'
+    tags:
+      - 'release-*'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_branch:
+        description: 'release/* branch to operate on'
+        required: true
+
+permissions:
+  contents: read
+  deployments: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test:unit
+      - run: pnpm run build
+
+  staging-smoke:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: staging-release
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run release-candidate smoke against staging
+        run: |
+          echo "TODO: wire actual staging smoke (curl /health, golden flows)."
+
+  production-gate:
+    needs: staging-smoke
+    runs-on: ubuntu-latest
+    environment:
+      name: production   # requires manual approval configured in repo Settings -> Environments
+    steps:
+      - name: Awaiting production approval
+        run: echo "Gated on environment 'production'. Approve in the GitHub UI to release."
+
+  tag-on-approve:
+    needs: production-gate
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Tag release commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="release-$(date -u +%Y%m%d)-$(git rev-parse --short HEAD)"
+          git tag -a "$tag" -m "Release $tag from ${{ github.ref_name }}"
+          git push origin "$tag"
+          echo "Tagged $tag"

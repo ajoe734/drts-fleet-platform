@@ -1,0 +1,47 @@
+# CODEOWNERS — branch-strategy gate ownership
+#
+# Lines later in the file take precedence over earlier ones.
+# Reviewers listed here are auto-requested on PRs that touch matching paths
+# and are the required approvers under branch protection on the merge/* trunks.
+#
+# NOTE: replace the placeholder @ajoe734 with team handles once teams are
+# created in the GitHub org (e.g. @org/backend-leads, @org/frontend-leads).
+
+# ---- Default fallback ----
+*                                                       @ajoe734
+
+# ---- Backend track ----
+apps/api/                                               @ajoe734
+apps/api-gateway/                                       @ajoe734
+packages/api-*/                                         @ajoe734
+packages/contracts/                                     @ajoe734
+packages/db/                                            @ajoe734
+packages/observability/                                 @ajoe734
+services/                                               @ajoe734
+
+# ---- Frontend track ----
+apps/ops-console-web/                                   @ajoe734
+apps/platform-admin-web/                                @ajoe734
+apps/tenant-console-web/                                @ajoe734
+apps/driver-app/                                        @ajoe734
+apps/partner-booking/                                   @ajoe734
+apps/passenger-*/                                       @ajoe734
+packages/ui-*/                                          @ajoe734
+packages/design-system/                                 @ajoe734
+docs/05-ui/drts-design-canvas/                          @ajoe734
+
+# ---- Docs ----
+docs/                                                   @ajoe734
+*.md                                                    @ajoe734
+
+# ---- Branch-strategy + CI + infra (extra scrutiny) ----
+.github/CODEOWNERS                                      @ajoe734
+.github/workflows/                                      @ajoe734
+docs/ops/branch-strategy.md                             @ajoe734
+docs/ops/orchestrator-integration-guide.md              @ajoe734
+scripts/branch-strategy/                                @ajoe734
+.orchestrator/branch_routing.py                         @ajoe734
+.orchestrator/supervisor.py                             @ajoe734
+.orchestrator/provider_permissions.py                   @ajoe734
+.orchestrator/config.json                               @ajoe734
+infra/                                                  @ajoe734
