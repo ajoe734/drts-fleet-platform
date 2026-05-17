@@ -1,15 +1,15 @@
 name: Deploy — Dev
 
-# Auto-fires after a green CI (integration trunk) on backend-dev or frontend-dev
-# (per the v2 branch strategy in docs/ops/branch-strategy.md: dev branch HEAD
-# is always continuously deployed). Also remains manually triggerable for
-# ad-hoc redeploys of any SHA.
+# v4: auto-fires on push to publish/v* (nightly snapshot). dev env now reflects
+# the latest nightly publish — NOT bleeding-edge dev branch — so testers have
+# a stable target for ~24h. Per docs/ops/branch-strategy.md (v4 §5).
+# Also workflow_dispatch for ad-hoc redeploys of any SHA / branch / tag.
 
 on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: "Commit SHA or ref to deploy to dev (defaults to the current branch SHA)"
+        description: "Tag (release/v<date>) OR branch (publish/v<date>) OR commit SHA. Default: current branch SHA."
         required: false
         type: string
       skip_migration:
@@ -20,12 +20,9 @@ on:
         options:
           - "false"
           - "true"
-  workflow_run:
-    workflows: ["CI (integration trunk)"]
-    types: [completed]
+  push:
     branches:
-      - backend-dev
-      - frontend-dev
+      - 'publish/v*'
 
 permissions:
   contents: read
@@ -64,9 +61,9 @@ env:
 jobs:
   prepare:
     name: Prepare dev deploy
-    # When triggered by workflow_run, only proceed if the upstream CI passed.
-    # workflow_dispatch is always allowed.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # Triggered by workflow_dispatch OR push to publish/v*. Both are intentional;
+    # no upstream CI conclusion to check (publish snapshots are pre-validated by
+    # nightly-publish.yml requiring ci-integ green on dev before cutting).
     runs-on: ubuntu-latest
     outputs:
       source_ref: ${{ steps.resolve.outputs.source_ref }}
@@ -95,11 +92,9 @@ jobs:
         env:
           INPUT_SOURCE_REF: ${{ inputs.source_ref }}
           INPUT_SKIP_MIGRATION: ${{ inputs.skip_migration }}
-          # When triggered via workflow_run, the upstream CI's head SHA is
-          # the real branch HEAD we want to build; GITHUB_SHA in that case
-          # is the workflow file's commit on the default branch, which is
-          # wrong for our purposes.
-          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          # On push to publish/v*, GITHUB_SHA is already the publish branch HEAD.
+          # On workflow_dispatch, INPUT_SOURCE_REF wins. The fallback chain
+          # below preserves both.
         run: |
           set -euo pipefail
 
@@ -167,7 +162,7 @@ jobs:
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
           registry="${artifact_region}-docker.pkg.dev/${artifact_project_id}/${artifact_repository}"
 
-          source_ref="${INPUT_SOURCE_REF:-${WORKFLOW_RUN_HEAD_SHA:-${GITHUB_SHA}}}"
+          source_ref="${INPUT_SOURCE_REF:-${GITHUB_SHA}}"
 
           missing=()
           [[ -n "$project_id" ]] || missing+=("vars.DEV_GCP_PROJECT_ID")

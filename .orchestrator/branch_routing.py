@@ -16,12 +16,12 @@ Configuration shape (added under top-level key `branch_strategy` in
     {
       "branch_strategy": {
         "tracks": {
-          "backend":  "backend-dev",
-          "frontend": "frontend-dev"
+          "backend":  "dev",
+          "frontend": "dev"
         },
         "publish_branches": {
-          "backend":  "backend-staging",
-          "frontend": "frontend-staging"
+          "backend":  "main",
+          "frontend": "main"
         },
         "track_rules": [
           { "track": "backend",  "prefixes": ["BE-", "API-", "SC-", "OBS-", ...] },
@@ -41,14 +41,17 @@ from typing import Any, Iterable
 
 DEFAULTS: dict[str, Any] = {
     "tracks": {
-        "backend": "backend-dev",
-        "frontend": "frontend-dev",
+        # v4: single integration trunk. backend-dev / frontend-dev are gone.
+        # Every worker PRs against `dev`. The track key is kept so callers
+        # that still read `decision.track` keep working — both resolve to
+        # the same base branch.
+        "backend": "dev",
+        "frontend": "dev",
     },
-    # v3: no staging branches. backend-dev / frontend-dev auto-publish to
-    # `main` via publish-to-master.yml; staging + production deploys are
-    # operator-driven workflow_dispatch picks of a prod-* tag (T10/T11 in
-    # docs/ops/branch-strategy.md). `publish_branches` is kept as `main`
-    # for backwards compat with consumers that still read it.
+    # v4: publish snapshots live under `publish/v<date>` branches (created by
+    # nightly-publish.yml). `publish_branches` here points consumers at the
+    # default for ad-hoc publish-related lookups — actual snapshot picking
+    # happens via tag (release/v<date>) selection.
     "publish_branches": {
         "backend": "main",
         "frontend": "main",

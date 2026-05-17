@@ -1,7 +1,7 @@
 name: CI
 
 # ci-feat — the 3 gates every PR must clear to merge into a protected branch.
-# Branch protection on main + backend-dev + frontend-dev requires:
+# Branch protection on main + dev requires:
 #   ① Commit trailers       — commit messages have <TASK-ID>: subject + Task-ID/LLM-Agent/Reviewer trailers
 #   ② Runtime mirror guard  — no docs-site/ / *-bg.pid / runtime-logs/ etc. in the diff
 #   ③ Smoke acceptance      — lint + typecheck + unit tests pass
@@ -13,8 +13,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - main
-      - 'backend-dev'
-      - 'frontend-dev'
+      - 'dev'
   push:
     branches: [main]
   workflow_dispatch: {}
@@ -63,7 +62,7 @@ jobs:
           python3 scripts/git/check_commit_trailers.py --base ${{ steps.ctx.outputs.base }} --head HEAD
       - name: Auto-publish bypass acknowledged
         if: steps.ctx.outputs.skip == 'true'
-        run: echo "Commit trailers gate bypassed for auto-publish PR. (Trailers were enforced when the source commits entered backend-dev / frontend-dev.)"
+        run: echo "Commit trailers gate bypassed for auto-publish PR. (Trailers were enforced when the source commits entered dev.)"
 
   runtime-mirror-guard:
     name: Runtime mirror guard

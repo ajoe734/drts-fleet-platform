@@ -26,8 +26,10 @@ git fetch origin --prune --quiet
 now_epoch=$(date +%s)
 stale_epoch=$(( now_epoch - STALE_DAYS * 86400 ))
 
-# Keep set — branches that the v3 model needs.
-keep_set='^(main|backend-dev|frontend-dev)$'
+# Keep set — branches that the v4 model needs.
+# publish/v* branches are also "keep" (permanent snapshots) but are matched
+# by name pattern, not enumerated here.
+keep_set='^(main|dev|publish/v[0-9].*)$'
 
 # Track routing prefixes (mirrors .orchestrator/branch_routing.py defaults).
 backend_re='^(be-|api-|sc-|obs-|evd-|fwd-|tch-|prt-|infra-)'

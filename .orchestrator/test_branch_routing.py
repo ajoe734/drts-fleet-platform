@@ -10,7 +10,8 @@ class RouteTaskTests(unittest.TestCase):
     def test_backend_prefix_routes_to_backend_trunk(self) -> None:
         decision = branch_routing.route_task("BE-APR-NOTIFY-001")
         self.assertEqual(decision.track, "backend")
-        self.assertEqual(decision.base_branch, "backend-dev")
+        # v4: single integration trunk `dev`. Both backend + frontend route here.
+        self.assertEqual(decision.base_branch, "dev")
         self.assertEqual(decision.publish_branch, "main")
         self.assertGreaterEqual(decision.matched_rule_index, 0)
 
@@ -19,7 +20,7 @@ class RouteTaskTests(unittest.TestCase):
             with self.subTest(task_id=task_id):
                 decision = branch_routing.route_task(task_id)
                 self.assertEqual(decision.track, "frontend", task_id)
-                self.assertEqual(decision.base_branch, "frontend-dev", task_id)
+                self.assertEqual(decision.base_branch, "dev", task_id)
 
     def test_xx_ui_regex_routes_frontend_even_without_listed_prefix(self) -> None:
         decision = branch_routing.route_task("XYZ-UI-NEW-001")
@@ -88,9 +89,10 @@ class RouteTaskTests(unittest.TestCase):
     def test_known_long_lived_branches(self) -> None:
         branches = branch_routing.known_long_lived_branches()
         self.assertIn("main", branches)
-        self.assertIn("backend-dev", branches)
-        self.assertIn("frontend-dev", branches)
-        # v3: no separate staging branches. publish_branches both map to main.
+        self.assertIn("dev", branches)
+        # v4: single integration trunk `dev`; publish snapshots live under
+        # publish/v<date> branches (not in this list — they're not "long-lived"
+        # in the same sense, they're permanent but indexed by version).
 
     def test_route_many_preserves_order(self) -> None:
         decisions = branch_routing.route_many(["BE-1", "UI-1", "DOC-1"])

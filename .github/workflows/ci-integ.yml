@@ -1,26 +1,23 @@
 name: CI (integration trunk)
 
-# Post-merge integration suite on backend-dev / frontend-dev. Triggered by
-# `push` only — PR-time gating is handled by ci.yml's 3 named checks
-# (Commit trailers / Runtime mirror guard / Smoke acceptance) so we don't
-# burn compute running everything twice.
+# v4: post-merge integration suite on `dev`. Triggered by `push` only —
+# PR-time gating is handled by ci.yml's 3 named checks (Commit trailers /
+# Runtime mirror guard / Smoke acceptance).
 #
-# A green ci-integ HEAD is the credentialing signal for two downstream
-# workflows:
-#   1. Deploy — Dev          (via workflow_run; auto-deploys dev HEAD)
-#   2. publish-to-master.yml (via workflow_run; opens auto-PR dev → main)
+# A green ci-integ on dev HEAD is the prerequisite for nightly-publish.yml
+# to cut the next publish/v<date> snapshot. Without ci-integ green,
+# nightly-publish skips with a warning.
 
 on:
   push:
     branches:
-      - 'backend-dev'
-      - 'frontend-dev'
+      - 'dev'
   workflow_dispatch:
     inputs:
       ref:
         description: 'Branch or commit SHA to run against'
         required: false
-        default: 'backend-dev'
+        default: 'dev'
 
 permissions:
   contents: read

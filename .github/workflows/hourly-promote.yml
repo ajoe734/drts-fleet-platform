@@ -1,0 +1,215 @@
+name: Hourly promote (publish → master)
+
+# T9 of v4 branch strategy: every hour, look at the latest publish/v<date>
+# branch. If it has been around long enough to receive feedback (default:
+# ≥30 minutes) and no `regression:v<date>` issue is open against it, open
+# an auto-PR `publish/v<date> → main`, set auto-merge, and after the merge
+# the workflow tags `prod/v<date>` (handled by tag-on-merge job below).
+#
+# Idempotent. If main already contains the publish snapshot's content
+# (git diff --quiet), skip silently.
+
+on:
+  schedule:
+    - cron: '15 * * * *'   # 15 past every hour, staggered from other crons
+  push:
+    branches: [main]       # for tag-on-merge job
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Publish version to promote (e.g. v2026.05.18.0). Default: latest publish/v* on origin.'
+        required: false
+        type: string
+      soak_minutes:
+        description: 'Minimum minutes a publish must have existed before promotion'
+        required: false
+        default: '30'
+        type: string
+
+permissions:
+  contents: write       # for the auto-PR + tag
+  pull-requests: write
+  issues: read          # for the regression-label check
+
+concurrency:
+  group: hourly-promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SOAK_MINUTES: ${{ github.event.inputs.soak_minutes || '30' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find publish to promote
+        id: pick
+        run: |
+          want="${{ github.event.inputs.version }}"
+          if [ -n "$want" ]; then
+            branch="publish/$want"
+            git fetch origin "$branch" --quiet
+            if ! git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+              echo "::error::publish branch $branch does not exist on origin."
+              exit 1
+            fi
+          else
+            # Latest publish/* by version sort
+            branch=$(git ls-remote --heads origin "refs/heads/publish/v*" \
+              | awk '{print $2}' | sort -V | tail -1 | sed 's|refs/heads/||')
+            if [ -z "$branch" ]; then
+              echo "::notice::No publish/v* branches exist yet; skipping."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            git fetch origin "$branch" --quiet
+          fi
+          version="${branch#publish/}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          sha=$(git rev-parse "origin/$branch")
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Considering $branch @ ${sha:0:12} for promotion"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Soak period check
+        if: steps.pick.outputs.skip != 'true'
+        id: soak
+        run: |
+          # Use the commit time of the publish branch HEAD as the cut moment.
+          cut_time=$(git log -1 --format=%cI "${{ steps.pick.outputs.sha }}")
+          cut_ts=$(date -d "$cut_time" +%s)
+          now_ts=$(date -u +%s)
+          age_min=$(( (now_ts - cut_ts) / 60 ))
+          echo "Publish age: ${age_min}m (require ≥${SOAK_MINUTES}m)"
+          if [ "$age_min" -lt "$SOAK_MINUTES" ]; then
+            echo "::notice::Publish ${{ steps.pick.outputs.version }} is only ${age_min}m old; soak period not met. Will retry next hour."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Regression-label check
+        if: steps.pick.outputs.skip != 'true' && steps.soak.outputs.skip != 'true'
+        id: regression
+        run: |
+          # Any open issue with label `regression:<version>` blocks promotion.
+          label="regression:${{ steps.pick.outputs.version }}"
+          count=$(gh issue list --state open --label "$label" --json number --jq 'length')
+          if [ "$count" -gt 0 ]; then
+            echo "::warning::$count open regression issue(s) labeled '$label' block promotion."
+            gh issue list --state open --label "$label" --json number,title --jq '.[]|"  #\(.number) \(.title)"' || true
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Already promoted?
+        if: steps.pick.outputs.skip != 'true' && steps.soak.outputs.skip != 'true' && steps.regression.outputs.skip != 'true'
+        id: already
+        run: |
+          git fetch origin main --quiet
+          if git diff --quiet "origin/main..${{ steps.pick.outputs.sha }}"; then
+            echo "::notice::main already contains the publish's content; nothing to promote."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update promote PR + enable auto-merge
+        if: steps.pick.outputs.skip != 'true' && steps.soak.outputs.skip != 'true' && steps.regression.outputs.skip != 'true' && steps.already.outputs.skip != 'true'
+        id: pr
+        run: |
+          src="${{ steps.pick.outputs.branch }}"
+          ver="${{ steps.pick.outputs.version }}"
+          title="auto-promote: $src → main ($ver)"
+          body=$(cat <<EOF
+          Hourly auto-promotion (T9 of v4 branch strategy).
+
+          - Snapshot: \`$src\` @ \`${{ steps.pick.outputs.sha }}\`
+          - Soak passed: ${{ env.SOAK_MINUTES }}+ minutes since cut
+          - No open \`regression:$ver\` issue
+          - main does not yet contain this content
+
+          On merge, \`tag-on-merge\` tags this as \`prod/$ver\`.
+          That tag is what \`deploy-prod.yml\` accepts as its required input.
+
+          Block this promotion: open an issue labeled \`regression:$ver\`.
+          EOF
+          )
+          existing=$(gh pr list --base main --head "$src" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "$title" --body "$body" || true
+            pr_number="$existing"
+          else
+            pr_url=$(gh pr create --base main --head "$src" --title "$title" --body "$body")
+            pr_number=$(basename "$pr_url")
+          fi
+          gh pr edit "$pr_number" --add-label "automated" --add-label "auto-publish" || true
+
+          # Cycle to fire downstream CI (GITHUB_TOKEN PRs don't trigger workflows
+          # by default; close+reopen acts as a synchronize signal).
+          gh pr close "$pr_number" || true
+          sleep 2
+          gh pr reopen "$pr_number" || true
+          gh pr merge "$pr_number" --squash --auto || \
+            echo "::warning::Auto-merge enable failed; manual merge needed once CI green."
+
+          {
+            echo "## Promote PR opened"
+            echo ""
+            echo "- PR: #$pr_number"
+            echo "- Version: \`$ver\`"
+            echo "- Snapshot: \`$src\`"
+            echo "- Auto-merge: enabled (squash)"
+            echo "- On merge: tag-on-merge will tag \`prod/$ver\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  tag-on-merge:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag prod/v<date> if main HEAD matches a publish snapshot
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          sha=$(git rev-parse HEAD)
+
+          # Find publish branches that have the same TREE as main HEAD.
+          # Squash-merge changes the SHA but preserves the tree; we match by tree.
+          main_tree=$(git rev-parse "$sha^{tree}")
+          matched_publish=""
+          for ref in $(git ls-remote --heads origin "refs/heads/publish/v*" | awk '{print $2}' | sort -V); do
+            git fetch origin "$ref" --quiet 2>&1 || continue
+            pub_sha=$(git ls-remote --heads origin "$ref" | awk '{print $1}')
+            pub_tree=$(git rev-parse "$pub_sha^{tree}" 2>/dev/null) || continue
+            if [ "$pub_tree" = "$main_tree" ]; then
+              matched_publish="${ref#refs/heads/}"
+              break
+            fi
+          done
+          if [ -z "$matched_publish" ]; then
+            echo "::notice::main HEAD tree does not match any publish snapshot; not tagging (this is a hotfix or unrelated push)."
+            exit 0
+          fi
+          version="${matched_publish#publish/}"
+          tag="prod/$version"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag $tag already exists; skipping."
+            exit 0
+          fi
+          git tag -a "$tag" "$sha" -m "Promoted to master from $matched_publish"
+          git push origin "$tag"
+          echo "Tagged $tag — available for deploy-prod.yml input."
