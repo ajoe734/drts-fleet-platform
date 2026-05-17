@@ -2,17 +2,19 @@
 
 **Status:** Adopted 2026-05-17  
 **Owner:** Release engineering  
-**Supersedes:** v3 (per-merge prod-* tags). v3 tagged every dev merge → tag pollution + dev VM thrashing. v4 cuts an **immutable nightly publish snapshot** that dev VM deploys to, then **hourly auto-promotes** to master with a `prod/v<date>` tag.
+**Supersedes:** v3 (per-merge prod-\* tags). v3 tagged every dev merge → tag pollution + dev VM thrashing. v4 cuts an **immutable nightly publish snapshot** that dev VM deploys to, then **hourly auto-promotes** to master with a `prod/v<date>` tag.
 
 ---
 
 ## 1. Why v4
 
 In v3, every dev merge auto-published to main and produced a `prod-*` tag. Two problems:
+
 - **Tag pollution.** 30 AI merges/hour × 24h = 720 tags/day. Git tag list becomes a SHA wall.
 - **dev VM instability.** dev VM = dev branch HEAD meant the environment shifted under testers mid-test.
 
 v4 decouples three rhythms:
+
 - AI cadence (continuous, per-PR merge to `dev`)
 - dev VM cadence (1 / day, at nightly publish cut)
 - prod-candidate cadence (≤ 1 / hour, hourly promote of latest stable publish)
@@ -71,15 +73,15 @@ You get a stable dev VM, a small list of meaningful tags, and a clear "which ver
 
 ## 3. Branches and tags
 
-| Name pattern              | Type      | How created                          | Mutability | Lifetime |
-| ------------------------- | --------- | ------------------------------------ | ---------- | -------- |
-| `feat/*` `fix/*` `codex/*` `claude/*` `gemini/*` | branch | human / agent | mutable | short |
-| `dev`                     | branch    | bootstrap                            | mutable (only via PR + 3 gates) | permanent |
-| `main`                    | branch    | bootstrap                            | mutable (only via PR + 3 gates) | permanent |
-| `publish/v<YYYY.MM.DD>.<N>` | branch  | `nightly-publish.yml` cron           | **immutable** | permanent (snapshot) |
-| `release/v<YYYY.MM.DD>.<N>` | tag     | `nightly-publish.yml` cron           | immutable | permanent |
-| `prod/v<YYYY.MM.DD>.<N>`  | tag       | `hourly-promote.yml` tag-on-merge    | immutable | permanent |
-| `hotfix/*`                | branch    | human / agent                        | mutable | short |
+| Name pattern                                     | Type   | How created                       | Mutability                      | Lifetime             |
+| ------------------------------------------------ | ------ | --------------------------------- | ------------------------------- | -------------------- |
+| `feat/*` `fix/*` `codex/*` `claude/*` `gemini/*` | branch | human / agent                     | mutable                         | short                |
+| `dev`                                            | branch | bootstrap                         | mutable (only via PR + 3 gates) | permanent            |
+| `main`                                           | branch | bootstrap                         | mutable (only via PR + 3 gates) | permanent            |
+| `publish/v<YYYY.MM.DD>.<N>`                      | branch | `nightly-publish.yml` cron        | **immutable**                   | permanent (snapshot) |
+| `release/v<YYYY.MM.DD>.<N>`                      | tag    | `nightly-publish.yml` cron        | immutable                       | permanent            |
+| `prod/v<YYYY.MM.DD>.<N>`                         | tag    | `hourly-promote.yml` tag-on-merge | immutable                       | permanent            |
+| `hotfix/*`                                       | branch | human / agent                     | mutable                         | short                |
 
 `<N>` is the daily sequence (0-indexed). Nightly cron always cuts `.0`; if you manually re-cut the same day you get `.1`, `.2`, ...
 
@@ -91,43 +93,48 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 ## 4. Workflows
 
-| Workflow | Trigger | What it does |
-|---|---|---|
-| `ci.yml` (3 named gates) | PR to main / dev; push main | Commit trailers + Runtime mirror guard + Smoke acceptance |
-| `ci-integ.yml` | push to dev; workflow_dispatch | heavier integration suite (build, integration tests, orchestrator-tests) — prerequisite for `nightly-publish` |
-| `nightly-publish.yml` | cron `0 3 * * *`; workflow_dispatch | cut `publish/v<date>` + tag `release/v<date>` from dev HEAD |
-| `deploy-dev.yml` | push to `publish/v*`; workflow_dispatch | deploy to dev GCP (this is what makes dev VM roll) |
-| `hourly-promote.yml` (promote job) | cron `15 * * * *`; workflow_dispatch | open auto-PR `publish/v<date> → main`, auto-merge |
-| `hourly-promote.yml` (tag-on-merge job) | push to main | tag `prod/v<date>` if main's tree matches a publish snapshot |
-| `deploy-staging.yml` | workflow_dispatch only | operator picks any ref → staging |
-| `deploy-prod.yml` | workflow_dispatch only, required `prod/v<date>` tag input | operator picks a prod tag → production (currently skeleton, see §7) |
+| Workflow                                | Trigger                                                   | What it does                                                                                                  |
+| --------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `ci.yml` (3 named gates)                | PR to main / dev; push main                               | Commit trailers + Runtime mirror guard + Smoke acceptance                                                     |
+| `ci-integ.yml`                          | push to dev; workflow_dispatch                            | heavier integration suite (build, integration tests, orchestrator-tests) — prerequisite for `nightly-publish` |
+| `nightly-publish.yml`                   | cron `0 3 * * *`; workflow_dispatch                       | cut `publish/v<date>` + tag `release/v<date>` from dev HEAD                                                   |
+| `deploy-dev.yml`                        | push to `publish/v*`; workflow_dispatch                   | deploy to dev GCP (this is what makes dev VM roll)                                                            |
+| `hourly-promote.yml` (promote job)      | cron `15 * * * *`; workflow_dispatch                      | open auto-PR `publish/v<date> → main`, auto-merge                                                             |
+| `hourly-promote.yml` (tag-on-merge job) | push to main                                              | tag `prod/v<date>` if main's tree matches a publish snapshot                                                  |
+| `deploy-staging.yml`                    | workflow_dispatch only                                    | operator picks any ref → staging                                                                              |
+| `deploy-prod.yml`                       | workflow_dispatch only, required `prod/v<date>` tag input | operator picks a prod tag → production (currently skeleton, see §7)                                           |
 
 ---
 
 ## 5. Promotion gates
 
 ### Gate 1: feat → dev (every PR)
+
 - 3 named CI checks: `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance`
 - 0 reviewers required
 - `auto-merge` enabled per PR
 
 ### Gate 2: dev → publish snapshot (once a day, nightly cron)
+
 - `ci-integ` must be green on dev HEAD (skip publish otherwise)
 - content delta vs latest publish required (skip if no real changes)
 
 ### Gate 3: publish → main (hourly cron)
+
 - ≥30 min soak time since publish was cut (configurable)
 - no open issue with label `regression:v<date>` (humans/testers can block by opening such an issue)
 - main does not already contain this publish's content (idempotency)
 - auto-PR opens, auto-merge enabled, 3 named CI checks must pass
 
 ### Gate 4: prod deploy (manual)
+
 - operator runs `gh workflow run deploy-prod.yml -f tag=prod/v<date>`
 - tag shape validation: `^prod/v[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$`
 - tag-existence validation against origin
 - production environment can be configured with required-reviewer for double gate
 
 ### Hotfix path
+
 - branch off main, PR to main, 3 gates (or admin bypass)
 - after merge, cherry-pick into dev
 - if the hotfix needs to ship immediately to prod: cut a manual publish (`gh workflow run nightly-publish.yml`), trigger hourly-promote manually, then `gh workflow run deploy-prod.yml -f tag=<new prod tag>`
@@ -138,15 +145,15 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 
 Identical settings on `main` and `dev`:
 
-| Setting | Value |
-| --- | --- |
-| Required reviewers | 0 |
-| Required status checks | `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance` |
-| Strict (up-to-date with base) | yes |
-| Linear history | yes |
-| Force-push | no |
-| Delete | no |
-| Enforce admins | no |
+| Setting                       | Value                                                         |
+| ----------------------------- | ------------------------------------------------------------- |
+| Required reviewers            | 0                                                             |
+| Required status checks        | `Commit trailers`, `Runtime mirror guard`, `Smoke acceptance` |
+| Strict (up-to-date with base) | yes                                                           |
+| Linear history                | yes                                                           |
+| Force-push                    | no                                                            |
+| Delete                        | no                                                            |
+| Enforce admins                | no                                                            |
 
 `publish/v*` branches are **not** protected by branch protection. They are protected by convention (immutable) and by the fact that nothing in the workflows writes to them after the initial nightly cut.
 
@@ -201,12 +208,12 @@ gh workflow run deploy-prod.yml -f tag=prod/v2026.05.17.0
 
 ## 9. Migration v3 → v4 (2026-05-17)
 
-| v3 | v4 |
-| --- | --- |
-| `backend-dev`, `frontend-dev` (two trunks) | `dev` (single trunk) |
-| every dev merge → main via `publish-to-master.yml` | nightly cut `publish/v<date>`; hourly promote to main |
-| `prod-YYYYMMDD-<sha8>` tag per main push | `release/v<date>` per nightly cut + `prod/v<date>` per successful promote |
-| deploy-dev triggered by ci-integ workflow_run | deploy-dev triggered by push to `publish/v*` |
+| v3                                                 | v4                                                                        |
+| -------------------------------------------------- | ------------------------------------------------------------------------- |
+| `backend-dev`, `frontend-dev` (two trunks)         | `dev` (single trunk)                                                      |
+| every dev merge → main via `publish-to-master.yml` | nightly cut `publish/v<date>`; hourly promote to main                     |
+| `prod-YYYYMMDD-<sha8>` tag per main push           | `release/v<date>` per nightly cut + `prod/v<date>` per successful promote |
+| deploy-dev triggered by ci-integ workflow_run      | deploy-dev triggered by push to `publish/v*`                              |
 
 v3 long-lived branches stay reachable in git history; they're deleted from origin after v4 is verified.
 
@@ -254,7 +261,7 @@ The anchor commit is **not the deliverable**; it is a flag that says "this lane 
 
 `git stash` is acceptable **only** for tiny, throwaway, no-design-intent edits (e.g. a `console.log` you forgot to remove). Any diff touching the fragile surfaces in §11.1 must become a commit, never a stash. Reason: stash entries are anonymous, unreviewable, and almost always require manual rework once mainline advances.
 
-If the supervisor reassigns a worker that has design-intent diffs in flight, the worker must anchor-commit **before** yielding. The supervisor's `worker_tree_guard` config (added by OPS-GIT-WORKFLOW-006) will block dispatch if a fragile-surface diff is uncommitted.
+If the supervisor reassigns a worker that has design-intent diffs in flight, the worker must anchor-commit **before** yielding. The supervisor's `worker_tree_guard` config (added by OPS-GIT-WORKFLOW-006) will block dispatch if a fragile-surface diff is uncommitted, and its chatbox sibling (`worker_tree_guard.chatbox_enabled`, added by OPS-GIT-WORKFLOW-007) refuses chatbox-driven `Edit`/`Write`/`MultiEdit`/`NotebookEdit` calls in the same condition.
 
 ### 11.3 Same-file parallel designers — declare the layer in the commit body
 
@@ -289,11 +296,11 @@ Do **not** rely on `git stash pop` to recover paused work; the stash blob has no
 
 The three surface classes most often overwritten by parallel lanes are:
 
-| Surface class | Examples | Why fragile |
-| --- | --- | --- |
-| `docs/**` | `docs/ops/branch-strategy.md`, `docs/03-runbooks/**` | chair-review and supervisor lanes both edit them |
-| `.orchestrator/skills/**` | `task-closeout-finalization.md`, `chairman-operational-review.md` | supervisor/chair changes touch these |
-| `.orchestrator/config*.json`, schema files | `config.example.json`, provider/capability schema | enabled-flag toggles by many lanes |
+| Surface class                              | Examples                                                          | Why fragile                                      |
+| ------------------------------------------ | ----------------------------------------------------------------- | ------------------------------------------------ |
+| `docs/**`                                  | `docs/ops/branch-strategy.md`, `docs/03-runbooks/**`              | chair-review and supervisor lanes both edit them |
+| `.orchestrator/skills/**`                  | `task-closeout-finalization.md`, `chairman-operational-review.md` | supervisor/chair changes touch these             |
+| `.orchestrator/config*.json`, schema files | `config.example.json`, provider/capability schema                 | enabled-flag toggles by many lanes               |
 
 For these, **never** keep edits in the working tree across more than one supervisor cycle. The required flow:
 
@@ -326,7 +333,9 @@ git switch -c <lane>/<task-id-kebab> origin/dev
 
 - [`.orchestrator/skills/worker-anchor-commit.md`](../../.orchestrator/skills/worker-anchor-commit.md) — worker-facing operational skill for anchor commits (companion to closeout skill)
 - [`.orchestrator/templates/wakeup.txt`](../../.orchestrator/templates/wakeup.txt) — supervisor wakeup template that injects branch context (target of OPS-GIT-WORKFLOW-005)
-- [`.orchestrator/supervisor.py`](../../.orchestrator/supervisor.py) `worker_tree_guard` — dispatch guard against dirty fragile-surface trees (target of OPS-GIT-WORKFLOW-006, opt-in)
+- [`.orchestrator/worker_tree_guard.py`](../../.orchestrator/worker_tree_guard.py) — shared tree-guard primitives (extracted by OPS-GIT-WORKFLOW-007). Backs both surfaces:
+  - `check_worker_tree_guard` — supervisor dispatch guard, gated by `branch_strategy.worker_tree_guard.enabled` (OPS-GIT-WORKFLOW-006, opt-in)
+  - `check_chatbox_tree_guard` — Claude-Code PreToolUse hook (via `.orchestrator/permission_broker.py`) for chatbox-driven `Edit`/`Write`/`MultiEdit`/`NotebookEdit`, gated by `branch_strategy.worker_tree_guard.chatbox_enabled` (OPS-GIT-WORKFLOW-007, opt-in)
 
 ---
 

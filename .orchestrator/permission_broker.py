@@ -19,6 +19,7 @@ from approval_queue import consume_resume_override, create_approval, find_resume
 from common import ROOT, load_config, load_json, utc_now, write_activity_log, write_json
 from provider_permissions import CLAUDE_LOCAL_SETTINGS_PATH, _verified_claude_policy
 from runtime_state import load_approval_state
+from worker_tree_guard import check_chatbox_tree_guard
 
 
 SAFE_BASH_PATTERNS = [
@@ -934,6 +935,82 @@ def _session_allow_updates(tool_name: str, tool_input: dict[str, Any]) -> list[d
     ]
 
 
+def _chatbox_tree_guard_reason(block: dict[str, Any]) -> str:
+    """Build the human-readable deny reason for a chatbox guard hit."""
+    paths = list(block.get("dirty_paths") or [])
+    head = paths[:5]
+    extra = ""
+    if len(paths) > 5:
+        extra = f" (+{len(paths) - 5} more)"
+    sample = ", ".join(head) if head else "(no paths)"
+    return (
+        "Working tree has uncommitted edits on fragile surfaces — "
+        f"{sample}{extra}. "
+        "Anchor-commit them on a task branch (branch from origin/dev) before "
+        "adding more edits. See docs/ops/branch-strategy.md §11 and the "
+        "anchor-commit protocol (OPS-GIT-WORKFLOW-004)."
+    )
+
+
+def _maybe_apply_chatbox_tree_guard(
+    config: dict[str, Any],
+    payload: dict[str, Any],
+    tool_name: str,
+) -> bool:
+    """Run the chatbox tree guard and emit a deny if it fires.
+
+    Returns True when the caller should stop processing the event (the
+    hook response has been emitted). Returns False when the caller should
+    fall through to the normal PreToolUse flow — either the guard is off,
+    not applicable to this tool, in log_only canary mode, or the tree is
+    clean.
+
+    Fails open on any unexpected exception: the guard is a safety net, it
+    must never break Claude Code's hook pipeline if its own logic crashes.
+    """
+    try:
+        block = check_chatbox_tree_guard(config, tool_name=tool_name)
+    except Exception as exc:  # noqa: BLE001 — fail open
+        log_event(
+            config,
+            "PreToolUse",
+            {
+                **payload,
+                "broker_decision": {
+                    "decision": "fail_open",
+                    "reason": f"chatbox_tree_guard_error: {exc.__class__.__name__}",
+                },
+                "effective_decision": "fail_open",
+                "effective_reason": "chatbox_tree_guard_error",
+            },
+        )
+        return False
+    if block is None:
+        return False
+    log_payload = {
+        **payload,
+        "broker_decision": {
+            "decision": "deny",
+            "reason": "chatbox_tree_guard_blocked",
+        },
+        "effective_decision": "log_only" if block["log_only"] else "deny",
+        "effective_reason": "chatbox_tree_guard_blocked",
+        "tree_guard": {
+            "dirty_paths": list(block.get("dirty_paths") or [])[:5],
+            "matched_globs": list(block.get("matched_globs") or []),
+            "total_dirty": len(block.get("dirty_paths") or []),
+            "log_only": bool(block.get("log_only")),
+        },
+    }
+    log_event(config, "PreToolUse", log_payload)
+    if block["log_only"]:
+        return False
+    emit_hook_response(
+        _decision_response("PreToolUse", "deny", _chatbox_tree_guard_reason(block))
+    )
+    return True
+
+
 def _matching_approval(
     config: dict[str, Any],
     *,
@@ -994,6 +1071,15 @@ def hook_mode(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
         tool_name = payload.get("tool_name") or payload.get("toolName") or ""
         tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
         session_id = payload.get("session_id") or payload.get("sessionId")
+        # Chatbox tree guard fires before override/approval lookups so a
+        # dirty fragile working tree can't be auto-allowed by a prior
+        # session approval. Only PreToolUse; PermissionRequest is the
+        # user-facing prompt path and the guard already blocked at
+        # PreToolUse if applicable.
+        if event_name == "PreToolUse" and _maybe_apply_chatbox_tree_guard(
+            config, payload, tool_name
+        ):
+            return 0
         active_override = find_resume_override(
             config,
             session_id=session_id,
