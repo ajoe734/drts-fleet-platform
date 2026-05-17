@@ -14,6 +14,15 @@ on:
       - 'backend-dev-publish'
       - 'frontend-dev-publish'
     types: [opened, synchronize, reopened, ready_for_review]
+  # Manual trigger as a safety net: if a promotion PR ever lands without
+  # ci-publish having run (e.g. the close+reopen retrigger in promote-nightly
+  # failed), the release manager can fire this from the Actions UI.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or commit SHA to run against'
+        required: false
+        default: 'backend-dev-publish'
 
 permissions:
   contents: read
