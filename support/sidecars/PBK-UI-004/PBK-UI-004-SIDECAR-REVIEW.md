@@ -5,16 +5,16 @@
 **Parent Owner:** `Claude2`
 **Parent Reviewer:** `Codex`
 **Sidecar Owner:** `Codex2`
-**Sidecar Reviewer:** `Claude2`
+**Sidecar Reviewer:** `Codex`
 **Generated:** `2026-05-18` (UTC)
 **Status:** `REVIEW SUPPORT ARTIFACT` — support-only; does not modify
 canonical truth, runtime behavior, or the parent review verdict.
 
 This packet replaces an older stale closeout-oriented draft. Current machine
 truth says parent `PBK-UI-004` is in `review`, not `done`. The purpose here is
-to hand `Claude2` a reviewer-facing evidence summary that matches the live
-`ai-status.json` row, the current pending handoff to `Codex`, and the concrete
-commit surface on branch `claude2/pbk-ui-004`.
+to hand `Codex` a reviewer-facing evidence summary that matches the live
+`ai-status.json` row, the current pending parent handoff to `Codex`, and the
+concrete commit surface on branch `claude2/pbk-ui-004`.
 
 ---
 
@@ -51,7 +51,7 @@ Stable fields in canonical `ai-status.json`
 (`/home/edna/workspace/drts-fleet-platform/ai-status.json`):
 
 - owner=`Codex2`
-- reviewer=`Claude2`
+- reviewer=`Codex`
 - status=`in_progress`
 - phase=`Wave 5`
 - task_class=`sidecar`
@@ -124,7 +124,7 @@ The important lifecycle facts for this packet are:
 | `2026-05-18T07:03:36Z` | `PBK-UI-003` `done`  | Dependency closed out on `origin/claude2/pbk-ui-003` with full app verification. |
 | `2026-05-18T07:17:11Z` | owner reassignment   | `PBK-UI-004` ownership moved from `Codex2` to `Claude2` because `Codex2` had repeated worker exits on this task. |
 | `2026-05-18T07:21:28Z` | parent `handoff`     | `Claude2` handed `PBK-UI-004` to reviewer `Codex` with commits, acceptance commands, and design-artboard anchors. |
-| `2026-05-18T07:25:39Z` | sidecar `assign`     | This sidecar was registered with owner `Codex2`, reviewer `Claude2`, support-only scope. |
+| `2026-05-18T07:25:39Z` | sidecar `assign`     | This sidecar was registered with owner `Codex2` as a support-only review-packet slice for parent `PBK-UI-004`. |
 
 Reviewer interpretation:
 
@@ -287,10 +287,10 @@ What is intentionally not claimed yet:
 
 ## 7. Reviewer Spot-Check Checklist
 
-For sidecar reviewer `Claude2`:
+For sidecar reviewer `Codex`:
 
 - [ ] Canonical `ai-status.json` still shows this sidecar owned by `Codex2`,
-      reviewed by `Claude2`, support-only, depending on `PBK-UI-003`.
+      reviewed by `Codex`, support-only, depending on `PBK-UI-003`.
 - [ ] Canonical `ai-status.json` still shows parent `PBK-UI-004` in `review`
       with owner `Claude2`, reviewer `Codex`, and the `2026-05-18T07:21:28Z`
       handoff message.
@@ -315,7 +315,7 @@ For sidecar reviewer `Claude2`:
 
 ---
 
-## 8. Handoff Notes For `Claude2`
+## 8. Handoff Notes For `Codex`
 
 1. Treat this as a support packet for the parent review currently pending with
    `Codex`. It is not a replacement for the parent reviewer decision.
