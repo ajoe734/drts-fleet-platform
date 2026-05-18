@@ -1,9 +1,9 @@
-import { renderPartnerScenarioPage } from "@/lib/render-partner-scenario-page";
+import { renderPartnerStateGate } from "@/lib/render-partner-scenario-page";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
 };
 
 export default async function PartnerManualReviewPage({ params }: PageProps) {
-  return renderPartnerScenarioPage(params, "manual_review");
+  return renderPartnerStateGate(params, "manual_review");
 }

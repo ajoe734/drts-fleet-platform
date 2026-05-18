@@ -1573,6 +1573,25 @@ export function PartnerBookingPhoneScreen({
   );
 }
 
+export function PartnerBookingStateGate({
+  brand,
+  scenario,
+  basePath,
+}: {
+  brand: PartnerBrandTemplate;
+  scenario: PartnerBookingScenarioId;
+  basePath: string;
+}) {
+  return (
+    <PartnerBookingReferenceFunnel
+      brand={brand}
+      activeScreen={getPartnerBookingScenarioScreen(scenario)}
+      activeScenario={scenario}
+      basePath={basePath}
+    />
+  );
+}
+
 export function PartnerBookingReferenceFunnel({
   brand,
   activeScreen,
@@ -1589,6 +1608,7 @@ export function PartnerBookingReferenceFunnel({
   const activeScenarioMeta = activeScenario
     ? getPartnerBookingScenarioMeta(activeScenario)
     : null;
+  const lockScreenNavigation = Boolean(activeScenario);
 
   return (
     <div style={pageStackStyle}>
@@ -1692,48 +1712,86 @@ export function PartnerBookingReferenceFunnel({
         style={{
           ...sectionCardStyle,
           padding: "16px",
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "10px",
+          display: "grid",
+          gap: "12px",
         }}
       >
-        {partnerBookingScreens.map((screen) => {
-          const meta = getPartnerBookingScreenMeta(screen);
-          const isActive = screen === activeScreen;
-          return (
-            <a
-              key={screen}
-              href={buildScreenHref(basePath, screen)}
-              style={{
-                textDecoration: "none",
-                display: "grid",
-                gap: "4px",
-                minWidth: "126px",
-                padding: "12px 14px",
-                borderRadius: "14px",
-                border: isActive
-                  ? `1px solid ${brand.primary}`
-                  : "1px solid rgba(15, 23, 42, 0.10)",
-                background: isActive ? `${brand.primary}10` : "#ffffff",
-                color: "#0e1424",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: "11px",
-                  fontWeight: 700,
-                  letterSpacing: "0.08em",
-                  color: isActive ? brand.primary : "#64748b",
-                }}
+        {lockScreenNavigation ? (
+          <div
+            style={{
+              fontSize: "13px",
+              lineHeight: 1.6,
+              color: "#56657f",
+            }}
+          >
+            This scenario route stays pinned to its gate surface. Use the
+            authority-safe state cards below instead of jumping into positive
+            funnel routes.
+          </div>
+        ) : null}
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "10px",
+          }}
+        >
+          {partnerBookingScreens.map((screen) => {
+            const meta = getPartnerBookingScreenMeta(screen);
+            const isActive = screen === activeScreen;
+            const sharedStyle: CSSProperties = {
+              textDecoration: "none",
+              display: "grid",
+              gap: "4px",
+              minWidth: "126px",
+              padding: "12px 14px",
+              borderRadius: "14px",
+              border: isActive
+                ? `1px solid ${brand.primary}`
+                : "1px solid rgba(15, 23, 42, 0.10)",
+              background: isActive ? `${brand.primary}10` : "#ffffff",
+              color: "#0e1424",
+              opacity: lockScreenNavigation && !isActive ? 0.56 : 1,
+              cursor: lockScreenNavigation ? "default" : "pointer",
+            };
+
+            const content = (
+              <>
+                <span
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    letterSpacing: "0.08em",
+                    color: isActive ? brand.primary : "#64748b",
+                  }}
+                >
+                  {meta.eyebrow}
+                </span>
+                <span style={{ fontSize: "14px", fontWeight: 800 }}>
+                  {meta.label}
+                </span>
+              </>
+            );
+
+            if (lockScreenNavigation) {
+              return (
+                <div key={screen} aria-disabled="true" style={sharedStyle}>
+                  {content}
+                </div>
+              );
+            }
+
+            return (
+              <a
+                key={screen}
+                href={buildScreenHref(basePath, screen)}
+                style={sharedStyle}
               >
-                {meta.eyebrow}
-              </span>
-              <span style={{ fontSize: "14px", fontWeight: 800 }}>
-                {meta.label}
-              </span>
-            </a>
-          );
-        })}
+                {content}
+              </a>
+            );
+          })}
+        </div>
       </section>
 
       <section

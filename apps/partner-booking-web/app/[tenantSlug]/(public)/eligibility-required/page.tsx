@@ -1,4 +1,4 @@
-import { renderPartnerScenarioPage } from "@/lib/render-partner-scenario-page";
+import { renderPartnerStateGate } from "@/lib/render-partner-scenario-page";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
@@ -7,5 +7,5 @@ type PageProps = {
 export default async function PartnerEligibilityRequiredPage({
   params,
 }: PageProps) {
-  return renderPartnerScenarioPage(params, "eligibility-required");
+  return renderPartnerStateGate(params, "eligibility-required");
 }

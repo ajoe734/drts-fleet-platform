@@ -3,8 +3,11 @@ import type { ReactNode } from "react";
 import { BRAND_TEMPLATES, type PartnerBrandTemplate } from "@drts/ui-tokens";
 import {
   getPartnerBookingArtboardAnchor,
+  getPartnerBookingScenarioMeta,
+  getPartnerBookingScenarioScreen,
   getPartnerBookingScreenMeta,
   PartnerBookingPhoneScreen,
+  type PartnerBookingScenarioId,
   type PartnerBookingScreenId,
 } from "./partner-booking-funnel";
 
@@ -46,12 +49,20 @@ function ComparisonFrame({
 function PartnerBookingStoryChrome({
   brand,
   screen,
+  scenario,
 }: {
   brand: PartnerBrandTemplate;
   screen: PartnerBookingScreenId;
+  scenario?: PartnerBookingScenarioId;
 }) {
-  const anchor = getPartnerBookingArtboardAnchor(screen);
-  const meta = getPartnerBookingScreenMeta(screen);
+  const resolvedScreen = scenario
+    ? getPartnerBookingScenarioScreen(scenario)
+    : screen;
+  const anchor = getPartnerBookingArtboardAnchor(resolvedScreen);
+  const meta = getPartnerBookingScreenMeta(resolvedScreen);
+  const scenarioMeta = scenario
+    ? getPartnerBookingScenarioMeta(scenario)
+    : null;
 
   return (
     <div style={{ padding: "24px", background: "#e2e8f0" }}>
@@ -68,8 +79,23 @@ function PartnerBookingStoryChrome({
           >
             {meta.eyebrow}
           </div>
+          {scenarioMeta ? (
+            <div
+              style={{
+                fontSize: "12px",
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: ctbcBrand.primary,
+              }}
+            >
+              route: {scenarioMeta.id}
+            </div>
+          ) : null}
           <div style={{ fontSize: "13px", color: "#475569", lineHeight: 1.5 }}>
-            {meta.summary}
+            {scenarioMeta
+              ? `${scenarioMeta.summary} Reuses the ${meta.eyebrow} artboard.`
+              : meta.summary}
           </div>
         </div>
         <div
@@ -98,12 +124,20 @@ function PartnerBookingStoryChrome({
                 padding: "24px",
               }}
             >
-              <PartnerBookingPhoneScreen brand={brand} screen={screen} />
+              <PartnerBookingPhoneScreen
+                brand={brand}
+                screen={resolvedScreen}
+                {...(scenario ? { scenario } : {})}
+              />
             </div>
           </ComparisonFrame>
           <ComparisonFrame
             title="Canvas"
-            subtitle={`\`docs/05-ui/drts-design-canvas/Partner Booking.html#${anchor}\``}
+            subtitle={
+              scenarioMeta
+                ? `Route \`/${ctbcBrand.tenantCode.toLowerCase()}/${scenarioMeta.id}\` reuses \`docs/05-ui/drts-design-canvas/Partner Booking.html#${anchor}\``
+                : `\`docs/05-ui/drts-design-canvas/Partner Booking.html#${anchor}\``
+            }
           >
             <iframe
               src={`${canvasBaseSrc}#${anchor}`}
@@ -131,7 +165,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "PBK-UI-003 parity stories. Each story compares the built white-label CTBC funnel screen against `Partner Booking.html` artboard anchors.",
+          "PBK-UI-003 and PBK-UI-004 parity stories. Funnel screens and authority-safe scenario routes compare the built CTBC white-label surface against the matching `Partner Booking.html` artboard anchors.",
       },
     },
   },
@@ -150,6 +184,22 @@ function createStory(screen: PartnerBookingScreenId): Story {
   };
 }
 
+function createScenarioStory(scenario: PartnerBookingScenarioId): Story {
+  const meta = getPartnerBookingScenarioMeta(scenario);
+  const screen = getPartnerBookingScenarioScreen(scenario);
+
+  return {
+    render: () => (
+      <PartnerBookingStoryChrome
+        brand={ctbcBrand}
+        screen={screen}
+        scenario={scenario}
+      />
+    ),
+    name: `${meta.id} route`,
+  };
+}
+
 export const Landing = createStory("landing");
 export const Eligibility = createStory("eligibility");
 export const Book = createStory("book");
@@ -157,3 +207,10 @@ export const Confirmed = createStory("confirmed");
 export const Trips = createStory("trips");
 export const Receipt = createStory("receipt");
 export const Help = createStory("help");
+export const EligibleRoute = createScenarioStory("eligible");
+export const IneligibleRoute = createScenarioStory("ineligible");
+export const ManualReviewRoute = createScenarioStory("manual_review");
+export const InactiveRoute = createScenarioStory("inactive");
+export const EligibilityRequiredRoute = createScenarioStory(
+  "eligibility-required",
+);

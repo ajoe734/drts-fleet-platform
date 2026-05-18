@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import {
-  getPartnerBookingScenarioScreen,
-  PartnerBookingReferenceFunnel,
+  PartnerBookingStateGate,
   type PartnerBookingScenarioId,
 } from "@drts/ui-web/partner-booking-funnel";
 import { getBrandForSlug } from "@/lib/brand";
@@ -10,7 +9,7 @@ type PageProps = {
   params: Promise<{ tenantSlug: string }>;
 };
 
-export async function renderPartnerScenarioPage(
+export async function renderPartnerStateGate(
   params: PageProps["params"],
   scenario: PartnerBookingScenarioId,
 ) {
@@ -21,11 +20,12 @@ export async function renderPartnerScenarioPage(
   }
 
   return (
-    <PartnerBookingReferenceFunnel
+    <PartnerBookingStateGate
       brand={brand}
-      activeScreen={getPartnerBookingScenarioScreen(scenario)}
-      activeScenario={scenario}
+      scenario={scenario}
       basePath={`/${tenantSlug}`}
     />
   );
 }
+
+export const renderPartnerScenarioPage = renderPartnerStateGate;

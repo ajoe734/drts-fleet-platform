@@ -70,7 +70,8 @@ task reorganizes the port map, update both `package.json` and the
 
 Storybook is wired centrally in `packages/ui-web` (see SBK-UI-001). The
 `Partner Booking/CTBC Funnel` stories compare the built white-label screens
-against the matching `Partner Booking.html#PB_*` artboard anchors:
+and PBK-UI-004 scenario routes against the matching `Partner Booking.html#PB_*`
+artboard anchors:
 
 - `PB_Landing`
 - `PB_Eligibility`
@@ -79,3 +80,10 @@ against the matching `Partner Booking.html#PB_*` artboard anchors:
 - `PB_Trips`
 - `PB_Receipt`
 - `PB_Help`
+
+PBK-UI-004 reuses the existing artboards instead of introducing a separate
+negative-path artboard family:
+
+- `/eligible`, `/ineligible`, and `/manual_review` compare against
+  `PB_Eligibility`
+- `/inactive` and `/eligibility-required` compare against `PB_Book`
