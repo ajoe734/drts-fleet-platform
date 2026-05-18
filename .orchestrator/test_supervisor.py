@@ -2883,6 +2883,36 @@ class PollWorkersRecoveryTests(unittest.TestCase):
 
 
 class SingleSupervisorGuardTests(unittest.TestCase):
+    def test_supervisor_cmdline_matches_actual_python_process(self) -> None:
+        repo_root = str(supervisor.THIS_DIR.parent.resolve())
+
+        self.assertTrue(
+            supervisor.supervisor_cmdline_matches_current_script(
+                ["/usr/bin/python3", ".orchestrator/supervisor.py", "--config", "config.json"],
+                repo_root,
+            )
+        )
+
+    def test_supervisor_cmdline_ignores_timeout_parent_wrapper(self) -> None:
+        repo_root = str(supervisor.THIS_DIR.parent.resolve())
+
+        self.assertFalse(
+            supervisor.supervisor_cmdline_matches_current_script(
+                ["timeout", "15", "/usr/bin/python3", ".orchestrator/supervisor.py", "--verbose"],
+                repo_root,
+            )
+        )
+
+    def test_supervisor_cmdline_ignores_shell_launcher(self) -> None:
+        repo_root = str(supervisor.THIS_DIR.parent.resolve())
+
+        self.assertFalse(
+            supervisor.supervisor_cmdline_matches_current_script(
+                ["/bin/bash", "-lc", "python3 .orchestrator/supervisor.py --verbose"],
+                repo_root,
+            )
+        )
+
     def test_terminate_older_supervisors_kills_only_older_matching_processes(self) -> None:
         config = {"activity_log": "/tmp/fake-log.jsonl"}
         killed: list[tuple[int, int]] = []

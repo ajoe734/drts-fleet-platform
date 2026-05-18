@@ -184,11 +184,45 @@ def clear_supervisor_pid(config: dict[str, Any]) -> None:
         path.unlink(missing_ok=True)
 
 
-def iter_matching_supervisor_pids() -> list[int]:
+def _supervisor_script_arg_matches(
+    part: str,
+    *,
+    current_script: str,
+    current_script_name: str,
+    current_script_rel: str,
+) -> bool:
+    return part == current_script or part == current_script_rel or part.endswith(f"/{current_script_name}")
+
+
+def supervisor_cmdline_matches_current_script(parts: list[str], proc_cwd: str) -> bool:
     current_script = str(Path(__file__).resolve())
     current_script_name = str(Path(__file__).name)
     current_script_rel = ".orchestrator/supervisor.py"
     current_repo_root = str(THIS_DIR.parent.resolve())
+    if proc_cwd != current_repo_root or not parts:
+        return False
+
+    # Only match the actual supervisor process, not a parent wrapper such as
+    # `timeout ... python3 .orchestrator/supervisor.py` or a shell/nohup launcher.
+    executable = Path(parts[0]).name
+    if _supervisor_script_arg_matches(
+        parts[0],
+        current_script=current_script,
+        current_script_name=current_script_name,
+        current_script_rel=current_script_rel,
+    ):
+        return True
+    if executable.startswith("python") and len(parts) > 1:
+        return _supervisor_script_arg_matches(
+            parts[1],
+            current_script=current_script,
+            current_script_name=current_script_name,
+            current_script_rel=current_script_rel,
+        )
+    return False
+
+
+def iter_matching_supervisor_pids() -> list[int]:
     matches: list[int] = []
     for proc_dir in Path("/proc").iterdir():
         if not proc_dir.name.isdigit():
@@ -206,13 +240,7 @@ def iter_matching_supervisor_pids() -> list[int]:
             proc_cwd = str((proc_dir / "cwd").resolve())
         except OSError:
             proc_cwd = ""
-        script_matches = any(
-            part == current_script
-            or part == current_script_rel
-            or part.endswith(f"/{current_script_name}")
-            for part in parts
-        )
-        if script_matches and proc_cwd == current_repo_root:
+        if supervisor_cmdline_matches_current_script(parts, proc_cwd):
             matches.append(pid)
     return sorted(matches)
 
