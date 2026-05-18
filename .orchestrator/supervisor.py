@@ -4354,6 +4354,7 @@ def create_sidecar_task(
     env.update(
         {
             "AI_NAME": "Codex",
+            "AI_STATUS_ROOT": str(config_path(config, "status_file").parent),
             "TASK_PHASE": phase,
             "TASK_TITLE": title,
             "TASK_SUMMARY_ZH": summary_zh,
@@ -4929,12 +4930,94 @@ def pending_approval_items(approval_state: dict[str, Any]) -> list[dict[str, Any
     ]
 
 
+def blocked_task_triage_kind(task: dict[str, Any]) -> str:
+    text = " ".join(
+        str(value or "")
+        for value in (
+            task.get("id"),
+            task.get("title"),
+            task.get("summary_zh"),
+            task.get("next"),
+            " ".join(str(item or "") for item in (task.get("artifacts") or [])),
+        )
+    ).lower()
+    if task_is_sidecar(task):
+        return "sidecar_parent_blocked"
+    if any(
+        marker in text
+        for marker in (
+            "commit",
+            "branch",
+            "worktree",
+            "task-scoped",
+            "history",
+            "head moved",
+            "pre-commit",
+            "push",
+        )
+    ):
+        return "history_repair"
+    if any(
+        marker in text
+        for marker in (
+            "contract",
+            "discussion_planning",
+            "canonical",
+            "scope decision",
+            "cost-center",
+            "approval-rule",
+            "quota contract",
+            "product",
+        )
+    ):
+        return "planning_decision"
+    return "manual_unblock"
+
+
+def dependency_ready_blocked_task_records(
+    config: dict[str, Any],
+    status: dict[str, Any] | None,
+    *,
+    include_sidecars: bool = False,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    if not isinstance(status, dict):
+        return []
+    settings = ready_dispatch_settings(config)
+    dependency_done_statuses = {str(value).lower() for value in settings.get("dependency_done_statuses", ["done"])}
+    task_map = task_index_from_status(config, status)
+    records: list[dict[str, Any]] = []
+    for task in status.get("tasks", []) or []:
+        if not isinstance(task, dict):
+            continue
+        task_id = str(task.get("id") or "").strip()
+        if not task_id or str(task.get("status") or "").lower() != "blocked":
+            continue
+        if task_is_sidecar(task) and not include_sidecars:
+            continue
+        if not dependencies_satisfied(task, task_map, dependency_done_statuses):
+            continue
+        records.append(
+            {
+                "task_id": task_id,
+                "task": task,
+                "owner": str(task.get("owner") or "").strip(),
+                "reviewer": str(task.get("reviewer") or "").strip(),
+                "kind": blocked_task_triage_kind(task),
+                "next": brief_reason_text(task.get("next"), max_length=220),
+            }
+        )
+    records.sort(key=lambda item: task_phase_priority(item["task"], task_map, dependency_done_statuses))
+    return records[:limit]
+
+
 def _chair_review_summary_lines(
     config: dict[str, Any],
     approval_state: dict[str, Any],
     state: dict[str, Any],
     provider_report: dict[str, Any] | None = None,
-) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
+    status: dict[str, Any] | None = None,
+) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str]]:
     approval_lines: list[str] = []
     for item in pending_approval_items(approval_state)[:6]:
         tool_input = item.get("tool_input") if isinstance(item.get("tool_input"), dict) else {}
@@ -5012,7 +5095,15 @@ def _chair_review_summary_lines(
     if not dispatch_pause_lines:
         dispatch_pause_lines.append("- none")
 
-    return approval_lines, failure_lines, provider_lines, dispatchable_provider_lines, dispatch_pause_lines
+    blocked_task_lines: list[str] = []
+    for item in dependency_ready_blocked_task_records(config, status, include_sidecars=False):
+        blocked_task_lines.append(
+            f"- {item.get('task_id')}: kind={item.get('kind')} owner={item.get('owner') or '-'} reviewer={item.get('reviewer') or '-'} next={item.get('next') or '-'}"
+        )
+    if not blocked_task_lines:
+        blocked_task_lines.append("- none")
+
+    return approval_lines, failure_lines, provider_lines, dispatchable_provider_lines, dispatch_pause_lines, blocked_task_lines
 
 
 def build_chair_review_message(
@@ -5024,12 +5115,21 @@ def build_chair_review_message(
     approval_state: dict[str, Any],
     state: dict[str, Any],
     provider_report: dict[str, Any] | None = None,
+    status: dict[str, Any] | None = None,
 ) -> str:
-    approval_lines, failure_lines, provider_lines, dispatchable_provider_lines, dispatch_pause_lines = _chair_review_summary_lines(
+    (
+        approval_lines,
+        failure_lines,
+        provider_lines,
+        dispatchable_provider_lines,
+        dispatch_pause_lines,
+        blocked_task_lines,
+    ) = _chair_review_summary_lines(
         config,
         approval_state,
         state,
         provider_report=provider_report,
+        status=status,
     )
     machine_truth_lines: list[str] = []
     for label, key in (
@@ -5071,7 +5171,8 @@ def build_chair_review_message(
         '    {"task_id": "TASK-ID", "role": "owner", "from": "OldAgent", "to": "NewAgent", "reason": "why"}\n'
         "  ],\n"
         '  "task_actions": [\n'
-        '    {"task_id": "TASK-ID", "action": "dispatch_now", "reason": "why now"}\n'
+        '    {"task_id": "TASK-ID", "action": "dispatch_now", "reason": "why now"},\n'
+        '    {"task_id": "BLOCKED-TASK-ID", "action": "create_unblock_task", "unblock_kind": "history_repair", "target_agent": "Codex", "reviewer": "Codex2", "reason": "why this repair route"}\n'
         "  ],\n"
         '  "provider_actions": [\n'
         '    {"agent": "AgentName", "action": "pause", "kind": "auth", "reason": "why"}\n'
@@ -5083,7 +5184,11 @@ def build_chair_review_message(
         "- reassignment_actions 必須使用 `role` 與 `reason`；不要用 `field` / `rationale`。\n"
         "- reviewer 改派只允許 `todo` / `in_progress` / `review` 狀態，用來維持 owner/reviewer 分離或處理 review 交接。\n"
         "- owner 改派只允許 `backlog` / `todo` / `in_progress` / `review_approved`；若是 `backlog` / `todo` / `in_progress`，代表重開成 `todo` 重新派工。\n"
-        "- `task_actions` 目前只允許 `dispatch_now`，而且只能對 machine truth 已經符合條件的任務觸發；不能繞過 dependency gate 或 commit gate。\n"
+        "- `task_actions` 目前只允許 `dispatch_now` / `create_unblock_task`；不能繞過 dependency gate 或 commit gate。\n"
+        "- `dispatch_now` 只能對 machine truth 已符合派工條件的非 blocked 任務觸發。\n"
+        "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
+        "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
+        "- 若 Chair review reason 是 `blocked_task_triage`，不可只評論；每個 listed blocked task 都要用 `create_unblock_task` 建修復/規劃工單，或在 blocked_by 明確寫出為什麼不能自動修。\n"
         "- `provider_actions` 目前只允許 `pause` / `clear_pause`，只針對 exact lane 生效；暫停原因必須具體；不要重複 pause 已在 Provider lane pauses 列出的 lane，除非你要改變其狀態。\n"
         "- 若 Chair review reason 是 `approval_triage`，Pending approvals 不可只評論；每一個 pending approval 都必須在 `approval_actions` 中明確 `allow` 或 `deny`，並寫具體 reason。\n"
         "- `approval_actions` 必須使用 `decision` 欄位，不要用 `action`；格式是 `{\"approval_id\":\"...\",\"decision\":\"allow|deny\",\"reason\":\"...\"}`。\n"
@@ -5105,15 +5210,24 @@ def build_chair_review_message(
         + "\n".join(dispatchable_provider_lines)
         + "\n\nDispatch pauses requiring chair attention:\n"
         + "\n".join(dispatch_pause_lines)
+        + "\n\nDependency-ready blocked tasks requiring chair repair:\n"
+        + "\n".join(blocked_task_lines)
         + "\n"
     )
 
 
-def chair_review_reason(state: dict[str, Any], approval_state: dict[str, Any]) -> str | None:
+def chair_review_reason(
+    state: dict[str, Any],
+    approval_state: dict[str, Any],
+    status: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
+) -> str | None:
     if pending_approval_items(approval_state):
         return "approval_triage"
     if repeated_failure_records(state):
         return "reassignment_triage"
+    if config is not None and dependency_ready_blocked_task_records(config, status, include_sidecars=False, limit=1):
+        return "blocked_task_triage"
     if active_provider_pause_records(state) or actionable_dispatch_pause_records(state, limit=1):
         return "provider_health_triage"
     return "operational_review"
@@ -5176,10 +5290,11 @@ def queue_chair_review(
     if chair_state.get("active_review"):
         return False
     approval_state = safe_load_approval_state(config)
-    reason = chair_review_reason(state, approval_state)
+    ready_blocked_tasks = dependency_ready_blocked_task_records(config, status, include_sidecars=False, limit=1)
+    reason = chair_review_reason(state, approval_state, status=status, config=config)
     if reason is None:
         return False
-    immediate_attention = bool(chair_review_needs_immediate_attention(state))
+    immediate_attention = bool(chair_review_needs_immediate_attention(state) or ready_blocked_tasks)
     bypass_cooldown = bool(pending_approval_items(approval_state) or immediate_attention)
     cooldown_until = _parse_iso_utc(chair_state.get("cooldown_until"))
     now = datetime.now(timezone.utc)
@@ -5238,6 +5353,7 @@ def queue_chair_review(
         approval_state=approval_state,
         state=state,
         provider_report=provider_report,
+        status=status,
     )
     queue_payload = {
         "event_id": new_runtime_id("evt"),
@@ -5394,8 +5510,8 @@ def validate_chair_review_payload(payload: Any) -> str | None:
     for action in payload.get("task_actions", []):
         if not isinstance(action, dict):
             return "task_actions items must be objects"
-        if action.get("action") not in {"dispatch_now"}:
-            return "task_actions action must be dispatch_now"
+        if action.get("action") not in {"dispatch_now", "create_unblock_task"}:
+            return "task_actions action must be dispatch_now or create_unblock_task"
         required = ("task_id", "reason")
         if any(not isinstance(action.get(key), str) or not str(action.get(key)).strip() for key in required):
             return "task_actions require task_id/reason strings"
@@ -5403,6 +5519,14 @@ def validate_chair_review_payload(payload: Any) -> str | None:
             not isinstance(action.get("target_agent"), str) or not str(action.get("target_agent")).strip()
         ):
             return "task_actions target_agent must be a non-empty string when provided"
+        if "reviewer" in action and (
+            not isinstance(action.get("reviewer"), str) or not str(action.get("reviewer")).strip()
+        ):
+            return "task_actions reviewer must be a non-empty string when provided"
+        if "unblock_kind" in action and (
+            not isinstance(action.get("unblock_kind"), str) or not str(action.get("unblock_kind")).strip()
+        ):
+            return "task_actions unblock_kind must be a non-empty string when provided"
     for action in payload.get("provider_actions", []):
         if not isinstance(action, dict):
             return "provider_actions items must be objects"
@@ -5427,28 +5551,42 @@ def validate_chair_review_context(
     *,
     reason: str | None,
     approval_state: dict[str, Any],
+    config: dict[str, Any] | None = None,
+    status: dict[str, Any] | None = None,
 ) -> str | None:
-    if reason != "approval_triage":
-        return None
-    if payload.get("provider_actions"):
-        return "approval_triage must not emit provider_actions"
-    pending_ids = [
-        str(item.get("approval_id") or "").strip()
-        for item in pending_approval_items(approval_state)
-        if str(item.get("approval_id") or "").strip()
-    ]
-    if not pending_ids:
-        return None
-    action_ids = {
-        str(normalize_chair_approval_action(action).get("approval_id") or "").strip()
-        for action in payload.get("approval_actions", []) or []
-        if isinstance(action, dict)
-        and normalize_chair_approval_action(action).get("decision") in {"allow", "deny"}
-        and str(normalize_chair_approval_action(action).get("approval_id") or "").strip()
-    }
-    missing = [approval_id for approval_id in pending_ids if approval_id not in action_ids]
-    if missing:
-        return f"approval_triage must resolve pending approvals: {', '.join(missing[:6])}"
+    if reason == "approval_triage":
+        if payload.get("provider_actions"):
+            return "approval_triage must not emit provider_actions"
+        pending_ids = [
+            str(item.get("approval_id") or "").strip()
+            for item in pending_approval_items(approval_state)
+            if str(item.get("approval_id") or "").strip()
+        ]
+        if pending_ids:
+            action_ids = {
+                str(normalize_chair_approval_action(action).get("approval_id") or "").strip()
+                for action in payload.get("approval_actions", []) or []
+                if isinstance(action, dict)
+                and normalize_chair_approval_action(action).get("decision") in {"allow", "deny"}
+                and str(normalize_chair_approval_action(action).get("approval_id") or "").strip()
+            }
+            missing = [approval_id for approval_id in pending_ids if approval_id not in action_ids]
+            if missing:
+                return f"approval_triage must resolve pending approvals: {', '.join(missing[:6])}"
+    if reason == "blocked_task_triage" and config is not None:
+        ready_blocked_ids = {
+            str(item.get("task_id") or "").strip()
+            for item in dependency_ready_blocked_task_records(config, status, include_sidecars=False)
+            if str(item.get("task_id") or "").strip()
+        }
+        if ready_blocked_ids:
+            action_ids = {
+                str(action.get("task_id") or "").strip()
+                for action in payload.get("task_actions", []) or []
+                if isinstance(action, dict) and action.get("action") == "create_unblock_task"
+            }
+            if not action_ids:
+                return "blocked_task_triage must create at least one unblock task"
     return None
 
 
@@ -5704,6 +5842,222 @@ def chair_dispatch_action_reason(
     return None
 
 
+def chair_unblock_task_id(parent_task_id: str, unblock_kind: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", unblock_kind).strip("-").upper() or "MANUAL"
+    return f"{parent_task_id}-UNBLOCK-{slug}"
+
+
+def open_unblock_task_for_parent(status: dict[str, Any], parent_task_id: str, unblock_kind: str) -> dict[str, Any] | None:
+    for task in status.get("tasks", []) or []:
+        if not isinstance(task, dict):
+            continue
+        if str(task.get("helper_parent") or "") != parent_task_id:
+            continue
+        if str(task.get("task_class") or "").lower() != "unblock":
+            continue
+        if str(task.get("helper_kind") or "") != unblock_kind:
+            continue
+        if str(task.get("status") or "").lower() == "done":
+            continue
+        return task
+    return None
+
+
+def chair_unblock_agent(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    provider_report: dict[str, Any],
+    preferred: list[str],
+    *,
+    exclude: set[str],
+) -> str | None:
+    known = known_agent_display_names(config)
+    seen: set[str] = set()
+    all_agents = [
+        str(agent.get("display_name") or agent.get("name") or agent_id).strip()
+        for agent_id, agent in (config.get("agents", {}) or {}).items()
+    ]
+    for candidate in preferred + all_agents:
+        display_name = display_name_for(config, str(candidate or ""))
+        if not display_name or display_name in seen or display_name not in known:
+            continue
+        seen.add(display_name)
+        if display_name in exclude or display_name_is_legacy_alias(display_name):
+            continue
+        if is_agent_dispatch_paused(config, state, display_name, provider_report=provider_report):
+            continue
+        return display_name
+    return None
+
+
+def unblock_task_acceptance(unblock_kind: str) -> list[str]:
+    if unblock_kind == "history_repair":
+        return [
+            "Identify the exact branch/worktree/commit contamination that keeps the parent blocked",
+            "Repair or document a non-destructive repair path without force-pushing shared history",
+            "Produce task-scoped commit/push/PR evidence for any canonical change",
+            "Update the parent task with the concrete unblocked next step",
+        ]
+    if unblock_kind == "planning_decision":
+        return [
+            "Resolve or route the missing product/contract decision through canonical planning artifacts",
+            "Record the decision, scope cut, or explicit follow-up needed by the parent task",
+            "Produce task-scoped commit/push/PR evidence for any canonical change",
+            "Update the parent task with the concrete unblocked next step",
+        ]
+    return [
+        "Diagnose why the dependency-ready parent remains blocked",
+        "Make only the task-scoped change needed to unblock or document the remaining blocker",
+        "Produce task-scoped commit/push/PR evidence for any canonical change",
+        "Update the parent task with the concrete unblocked next step",
+    ]
+
+
+def create_chair_unblock_task(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    action: dict[str, Any],
+    provider_report: dict[str, Any],
+) -> bool:
+    parent_id = str(action.get("task_id") or "").strip()
+    chair_reason = str(action.get("reason") or "").strip()
+    if not parent_id or not chair_reason:
+        return False
+
+    status = load_status(config)
+    task_map = task_index_from_status(config, status)
+    parent = task_map.get(parent_id)
+    if parent is None or str(parent.get("status") or "").lower() != "blocked" or task_is_sidecar(parent):
+        return False
+    dependency_done_statuses = {
+        str(value).lower() for value in ready_dispatch_settings(config).get("dependency_done_statuses", ["done"])
+    }
+    if not dependencies_satisfied(parent, task_map, dependency_done_statuses):
+        return False
+
+    requested_kind = str(action.get("unblock_kind") or "").strip()
+    unblock_kind = requested_kind if requested_kind else blocked_task_triage_kind(parent)
+    if unblock_kind not in {"history_repair", "planning_decision", "manual_unblock"}:
+        unblock_kind = blocked_task_triage_kind(parent)
+    unblock_id = chair_unblock_task_id(parent_id, unblock_kind)
+    if open_unblock_task_for_parent(status, parent_id, unblock_kind) is not None or task_map.get(unblock_id) is not None:
+        return False
+
+    requested_owner = str(action.get("target_agent") or "").strip()
+    requested_reviewer = str(action.get("reviewer") or "").strip()
+    parent_owner = str(parent.get("owner") or "").strip()
+    parent_reviewer = str(parent.get("reviewer") or "").strip()
+    owner = chair_unblock_agent(
+        config,
+        state,
+        provider_report,
+        [requested_owner, parent_owner, "Codex", "Codex2", "Claude2", "Claude", "Gemini2", "Gemini", "Copilot"],
+        exclude=set(),
+    )
+    if owner is None:
+        return False
+    reviewer = chair_unblock_agent(
+        config,
+        state,
+        provider_report,
+        [requested_reviewer, parent_reviewer, "Codex2", "Codex", "Claude2", "Claude", "Gemini2", "Gemini", "Copilot"],
+        exclude={owner},
+    )
+    if reviewer is None:
+        return False
+
+    script = config_path(config, "status_file").parent / "scripts" / "ai_status.py"
+    title_by_kind = {
+        "history_repair": f"Repair unblock path for {parent_id} branch/commit history",
+        "planning_decision": f"Resolve planning blocker for {parent_id}",
+        "manual_unblock": f"Unblock {parent_id}",
+    }
+    summary_by_kind = {
+        "history_repair": (
+            f"Chairman generated unblock task for {parent_id}: repair branch/worktree/commit contamination "
+            "without force-pushing shared history."
+        ),
+        "planning_decision": (
+            f"Chairman generated unblock task for {parent_id}: resolve or route the missing product/contract decision."
+        ),
+        "manual_unblock": f"Chairman generated unblock task for {parent_id}: diagnose and clear the remaining blocker.",
+    }
+    metadata = {
+        "task_class": "unblock",
+        "auto_generated": True,
+        "helper_parent": parent_id,
+        "helper_kind": unblock_kind,
+        "mutates_canonical": True,
+        "auto_created_by": "chairman-blocked-task-triage",
+    }
+    env = os.environ.copy()
+    env.update(
+        {
+            "AI_NAME": "Codex",
+            "AI_STATUS_ROOT": str(config_path(config, "status_file").parent),
+            "TASK_PHASE": str(parent.get("phase") or "Blocked Task Unblock"),
+            "TASK_TITLE": title_by_kind[unblock_kind],
+            "TASK_SUMMARY_ZH": summary_by_kind[unblock_kind],
+            "TASK_DEPENDS_ON": ",".join(str(dep) for dep in (parent.get("depends_on") or [])),
+            "TASK_ARTIFACTS": f"support/unblock/{parent_id}/{unblock_id}.md",
+            "TASK_ACCEPTANCE": ",".join(unblock_task_acceptance(unblock_kind)),
+            "TASK_METADATA_JSON": json.dumps(metadata, ensure_ascii=False),
+        }
+    )
+    result = subprocess.run(
+        [sys.executable, str(script), "assign", unblock_id, owner, reviewer],
+        cwd=str(config_path(config, "status_file").parent),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if result.returncode != 0:
+        write_activity_log(
+            config,
+            {
+                "type": "chair_unblock_task_create_failed",
+                "task_id": parent_id,
+                "unblock_task_id": unblock_id,
+                "message": result.stderr.strip() or result.stdout.strip() or "unknown error",
+            },
+        )
+        return False
+
+    status = load_status(config)
+    task_map = task_index_from_status(config, status)
+    unblock_task = task_map.get(unblock_id)
+    if unblock_task is not None:
+        state.setdefault("tasks", {})[unblock_id] = snapshot_task(unblock_task, config.get("schema", {}))
+        dispatch_plan = chair_dispatch_action_reason(config, unblock_task, task_map)
+        if dispatch_plan is not None:
+            target_agent, dispatch_reason = dispatch_plan
+            active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
+            active_agent_counts = active_worker_agent_counts(state, active_statuses)
+            pending_agent_counts = outstanding_delivery_agent_counts(config, state)
+            lane_id = normalize_agent_id(target_agent)
+            lane_capacity = max_tasks_per_agent_for_lane(ready_dispatch_settings(config), lane_id)
+            lane_load = active_agent_counts.get(lane_id, 0) + pending_agent_counts.get(lane_id, 0)
+            if lane_load < lane_capacity and not is_agent_dispatch_paused(config, state, target_agent, provider_report=provider_report):
+                _pending_agents, _pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
+                event = build_dispatch_event(unblock_task, target_agent, dispatch_reason, task_map)
+                if event["key"] not in pending_event_keys and queue_delivery_event(config, event):
+                    state.setdefault("seen_event_keys", {})[event["key"]] = utc_now()
+
+    write_activity_log(
+        config,
+        {
+            "type": "chair_unblock_task_created",
+            "task_id": parent_id,
+            "unblock_task_id": unblock_id,
+            "unblock_kind": unblock_kind,
+            "owner": owner,
+            "reviewer": reviewer,
+            "message": f"Chairman created {unblock_id} for blocked parent {parent_id}: {chair_reason}",
+        },
+    )
+    return True
+
+
 def apply_chair_task_action(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -5714,6 +6068,8 @@ def apply_chair_task_action(
     action_name = str(action.get("action") or "").strip()
     chair_reason = str(action.get("reason") or "").strip()
     requested_target = str(action.get("target_agent") or "").strip()
+    if action_name == "create_unblock_task":
+        return create_chair_unblock_task(config, state, action, provider_report)
     if not task_id or action_name != "dispatch_now" or not chair_reason:
         return False
 
@@ -6018,6 +6374,8 @@ def refresh_chair_review_state(
                 payload,
                 reason=str(active.get("reason") or ""),
                 approval_state=safe_load_approval_state(config),
+                config=config,
+                status=load_status(config),
             )
         if not markdown_path.exists():
             error = error or "markdown report missing"
