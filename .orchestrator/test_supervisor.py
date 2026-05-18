@@ -1724,6 +1724,43 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
 
 
 class RunOnceSupervisorStateTests(unittest.TestCase):
+    def test_mode_occupancy_does_not_count_active_queue_event_as_pending(self) -> None:
+        state = {
+            "workers": {
+                "run-1": {
+                    "status": "running",
+                    "queue_event_id": "evt-active",
+                    "request_snapshot": {
+                        "reason": "owned_ready_dispatch",
+                        "metadata": {"mode": "execution"},
+                    },
+                }
+            },
+            "queue": {
+                "events": {
+                    "evt-active": {"status": "started", "mode": "execution", "run_id": "run-1"},
+                    "evt-queued": {"status": "queued", "mode": "execution"},
+                    "evt-pending": {"status": "manual_pending", "mode": "coordination"},
+                }
+            },
+            "supervisor": {},
+        }
+
+        supervisor.update_supervisor_mode_metadata(
+            state,
+            focus_mode="execution",
+            heartbeat_at="2026-05-18T00:00:00Z",
+        )
+
+        self.assertEqual(
+            state["supervisor"]["mode_occupancy"]["execution"],
+            {"running": 1, "pending": 0, "queued": 1},
+        )
+        self.assertEqual(
+            state["supervisor"]["mode_occupancy"]["coordination"],
+            {"running": 0, "pending": 1, "queued": 0},
+        )
+
     def test_heartbeat_lag_seconds_reports_gap(self) -> None:
         lag = supervisor.heartbeat_lag_seconds(
             "2026-04-06T12:00:00Z",
