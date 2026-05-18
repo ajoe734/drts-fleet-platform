@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-17T18:45:16Z
+Last updated: 2026-05-18T03:31:53Z
 
 ## Objective
 
@@ -129,23 +129,4 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Latest Checkpoints
 
-- 2026-05-17T18:43:32Z Orchestrator: PreToolUse: Bash
-- 2026-05-17T18:43:35Z Orchestrator: PostToolUse: Bash
-- 2026-05-17T18:43:35Z Orchestrator: PreToolUse: Bash
-- 2026-05-17T18:43:38Z Orchestrator: PostToolUse: Bash
-- 2026-05-17T18:43:41Z Orchestrator: PreToolUse: Bash
-- 2026-05-17T18:43:49Z Orchestrator: PostToolUse: Bash
-- 2026-05-17T18:43:53Z Orchestrator: PreToolUse: Bash
-- 2026-05-17T18:43:53Z Orchestrator: PostToolUse: Bash
-- 2026-05-17T18:44:13Z Orchestrator: PreToolUse: Bash
-- 2026-05-17T18:44:13Z Orchestrator: PostToolUse: Bash
-- 2026-05-17T18:44:31Z Orchestrator: PreToolUse: Bash
-- 2026-05-17T18:44:31Z Orchestrator: PostToolUse: Bash
-- 2026-05-17T18:44:37Z Orchestrator: PreToolUse: Bash
-- 2026-05-17T18:44:37Z Orchestrator: PostToolUse: Bash
-- 2026-05-17T18:44:45Z Orchestrator: PreToolUse: Bash
-- 2026-05-17T18:44:45Z Orchestrator: PostToolUse: Bash
-- 2026-05-17T18:44:52Z Orchestrator: PreToolUse: Bash
-- 2026-05-17T18:44:52Z Orchestrator: PostToolUse: Bash
-- 2026-05-17T18:45:15Z Orchestrator: PreToolUse: Bash
-- 2026-05-17T18:45:15Z Claude2: `PBK-UI-003` Review passed: CTBC 7-screen reference funnel implementation verified on origin/codex2/pbk-ui-003 HEAD 839344f. All acceptance commands green; Storybook PB_Landing/Eligibility/Book/Confirmed/Trips/Receipt/Help anchored against drts-design-canvas/Partner Booking.html artboards.
+- No checkpoints yet.

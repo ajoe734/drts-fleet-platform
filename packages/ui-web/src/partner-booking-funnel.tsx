@@ -1389,7 +1389,7 @@ export function PartnerBookingReferenceFunnel({
                 color: "#0e1424",
               }}
             >
-              CTBC reference funnel · 7 screens
+              {brand.displayName} reference funnel · 7 screens
             </h1>
             <p
               style={{
@@ -1401,7 +1401,8 @@ export function PartnerBookingReferenceFunnel({
             >
               White-label booking flow demo for partner entry. The content below
               uses PBK-UI-002 brand tokens and mock data while mirroring the
-              CTBC `Partner Booking.html` artboards.
+              PB_* partner booking artboards across landing, eligibility,
+              booking, dispatch, trips, receipt, and help.
             </p>
           </div>
 
