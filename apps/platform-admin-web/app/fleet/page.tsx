@@ -6,6 +6,15 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import {
+  actionButtonStyle,
+  emptyStateStyle,
+  fieldLabelStyle,
+  inputStyle,
+  textMutedStyle,
+  toggleButtonStyle,
+  toggleGroupStyle,
+} from "@/components/platform-ui";
 import { usePlatformAdminClient, formatDateTime } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -13,6 +22,8 @@ import {
   getPlatformLabel,
 } from "@/lib/localized-labels";
 import type {
+  ReportJobDetailRecord,
+  ReportJobType,
   CreateDriverMasterCommand,
   DriverDeviceBindingSummary,
   DriverRegistryRecord,
@@ -21,9 +32,17 @@ import type {
   VehicleContractRecord,
   VehicleRegistryRecord,
 } from "@drts/contracts";
+import {
+  CalloutBanner,
+  DataViewCard,
+  KpiCard,
+  KpiRow,
+  PageHeader,
+  StatusChip,
+} from "@drts/ui-web";
 
 function badgeClassForLifecycle(status: string) {
-  if (status === "active") return "admin-badge--success";
+  if (status === "active") return "platform-ui-badge--success";
   if (
     status === "expired" ||
     status === "terminated" ||
@@ -32,9 +51,9 @@ function badgeClassForLifecycle(status: string) {
     status === "retired" ||
     status === "suspended"
   ) {
-    return "admin-badge--warning";
+    return "platform-ui-badge--warning";
   }
-  return "admin-badge--neutral";
+  return "platform-ui-badge--neutral";
 }
 
 function createInitialDriverForm(): CreateDriverMasterCommand {
@@ -67,12 +86,29 @@ function createInitialOffboardingForm(): InitiateVehicleOffboardingCommand {
   };
 }
 
+const FLEET_REPORT_JOB_TYPES = [
+  "vehicle_roster",
+  "driver_roster",
+  "contract_roster",
+] as const satisfies ReportJobType[];
+
+type FleetReportJobType = (typeof FLEET_REPORT_JOB_TYPES)[number];
+
+function sleep(milliseconds: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
+
 export default function FleetPage() {
   const { t, locale } = useTranslation();
   const client = usePlatformAdminClient();
   const [vehicles, setVehicles] = useState<VehicleRegistryRecord[]>([]);
   const [drivers, setDrivers] = useState<DriverRegistryRecord[]>([]);
   const [contracts, setContracts] = useState<VehicleContractRecord[]>([]);
+  const [reportJobs, setReportJobs] = useState<
+    Partial<Record<FleetReportJobType, ReportJobDetailRecord>>
+  >({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
@@ -85,6 +121,8 @@ export default function FleetPage() {
   const [driverActionId, setDriverActionId] = useState<string | null>(null);
   const [bindingActionId, setBindingActionId] = useState<string | null>(null);
   const [vehicleActionId, setVehicleActionId] = useState<string | null>(null);
+  const [reportActionId, setReportActionId] =
+    useState<FleetReportJobType | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(
     null,
   );
@@ -114,6 +152,20 @@ export default function FleetPage() {
         }
         return v?.[0]?.vehicleId ?? null;
       });
+      const jobs = await client.listReportJobs();
+      const latestFleetJobs = await FLEET_REPORT_JOB_TYPES.reduce<
+        Promise<Partial<Record<FleetReportJobType, ReportJobDetailRecord>>>
+      >(async (accumulatorPromise, jobType) => {
+        const accumulator = await accumulatorPromise;
+        const latestJob = jobs.find((job) => job.jobType === jobType);
+        if (!latestJob) {
+          return accumulator;
+        }
+        const detail = await client.getReportJob(latestJob.jobId);
+        accumulator[jobType] = detail;
+        return accumulator;
+      }, Promise.resolve({}));
+      setReportJobs(latestFleetJobs);
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -129,6 +181,118 @@ export default function FleetPage() {
     vehicles.find((vehicle) => vehicle.vehicleId === selectedVehicleId) ??
     vehicles[0] ??
     null;
+  const pendingOffboardingVehicles = vehicles.filter((vehicle) => {
+    const offboardingStatus = vehicle.supplyLifecycle.offboarding.status;
+    return offboardingStatus !== "none" && offboardingStatus !== "completed";
+  });
+  const complianceWarnings = [
+    ...vehicles
+      .filter(
+        (vehicle) =>
+          !vehicle.dispatchableFlag ||
+          vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
+      )
+      .map((vehicle) => ({
+        id: vehicle.vehicleId,
+        message:
+          locale === "en"
+            ? `${vehicle.vehicleId} is not dispatchable until compliance holds are cleared.`
+            : `${vehicle.vehicleId} 仍不可派遣，需先清除合規 hold。`,
+      })),
+    ...drivers
+      .filter(
+        (driver) =>
+          !driver.dispatchEligible ||
+          driver.eligibilityBlockedReasons.length > 0,
+      )
+      .map((driver) => ({
+        id: driver.driverId,
+        message:
+          locale === "en"
+            ? `${driver.driverId} is blocked from dispatch eligibility review.`
+            : `${driver.driverId} 目前被阻擋，需完成派遣資格審查。`,
+      })),
+  ].slice(0, 5);
+  const fleetWorkflowCopy =
+    locale === "en"
+      ? {
+          summaryTitle: "Compliance workflow",
+          summaryNote:
+            "Drivers, vehicles, contracts, exclusivity, and offboarding stay visible in one governance lane so operators can clear dispatch blockers before publication or payout windows.",
+          blockedVehicles: "Blocked vehicles",
+          blockedDrivers: "Blocked drivers",
+          pendingExclusivity: "Pending exclusivity",
+          pendingOffboarding: "Pending offboarding",
+          exportVehicles: "Export vehicles",
+          exportDrivers: "Export drivers",
+          exportContracts: "Export contracts",
+          exportHint:
+            "Exports create governed report jobs and only download server-signed artifacts.",
+          exportIdle: "No governed artifact generated yet.",
+          exportPending: "Preparing governed export…",
+          exportReady: "Latest artifact ready",
+          exportOpen: "Open signed download",
+          warningTitle: "Immediate warnings",
+        }
+      : {
+          summaryTitle: "合規流程總覽",
+          summaryNote:
+            "把司機、車輛、合約、獨家供應與下線流程放在同一條治理視角，方便先清掉 dispatch blocker，再進入發布或結算窗口。",
+          blockedVehicles: "受阻車輛",
+          blockedDrivers: "受阻司機",
+          pendingExclusivity: "待審獨家供應",
+          pendingOffboarding: "待完成下線",
+          exportVehicles: "匯出車輛",
+          exportDrivers: "匯出司機",
+          exportContracts: "匯出合約",
+          exportHint:
+            "匯出會建立受治理的 report job，只透過伺服器簽發的 artifact URL 下載。",
+          exportIdle: "尚未建立受治理 artifact。",
+          exportPending: "正在準備受治理匯出…",
+          exportReady: "最新 artifact 已就緒",
+          exportOpen: "開啟簽名下載",
+          warningTitle: "即時警示",
+        };
+
+  const requestFleetReport = useCallback(
+    async (jobType: FleetReportJobType) => {
+      setReportActionId(jobType);
+      setError(null);
+      try {
+        const accepted = await client.createReportJob({
+          jobType,
+          format: "xlsx",
+        });
+        let detail: ReportJobDetailRecord | null = null;
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          detail = await client.getReportJob(accepted.jobId);
+          if (detail.artifact?.downloadMetadata.downloadUrl) {
+            break;
+          }
+          await sleep(150);
+        }
+        if (!detail) {
+          throw new Error("Unable to load report job detail.");
+        }
+        setReportJobs((current) => ({
+          ...current,
+          [jobType]: detail,
+        }));
+        if (detail.artifact?.downloadMetadata.downloadUrl) {
+          window.open(
+            detail.artifact.downloadMetadata.downloadUrl,
+            "_blank",
+            "noopener,noreferrer",
+          );
+        }
+      } catch (e: any) {
+        setError(e?.message || String(e));
+      } finally {
+        setReportActionId(null);
+      }
+    },
+    [client],
+  );
 
   useEffect(() => {
     if (!selectedVehicle) {
@@ -343,60 +507,242 @@ export default function FleetPage() {
     [client, loadData, offboardingForm],
   );
 
-  if (loading) return <div className="admin-empty">{t("fleet.loading")}</div>;
+  if (loading) {
+    return <div style={emptyStateStyle}>{t("fleet.loading")}</div>;
+  }
 
   return (
-    <div>
-      <div className="admin-page-header">
-        <h1>{t("fleet.title")}</h1>
-        <p>
-          {t("fleet.subtitle", {
-            vehicles: vehicles.length,
-            drivers: drivers.length,
-            contracts: contracts.length,
-          })}
-        </p>
-      </div>
+    <div style={{ display: "grid", gap: 16 }}>
+      <PageHeader
+        eyebrow={locale === "en" ? "Fleet Governance" : "車隊治理"}
+        title={t("fleet.title")}
+        subtitle={t("fleet.subtitle", {
+          vehicles: vehicles.length,
+          drivers: drivers.length,
+          contracts: contracts.length,
+        })}
+        actions={
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {(
+              [
+                ["vehicle_roster", fleetWorkflowCopy.exportVehicles],
+                ["driver_roster", fleetWorkflowCopy.exportDrivers],
+                ["contract_roster", fleetWorkflowCopy.exportContracts],
+              ] as const
+            ).map(([jobType, label]) => (
+              <button
+                key={jobType}
+                type="button"
+                style={actionButtonStyle({ tone: "secondary" })}
+                disabled={reportActionId === jobType}
+                onClick={() => void requestFleetReport(jobType)}
+              >
+                {reportActionId === jobType
+                  ? fleetWorkflowCopy.exportPending
+                  : label}
+              </button>
+            ))}
+            <button
+              type="button"
+              style={actionButtonStyle({ tone: "secondary" })}
+              onClick={() => void loadData()}
+            >
+              {t("common.refresh")}
+            </button>
+          </div>
+        }
+      />
 
       {error && (
-        <div
-          className="admin-card"
-          style={{ borderColor: "rgba(239,68,68,0.3)" }}
-        >
-          <p style={{ color: "#dc2626", margin: 0 }}>
-            {getPlatformLabel(locale, "error")}: {error}
-          </p>
-        </div>
+        <CalloutBanner
+          tone="danger"
+          title={getPlatformLabel(locale, "error")}
+          description={error}
+        />
       )}
 
-      <div className="admin-toolbar">
-        <div className="admin-toggle-group">
-          <button
-            className={`admin-toggle-btn ${activeTab === "vehicles" ? "active" : ""}`}
-            onClick={() => setActiveTab("vehicles")}
-          >
-            {t("fleet.tab.vehicles")} ({vehicles.length})
-          </button>
-          <button
-            className={`admin-toggle-btn ${activeTab === "drivers" ? "active" : ""}`}
-            onClick={() => setActiveTab("drivers")}
-          >
-            {t("fleet.tab.drivers")} ({drivers.length})
-          </button>
-          <button
-            className={`admin-toggle-btn ${activeTab === "contracts" ? "active" : ""}`}
-            onClick={() => setActiveTab("contracts")}
-          >
-            {t("fleet.tab.contracts")} ({contracts.length})
-          </button>
+      <CalloutBanner
+        tone="warning"
+        eyebrow={fleetWorkflowCopy.summaryTitle}
+        title={
+          locale === "en"
+            ? "Drivers, vehicles, contracts, and offboarding blockers stay visible in one governance lane."
+            : "司機、車輛、合約與下線阻塞集中在同一條治理路徑。"
+        }
+        description={fleetWorkflowCopy.summaryNote}
+        meta={
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <StatusChip
+              tone="warning"
+              label={`${fleetWorkflowCopy.blockedVehicles} · ${
+                vehicles.filter(
+                  (vehicle) =>
+                    !vehicle.dispatchableFlag ||
+                    vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
+                ).length
+              }`}
+            />
+            <StatusChip
+              tone="danger"
+              label={`${fleetWorkflowCopy.pendingOffboarding} · ${pendingOffboardingVehicles.length}`}
+            />
+            <StatusChip
+              tone="info"
+              label={`${fleetWorkflowCopy.pendingExclusivity} · ${
+                vehicles.filter(
+                  (vehicle) =>
+                    vehicle.supplyLifecycle.exclusivity.reviewStatus ===
+                    "pending",
+                ).length
+              }`}
+            />
+          </div>
+        }
+      />
+
+      <KpiRow minWidth="220px">
+        {[
+          {
+            label: fleetWorkflowCopy.blockedVehicles,
+            value: vehicles.filter(
+              (vehicle) =>
+                !vehicle.dispatchableFlag ||
+                vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
+            ).length,
+          },
+          {
+            label: fleetWorkflowCopy.blockedDrivers,
+            value: drivers.filter(
+              (driver) =>
+                !driver.dispatchEligible ||
+                driver.eligibilityBlockedReasons.length > 0,
+            ).length,
+          },
+          {
+            label: fleetWorkflowCopy.pendingExclusivity,
+            value: vehicles.filter(
+              (vehicle) =>
+                vehicle.supplyLifecycle.exclusivity.reviewStatus === "pending",
+            ).length,
+          },
+          {
+            label: fleetWorkflowCopy.pendingOffboarding,
+            value: pendingOffboardingVehicles.length,
+          },
+        ].map((card) => (
+          <KpiCard
+            key={card.label}
+            label={card.label}
+            value={card.value}
+            tone={
+              card.label === fleetWorkflowCopy.pendingExclusivity
+                ? "info"
+                : card.label === fleetWorkflowCopy.pendingOffboarding
+                  ? "danger"
+                  : "warning"
+            }
+          />
+        ))}
+      </KpiRow>
+
+      {complianceWarnings.length > 0 && (
+        <CalloutBanner
+          tone="warning"
+          title={fleetWorkflowCopy.warningTitle}
+          description={
+            <div style={{ display: "grid", gap: 6 }}>
+              {complianceWarnings.map((warning) => (
+                <div key={warning.id} style={{ fontSize: 13 }}>
+                  {warning.message}
+                </div>
+              ))}
+            </div>
+          }
+        />
+      )}
+
+      <DataViewCard
+        title={locale === "en" ? "Operational focus" : "操作焦點"}
+        subtitle={fleetWorkflowCopy.exportHint}
+        filters={
+          <div style={toggleGroupStyle}>
+            <button
+              type="button"
+              style={toggleButtonStyle(activeTab === "vehicles")}
+              onClick={() => setActiveTab("vehicles")}
+            >
+              {t("fleet.tab.vehicles")} ({vehicles.length})
+            </button>
+            <button
+              type="button"
+              style={toggleButtonStyle(activeTab === "drivers")}
+              onClick={() => setActiveTab("drivers")}
+            >
+              {t("fleet.tab.drivers")} ({drivers.length})
+            </button>
+            <button
+              type="button"
+              style={toggleButtonStyle(activeTab === "contracts")}
+              onClick={() => setActiveTab("contracts")}
+            >
+              {t("fleet.tab.contracts")} ({contracts.length})
+            </button>
+          </div>
+        }
+      >
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: 12,
+          }}
+        >
+          {(
+            [
+              ["vehicle_roster", fleetWorkflowCopy.exportVehicles],
+              ["driver_roster", fleetWorkflowCopy.exportDrivers],
+              ["contract_roster", fleetWorkflowCopy.exportContracts],
+            ] as const
+          ).map(([jobType, label]) => {
+            const reportJob = reportJobs[jobType];
+            return (
+              <div
+                key={`${jobType}:artifact`}
+                style={{
+                  border: "1px solid rgba(148,163,184,0.35)",
+                  borderRadius: 14,
+                  padding: 12,
+                  background: "rgba(255,255,255,0.78)",
+                  display: "grid",
+                  gap: 8,
+                }}
+              >
+                <p style={{ margin: 0, fontWeight: 600 }}>{label}</p>
+                <p style={{ margin: 0, fontSize: 13, color: "#6b7280" }}>
+                  {reportJob?.artifact
+                    ? `${fleetWorkflowCopy.exportReady} · ${formatDateTime(reportJob.artifact.expiresAt)}`
+                    : reportActionId === jobType
+                      ? fleetWorkflowCopy.exportPending
+                      : fleetWorkflowCopy.exportIdle}
+                </p>
+                {reportJob?.artifact ? (
+                  <a
+                    href={reportJob.artifact.downloadMetadata.downloadUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                    style={actionButtonStyle({ tone: "secondary" })}
+                  >
+                    {fleetWorkflowCopy.exportOpen}
+                  </a>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
-        <button className="admin-btn admin-btn--secondary" onClick={loadData}>
-          {t("common.refresh")}
-        </button>
-      </div>
+      </DataViewCard>
 
       {activeTab === "drivers" && (
-        <div className="admin-card" style={{ marginBottom: 16 }}>
+        <div className="platform-ui-card" style={{ marginBottom: 16 }}>
           <form
             onSubmit={submitDriver}
             style={{
@@ -407,9 +753,9 @@ export default function FleetPage() {
             }}
           >
             <label>
-              <div className="admin-field-label">{t("fleet.col.name")}</div>
+              <div style={fieldLabelStyle}>{t("fleet.col.name")}</div>
               <input
-                className="admin-input"
+                style={inputStyle}
                 value={driverForm.name}
                 onChange={(event) =>
                   setDriverForm((current) => ({
@@ -421,9 +767,9 @@ export default function FleetPage() {
               />
             </label>
             <label>
-              <div className="admin-field-label">{t("fleet.form.phone")}</div>
+              <div style={fieldLabelStyle}>{t("fleet.form.phone")}</div>
               <input
-                className="admin-input"
+                style={inputStyle}
                 value={driverForm.phone ?? ""}
                 onChange={(event) =>
                   setDriverForm((current) => ({
@@ -434,9 +780,9 @@ export default function FleetPage() {
               />
             </label>
             <label>
-              <div className="admin-field-label">{t("fleet.form.email")}</div>
+              <div style={fieldLabelStyle}>{t("fleet.form.email")}</div>
               <input
-                className="admin-input"
+                style={inputStyle}
                 value={driverForm.email ?? ""}
                 onChange={(event) =>
                   setDriverForm((current) => ({
@@ -467,7 +813,7 @@ export default function FleetPage() {
               <span>{t("fleet.form.licensesValid")}</span>
             </label>
             <button
-              className="admin-btn"
+              className="platform-ui-btn"
               type="submit"
               disabled={creatingDriver}
             >
@@ -479,13 +825,13 @@ export default function FleetPage() {
         </div>
       )}
 
-      <div className="admin-card" style={{ overflowX: "auto" }}>
+      <div className="platform-ui-card" style={{ overflowX: "auto" }}>
         {activeTab === "vehicles" &&
           (vehicles.length === 0 ? (
-            <p className="admin-empty">{t("fleet.noVehicles")}</p>
+            <p className="platform-ui-empty">{t("fleet.noVehicles")}</p>
           ) : (
             <>
-              <table className="admin-table">
+              <table className="platform-ui-table">
                 <thead>
                   <tr>
                     <th>{t("fleet.col.vehicleId")}</th>
@@ -519,10 +865,10 @@ export default function FleetPage() {
                       <td>{v.plateNo || "—"}</td>
                       <td>
                         <span
-                          className={`admin-badge ${
+                          className={`platform-ui-badge ${
                             v.dispatchableFlag
-                              ? "admin-badge--success"
-                              : "admin-badge--neutral"
+                              ? "platform-ui-badge--success"
+                              : "platform-ui-badge--neutral"
                           }`}
                         >
                           {v.dispatchableFlag
@@ -533,7 +879,7 @@ export default function FleetPage() {
                       <td>{v.operatingArea || "—"}</td>
                       <td>
                         <span
-                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.contract.lifecycleStatus)}`}
+                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.contract.lifecycleStatus)}`}
                         >
                           {formatPlatformCodeLabel(
                             locale,
@@ -543,7 +889,7 @@ export default function FleetPage() {
                       </td>
                       <td>
                         <span
-                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.insurance.lifecycleStatus)}`}
+                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.insurance.lifecycleStatus)}`}
                         >
                           {formatPlatformCodeLabel(
                             locale,
@@ -553,7 +899,7 @@ export default function FleetPage() {
                       </td>
                       <td>
                         <span
-                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.exclusivity.lifecycleStatus)}`}
+                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.exclusivity.lifecycleStatus)}`}
                         >
                           {formatPlatformCodeLabel(
                             locale,
@@ -563,7 +909,7 @@ export default function FleetPage() {
                       </td>
                       <td>
                         <span
-                          className={`admin-badge ${badgeClassForLifecycle(v.supplyLifecycle.offboarding.status)}`}
+                          className={`platform-ui-badge ${badgeClassForLifecycle(v.supplyLifecycle.offboarding.status)}`}
                         >
                           {formatPlatformCodeLabel(
                             locale,
@@ -582,7 +928,7 @@ export default function FleetPage() {
                             ),
                           )
                         ) : (
-                          <span className="admin-badge admin-badge--success">
+                          <span className="platform-ui-badge platform-ui-badge--success">
                             {t("fleet.noneBlocked")}
                           </span>
                         )}
@@ -591,12 +937,7 @@ export default function FleetPage() {
                         {v.supplyLifecycle.lastTrace ? (
                           <div>
                             <div>{v.supplyLifecycle.lastTrace.message}</div>
-                            <div
-                              style={{
-                                color: "var(--admin-text-muted)",
-                                fontSize: 12,
-                              }}
-                            >
+                            <div style={textMutedStyle}>
                               {formatDateTime(
                                 v.supplyLifecycle.lastTrace.occurredAt,
                               )}
@@ -620,7 +961,7 @@ export default function FleetPage() {
                     gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
                   }}
                 >
-                  <div className="admin-card">
+                  <div className="platform-ui-card">
                     <h3 style={{ marginTop: 0 }}>
                       {t("fleet.detail.dispatch")}
                     </h3>
@@ -633,7 +974,7 @@ export default function FleetPage() {
                         (reason) => (
                           <span
                             key={reason}
-                            className="admin-badge admin-badge--warning"
+                            className="platform-ui-badge platform-ui-badge--warning"
                           >
                             {formatPlatformCodeLabel(locale, reason)}
                           </span>
@@ -641,7 +982,7 @@ export default function FleetPage() {
                       )}
                       {selectedVehicle.supplyLifecycle.dispatch.blockedReasons
                         .length === 0 && (
-                        <span className="admin-badge admin-badge--success">
+                        <span className="platform-ui-badge platform-ui-badge--success">
                           {t("fleet.noneBlocked")}
                         </span>
                       )}
@@ -655,7 +996,7 @@ export default function FleetPage() {
                       }}
                     >
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -675,7 +1016,7 @@ export default function FleetPage() {
                           : t("fleet.markDispatchable")}
                       </button>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -697,7 +1038,7 @@ export default function FleetPage() {
                     </div>
                   </div>
 
-                  <div className="admin-card">
+                  <div className="platform-ui-card">
                     <h3 style={{ marginTop: 0 }}>
                       {t("fleet.detail.insurance")}
                     </h3>
@@ -713,7 +1054,7 @@ export default function FleetPage() {
                         : "—"}
                     </p>
                     <span
-                      className={`admin-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.insurance.lifecycleStatus)}`}
+                      className={`platform-ui-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.insurance.lifecycleStatus)}`}
                     >
                       {formatPlatformCodeLabel(
                         locale,
@@ -723,7 +1064,7 @@ export default function FleetPage() {
                     </span>
                   </div>
 
-                  <div className="admin-card">
+                  <div className="platform-ui-card">
                     <h3 style={{ marginTop: 0 }}>
                       {t("fleet.detail.exclusivity")}
                     </h3>
@@ -735,11 +1076,11 @@ export default function FleetPage() {
                       }}
                     >
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.provider")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           value={exclusivityForm.exclusiveProviderName ?? ""}
                           onChange={(event) =>
                             setExclusivityForm((current) => ({
@@ -750,11 +1091,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.declarationFile")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           value={exclusivityForm.declarationFileId ?? ""}
                           onChange={(event) =>
                             setExclusivityForm((current) => ({
@@ -765,11 +1106,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.effectiveStart")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           placeholder="2026-12-31T00:00:00.000Z"
                           value={exclusivityForm.effectiveStart ?? ""}
                           onChange={(event) =>
@@ -781,11 +1122,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.effectiveEnd")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           placeholder="2026-12-31T23:59:59.000Z"
                           value={exclusivityForm.effectiveEnd ?? ""}
                           onChange={(event) =>
@@ -799,7 +1140,7 @@ export default function FleetPage() {
                     </div>
                     <div style={{ marginTop: 12, marginBottom: 12 }}>
                       <span
-                        className={`admin-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.exclusivity.lifecycleStatus)}`}
+                        className={`platform-ui-badge ${badgeClassForLifecycle(selectedVehicle.supplyLifecycle.exclusivity.lifecycleStatus)}`}
                       >
                         {formatPlatformCodeLabel(
                           locale,
@@ -807,12 +1148,7 @@ export default function FleetPage() {
                             .lifecycleStatus,
                         )}
                       </span>{" "}
-                      <span
-                        style={{
-                          color: "var(--admin-text-muted)",
-                          fontSize: 12,
-                        }}
-                      >
+                      <span style={textMutedStyle}>
                         {formatPlatformCodeLabel(
                           locale,
                           selectedVehicle.supplyLifecycle.exclusivity
@@ -822,7 +1158,7 @@ export default function FleetPage() {
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -838,7 +1174,7 @@ export default function FleetPage() {
                           : t("fleet.submitExclusivity")}
                       </button>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -854,7 +1190,7 @@ export default function FleetPage() {
                           : t("fleet.approveExclusivity")}
                       </button>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -872,7 +1208,7 @@ export default function FleetPage() {
                     </div>
                   </div>
 
-                  <div className="admin-card">
+                  <div className="platform-ui-card">
                     <h3 style={{ marginTop: 0 }}>
                       {t("fleet.detail.offboarding")}
                     </h3>
@@ -884,11 +1220,11 @@ export default function FleetPage() {
                       }}
                     >
                       <label style={{ gridColumn: "1 / -1" }}>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.offboardingReason")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           value={offboardingForm.reason}
                           onChange={(event) =>
                             setOffboardingForm((current) => ({
@@ -899,11 +1235,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.requestedBy")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           value={offboardingForm.requestedBy ?? ""}
                           onChange={(event) =>
                             setOffboardingForm((current) => ({
@@ -914,11 +1250,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.debrandingTicket")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           value={offboardingForm.debrandingTicketId ?? ""}
                           onChange={(event) =>
                             setOffboardingForm((current) => ({
@@ -929,11 +1265,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.effectiveStart")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           placeholder="2026-12-31T00:00:00.000Z"
                           value={offboardingForm.effectiveAt ?? ""}
                           onChange={(event) =>
@@ -945,11 +1281,11 @@ export default function FleetPage() {
                         />
                       </label>
                       <label>
-                        <div className="admin-field-label">
+                        <div style={fieldLabelStyle}>
                           {t("fleet.form.debrandingDueAt")}
                         </div>
                         <input
-                          className="admin-input"
+                          style={inputStyle}
                           placeholder="2026-12-31T23:59:59.000Z"
                           value={offboardingForm.debrandingDueAt ?? ""}
                           onChange={(event) =>
@@ -983,10 +1319,9 @@ export default function FleetPage() {
                     </div>
                     <p
                       style={{
+                        ...textMutedStyle,
                         marginTop: 12,
                         marginBottom: 12,
-                        color: "var(--admin-text-muted)",
-                        fontSize: 12,
                       }}
                     >
                       {t("fleet.detail.debrandingStatus")}:{" "}
@@ -998,7 +1333,7 @@ export default function FleetPage() {
                     </p>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -1014,7 +1349,7 @@ export default function FleetPage() {
                           : t("fleet.startOffboarding")}
                       </button>
                       <button
-                        className="admin-btn admin-btn--secondary"
+                        className="platform-ui-btn platform-ui-btn--secondary"
                         type="button"
                         disabled={
                           vehicleActionId ===
@@ -1040,9 +1375,9 @@ export default function FleetPage() {
 
         {activeTab === "drivers" &&
           (drivers.length === 0 ? (
-            <p className="admin-empty">{t("fleet.noDrivers")}</p>
+            <p className="platform-ui-empty">{t("fleet.noDrivers")}</p>
           ) : (
-            <table className="admin-table">
+            <table className="platform-ui-table">
               <thead>
                 <tr>
                   <th>{t("fleet.col.driverId")}</th>
@@ -1064,12 +1399,7 @@ export default function FleetPage() {
                     </td>
                     <td>
                       <div>{d.name || "—"}</div>
-                      <div
-                        style={{
-                          color: "var(--admin-text-muted)",
-                          fontSize: 12,
-                        }}
-                      >
+                      <div style={textMutedStyle}>
                         {d.dispatchEligible
                           ? t("fleet.driverDispatchEligible")
                           : t("fleet.driverNotEligible")}
@@ -1077,17 +1407,17 @@ export default function FleetPage() {
                     </td>
                     <td>
                       <span
-                        className={`admin-badge ${badgeClassForLifecycle(d.lifecycleStatus)}`}
+                        className={`platform-ui-badge ${badgeClassForLifecycle(d.lifecycleStatus)}`}
                       >
                         {formatPlatformCodeLabel(locale, d.lifecycleStatus)}
                       </span>
                     </td>
                     <td>
                       <span
-                        className={`admin-badge ${
+                        className={`platform-ui-badge ${
                           d.workState === "available"
-                            ? "admin-badge--success"
-                            : "admin-badge--neutral"
+                            ? "platform-ui-badge--success"
+                            : "platform-ui-badge--neutral"
                         }`}
                       >
                         {formatPlatformCodeLabel(locale, d.workState)}
@@ -1095,10 +1425,10 @@ export default function FleetPage() {
                     </td>
                     <td>
                       <span
-                        className={`admin-badge ${
+                        className={`platform-ui-badge ${
                           d.licensesValid
-                            ? "admin-badge--success"
-                            : "admin-badge--warning"
+                            ? "platform-ui-badge--success"
+                            : "platform-ui-badge--warning"
                         }`}
                       >
                         {d.licensesValid
@@ -1112,12 +1442,7 @@ export default function FleetPage() {
                           ? t("fleet.profileReady")
                           : t("fleet.profileMissing")}
                       </div>
-                      <div
-                        style={{
-                          color: "var(--admin-text-muted)",
-                          fontSize: 12,
-                        }}
-                      >
+                      <div style={textMutedStyle}>
                         {formatDateTime(d.profileUpdatedAt || "")}
                       </div>
                     </td>
@@ -1133,12 +1458,7 @@ export default function FleetPage() {
                             >
                               {binding.deviceId}
                             </div>
-                            <div
-                              style={{
-                                color: "var(--admin-text-muted)",
-                                fontSize: 12,
-                              }}
-                            >
+                            <div style={textMutedStyle}>
                               {binding.deviceLabel || binding.status}
                             </div>
                             <div
@@ -1150,7 +1470,7 @@ export default function FleetPage() {
                               }}
                             >
                               <button
-                                className="admin-btn admin-btn--secondary"
+                                className="platform-ui-btn platform-ui-btn--secondary"
                                 disabled={
                                   binding.status === "revoked" ||
                                   bindingActionId === binding.bindingId
@@ -1164,12 +1484,7 @@ export default function FleetPage() {
                                   ? t("fleet.revokingDevice")
                                   : t("fleet.revokeDevice")}
                               </button>
-                              <span
-                                style={{
-                                  color: "var(--admin-text-muted)",
-                                  fontSize: 12,
-                                }}
-                              >
+                              <span style={textMutedStyle}>
                                 {binding.status === "revoked"
                                   ? t("fleet.deviceRevoked")
                                   : t("fleet.deviceRebindHint")}
@@ -1189,7 +1504,7 @@ export default function FleetPage() {
                           </div>
                         ))
                       ) : (
-                        <span className="admin-badge admin-badge--success">
+                        <span className="platform-ui-badge platform-ui-badge--success">
                           {t("fleet.noneBlocked")}
                         </span>
                       )}
@@ -1211,7 +1526,7 @@ export default function FleetPage() {
                             return (
                               <button
                                 key={nextStatus}
-                                className="admin-btn admin-btn--secondary"
+                                className="platform-ui-btn platform-ui-btn--secondary"
                                 disabled={
                                   busy || d.lifecycleStatus === nextStatus
                                 }
@@ -1237,9 +1552,9 @@ export default function FleetPage() {
 
         {activeTab === "contracts" &&
           (contracts.length === 0 ? (
-            <p className="admin-empty">{t("fleet.noContracts")}</p>
+            <p className="platform-ui-empty">{t("fleet.noContracts")}</p>
           ) : (
-            <table className="admin-table">
+            <table className="platform-ui-table">
               <thead>
                 <tr>
                   <th>{t("fleet.col.contractId")}</th>
@@ -1266,10 +1581,10 @@ export default function FleetPage() {
                     </td>
                     <td>
                       <span
-                        className={`admin-badge ${
+                        className={`platform-ui-badge ${
                           c.lifecycleStatus === "active"
-                            ? "admin-badge--success"
-                            : "admin-badge--warning"
+                            ? "platform-ui-badge--success"
+                            : "platform-ui-badge--warning"
                         }`}
                       >
                         {formatPlatformCodeLabel(locale, c.lifecycleStatus)}
