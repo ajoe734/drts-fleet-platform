@@ -22,6 +22,29 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+class CommandActivityLogSummaryTests(unittest.TestCase):
+    def test_summarizes_codex_exec_prompt_without_logging_full_prompt(self) -> None:
+        prompt = "read a very large task packet\n" + ("x" * 1000)
+        summary = supervisor.summarize_command_for_activity_log(
+            ["codex", "exec", "--model", "gpt-5.2", prompt]
+        )
+
+        self.assertEqual(summary["argv0"], "codex")
+        self.assertEqual(summary["prompt_chars"], len(prompt))
+        self.assertIn("prompt_sha256", summary)
+        self.assertNotIn(prompt, summary["args_preview"])
+        self.assertLessEqual(len(summary["prompt_preview"]), 243)
+
+    def test_summarizes_flag_prompt_without_logging_argument_value(self) -> None:
+        prompt = "dispatch worker context"
+        summary = supervisor.summarize_command_for_activity_log(
+            ["agent", "run", "--prompt", prompt, "--other", "value"]
+        )
+
+        self.assertEqual(summary["args_preview"], ["agent", "run", "--other", "value"])
+        self.assertEqual(summary["prompt_chars"], len(prompt))
+
+
 class DetectWorkerFailureTests(unittest.TestCase):
     def _worker_for_log(self, content: str) -> dict[str, str]:
         handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
