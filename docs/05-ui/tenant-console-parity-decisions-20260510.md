@@ -375,6 +375,27 @@ Branch note: `f0e8265` ships on a dedicated closeout branch
 with `git fetch origin codex2/ten-ui-rd-014-closeout` followed by a scoped
 `git diff` against the route artifacts.
 
+### 2026-05-18 unblock reconciliation
+
+The original 2026-05-10 blocker is no longer the right routing decision.
+`TEN-UI-RD-014` should not be sent back to `discussion_planning` for a missing
+product/contract choice because that choice was resolved by the accepted tenant
+governance contract wave:
+
+- `BE-RULE-001` published the tenant approval-rule list/read/mutation surface.
+- `BE-QUOTA-001` published the tenant quota policy, usage, and quota-aware
+  condition vocabulary that `TN_Rules` depends on.
+- `BE-APR-001` published the approval-evaluation and approval-request surfaces
+  consumed by the route.
+
+Supervisor routing implication:
+
+1. Treat the planning blocker as resolved.
+2. Route the parent task back into execution closeout on the shipped branch
+   `origin/codex2/ten-ui-rd-014-closeout` at commit `f0e8265`.
+3. Update machine truth so `TEN-UI-RD-014.next` points at the shipped branch /
+   commit evidence instead of the old "missing contract" message.
+
 ### Why this was blocked
 
 The published tenant/backend surface does not expose the rule, approver, or
