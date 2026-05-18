@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import signal
 import subprocess
 import tempfile
 import unittest
@@ -1791,6 +1792,121 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
         )
 
         self.assertEqual(lag, 12.0)
+
+    def test_mark_supervisor_stopped_clears_pid_workers_and_chair_review(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            state_path = root / "state.json"
+            event_queue_path = root / "event-queue.jsonl"
+            activity_log_path = root / "activity-log.jsonl"
+            status_path = root / "ai-status.json"
+            approval_path = root / "approval-queue.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "queue": {
+                            "events": {
+                                "evt-worker": {"status": "started", "run_id": "run-worker"},
+                                "evt-chair": {"status": "started", "run_id": "run-chair"},
+                            }
+                        },
+                        "workers": {
+                            "run-worker": {
+                                "run_id": "run-worker",
+                                "status": "running",
+                                "pid": 4242,
+                                "queue_event_id": "evt-worker",
+                                "task_id": "TASK-1",
+                                "provider": "codex",
+                                "request_snapshot": {
+                                    "reason": "owned_in_progress_dispatch",
+                                    "metadata": {"mode": "execution"},
+                                },
+                            },
+                        },
+                        "chair_review": {
+                            "active_review": {
+                                "agent": "Gemini2",
+                                "agent_id": "gemini2",
+                                "reason": "provider_health_triage",
+                                "queue_event_id": "evt-chair",
+                            }
+                        },
+                        "supervisor": {
+                            "pid": 4241,
+                            "focus_mode": "execution",
+                            "mode_status": "active",
+                            "lifecycle": "running",
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            event_queue_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"event_id": "evt-worker"}),
+                        json.dumps({"event_id": "evt-chair"}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            activity_log_path.write_text("", encoding="utf-8")
+            status_path.write_text('{"tasks":[]}\n', encoding="utf-8")
+            approval_path.write_text('{"pending":[],"history":[]}\n', encoding="utf-8")
+            config = {
+                "paths": {
+                    "state_file": str(state_path),
+                    "event_queue": str(event_queue_path),
+                    "activity_log": str(activity_log_path),
+                    "status_file": str(status_path),
+                    "approval_queue": str(approval_path),
+                },
+                "ready_dispatcher": {
+                    "active_worker_statuses": ["running", "stalled", "waiting_approval", "manual_pending"]
+                },
+            }
+
+            with mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate:
+                changed = supervisor.mark_supervisor_stopped(
+                    config,
+                    reason="signal:SIGTERM",
+                    signum=15,
+                    terminate_workers=True,
+                )
+
+            self.assertTrue(changed)
+            terminate.assert_called_once_with(4242)
+            saved = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertIsNone(saved["supervisor"]["pid"])
+            self.assertEqual(saved["supervisor"]["last_pid"], 4241)
+            self.assertEqual(saved["supervisor"]["lifecycle"], "stopped")
+            self.assertEqual(saved["supervisor"]["mode_status"], "stopped")
+            self.assertEqual(saved["supervisor"]["stop_reason"], "signal:SIGTERM")
+            self.assertEqual(saved["workers"]["run-worker"]["status"], "interrupted")
+            self.assertIsNone(saved["workers"]["run-worker"]["pid"])
+            self.assertEqual(saved["workers"]["run-worker"]["stopped_pid"], 4242)
+            self.assertEqual(saved["queue"]["events"]["evt-worker"]["status"], "failed")
+            self.assertIn("Supervisor stopped", saved["queue"]["events"]["evt-worker"]["error"])
+            self.assertEqual(saved["queue"]["events"]["evt-chair"]["status"], "failed")
+            self.assertIsNone(saved["chair_review"]["active_review"])
+            self.assertEqual(saved["chair_review"]["interrupted_review"]["agent_id"], "gemini2")
+            self.assertEqual(saved["chair_review"]["interrupted_review"]["reason"], "provider_health_triage")
+            self.assertEqual(
+                saved["chair_review"]["interrupted_review"]["interruption_reason"],
+                "signal:SIGTERM",
+            )
+            self.assertEqual(saved["supervisor"]["mode_occupancy"]["execution"]["running"], 0)
+
+    def test_signal_handler_raises_controlled_shutdown(self) -> None:
+        with self.assertRaises(supervisor.SupervisorShutdown) as ctx:
+            supervisor.raise_supervisor_shutdown(signal.SIGTERM, None)
+
+        self.assertEqual(ctx.exception.signum, signal.SIGTERM)
+        self.assertEqual(ctx.exception.reason, "signal:SIGTERM")
 
     def test_run_once_re_stamps_current_pid_after_watch_reload(self) -> None:
         config = {
