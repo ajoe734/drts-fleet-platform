@@ -6,7 +6,7 @@ single deployable can serve any number of partner brands.
 
 ## Status
 
-This is the PBK-UI-001 bootstrap slice. Per
+This app now carries the PBK-UI-003 CTBC reference funnel baseline. Per
 `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`:
 
 - **Wave 5 — not deployed.** CI must build / lint / typecheck cleanly, but no
@@ -14,11 +14,11 @@ This is the PBK-UI-001 bootstrap slice. Per
 - Brand layering now resolves through
   `packages/ui-tokens/src/brands.ts` with shared CTBC / CATHAY / GRAND demo
   templates.
-- The CTBC reference funnel (7 screens) and authority-safe negative paths land
-  in **PBK-UI-003** and **PBK-UI-004**.
+- The CTBC reference funnel (7 screens) now lands in **PBK-UI-003**.
+- Authority-safe negative paths are implemented as direct gate routes in
+  **PBK-UI-004**.
 - The cutover policy between this app and the legacy
-  `tenant-console-web/app/partner/` route is recorded in
-  `docs/01-decisions/SD-DP-20260512-006-partner-booking-app-cutover-topology.md`.
+  `tenant-console-web/app/partner/` route is a **PBK-UI-005** decision doc.
 
 ## Routing rules (white-label invariant)
 
@@ -27,16 +27,14 @@ This is the PBK-UI-001 bootstrap slice. Per
   bring-up.
 - Every functional surface lives under `/[tenantSlug]/...`. The dynamic
   segment is required — there is no "default tenant" in this app.
-- Screen routes are explicit path states: `/[tenantSlug]/book`,
-  `/[tenantSlug]/confirmed`, `/[tenantSlug]/help`, etc. The tenant root still
-  accepts `?screen=` / `?scenario=` for backward-compatible demo entry, but
-  the canonical PBK-UI-004 negative-path states are direct routes.
-- Authority-safe negative paths are preserved as
-  `/[tenantSlug]/eligible`, `/[tenantSlug]/ineligible`,
-  `/[tenantSlug]/manual_review`, `/[tenantSlug]/inactive`, and
-  `/[tenantSlug]/eligibility-required`. These routes resolve to the correct
-  eligibility or booking gate instead of silently falling through to another
-  screen.
+- The PBK-UI-003 CTBC reference funnel is served as seven explicit Next.js
+  routes grouped under `app/[tenantSlug]/(public|authenticated)/...`:
+  `landing` (the tenant root), `eligibility`, and `help` sit in
+  `(public)/`; `book`, `confirmed`, `trips`, and `receipt` sit in
+  `(authenticated)/`. Each page renders the shared
+  `PartnerBookingReferenceFunnel` (`@drts/ui-web`) with a fixed
+  `activeScreen`, so the funnel navigator's hrefs map one-to-one onto
+  those routes.
 - `app/[tenantSlug]/layout.tsx` resolves the brand via `lib/brand.ts`. An
   unknown slug returns `notFound()` so we cannot accidentally render an
   unbranded experience.
@@ -63,7 +61,14 @@ task reorganizes the port map, update both `package.json` and the
 
 ## Storybook
 
-Storybook is wired centrally in `packages/ui-web` (see SBK-UI-001). Per
-`PBK-UI-003` acceptance, partner-booking surfaces will be rendered against
-the `partner-screens.jsx::PB_*` artboards once those screens land. PBK-UI-001
-itself does not ship Storybook stories.
+Storybook is wired centrally in `packages/ui-web` (see SBK-UI-001). The
+`Partner Booking/CTBC Funnel` stories compare the built white-label screens
+against the matching `Partner Booking.html#PB_*` artboard anchors:
+
+- `PB_Landing`
+- `PB_Eligibility`
+- `PB_Book`
+- `PB_Confirmed`
+- `PB_Trips`
+- `PB_Receipt`
+- `PB_Help`
