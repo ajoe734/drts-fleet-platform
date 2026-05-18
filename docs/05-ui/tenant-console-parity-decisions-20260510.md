@@ -1,5 +1,32 @@
 # Tenant Console Parity Decisions — 2026-05-10
 
+## 2026-05-18 Final Closeout Update
+
+The reopened parity-fill tasks are now fully closed out in canonical machine
+truth, and the Wave 3 tenant closeout packet has been superseded accordingly:
+
+- `TEN-UI-RD-010` (`TN_NewBooking`) is `done` with final closeout commit
+  `0232a1b` on `origin/codex2/ten-ui-rd-010`. Reviewer Codex posted the final
+  `review_approved` event at `2026-05-18T06:27:24Z`. Historical shipped
+  evidence still includes `6e0c9fd` on `origin/codex/be-cc-001-fu-seed`, but
+  the canonical `done` metadata now points at the task-scoped closeout branch.
+- `TEN-UI-RD-013` (`TN_CostCenter`) is `done` with final closeout commit
+  `edd8433` on `origin/codex2/ten-ui-rd-013`. Reviewer Codex approved the
+  final cost-center fix at `2026-05-18T07:25:29Z`. The earlier
+  `921c456` reopen shipment remains historical evidence only.
+- `TEN-UI-RD-014` (`TN_Rules`) is `done` with final closeout commit `e488b58`
+  on `origin/codex2/ten-ui-rd-014`. Reviewer Codex approved the final rules
+  route evidence at `2026-05-18T06:46:37Z`. The earlier `f0e8265` reopen
+  shipment remains historical evidence only.
+
+The canonical closeout packet for Wave 3 tenant-console surfaces is now:
+
+- [`docs/05-ui/tenant-console-redesign-closeout-20260518.md`](./tenant-console-redesign-closeout-20260518.md)
+
+The 2026-05-14 head note below remains as the historical record of the first
+reopen wave, but this 2026-05-18 note is the final status summary that aligns
+with canonical `ai-status.json` and `ai-activity-log.jsonl`.
+
 ## 2026-05-14 Wave 3 Closeout Update
 
 All three previously-blocked parity-fill tasks have reopened and shipped now
