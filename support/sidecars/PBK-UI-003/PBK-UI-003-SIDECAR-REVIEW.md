@@ -3,7 +3,7 @@
 This packet is a support artifact for `PBK-UI-003` only. It does not change
 canonical truth, runtime code, contracts, or the parent task state. Its job is
 to summarize the current machine-truth anchors and the candidate implementation
-evidence that the parent reviewer (`Codex`) needs, then hand that summary to
+evidence that the parent reviewer (`Codex2`) needs, then hand that summary to
 the sidecar reviewer (`Codex2`).
 
 This worktree is the isolated sidecar branch, not the parent implementation
@@ -46,7 +46,7 @@ Guardrails for this packet:
 - Treat the acceptance packet as the upstream scope/dependency reference; this
   review packet extends it with review evidence rather than replacing it.
 - Do not claim parent acceptance from this sidecar. Parent `PBK-UI-003` stays a
-  separate review decision owned by `Claude2` and reviewed by `Codex`.
+  separate review decision owned by `Claude2` and reviewed by `Codex2`.
 
 Control-plane note: the embedded dispatch brief claimed this sidecar for
 `Codex` at `2026-05-18T04:30:26Z`, but the isolated worktree did not contain a
@@ -55,26 +55,30 @@ now records the coherent active pair `owner=Codex`, `reviewer=Codex2`.
 
 ## 2. Machine-Truth Snapshot
 
+These fields were re-read from canonical machine truth during the owner refresh
+at `2026-05-18T05:51:04Z`, immediately before the re-handoff triggered by this
+packet update.
+
 ### Parent task: `PBK-UI-003`
 
 | Field | Value |
 | --- | --- |
 | Owner | `Claude2` |
-| Reviewer | `Codex` |
+| Reviewer | `Codex2` |
 | Status | `review` |
 | Depends on | `PBK-UI-002` |
 | Planning ref | `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md` |
-| Last update | `2026-05-18T04:16:21Z` |
-| Pending handoff | `Claude2 -> Codex` |
+| Last update | `2026-05-18T04:47:00Z` |
+| Pending handoff | `Claude2 -> Codex2` |
 
 Current canonical `next` summary for the parent:
 
-- re-handoff is at commit `89b5a96`
-- reviewer concern addressed by removing the redundant
-  `@drts/ui-web` path-map from `apps/partner-booking-web/tsconfig.json`
-- clean-install rerun claimed `CI=true pnpm install --frozen-lockfile PASS`
-- claimed reruns also include `partner-booking-web` `typecheck / build / lint /
-  test` and `ui-web` `typecheck / build-storybook`
+- chair review reassigned the parent reviewer from `Codex` to `Codex2`
+- rationale recorded in machine truth: keep owner/reviewer separation from
+  `Claude2` and move the review off the `Codex` lane after the `2/2` terminal
+  review loop
+- the implementation evidence under review still points at branch head
+  `89b5a96`
 
 ### Sidecar task: `PBK-UI-003-SIDECAR-REVIEW`
 
@@ -82,14 +86,16 @@ Current canonical `next` summary for the parent:
 | --- | --- |
 | Owner | `Codex` |
 | Reviewer | `Codex2` |
-| Status | `review` |
+| Status | `in_progress` |
 | Depends on | `PBK-UI-002` |
 | Helper kind | `review_packet` |
 | Mutates canonical | `false` |
-| Last update | `2026-05-18T04:40:58Z` |
+| Last update | `2026-05-18T05:51:04Z` |
 
-This sidecar currently exists only to deliver this packet. It should not be
-used to rewrite the parent row or to re-run parent lifecycle commands.
+This row reflects the owner refresh that re-opened the sidecar after detecting
+packet drift during closeout. After this refreshed packet is committed and
+pushed, the owner should hand it back to `Codex2` for review rather than using
+the sidecar to rewrite the parent row or re-run parent lifecycle commands.
 
 ### Direct dependency: `PBK-UI-002`
 
@@ -224,7 +230,7 @@ current review handoff is at `89b5a96`, not at `a9a634a`:
      directly to source
    - `89b5a96` removes that redundant path-map
 
-Current residual audit points for the parent reviewer (`Codex`):
+Current residual audit points for the parent reviewer (`Codex2`):
 
 - rerun the parent acceptance commands from a clean checkout if trust in the
   owner's `89b5a96` verification is still in question
@@ -238,10 +244,13 @@ packages the evidence and review history.
 ## 5. Sidecar Reviewer Checklist For `Codex2`
 
 - [ ] Re-read canonical `/home/edna/workspace/drts-fleet-platform/ai-status.json`
-  and confirm `PBK-UI-003` is still `owner=Claude2`, `reviewer=Codex`,
-  `status=review`, `last_update=2026-05-18T04:16:21Z`.
+  and confirm `PBK-UI-003` is still `owner=Claude2`, `reviewer=Codex2`,
+  `status=review`, `last_update=2026-05-18T04:47:00Z`, and branch-head review
+  evidence still points at `89b5a96`.
 - [ ] Confirm `PBK-UI-003-SIDECAR-REVIEW` is still `owner=Codex`,
-  `reviewer=Codex2`, `helper_kind=review_packet`, `mutates_canonical=false`.
+  `reviewer=Codex2`, `helper_kind=review_packet`,
+  `mutates_canonical=false`, and that the latest owner handoff references this
+  refreshed packet.
 - [ ] Confirm `PBK-UI-002` is still `done` at `d7046eb`.
 - [ ] Confirm branch `origin/claude2/pbk-ui-003` still contains commits
   `a3ca727`, `a9a634a`, `fae4de0`, and `89b5a96`.
