@@ -501,7 +501,7 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             root = Path(tmpdir) / "repo"
             root.mkdir()
             self._init_repo(root)
-            existing = Path(tmpdir) / "pbk-ui-003"
+            existing = root / ".artifacts/worktrees/auto/codex2-pbk-ui-003"
             _git(root, "worktree", "add", "-b", "codex2/pbk-ui-003", str(existing), "dev")
 
             request = supervisor.DeliveryRequest(
@@ -522,6 +522,34 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(branch, "codex2/pbk-ui-003")
             self.assertEqual(base_branch, "dev")
             self.assertEqual(source, "existing_worktree")
+
+    def test_does_not_reuse_unmanaged_worktree_for_task_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            unmanaged = Path(tmpdir) / "pbk-ui-003"
+            _git(root, "worktree", "add", "-b", "codex2/pbk-ui-003", str(unmanaged), "dev")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="PBK-UI-003",
+                metadata={"mode": "execution"},
+            )
+            workspace, branch, _base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("PBK-UI-003"),
+            )
+
+            self.assertEqual(branch, "codex2/pbk-ui-003")
+            self.assertEqual(source, "created_worktree")
+            self.assertNotEqual(workspace, unmanaged.resolve())
+            self.assertEqual(workspace, (root / ".artifacts/worktrees/auto/codex2-pbk-ui-003").resolve())
+            self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "codex2/pbk-ui-003")
 
     def test_creates_isolated_worktree_for_new_task_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
