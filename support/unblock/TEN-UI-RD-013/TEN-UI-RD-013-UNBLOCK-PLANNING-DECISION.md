@@ -1,9 +1,9 @@
 # TEN-UI-RD-013 Unblock Planning Decision
 
-Task: `TEN-UI-RD-013-UNBLOCK-PLANNING-DECISION`  
-Parent: `TEN-UI-RD-013`  
-Owner: `Codex`  
-Reviewer: `Claude2`  
+Task: `TEN-UI-RD-013-UNBLOCK-PLANNING-DECISION`
+Parent: `TEN-UI-RD-013`
+Owner: `Codex`
+Reviewer: `Codex2`
 Date: `2026-05-18`
 
 ## Decision
