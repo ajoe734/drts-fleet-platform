@@ -5089,6 +5089,9 @@ def dependency_ready_blocked_task_records(
             continue
         if not dependencies_satisfied(task, task_map, dependency_done_statuses):
             continue
+        action, helper_task_id = blocked_task_triage_action(status, task)
+        if action == "wait_for_unblock_task":
+            continue
         records.append(
             {
                 "task_id": task_id,
@@ -5096,6 +5099,8 @@ def dependency_ready_blocked_task_records(
                 "owner": str(task.get("owner") or "").strip(),
                 "reviewer": str(task.get("reviewer") or "").strip(),
                 "kind": blocked_task_triage_kind(task),
+                "action": action,
+                "helper_task_id": helper_task_id,
                 "next": brief_reason_text(task.get("next"), max_length=220),
             }
         )
@@ -5189,8 +5194,10 @@ def _chair_review_summary_lines(
 
     blocked_task_lines: list[str] = []
     for item in dependency_ready_blocked_task_records(config, status, include_sidecars=False):
+        action_label = str(item.get("action") or "-")
+        helper_label = str(item.get("helper_task_id") or "-")
         blocked_task_lines.append(
-            f"- {item.get('task_id')}: kind={item.get('kind')} owner={item.get('owner') or '-'} reviewer={item.get('reviewer') or '-'} next={item.get('next') or '-'}"
+            f"- {item.get('task_id')}: kind={item.get('kind')} action={action_label} helper={helper_label} owner={item.get('owner') or '-'} reviewer={item.get('reviewer') or '-'} next={item.get('next') or '-'}"
         )
     if not blocked_task_lines:
         blocked_task_lines.append("- none")
@@ -5264,7 +5271,8 @@ def build_chair_review_message(
         "  ],\n"
         '  "task_actions": [\n'
         '    {"task_id": "TASK-ID", "action": "dispatch_now", "reason": "why now"},\n'
-        '    {"task_id": "BLOCKED-TASK-ID", "action": "create_unblock_task", "unblock_kind": "history_repair", "target_agent": "Codex", "reviewer": "Codex2", "reason": "why this repair route"}\n'
+        '    {"task_id": "BLOCKED-TASK-ID", "action": "create_unblock_task", "unblock_kind": "history_repair", "target_agent": "Codex", "reviewer": "Codex2", "reason": "why this repair route"},\n'
+        '    {"task_id": "BLOCKED-PARENT-ID", "action": "resume_parent_task", "resume_status": "todo", "reason": "existing unblock child is done; owner can resume execution"}\n'
         "  ],\n"
         '  "provider_actions": [\n'
         '    {"agent": "AgentName", "action": "pause", "kind": "auth", "reason": "why"}\n'
@@ -5276,11 +5284,12 @@ def build_chair_review_message(
         "- reassignment_actions 必須使用 `role` 與 `reason`；不要用 `field` / `rationale`。\n"
         "- reviewer 改派只允許 `todo` / `in_progress` / `review` 狀態，用來維持 owner/reviewer 分離或處理 review 交接。\n"
         "- owner 改派只允許 `backlog` / `todo` / `in_progress` / `review_approved`；若是 `backlog` / `todo` / `in_progress`，代表重開成 `todo` 重新派工。\n"
-        "- `task_actions` 目前只允許 `dispatch_now` / `create_unblock_task`；不能繞過 dependency gate 或 commit gate。\n"
+        "- `task_actions` 目前只允許 `dispatch_now` / `create_unblock_task` / `resume_parent_task`；不能繞過 dependency gate 或 commit gate。\n"
         "- `dispatch_now` 只能對 machine truth 已符合派工條件的非 blocked 任務觸發。\n"
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
+        "- `resume_parent_task` 只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
-        "- 若 Chair review reason 是 `blocked_task_triage`，不可只評論；每個 listed blocked task 都要用 `create_unblock_task` 建修復/規劃工單，或在 blocked_by 明確寫出為什麼不能自動修。\n"
+        "- 若 Chair review reason 是 `blocked_task_triage`，不可只評論；每個 listed blocked task 都要依摘要建議採取 `create_unblock_task` 或 `resume_parent_task`，讓 machine truth 真正往前走。\n"
         "- `provider_actions` 目前只允許 `pause` / `clear_pause`，只針對 exact lane 生效；暫停原因必須具體；不要重複 pause 已在 Provider lane pauses 列出的 lane，除非你要改變其狀態。\n"
         "- 若 Chair review reason 是 `approval_triage`，Pending approvals 不可只評論；每一個 pending approval 都必須在 `approval_actions` 中明確 `allow` 或 `deny`，並寫具體 reason。\n"
         "- `approval_actions` 必須使用 `decision` 欄位，不要用 `action`；格式是 `{\"approval_id\":\"...\",\"decision\":\"allow|deny\",\"reason\":\"...\"}`。\n"
@@ -5602,8 +5611,8 @@ def validate_chair_review_payload(payload: Any) -> str | None:
     for action in payload.get("task_actions", []):
         if not isinstance(action, dict):
             return "task_actions items must be objects"
-        if action.get("action") not in {"dispatch_now", "create_unblock_task"}:
-            return "task_actions action must be dispatch_now or create_unblock_task"
+        if action.get("action") not in {"dispatch_now", "create_unblock_task", "resume_parent_task"}:
+            return "task_actions action must be dispatch_now, create_unblock_task, or resume_parent_task"
         required = ("task_id", "reason")
         if any(not isinstance(action.get(key), str) or not str(action.get(key)).strip() for key in required):
             return "task_actions require task_id/reason strings"
@@ -5619,6 +5628,12 @@ def validate_chair_review_payload(payload: Any) -> str | None:
             not isinstance(action.get("unblock_kind"), str) or not str(action.get("unblock_kind")).strip()
         ):
             return "task_actions unblock_kind must be a non-empty string when provided"
+        if "resume_status" in action and str(action.get("resume_status") or "").strip().lower() not in {
+            "backlog",
+            "todo",
+            "in_progress",
+        }:
+            return "task_actions resume_status must be backlog, todo, or in_progress when provided"
     for action in payload.get("provider_actions", []):
         if not isinstance(action, dict):
             return "provider_actions items must be objects"
@@ -5666,19 +5681,27 @@ def validate_chair_review_context(
             if missing:
                 return f"approval_triage must resolve pending approvals: {', '.join(missing[:6])}"
     if reason == "blocked_task_triage" and config is not None:
-        ready_blocked_ids = {
-            str(item.get("task_id") or "").strip()
-            for item in dependency_ready_blocked_task_records(config, status, include_sidecars=False)
-            if str(item.get("task_id") or "").strip()
-        }
-        if ready_blocked_ids:
-            action_ids = {
-                str(action.get("task_id") or "").strip()
-                for action in payload.get("task_actions", []) or []
-                if isinstance(action, dict) and action.get("action") == "create_unblock_task"
-            }
-            if not action_ids:
-                return "blocked_task_triage must create at least one unblock task"
+        ready_blocked = dependency_ready_blocked_task_records(config, status, include_sidecars=False)
+        if ready_blocked:
+            action_index: dict[str, set[str]] = {}
+            for action in payload.get("task_actions", []) or []:
+                if not isinstance(action, dict):
+                    continue
+                task_id = str(action.get("task_id") or "").strip()
+                action_name = str(action.get("action") or "").strip()
+                if not task_id or not action_name:
+                    continue
+                action_index.setdefault(task_id, set()).add(action_name)
+            missing: list[str] = []
+            for item in ready_blocked:
+                task_id = str(item.get("task_id") or "").strip()
+                expected_action = str(item.get("action") or "").strip()
+                if not task_id or not expected_action:
+                    continue
+                if expected_action not in action_index.get(task_id, set()):
+                    missing.append(f"{task_id}:{expected_action}")
+            if missing:
+                return "blocked_task_triage must resolve blocked tasks via " + ", ".join(missing[:6])
     return None
 
 
@@ -5939,6 +5962,30 @@ def chair_unblock_task_id(parent_task_id: str, unblock_kind: str) -> str:
     return f"{parent_task_id}-UNBLOCK-{slug}"
 
 
+def completed_unblock_task_for_parent(
+    status: dict[str, Any],
+    parent_task_id: str,
+    unblock_kind: str,
+) -> dict[str, Any] | None:
+    completed: list[dict[str, Any]] = []
+    for task in status.get("tasks", []) or []:
+        if not isinstance(task, dict):
+            continue
+        if str(task.get("helper_parent") or "") != parent_task_id:
+            continue
+        if str(task.get("task_class") or "").lower() != "unblock":
+            continue
+        if str(task.get("helper_kind") or "") != unblock_kind:
+            continue
+        if str(task.get("status") or "").lower() != "done":
+            continue
+        completed.append(task)
+    if not completed:
+        return None
+    completed.sort(key=lambda item: str(item.get("last_update") or ""))
+    return completed[-1]
+
+
 def open_unblock_task_for_parent(status: dict[str, Any], parent_task_id: str, unblock_kind: str) -> dict[str, Any] | None:
     for task in status.get("tasks", []) or []:
         if not isinstance(task, dict):
@@ -5953,6 +6000,23 @@ def open_unblock_task_for_parent(status: dict[str, Any], parent_task_id: str, un
             continue
         return task
     return None
+
+
+def blocked_task_triage_action(
+    status: dict[str, Any],
+    task: dict[str, Any],
+) -> tuple[str, str | None]:
+    task_id = str(task.get("id") or "").strip()
+    if not task_id:
+        return "create_unblock_task", None
+    unblock_kind = blocked_task_triage_kind(task)
+    completed_helper = completed_unblock_task_for_parent(status, task_id, unblock_kind)
+    if completed_helper is not None:
+        return "resume_parent_task", str(completed_helper.get("id") or "").strip() or None
+    open_helper = open_unblock_task_for_parent(status, task_id, unblock_kind)
+    if open_helper is not None:
+        return "wait_for_unblock_task", str(open_helper.get("id") or "").strip() or None
+    return "create_unblock_task", None
 
 
 def chair_unblock_agent(
@@ -6150,6 +6214,67 @@ def create_chair_unblock_task(
     return True
 
 
+def apply_chair_parent_resume_action(
+    config: dict[str, Any],
+    state: dict[str, Any],
+    action: dict[str, Any],
+) -> bool:
+    task_id = str(action.get("task_id") or "").strip()
+    chair_reason = str(action.get("reason") or "").strip()
+    if not task_id or not chair_reason:
+        return False
+
+    status_path = config_path(config, "status_file")
+    status = load_status(config)
+    task_map = task_index_from_status(config, status)
+    parent = task_map.get(task_id)
+    if parent is None or str(parent.get("status") or "").lower() != "blocked" or task_is_sidecar(parent):
+        return False
+
+    dependency_done_statuses = {
+        str(value).lower() for value in ready_dispatch_settings(config).get("dependency_done_statuses", ["done"])
+    }
+    if not dependencies_satisfied(parent, task_map, dependency_done_statuses):
+        return False
+
+    unblock_kind = blocked_task_triage_kind(parent)
+    completed_helper = completed_unblock_task_for_parent(status, task_id, unblock_kind)
+    if completed_helper is None:
+        return False
+
+    resume_status = str(action.get("resume_status") or "todo").strip().lower() or "todo"
+    if resume_status not in {"backlog", "todo", "in_progress"}:
+        return False
+
+    timestamp = utc_now()
+    helper_id = str(completed_helper.get("id") or "").strip()
+    parent["status"] = resume_status
+    parent["last_update"] = timestamp
+    parent["next"] = brief_reason_text(f"Chairman resumed after {helper_id}: {chair_reason}", max_length=280)
+    parent.pop("waiting_for", None)
+
+    for blocker in status.get("blockers", []) or []:
+        if blocker.get("task_id") == task_id and blocker.get("status") == "open":
+            blocker["status"] = "resolved"
+            blocker["resolved_at"] = timestamp
+
+    write_json(status_path, status)
+    if not sync_status_pipeline(config):
+        return False
+
+    write_activity_log(
+        config,
+        {
+            "type": "chair_parent_resume_applied",
+            "task_id": task_id,
+            "helper_task_id": helper_id,
+            "resume_status": resume_status,
+            "message": parent["next"],
+        },
+    )
+    return True
+
+
 def apply_chair_task_action(
     config: dict[str, Any],
     state: dict[str, Any],
@@ -6160,6 +6285,8 @@ def apply_chair_task_action(
     action_name = str(action.get("action") or "").strip()
     chair_reason = str(action.get("reason") or "").strip()
     requested_target = str(action.get("target_agent") or "").strip()
+    if action_name == "resume_parent_task":
+        return apply_chair_parent_resume_action(config, state, action)
     if action_name == "create_unblock_task":
         return create_chair_unblock_task(config, state, action, provider_report)
     if not task_id or action_name != "dispatch_now" or not chair_reason:

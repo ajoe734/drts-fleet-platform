@@ -4129,7 +4129,7 @@ class ChairmanFlowTests(unittest.TestCase):
                 config={"paths": {}},
                 status=status,
             ),
-            "blocked_task_triage must create at least one unblock task",
+            "blocked_task_triage must resolve blocked tasks via TEN-UI-RD-010:create_unblock_task",
         )
         payload["task_actions"] = [
             {
@@ -4137,6 +4137,73 @@ class ChairmanFlowTests(unittest.TestCase):
                 "action": "create_unblock_task",
                 "unblock_kind": "planning_decision",
                 "reason": "Missing tenant approval-rule contract needs planning.",
+            }
+        ]
+        self.assertIsNone(supervisor.validate_chair_review_payload(payload))
+        self.assertIsNone(
+            supervisor.validate_chair_review_context(
+                payload,
+                reason="blocked_task_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            )
+        )
+
+    def test_blocked_task_triage_requires_parent_resume_when_unblock_child_is_done(self) -> None:
+        payload = {
+            "version": 1,
+            "decision": "operational_review",
+            "sidecar_approved": False,
+            "approval_ttl_minutes": 45,
+            "max_sidecars": 2,
+            "reason": "blocked parent should resume after existing unblock child",
+            "blocked_by": [],
+            "blocked_sidecar_parents": [],
+            "approval_actions": [],
+            "reassignment_actions": [],
+            "task_actions": [],
+            "provider_actions": [],
+            "recommended_focus": [],
+        }
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "ADM-UI-RD-006",
+                    "status": "blocked",
+                    "owner": "Codex2",
+                    "reviewer": "Codex",
+                    "depends_on": ["DEP-001"],
+                    "next": "See support/unblock/ADM-UI-RD-006/ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR.md",
+                },
+                {
+                    "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                    "status": "done",
+                    "task_class": "unblock",
+                    "helper_parent": "ADM-UI-RD-006",
+                    "helper_kind": "history_repair",
+                    "next": "Repair route documented and pushed.",
+                },
+            ]
+        }
+
+        self.assertEqual(
+            supervisor.validate_chair_review_context(
+                payload,
+                reason="blocked_task_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            ),
+            "blocked_task_triage must resolve blocked tasks via ADM-UI-RD-006:resume_parent_task",
+        )
+        payload["task_actions"] = [
+            {
+                "task_id": "ADM-UI-RD-006",
+                "action": "resume_parent_task",
+                "resume_status": "todo",
+                "reason": "Completed history-repair helper already documented the rebuild route.",
             }
         ]
         self.assertIsNone(supervisor.validate_chair_review_payload(payload))
@@ -5268,6 +5335,115 @@ class ChairmanFlowTests(unittest.TestCase):
 
             self.assertTrue(changed)
             create_unblock.assert_called_once()
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["last_reason"], "blocked_task_triage")
+
+    def test_refresh_chair_review_state_applies_resume_parent_task_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260518T000100Z-codex.md"
+            json_path = review_dir / "20260518T000100Z-codex.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "blocked_task_triage",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "existing unblock child is already done",
+                        "blocked_by": [],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [],
+                        "task_actions": [
+                            {
+                                "task_id": "ADM-UI-RD-006",
+                                "action": "resume_parent_task",
+                                "resume_status": "todo",
+                                "reason": "Completed history-repair helper already documented the rebuild route.",
+                            }
+                        ],
+                        "provider_actions": [],
+                        "recommended_focus": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {"id": "DEP-001", "status": "done"},
+                            {
+                                "id": "ADM-UI-RD-006",
+                                "owner": "Codex2",
+                                "reviewer": "Codex",
+                                "status": "blocked",
+                                "depends_on": ["DEP-001"],
+                                "next": "See support/unblock/ADM-UI-RD-006/ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR.md",
+                            },
+                            {
+                                "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                                "owner": "Codex2",
+                                "reviewer": "Codex",
+                                "status": "done",
+                                "task_class": "unblock",
+                                "helper_parent": "ADM-UI-RD-006",
+                                "helper_kind": "history_repair",
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "codex",
+                        "agent": "Codex",
+                        "reason": "blocked_task_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "apply_chair_parent_resume_action", return_value=True) as resume_parent,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            resume_parent.assert_called_once()
             self.assertIsNone(state["chair_review"]["active_review"])
             self.assertEqual(state["chair_review"]["last_reason"], "blocked_task_triage")
 

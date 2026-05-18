@@ -67,5 +67,107 @@ class CompletionMetadataTest(unittest.TestCase):
         self.assertEqual(metadata["commit_subject"], "no-commit closeout")
 
 
+class UnblockParentResolutionTest(unittest.TestCase):
+    def test_unblock_done_resumes_parent_to_todo(self) -> None:
+        state = {
+            "tasks": [
+                {
+                    "id": "ADM-UI-RD-006",
+                    "owner": "Codex",
+                    "reviewer": "Claude",
+                    "status": "blocked",
+                    "next": "Waiting on history repair.",
+                    "waiting_for": "Claude",
+                },
+                {
+                    "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                    "owner": "Claude2",
+                    "reviewer": "Codex",
+                    "status": "review_approved",
+                    "task_class": "unblock",
+                    "helper_parent": "ADM-UI-RD-006",
+                    "helper_kind": "history_repair",
+                    "mutates_canonical": False,
+                },
+            ],
+            "blockers": [
+                {
+                    "task_id": "ADM-UI-RD-006",
+                    "owner": "Codex",
+                    "waiting_for": "Claude",
+                    "message": "Waiting on history repair.",
+                    "status": "open",
+                    "created_at": "2026-05-18T00:00:00Z",
+                }
+            ],
+            "handoffs": [],
+        }
+
+        with mock.patch.dict(os.environ, {"AI_NAME": "Claude2"}, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_done(
+                state,
+                ["ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR", "Repair packet complete and parent can resume."],
+            )
+
+        parent = next(task for task in state["tasks"] if task["id"] == "ADM-UI-RD-006")
+        child = next(task for task in state["tasks"] if task["id"] == "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR")
+        self.assertEqual(child["status"], "done")
+        self.assertEqual(parent["status"], "todo")
+        self.assertIn("ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR", parent["next"])
+        self.assertEqual(child["resolved_parent_status"], "todo")
+        self.assertEqual(state["blockers"][0]["status"], "resolved")
+        self.assertEqual(len(state["handoffs"]), 1)
+        self.assertEqual(state["handoffs"][0]["to"], "Codex")
+
+    def test_unblock_done_can_keep_parent_blocked(self) -> None:
+        state = {
+            "tasks": [
+                {
+                    "id": "ADM-UI-RD-006",
+                    "owner": "Codex",
+                    "reviewer": "Claude",
+                    "status": "blocked",
+                    "next": "Waiting on history repair.",
+                    "waiting_for": "Claude",
+                },
+                {
+                    "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                    "owner": "Claude2",
+                    "reviewer": "Codex",
+                    "status": "review_approved",
+                    "task_class": "unblock",
+                    "helper_parent": "ADM-UI-RD-006",
+                    "helper_kind": "history_repair",
+                    "mutates_canonical": False,
+                },
+            ],
+            "blockers": [],
+            "handoffs": [],
+        }
+
+        env = {
+            "AI_NAME": "Claude2",
+            "PARENT_STATUS": "blocked",
+            "PARENT_WAITING_FOR": "Codex",
+            "PARENT_NEXT": "Artifact path still needs canonical reconciliation before owner resume.",
+        }
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_done(
+                state,
+                ["ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR", "Repair packet complete but artifact reconcile remains."],
+            )
+
+        parent = next(task for task in state["tasks"] if task["id"] == "ADM-UI-RD-006")
+        child = next(task for task in state["tasks"] if task["id"] == "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR")
+        self.assertEqual(parent["status"], "blocked")
+        self.assertEqual(parent["waiting_for"], "Codex")
+        self.assertEqual(parent["next"], "Artifact path still needs canonical reconciliation before owner resume.")
+        self.assertEqual(child["resolved_parent_status"], "blocked")
+        self.assertEqual(child["resolved_parent_waiting_for"], "Codex")
+        self.assertEqual(len(state["handoffs"]), 0)
+        self.assertEqual(len(state["blockers"]), 1)
+        self.assertEqual(state["blockers"][0]["status"], "open")
+
+
 if __name__ == "__main__":
     unittest.main()
