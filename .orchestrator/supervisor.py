@@ -152,6 +152,13 @@ CLOSEOUT_SKILL_PATH = THIS_DIR / "skills" / "task-closeout-finalization.md"
 CHAIRMAN_SKILL_PATH = THIS_DIR / "skills" / "chairman-operational-review.md"
 
 
+class SupervisorShutdown(Exception):
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        self.reason = supervisor_shutdown_reason(signum)
+        super().__init__(self.reason)
+
+
 @dataclass(frozen=True)
 class WorkerFailureSignal:
     reason: str
@@ -183,6 +190,23 @@ def clear_supervisor_pid(config: dict[str, Any]) -> None:
         return
     if current == str(os.getpid()):
         path.unlink(missing_ok=True)
+
+
+def supervisor_shutdown_reason(signum: int) -> str:
+    try:
+        signal_name = signal.Signals(signum).name
+    except ValueError:
+        signal_name = str(signum)
+    return f"signal:{signal_name}"
+
+
+def raise_supervisor_shutdown(signum: int, _frame: Any) -> None:
+    raise SupervisorShutdown(signum)
+
+
+def install_supervisor_signal_handlers() -> None:
+    signal.signal(signal.SIGTERM, raise_supervisor_shutdown)
+    signal.signal(signal.SIGINT, raise_supervisor_shutdown)
 
 
 def _supervisor_script_arg_matches(
@@ -785,6 +809,104 @@ def update_supervisor_mode_metadata(
             occupancy[bucket]["pending"] += 1
 
     supervisor_state["mode_occupancy"] = occupancy
+
+
+def mark_supervisor_stopped(
+    config: dict[str, Any],
+    *,
+    reason: str,
+    signum: int | None = None,
+    terminate_workers: bool = True,
+) -> bool:
+    stopped_at = utc_now()
+    message = f"Supervisor stopped before worker completed: {reason}"
+    changed = False
+    try:
+        state = load_runtime_state(config)
+    except Exception as exc:
+        console_log(f"unable to load runtime state during supervisor shutdown: {exc}", quiet=SUPERVISOR_LOG_QUIET)
+        return False
+
+    supervisor_state = state.setdefault("supervisor", {})
+    previous_pid = supervisor_state.get("pid")
+    supervisor_state["last_pid"] = previous_pid
+    supervisor_state["pid"] = None
+    supervisor_state["lifecycle"] = "stopped"
+    supervisor_state["mode_status"] = "stopped"
+    supervisor_state["stopped_at"] = stopped_at
+    supervisor_state["stop_reason"] = reason
+    if signum is not None:
+        supervisor_state["stop_signal"] = signum
+    changed = True
+
+    active_statuses = set(ACTIVE_RUNTIME_STATUSES)
+    for worker in state.setdefault("workers", {}).values():
+        status = str(worker.get("status") or "")
+        if status not in active_statuses:
+            continue
+        worker["previous_status"] = status
+        worker["status"] = "interrupted"
+        worker["last_event_at"] = stopped_at
+        worker["last_error"] = message
+        worker["interrupted_by"] = "supervisor_shutdown"
+        worker["supervisor_stopped_at"] = stopped_at
+        if worker.get("pid"):
+            worker["stopped_pid"] = worker.get("pid")
+        if terminate_workers:
+            terminate_worker_pid(worker.get("pid"))
+        worker["pid"] = None
+        queue_event_id = worker.get("queue_event_id")
+        if queue_event_id:
+            record = queue_status(state, str(queue_event_id))
+            if str(record.get("status") or "") not in {"completed", "failed", "done"}:
+                record["status"] = "failed"
+                record["processed_at"] = stopped_at
+                record["error"] = message
+        changed = True
+
+    chair = state.setdefault("chair_review", {})
+    active_review = chair.get("active_review")
+    if active_review:
+        queue_event_id = active_review.get("queue_event_id")
+        if queue_event_id:
+            record = queue_status(state, str(queue_event_id))
+            if str(record.get("status") or "") not in {"completed", "failed", "done"}:
+                record["status"] = "failed"
+                record["processed_at"] = stopped_at
+                record["error"] = f"Supervisor stopped before chair review completed: {reason}"
+        chair["interrupted_review"] = {
+            **dict(active_review),
+            "interrupted_at": stopped_at,
+            "interruption_reason": reason,
+        }
+        chair["active_review"] = None
+        changed = True
+
+    update_supervisor_mode_metadata(
+        state,
+        focus_mode=str(supervisor_state.get("focus_mode") or "execution"),
+        heartbeat_at=stopped_at,
+    )
+    supervisor_state["lifecycle"] = "stopped"
+    supervisor_state["mode_status"] = "stopped"
+    supervisor_state["pid"] = None
+
+    try:
+        save_runtime_state(config, state)
+        write_activity_log(
+            config,
+            {
+                "type": "supervisor_stopped",
+                "message": f"Supervisor stopped cleanly: {reason}",
+                "old_pid": previous_pid,
+                "stopped_at": stopped_at,
+                "signal": signum,
+            },
+        )
+    except Exception as exc:
+        console_log(f"unable to save runtime state during supervisor shutdown: {exc}", quiet=SUPERVISOR_LOG_QUIET)
+        return False
+    return changed
 
 
 def planning_primary_file(workspace: Path, status: dict[str, Any], current_owner: str) -> str:
@@ -7323,34 +7445,43 @@ def main() -> int:
     if manage_pid_file:
         terminate_older_supervisors(config)
         atexit.register(clear_supervisor_pid, config)
+        install_supervisor_signal_handlers()
         write_supervisor_pid(config)
     poll_interval = args.poll_interval or float(config.get("supervisor", {}).get("poll_interval_seconds", 2.0))
     console_log(
         f"starting supervisor pid={os.getpid()} poll_interval={poll_interval:.1f}s config={args.config}",
         quiet=args.quiet,
     )
-    run_once(
-        config,
-        watch=not args.no_watch,
-        replay=args.replay,
-        quiet=args.quiet,
-        verbose=args.verbose,
-        once=args.once,
-        manage_pid_file=manage_pid_file,
-    )
-    if args.once:
-        return 0
-    while True:
-        time.sleep(poll_interval)
+    try:
         run_once(
             config,
             watch=not args.no_watch,
-            replay=False,
+            replay=args.replay,
             quiet=args.quiet,
             verbose=args.verbose,
-            once=False,
-            manage_pid_file=True,
+            once=args.once,
+            manage_pid_file=manage_pid_file,
         )
+        if args.once:
+            return 0
+        while True:
+            time.sleep(poll_interval)
+            run_once(
+                config,
+                watch=not args.no_watch,
+                replay=False,
+                quiet=args.quiet,
+                verbose=args.verbose,
+                once=False,
+                manage_pid_file=True,
+            )
+    except SupervisorShutdown as exc:
+        console_log(f"stopping supervisor after {exc.reason}", quiet=args.quiet)
+        mark_supervisor_stopped(config, reason=exc.reason, signum=exc.signum, terminate_workers=True)
+        return 128 + exc.signum
+    finally:
+        if manage_pid_file:
+            clear_supervisor_pid(config)
 
 
 if __name__ == "__main__":
