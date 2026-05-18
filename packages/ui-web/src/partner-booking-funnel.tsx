@@ -559,6 +559,8 @@ export function PartnerBookingPhoneScreen({
   const scenarioMeta = scenario
     ? getPartnerBookingScenarioMeta(scenario)
     : null;
+  const eligibilityBlocked =
+    scenario === "ineligible" || scenario === "manual_review";
   const bookBlocked =
     scenario === "inactive" || scenario === "eligibility-required";
 
@@ -822,11 +824,25 @@ export function PartnerBookingPhoneScreen({
               label={
                 scenario === "eligible"
                   ? "資格已通過，可前往建立行程"
-                  : "確認連結並繼續"
+                  : scenario === "manual_review"
+                    ? "人工審核中，暫停建立行程"
+                    : scenario === "ineligible"
+                      ? "資格不符，無法建立行程"
+                      : "確認連結並繼續"
               }
               primary
+              disabled={eligibilityBlocked}
             />
-            <ActionButton brand={brand} label="稍後" />
+            <ActionButton
+              brand={brand}
+              label={
+                scenario === "ineligible"
+                  ? "聯絡合作夥伴客服"
+                  : scenario === "manual_review"
+                    ? "稍後查看審核狀態"
+                    : "稍後"
+              }
+            />
           </div>
           {scenarioMeta ? (
             <PhoneCard
