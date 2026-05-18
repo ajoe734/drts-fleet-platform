@@ -357,13 +357,30 @@ def _worktree_entries(repo_root: Path) -> list[dict[str, str]]:
     return entries
 
 
-def _worktree_for_branch(repo_root: Path, branch: str, *, exclude: Path | None = None) -> Path | None:
+def _path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _worktree_for_branch(
+    repo_root: Path,
+    branch: str,
+    *,
+    exclude: Path | None = None,
+    within: Path | None = None,
+) -> Path | None:
     ref = f"refs/heads/{branch}"
     excluded = exclude.resolve() if exclude else None
+    required_parent = within.resolve() if within else None
     for entry in _worktree_entries(repo_root):
         if entry.get("branch") == ref and entry.get("worktree"):
             path = Path(entry["worktree"]).resolve()
             if excluded is not None and path == excluded:
+                continue
+            if required_parent is not None and not _path_is_within(path, required_parent):
                 continue
             return path
     return None
@@ -504,11 +521,11 @@ def ensure_execution_workspace(
 
     branch = _task_branch(request.agent_id, request.task_id)
     base_branch = routing.base_branch if routing else "dev"
-    existing = _worktree_for_branch(repo_root, branch, exclude=repo_root)
+    base = _worker_worktree_base(config, repo_root)
+    existing = _worktree_for_branch(repo_root, branch, exclude=repo_root, within=base)
     if existing is not None:
         return existing, branch, base_branch, "existing_worktree"
 
-    base = _worker_worktree_base(config, repo_root)
     base.mkdir(parents=True, exist_ok=True)
     destination = _candidate_worktree_path(base, request.agent_id, request.task_id)
     if destination.exists() and _current_branch(destination) == branch:
