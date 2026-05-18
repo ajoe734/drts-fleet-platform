@@ -115,6 +115,24 @@ class DetectWorkerFailureTests(unittest.TestCase):
 
         self.assertIsNone(supervisor.detect_worker_failure(worker))
 
+    def test_ignores_chair_narrative_that_mentions_codex_refresh_reuse(self) -> None:
+        worker = self._worker_for_log(
+            '"Codex2 remains auth-paused after repeated 401 Unauthorized, '
+            'token_invalidated, and refresh_token_reused failures and requires manual re-login '
+            'before any further dispatch.",\n'
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_shell_search_command_that_mentions_auth_markers(self) -> None:
+        worker = self._worker_for_log(
+            "/bin/bash -lc \"rg -n 'dispatch_pauses|paused|quota|401 Unauthorized|"
+            "token_invalidated|refresh_token_reused|Failed to authenticate' "
+            "ai-status.json .orchestrator/state.json\" in /home/edna/workspace/drts-fleet-platform\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
     def test_ignores_embedded_auth_error_from_claude_tool_result_json(self) -> None:
         worker = self._worker_for_log(
             json.dumps(
@@ -225,6 +243,19 @@ class DetectWorkerFailureTests(unittest.TestCase):
         detected = supervisor.detect_worker_failure(worker)
         self.assertEqual(detected, "reason: refresh_token_reused")
         result = supervisor.classify_worker_failure({}, {"provider": "codex2"}, detected)
+        self.assertEqual(result["kind"], "auth")
+
+    def test_detects_codex_token_invalidated_error_line(self) -> None:
+        worker = self._worker_for_log(
+            "Error: Your authentication token has been invalidated. Please log out and sign in again.\n"
+        )
+
+        detected = supervisor.detect_worker_failure(worker)
+        self.assertEqual(
+            detected,
+            "Error: Your authentication token has been invalidated. Please log out and sign in again.",
+        )
+        result = supervisor.classify_worker_failure({}, {"provider": "codex"}, detected)
         self.assertEqual(result["kind"], "auth")
 
     def test_detects_copilot_no_quota_plain_text_log(self) -> None:

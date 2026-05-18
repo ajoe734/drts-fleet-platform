@@ -90,9 +90,8 @@ WORKER_FAILURE_PATTERNS = (
     re.compile(r"\bFailed to authenticate\b", re.IGNORECASE),
     re.compile(r"\bauthentication_error\b", re.IGNORECASE),
     re.compile(r"\bInvalid authentication credentials\b", re.IGNORECASE),
-    re.compile(r"\btoken_invalidated\b", re.IGNORECASE),
-    re.compile(r"\brefresh_token_reused\b", re.IGNORECASE),
-    re.compile(r"\bauthentication token has been invalidated\b", re.IGNORECASE),
+    re.compile(r"^(?:reason|code|error|error_code|type):\s*['\"]?(?:token_invalidated|refresh_token_reused)\b", re.IGNORECASE),
+    re.compile(r"^(?:Error:\s*)?(?:Your\s+)?authentication token has been invalidated\b", re.IGNORECASE),
     re.compile(r'^Error:\s*Model\s+".+"\s+from --model flag is not available\.', re.IGNORECASE),
     re.compile(r"^402\b.*\byou have no quota\b", re.IGNORECASE),
     re.compile(r"^(?:error:\s*)?\b(?:you have no quota|no quota remaining|payment required)\b", re.IGNORECASE),
@@ -1083,6 +1082,16 @@ def _iter_json_string_values(payload: Any) -> list[str]:
 
 def _ignore_embedded_failure_line(stripped: str) -> bool:
     embedded_state_key = r"(?:summary|reason|last_error|last_failure_summary|next)"
+    shell_command_prefixes = (
+        "/bin/bash -lc ",
+        "bash -lc ",
+        "/bin/sh -c ",
+        "sh -c ",
+        "rg ",
+        "grep ",
+    )
+    if stripped.startswith(shell_command_prefixes):
+        return True
     if re.match(r"^\d+\t", stripped):
         return True
     if re.match(r"^\d+:\s+", stripped):
