@@ -4703,9 +4703,12 @@ def agent_dispatch_loads(
         loads.setdefault(agent_name, []).append(priority)
 
     queue_records = state.get("queue", {}).get("events", {})
+    active_event_ids = active_worker_queue_event_ids(state, active_statuses)
     for event in load_event_queue(config):
         event_id = str(event.get("event_id") or "")
         if not event_id:
+            continue
+        if event_id in active_event_ids:
             continue
         record = queue_records.get(event_id, {})
         if record.get("status") in {"completed", "failed"}:
@@ -4804,24 +4807,40 @@ def higher_priority_ready_task_exists(
             continue
         task_status = str(task.get("status") or "").lower()
         candidate_priority = None
+        candidate_reason = None
         if task_status in review_statuses and task.get(reviewer_field) == agent_name:
             candidate_priority = 0
+            candidate_reason = "review_ready_dispatch"
         elif task_status in finalize_statuses and task.get(owner_field) == agent_name:
             candidate_priority = 1
+            candidate_reason = "owned_finalize_dispatch"
         elif (
             task_status == "in_progress"
             and task.get(owner_field) == agent_name
             and dependencies_satisfied(task, task_map, dependency_done_statuses)
         ):
             candidate_priority = 2
+            candidate_reason = "owned_in_progress_dispatch"
         elif (
             task_status in {"todo", "backlog"}
             and task.get(owner_field) == agent_name
             and dependencies_satisfied(task, task_map, dependency_done_statuses)
         ):
             candidate_priority = 3
+            candidate_reason = "owned_ready_dispatch"
 
-        if candidate_priority is not None and candidate_priority < current_priority:
+        if candidate_priority is None or candidate_reason is None or candidate_priority >= current_priority:
+            continue
+        if not task_is_dispatch_eligible_for_agent(task, agent_name):
+            continue
+        if state is not None and task_waiting_on_chair_reassignment(
+            state,
+            task,
+            reason=candidate_reason,
+            target_agent=agent_name,
+        ):
+            continue
+        if candidate_priority < current_priority:
             return True
 
     return False
