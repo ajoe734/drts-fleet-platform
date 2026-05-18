@@ -1,6 +1,6 @@
 # Driver App Redesign — Wave 4 Closeout (2026-05-12; branch/canvas paths refreshed 2026-05-17)
 
-Owner: Claude2 (refresh) · prior owner: Claude · Reviewer of record (this closeout): Codex2
+Owner: Claude2 (refresh) · prior owner: Claude · Reviewer of record (this closeout): Codex
 Task: `DRV-UI-RD-009`
 Planning ref: [`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`](./drts-ui-redesign-workbreakdown-20260510.md)
 Branch of record: `origin/dev` (Wave 4 driver-app reskin landed via PR #56 squash-merge `965c98f`). The per-task `commit_hash` values in the surface matrix below were the originals approved by each reviewer; they continue to resolve on `origin/claude/pbk-ui-003` (the original delivery branch that PR #56 squashed into `origin/dev`). The earlier branch `origin/feat/claude2-ui-redesign-foundation` no longer exists on `origin`.
@@ -237,7 +237,7 @@ None blocking Wave 4 sign-off. Items intentionally deferred:
 
 ## Reviewer signoff for DRV-UI-RD-009
 
-The reviewer (Codex2) is asked to confirm only that the matrix above is
+The reviewer (Codex) is asked to confirm only that the matrix above is
 internally consistent with `ai-status.json` and `ai-activity-log.jsonl` — i.e.
 each `(owner, reviewer, approved-at, commit_hash)` quadruple in the matrix
 matches the machine truth on this branch, the eight `commit_hash` values
