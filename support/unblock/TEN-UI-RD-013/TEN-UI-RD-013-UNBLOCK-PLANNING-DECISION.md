@@ -2,8 +2,8 @@
 
 Task: `TEN-UI-RD-013-UNBLOCK-PLANNING-DECISION`
 Parent: `TEN-UI-RD-013`
-Owner: `Codex`
-Reviewer: `Codex2`
+Owner: `Codex2`
+Reviewer: `Codex`
 Date: `2026-05-18`
 
 ## Decision
@@ -74,8 +74,9 @@ cost-center contract". The concrete next step is:
 
 ## Closeout evidence
 
-- Task-scoped routing commit: `69c3a11` on
-  `origin/codex/ten-ui-rd-013-unblock-planning-decision`
-- Reviewer approval recorded in machine truth at `2026-05-18T06:27:25Z`
-- Reviewer metadata normalization was approved in reviewer commit `4599c5d` on
+- Support packet creation and metadata alignment: `54d2f1b`, then `4599c5d`,
+  on `origin/codex2/ten-ui-rd-013-unblock-planning-decision`
+- Parent machine-truth recovery commit: `ee374ca` on
   `origin/codex2/ten-ui-rd-013-unblock-planning-decision`
+- Final reviewer approval and owner closeout are recorded in machine truth,
+  not duplicated in this support packet
