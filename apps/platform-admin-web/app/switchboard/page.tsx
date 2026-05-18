@@ -681,6 +681,7 @@ export default function SwitchboardPage() {
                       {version.status === "draft" ? (
                         <div style={actionsStyle}>
                           <button
+                            type="button"
                             className="admin-btn admin-btn--primary"
                             onClick={() =>
                               void handlePublish(version.versionId)
@@ -695,6 +696,7 @@ export default function SwitchboardPage() {
                               : t("switchboard.publishDraft")}
                           </button>
                           <button
+                            type="button"
                             className="admin-btn admin-btn--secondary"
                             onClick={() =>
                               void handleDeleteDraft(version.versionId)
@@ -805,6 +807,7 @@ export default function SwitchboardPage() {
                     <td>
                       {!placard.publishedAt ? (
                         <button
+                          type="button"
                           className="admin-btn admin-btn--primary"
                           onClick={() =>
                             void handlePublishPlacard(placard.placardVersionId)
