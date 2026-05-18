@@ -1,10 +1,10 @@
 # TEN-UI-RD-014 Unblock Planning Decision
 
-Last updated: 2026-05-18 (closeout evidence refreshed)
+Last updated: 2026-05-18 (machine-truth reviewer + handoff evidence refreshed)
 Task: `TEN-UI-RD-014-UNBLOCK-PLANNING-DECISION`
 Parent task: `TEN-UI-RD-014`
 Owner: `Codex2`
-Reviewer: `Claude2`
+Reviewer: `Codex`
 
 ## Summary
 
@@ -80,18 +80,18 @@ This unblock task does not attempt to re-close `TEN-UI-RD-014` itself and does
 not rewrite the parent status lifecycle. It only resolves the planning blocker
 and records the correct routing decision.
 
-## Closeout evidence
+## Branch evidence
 
-This unblock task closes on its own task branch and does not replace the parent
-task's shipped branch evidence.
+This unblock task records the planning/routing decision on its own task branch
+and does not replace the parent task's shipped branch evidence.
 
 - task branch: `origin/codex2/ten-ui-rd-014-unblock-planning-decision`
 - routing commit: `9e2dbda`
 - parent shipped branch: `origin/codex2/ten-ui-rd-014-closeout`
 - parent shipped commit: `f0e8265`
 
-Verification used for this closeout:
+Verification used for this handoff:
 
 - `git status --short`
 - `git ls-remote --heads origin codex2/ten-ui-rd-014-unblock-planning-decision`
-- `python3 scripts/ai_status.py done TEN-UI-RD-014-UNBLOCK-PLANNING-DECISION ...`
+- `AI_NAME=Codex2 scripts/ai-status.sh reopen TEN-UI-RD-014 "..."`

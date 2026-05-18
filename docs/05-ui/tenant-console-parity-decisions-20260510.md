@@ -40,8 +40,10 @@ its reviewer / approval-time / commit / canvas anchor / parity story is
 - `TEN-UI-RD-013` can reopen against this canonical directory surface.
 - `TEN-UI-RD-010` can reopen against the landed booking-governance contract
   set (`BE-CC-001`, `BE-RULE-001`, `BE-QUOTA-001`, `BE-APR-001`).
-- `TEN-UI-RD-014` requires its own route-scope decision even though the rule,
-  quota, and approval contracts now exist.
+- `TEN-UI-RD-014` was initially left pending a route-scope reconciliation, but
+  the 2026-05-18 unblock reconciliation below records that the contract/routing
+  decision is now resolved and the parent task should move back to execution
+  closeout on the shipped branch evidence.
 
 ## TEN-UI-RD-010 — TN_NewBooking contract validation
 
