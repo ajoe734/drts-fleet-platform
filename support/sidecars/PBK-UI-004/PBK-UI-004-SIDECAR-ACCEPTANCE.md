@@ -4,7 +4,9 @@ This document is the parallel acceptance-support packet for `PBK-UI-004`
 ("Authority-safe negative paths"). It does not change canonical truth. It
 collects the current machine-truth anchors, the dependency map, and the
 reviewer-facing acceptance checklist that `Codex` should use when the parent
-task is ready to move from `in_progress` to `review`.
+task is ready to move from `in_progress` to `review`. This closeout refresh
+captures the sidecar's own `review_approved` state before owner finalization
+to `done`.
 
 This packet is intentionally scoped to support material only:
 
@@ -27,7 +29,8 @@ This packet is intentionally scoped to support material only:
 - **Mutates Canonical:** `false`
 - **Objective:** Hand off an acceptance checklist and dependency map for the
   parent negative-path task without editing L1/L2 truth, runtime code, or the
-  parent backlog item itself.
+  parent backlog item itself, then preserve the reviewer-approved packet as a
+  closeout artifact.
 
 Guardrails for this packet:
 
@@ -44,7 +47,7 @@ Guardrails for this packet:
 
 ### Parent task: `PBK-UI-004`
 
-The active dispatch workspace currently records:
+The active dispatch workspace recorded at handoff time:
 
 | Field        | Value |
 | ------------ | ----- |
@@ -59,26 +62,27 @@ The active dispatch workspace currently records:
 | Last update  | `2026-05-18T01:19:50Z` |
 | Next         | `Owner worker codex-20260518T010028Z-825b4ade is actively implementing PBK-UI-004; machine truth realigned after sidecar reassignment maintenance.` |
 
-Acceptance implication: this parent task is not yet in `review` or
-`review_approved` in the current control plane, so this packet is a
-pre-handoff acceptance aid, not a post-closeout audit.
+Acceptance implication: this parent task was not yet in `review` or
+`review_approved` when this packet was first assembled, so the parent-facing
+checklist remains a pre-handoff acceptance aid rather than a claim that the
+parent itself has closed.
 
 ### This sidecar task: `PBK-UI-004-SIDECAR-ACCEPTANCE`
 
-The active dispatch workspace currently records:
+The active dispatch workspace now records:
 
 | Field               | Value |
 | ------------------- | ----- |
 | Owner               | `Codex2` |
 | Reviewer            | `Codex` |
-| Status              | `in_progress` |
+| Status              | `review_approved` |
 | `task_class`        | `sidecar` |
 | `helper_parent`     | `PBK-UI-004` |
 | `helper_kind`       | `acceptance_packet` |
 | `mutates_canonical` | `false` |
 | Depends on          | `PBK-UI-003` |
 | Artifact            | `support/sidecars/PBK-UI-004/PBK-UI-004-SIDECAR-ACCEPTANCE.md` |
-| Last update         | `2026-05-18T01:22:44Z` |
+| Last update         | `2026-05-18T01:32:43Z` |
 
 ### Important control-plane note
 
@@ -87,7 +91,22 @@ older snapshot where `PBK-UI-004` was `todo` and this sidecar task was not yet
 present. That is a branch-base lag, not a reason to edit canonical truth from
 this sidecar. For acceptance purposes, the authoritative state is the active
 dispatch workspace machine truth that reassigned the parent owner to `Codex`
-and this sidecar owner to `Codex2`.
+and this sidecar owner to `Codex2`, then advanced this sidecar to
+`review_approved` after reviewer `Codex` accepted the packet.
+
+### Reviewer approval anchor
+
+The recorded reviewer conclusion is:
+
+> PASS: acceptance packet is support-only, cites valid parent/dependency
+> anchors, and gives a usable reviewer checklist for PBK-UI-004.
+
+The full note also states that reviewer `Codex` checked owner evidence from
+commit `93e3a70` against repo anchors
+`PBK-UI-004-SIDECAR-REVIEW.md`, `apps/partner-booking-web/README.md`,
+`docs/01-decisions/SD-DP-20260512-006-partner-booking-app-cutover-topology.md`,
+and historical implementation commit
+`13104105d299eadd0b433596b2f173249dfbb5fc`.
 
 ## §3 Dependency Map
 
@@ -233,5 +252,24 @@ claim.
    update the review packet or reopen the parent task; do not silently approve
    against stale evidence.
 5. This sidecar's own acceptance is narrower: the packet is complete once this
-   file exists, machine-truth state was updated through the status script, and
-   the work is handed off to reviewer `Codex`.
+   file exists, machine-truth state was updated through the status script, the
+   work was handed off to reviewer `Codex`, and reviewer approval was recorded
+   before owner closeout.
+
+## §6 Closeout Snapshot
+
+The sidecar content history is intentionally small:
+
+| Item | Value |
+| ---- | ----- |
+| Anchor commit | `93e3a70f2780aecf6a0281d9fd48884606ab4c4b` |
+| Anchor subject | `wip(PBK-UI-004-SIDECAR-ACCEPTANCE): anchor acceptance packet` |
+| Closeout refresh purpose | Preserve the reviewer-approved state in the packet before owner `done` |
+| Runtime verification | None rerun for this sidecar slice; support-only artifact refresh |
+
+Owner closeout should therefore verify only that:
+
+- the branch still contains the support-only packet changes
+- the branch is pushed normally to `origin/codex2/pbk-ui-004-sidecar-acceptance`
+- `scripts/ai-status.sh done` records the final machine-truth closeout with the
+  pushed closeout commit metadata
