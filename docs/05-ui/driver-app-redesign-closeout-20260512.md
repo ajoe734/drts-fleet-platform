@@ -14,6 +14,11 @@ Historical note: local branch `feat/claude2-ui-redesign-foundation` still
 contains the eight shipped commits in this checkout, but
 `origin/feat/claude2-ui-redesign-foundation` no longer exists as of
 2026-05-18.
+Closeout review note: the final `review_approved` event for `DRV-UI-RD-009`
+was posted by Gemini2 at 2026-05-18T19:07:51Z after reviewer verification
+work recorded under commit `4745461`; this owner branch preserves the repaired
+checked-in asset paths and canonical-root verification guidance in the final
+closeout copy.
 
 ## Purpose
 
