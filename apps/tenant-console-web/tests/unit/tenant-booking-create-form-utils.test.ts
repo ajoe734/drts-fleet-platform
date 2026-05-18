@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { TenantPassengerRecord } from "@drts/contracts";
 import {
   buildTenantBookingCreateCommand,
+  formatDateTimeLocalInputValue,
+  getDefaultDateTimeLocalValue,
   getBlockingTenantBookingDraftErrors,
   isMissingRequiredBookingFields,
   isReadyForTenantBookingPolicyPreview,
@@ -120,5 +122,12 @@ describe("tenant booking create form utils", () => {
         true,
       ),
     ).toBe(true);
+  });
+
+  it("formats datetime-local defaults without UTC slicing drift", () => {
+    const now = new Date("2026-05-15T01:02:33.000Z");
+
+    expect(formatDateTimeLocalInputValue(now)).toBe("2026-05-15T01:02");
+    expect(getDefaultDateTimeLocalValue(30, now)).toBe("2026-05-15T01:32");
   });
 });
