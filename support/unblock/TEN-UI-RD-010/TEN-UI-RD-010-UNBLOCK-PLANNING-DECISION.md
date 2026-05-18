@@ -13,10 +13,12 @@ contract decision. The canonical decision was already recorded on 2026-05-13
 through 2026-05-14, and the route shipped on commit `6e0c9fd`
 (`origin/codex/be-cc-001-fu-seed`).
 
-The remaining issue is machine-truth drift: `ai-status.json` still keeps the
-parent task in the 2026-05-10 `blocked` state even though the contract wave,
-parity decision, implementation, review approval, and closeout packet all say
-the blocker was resolved.
+The remaining issue was machine-truth drift on this worktree branch. Canonical
+machine truth has now been repaired: parent task `TEN-UI-RD-010` was closed at
+`2026-05-18T15:28:03Z` with merge commit `12616aa`
+(`origin/codex/ten-ui-rd-010`), so this unblock task only needs to refresh the
+branch-local packet and record that the planning blocker is definitively
+retired.
 
 ## Canonical Decision
 
@@ -57,18 +59,20 @@ This decision is already canonical in:
 ## Resolution Applied
 
 This unblock task does not invent any new product semantics. It resolves the
-planning blocker by routing the parent task back onto the already-accepted
-canonical decision:
+planning blocker by confirming that the parent already moved onto the
+already-accepted canonical decision and was then closed out:
 
-- treat the old `blocked` entry as stale machine truth
+- treat the old `blocked` branch-local entry as stale machine truth
 - record in canonical planning notes that later drift is delivery-history
   repair, not a missing product decision
-- update the parent task with the concrete post-unblock next step below
+- keep the concrete post-unblock next step below as the reason the final
+  parent closeout was valid
 
 ## Parent Task Next Step
 
-The parent should leave `blocked` and proceed as a closeout/history-repair
-follow-up, not as a planning-decision escalation.
+The parent should not route back to `discussion_planning`. Its unblocked next
+step was to proceed as closeout/history repair, and that step is now complete
+in canonical machine truth.
 
 Concrete next step:
 
@@ -76,7 +80,8 @@ Concrete next step:
    packet as the source of truth.
 2. Treat any missing 2026-05-16 branch anchor as delivery-history repair.
 3. Re-close the parent against reachable branch evidence instead of routing it
-   back to `discussion_planning`.
+   back to `discussion_planning`. This is now recorded in `ai-status.json` as
+   commit `12616aa` on `origin/codex/ten-ui-rd-010`.
 
 Evidence to verify while doing that repair:
 
