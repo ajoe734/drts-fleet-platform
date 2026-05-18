@@ -72,3 +72,17 @@ against the matching `Partner Booking.html#PB_*` artboard anchors:
 - `PB_Trips`
 - `PB_Receipt`
 - `PB_Help`
+
+`PBK-UI-004` adds a second story group, `Partner Booking/Authority-safe Gates`,
+for the five partner-entry gate routes:
+
+- `eligible`
+- `ineligible`
+- `manual_review`
+- `inactive`
+- `eligibility-required`
+
+Those stories do not invent a new booking flow. They exist to keep the legacy
+`apps/tenant-console-web/app/partner/*` safety contract visible in Storybook:
+only `eligible` may proceed to `/book`, and the four negative outcomes remain
+explicit hard-stop routes inside the branded partner frame.
