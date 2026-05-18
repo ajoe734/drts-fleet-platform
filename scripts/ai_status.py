@@ -13,7 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(
+    os.environ.get("AI_STATUS_ROOT")
+    or os.environ.get("ORCH_STATUS_ROOT")
+    or Path(__file__).resolve().parents[1]
+).resolve()
 STATUS_FILE = ROOT / "ai-status.json"
 LOG_FILE = ROOT / "ai-activity-log.jsonl"
 CURRENT_WORK_FILE = ROOT / "current-work.md"

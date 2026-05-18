@@ -7,8 +7,10 @@ from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, Deli
 from adapters.file_inbox import FileInboxAdapter
 from common import (
     agent_config_for,
+    apply_orchestrator_runtime_env,
     command_exists,
     config_path,
+    delivery_workspace_root,
     load_json,
     new_runtime_id,
     runtime_log_path,
@@ -59,7 +61,7 @@ def _gemini_provider_for_agent(config: dict, agent_id: str) -> tuple[str, dict, 
 
 
 def _gemini_include_directories(config: dict, gemini_settings: dict) -> list[str]:
-    repo_root = config_path(config, "status_file").parents[0]
+    repo_root = Path(str(gemini_settings.get("workspace_root") or config_path(config, "status_file").parents[0]))
     include_setting = gemini_settings.get("include_directories")
     directories: list[str] = []
     if include_setting is True:
@@ -270,15 +272,19 @@ class GeminiAdapter(BaseAdapter):
             command.extend(["--allowed-tools", ",".join(allowed_tools)])
         for policy_path in _gemini_policy_paths(self.config, gemini_settings):
             command.extend(["--policy", policy_path])
-        for directory in _gemini_include_directories(self.config, gemini_settings):
+        workspace_root = delivery_workspace_root(self.config, request.metadata)
+        runtime_include_settings = dict(gemini_settings)
+        runtime_include_settings["workspace_root"] = str(workspace_root)
+        for directory in _gemini_include_directories(self.config, runtime_include_settings):
             command.extend(["--include-directories", directory])
 
         run_id = new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)
         env = _gemini_runtime_env(gemini_settings, ensure_dirs=True)
+        apply_orchestrator_runtime_env(env, self.config, request.metadata)
         process, _ = spawn_background_process(
             command,
-            cwd=config_path(self.config, "status_file").parents[0],
+            cwd=workspace_root,
             log_path=log_path,
             env=env,
         )

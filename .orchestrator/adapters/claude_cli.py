@@ -8,7 +8,9 @@ from adapters.base import DeliveryCapability, DeliveryRequest, DeliveryResult
 from adapters.claude_code import ClaudeCodeAdapter
 from common import (
     agent_config_for,
+    apply_orchestrator_runtime_env,
     config_path,
+    delivery_workspace_root,
     new_runtime_id,
     runtime_log_path,
     shell_quote,
@@ -127,6 +129,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
 
         run_id = new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)
+        workspace_root = delivery_workspace_root(self.config, request.metadata)
         env.update(
             {
                 "ORCH_RUN_ID": run_id,
@@ -137,9 +140,10 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
                 "ORCH_TARGET_FILES": "\n".join(request.target_files),
             }
         )
+        apply_orchestrator_runtime_env(env, self.config, request.metadata)
         process, _ = spawn_background_process(
             command,
-            cwd=config_path(self.config, "status_file").parents[0],
+            cwd=workspace_root,
             log_path=log_path,
             env=env,
         )

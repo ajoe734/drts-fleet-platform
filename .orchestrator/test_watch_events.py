@@ -220,6 +220,8 @@ class RenderWakeupMessageTests(unittest.TestCase):
         self.assertIn("`claude/be-apr-notify-001`", rendered)
         # v4: backend track now routes to the single `dev` trunk.
         self.assertIn("origin/dev", rendered)
+        self.assertIn("git worktree list --porcelain", rendered)
+        self.assertIn("git show-ref --verify --quiet refs/heads/claude/be-apr-notify-001", rendered)
         self.assertIn('LLM-Agent: claude', rendered)
         self.assertIn("Task-ID: BE-APR-NOTIFY-001", rendered)
         self.assertIn(".orchestrator/skills/worker-anchor-commit.md", rendered)

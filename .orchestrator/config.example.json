@@ -406,6 +406,12 @@
       }
     }
   },
+  "branch_strategy": {
+    "worker_worktrees": {
+      "enabled": true,
+      "root": ".artifacts/worktrees/auto"
+    }
+  },
   "ready_dispatcher": {
     "enabled": true,
     "review_statuses": ["review"],

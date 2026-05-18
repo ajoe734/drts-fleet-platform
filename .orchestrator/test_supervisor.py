@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 import os
@@ -9,6 +10,16 @@ from pathlib import Path
 from unittest import mock
 
 import supervisor
+
+
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
 
 
 class DetectWorkerFailureTests(unittest.TestCase):
@@ -453,6 +464,89 @@ class DetectWorkerFailureTests(unittest.TestCase):
             supervisor.format_runtime_timestamp_local("2026-04-06T14:35:42Z"),
             "2026-04-06 22:35:42",
         )
+
+
+class ExecutionWorkspaceTests(unittest.TestCase):
+    def _repo_config(self, root: Path) -> dict:
+        (root / "ai-status.json").write_text('{"tasks":[]}\n', encoding="utf-8")
+        return {
+            "paths": {"status_file": str(root / "ai-status.json")},
+            "agents": {
+                "codex2": {
+                    "id": "codex2",
+                    "display_name": "Codex2",
+                    "provider": "codex2",
+                    "adapter": "codex",
+                }
+            },
+            "providers": {"codex2": {"delivery_mode": "codex"}},
+            "branch_strategy": {
+                "worker_worktrees": {
+                    "enabled": True,
+                    "root": ".artifacts/worktrees/auto",
+                }
+            },
+        }
+
+    def _init_repo(self, root: Path) -> None:
+        _git(root, "init", "-b", "dev")
+        _git(root, "config", "user.email", "test@example.com")
+        _git(root, "config", "user.name", "Test User")
+        (root / "README.md").write_text("test\n", encoding="utf-8")
+        _git(root, "add", "README.md")
+        _git(root, "commit", "-m", "init")
+
+    def test_reuses_existing_worktree_for_task_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            existing = Path(tmpdir) / "pbk-ui-003"
+            _git(root, "worktree", "add", "-b", "codex2/pbk-ui-003", str(existing), "dev")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="PBK-UI-003",
+                metadata={"mode": "execution"},
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("PBK-UI-003"),
+            )
+
+            self.assertEqual(workspace, existing.resolve())
+            self.assertEqual(branch, "codex2/pbk-ui-003")
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "existing_worktree")
+
+    def test_creates_isolated_worktree_for_new_task_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="PBK-UI-004",
+                metadata={"mode": "execution"},
+            )
+            workspace, branch, _base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("PBK-UI-004"),
+            )
+
+            self.assertEqual(branch, "codex2/pbk-ui-004")
+            self.assertEqual(source, "created_worktree")
+            self.assertEqual(workspace, (root / ".artifacts/worktrees/auto/codex2-pbk-ui-004").resolve())
+            self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "codex2/pbk-ui-004")
 
 
 class ProcessQueueDispatchGuardTests(unittest.TestCase):
