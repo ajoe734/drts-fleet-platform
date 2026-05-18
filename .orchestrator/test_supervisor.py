@@ -133,6 +133,45 @@ class DetectWorkerFailureTests(unittest.TestCase):
 
         self.assertIsNone(supervisor.detect_worker_failure(worker))
 
+    def test_ignores_provider_error_inside_captured_exec_output(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "exec",
+                    '/bin/bash -lc "cat .orchestrator/logs/old-worker.log" in /repo',
+                    " succeeded in 0ms:",
+                    "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+                    "",
+                    "tokens used",
+                    "Reviewed old logs; no live auth error happened in this worker.",
+                ]
+            )
+            + "\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure_signal(worker))
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_assistant_json_auth_text_as_state_authority(self) -> None:
+        worker = self._worker_for_log(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+                            }
+                        ]
+                    },
+                }
+            )
+            + "\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure_signal(worker))
+
     def test_ignores_embedded_auth_error_from_claude_tool_result_json(self) -> None:
         worker = self._worker_for_log(
             json.dumps(
@@ -228,6 +267,10 @@ class DetectWorkerFailureTests(unittest.TestCase):
         )
 
         self.assertIn("Failed to authenticate", supervisor.detect_worker_failure(worker) or "")
+        signal = supervisor.detect_worker_failure_signal(worker)
+        self.assertIsNotNone(signal)
+        self.assertTrue(signal.provider_pause_authorized)
+        self.assertEqual(signal.source, "json_result_error")
 
     def test_detects_codex_refresh_token_reuse_as_auth_failure(self) -> None:
         worker = self._worker_for_log(
@@ -242,6 +285,10 @@ class DetectWorkerFailureTests(unittest.TestCase):
 
         detected = supervisor.detect_worker_failure(worker)
         self.assertEqual(detected, "reason: refresh_token_reused")
+        signal = supervisor.detect_worker_failure_signal(worker)
+        self.assertIsNotNone(signal)
+        self.assertTrue(signal.provider_pause_authorized)
+        self.assertEqual(signal.source, "raw_process_line")
         result = supervisor.classify_worker_failure({}, {"provider": "codex2"}, detected)
         self.assertEqual(result["kind"], "auth")
 
@@ -3221,8 +3268,12 @@ class WorkerReassignmentTests(unittest.TestCase):
             mock.patch.object(supervisor, "pid_is_alive", return_value=True),
             mock.patch.object(
                 supervisor,
-                "detect_worker_failure",
-                return_value="status: 429 RESOURCE_EXHAUSTED No capacity available for model gemini-2.5-pro",
+                "detect_worker_failure_signal",
+                return_value=supervisor.WorkerFailureSignal(
+                    "status: 429 RESOURCE_EXHAUSTED No capacity available for model gemini-2.5-pro",
+                    source="raw_process_line",
+                    provider_pause_authorized=True,
+                ),
             ),
             mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
             mock.patch.object(supervisor, "request_for_worker", return_value={"task_id": None}),
@@ -3238,6 +3289,69 @@ class WorkerReassignmentTests(unittest.TestCase):
         self.assertEqual(worker["status"], "failed")
         self.assertEqual(state["queue"]["events"]["evt-live-capacity"]["status"], "failed")
         self.assertEqual(state["provider_pauses"]["gemini2"]["kind"], "capacity")
+
+    def test_live_coordination_log_excerpt_does_not_pause_provider(self) -> None:
+        handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
+        handle.write(
+            "\n".join(
+                [
+                    "exec",
+                    '/bin/bash -lc "cat .orchestrator/logs/old-worker.log" in /repo',
+                    " succeeded in 0ms:",
+                    "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+                    "",
+                    "tokens used",
+                    "Reviewed archived auth failures; no live auth error happened in this worker.",
+                ]
+            )
+            + "\n"
+        )
+        handle.flush()
+        handle.close()
+        self.addCleanup(Path(handle.name).unlink, missing_ok=True)
+        config = {
+            "agents": {
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            },
+            "ready_dispatch": {
+                "active_worker_statuses": ["running", "retry_backoff", "stalled", "waiting_approval", "manual_pending"],
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-chair": {"status": "started"}}},
+            "workers": {
+                "codex2-chair": {
+                    "run_id": "codex2-chair",
+                    "provider": "codex2",
+                    "agent_id": "codex2",
+                    "task_id": None,
+                    "pid": 4243,
+                    "status": "running",
+                    "mode": "coordination",
+                    "request_snapshot": {"reason": "chair_review:provider_health_triage", "metadata": {"mode": "coordination"}},
+                    "queue_event_id": "evt-chair",
+                    "last_event_at": "2999-01-01T00:00:00Z",
+                    "retry_count": 0,
+                    "log_path": handle.name,
+                }
+            },
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": []}),
+            mock.patch.object(supervisor, "load_provider_report", return_value={"providers": {"codex2": {"auth_ready": True}}}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "update_from_log"),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+            mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            supervisor.poll_workers(config, state)
+
+        terminate.assert_not_called()
+        self.assertNotIn("provider_pauses", state)
+        self.assertEqual(state["workers"]["codex2-chair"]["status"], "running")
 
     def test_finalize_terminal_wrapper_passes_state_into_reassignment(self) -> None:
         config = dict(self.config)
