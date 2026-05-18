@@ -4,6 +4,7 @@ Date: 2026-05-18
 Owner: Codex2
 Reviewer: Codex
 Parent task: `TEN-UI-RD-010`
+Child task: `TEN-UI-RD-010-UNBLOCK-PLANNING-DECISION`
 
 ## Summary
 
@@ -49,6 +50,9 @@ This decision is already canonical in:
 - The closeout packet records reviewer `Codex2` approval at
   `2026-05-14T04:07:00Z` and ties the route, storybook parity story, and
   branch-of-record to the shipped outcome.
+- `ai-activity-log.jsonl` records a later 2026-05-16 reopen for delivery fixes
+  (`71453bb`, `18bc6e0`) rather than for any reopened planning or product
+  decision.
 
 ## Resolution Applied
 
@@ -57,19 +61,29 @@ planning blocker by routing the parent task back onto the already-accepted
 canonical decision:
 
 - treat the old `blocked` entry as stale machine truth
-- reconcile `ai-status.json` for `TEN-UI-RD-010` with the shipped evidence
-- use the shipped decision above as the parent task's concrete next step
+- record in canonical planning notes that later drift is delivery-history
+  repair, not a missing product decision
+- update the parent task with the concrete post-unblock next step below
 
 ## Parent Task Next Step
 
-Reviewer should verify that the parent task's machine truth is updated from
-the stale 2026-05-10 blocker to the shipped decision/evidence path:
+The parent should leave `blocked` and proceed as a closeout/history-repair
+follow-up, not as a planning-decision escalation.
 
-- commit `6e0c9fd`
-- branch `origin/codex/be-cc-001-fu-seed`
-- parity decision section `TEN-UI-RD-010`
-- closeout packet row `TEN-UI-RD-010`
+Concrete next step:
 
-If the reviewer agrees, `TEN-UI-RD-010` should leave the stale blocker state
-and proceed through review/final closeout instead of waiting for a new product
-decision from Claude.
+1. Use the accepted shipped scope recorded in the parity decision and closeout
+   packet as the source of truth.
+2. Treat any missing 2026-05-16 branch anchor as delivery-history repair.
+3. Re-close the parent against reachable branch evidence instead of routing it
+   back to `discussion_planning`.
+
+Evidence to verify while doing that repair:
+
+- planning decision section `TEN-UI-RD-010` in
+  `docs/05-ui/tenant-console-parity-decisions-20260510.md`
+- closeout row `TEN-UI-RD-010` in
+  `docs/05-ui/tenant-console-redesign-closeout-20260514.md`
+- shipped commit `6e0c9fd`
+- delivery-fix commits `71453bb` and `18bc6e0` still present in reflog/object
+  history

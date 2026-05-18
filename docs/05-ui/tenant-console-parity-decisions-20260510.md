@@ -1,5 +1,27 @@
 # Tenant Console Parity Decisions — 2026-05-10
 
+## 2026-05-18 Machine-Truth Reconciliation Note
+
+`TEN-UI-RD-010` does not need a new product or contract decision.
+
+The accepted `TN_NewBooking` scope is unchanged:
+
+- implement against the published tenant booking, cost-center, quota-preview,
+  and approval-evaluation contracts
+- keep estimated spend preview-only
+- allow booking-on-behalf metadata
+- do not add draft-save or tenant-side quoted-fare override behavior
+
+The task did reopen on 2026-05-16, but only for delivery fixes after the
+planning unblock had already landed:
+
+- `71453bb` fixed client-only datetime seeding after mount
+- `18bc6e0` recorded the owner closeout in `ai-activity-log.jsonl`
+
+If those later commits are missing from a live branch or remote, treat that as
+delivery-history repair. Do not reopen the planning blocker or route the task
+back to `discussion_planning`.
+
 ## 2026-05-14 Wave 3 Closeout Update
 
 All three previously-blocked parity-fill tasks have reopened and shipped now
@@ -48,7 +70,7 @@ its reviewer / approval-time / commit / canvas anchor / parity story is
 Status: shipped
 Owner: `Codex`
 Reviewer: `Codex2`
-Last checked: `2026-05-14`
+Last checked: `2026-05-18`
 
 ### Decision
 
@@ -57,6 +79,13 @@ quota preview, and approval-evaluation contracts.
 
 Keep estimated spend as preview-only input, allow booking-on-behalf metadata,
 and omit any unpublished draft-save or tenant-side quoted-fare override path.
+
+### Post-decision delivery note
+
+The planning unblock completed on 2026-05-14. A later 2026-05-16 reopen fixed
+datetime-local seeding on the shipped form without changing the accepted
+contract boundary or UI scope. Treat any missing branch anchor for the later
+fixes as closeout/history repair, not as a renewed product-decision gap.
 
 ### Why this is blocked
 
