@@ -15,7 +15,9 @@ This app now carries the PBK-UI-003 CTBC reference funnel baseline. Per
   `packages/ui-tokens/src/brands.ts` with shared CTBC / CATHAY / GRAND demo
   templates.
 - The CTBC reference funnel (7 screens) now lands in **PBK-UI-003**.
-- Authority-safe negative paths remain the follow-on **PBK-UI-004** task.
+- Authority-safe negative paths now land in **PBK-UI-004** as direct tenant
+  routes that reuse the existing eligibility / book artboards with
+  scenario-specific overlays.
 - The cutover policy between this app and the legacy
   `tenant-console-web/app/partner/` route is a **PBK-UI-005** decision doc.
 
@@ -34,6 +36,12 @@ This app now carries the PBK-UI-003 CTBC reference funnel baseline. Per
   `PartnerBookingReferenceFunnel` (`@drts/ui-web`) with a fixed
   `activeScreen`, so the funnel navigator's hrefs map one-to-one onto
   those routes.
+- The PBK-UI-004 authority-safe negative paths are preserved as explicit
+  routes under `/[tenantSlug]/eligible`, `/[tenantSlug]/ineligible`,
+  `/[tenantSlug]/manual_review`, `/[tenantSlug]/inactive`, and
+  `/[tenantSlug]/eligibility-required`. These routes reuse the existing
+  `eligibility` / `book` screens via `activeScenario` instead of introducing
+  a separate negative-path artboard family.
 - `app/[tenantSlug]/layout.tsx` resolves the brand via `lib/brand.ts`. An
   unknown slug returns `notFound()` so we cannot accidentally render an
   unbranded experience.

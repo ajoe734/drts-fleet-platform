@@ -1,12 +1,19 @@
 import { notFound } from "next/navigation";
-import { PartnerBookingReferenceFunnel } from "@drts/ui-web/partner-booking-funnel";
+import {
+  getPartnerBookingScenarioScreen,
+  PartnerBookingReferenceFunnel,
+  type PartnerBookingScenarioId,
+} from "@drts/ui-web/partner-booking-funnel";
 import { getBrandForSlug } from "@/lib/brand";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
 };
 
-export default async function PartnerReceiptPage({ params }: PageProps) {
+export async function renderPartnerScenarioPage(
+  params: PageProps["params"],
+  scenario: PartnerBookingScenarioId,
+) {
   const { tenantSlug } = await params;
   const brand = getBrandForSlug(tenantSlug);
   if (!brand) {
@@ -16,7 +23,8 @@ export default async function PartnerReceiptPage({ params }: PageProps) {
   return (
     <PartnerBookingReferenceFunnel
       brand={brand}
-      activeScreen="receipt"
+      activeScreen={getPartnerBookingScenarioScreen(scenario)}
+      activeScenario={scenario}
       basePath={`/${tenantSlug}`}
     />
   );

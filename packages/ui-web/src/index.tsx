@@ -141,10 +141,17 @@ export type {
 } from "./workflow-primitives";
 export {
   getPartnerBookingArtboardAnchor,
+  getPartnerBookingScenarioMeta,
+  getPartnerBookingScenarioScreen,
   getPartnerBookingScreenMeta,
+  isPartnerBookingScenarioId,
   isPartnerBookingScreenId,
+  partnerBookingScenarios,
   partnerBookingScreens,
   PartnerBookingPhoneScreen,
   PartnerBookingReferenceFunnel,
 } from "./partner-booking-funnel";
-export type { PartnerBookingScreenId } from "./partner-booking-funnel";
+export type {
+  PartnerBookingScenarioId,
+  PartnerBookingScreenId,
+} from "./partner-booking-funnel";
