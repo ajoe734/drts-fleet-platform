@@ -13,6 +13,7 @@ import type {
 import { SurfaceCard } from "@/components/page-primitives";
 import {
   buildTenantBookingCreateCommand,
+  getDefaultDateTimeLocalValue,
   getBlockingTenantBookingDraftErrors,
   isMissingRequiredBookingFields,
   isReadyForTenantBookingPolicyPreview,
@@ -32,13 +33,6 @@ const BUSINESS_SUBTYPE_OPTIONS: Array<{
 ];
 
 const CURRENCY = "TWD";
-
-function defaultStartIso(offsetMinutes: number): string {
-  const now = new Date();
-  now.setMinutes(now.getMinutes() + offsetMinutes);
-  now.setSeconds(0, 0);
-  return now.toISOString().slice(0, 16);
-}
 
 function formatCurrency(amountMinor: number | null | undefined) {
   if (amountMinor == null || Number.isNaN(amountMinor)) {
@@ -114,15 +108,12 @@ export function TenantBookingCreateForm({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  const initialPassenger = passengers[0] ?? null;
   const initialPickupAddress = addresses[0] ?? null;
   const initialDropoffAddress = addresses[1] ?? addresses[0] ?? null;
 
   const [businessDispatchSubtype, setBusinessDispatchSubtype] =
     useState<BusinessDispatchSubtype>("credit_card_airport_transfer");
-  const [selectedPassengerId, setSelectedPassengerId] = useState(
-    initialPassenger?.passengerId ?? "",
-  );
+  const [selectedPassengerId, setSelectedPassengerId] = useState("");
   const [pickupAddressId, setPickupAddressId] = useState(
     initialPickupAddress?.addressId ?? "",
   );
@@ -147,21 +138,11 @@ export function TenantBookingCreateForm({
   const [dropoffLng, setDropoffLng] = useState(
     initialDropoffAddress?.lng == null ? "" : String(initialDropoffAddress.lng),
   );
-  const [reservationWindowStart, setReservationWindowStart] = useState(
-    defaultStartIso(30),
-  );
-  const [reservationWindowEnd, setReservationWindowEnd] = useState(
-    defaultStartIso(60),
-  );
-  const [passengerName, setPassengerName] = useState(
-    initialPassenger?.fullName ?? "",
-  );
-  const [passengerPhone, setPassengerPhone] = useState(
-    initialPassenger?.mobile ?? "",
-  );
-  const [costCenter, setCostCenter] = useState(
-    costCenters.length > 0 ? (costCenters[0]?.code ?? "") : "",
-  );
+  const [reservationWindowStart, setReservationWindowStart] = useState("");
+  const [reservationWindowEnd, setReservationWindowEnd] = useState("");
+  const [passengerName, setPassengerName] = useState("");
+  const [passengerPhone, setPassengerPhone] = useState("");
+  const [costCenter, setCostCenter] = useState("");
   const [benefitReference, setBenefitReference] = useState("");
   const [vehiclePreference, setVehiclePreference] = useState("");
   const [direction, setDirection] = useState<"" | "pickup" | "dropoff">("");
@@ -222,6 +203,15 @@ export function TenantBookingCreateForm({
     costCenters.length > 0,
   );
   const policyPreviewReady = isReadyForTenantBookingPolicyPreview(draft);
+
+  useEffect(() => {
+    setReservationWindowStart(
+      (value) => value || getDefaultDateTimeLocalValue(30),
+    );
+    setReservationWindowEnd(
+      (value) => value || getDefaultDateTimeLocalValue(60),
+    );
+  }, []);
 
   useEffect(() => {
     const passenger = passengers.find(
@@ -394,6 +384,8 @@ export function TenantBookingCreateForm({
   const activePassenger = passengers.find(
     (row) => row.passengerId === selectedPassengerId,
   );
+  const passengerPhoneLocked =
+    !!activePassenger && !!activePassenger.mobile?.trim();
   const decision = approvalEvaluation?.outcome?.decision ?? "allow";
   const submitDisabled =
     submitting ||
@@ -447,7 +439,8 @@ export function TenantBookingCreateForm({
                 ))}
               </select>
               <span className="field-hint">
-                Directory selection keeps booking-on-behalf explicit.
+                Select a directory passenger for booking-on-behalf, or stay on
+                manual entry.
               </span>
             </label>
 
@@ -478,21 +471,35 @@ export function TenantBookingCreateForm({
             <label className="field-stack">
               <span>Passenger name</span>
               <input
+                disabled={!!activePassenger}
                 onChange={(event) => setPassengerName(event.target.value)}
                 required
                 type="text"
                 value={passengerName}
               />
+              <span className="field-hint">
+                {activePassenger
+                  ? "Passenger name stays locked to the selected directory record."
+                  : "Switch to a directory passenger if this booking is on behalf of someone else."}
+              </span>
             </label>
 
             <label className="field-stack">
               <span>Passenger phone</span>
               <input
+                disabled={passengerPhoneLocked}
                 onChange={(event) => setPassengerPhone(event.target.value)}
                 required
                 type="tel"
                 value={passengerPhone}
               />
+              <span className="field-hint">
+                {activePassenger
+                  ? passengerPhoneLocked
+                    ? "Passenger phone comes from the selected directory record."
+                    : "This directory passenger has no published phone number; provide one here."
+                  : "Manual passenger entry requires a direct contact phone."}
+              </span>
             </label>
           </div>
         </SurfaceCard>
