@@ -548,6 +548,33 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(workspace, (root / ".artifacts/worktrees/auto/codex2-pbk-ui-004").resolve())
             self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "codex2/pbk-ui-004")
 
+    def test_does_not_reuse_canonical_root_when_task_branch_is_checked_out_there(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            _git(root, "switch", "-c", "codex2/pbk-ui-003")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="PBK-UI-003",
+                metadata={"mode": "execution"},
+            )
+            workspace, branch, _base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("PBK-UI-003"),
+            )
+
+            self.assertEqual(branch, "codex2/pbk-ui-003")
+            self.assertEqual(source, "created_worktree")
+            self.assertNotEqual(workspace, root.resolve())
+            self.assertEqual(workspace, (root / ".artifacts/worktrees/auto/codex2-pbk-ui-003").resolve())
+            self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "codex2/pbk-ui-003")
+
 
 class ProcessQueueDispatchGuardTests(unittest.TestCase):
     def setUp(self) -> None:
