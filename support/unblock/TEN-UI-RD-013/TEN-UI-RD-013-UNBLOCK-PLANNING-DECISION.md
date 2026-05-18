@@ -1,9 +1,9 @@
 # TEN-UI-RD-013 Unblock Planning Decision
 
-Task: `TEN-UI-RD-013-UNBLOCK-PLANNING-DECISION`  
-Parent: `TEN-UI-RD-013`  
-Owner: `Codex`  
-Reviewer: `Claude2`  
+Task: `TEN-UI-RD-013-UNBLOCK-PLANNING-DECISION`
+Parent: `TEN-UI-RD-013`
+Owner: `Codex`
+Reviewer: `Codex2`
 Date: `2026-05-18`
 
 ## Decision
@@ -71,3 +71,11 @@ cost-center contract". The concrete next step is:
   - `apps/tenant-console-web/app/cost-centers/page.tsx`
   - `packages/api-client/src/index.ts`
   - `packages/contracts/src/index.ts`
+
+## Closeout evidence
+
+- Task-scoped routing commit: `69c3a11` on
+  `origin/codex/ten-ui-rd-013-unblock-planning-decision`
+- Reviewer approval recorded in machine truth at `2026-05-18T06:27:25Z`
+- Reviewer metadata normalization was approved in reviewer commit `4599c5d` on
+  `origin/codex2/ten-ui-rd-013-unblock-planning-decision`
