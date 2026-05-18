@@ -6,6 +6,9 @@
 
 找出目前分配給你、等待你回應、剛交接給你的 task，或已進入 `review_approved` 並等待你正式收尾為 `done` 的 task，然後直接繼續工作。
 {{branch_protocol}}
+若本次變更碰到 `docs/ops/branch-strategy.md` §11.1 的 fragile surface，或跨多檔共享 design intent，不能把 diff 只留在 working tree；在 yield / 換 task / 結束 session 前，先做 task-scoped anchor commit 或正式 closeout commit。
+工作樹已有不相關修改不是跳過 commit 的理由；只 stage 你 own 的檔案，必要時切到乾淨 branch/worktree 再繼續。
+若安全 commit 或普通 non-force push 做不到，必須明確回報 `progress` / `blocker` 與原因，不能把工作描述成已完成。
 狀態更新請優先使用 `scripts/ai-status.sh` 或 `python3 scripts/ai_status.py`。
 不要用臨時 Python/heredoc 直接改 `ai-status.json`、`current-work.md` 或 `ai-activity-log.jsonl`。
 `current-work.md` 與 dashboard 類檔案是給人看的摘要，不是預設 machine truth。
