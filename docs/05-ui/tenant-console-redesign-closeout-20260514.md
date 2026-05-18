@@ -1,10 +1,16 @@
-# Tenant Console Redesign — Wave 3 Closeout (2026-05-14)
+# Tenant Console Redesign — Wave 3 Closeout (2026-05-14, refreshed 2026-05-18)
 
-Owner: Claude · Reviewer of record (this closeout): Codex
+Owner: Codex · Reviewer of record (this closeout): Codex2
 Task: `TEN-UI-RD-099`
 Planning ref: [`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`](./drts-ui-redesign-workbreakdown-20260510.md)
 Parity decisions companion: [`docs/05-ui/tenant-console-parity-decisions-20260510.md`](./tenant-console-parity-decisions-20260510.md)
-Branches of record: `origin/feat/claude2-ui-redesign-foundation` (Wave 3 baseline), plus the two follow-on branches that landed late parity-fill tasks against newer backend contracts (`origin/codex/be-cc-001-fu-seed` and `origin/codex2/ten-ui-rd-014-closeout`).
+Branches of record: `origin/feat/claude2-ui-redesign-foundation` (Wave 3 baseline), the preserved `codex/be-cc-001-fu-seed` branch-of-record for `TEN-UI-RD-013`, and the two owner closeout branches that finalized late parity-fill tasks on 2026-05-18 (`origin/codex/ten-ui-rd-010` and `origin/codex/ten-ui-rd-014`).
+
+Refresh note: this packet was originally drafted on 2026-05-14. The
+2026-05-18 refresh aligns it with current canonical machine truth after
+`TEN-UI-RD-010` and `TEN-UI-RD-014` were re-reviewed and closed out on new
+owner branches, while `TEN-UI-RD-013` was restored to its original shipped
+tuple through a control-plane repair rather than a new parent-source delta.
 
 ## Purpose
 
@@ -51,9 +57,19 @@ fields). The reviewer for `TEN-UI-RD-099` is asked to confirm only that:
    event in `ai-activity-log.jsonl` for that task,
 3. each cited canvas anchor exists in
    `docs/05-ui/drts-design-canvas/Tenant Console.html`,
-4. each cited parity story file exists under `packages/ui-web/src/` (with the
-   one explicit exception called out under "Outstanding items" below for
-   `TN_ApiKeys`, which is `Storybook N/A` per its task entry).
+4. each cited parity story file exists on the cited branch of record under
+   `packages/ui-web/src/` (with the one explicit exception called out under
+   "Outstanding items" below for `TN_ApiKeys`, which is `Storybook N/A` per
+   its task entry).
+
+For tasks that required an owner-closeout branch after reviewer approval
+(`TEN-UI-RD-010` and `TEN-UI-RD-014`), the matrix intentionally pairs the
+final `review_approved` tuple from `ai-activity-log.jsonl` with the final
+`commit_hash` / `push_branch` tuple from the `done` row in `ai-status.json`.
+This keeps the reviewer signature and the canonical closeout branch visible in
+one place. `TEN-UI-RD-013` is the inverse case: a 2026-05-18 machine-truth
+repair restored the original 2026-05-14 shipped tuple without introducing a
+replacement parent implementation commit.
 
 The Wave 3 acceptance set per task is fixed by the planning ref:
 
@@ -77,11 +93,11 @@ what was rerun at review approval.
 | TEN-UI-RD-002 | Home + Bookings list + Booking Detail     | Codex   | Codex2   | 2026-05-11T01:36:04Z | `aae6d02`      | `feat/claude2-ui-redesign-foundation` | `Tenant Console.html#home` (`TN_Home`), `#bookings` (`TN_Bookings`), `#booking-detail` (`TN_BookingDetail`) | `tenant-home.stories.tsx`, `tenant-bookings.stories.tsx`, `tenant-booking-detail.stories.tsx`              |
 | TEN-UI-RD-003 | Audit + Users + Settings                  | Codex2  | Codex    | 2026-05-11T01:11:08Z | `f4d91bb`      | `feat/claude2-ui-redesign-foundation` | `Tenant Console.html#audit` (`TN_Audit`), `#users` (`TN_Users`), `#settings` (`TN_Settings`)                | `tenant-audit.stories.tsx`, `tenant-users.stories.tsx`, `tenant-settings.stories.tsx`                      |
 | TEN-UI-RD-004 | Tenant shell internal-language copy strip | Codex2  | Claude2  | 2026-05-11T01:18:29Z | `051b68c`      | `feat/claude2-ui-redesign-foundation` | _(no new anchor — shell-only copy replacement; verified against `Tenant Console.html#home` shell chrome)_   | `tenant-shell.stories.tsx` (`brandSub` / footer / search-note copy)                                        |
-| TEN-UI-RD-010 | TN_NewBooking parity-fill                 | Codex   | Codex2   | 2026-05-14T04:07:00Z | `6e0c9fd`      | `codex/be-cc-001-fu-seed`             | `Tenant Console.html#newbooking` (`TN_NewBooking`)                                                          | `tenant-new-booking.stories.tsx`                                                                           |
+| TEN-UI-RD-010 | TN_NewBooking parity-fill                 | Codex2 -> Codex | Codex    | 2026-05-18T15:18:15Z | `12616aa`      | `codex/ten-ui-rd-010`                 | `Tenant Console.html#newbooking` (`TN_NewBooking`)                                                          | `tenant-new-booking.stories.tsx`                                                                           |
 | TEN-UI-RD-011 | TN_Passengers parity-fill                 | Codex   | Codex2   | 2026-05-10T20:19:03Z | `1ceb922`      | `feat/claude2-ui-redesign-foundation` | `Tenant Console.html#passengers` (`TN_Passengers`)                                                          | `tenant-passengers.stories.tsx`                                                                            |
 | TEN-UI-RD-012 | TN_Addresses parity-fill                  | Claude2 | Codex2   | 2026-05-10T19:14:46Z | `4f3956b`      | `feat/claude2-ui-redesign-foundation` | `Tenant Console.html#addresses` (`TN_Addresses`)                                                            | `tenant-addresses.stories.tsx`                                                                             |
 | TEN-UI-RD-013 | TN_CostCenter parity-fill (read-only)     | Codex2  | Claude2  | 2026-05-14T03:16:30Z | `921c456`      | `codex/be-cc-001-fu-seed`             | `Tenant Console.html#costcenter` (`TN_CostCenter`)                                                          | `tenant-cost-centers.stories.tsx`                                                                          |
-| TEN-UI-RD-014 | TN_Rules parity-fill                      | Codex2  | Codex    | 2026-05-14T04:21:35Z | `f0e8265`      | `codex2/ten-ui-rd-014-closeout`       | `Tenant Console.html#rules` (`TN_Rules`)                                                                    | `tenant-rules.stories.tsx`                                                                                 |
+| TEN-UI-RD-014 | TN_Rules parity-fill                      | Codex   | Codex2   | 2026-05-18T15:30:26Z | `41bdce1`      | `codex/ten-ui-rd-014`                 | `Tenant Console.html#rules` (`TN_Rules`)                                                                    | `tenant-rules.stories.tsx`                                                                                 |
 | TEN-UI-RD-015 | TN_Invoices parity-fill                   | Codex2  | Codex2   | 2026-05-10T19:23:35Z | `3daab74`      | `feat/claude2-ui-redesign-foundation` | `Tenant Console.html#invoices` (`TN_Invoices`)                                                              | `tenant-invoices.stories.tsx`                                                                              |
 | TEN-UI-RD-016 | TN_Reports parity-fill                    | Codex2  | Codex    | 2026-05-10T23:56:22Z | `f8857db`      | `feat/claude2-ui-redesign-foundation` | `Tenant Console.html#reports` (`TN_Reports`)                                                                | `tenant-reports.stories.tsx`                                                                               |
 | TEN-UI-RD-017 | TN_ApiKeys completion                     | Codex   | Claude2  | 2026-05-12T14:19:22Z | `4d8ce97`      | `feat/claude2-ui-redesign-foundation` | `Tenant Console.html#apikeys` (`TN_ApiKeys`)                                                                | _(Storybook N/A — see Outstanding items; parity verified against the canvas artboard at the cited anchor)_ |
@@ -89,13 +105,13 @@ what was rerun at review approval.
 
 All thirteen rows are recorded in machine truth in `ai-status.json` as `done`
 with `commit_hash`, `commit_subject`, `push_remote`, and `push_branch` fields
-populated. Eleven rows ship on `origin/feat/claude2-ui-redesign-foundation`;
-the three rows that landed after the `BE-CC-001` / `BE-RULE-001` /
-`BE-QUOTA-001` / `BE-APR-001` parity-fill contract set went canonical ship on
-the two follow-on branches (`origin/codex/be-cc-001-fu-seed` for
-`TEN-UI-RD-010` and `TEN-UI-RD-013`, `origin/codex2/ten-ui-rd-014-closeout`
-for `TEN-UI-RD-014`). Reviewers can reproduce the redesign delta for any
-single surface with:
+populated. Ten rows ship on `origin/feat/claude2-ui-redesign-foundation`; the
+three parity-fill rows that needed late contract recovery or owner-closeout
+branching now point to three non-baseline branches of record:
+`codex/be-cc-001-fu-seed` for `TEN-UI-RD-013`,
+`origin/codex/ten-ui-rd-010` for `TEN-UI-RD-010`, and
+`origin/codex/ten-ui-rd-014` for `TEN-UI-RD-014`. Reviewers can reproduce the
+redesign delta for any single surface with:
 
 ```bash
 git diff <before>..<after> -- <artifact-paths>
@@ -175,11 +191,15 @@ topology`) from the user-facing shell chrome. Verification anchors on the
   `TenantCostCenterRecord`, `TenantBookingQuotaImpactPreview`,
   `TenantApprovalEvaluationResult`) per
   `tenant-console-parity-decisions-20260510.md` § `TEN-UI-RD-010`.
-- Reviewer Codex2 approval at 2026-05-14T04:07:00Z. Reviewer rerun:
-  `pnpm --filter @drts/tenant-console-web typecheck` / `build` / `test`,
-  plus `pnpm --filter @drts/ui-web build-storybook` — all PASS. The scope
-  guardrail (no tenant-side `quotedFare` submission, no invented draft-save
-  or tenant-side approval override) is enforced in the form-state logic and
+- Reviewer Codex approval at 2026-05-18T15:18:15Z on the reviewed
+  implementation branch `origin/codex2/ten-ui-rd-010` (`0232a1b`) reran
+  `pnpm --filter @drts/tenant-console-web typecheck` / `test` / `build` plus
+  `pnpm --filter @drts/ui-web build-storybook` — all PASS. The canonical
+  `done` row then records merge closeout commit `12616aa` on
+  `origin/codex/ten-ui-rd-010`, which preserves the reviewer-approved
+  TN_NewBooking payload on top of current `origin/dev`. The scope guardrail
+  (no tenant-side `quotedFare` submission, no invented draft-save or
+  tenant-side approval override) remains enforced in the form-state logic and
   the BFF route handlers.
 
 ### TEN-UI-RD-011 — TN_Passengers parity-fill
@@ -225,7 +245,9 @@ Cost centers` entry; `tenant-rules.stories.tsx`-style warning chip status is
   story matches the seven-column `TN_CostCenter` artboard
   (`Code` / `Name` / `Owner` / `Quota` / `Used` / `Approval` etc.). The
   parity-decisions companion now records this row as `shipped`; the
-  previously documented blocker has been resolved by `BE-CC-001`.
+  previously documented blocker has been resolved by `BE-CC-001`. A
+  2026-05-18 control-plane repair reasserted this original shipped tuple in
+  machine truth without replacing the parent route commit.
 
 ### TEN-UI-RD-014 — TN_Rules parity-fill (delegated reopen)
 
@@ -237,21 +259,22 @@ Cost centers` entry; `tenant-rules.stories.tsx`-style warning chip status is
   now-published rule, quota, approval-evaluation, and approval-rule listing
   contracts (`BE-RULE-001`, `BE-QUOTA-001`, `BE-APR-001`) per
   `tenant-console-parity-decisions-20260510.md` § `TEN-UI-RD-014`.
-- Reviewer Codex approval at 2026-05-14T04:21:35Z. Reviewer rerun on the
-  task-scoped commit `f0e8265` on `origin/codex2/ten-ui-rd-014-closeout`:
-  `pnpm --filter @drts/tenant-console-web typecheck` PASS;
-  `pnpm --filter @drts/tenant-console-web build` PASS;
-  `pnpm --filter @drts/tenant-console-web test` PASS (3 tests);
-  `pnpm --filter @drts/ui-web build-storybook` PASS. The parity-decisions
+- Reviewer Codex2 approval at 2026-05-18T15:30:26Z re-ran
+  `pnpm --filter @drts/tenant-console-web typecheck` / `build` / `test`
+  successfully on the reviewed Rules route. The canonical `done` row now
+  records owner closeout commit `41bdce1` on `origin/codex/ten-ui-rd-014`;
+  the reviewed implementation payload remains `412116b` on the same branch,
+  and owner closeout verification additionally recorded
+  `pnpm --filter @drts/ui-web typecheck` and
+  `pnpm --filter @drts/ui-web build-storybook` as PASS. The parity-decisions
   companion now records this row as `shipped`; the previously documented
   blocker has been resolved by the late-Wave-3 rule + quota + approval
   contract trio.
-- Branch note: `f0e8265` is **not** reachable from
-  `origin/codex/be-cc-001-fu-seed` (the current closeout-task branch); the
-  matrix preserves the source-of-truth shipping branch per machine truth.
-  Reviewer can `git fetch origin codex2/ten-ui-rd-014-closeout && git diff
-<before>..f0e8265 -- apps/tenant-console-web/app/rules` to reproduce the
-  redesign delta.
+- Branch note: both `41bdce1` (closeout evidence) and `412116b`
+  (reviewed implementation payload) are reachable from
+  `origin/codex/ten-ui-rd-014`. Reviewer can
+  `git fetch origin codex/ten-ui-rd-014 && git diff <before>..412116b -- apps/tenant-console-web/app/rules`
+  to reproduce the redesign delta.
 
 ### TEN-UI-RD-015 — TN_Invoices parity-fill
 
@@ -327,37 +350,38 @@ reviewer:
   (`docs/05-ui/drts-design-canvas/Tenant Console.html`) and the parity
   Storybook stories (`packages/ui-web/src/tenant-*.stories.tsx`) provide the
   living comparison surface and are reproducible from the listed commits.
-- `TEN-UI-RD-013`'s closeout note records that the owner saw a follow-up
-  workspace error in `app/rules/rules-manager.tsx` after the cost-centers
-  route landed; the rules file then shipped under `TEN-UI-RD-014` on a
-  separate branch (`origin/codex2/ten-ui-rd-014-closeout`). The reviewer
-  approvals for both tasks remain valid against their respective branches; no
-  Wave 3 blocker remains.
+- `TEN-UI-RD-013` remains the only parity-fill row whose 2026-05-18 repair
+  intentionally restored an earlier 2026-05-14 shipped tuple rather than
+  creating a new parent route commit. `TEN-UI-RD-014` later finalized on
+  `origin/codex/ten-ui-rd-014`; both rows now have a coherent closeout story
+  and no Wave 3 blocker remains.
 
 ## Parity-fill decision crosswalk
 
-| Task          | Parity-decisions § | 2026-05-10 status | 2026-05-14 status (this packet) |
-| ------------- | ------------------ | ----------------- | ------------------------------- |
-| TEN-UI-RD-010 | `TN_NewBooking`    | blocked           | shipped (`6e0c9fd`)             |
+| Task          | Parity-decisions § | 2026-05-10 status | 2026-05-18 canonical status |
+| ------------- | ------------------ | ----------------- | --------------------------- |
+| TEN-UI-RD-010 | `TN_NewBooking`    | blocked           | shipped (`12616aa`)         |
 | TEN-UI-RD-011 | `TN_Passengers`    | shipped           | shipped (`1ceb922`)             |
 | TEN-UI-RD-012 | `TN_Addresses`     | shipped           | shipped (`4f3956b`)             |
 | TEN-UI-RD-013 | `TN_CostCenter`    | blocked           | shipped (`921c456`)             |
-| TEN-UI-RD-014 | `TN_Rules`         | blocked           | shipped (`f0e8265`)             |
+| TEN-UI-RD-014 | `TN_Rules`         | blocked           | shipped (`41bdce1`)         |
 | TEN-UI-RD-015 | `TN_Invoices`      | shipped           | shipped (`3daab74`)             |
 
 The companion file
 `docs/05-ui/tenant-console-parity-decisions-20260510.md` has been updated
-with a 2026-05-14 head note that records the three reopen decisions
-(`TEN-UI-RD-010` / `TEN-UI-RD-013` / `TEN-UI-RD-014`) and the contract
+with 2026-05-14 and 2026-05-18 head notes that record the three reopen
+decisions (`TEN-UI-RD-010` / `TEN-UI-RD-013` / `TEN-UI-RD-014`), the contract
 publications that unblocked them (`BE-CC-001`, `BE-RULE-001`,
-`BE-QUOTA-001`, `BE-APR-001`).
+`BE-QUOTA-001`, `BE-APR-001`), and the later owner-closeout / machine-truth
+repair tuples that now govern this refreshed packet.
 
 ## Reviewer signoff for TEN-UI-RD-099
 
-The reviewer (Codex) is asked to confirm only that the matrix above is
+The reviewer (Codex2) is asked to confirm only that the matrix above is
 internally consistent with `ai-status.json` and `ai-activity-log.jsonl` —
 i.e. each `(reviewer, approved-at, commit_hash, push_branch)` tuple in the
 matrix matches the machine truth on the cited branches, the cited canvas
 anchors exist in `docs/05-ui/drts-design-canvas/Tenant Console.html`, and
-the cited parity story files exist under `packages/ui-web/src/` (with the
-one explicit `Storybook N/A` exception for `TN_ApiKeys`).
+the cited parity story files exist on their branch of record under
+`packages/ui-web/src/` (with the one explicit `Storybook N/A` exception for
+`TN_ApiKeys`).
