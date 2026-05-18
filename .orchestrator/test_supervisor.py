@@ -2419,6 +2419,112 @@ class PollWorkersRecoveryTests(unittest.TestCase):
             )
         )
 
+    def test_chair_guarded_higher_priority_task_does_not_supersede_full_lane(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "active_worker_statuses": ["running"],
+                "review_statuses": ["review"],
+                "dependency_done_statuses": ["done"],
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"codex2": 1},
+            },
+            "agents": {"codex2": {"id": "codex2", "display_name": "Codex2"}},
+        }
+        low_worker = {
+            "task_id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+            "provider": "codex2",
+            "agent_id": "codex2",
+            "status": "running",
+            "queue_event_id": "evt-low",
+            "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+        }
+        state = {
+            "queue": {"events": {"evt-low": {"status": "started"}}},
+            "workers": {"run-low": low_worker},
+            "failure_streaks": {
+                "PBK-UI-003:reviewer": {
+                    "task_id": "PBK-UI-003",
+                    "role": "reviewer",
+                    "agent": "Codex2",
+                    "awaiting_chair": True,
+                }
+            },
+        }
+        task_map = {
+            "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR": {
+                "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                "status": "in_progress",
+                "owner": "Codex2",
+                "reviewer": "Claude2",
+                "depends_on": [],
+            },
+            "PBK-UI-003": {
+                "id": "PBK-UI-003",
+                "status": "review",
+                "owner": "Claude2",
+                "reviewer": "Codex2",
+                "depends_on": [],
+            },
+        }
+
+        with mock.patch.object(supervisor, "load_event_queue", return_value=[]):
+            self.assertFalse(
+                supervisor.higher_priority_ready_task_exists(
+                    config,
+                    low_worker,
+                    task_map,
+                    state=state,
+                    active_statuses={"running"},
+                )
+            )
+
+    def test_agent_dispatch_loads_skip_events_with_active_workers(self) -> None:
+        config = {
+            "ready_dispatcher": {"active_worker_statuses": ["running"]},
+            "agents": {"codex2": {"id": "codex2", "display_name": "Codex2"}},
+        }
+        state = {
+            "queue": {
+                "events": {
+                    "evt-active": {"status": "started"},
+                    "evt-pending": {"status": "queued"},
+                }
+            },
+            "workers": {
+                "run-active": {
+                    "queue_event_id": "evt-active",
+                    "agent_id": "codex2",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+        events = [
+            {
+                "event_id": "evt-active",
+                "target_agent": "codex2",
+                "target_display_name": "Codex2",
+                "reason": "owned_in_progress_dispatch",
+            },
+            {
+                "event_id": "evt-pending",
+                "target_agent": "codex2",
+                "target_display_name": "Codex2",
+                "reason": "owned_finalize_dispatch",
+            },
+        ]
+
+        with mock.patch.object(supervisor, "load_event_queue", return_value=events):
+            loads = supervisor.agent_dispatch_loads(config, state, {"running"})
+
+        self.assertEqual(loads, {"Codex2": [2, 1]})
+
     def test_dead_worker_for_open_task_is_marked_failed_not_completed(self) -> None:
         config = {
             "schema": {
