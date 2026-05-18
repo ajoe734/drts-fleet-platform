@@ -768,7 +768,10 @@ def update_supervisor_mode_metadata(
         occupancy.setdefault(bucket, {"running": 0, "pending": 0, "queued": 0})
         occupancy[bucket]["running"] += 1
 
-    for record in state.get("queue", {}).get("events", {}).values():
+    active_event_ids = active_worker_queue_event_ids(state, ACTIVE_RUNTIME_STATUSES)
+    for event_id, record in state.get("queue", {}).get("events", {}).items():
+        if event_id in active_event_ids:
+            continue
         queue_status = str(record.get("status") or "").strip().lower()
         if queue_status in {"completed", "failed", "done"}:
             continue
