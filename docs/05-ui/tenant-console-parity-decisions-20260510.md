@@ -1,5 +1,25 @@
 # Tenant Console Parity Decisions — 2026-05-10
 
+## 2026-05-18 Planning Recovery Note
+
+The product/contract decision that originally blocked `TEN-UI-RD-013` is now
+resolved and should no longer keep the parent task parked in
+`discussion_planning`:
+
+- `docs/05-ui/tenant-canonical-contract-gaps-design-response-20260513.md`
+  accepts the Tenant Governance Contract Wave and treats `BE-CC-001` as the
+  canonical tenant cost-center directory baseline.
+- `docs/03-runbooks/tenant-governance-wave-execution-packet-20260513.md` §7
+  says `TEN-UI-RD-013` unblocks when `BE-CC-001` is done, and marks that as
+  "already true".
+- The route later shipped on commit `921c456` as the read-only TN_CostCenter
+  surface; see the 2026-05-14 update below and the Wave 3 closeout packet.
+
+What remains out of scope is only the **management editor** surface
+(`create/update/disable`, owner reassignment, approval-policy mutation). That
+needs a separate follow-up decision if product still wants the full artboard,
+but it is not a reason to keep the read-only route blocked.
+
 ## 2026-05-14 Wave 3 Closeout Update
 
 All three previously-blocked parity-fill tasks have reopened and shipped now
@@ -260,14 +280,17 @@ What is missing from the published tenant contract:
   - `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`
   - `ai-status.json` task `TEN-UI-RD-013`
 
-### Required follow-up
+### Remaining follow-up (out of scope for the shipped read-only route)
 
-Supervisor should decide one of these before reopening `TEN-UI-RD-013`:
+The unblock decision above has already been made and executed: `BE-CC-001`
+published the canonical tenant cost-center directory contract, and
+`TEN-UI-RD-013` shipped as a read-only informational surface on top of it.
 
-1. Add canonical tenant cost-center read/write contracts, including quota,
-   usage, owner, and approval metadata.
-2. Narrow the UI acceptance so the route ships only after a revised,
-   authority-safe informational scope is explicitly approved.
+Only the broader management-table editor remains deferred. If product still
+wants inline create / disable controls, owner reassignment, or approval-policy
+mutation in this route, open a separate follow-up task against a new backend
+mutation decision. Do not re-block the shipped read-only route on that larger
+scope.
 
 ## TEN-UI-RD-011 — TN_Passengers contract validation
 
