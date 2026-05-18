@@ -48,7 +48,7 @@ its reviewer / approval-time / commit / canvas anchor / parity story is
 Status: shipped
 Owner: `Codex`
 Reviewer: `Codex2`
-Last checked: `2026-05-14`
+Last checked: `2026-05-18`
 
 ### Decision
 
@@ -375,6 +375,28 @@ Branch note: `f0e8265` ships on a dedicated closeout branch
 with `git fetch origin codex2/ten-ui-rd-014-closeout` followed by a scoped
 `git diff` against the route artifacts.
 
+### 2026-05-18 unblock reconciliation
+
+The original 2026-05-10 planning blocker is now stale. `TEN-UI-RD-014`
+should not route back to `discussion_planning` for a missing
+product/contract choice because the accepted tenant-governance wave already
+published the missing tenant rule, quota, and approval surfaces:
+
+- `BE-RULE-001` published the tenant approval-rule list/read/mutation
+  surface.
+- `BE-QUOTA-001` published the tenant quota policy, usage, and
+  quota-aware-condition vocabulary consumed by `TN_Rules`.
+- `BE-APR-001` published the approval-evaluation and approval-request
+  surfaces used by the route.
+
+Supervisor routing implication:
+
+1. Treat the planning blocker as resolved.
+2. Reconcile `TEN-UI-RD-014` against the shipped branch
+   `origin/codex2/ten-ui-rd-014-closeout` at commit `f0e8265`.
+3. Update machine truth so the parent task points at shipped closeout
+   evidence instead of the old "missing contract" redirect.
+
 ### Why this was blocked
 
 The published tenant/backend surface does not expose the rule, approver, or
@@ -426,9 +448,11 @@ What is missing from the published tenant contract:
   - `docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`
   - `ai-status.json` task `TEN-UI-RD-014`
 
-### Required follow-up
+### Historical follow-up requirement
 
-Supervisor should decide one of these before reopening `TEN-UI-RD-014`:
+The following requirement was accurate before `BE-RULE-001`,
+`BE-QUOTA-001`, and `BE-APR-001` landed. It is retained as historical
+context only:
 
 1. Add canonical tenant approval-rule and quota read/write contracts,
    including approver resolution and rule ordering/state semantics.
