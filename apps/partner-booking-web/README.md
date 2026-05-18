@@ -20,6 +20,24 @@ This app now carries the PBK-UI-003 CTBC reference funnel baseline. Per
 - The cutover policy between this app and the legacy
   `tenant-console-web/app/partner/` route is a **PBK-UI-005** decision doc.
 
+## Cutover Policy Snapshot
+
+`docs/01-decisions/SD-DP-20260512-006-partner-booking-app-cutover-topology.md`
+is the governing record for coexistence between the new app, the legacy
+tenant-console partner route, and the still-live external partner mode.
+
+- `apps/partner-booking-web` is the canonical repo-local landing zone for new
+  partner-booking UI, branding, and Storybook parity work.
+- `apps/tenant-console-web/app/partner/*` is a legacy compatibility and
+  rollback surface only. It may take safety or parity fixes, but no new
+  partner-only IA or feature expansion.
+- `tenant-commute-hub` partner mode remains the live production owner until a
+  later cutover task proves auth/bootstrap wiring, partner-entry routing,
+  negative-path evidence, and named cutover/rollback owners.
+- The live cutover unit is a single partner entry, not a whole tenant, and
+  each migrated entry keeps at least 14 calendar days of rollback retention
+  before the legacy repo-local route can be removed.
+
 ## Routing rules (white-label invariant)
 
 - The root path `/` is **not** a product surface. It is a developer-facing

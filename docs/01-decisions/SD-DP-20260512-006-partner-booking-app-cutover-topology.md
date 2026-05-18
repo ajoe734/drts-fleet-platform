@@ -1,6 +1,6 @@
-# SD-DP-20260512-006: Partner Booking App Cutover Topology
+# SD-DP-20260512-006: Partner Booking App Cutover And Coexistence Policy
 
-Status: accepted system-design decision for partner booking repo-local topology and cutover gating
+Status: accepted repo-local coexistence policy for partner-booking topology, switch gates, and retirement guardrails
 Date: 2026-05-12
 Task: `PBK-UI-005`
 Owner: `Codex`
@@ -33,6 +33,20 @@ host-resolved entry), not a whole tenant. The current Wave 5 `tenantSlug`
 route in `apps/partner-booking-web` is valid as a repo-local white-label demo
 surface, but it is not itself a production cutover contract.
 
+## Sign-off Scope
+
+`PBK-UI-005` signs off only the repo-local coexistence policy:
+
+- where new partner-booking UI work lands
+- when a partner entry may switch live traffic
+- how long rollback retention must stay available
+- when the legacy repo-local route may be retired
+
+Reviewer approval on this task is the governance review for the policy above.
+It is not a production cutover approval. Any later live promotion still
+requires a separate cutover task or runbook with named supervisor and rollback
+sign-off.
+
 ## Coexistence Policy
 
 | Surface                                 | Role during coexistence                             | Allowed changes                                                                 | Not allowed                                                                                | Exit condition                                                                                   |
@@ -41,7 +55,7 @@ surface, but it is not itself a production cutover contract.
 | `apps/tenant-console-web/app/partner/*` | legacy compatibility and behavior-reference surface | production-safety fixes, negative-path parity confirmation, rollback support    | new IA, new partner-only features, broad redesign scope, tenant-admin navigation expansion | remove only through a dedicated cleanup task after all migrated entries clear rollback retention |
 | `tenant-commute-hub` partner mode       | current live production owner outside this repo     | existing live traffic, upstream production support                              | repo-local topology claims that it has already been replaced                               | upstream retirement after a later live cutover and rollback closeout                             |
 
-## Cutover Gates
+## When To Switch
 
 ### 1. Repo-local readiness gate
 
@@ -83,7 +97,7 @@ supervisor and governance sign-off. That later task must record:
 `PBK-UI-005` resolves topology, transition length, and retirement strategy. It
 does not authorize production promotion by itself.
 
-## Transition Length
+## Transition Period
 
 Two coexistence windows apply:
 
@@ -97,7 +111,7 @@ The repo-local legacy route under `apps/tenant-console-web/app/partner/*` may
 not be removed until the last actively migrated partner entry has completed its
 `14`-day rollback-retention window and no rollback is pending.
 
-## Deprecation Strategy
+## Retirement Strategy
 
 1. Freeze `apps/tenant-console-web/app/partner/*` to compatibility, safety, and
    rollback-support changes only.
