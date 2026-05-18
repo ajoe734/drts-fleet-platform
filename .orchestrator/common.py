@@ -195,8 +195,8 @@ def canonical_workspace_root(config: dict[str, Any]) -> Path:
 def delivery_workspace_root(config: dict[str, Any], metadata: dict[str, Any] | None = None) -> Path:
     """Return the cwd a worker should use for repository edits.
 
-    Execution dispatch may run in an isolated git worktree, while coordination
-    and fallback delivery continue to use the canonical workspace.
+    Execution and coordination dispatch may run in isolated git worktrees,
+    while fallback delivery continues to use the canonical workspace.
     """
     raw = (metadata or {}).get("workspace_root")
     if raw:

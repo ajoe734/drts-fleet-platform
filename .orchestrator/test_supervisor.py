@@ -575,6 +575,48 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertEqual(workspace, (root / ".artifacts/worktrees/auto/codex2-pbk-ui-003").resolve())
             self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "codex2/pbk-ui-003")
 
+    def test_creates_isolated_worktree_for_coordination_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="chair wake",
+                task_id=None,
+                reason="chair_review:provider_health_triage",
+                metadata={"mode": "coordination", "workspace_key": "chair-provider_health_triage"},
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                None,
+            )
+            supervisor.attach_workspace_metadata(
+                self._repo_config(root),
+                request,
+                workspace,
+                branch,
+                base_branch,
+                source,
+            )
+
+            self.assertIsNone(branch)
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "created_coordination_worktree")
+            self.assertEqual(
+                workspace,
+                (root / ".artifacts/worktrees/auto/codex2-coordination-chair-provider_health_triage").resolve(),
+            )
+            self.assertNotEqual(workspace, root.resolve())
+            self.assertEqual(_git(workspace, "rev-parse", "--is-inside-work-tree").stdout.strip(), "true")
+            self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "")
+            self.assertIn("isolated coordination worktree", request.message)
+            self.assertEqual(request.metadata["workspace_root"], str(workspace))
+
 
 class ProcessQueueDispatchGuardTests(unittest.TestCase):
     def setUp(self) -> None:
