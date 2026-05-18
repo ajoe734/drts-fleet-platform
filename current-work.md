@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-18T00:37:32Z
+Last updated: 2026-05-18T01:03:50Z
 
 ## Objective
 
@@ -38,9 +38,9 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 - `Claude`: governance-review, architecture-arbitration, control-plane; next: Closeout packet fix applied: docs/05-ui/driver-app-redesign-closeout-20260512.md now names Codex as reviewer on lines 3 and 234 (was Copilot). Grep confirms no remaining 'Copilot' references in the cl
 - `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
-- `Codex`: contracts, schema, state-system, acceptance; next: Owner closeout blocked: shared branch HEAD moved to local commit f481c294d627390bf574a46b3c6fdaaf5951f5eb (feat(ADM-UI-RD-006): finalize users fleet switchboard redesign, LLM-Agent: Codex2) before ADM
+- `Codex`: contracts, schema, state-system, acceptance; next: Rebased codex/pbk-ui-004 onto origin/dev; taking ownership of the negative-path parity fix and aligning route semantics plus compare surfaces before rerunning acceptance.
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
-- `Codex2`: contracts, schema, state-system, acceptance; next: Review failed: partner-booking-web typecheck/lint/build are green, but the 5 negative paths still have no Storybook/artboard parity target. packages/ui-web/src/partner-booking.stories.tsx exports only
+- `Codex2`: contracts, schema, state-system, acceptance; next: Continuing CTBC 7-screen partner booking funnel implementation and verification in apps/partner-booking-web.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
 - `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
 
@@ -59,7 +59,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `TEN-UI-RD-099` | Wave 3 | Wave 3 tenant closeout packet | Claude | backlog | `TEN-UI-RD-001`, `TEN-UI-RD-002`, `TEN-UI-RD-003`, `TEN-UI-RD-004`, `TEN-UI-RD-010`, `TEN-UI-RD-011`, `TEN-UI-RD-012`, `TEN-UI-RD-013`, `TEN-UI-RD-014`, `TEN-UI-RD-015`, `TEN-UI-RD-016`, `TEN-UI-RD-017`, `TEN-UI-RD-018` | TEN-UI-RD-001..018 全 review_approved 後產出 closeout 文件，含 parity-fill 決策。 |
 | `DRV-UI-RD-009` | Wave 4 | Wave 4 driver closeout packet | Claude | review | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008` | DRV-UI-RD-001..008 全 review_approved 後產出 closeout 文件。 |
 | `PBK-UI-003` | Wave 5 | CTBC reference funnel — 7 screens | Codex2 | in_progress | `PBK-UI-002` | Landing / Eligibility / Book / Confirmed / Trips / Receipt / Help — 全部 white-label component + CTBC brand demo。Mock data。 |
-| `PBK-UI-004` | Wave 5 | Authority-safe negative paths | Codex2 | in_progress | `PBK-UI-003` | 保留 tenant-console-web/app/partner/ 既有 5 條 negative path (eligible / ineligible / manual_review / inactive / eligibility-required) 並移植。 |
+| `PBK-UI-004` | Wave 5 | Authority-safe negative paths | Codex | in_progress | `PBK-UI-003` | 保留 tenant-console-web/app/partner/ 既有 5 條 negative path (eligible / ineligible / manual_review / inactive / eligibility-required) 並移植。 |
 | `PBK-UI-005` | Wave 5 | 新舊 partner mode 共存政策 (decision doc) | Codex | backlog | `PBK-UI-004` | Decision doc 簽核：何時切換 / 過渡期 / 棄置策略。Supervisor + governance reviewer 共同簽。 |
 | `TOK-UI-001-SIDECAR-ACCEPTANCE` | Wave 1 | [Sidecar] [Auto] [Parent TOK-UI-001] Prepare TOK-UI-001 acceptance packet and dependency map | Codex | blocked | `RDX-W0-002` | 平行支援 TOK-UI-001，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。 |
 
@@ -82,7 +82,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `TEN-UI-RD-099` | Wave 3 | Wave 3 tenant closeout packet | Claude | backlog | `TEN-UI-RD-001`, `TEN-UI-RD-002`, `TEN-UI-RD-003`, `TEN-UI-RD-004`, `TEN-UI-RD-010`, `TEN-UI-RD-011`, `TEN-UI-RD-012`, `TEN-UI-RD-013`, `TEN-UI-RD-014`, `TEN-UI-RD-015`, `TEN-UI-RD-016`, `TEN-UI-RD-017`, `TEN-UI-RD-018` |
 | `DRV-UI-RD-009` | Wave 4 | Wave 4 driver closeout packet | Claude | review | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008` |
 | `PBK-UI-003` | Wave 5 | CTBC reference funnel — 7 screens | Codex2 | in_progress | `PBK-UI-002` |
-| `PBK-UI-004` | Wave 5 | Authority-safe negative paths | Codex2 | in_progress | `PBK-UI-003` |
+| `PBK-UI-004` | Wave 5 | Authority-safe negative paths | Codex | in_progress | `PBK-UI-003` |
 | `PBK-UI-005` | Wave 5 | 新舊 partner mode 共存政策 (decision doc) | Codex | backlog | `PBK-UI-004` |
 | `TOK-UI-001-SIDECAR-ACCEPTANCE` | Wave 1 | [Sidecar] [Auto] [Parent TOK-UI-001] Prepare TOK-UI-001 acceptance packet and dependency map | Codex | blocked | `RDX-W0-002` |
 
@@ -127,3 +127,5 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 ## Latest Checkpoints
 
 - 2026-05-18T00:37:32Z Codex: `PBK-UI-004` Review failed: partner-booking-web typecheck/lint/build are green, but the 5 negative paths still have no Storybook/artboard parity target. packages/ui-web/src/partner-booking.stories.tsx exports only the 7 PBK-UI-003 funnel stories, and docs/05-ui/drts-design-canvas/Partner Booking.html plus partner-screens.jsx still define only landing/eligibility/book/confirmed/trips/receipt/help, so there is no PB_Eligible/PB_Ineligible/PB_ManualReview/PB_Inactive/PB_EligibilityRequired compare surface.
+- 2026-05-18T01:03:40Z Codex: `PBK-UI-004` Assigned PBK-UI-004 to Codex with reviewer Codex2
+- 2026-05-18T01:03:49Z Codex: `PBK-UI-004` Rebased codex/pbk-ui-004 onto origin/dev; taking ownership of the negative-path parity fix and aligning route semantics plus compare surfaces before rerunning acceptance.
