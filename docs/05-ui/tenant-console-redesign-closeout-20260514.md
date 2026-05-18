@@ -10,8 +10,8 @@ Branches of record: `origin/feat/claude2-ui-redesign-foundation` (Wave 3 baselin
 
 Wave 3 closeout for the tenant-console-web redesign. The thirteen
 implementation tasks `TEN-UI-RD-001`..`TEN-UI-RD-004` and
-`TEN-UI-RD-010`..`TEN-UI-RD-018` have all reached `done` in `ai-status.json`.
-This document binds each shipped surface to:
+`TEN-UI-RD-010`..`TEN-UI-RD-018` were all closed out for shipment in this
+wave, and this document binds each shipped surface to:
 
 - the **after** state (the shipped redesign commit on its push branch),
 - the **before** state (the most recent commit that materially set the page's
