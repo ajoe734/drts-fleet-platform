@@ -1,6 +1,5 @@
 import type { CSSProperties } from "react";
 import type {
-  TenantApprovalRuleCondition,
   TenantApprovalRuleRecord,
   TenantCostCenterCoverageReport,
   TenantCostCenterRecord,
@@ -19,6 +18,7 @@ import {
 } from "@drts/ui-web";
 import { CalloutPanel } from "@/components/page-primitives";
 import { getTenantClient } from "@/lib/api-client";
+import { summarizeApprovalRulesForCostCenter } from "./summary";
 
 export const dynamic = "force-dynamic";
 
@@ -210,13 +210,15 @@ function formatQuotaUsage(summary: TenantCostCenterQuotaSummary | null) {
 
   if (summary.limit.bookingCountLimit !== null) {
     const used =
-      summary.usage.confirmedBookingCount + summary.usage.pendingReservedBookingCount;
+      summary.usage.confirmedBookingCount +
+      summary.usage.pendingReservedBookingCount;
     return `${formatCount(used)} 已用 · ${formatCount(summary.usage.bookingCountRemaining)} 剩餘`;
   }
 
   if (summary.limit.amountMinorLimit !== null) {
     const usedMinor =
-      summary.usage.confirmedAmountMinor + summary.usage.pendingReservedAmountMinor;
+      summary.usage.confirmedAmountMinor +
+      summary.usage.pendingReservedAmountMinor;
     const remainingMinor =
       summary.usage.amountMinorRemaining === null
         ? null
@@ -227,12 +229,16 @@ function formatQuotaUsage(summary: TenantCostCenterQuotaSummary | null) {
   return "無上限";
 }
 
-function getQuotaRemainingPercent(summary: TenantCostCenterQuotaSummary | null) {
+function getQuotaRemainingPercent(
+  summary: TenantCostCenterQuotaSummary | null,
+) {
   if (!summary || summary.usage.remainingPercent === null) return "—";
   return `${summary.usage.remainingPercent}% 剩餘`;
 }
 
-function getQuotaTone(summary: TenantCostCenterQuotaSummary | null): CanvasTone {
+function getQuotaTone(
+  summary: TenantCostCenterQuotaSummary | null,
+): CanvasTone {
   if (!summary) return "neutral";
 
   if (
@@ -257,62 +263,6 @@ function getQuotaTone(summary: TenantCostCenterQuotaSummary | null): CanvasTone 
   }
 
   return "info";
-}
-
-function conditionReferencesCostCenter(
-  condition: TenantApprovalRuleCondition,
-  code: string,
-) {
-  if (condition.field !== "cost_center.code") return false;
-
-  const scalarValues = [
-    condition.value,
-    ...(condition.values ?? []),
-  ].flatMap((value) => (Array.isArray(value) ? value : [value]));
-
-  return scalarValues.some((value) => value === code);
-}
-
-function summarizeApprovalRulesForCostCenter(
-  costCenterCode: string,
-  rules: readonly TenantApprovalRuleRecord[],
-) {
-  const scopedRules = rules.filter((rule) => {
-    if (!rule.activeFlag) return false;
-
-    if (rule.conditions.some((condition) => conditionReferencesCostCenter(condition, costCenterCode))) {
-      return true;
-    }
-
-    if (
-      rule.approvers.some(
-        (approver) =>
-          approver.kind === "cost_center_owner" &&
-          approver.costCenterCode === costCenterCode,
-      )
-    ) {
-      return true;
-    }
-
-    return false;
-  });
-
-  const strictCount = scopedRules.filter(
-    (rule) => rule.action === "require_approval" || rule.action === "block",
-  ).length;
-  const ownerApprovalCount = scopedRules.filter((rule) =>
-    rule.approvers.some(
-      (approver) =>
-        approver.kind === "cost_center_owner" &&
-        approver.costCenterCode === costCenterCode,
-    ),
-  ).length;
-
-  return {
-    totalCount: scopedRules.length,
-    strictCount,
-    ownerApprovalCount,
-  };
 }
 
 function getApprovalTone(
@@ -346,11 +296,15 @@ export default async function CostCentersPage() {
     ),
   }));
 
-  const activeCount = costCenters.filter((costCenter) => costCenter.activeFlag).length;
+  const activeCount = costCenters.filter(
+    (costCenter) => costCenter.activeFlag,
+  ).length;
   const disabledCount = costCenters.length - activeCount;
   const unresolvedCount = coverage?.unresolvedCount ?? 0;
   const strictRuleCount = approvalRules.filter(
-    (rule) => rule.activeFlag && (rule.action === "require_approval" || rule.action === "block"),
+    (rule) =>
+      rule.activeFlag &&
+      (rule.action === "require_approval" || rule.action === "block"),
   ).length;
 
   const columns: CanvasTableColumn<CostCenterRow>[] = [
@@ -369,7 +323,8 @@ export default async function CostCentersPage() {
         <div style={inlineStackStyle}>
           <span style={codePrimaryStyle}>{row.name}</span>
           <span style={secondaryTextStyle}>
-            {row.description ?? "配額分組與報表歸屬沿用 canonical directory record。"}
+            {row.description ??
+              "配額分組與報表歸屬沿用 canonical directory record。"}
           </span>
         </div>
       ),
@@ -415,7 +370,8 @@ export default async function CostCentersPage() {
         <div style={inlineStackStyle}>
           <span>{formatQuotaUsage(row.quotaSummary)}</span>
           <span style={secondaryTextStyle}>
-            confirmed {formatCount(row.quotaSummary?.usage.confirmedBookingCount)}
+            confirmed{" "}
+            {formatCount(row.quotaSummary?.usage.confirmedBookingCount)}
             {" · "}pending{" "}
             {formatCount(row.quotaSummary?.usage.pendingReservedBookingCount)}
           </span>
@@ -428,10 +384,7 @@ export default async function CostCentersPage() {
       r: (row) => (
         <div style={inlineStackStyle}>
           <div style={pillRowStyle}>
-            <CanvasPill
-              theme={th}
-              tone={getApprovalTone(row.approvalSummary)}
-            >
+            <CanvasPill theme={th} tone={getApprovalTone(row.approvalSummary)}>
               {getApprovalLabel(row.approvalSummary)}
             </CanvasPill>
           </div>
@@ -547,7 +500,9 @@ export default async function CostCentersPage() {
                   },
                   {
                     k: "Active rules",
-                    v: formatCount(approvalRules.filter((rule) => rule.activeFlag).length),
+                    v: formatCount(
+                      approvalRules.filter((rule) => rule.activeFlag).length,
+                    ),
                     mono: true,
                   },
                 ]}
@@ -564,7 +519,9 @@ export default async function CostCentersPage() {
                   {coverage.unresolvedSamples.slice(0, 5).map((sample) => (
                     <li key={sample.rawCostCenter}>
                       <div style={inlineStackStyle}>
-                        <span style={codePrimaryStyle}>{sample.rawCostCenter}</span>
+                        <span style={codePrimaryStyle}>
+                          {sample.rawCostCenter}
+                        </span>
                         <span style={secondaryTextStyle}>
                           {formatCount(sample.occurrences)} booking hit
                           {sample.occurrences === 1 ? "" : "s"}
