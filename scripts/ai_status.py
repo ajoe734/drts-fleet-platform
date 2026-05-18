@@ -956,6 +956,9 @@ def recompute_agents(state: dict[str, Any]) -> None:
             agent["status"] = "idle"
             agent["current_task_ids"] = []
 
+        current_task_ids = agent.get("current_task_ids", [])
+        agent["current_task"] = current_task_ids[0] if current_task_ids else None
+
         if active:
             latest = sorted(
                 active,
