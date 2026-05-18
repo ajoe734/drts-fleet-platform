@@ -4437,14 +4437,29 @@ def active_worker_agent_counts(state: dict[str, Any], active_statuses: set[str])
     return counts
 
 
+def active_worker_queue_event_ids(state: dict[str, Any], active_statuses: set[str]) -> set[str]:
+    event_ids: set[str] = set()
+    for worker in state.get("workers", {}).values():
+        if worker.get("status") not in active_statuses:
+            continue
+        queue_event_id = str(worker.get("queue_event_id") or "")
+        if queue_event_id:
+            event_ids.add(queue_event_id)
+    return event_ids
+
+
 def outstanding_delivery_indexes(config: dict[str, Any], state: dict[str, Any]) -> tuple[set[str], set[tuple[str, str]], set[str]]:
     agents: set[str] = set()
     task_agents: set[tuple[str, str]] = set()
     event_keys: set[str] = set()
     queue_records = state.get("queue", {}).get("events", {})
+    active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
+    active_event_ids = active_worker_queue_event_ids(state, active_statuses)
     for event in load_event_queue(config):
-        event_id = event.get("event_id")
+        event_id = str(event.get("event_id") or "")
         if not event_id:
+            continue
+        if event_id in active_event_ids:
             continue
         record = queue_records.get(event_id, {})
         if record.get("status") in {"completed", "failed"}:
@@ -4464,9 +4479,13 @@ def outstanding_delivery_indexes(config: dict[str, Any], state: dict[str, Any]) 
 def outstanding_delivery_agent_counts(config: dict[str, Any], state: dict[str, Any]) -> dict[str, int]:
     counts: dict[str, int] = {}
     queue_records = state.get("queue", {}).get("events", {})
+    active_statuses = {str(value) for value in ready_dispatch_settings(config).get("active_worker_statuses", [])}
+    active_event_ids = active_worker_queue_event_ids(state, active_statuses)
     for event in load_event_queue(config):
-        event_id = event.get("event_id")
+        event_id = str(event.get("event_id") or "")
         if not event_id:
+            continue
+        if event_id in active_event_ids:
             continue
         record = queue_records.get(event_id, {})
         if record.get("status") in {"completed", "failed"}:

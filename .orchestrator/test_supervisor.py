@@ -913,6 +913,119 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
         self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
 
+    def test_outstanding_delivery_counts_skip_events_with_active_workers(self) -> None:
+        config = {
+            "ready_dispatcher": {
+                "active_worker_statuses": ["running", "manual_pending"],
+            }
+        }
+        state = {
+            "queue": {
+                "events": {
+                    "evt-active": {"status": "started"},
+                    "evt-pending": {"status": "queued"},
+                }
+            },
+            "workers": {
+                "run-active": {
+                    "queue_event_id": "evt-active",
+                    "agent_id": "codex2",
+                    "task_id": "CODEX2-ACTIVE",
+                    "status": "running",
+                }
+            },
+        }
+        events = [
+            {
+                "event_id": "evt-active",
+                "event_key": "dispatcher:Codex2:CODEX2-ACTIVE",
+                "target_agent": "codex2",
+                "task_id": "CODEX2-ACTIVE",
+            },
+            {
+                "event_id": "evt-pending",
+                "event_key": "dispatcher:Codex2:CODEX2-PENDING",
+                "target_agent": "codex2",
+                "task_id": "CODEX2-PENDING",
+            },
+        ]
+
+        with mock.patch.object(supervisor, "load_event_queue", return_value=events):
+            agents, task_agents, event_keys = supervisor.outstanding_delivery_indexes(config, state)
+            counts = supervisor.outstanding_delivery_agent_counts(config, state)
+
+        self.assertEqual(agents, {"codex2"})
+        self.assertEqual(task_agents, {("CODEX2-PENDING", "codex2")})
+        self.assertEqual(event_keys, {"dispatcher:Codex2:CODEX2-PENDING"})
+        self.assertEqual(counts, {"codex2": 1})
+
+    def test_dispatcher_does_not_double_count_started_events_against_lane_capacity(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"codex2": 3},
+                "max_dispatches_per_tick": 4,
+            },
+            "agents": {
+                "codex2": {
+                    "id": "codex2",
+                    "display_name": "Codex2",
+                    "provider": "codex2",
+                    "adapter": "codex",
+                }
+            },
+            "providers": {"codex2": {"delivery_mode": "codex"}},
+        }
+        active_task = {"id": "CODEX2-ACTIVE", "status": "in_progress", "owner": "Codex2", "reviewer": "Codex", "depends_on": []}
+        active_event = supervisor.build_dispatch_event(
+            active_task,
+            "Codex2",
+            "owned_in_progress_dispatch",
+            {"CODEX2-ACTIVE": active_task},
+        )
+        active_event["event_id"] = "evt-active"
+        state = {
+            "queue": {"events": {"evt-active": {"status": "started", "run_id": "run-active"}}},
+            "workers": {
+                "run-active": {
+                    "run_id": "run-active",
+                    "queue_event_id": "evt-active",
+                    "task_id": "CODEX2-ACTIVE",
+                    "agent_id": "codex2",
+                    "provider": "codex2",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+            "seen_event_keys": {},
+        }
+        status = {
+            "tasks": [
+                active_task,
+                {"id": "CODEX2-NEXT-1", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-NEXT-2", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-NEXT-3", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[active_event]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertTrue(changed)
+        queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
+        self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
+
     def test_prune_completed_dispatch_pauses_removes_done_task_entries(self) -> None:
         state = {
             "dispatch_pauses": [
