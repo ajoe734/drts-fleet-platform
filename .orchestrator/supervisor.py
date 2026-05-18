@@ -5280,6 +5280,12 @@ def apply_chair_reassignment_action(
     task = next((item for item in status.get("tasks", []) or [] if str(item.get("id") or "") == task_id), None)
     if task is None or not task_is_dispatch_eligible_for_agent(task, to_agent):
         return False
+    current_owner = str(task.get("owner") or "").strip()
+    current_reviewer = str(task.get("reviewer") or "").strip()
+    if role == "owner" and to_agent == current_reviewer:
+        return False
+    if role == "reviewer" and to_agent == current_owner:
+        return False
     timestamp = utc_now()
     if role == "reviewer":
         if str(task.get("status") or "").lower() not in {"todo", "in_progress", "review"}:
@@ -5346,7 +5352,17 @@ def apply_chair_reassignment_actions(
     provider_report: dict[str, Any],
 ) -> bool:
     changed = False
-    for action in payload.get("reassignment_actions", []) or []:
+    actions = [
+        action
+        for action in payload.get("reassignment_actions", []) or []
+        if isinstance(action, dict)
+    ]
+    actions.sort(
+        key=lambda action: 0
+        if normalize_chair_reassignment_action(action).get("role") == "reviewer"
+        else 1
+    )
+    for action in actions:
         changed = apply_chair_reassignment_action(config, state, action, provider_report) or changed
     return changed
 

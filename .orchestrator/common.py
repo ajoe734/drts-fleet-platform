@@ -12,7 +12,7 @@ import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 ORCHESTRATOR_DIR = ROOT / ".orchestrator"
@@ -206,7 +206,28 @@ def run_command(
     )
 
 
-def command_exists(name: str) -> str | None:
+def _cli_search_roots(extra_roots: Iterable[str | Path] | None = None) -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+    if extra_roots is None:
+        values: list[str | Path] = []
+    elif isinstance(extra_roots, (str, Path)):
+        values = [extra_roots]
+    else:
+        values = list(extra_roots)
+    for value in [*values, ROOT]:
+        path = Path(os.path.expandvars(os.path.expanduser(str(value))))
+        if not path.is_absolute():
+            path = ROOT / path
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        roots.append(path)
+    return roots
+
+
+def command_exists(name: str, *, search_roots: Iterable[str | Path] | None = None) -> str | None:
     candidate = str(name or "").strip()
     if not candidate:
         return None
@@ -218,10 +239,14 @@ def command_exists(name: str) -> str | None:
     resolved = shutil.which(candidate)
     if resolved:
         return resolved
-    local_candidates = [
-        ROOT / ".orchestrator" / "bin" / "node_modules" / ".bin" / candidate,
-        ROOT / ".orchestrator" / "bin" / candidate,
-    ]
+    local_candidates = []
+    for root in _cli_search_roots(search_roots):
+        local_candidates.extend(
+            [
+                root / ".orchestrator" / "bin" / "node_modules" / ".bin" / candidate,
+                root / ".orchestrator" / "bin" / candidate,
+            ]
+        )
     for path in local_candidates:
         if path.is_file() and os.access(path, os.X_OK):
             return str(path)
