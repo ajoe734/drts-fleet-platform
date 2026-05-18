@@ -3,18 +3,20 @@
 **Sidecar Kind:** `review_packet`
 **Parent Task:** `PBK-UI-004` — Authority-safe negative paths
 **Parent Owner:** `Claude2`
-**Parent Reviewer:** `Codex`
+**Parent Reviewer:** `Codex2`
 **Sidecar Owner:** `Codex2`
 **Sidecar Reviewer:** `Codex`
 **Generated:** `2026-05-18` (UTC)
-**Status:** `REVIEW SUPPORT ARTIFACT` — support-only; does not modify
-canonical truth, runtime behavior, or the parent review verdict.
+**Status:** `REVIEW-APPROVED SUPPORT ARTIFACT` — support-only; does not
+modify canonical truth, runtime behavior, or the parent review verdict.
 
-This packet replaces an older stale closeout-oriented draft. Current machine
-truth says parent `PBK-UI-004` is in `review`, not `done`. The purpose here is
-to hand `Codex` a reviewer-facing evidence summary that matches the live
-`ai-status.json` row, the current pending parent handoff to `Codex`, and the
-concrete commit surface on branch `claude2/pbk-ui-004`.
+This packet replaces an older stale closeout-oriented draft and now reflects
+the reviewer-approved sidecar state. Current machine truth says parent
+`PBK-UI-004` is still in `review`, now under reviewer `Codex2`, while this
+sidecar is `review_approved` and awaiting owner closeout. The purpose here is
+to preserve the evidence summary that `Codex` approved, aligned with the live
+`ai-status.json` rows and the concrete commit surface on branch
+`claude2/pbk-ui-004`.
 
 ---
 
@@ -52,7 +54,7 @@ Stable fields in canonical `ai-status.json`
 
 - owner=`Codex2`
 - reviewer=`Codex`
-- status=`in_progress`
+- status=`review_approved`
 - phase=`Wave 5`
 - task_class=`sidecar`
 - helper_parent=`PBK-UI-004`
@@ -61,9 +63,9 @@ Stable fields in canonical `ai-status.json`
 - depends_on=`PBK-UI-003`
 - artifact=`support/sidecars/PBK-UI-004/PBK-UI-004-SIDECAR-REVIEW.md`
 
-Current owner note in machine truth:
+Current reviewer-approved note in machine truth:
 
-- `Packet being rewritten from stale closeout narrative to current review-ready handoff aligned with parent PBK-UI-004 review state`
+- `Review passed: packet now matches live machine truth for the sidecar and parent tasks, anchors PBK-UI-003 done-state and the claude2/pbk-ui-004 evidence commits, and clearly separates the current parent reviewer (Codex2) from this sidecar reviewer (Codex). Verification: git diff --check -- support/sidecars/PBK-UI-004/PBK-UI-004-SIDECAR-REVIEW.md PASS.`
 
 ### Parent task — `PBK-UI-004`
 
@@ -71,16 +73,25 @@ Stable fields in canonical `ai-status.json`:
 
 - title=`Authority-safe negative paths`
 - owner=`Claude2`
-- reviewer=`Codex`
+- reviewer=`Codex2`
 - status=`review`
 - depends_on=`PBK-UI-003`
 - acceptance:
   - `pnpm --filter @drts/partner-booking-web typecheck / build / lint`
   - `Storybook 對照對應 PB_* artboard (PBK-UI-003 起)`
 - planning_ref=`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`
-- last_update=`2026-05-18T07:21:28Z`
+- last_update=`2026-05-18T07:46:24Z`
 
-Current pending review handoff in machine truth:
+Current structured review state in machine truth:
+
+- pending handoff from=`Codex` to=`Codex2`
+- handoff created_at=`2026-05-18T07:43:14Z`
+- handoff reason:
+  - `PBK-UI-004` remains in `review`
+  - reviewer responsibility moved because `Codex` exhausted terminal retries
+  - `Codex2` remains separate from owner `Claude2`
+
+Historical parent owner handoff still relevant as evidence anchor:
 
 - from=`Claude2`
 - to=`Codex`
@@ -125,12 +136,15 @@ The important lifecycle facts for this packet are:
 | `2026-05-18T07:17:11Z` | owner reassignment   | `PBK-UI-004` ownership moved from `Codex2` to `Claude2` because `Codex2` had repeated worker exits on this task. |
 | `2026-05-18T07:21:28Z` | parent `handoff`     | `Claude2` handed `PBK-UI-004` to reviewer `Codex` with commits, acceptance commands, and design-artboard anchors. |
 | `2026-05-18T07:25:39Z` | sidecar `assign`     | This sidecar was registered with owner `Codex2` as a support-only review-packet slice for parent `PBK-UI-004`. |
+| `2026-05-18T07:43:14Z` | parent reviewer reassignment | Parent `PBK-UI-004` review responsibility moved from `Codex` to `Codex2`; the accepted packet must reflect that the current parent reviewer is no longer `Codex`. |
+| `2026-05-18T07:50:20Z` | sidecar `review_approved` | `Codex` approved this packet and handed finalize responsibility back to owner `Codex2`. |
 
-Reviewer interpretation:
+Closeout interpretation:
 
-- the parent is waiting on `Codex`, not on closeout
-- this sidecar should help verify the review-ready evidence packet, not claim
-  the parent has already been approved or pushed to `done`
+- the parent is waiting on `Codex2`, not on closeout
+- this sidecar itself is no longer waiting on reviewer input; it is waiting on
+  owner finalize after task-scoped commit and normal push
+- this packet still must not claim parent `review_approved` or `done`
 
 ---
 
@@ -267,7 +281,7 @@ Review value:
 
 ## 6. Acceptance Evidence Mapping
 
-The parent handoff message to `Codex` claims:
+The parent owner handoff message to `Codex` claims:
 
 | Acceptance item | Evidence currently available |
 | --------------- | ---------------------------- |
@@ -281,19 +295,22 @@ What is intentionally not claimed yet:
 - no parent `review_approved` note exists yet
 - no parent `done` metadata (`commit_hash`, `push_remote`, `push_branch`) exists
   yet in machine truth
+- parent free-text `next` is stale and still mentions the older `reviewer=Codex`
+  snapshot, so reviewer/owner routing should be taken from structured fields
+  plus the pending handoff to `Codex2`
 - this sidecar packet does not invent those fields ahead of the parent review
 
 ---
 
-## 7. Reviewer Spot-Check Checklist
+## 7. Closeout Spot-Check Checklist
 
-For sidecar reviewer `Codex`:
+For sidecar owner `Codex2` before marking `done`:
 
 - [ ] Canonical `ai-status.json` still shows this sidecar owned by `Codex2`,
-      reviewed by `Codex`, support-only, depending on `PBK-UI-003`.
+      reviewed by `Codex`, support-only, and already `review_approved`.
 - [ ] Canonical `ai-status.json` still shows parent `PBK-UI-004` in `review`
-      with owner `Claude2`, reviewer `Codex`, and the `2026-05-18T07:21:28Z`
-      handoff message.
+      with owner `Claude2`, reviewer `Codex2`, and the pending reviewer
+      reassignment handoff created at `2026-05-18T07:43:14Z`.
 - [ ] Canonical `ai-status.json` still shows dependency `PBK-UI-003` as `done`
       at commit `89b5a96840987e6caac94d251e76dcbc40f83ce8`.
 - [ ] `git branch -a --contains f8da53e` and `git branch -a --contains 63f6aef`
@@ -312,24 +329,25 @@ For sidecar reviewer `Codex`:
       PBK-UI-003, PBK-UI-004, and PBK-UI-005 responsibilities cleanly.
 - [ ] The only task-scoped content edit under this sidecar remains this packet
       file in `support/sidecars/PBK-UI-004/`.
+- [ ] Closeout is backed by a task-scoped commit and a normal non-force push on
+      `codex2/pbk-ui-004-sidecar-review` before `scripts/ai-status.sh done`.
 
 ---
 
-## 8. Handoff Notes For `Codex`
+## 8. Handoff Notes For `Codex2`
 
-1. Treat this as a support packet for the parent review currently pending with
-   `Codex`. It is not a replacement for the parent reviewer decision.
-2. The previous version of this file assumed parent closeout metadata from an
-   older branch state. That was stale relative to canonical machine truth on
-   `2026-05-18`; this rewrite deliberately removes those premature `done`
-   claims.
-3. If parent `PBK-UI-004` advances to `review_approved` or `done` before you
-   review this sidecar, update the packet or request a refresh rather than
-   approving stale lifecycle text.
+1. Treat this as the reviewer-approved support packet for the parent review now
+   pending with `Codex2`. It is not a replacement for the parent reviewer
+   decision on `PBK-UI-004`.
+2. The previous version of this file assumed older reviewer routing and sidecar
+   lifecycle state. This rewrite preserves the evidence summary while aligning
+   the lifecycle text to `review_approved`.
+3. If parent `PBK-UI-004` advances again before you finalize this sidecar,
+   refresh the packet or record `progress` rather than closing out stale
+   lifecycle text.
 4. If the parent handoff commit set changes away from `f8da53e` and `63f6aef`,
-   reopen this sidecar instead of approving a packet that points at the wrong
+   reopen this sidecar instead of closing out a packet that points at the wrong
    review surface.
-5. Approval should confirm that this sidecar stayed support-only and that any
-   machine-truth transitions happened through `scripts/ai-status.sh` or
-   `python3 scripts/ai_status.py`, not by manual edits to canonical status
-   files.
+5. Final `done` for this sidecar should include the task-scoped closeout commit
+   and scoped normal push metadata, then resolve machine truth through
+   `scripts/ai-status.sh done`.
