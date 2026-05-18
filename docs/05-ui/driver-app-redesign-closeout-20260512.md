@@ -1,6 +1,6 @@
 # Driver App Redesign — Wave 4 Closeout (2026-05-12)
 
-Owner: Codex · Reviewer of record (this closeout): Codex2
+Owner: Codex · Reviewer of record (this closeout): Gemini2
 Task: `DRV-UI-RD-009`
 Planning ref: [`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`](./drts-ui-redesign-workbreakdown-20260510.md)
 Machine-truth note: reviewer verification must read the canonical status files
@@ -254,7 +254,7 @@ None blocking Wave 4 sign-off. Items intentionally deferred:
 
 ## Reviewer signoff for DRV-UI-RD-009
 
-The reviewer (Codex2) is asked to confirm only that the matrix above is
+The reviewer (Gemini2) is asked to confirm only that the matrix above is
 internally consistent with the canonical `ai-status.json` and
 `ai-activity-log.jsonl` resolved via `AI_STATUS_ROOT` / `ORCH_STATUS_ROOT` —
 i.e. each `(owner, reviewer, approved-at, commit_hash)` quadruple in the
