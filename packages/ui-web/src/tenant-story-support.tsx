@@ -42,6 +42,7 @@ export const tenantSections: ManagementSidebarSection[] = [
     key: "governance",
     title: "Governance",
     items: [
+      { href: "/rules", label: "Rules" },
       { href: "/audit", label: "Audit" },
       { href: "/users", label: "Users" },
       { href: "/settings", label: "Settings" },
