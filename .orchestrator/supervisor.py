@@ -357,11 +357,15 @@ def _worktree_entries(repo_root: Path) -> list[dict[str, str]]:
     return entries
 
 
-def _worktree_for_branch(repo_root: Path, branch: str) -> Path | None:
+def _worktree_for_branch(repo_root: Path, branch: str, *, exclude: Path | None = None) -> Path | None:
     ref = f"refs/heads/{branch}"
+    excluded = exclude.resolve() if exclude else None
     for entry in _worktree_entries(repo_root):
         if entry.get("branch") == ref and entry.get("worktree"):
-            return Path(entry["worktree"]).resolve()
+            path = Path(entry["worktree"]).resolve()
+            if excluded is not None and path == excluded:
+                continue
+            return path
     return None
 
 
@@ -420,7 +424,7 @@ def ensure_execution_workspace(
 
     branch = _task_branch(request.agent_id, request.task_id)
     base_branch = routing.base_branch if routing else "dev"
-    existing = _worktree_for_branch(repo_root, branch)
+    existing = _worktree_for_branch(repo_root, branch, exclude=repo_root)
     if existing is not None:
         return existing, branch, base_branch, "existing_worktree"
 
@@ -430,8 +434,12 @@ def ensure_execution_workspace(
     if destination.exists() and _current_branch(destination) == branch:
         return destination.resolve(), branch, base_branch, "existing_path"
 
+    branch_checked_out = _worktree_for_branch(repo_root, branch) is not None
     if _branch_exists(repo_root, branch):
-        command = ["worktree", "add", str(destination), branch]
+        command = ["worktree", "add"]
+        if branch_checked_out:
+            command.append("--force")
+        command.extend([str(destination), branch])
     elif _remote_branch_exists(repo_root, branch):
         command = ["worktree", "add", "-b", branch, str(destination), f"origin/{branch}"]
     else:
