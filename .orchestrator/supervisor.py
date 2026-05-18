@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import fnmatch
+import hashlib
 import json
 import os
 import random
@@ -989,6 +990,56 @@ def resolve_agent_model_preference(config: dict[str, Any], agent: dict[str, Any]
     return None
 
 
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def extract_prompt_text(command: list[str]) -> str | None:
+    if not command:
+        return None
+    if "--prompt" in command:
+        index = command.index("--prompt")
+        if index + 1 < len(command):
+            return str(command[index + 1])
+    if "-p" in command:
+        index = command.index("-p")
+        if index + 1 < len(command):
+            return str(command[index + 1])
+    if len(command) >= 2 and command[0] == "codex" and command[1] == "exec":
+        return str(command[-1])
+    return None
+
+
+def summarize_command_for_activity_log(command: list[str]) -> dict[str, Any]:
+    if not command:
+        return {}
+    prompt = extract_prompt_text(command)
+    sanitized_args: list[str] = []
+    skip_next = False
+    for index, token in enumerate(command):
+        if skip_next:
+            skip_next = False
+            continue
+        if token in {"--prompt", "-p"}:
+            skip_next = True
+            continue
+        if prompt is not None and index == len(command) - 1 and token == prompt:
+            continue
+        sanitized_args.append(token)
+    summary: dict[str, Any] = {
+        "argv0": command[0],
+        "argc": len(command),
+        "args_preview": sanitized_args[:12],
+    }
+    if len(sanitized_args) > 12:
+        summary["args_truncated"] = True
+    if prompt:
+        summary["prompt_chars"] = len(prompt)
+        summary["prompt_sha256"] = _sha256_text(prompt)
+        summary["prompt_preview"] = prompt[:240] + ("..." if len(prompt) > 240 else "")
+    return summary
+
+
 def build_request(config: dict[str, Any], event: dict[str, Any]) -> DeliveryRequest:
     agent = agent_config_for(config, event["target_agent"])
     metadata = dict(event.get("metadata", {}) or {})
@@ -1208,7 +1259,7 @@ def start_worker_for_request(
             "queue_event_id": event_id_for_log,
             "worker_run_id": worker_run_id,
             "parent_run_id": parent_run_id,
-            "command": result.command,
+            "command_summary": summarize_command_for_activity_log(result.command),
             "log_path": result.log_path,
             "payload_path": result.payload_path,
         },

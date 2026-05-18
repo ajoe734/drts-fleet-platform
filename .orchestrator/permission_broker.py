@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -830,8 +831,61 @@ def emit_hook_response(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, ensure_ascii=False))
 
 
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _truncate_preview(value: str, limit: int = 240) -> str:
+    preview = value[:limit]
+    return preview + ("..." if len(value) > limit else "")
+
+
+def _sanitize_hook_value(value: Any, *, key: str = "", depth: int = 0) -> Any:
+    if depth > 4:
+        return {"type": type(value).__name__}
+    if isinstance(value, str):
+        if value and (key in {"content", "stdout", "stderr", "old_string", "new_string", "structuredPatch", "raw"} or len(value) > 240):
+            return {
+                "preview": _truncate_preview(value),
+                "chars": len(value),
+                "sha256": _sha256_text(value),
+                "truncated": len(value) > 240 or key in {"content", "stdout", "stderr", "old_string", "new_string", "structuredPatch", "raw"},
+            }
+        return value
+    if isinstance(value, list):
+        if len(value) > 12:
+            serialized = json.dumps(value, ensure_ascii=False, sort_keys=True)
+            return {
+                "items": len(value),
+                "sha256": _sha256_text(serialized),
+                "preview": [_sanitize_hook_value(item, depth=depth + 1) for item in value[:4]],
+                "truncated": True,
+            }
+        return [_sanitize_hook_value(item, depth=depth + 1) for item in value]
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for subkey, subvalue in value.items():
+            sanitized[subkey] = _sanitize_hook_value(subvalue, key=str(subkey), depth=depth + 1)
+        return sanitized
+    return value
+
+
+def sanitize_hook_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    return _sanitize_hook_value(payload, depth=0)
+
+
+def hook_log_message(event_name: str, payload: dict[str, Any]) -> str:
+    message = payload.get("tool_name") or payload.get("toolName")
+    if message:
+        return str(message)
+    raw = payload.get("raw")
+    if isinstance(raw, str) and raw:
+        return f"raw:{_truncate_preview(raw)} sha256={_sha256_text(raw)} chars={len(raw)}"
+    return event_name
+
+
 def log_event(config: dict[str, Any], event_name: str, payload: dict[str, Any]) -> None:
-    message = payload.get("tool_name") or payload.get("toolName") or payload.get("raw") or event_name
+    message = hook_log_message(event_name, payload)
     write_activity_log(
         config,
         {
@@ -839,7 +893,7 @@ def log_event(config: dict[str, Any], event_name: str, payload: dict[str, Any]) 
             "provider": "claude",
             "message": f"{event_name}: {message}",
             "hook_event": event_name,
-            "hook_payload": payload,
+            "hook_payload": sanitize_hook_payload(payload),
             "ts_local": utc_now(),
         },
     )
