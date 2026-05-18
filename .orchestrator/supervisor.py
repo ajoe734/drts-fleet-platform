@@ -13,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -148,6 +149,15 @@ CHAIR_REVIEW_OUTPUT_KEYS = {
 }
 CLOSEOUT_SKILL_PATH = THIS_DIR / "skills" / "task-closeout-finalization.md"
 CHAIRMAN_SKILL_PATH = THIS_DIR / "skills" / "chairman-operational-review.md"
+
+
+@dataclass(frozen=True)
+class WorkerFailureSignal:
+    reason: str
+    source: str
+    provider_pause_authorized: bool
+
+
 CHAIRMAN_JSON_TEMPLATE_PATH = THIS_DIR / "templates" / "chairman-decision-packet.example.json"
 CHAIRMAN_REPORT_TEMPLATE_PATH = THIS_DIR / "templates" / "chairman-review-report-template.md"
 
@@ -1154,7 +1164,33 @@ def _extract_failure_candidate(text: str) -> str | None:
     return None
 
 
-def _detect_json_worker_failure(line: str) -> str | None:
+def _captured_tool_log_line_indexes(lines: list[str]) -> set[int]:
+    """Return line indexes that are model/tool transcript, not provider runtime output."""
+    ignored: set[int] = set()
+    in_exec_block = False
+    in_final_response = False
+    runtime_log_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\s+(?:DEBUG|INFO|WARN|ERROR)\b")
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "tokens used":
+            in_final_response = True
+            ignored.add(index)
+            continue
+        if in_final_response:
+            ignored.add(index)
+            continue
+        if stripped == "exec":
+            in_exec_block = True
+            ignored.add(index)
+            continue
+        if in_exec_block and runtime_log_pattern.match(stripped):
+            in_exec_block = False
+        if in_exec_block:
+            ignored.add(index)
+    return ignored
+
+
+def _detect_json_worker_failure_signal(line: str) -> WorkerFailureSignal | None:
     try:
         payload = json.loads(line)
     except json.JSONDecodeError:
@@ -1168,13 +1204,15 @@ def _detect_json_worker_failure(line: str) -> str | None:
         status = str(rate_info.get("status") or payload.get("status") or "").strip().lower()
         if status in {"allowed", "allowed_warning"}:
             return None
-    if payload.get("type") == "user":
-        message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
-        content = message.get("content") if isinstance(message.get("content"), list) else []
-        if any(isinstance(item, dict) and item.get("type") == "tool_result" for item in content):
-            return None
+        detected = _extract_failure_candidate(line)
+        if detected:
+            return WorkerFailureSignal(detected, source="rate_limit_event", provider_pause_authorized=True)
+        return None
+    payload_type = str(payload.get("type") or "").strip().lower()
+    if payload_type in {"assistant", "user"}:
+        return None
     candidates = _iter_json_string_values(payload)
-    if payload.get("type") not in {"assistant", "user"}:
+    if payload_type not in {"assistant", "user"}:
         candidates = [*candidates, line]
     for candidate in candidates:
         stripped = candidate.strip()
@@ -1182,8 +1220,18 @@ def _detect_json_worker_failure(line: str) -> str | None:
             continue
         detected = _extract_failure_candidate(stripped)
         if detected:
-            return detected
+            provider_pause_authorized = True
+            source = "structured_json"
+            if payload_type == "result":
+                source = "json_result_error" if payload.get("is_error") else "json_result"
+                provider_pause_authorized = bool(payload.get("is_error")) or _is_result_level_provider_blocker(detected)
+            return WorkerFailureSignal(detected, source=source, provider_pause_authorized=provider_pause_authorized)
     return None
+
+
+def _detect_json_worker_failure(line: str) -> str | None:
+    signal = _detect_json_worker_failure_signal(line)
+    return signal.reason if signal else None
 
 
 def _is_result_level_provider_blocker(candidate: str) -> bool:
@@ -1218,7 +1266,7 @@ def _is_result_level_provider_blocker(candidate: str) -> bool:
     return any(marker in normalized for marker in markers)
 
 
-def detect_worker_failure(worker: dict[str, Any]) -> str | None:
+def detect_worker_failure_signal(worker: dict[str, Any]) -> WorkerFailureSignal | None:
     log_path_value = worker.get("log_path")
     if not log_path_value:
         return None
@@ -1230,8 +1278,11 @@ def detect_worker_failure(worker: dict[str, Any]) -> str | None:
     except OSError:
         return None
 
-    fallback_detected: str | None = None
-    for line in reversed(lines):
+    ignored_indexes = _captured_tool_log_line_indexes(lines)
+    fallback_detected: WorkerFailureSignal | None = None
+    for index, line in reversed(list(enumerate(lines))):
+        if index in ignored_indexes:
+            continue
         stripped = line.strip()
         if not stripped:
             continue
@@ -1241,13 +1292,13 @@ def detect_worker_failure(worker: dict[str, Any]) -> str | None:
             except json.JSONDecodeError:
                 payload = None
             if isinstance(payload, dict) and payload.get("type") == "result" and not payload.get("is_error"):
-                detected = _detect_json_worker_failure(stripped)
-                if detected and _is_result_level_provider_blocker(detected):
+                detected = _detect_json_worker_failure_signal(stripped)
+                if detected and _is_result_level_provider_blocker(detected.reason):
                     return detected
                 return None
-            detected = _detect_json_worker_failure(stripped)
+            detected = _detect_json_worker_failure_signal(stripped)
             if detected:
-                if "an unexpected critical error occurred" in detected.lower():
+                if "an unexpected critical error occurred" in detected.reason.lower():
                     fallback_detected = fallback_detected or detected
                     continue
                 return detected
@@ -1262,10 +1313,19 @@ def detect_worker_failure(worker: dict[str, Any]) -> str | None:
         detected = _extract_failure_candidate(stripped)
         if detected:
             if "an unexpected critical error occurred" in detected.lower():
-                fallback_detected = fallback_detected or detected
+                fallback_detected = fallback_detected or WorkerFailureSignal(
+                    detected,
+                    source="raw_process_line",
+                    provider_pause_authorized=True,
+                )
                 continue
-            return detected
+            return WorkerFailureSignal(detected, source="raw_process_line", provider_pause_authorized=True)
     return fallback_detected
+
+
+def detect_worker_failure(worker: dict[str, Any]) -> str | None:
+    signal = detect_worker_failure_signal(worker)
+    return signal.reason if signal else None
 
 
 def classify_worker_failure(config: dict[str, Any], worker: dict[str, Any], reason: str | None) -> dict[str, Any]:
@@ -2595,6 +2655,8 @@ def maybe_trigger_retry_or_fallback(
     provider_report: dict[str, Any],
     worker: dict[str, Any],
     reason: str,
+    *,
+    allow_provider_pause: bool = True,
 ) -> tuple[bool, bool]:
     retry = worker_retry_settings(config, worker.get("provider"))
     failure = classify_worker_failure(config, worker, reason)
@@ -2619,7 +2681,7 @@ def maybe_trigger_retry_or_fallback(
         return True, True
     if retry_count < max_attempts:
         schedule_worker_retry(config, worker, failure_summary)
-        if failure.get("kind") == "capacity":
+        if failure.get("kind") == "capacity" and allow_provider_pause:
             agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
             next_retry_at = _parse_iso_utc(worker.get("next_retry_at"))
             reset_seconds = None
@@ -3302,33 +3364,41 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
             changed = True
 
         if alive:
-            live_failure_reason = detect_worker_failure(worker)
-            if live_failure_reason:
+            live_failure_signal = detect_worker_failure_signal(worker)
+            if live_failure_signal:
+                live_failure_reason = live_failure_signal.reason
                 failure = classify_worker_failure(config, worker, live_failure_reason)
                 if failure.get("kind") in {"auth", "quota_terminal", "capacity"}:
                     console_log(
-                        f"live worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} reason={live_failure_reason}",
+                        f"live worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} source={live_failure_signal.source} reason={live_failure_reason}",
                         quiet=SUPERVISOR_LOG_QUIET,
                     )
                     terminate_worker_pid(worker.get("pid"))
-                    if failure.get("kind") == "quota_terminal":
+                    if failure.get("kind") == "quota_terminal" and live_failure_signal.provider_pause_authorized:
                         agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                         if agent_id:
                             pause_provider(state, agent_id, live_failure_reason, kind="quota", reset_seconds=14400)
-                    if failure.get("kind") == "auth":
+                    if failure.get("kind") == "auth" and live_failure_signal.provider_pause_authorized:
                         agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                         if agent_id:
                             pause_provider(state, agent_id, live_failure_reason, kind="auth", reset_seconds=None)
                     if failure.get("kind") == "capacity" and current_mode == "coordination":
                         agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                         reset_seconds = int(worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300))
-                        if agent_id:
+                        if agent_id and live_failure_signal.provider_pause_authorized:
                             pause_provider(state, agent_id, live_failure_reason, kind="capacity", reset_seconds=reset_seconds)
                         finalize_terminal_worker_outcome(config, state, worker, live_failure_reason)
                         changed = True
                         continue
                     if is_transient_worker_failure(config, worker, live_failure_reason):
-                        handled, retry_changed = maybe_trigger_retry_or_fallback(config, state, provider_report, worker, live_failure_reason)
+                        handled, retry_changed = maybe_trigger_retry_or_fallback(
+                            config,
+                            state,
+                            provider_report,
+                            worker,
+                            live_failure_reason,
+                            allow_provider_pause=live_failure_signal.provider_pause_authorized,
+                        )
                         if handled:
                             changed = changed or retry_changed
                             continue
@@ -3398,31 +3468,39 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                     changed = True
             continue
 
-        failure_reason = detect_worker_failure(worker)
-        if failure_reason and worker.get("status") != "failed":
+        failure_signal = detect_worker_failure_signal(worker)
+        if failure_signal and worker.get("status") != "failed":
+            failure_reason = failure_signal.reason
             failure = classify_worker_failure(config, worker, failure_reason)
             console_log(
-                f"worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} transient={'yes' if failure.get('transient') else 'no'} reason={failure_reason}",
+                f"worker failure: provider={worker.get('provider')} task={worker.get('task_id')} kind={failure.get('label')} transient={'yes' if failure.get('transient') else 'no'} source={failure_signal.source} reason={failure_reason}",
                 quiet=SUPERVISOR_LOG_QUIET,
             )
-            if failure.get("kind") == "quota_terminal":
+            if failure.get("kind") == "quota_terminal" and failure_signal.provider_pause_authorized:
                 agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                 if agent_id:
                     pause_provider(state, agent_id, failure_reason, kind="quota", reset_seconds=14400)
-            if failure.get("kind") == "auth":
+            if failure.get("kind") == "auth" and failure_signal.provider_pause_authorized:
                 agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                 if agent_id:
                     pause_provider(state, agent_id, failure_reason, kind="auth", reset_seconds=None)
             if failure.get("kind") == "capacity" and current_mode == "coordination":
                 agent_id = str(worker.get("agent_id") or worker.get("provider") or "")
                 reset_seconds = int(worker_retry_settings(config, worker.get("provider")).get("capacity_pause_seconds", 300))
-                if agent_id:
+                if agent_id and failure_signal.provider_pause_authorized:
                     pause_provider(state, agent_id, failure_reason, kind="capacity", reset_seconds=reset_seconds)
                 finalize_terminal_worker_outcome(config, state, worker, failure_reason)
                 changed = True
                 continue
             if is_transient_worker_failure(config, worker, failure_reason):
-                handled, retry_changed = maybe_trigger_retry_or_fallback(config, state, provider_report, worker, failure_reason)
+                handled, retry_changed = maybe_trigger_retry_or_fallback(
+                    config,
+                    state,
+                    provider_report,
+                    worker,
+                    failure_reason,
+                    allow_provider_pause=failure_signal.provider_pause_authorized,
+                )
                 if handled:
                     changed = changed or retry_changed
                     continue
