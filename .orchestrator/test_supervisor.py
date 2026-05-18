@@ -4169,6 +4169,65 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertEqual(state["chair_reassignment_guards"]["OPX-MD-003:owner"]["to"], "Codex")
             self.assertEqual(state["chair_reassignment_guards"]["OPX-MD-003:reviewer"]["to"], "Claude")
 
+    def test_chair_reassignment_rejects_owner_move_to_current_reviewer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            status_path = root / "ai-status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "id": "PBK-UI-004",
+                                "owner": "Codex",
+                                "reviewer": "Codex2",
+                                "status": "in_progress",
+                                "last_update": "2026-05-18T00:00:00Z",
+                            }
+                        ],
+                        "handoffs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                    "claude2": {"display_name": "Claude2", "provider": "claude2"},
+                },
+            }
+            state = {"queue": {"events": {}}, "workers": {}, "failure_streaks": {}}
+
+            with mock.patch.object(supervisor, "sync_status_pipeline", return_value=True) as sync:
+                changed = supervisor.apply_chair_reassignment_action(
+                    config,
+                    state,
+                    {
+                        "task_id": "PBK-UI-004",
+                        "role": "owner",
+                        "from": "Codex",
+                        "to": "Codex2",
+                        "reason": "Codex hit repeated terminal failures.",
+                    },
+                    provider_report={},
+                )
+
+            self.assertFalse(changed)
+            sync.assert_not_called()
+            task = json.loads(status_path.read_text(encoding="utf-8"))["tasks"][0]
+            self.assertEqual(task["owner"], "Codex")
+            self.assertEqual(task["reviewer"], "Codex2")
+
     def test_refresh_chair_review_state_reassigns_backlog_owner_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -131,8 +131,9 @@ def _gemini_policy_paths(config: dict, gemini_settings: dict) -> list[str]:
     return paths
 
 
-def _gemini_cli_path(gemini_settings: dict) -> str | None:
-    return command_exists(gemini_settings.get("cli") or "gemini")
+def _gemini_cli_path(config: dict, gemini_settings: dict) -> str | None:
+    workspace_root = config_path(config, "status_file").parents[0]
+    return command_exists(gemini_settings.get("cli") or "gemini", search_roots=[workspace_root])
 
 
 def _gemini_selected_auth_type(runtime: dict | None = None, env: dict[str, str] | None = None) -> str | None:
@@ -175,7 +176,7 @@ class GeminiAdapter(BaseAdapter):
 
     def capability(self, agent_id: str) -> DeliveryCapability:
         provider_key, _, gemini_settings = _gemini_provider_for_agent(self.config, agent_id)
-        cli = _gemini_cli_path(gemini_settings)
+        cli = _gemini_cli_path(self.config, gemini_settings)
         env = _gemini_runtime_env(gemini_settings)
         auth_ready = _gemini_auth_ready(gemini_settings, env)
         supported = bool(cli and auth_ready)
@@ -229,7 +230,7 @@ class GeminiAdapter(BaseAdapter):
         provider_key, provider, gemini_settings = _gemini_provider_for_agent(self.config, request.agent_id)
         gemini_settings = provider.get("gemini", {})
         approval = provider.get("approval", {})
-        cli = _gemini_cli_path(gemini_settings)
+        cli = _gemini_cli_path(self.config, gemini_settings)
         if not cli:
             notes = "Gemini CLI was available during capability probing but is no longer resolvable before dispatch."
             fallback = FileInboxAdapter(config=self.config, provider_capabilities=self.provider_capabilities)

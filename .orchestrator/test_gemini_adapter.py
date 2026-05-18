@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -75,6 +76,54 @@ class GeminiAdapterTests(unittest.TestCase):
                 if value == "--include-directories"
             ]
             self.assertEqual(include_values, [str(status_file.parent), str(tenant_repo)])
+
+    def test_gemini_cli_resolves_from_configured_workspace_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            status_file = tmp / "workspace" / "ai-status.json"
+            status_file.parent.mkdir()
+            status_file.write_text('{"tasks":[]}', encoding="utf-8")
+            local_cli = status_file.parent / ".orchestrator" / "bin" / "node_modules" / ".bin" / "gemini"
+            local_cli.parent.mkdir(parents=True)
+            local_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            local_cli.chmod(0o755)
+            config = {
+                "paths": {"status_file": str(status_file)},
+                "agents": {
+                    "gemini2": {
+                        "id": "gemini2",
+                        "display_name": "Gemini2",
+                        "provider": "gemini2",
+                        "adapter": "gemini",
+                    }
+                },
+                "providers": {
+                    "gemini2": {
+                        "delivery_mode": "gemini",
+                        "gemini": {"cli": "gemini"},
+                    }
+                },
+            }
+            request = DeliveryRequest(
+                agent_id="gemini2",
+                provider="gemini2",
+                delivery_mode="gemini",
+                message="wake up",
+                task_id="XREPO-001",
+            )
+            process = mock.Mock()
+            process.pid = 43210
+            with (
+                mock.patch.dict(os.environ, {"PATH": ""}),
+                mock.patch("adapters.gemini._gemini_auth_ready", return_value=True),
+                mock.patch("adapters.gemini.spawn_background_process", return_value=(process, Path("/tmp/gemini.log"))) as spawn,
+                mock.patch("adapters.gemini.runtime_log_path", return_value=Path("/tmp/gemini.log")),
+                mock.patch("adapters.gemini.new_runtime_id", return_value="gemini2-test"),
+            ):
+                result = GeminiAdapter(config=config, provider_capabilities={}).deliver(request)
+
+            self.assertTrue(result.ok)
+            self.assertEqual(spawn.call_args.args[0][0], str(local_cli))
 
     def test_gemini_dispatch_falls_back_when_cli_disappears_after_capability_check(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

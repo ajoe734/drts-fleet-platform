@@ -26,6 +26,20 @@ class CommandExistsTests(unittest.TestCase):
             with mock.patch.object(common, "ROOT", root):
                 self.assertEqual(common.command_exists("gemini"), str(local_cli))
 
+    def test_finds_cli_from_additional_search_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            code_root = tmp / "code-copy"
+            workspace_root = tmp / "workspace"
+            code_root.mkdir()
+            local_cli = workspace_root / ".orchestrator" / "bin" / "node_modules" / ".bin" / "gemini"
+            local_cli.parent.mkdir(parents=True)
+            local_cli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            local_cli.chmod(0o755)
+
+            with mock.patch.object(common, "ROOT", code_root), mock.patch.dict("os.environ", {"PATH": ""}):
+                self.assertEqual(common.command_exists("gemini", search_roots=[workspace_root]), str(local_cli))
+
 
 if __name__ == "__main__":
     unittest.main()
