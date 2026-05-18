@@ -2,7 +2,7 @@
 
 Last updated: 2026-05-18
 Owner: Codex2
-Reviewer: Claude2
+Reviewer: Codex
 Task: `ADM-UI-RD-005-UNBLOCK-HISTORY-REPAIR`
 
 ## Summary
@@ -145,3 +145,10 @@ git push -u origin codex/adm-ui-rd-005-recovery
 - It treats `f481c294` strictly as evidence of what went wrong, not as canonical delivery material.
 - It reuses the already recovered `ADM-UI-RD-005` payload from `911fba9`, so the parent task is not blocked on rediscovery.
 - It gives `Codex` a concrete next step: rebuild the parent closeout on a clean branch from current `origin/dev`, then verify and push normally.
+
+## Closeout evidence
+
+- Canonical documentation change commit: `07325d053c1e5213b1a19b455b6c297ce081d7cc`
+- Commit subject: `ADM-UI-RD-005-UNBLOCK-HISTORY-REPAIR: document non-force recovery path`
+- Normal push target already exists on shared remote: `origin/codex2/adm-ui-rd-005-unblock-history-repair`
+- This closeout task therefore ends as a documentation-and-control-plane repair, while the parent implementation task remains unblocked by following the recovery path above.
