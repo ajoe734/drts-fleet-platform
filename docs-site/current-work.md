@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-18T14:23:31Z
+Last updated: 2026-05-12T20:13:23Z
 
 ## Objective
 
@@ -36,101 +36,114 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ## Active Slices
 
-- `Claude`: governance-review, architecture-arbitration, control-plane; next: Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.
+- `Claude`: governance-review, architecture-arbitration, control-plane; next: Closeout packet fix applied: docs/05-ui/driver-app-redesign-closeout-20260512.md now names Codex as reviewer on lines 3 and 234 (was Copilot). Grep confirms no remaining 'Copilot' references in the cl
 - `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
-- `Codex`: contracts, schema, state-system, acceptance; next: Missing tenant approval-rule/quota contract for TN_Rules; see docs/05-ui/tenant-console-parity-decisions-20260510.md and route back to discussion_planning for contract or scope decision.
+- `Codex`: contracts, schema, state-system, acceptance; next: Owner closeout blocked: shared branch HEAD moved to local commit f481c294d627390bf574a46b3c6fdaaf5951f5eb (feat(ADM-UI-RD-006): finalize users fleet switchboard redesign, LLM-Agent: Codex2) before ADM
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
-- `Codex2`: contracts, schema, state-system, acceptance; next: Validated tenant new-booking contract. CreateTenantBookingCommand supports delegate-booking fields (bookedBy, onsiteContact, costCenter) but no tenant cost-center directory or approval-rule read model
-- `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Availability-first reassignment: Claude2 claimed DRV-UI-RD-009 while Claude was unavailable or occupied.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Chairman reassigned owner from Codex2 to Gemini2: Terminal branch conflict on Codex2; moving to Gemini2 to resolve.
+- `Codex2`: contracts, schema, state-system, acceptance; next: Continuing CTBC 7-screen partner booking funnel implementation and verification in apps/partner-booking-web.
+- `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
 
 ## Delivery Layers
 
 ### Primary Project Work
 
-| ID | Phase | Task | Owner | Status | Depends On | 中文說明 |
-|---|---|---|---|---|---|---|
-| `TEN-UI-RD-010` | Wave 3 | New Booking 完整化 | Codex2 | blocked | `TEN-UI-RD-001` | TN_NewBooking — 現為 placeholder，補完代訂 / cost-center 套規則。 |
-| `TEN-UI-RD-013` | Wave 3 | Cost Center route 新增 | Codex | blocked | `TEN-UI-RD-001` | TN_CostCenter — 需確認 backend contract，不齊全則回 discussion_planning。 |
-| `TEN-UI-RD-014` | Wave 3 | Rules route 新增 | Codex | blocked | `TEN-UI-RD-001` | TN_Rules — 審批與配額。 |
-| `TEN-UI-RD-099` | Wave 3 | Wave 3 tenant closeout packet | Claude2 | todo | `TEN-UI-RD-001`, `TEN-UI-RD-002`, `TEN-UI-RD-003`, `TEN-UI-RD-004`, `TEN-UI-RD-010`, `TEN-UI-RD-011`, `TEN-UI-RD-012`, `TEN-UI-RD-013`, `TEN-UI-RD-014`, `TEN-UI-RD-015`, `TEN-UI-RD-016`, `TEN-UI-RD-017`, `TEN-UI-RD-018` | TEN-UI-RD-001..018 全 review_approved 後產出 closeout 文件，含 parity-fill 決策。 |
-| `DRV-UI-RD-009` | Wave 4 | Wave 4 driver closeout packet | Claude2 | in_progress | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008` | DRV-UI-RD-001..008 全 review_approved 後產出 closeout 文件。 |
-| `PBK-UI-003` | Wave 5 | CTBC reference funnel — 7 screens | Gemini2 | todo | `PBK-UI-002` | Landing / Eligibility / Book / Confirmed / Trips / Receipt / Help — 全部 white-label component + CTBC brand demo。Mock data。 |
-| `PBK-UI-005` | Wave 5 | 新舊 partner mode 共存政策 (decision doc) | Codex | backlog | `PBK-UI-004` | Decision doc 簽核：何時切換 / 過渡期 / 棄置策略。Supervisor + governance reviewer 共同簽。 |
+| ID                              | Phase  | Task                                                                                         | Owner  | Status      | Depends On                                                                                                                                                                                                                  | 中文說明                                                                                                                                        |
+| ------------------------------- | ------ | -------------------------------------------------------------------------------------------- | ------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADM-UI-RD-005`                 | Wave 3 | Partners list + Partner Detail redesign                                                      | Codex  | blocked     | `ADM-UI-RD-002`, `OPS-UI-RD-009`                                                                                                                                                                                            | PA_Partners + PA_PartnerDetail。                                                                                                                |
+| `ADM-UI-RD-006`                 | Wave 3 | Users + Fleet + Switchboard redesign                                                         | Codex2 | blocked     | `ADM-UI-RD-002`, `OPS-UI-RD-009`                                                                                                                                                                                            | PA_Users + PA_Fleet + PA_Switchboard。                                                                                                          |
+| `ADM-UI-RD-010`                 | Wave 3 | Wave 3 platform closeout packet                                                              | Claude | backlog     | `ADM-UI-RD-001`, `ADM-UI-RD-002`, `ADM-UI-RD-003`, `ADM-UI-RD-004`, `ADM-UI-RD-005`, `ADM-UI-RD-006`, `ADM-UI-RD-007`, `ADM-UI-RD-008`, `ADM-UI-RD-009`                                                                     | ADM-UI-RD-001..009 全 review_approved 後產出 closeout 文件。                                                                                    |
+| `TEN-UI-RD-010`                 | Wave 3 | New Booking 完整化                                                                           | Codex2 | blocked     | `TEN-UI-RD-001`                                                                                                                                                                                                             | TN_NewBooking — 現為 placeholder，補完代訂 / cost-center 套規則。                                                                               |
+| `TEN-UI-RD-013`                 | Wave 3 | Cost Center route 新增                                                                       | Codex  | blocked     | `TEN-UI-RD-001`                                                                                                                                                                                                             | TN_CostCenter — 需確認 backend contract，不齊全則回 discussion_planning。                                                                       |
+| `TEN-UI-RD-014`                 | Wave 3 | Rules route 新增                                                                             | Codex  | blocked     | `TEN-UI-RD-001`                                                                                                                                                                                                             | TN_Rules — 審批與配額。                                                                                                                         |
+| `TEN-UI-RD-099`                 | Wave 3 | Wave 3 tenant closeout packet                                                                | Claude | backlog     | `TEN-UI-RD-001`, `TEN-UI-RD-002`, `TEN-UI-RD-003`, `TEN-UI-RD-004`, `TEN-UI-RD-010`, `TEN-UI-RD-011`, `TEN-UI-RD-012`, `TEN-UI-RD-013`, `TEN-UI-RD-014`, `TEN-UI-RD-015`, `TEN-UI-RD-016`, `TEN-UI-RD-017`, `TEN-UI-RD-018` | TEN-UI-RD-001..018 全 review_approved 後產出 closeout 文件，含 parity-fill 決策。                                                               |
+| `DRV-UI-RD-009`                 | Wave 4 | Wave 4 driver closeout packet                                                                | Claude | review      | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008`                                                                                      | DRV-UI-RD-001..008 全 review_approved 後產出 closeout 文件。                                                                                    |
+| `PBK-UI-003`                    | Wave 5 | CTBC reference funnel — 7 screens                                                            | Codex2 | in_progress | `PBK-UI-002`                                                                                                                                                                                                                | Landing / Eligibility / Book / Confirmed / Trips / Receipt / Help — 全部 white-label component + CTBC brand demo。Mock data。                   |
+| `PBK-UI-004`                    | Wave 5 | Authority-safe negative paths                                                                | Codex2 | todo        | `PBK-UI-003`                                                                                                                                                                                                                | 保留 tenant-console-web/app/partner/ 既有 5 條 negative path (eligible / ineligible / manual_review / inactive / eligibility-required) 並移植。 |
+| `PBK-UI-005`                    | Wave 5 | 新舊 partner mode 共存政策 (decision doc)                                                    | Codex  | backlog     | `PBK-UI-004`                                                                                                                                                                                                                | Decision doc 簽核：何時切換 / 過渡期 / 棄置策略。Supervisor + governance reviewer 共同簽。                                                      |
+| `TOK-UI-001-SIDECAR-ACCEPTANCE` | Wave 1 | [Sidecar] [Auto] [Parent TOK-UI-001] Prepare TOK-UI-001 acceptance packet and dependency map | Codex  | blocked     | `RDX-W0-002`                                                                                                                                                                                                                | 平行支援 TOK-UI-001，先整理 acceptance checklist、dependency map 與 support packet，不改 canonical truth。                                      |
 
 ### External / Upstream Integration Work
 
-| ID | Phase | Task | Owner | Status | Depends On | 中文說明 |
-|---|---|---|---|---|---|---|
-| _(none)_ | - | - | - | - | - | - |
+| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
+| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
+| _(none)_ | -     | -    | -     | -      | -          | -        |
 
 ## Task Board (active only)
 
-| ID | Phase | Task | Owner | Status | Depends On |
-|---|---|---|---|---|---|
-| `TEN-UI-RD-010` | Wave 3 | New Booking 完整化 | Codex2 | blocked | `TEN-UI-RD-001` |
-| `TEN-UI-RD-013` | Wave 3 | Cost Center route 新增 | Codex | blocked | `TEN-UI-RD-001` |
-| `TEN-UI-RD-014` | Wave 3 | Rules route 新增 | Codex | blocked | `TEN-UI-RD-001` |
-| `TEN-UI-RD-099` | Wave 3 | Wave 3 tenant closeout packet | Claude2 | todo | `TEN-UI-RD-001`, `TEN-UI-RD-002`, `TEN-UI-RD-003`, `TEN-UI-RD-004`, `TEN-UI-RD-010`, `TEN-UI-RD-011`, `TEN-UI-RD-012`, `TEN-UI-RD-013`, `TEN-UI-RD-014`, `TEN-UI-RD-015`, `TEN-UI-RD-016`, `TEN-UI-RD-017`, `TEN-UI-RD-018` |
-| `DRV-UI-RD-009` | Wave 4 | Wave 4 driver closeout packet | Claude2 | in_progress | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008` |
-| `PBK-UI-003` | Wave 5 | CTBC reference funnel — 7 screens | Gemini2 | todo | `PBK-UI-002` |
-| `PBK-UI-005` | Wave 5 | 新舊 partner mode 共存政策 (decision doc) | Codex | backlog | `PBK-UI-004` |
+| ID                              | Phase  | Task                                                                                         | Owner  | Status      | Depends On                                                                                                                                                                                                                  |
+| ------------------------------- | ------ | -------------------------------------------------------------------------------------------- | ------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADM-UI-RD-005`                 | Wave 3 | Partners list + Partner Detail redesign                                                      | Codex  | blocked     | `ADM-UI-RD-002`, `OPS-UI-RD-009`                                                                                                                                                                                            |
+| `ADM-UI-RD-006`                 | Wave 3 | Users + Fleet + Switchboard redesign                                                         | Codex2 | blocked     | `ADM-UI-RD-002`, `OPS-UI-RD-009`                                                                                                                                                                                            |
+| `ADM-UI-RD-010`                 | Wave 3 | Wave 3 platform closeout packet                                                              | Claude | backlog     | `ADM-UI-RD-001`, `ADM-UI-RD-002`, `ADM-UI-RD-003`, `ADM-UI-RD-004`, `ADM-UI-RD-005`, `ADM-UI-RD-006`, `ADM-UI-RD-007`, `ADM-UI-RD-008`, `ADM-UI-RD-009`                                                                     |
+| `TEN-UI-RD-010`                 | Wave 3 | New Booking 完整化                                                                           | Codex2 | blocked     | `TEN-UI-RD-001`                                                                                                                                                                                                             |
+| `TEN-UI-RD-013`                 | Wave 3 | Cost Center route 新增                                                                       | Codex  | blocked     | `TEN-UI-RD-001`                                                                                                                                                                                                             |
+| `TEN-UI-RD-014`                 | Wave 3 | Rules route 新增                                                                             | Codex  | blocked     | `TEN-UI-RD-001`                                                                                                                                                                                                             |
+| `TEN-UI-RD-099`                 | Wave 3 | Wave 3 tenant closeout packet                                                                | Claude | backlog     | `TEN-UI-RD-001`, `TEN-UI-RD-002`, `TEN-UI-RD-003`, `TEN-UI-RD-004`, `TEN-UI-RD-010`, `TEN-UI-RD-011`, `TEN-UI-RD-012`, `TEN-UI-RD-013`, `TEN-UI-RD-014`, `TEN-UI-RD-015`, `TEN-UI-RD-016`, `TEN-UI-RD-017`, `TEN-UI-RD-018` |
+| `DRV-UI-RD-009`                 | Wave 4 | Wave 4 driver closeout packet                                                                | Claude | review      | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008`                                                                                      |
+| `PBK-UI-003`                    | Wave 5 | CTBC reference funnel — 7 screens                                                            | Codex2 | in_progress | `PBK-UI-002`                                                                                                                                                                                                                |
+| `PBK-UI-004`                    | Wave 5 | Authority-safe negative paths                                                                | Codex2 | todo        | `PBK-UI-003`                                                                                                                                                                                                                |
+| `PBK-UI-005`                    | Wave 5 | 新舊 partner mode 共存政策 (decision doc)                                                    | Codex  | backlog     | `PBK-UI-004`                                                                                                                                                                                                                |
+| `TOK-UI-001-SIDECAR-ACCEPTANCE` | Wave 1 | [Sidecar] [Auto] [Parent TOK-UI-001] Prepare TOK-UI-001 acceptance packet and dependency map | Codex  | blocked     | `RDX-W0-002`                                                                                                                                                                                                                |
 
 ## Handoff Queue
 
-| Task | From | To | Message | Status | Created At |
-|---|---|---|---|---|---|
-| `TEN-UI-RD-099` | Claude | Claude2 | Chairman reassigned owner from Claude to Claude2: Owner Claude is exact auth-paused in provider_pauses; backlog owner reassignment is allowed, and Claude2 keeps the closeout packet on a healthy lane without routing new work to paused Claude. | pending | 2026-05-18T02:12:34Z |
-| `PBK-UI-003` | Codex2 | Gemini2 | Chairman reassigned owner from Codex2 to Gemini2: Terminal branch conflict on Codex2; moving to Gemini2 to resolve. | pending | 2026-05-18T02:15:59Z |
+| Task            | From   | To    | Message                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Status  | Created At           |
+| --------------- | ------ | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------- |
+| `PBK-UI-004`    | Claude | Codex | Chairman reassigned reviewer from Claude to Codex: Claude lane is capacity-paused. Preemptively move the reviewer slot to healthy Codex so the task will not stall on reviewer assignment once its dependency clears.                                                                                                                                                                                                                                                                                                                        | pending | 2026-05-12T18:55:03Z |
+| `DRV-UI-RD-009` | Claude | Codex | Closeout packet fix applied: docs/05-ui/driver-app-redesign-closeout-20260512.md now names Codex as reviewer on lines 3 and 234 (was Copilot). Grep confirms no remaining 'Copilot' references in the closeout doc. Surface signoff matrix unchanged — DRV-UI-RD-001..008 (owner, reviewer, approved-at, commit_hash) quadruples and the canvas/Screen\*/sidecar citations are the same packet you already validated. Re-review limited to the two reviewer-of-record lines plus a final consistency check vs ai-status.json reviewer=Codex. | pending | 2026-05-12T20:13:23Z |
 
 ## Blockers
 
-| Task | Owner | Waiting For | Message | Status |
-|---|---|---|---|---|
-| `TEN-UI-RD-010` | Codex2 | Claude | Validated tenant new-booking contract. CreateTenantBookingCommand supports delegate-booking fields (bookedBy, onsiteContact, costCenter) but no tenant cost-center directory or approval-rule read model exists; ProductRuleCatalog exposes pricing authority only. Blocking before inventing TN_NewBooking rule automation or selector-driven cost-center UX. | open |
-| `TEN-UI-RD-013` | Codex | Claude | Missing canonical tenant cost-center contract: product route map has no /cost-centers module, and backend only exposes costCenter as booking metadata with no tenant cost-center list, quota, usage, owner, or approval-rule endpoints. Recorded analysis in docs/05-ui/tenant-console-parity-decisions-20260510.md; return to discussion_planning before UI implementation. | open |
-| `TEN-UI-RD-014` | Codex | Claude | Missing tenant approval-rule/quota contract for TN_Rules; see docs/05-ui/tenant-console-parity-decisions-20260510.md and route back to discussion_planning for contract or scope decision. | open |
+| Task                            | Owner  | Waiting For | Message                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Status |
+| ------------------------------- | ------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `TOK-UI-001-SIDECAR-ACCEPTANCE` | Codex  | Gemini2     | Paused: parent task TOK-UI-001 was reopened in review. Acceptance packet cannot complete until the token package contract and cross-stack import evidence are fixed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | open   |
+| `TEN-UI-RD-010`                 | Codex2 | Claude      | Validated tenant new-booking contract. CreateTenantBookingCommand supports delegate-booking fields (bookedBy, onsiteContact, costCenter) but no tenant cost-center directory or approval-rule read model exists; ProductRuleCatalog exposes pricing authority only. Blocking before inventing TN_NewBooking rule automation or selector-driven cost-center UX.                                                                                                                                                                                                                                                                                                                                            | open   |
+| `TEN-UI-RD-013`                 | Codex  | Claude      | Missing canonical tenant cost-center contract: product route map has no /cost-centers module, and backend only exposes costCenter as booking metadata with no tenant cost-center list, quota, usage, owner, or approval-rule endpoints. Recorded analysis in docs/05-ui/tenant-console-parity-decisions-20260510.md; return to discussion_planning before UI implementation.                                                                                                                                                                                                                                                                                                                              | open   |
+| `TEN-UI-RD-014`                 | Codex  | Claude      | Missing tenant approval-rule/quota contract for TN_Rules; see docs/05-ui/tenant-console-parity-decisions-20260510.md and route back to discussion_planning for contract or scope decision.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | open   |
+| `ADM-UI-RD-006`                 | Codex2 | Claude      | Closeout blocked: local commit f481c294d627390bf574a46b3c6fdaaf5951f5eb is not task-scoped. Pre-commit restaged unrelated ADM-UI-RD-005 files (apps/platform-admin-web/app/partners/page.tsx, apps/platform-admin-web/app/partners/[entrySlug]/page.tsx, packages/ui-web/src/platform-partners.stories.tsx) under an ADM-UI-RD-006 subject, while apps/platform-admin-web/app/switchboard/page.tsx remains uncommitted. Acceptance re-run passed: pnpm --filter @drts/platform-admin-web typecheck/build/test and pnpm --filter @drts/ui-web typecheck. Not pushed; cannot call done until history is repaired safely.                                                                                    | open   |
+| `ADM-UI-RD-005`                 | Codex  | Codex2      | Owner closeout blocked: shared branch HEAD moved to local commit f481c294d627390bf574a46b3c6fdaaf5951f5eb (feat(ADM-UI-RD-006): finalize users fleet switchboard redesign, LLM-Agent: Codex2) before ADM-UI-RD-005 could create its own task-scoped commit. That commit already contains apps/platform-admin-web/app/partners/page.tsx, apps/platform-admin-web/app/partners/[entrySlug]/page.tsx, and packages/ui-web/src/platform-partners.stories.tsx, while apps/platform-admin-web/app/switchboard/page.tsx remains uncommitted in the worktree. Normal non-force push is not safe, and done would violate the task-scoped commit rule until Codex2 disentangles or reopens the shared branch state. | open   |
 
 ## Review Notes (active tasks)
 
-| Task | Reviewer | 修正重點 | Review File |
-|---|---|---|---|
-| _(none)_ | - | - | - |
+| Task     | Reviewer | 修正重點 | Review File |
+| -------- | -------- | -------- | ----------- |
+| _(none)_ | -        | -        | -           |
 
 ## Completion Evidence (last 10)
 
-| Task | Commit | Subject | LLM Agent | Reviewer | Recorded At |
-|---|---|---|---|---|---|
-| `DRV-UI-RD-006` | 622932517dcfe34a42aa3dcf2e12cf2c10877711 | feat(DRV-UI-RD-006): reskin earnings and shift | Codex2 | Codex | 2026-05-12T19:09:07Z |
-| `DRV-UI-RD-007` | c95a401415c6cb0642a5839b945dccb3ff42d8f8 | Task ID: DRV-UI-RD-007 Reskin SOS | Codex | Codex2 | 2026-05-12T19:22:32Z |
-| `DRV-UI-RD-008` | c6c7373acbde8872422110631094f19d984d2d51 | Task ID: DRV-UI-RD-008 Reskin Settings | Codex2 | Codex | 2026-05-12T19:44:41Z |
-| `PBK-UI-001` | 44e8d530d8e82a3758c5ba63b93bed8f27e79ba7 | feat(PBK-UI-001): bootstrap apps/partner-booking-web (white-label Next.js) | Claude2 | Codex2 | 2026-05-10T14:47:14Z |
-| `PBK-UI-002` | d7046eb | PBK-UI-002 Partner token brand chrome | Codex2 | Codex | 2026-05-10T17:04:37Z |
-| `PBK-UI-004` | a72748815b6a49a378c036b9a3c6025eb42e8289 | PBK-UI-004: Authority-safe negative paths for partner-booking-web (#142) | Codex2 | Codex | 2026-05-18T13:27:54Z |
-| `TOK-UI-001-SIDECAR-ACCEPTANCE` | - | no-commit closeout | Codex | Gemini2 | 2026-05-18T13:27:01Z |
-| `ADM-UI-RD-002-SIDECAR-REVIEW` | - | no-commit closeout | Claude | Codex2 | 2026-05-10T21:12:31Z |
-| `TEN-UI-RD-010-SIDECAR-ACCEPTANCE` | - | no-commit closeout | Claude | Codex2 | 2026-05-12T16:20:49Z |
-| `DRV-UI-RD-008-SIDECAR-REVIEW` | - | no-commit closeout | Claude | Codex2 | 2026-05-12T19:56:43Z |
+| Task                               | Commit                                   | Subject                                                                    | LLM Agent | Reviewer | Recorded At          |
+| ---------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------- | --------- | -------- | -------------------- |
+| `DRV-UI-RD-004`                    | 411a2ab25c62ab2892b852ced77abd9143736566 | feat(DRV-UI-RD-004): reskin trip 7-state experience                        | Codex2    | Claude   | 2026-05-12T17:51:05Z |
+| `DRV-UI-RD-005`                    | 0887ccf78ccae1ae52c71c5b31db85a4b7b4a059 | feat(DRV-UI-RD-005): reskin platform presence                              | Codex     | Codex2   | 2026-05-12T18:25:25Z |
+| `DRV-UI-RD-006`                    | 622932517dcfe34a42aa3dcf2e12cf2c10877711 | feat(DRV-UI-RD-006): reskin earnings and shift                             | Codex2    | Codex    | 2026-05-12T19:09:07Z |
+| `DRV-UI-RD-007`                    | c95a401415c6cb0642a5839b945dccb3ff42d8f8 | Task ID: DRV-UI-RD-007 Reskin SOS                                          | Codex     | Codex2   | 2026-05-12T19:22:32Z |
+| `DRV-UI-RD-008`                    | c6c7373acbde8872422110631094f19d984d2d51 | Task ID: DRV-UI-RD-008 Reskin Settings                                     | Codex2    | Codex    | 2026-05-12T19:44:41Z |
+| `PBK-UI-001`                       | 44e8d530d8e82a3758c5ba63b93bed8f27e79ba7 | feat(PBK-UI-001): bootstrap apps/partner-booking-web (white-label Next.js) | Claude2   | Codex2   | 2026-05-10T14:47:14Z |
+| `PBK-UI-002`                       | d7046eb                                  | PBK-UI-002 Partner token brand chrome                                      | Codex2    | Codex    | 2026-05-10T17:04:37Z |
+| `ADM-UI-RD-002-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                         | Claude    | Codex2   | 2026-05-10T21:12:31Z |
+| `TEN-UI-RD-010-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                         | Claude    | Codex2   | 2026-05-12T16:20:49Z |
+| `DRV-UI-RD-008-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                         | Claude    | Codex2   | 2026-05-12T19:56:43Z |
 
 ## Latest Checkpoints
 
-- 2026-05-18T13:36:11Z Orchestrator: PreToolUse: Read
-- 2026-05-18T13:36:11Z Orchestrator: PostToolUse: Read
-- 2026-05-18T13:36:25Z Orchestrator: PreToolUse: Bash
-- 2026-05-18T13:36:27Z Orchestrator: PostToolUse: Bash
-- 2026-05-18T13:36:47Z Orchestrator: PreToolUse: Bash
-- 2026-05-18T13:36:47Z Orchestrator: PostToolUse: Bash
-- 2026-05-18T13:36:58Z Orchestrator: PreToolUse: Read
-- 2026-05-18T13:36:58Z Orchestrator: PostToolUse: Read
-- 2026-05-18T13:37:11Z Orchestrator: PreToolUse: Bash
-- 2026-05-18T13:37:12Z Orchestrator: PostToolUse: Bash
-- 2026-05-18T13:37:24Z Orchestrator: PreToolUse: Bash
-- 2026-05-18T13:37:25Z Orchestrator: PostToolUse: Bash
-- 2026-05-18T13:37:41Z Orchestrator: PreToolUse: Bash
-- 2026-05-18T13:37:43Z Orchestrator: PostToolUse: Bash
-- 2026-05-18T13:37:50Z Orchestrator: PreToolUse: Read
-- 2026-05-18T13:37:51Z Orchestrator: PostToolUse: Read
-- 2026-05-18T13:38:01Z Orchestrator: PreToolUse: Read
-- 2026-05-18T13:38:01Z Orchestrator: PostToolUse: Read
-- 2026-05-18T13:38:22Z Orchestrator: PreToolUse: Bash
-- 2026-05-18T13:38:22Z Claude2: `ADM-UI-RD-010` Wave 3 closeout doc shipped via PR #147
+- 2026-05-12T20:12:33Z Orchestrator: PostToolUse: Edit
+- 2026-05-12T20:12:37Z Orchestrator: PreToolUse: Edit
+- 2026-05-12T20:12:37Z Orchestrator: PostToolUse: Edit
+- 2026-05-12T20:12:39Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:12:39Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:12:43Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:12:43Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:12:49Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:12:50Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:12:54Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:12:54Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:13:01Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:13:02Z Claude: `DRV-UI-RD-009` Updated docs/05-ui/driver-app-redesign-closeout-20260512.md lines 3 and 234 to reflect machine-truth reviewer (Codex, per ai-status.json) — removed both remaining 'Copilot' references that triggered the review rejection. Surface matrix and per-surface notes unchanged. Verified no other 'Copilot' references remain in the closeout doc.
+- 2026-05-12T20:13:10Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:13:13Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:13:13Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:13:17Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:13:17Z Orchestrator: PostToolUse: Bash
+- 2026-05-12T20:13:23Z Orchestrator: PreToolUse: Bash
+- 2026-05-12T20:13:23Z Claude: `DRV-UI-RD-009` Handoff to Codex: Closeout packet fix applied: docs/05-ui/driver-app-redesign-closeout-20260512.md now names Codex as reviewer on lines 3 and 234 (was Copilot). Grep confirms no remaining 'Copilot' references in the closeout doc. Surface signoff matrix unchanged — DRV-UI-RD-001..008 (owner, reviewer, approved-at, commit_hash) quadruples and the canvas/Screen\*/sidecar citations are the same packet you already validated. Re-review limited to the two reviewer-of-record lines plus a final consistency check vs ai-status.json reviewer=Codex.
