@@ -40,6 +40,32 @@ function hasText(value: string) {
   return value.trim().length > 0;
 }
 
+function padDateTimeSegment(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+export function formatDateTimeLocalInputValue(value: Date) {
+  return [
+    value.getFullYear(),
+    padDateTimeSegment(value.getMonth() + 1),
+    padDateTimeSegment(value.getDate()),
+  ]
+    .join("-")
+    .concat(
+      `T${padDateTimeSegment(value.getHours())}:${padDateTimeSegment(value.getMinutes())}`,
+    );
+}
+
+export function getDefaultDateTimeLocalValue(
+  offsetMinutes: number,
+  now = new Date(),
+) {
+  const next = new Date(now.getTime());
+  next.setMinutes(next.getMinutes() + offsetMinutes);
+  next.setSeconds(0, 0);
+  return formatDateTimeLocalInputValue(next);
+}
+
 function parseOptionalFloat(value: string) {
   if (!hasText(value)) {
     return null;
