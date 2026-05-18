@@ -3,6 +3,11 @@
 Owner: Codex · Reviewer of record (this closeout): Codex2
 Task: `DRV-UI-RD-009`
 Planning ref: [`docs/05-ui/drts-ui-redesign-workbreakdown-20260510.md`](./drts-ui-redesign-workbreakdown-20260510.md)
+Machine-truth note: reviewer verification must read the canonical status files
+via `AI_STATUS_ROOT` / `ORCH_STATUS_ROOT`. The worktree-local `ai-status.json`
+and `ai-activity-log.jsonl` files committed on this isolated branch are not the
+authoritative history for the already-shipped `DRV-UI-RD-001`..`DRV-UI-RD-008`
+tasks.
 Verification baseline: immutable per-surface commit hashes in this repo, plus
 the checked-in design assets under `docs/05-ui/driver-app-design-20260507/`.
 Historical note: local branch `feat/claude2-ui-redesign-foundation` still
@@ -26,8 +31,9 @@ This document binds each shipped surface to:
   (the design source of truth) and the matching `Screen*` JSX block in
   `docs/05-ui/driver-app-design-20260507/driver-screens-{1,2,3}.jsx`,
 - the **reviewer of record** and the UTC timestamp at which they posted the
-  final `review_approved` event in `ai-activity-log.jsonl` for the task entry
-  that was finalized into `done`.
+  final `review_approved` evidence in the canonical machine-truth root
+  (`AI_STATUS_ROOT` / `ORCH_STATUS_ROOT`) for the task entry that was
+  finalized into `done`.
 
 driver-app is Expo / React Native, so per the Wave 4 guardrail it **cannot**
 import `@drts/ui-web`. The "parity story" column is therefore not a Storybook
@@ -40,14 +46,18 @@ on-device primitives that landed in
 
 This closeout does **not** rerun the per-task acceptance commands. Each
 surface row cites the reviewer rerun summary recorded in the corresponding
-`DRV-UI-RD-00x` task entry in `ai-status.json` (`review_notes_zh` and `next`
-fields). The reviewer for `DRV-UI-RD-009` is asked to confirm that:
+`DRV-UI-RD-00x` task entry in the canonical `ai-status.json`
+(`review_notes_zh` and `next` fields) under `AI_STATUS_ROOT`. The reviewer for
+`DRV-UI-RD-009` is asked to confirm against the canonical machine-truth root
+(`AI_STATUS_ROOT` / `ORCH_STATUS_ROOT`), not the worktree-local snapshots
+committed on this isolated branch, that:
 
 1. each row's `commit_hash` resolves to a commit object in this checkout, and
    remains reachable from the local historical branch
    `feat/claude2-ui-redesign-foundation`,
-2. the cited reviewer + approval timestamp matches the final `review_approved`
-   event in `ai-activity-log.jsonl` for that task,
+2. the cited reviewer + approval timestamp matches the final
+   `review_approved` evidence in the canonical machine-truth root for that
+   task,
 3. each cited canvas anchor exists in
    `docs/05-ui/driver-app-design-20260507/DRTS Driver App.html`,
 4. each cited `Screen*` JSX block exists in
@@ -245,9 +255,11 @@ None blocking Wave 4 sign-off. Items intentionally deferred:
 ## Reviewer signoff for DRV-UI-RD-009
 
 The reviewer (Codex2) is asked to confirm only that the matrix above is
-internally consistent with `ai-status.json` and `ai-activity-log.jsonl` — i.e.
-each `(owner, reviewer, approved-at, commit_hash)` quadruple in the matrix
-matches the machine truth on this branch, the eight `commit_hash` values
-resolve in the current repo and remain reachable from local branch
-`feat/claude2-ui-redesign-foundation`, and each cited canvas anchor,
+internally consistent with the canonical `ai-status.json` and
+`ai-activity-log.jsonl` resolved via `AI_STATUS_ROOT` / `ORCH_STATUS_ROOT` —
+i.e. each `(owner, reviewer, approved-at, commit_hash)` quadruple in the
+matrix matches the canonical machine truth for this repo, the eight
+`commit_hash` values resolve in the current repo and remain reachable from
+local branch `feat/claude2-ui-redesign-foundation`, and each cited canvas
+anchor,
 `Screen*` JSX block, and checked-in sidecar packet path exists.
