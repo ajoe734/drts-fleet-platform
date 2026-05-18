@@ -3753,6 +3753,124 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertEqual(reason, "provider_health_triage")
 
+    def test_chair_review_reason_prioritizes_dependency_ready_blocked_tasks(self) -> None:
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {
+                    "id": "ADM-UI-RD-005",
+                    "status": "blocked",
+                    "owner": "Codex",
+                    "reviewer": "Codex2",
+                    "depends_on": ["DEP-001"],
+                    "next": "Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                },
+            ]
+        }
+
+        reason = supervisor.chair_review_reason(
+            {
+                "provider_pauses": {
+                    "gemini": {
+                        "kind": "quota",
+                        "reason": "QUOTA_EXHAUSTED",
+                        "paused_at": "2026-05-18T00:00:00Z",
+                    }
+                }
+            },
+            {"pending": []},
+            status=status,
+            config={"paths": {}},
+        )
+
+        self.assertEqual(reason, "blocked_task_triage")
+
+    def test_chair_review_message_includes_dependency_ready_blocked_tasks(self) -> None:
+        message = supervisor.build_chair_review_message(
+            {
+                "paths": {},
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                },
+            },
+            reason="blocked_task_triage",
+            markdown_path=Path(".orchestrator/chair-reviews/test.md"),
+            json_path=Path(".orchestrator/chair-reviews/test.json"),
+            approval_state={"pending": []},
+            state={"failure_streaks": {}, "provider_pauses": {}, "dispatch_pauses": []},
+            provider_report={},
+            status={
+                "tasks": [
+                    {"id": "DEP-001", "status": "done"},
+                    {
+                        "id": "ADM-UI-RD-005",
+                        "status": "blocked",
+                        "owner": "Codex",
+                        "reviewer": "Codex2",
+                        "depends_on": ["DEP-001"],
+                        "next": "Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                    },
+                ]
+            },
+        )
+
+        self.assertIn("Dependency-ready blocked tasks requiring chair repair", message)
+        self.assertIn("ADM-UI-RD-005", message)
+        self.assertIn("kind=history_repair", message)
+        self.assertIn("create_unblock_task", message)
+
+    def test_blocked_task_triage_requires_unblock_task_action(self) -> None:
+        payload = {
+            "version": 1,
+            "decision": "operational_review",
+            "sidecar_approved": False,
+            "approval_ttl_minutes": 45,
+            "max_sidecars": 2,
+            "reason": "blocked task needs repair",
+            "blocked_by": [],
+            "blocked_sidecar_parents": [],
+            "approval_actions": [],
+            "reassignment_actions": [],
+            "task_actions": [],
+            "provider_actions": [],
+            "recommended_focus": [],
+        }
+        status = {
+            "tasks": [
+                {"id": "DEP-001", "status": "done"},
+                {"id": "TEN-UI-RD-010", "status": "blocked", "depends_on": ["DEP-001"]},
+            ]
+        }
+
+        self.assertEqual(
+            supervisor.validate_chair_review_context(
+                payload,
+                reason="blocked_task_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            ),
+            "blocked_task_triage must create at least one unblock task",
+        )
+        payload["task_actions"] = [
+            {
+                "task_id": "TEN-UI-RD-010",
+                "action": "create_unblock_task",
+                "unblock_kind": "planning_decision",
+                "reason": "Missing tenant approval-rule contract needs planning.",
+            }
+        ]
+        self.assertIsNone(supervisor.validate_chair_review_payload(payload))
+        self.assertIsNone(
+            supervisor.validate_chair_review_context(
+                payload,
+                reason="blocked_task_triage",
+                approval_state={"pending": []},
+                config={"paths": {}},
+                status=status,
+            )
+        )
+
     def test_provider_health_review_respects_cooldown_after_recent_pause_review(self) -> None:
         state = {
             "provider_pauses": {
@@ -4770,6 +4888,109 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertEqual(len(events), 1)
             self.assertEqual(events[0]["task_id"], "OPX-CM-003")
             self.assertEqual(events[0]["reason"], "owned_finalize_dispatch")
+
+    def test_refresh_chair_review_state_applies_unblock_task_action(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            review_dir = root / "chair-reviews"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            markdown_path = review_dir / "20260518T000000Z-claude2.md"
+            json_path = review_dir / "20260518T000000Z-claude2.json"
+            status_path = root / "ai-status.json"
+            markdown_path.write_text("# Review\n", encoding="utf-8")
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "decision": "operational_review",
+                        "sidecar_approved": False,
+                        "approval_ttl_minutes": 45,
+                        "max_sidecars": 2,
+                        "reason": "blocked parent needs an unblock task",
+                        "blocked_by": [],
+                        "blocked_sidecar_parents": [],
+                        "approval_actions": [],
+                        "reassignment_actions": [],
+                        "task_actions": [
+                            {
+                                "task_id": "ADM-UI-RD-005",
+                                "action": "create_unblock_task",
+                                "unblock_kind": "history_repair",
+                                "target_agent": "Codex",
+                                "reviewer": "Codex2",
+                                "reason": "Shared branch history must be disentangled.",
+                            }
+                        ],
+                        "provider_actions": [],
+                        "recommended_focus": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {"id": "DEP-001", "status": "done"},
+                            {
+                                "id": "ADM-UI-RD-005",
+                                "owner": "Codex",
+                                "reviewer": "Codex2",
+                                "status": "blocked",
+                                "depends_on": ["DEP-001"],
+                                "next": "Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (root / "activity-log.jsonl").write_text("", encoding="utf-8")
+            (root / "event-queue.jsonl").write_text("", encoding="utf-8")
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                    "claude2": {"display_name": "Claude2", "provider": "claude2"},
+                },
+                "chair_review": {"enabled": True, "cooldown_seconds": 900},
+            }
+            state = {
+                "queue": {"events": {"evt-chair": {"status": "completed"}}},
+                "workers": {},
+                "chair_review": {
+                    "active_review": {
+                        "agent_id": "claude2",
+                        "agent": "Claude2",
+                        "reason": "blocked_task_triage",
+                        "queue_event_id": "evt-chair",
+                        "markdown_path": str(markdown_path),
+                        "json_path": str(json_path),
+                    }
+                },
+            }
+
+            with (
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "create_chair_unblock_task", return_value=True) as create_unblock,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+
+            self.assertTrue(changed)
+            create_unblock.assert_called_once()
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["last_reason"], "blocked_task_triage")
 
     def test_proactive_claim_respects_chair_reassignment_guard(self) -> None:
         config = {
