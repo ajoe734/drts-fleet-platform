@@ -58,6 +58,11 @@ const passenger: TenantPassengerRecord = {
   updatedAt: "2026-05-01T00:00:00.000Z",
 };
 
+function formatExpectedLocalValue(value: Date) {
+  const pad = (segment: number) => String(segment).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
+
 describe("tenant booking create form utils", () => {
   it("keeps estimated spend out of the create-booking command", () => {
     const command = buildTenantBookingCreateCommand({
@@ -126,8 +131,14 @@ describe("tenant booking create form utils", () => {
 
   it("formats datetime-local defaults without UTC slicing drift", () => {
     const now = new Date("2026-05-15T01:02:33.000Z");
+    const expectedNow = formatExpectedLocalValue(now);
+    const expectedOffset = new Date(now.getTime());
+    expectedOffset.setMinutes(expectedOffset.getMinutes() + 30);
+    expectedOffset.setSeconds(0, 0);
 
-    expect(formatDateTimeLocalInputValue(now)).toBe("2026-05-15T01:02");
-    expect(getDefaultDateTimeLocalValue(30, now)).toBe("2026-05-15T01:32");
+    expect(formatDateTimeLocalInputValue(now)).toBe(expectedNow);
+    expect(getDefaultDateTimeLocalValue(30, now)).toBe(
+      formatExpectedLocalValue(expectedOffset),
+    );
   });
 });
