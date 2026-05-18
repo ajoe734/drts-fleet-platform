@@ -1,30 +1,23 @@
 import { notFound } from "next/navigation";
 import { PartnerBookingReferenceFunnel } from "@drts/ui-web";
 import { getBrandForSlug } from "@/lib/brand";
-import { resolvePartnerSearchState } from "@/lib/route-state";
+import { resolvePartnerRouteState } from "@/lib/route-state";
 
 type PageProps = {
-  params: Promise<{ tenantSlug: string }>;
-  searchParams: Promise<{
-    screen?: string | string[];
-    scenario?: string | string[];
-  }>;
+  params: Promise<{ tenantSlug: string; routeState: string }>;
 };
 
-export default async function PartnerLandingPage({
-  params,
-  searchParams,
-}: PageProps) {
-  const { tenantSlug } = await params;
-  const resolvedSearchParams = (await searchParams) ?? {};
+export default async function PartnerRouteStatePage({ params }: PageProps) {
+  const { tenantSlug, routeState } = await params;
   const brand = getBrandForSlug(tenantSlug);
   if (!brand) {
     notFound();
   }
-  const resolved = resolvePartnerSearchState(
-    resolvedSearchParams.screen,
-    resolvedSearchParams.scenario,
-  );
+
+  const resolved = resolvePartnerRouteState(routeState);
+  if (!resolved) {
+    notFound();
+  }
   const scenarioProps = resolved.activeScenario
     ? { activeScenario: resolved.activeScenario }
     : undefined;

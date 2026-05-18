@@ -34,6 +34,14 @@ This app now carries the PBK-UI-003 CTBC reference funnel baseline. Per
   `PartnerBookingReferenceFunnel` (`@drts/ui-web`) with a fixed
   `activeScreen`, so the funnel navigator's hrefs map one-to-one onto
   those routes.
+- The tenant root still accepts `?screen=` / `?scenario=` for backward-
+  compatible demo entry, but the canonical PBK-UI-004 negative-path states
+  are direct routes under `app/[tenantSlug]/[routeState]/page.tsx`:
+  `/eligible`, `/ineligible`, `/manual_review`, `/inactive`, and
+  `/eligibility-required`.
+- Scenario routing is strict: direct unknown `routeState` values return
+  `notFound()`, while unknown `?screen` / `?scenario` query values fall back
+  to `landing`.
 - `app/[tenantSlug]/layout.tsx` resolves the brand via `lib/brand.ts`. An
   unknown slug returns `notFound()` so we cannot accidentally render an
   unbranded experience.

@@ -13,11 +13,30 @@ export const partnerBookingScreens = [
 
 export type PartnerBookingScreenId = (typeof partnerBookingScreens)[number];
 
+export const partnerBookingScenarios = [
+  "eligible",
+  "ineligible",
+  "manual_review",
+  "inactive",
+  "eligibility-required",
+] as const;
+
+export type PartnerBookingScenarioId = (typeof partnerBookingScenarios)[number];
+
 type ScreenMeta = {
   id: PartnerBookingScreenId;
   label: string;
   eyebrow: string;
   summary: string;
+};
+
+type ScenarioMeta = {
+  id: PartnerBookingScenarioId;
+  label: string;
+  title: string;
+  summary: string;
+  detail: string;
+  tone: "neutral" | "primary" | "accent" | "success";
 };
 
 type TripItem = {
@@ -85,6 +104,65 @@ const screenMetaById = Object.fromEntries(
   screenMeta.map((item) => [item.id, item]),
 ) as Record<PartnerBookingScreenId, ScreenMeta>;
 
+const scenarioScreenById: Record<
+  PartnerBookingScenarioId,
+  PartnerBookingScreenId
+> = {
+  eligible: "eligibility",
+  ineligible: "eligibility",
+  manual_review: "eligibility",
+  inactive: "book",
+  "eligibility-required": "book",
+};
+
+const scenarioMetaById: Record<PartnerBookingScenarioId, ScenarioMeta> = {
+  eligible: {
+    id: "eligible",
+    label: "eligible",
+    title: "Eligibility approved",
+    summary: "Eligibility gate passed; booking create can continue.",
+    detail:
+      "The verification id is valid and the partner may proceed into booking creation without leaving the white-label flow.",
+    tone: "success",
+  },
+  ineligible: {
+    id: "ineligible",
+    label: "ineligible",
+    title: "Eligibility denied",
+    summary: "Issuer rejection is explicit and blocks booking creation.",
+    detail:
+      "The rider sees the denial reason on the eligibility gate and must correct the input or switch entitlement before retrying.",
+    tone: "accent",
+  },
+  manual_review: {
+    id: "manual_review",
+    label: "manual_review",
+    title: "Manual review required",
+    summary: "Issuer fallback or degraded verification holds the request.",
+    detail:
+      "Booking stays blocked until ops review confirms fallback evidence; the surface must not silently continue into create.",
+    tone: "primary",
+  },
+  inactive: {
+    id: "inactive",
+    label: "inactive",
+    title: "Partner entry inactive",
+    summary: "Entry lifecycle state blocks booking at the create gate.",
+    detail:
+      "The partner sees the inactive-entry rejection directly on the booking surface and cannot submit while the entry remains inactive.",
+    tone: "accent",
+  },
+  "eligibility-required": {
+    id: "eligibility-required",
+    label: "eligibility_required",
+    title: "Eligibility verification required",
+    summary: "Booking is blocked until the rider completes eligibility.",
+    detail:
+      "This path mirrors the legacy eligibility_required rejection: no verification id means no create, even though the booking form remains visible.",
+    tone: "primary",
+  },
+};
+
 const phoneScreenStyle: CSSProperties = {
   width: "100%",
   maxWidth: "390px",
@@ -113,6 +191,13 @@ function buildScreenHref(
   screen: PartnerBookingScreenId,
 ): string {
   return screen === "landing" ? basePath : `${basePath}/${screen}`;
+}
+
+function buildScenarioHref(
+  basePath: string,
+  scenario: PartnerBookingScenarioId,
+): string {
+  return `${basePath}/${scenario}`;
 }
 
 function screenToneStyle(
@@ -433,6 +518,12 @@ export function isPartnerBookingScreenId(
   return partnerBookingScreens.includes(value as PartnerBookingScreenId);
 }
 
+export function isPartnerBookingScenarioId(
+  value: string,
+): value is PartnerBookingScenarioId {
+  return partnerBookingScenarios.includes(value as PartnerBookingScenarioId);
+}
+
 export function getPartnerBookingScreenMeta(
   screen: PartnerBookingScreenId,
 ): ScreenMeta {
@@ -445,17 +536,34 @@ export function getPartnerBookingArtboardAnchor(
   return screen;
 }
 
+export function getPartnerBookingScenarioMeta(
+  scenario: PartnerBookingScenarioId,
+): ScenarioMeta {
+  return scenarioMetaById[scenario];
+}
+
+export function getPartnerBookingScenarioScreen(
+  scenario: PartnerBookingScenarioId,
+): PartnerBookingScreenId {
+  return scenarioScreenById[scenario];
+}
+
 export function PartnerBookingPhoneScreen({
   brand,
   screen,
+  scenario,
 }: {
   brand: PartnerBrandTemplate;
   screen: PartnerBookingScreenId;
+  scenario?: PartnerBookingScenarioId;
 }) {
   const demo = metaForBrand(brand);
   const benefitWidth = `${
     (demo.remainingBenefits / demo.totalBenefits) * 100
   }%`;
+  const scenarioMeta = scenario
+    ? getPartnerBookingScenarioMeta(scenario)
+    : undefined;
 
   let content: ReactNode;
 
@@ -650,6 +758,30 @@ export function PartnerBookingPhoneScreen({
           subtitle="第一次使用 · 一次性確認"
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
+          {scenarioMeta ? (
+            <PhoneCard
+              title={scenarioMeta.title}
+              style={{
+                background:
+                  scenarioMeta.tone === "success"
+                    ? "linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%)"
+                    : "linear-gradient(180deg, #fff7ed 0%, #ffffff 100%)",
+                borderColor:
+                  scenarioMeta.tone === "success" ? "#bbf7d0" : "#fed7aa",
+              }}
+            >
+              <div style={{ display: "grid", gap: "10px" }}>
+                <Chip
+                  brand={brand}
+                  tone={scenarioMeta.tone}
+                  label={scenarioMeta.label}
+                />
+                <div style={{ fontSize: "12px", lineHeight: 1.65 }}>
+                  {scenarioMeta.detail}
+                </div>
+              </div>
+            </PhoneCard>
+          ) : null}
           <PhoneCard title="您的權益">
             <DetailRow label="持卡身份" value={brand.programName} />
             <DetailRow label="卡號末四碼" value={brand.cardArt.lastFour} mono />
@@ -707,8 +839,21 @@ export function PartnerBookingPhoneScreen({
             ))}
           </PhoneCard>
           <div style={{ display: "grid", gap: "8px" }}>
-            <ActionButton brand={brand} label="確認連結並繼續" primary />
-            <ActionButton brand={brand} label="稍後" />
+            <ActionButton
+              brand={brand}
+              label={
+                scenario === "manual_review"
+                  ? "等待人工審核"
+                  : scenario === "ineligible"
+                    ? "重新確認資格"
+                    : "確認連結並繼續"
+              }
+              primary
+            />
+            <ActionButton
+              brand={brand}
+              label={scenario === "eligible" ? "前往建立行程" : "稍後"}
+            />
           </div>
         </div>
       </>
@@ -722,6 +867,26 @@ export function PartnerBookingPhoneScreen({
           subtitle="機場接送 · 桃園 T2"
         />
         <div style={{ padding: "16px", display: "grid", gap: "12px" }}>
+          {scenarioMeta ? (
+            <PhoneCard
+              title={scenarioMeta.title}
+              style={{
+                background: "linear-gradient(180deg, #fff7ed 0%, #ffffff 100%)",
+                borderColor: "#fed7aa",
+              }}
+            >
+              <div style={{ display: "grid", gap: "10px" }}>
+                <Chip
+                  brand={brand}
+                  tone={scenarioMeta.tone}
+                  label={scenarioMeta.label}
+                />
+                <div style={{ fontSize: "12px", lineHeight: 1.65 }}>
+                  {scenarioMeta.detail}
+                </div>
+              </div>
+            </PhoneCard>
+          ) : null}
           <PhoneCard>
             <div
               style={{
@@ -886,7 +1051,17 @@ export function PartnerBookingPhoneScreen({
               </span>
             </div>
           </PhoneCard>
-          <ActionButton brand={brand} label="確認預約" primary />
+          <ActionButton
+            brand={brand}
+            label={
+              scenario === "inactive"
+                ? "聯絡平台管理員"
+                : scenario === "eligibility-required"
+                  ? "先完成資格確認"
+                  : "確認預約"
+            }
+            primary
+          />
         </div>
       </>
     );
@@ -1342,14 +1517,22 @@ export function PartnerBookingPhoneScreen({
 export function PartnerBookingReferenceFunnel({
   brand,
   activeScreen,
+  activeScenario,
   basePath,
 }: {
   brand: PartnerBrandTemplate;
   activeScreen: PartnerBookingScreenId;
+  activeScenario?: PartnerBookingScenarioId;
   basePath: string;
 }) {
   const demo = metaForBrand(brand);
   const activeMeta = getPartnerBookingScreenMeta(activeScreen);
+  const activeScenarioMeta = activeScenario
+    ? getPartnerBookingScenarioMeta(activeScenario)
+    : undefined;
+  const phoneScenarioProps = activeScenario
+    ? { scenario: activeScenario }
+    : undefined;
 
   return (
     <div style={pageStackStyle}>
@@ -1403,6 +1586,30 @@ export function PartnerBookingReferenceFunnel({
               uses PBK-UI-002 brand tokens and mock data while mirroring the
               CTBC `Partner Booking.html` artboards.
             </p>
+            {activeScenarioMeta ? (
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                  borderRadius: "999px",
+                  padding: "10px 14px",
+                  background: "#ffffff",
+                  border: `1px solid ${brand.surface.border}`,
+                  width: "fit-content",
+                }}
+              >
+                <Chip
+                  brand={brand}
+                  tone={activeScenarioMeta.tone}
+                  label={activeScenarioMeta.label}
+                />
+                <span style={{ fontSize: "13px", color: "#475569" }}>
+                  {activeScenarioMeta.summary}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           <div
@@ -1437,6 +1644,83 @@ export function PartnerBookingReferenceFunnel({
               {brand.hotline.phone}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section
+        style={{
+          ...sectionCardStyle,
+          padding: "16px",
+          display: "grid",
+          gap: "12px",
+        }}
+      >
+        <div
+          style={{
+            fontSize: "12px",
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "#64748b",
+            fontWeight: 700,
+          }}
+        >
+          Authority-safe states
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gap: "10px",
+            gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+          }}
+        >
+          {partnerBookingScenarios.map((scenario) => {
+            const meta = getPartnerBookingScenarioMeta(scenario);
+            const isActive = scenario === activeScenario;
+            return (
+              <a
+                key={scenario}
+                href={buildScenarioHref(basePath, scenario)}
+                style={{
+                  textDecoration: "none",
+                  display: "grid",
+                  gap: "8px",
+                  padding: "14px",
+                  borderRadius: "14px",
+                  border: isActive
+                    ? `1px solid ${brand.primary}`
+                    : "1px solid rgba(15, 23, 42, 0.10)",
+                  background: isActive ? `${brand.primary}0d` : "#ffffff",
+                  color: "#0e1424",
+                }}
+              >
+                <div
+                  style={{ display: "flex", justifyContent: "space-between" }}
+                >
+                  <span
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    {meta.title}
+                  </span>
+                  <Chip brand={brand} tone={meta.tone} label={meta.label} />
+                </div>
+                <div
+                  style={{
+                    fontSize: "12px",
+                    lineHeight: 1.6,
+                    color: "#56657f",
+                  }}
+                >
+                  {meta.summary}
+                </div>
+                <div style={{ fontSize: "11px", color: "#64748b" }}>
+                  Stops at {getPartnerBookingScenarioScreen(scenario)}
+                </div>
+              </a>
+            );
+          })}
         </div>
       </section>
 
@@ -1519,12 +1803,12 @@ export function PartnerBookingReferenceFunnel({
               <div
                 style={{ fontSize: "28px", fontWeight: 800, color: "#0e1424" }}
               >
-                {activeMeta.label}
+                {activeScenarioMeta?.title ?? activeMeta.label}
               </div>
               <div
                 style={{ fontSize: "14px", lineHeight: 1.7, color: "#56657f" }}
               >
-                {activeMeta.summary}
+                {activeScenarioMeta?.detail ?? activeMeta.summary}
               </div>
             </div>
 
@@ -1652,7 +1936,11 @@ export function PartnerBookingReferenceFunnel({
         </div>
 
         <div style={{ justifySelf: "center" }}>
-          <PartnerBookingPhoneScreen brand={brand} screen={activeScreen} />
+          <PartnerBookingPhoneScreen
+            brand={brand}
+            screen={activeScreen}
+            {...phoneScenarioProps}
+          />
         </div>
       </section>
     </div>
