@@ -1660,6 +1660,8 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
             mock.patch.object(supervisor, "reconcile_queue_records", return_value=False),
             mock.patch.object(supervisor, "prune_event_queue", return_value=False),
             mock.patch.object(supervisor, "dispatch_ready_tasks", return_value=False),
+            mock.patch.object(supervisor, "dispatch_underutilization_sidecars", return_value=False),
+            mock.patch.object(supervisor, "dispatch_underutilization_main_tasks", return_value=False) as main_backfill,
             mock.patch.object(supervisor, "process_queue", return_value=False),
             mock.patch.object(supervisor, "sync_github_bus", return_value=False),
             mock.patch.object(supervisor, "trim_worker_history"),
@@ -1671,6 +1673,7 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
         self.assertEqual(saved_state["supervisor"]["pid"], os.getpid())
         self.assertIsNotNone(saved_state["supervisor"]["last_heartbeat_at"])
         self.assertEqual(saved_state["supervisor"]["started_at"], saved_state["supervisor"]["last_heartbeat_at"])
+        main_backfill.assert_called_once()
 
     def test_run_once_can_skip_pid_file_management(self) -> None:
         config = {
@@ -1698,6 +1701,8 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
             mock.patch.object(supervisor, "reconcile_queue_records", return_value=False),
             mock.patch.object(supervisor, "prune_event_queue", return_value=False),
             mock.patch.object(supervisor, "dispatch_ready_tasks", return_value=False),
+            mock.patch.object(supervisor, "dispatch_underutilization_sidecars", return_value=False),
+            mock.patch.object(supervisor, "dispatch_underutilization_main_tasks", return_value=False) as main_backfill,
             mock.patch.object(supervisor, "process_queue", return_value=False),
             mock.patch.object(supervisor, "sync_github_bus", return_value=False),
             mock.patch.object(supervisor, "trim_worker_history"),
@@ -1707,6 +1712,7 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
             supervisor.run_once(config, watch=False, replay=False, once=True, manage_pid_file=False)
 
         write_pid.assert_not_called()
+        main_backfill.assert_called_once()
 
     def test_main_once_skips_daemon_pid_management(self) -> None:
         args = mock.Mock(
