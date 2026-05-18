@@ -38,6 +38,11 @@ def _claude_runtime_env(runtime: dict, *, ensure_dirs: bool = False) -> dict[str
     return env
 
 
+def _claude_cli_path(config: dict, runtime: dict) -> str | None:
+    workspace_root = config_path(config, "status_file").parents[0]
+    return command_exists(runtime.get("cli") or "claude", search_roots=[workspace_root])
+
+
 def _claude_auth_ready(cli: str | None, env: dict[str, str] | None = None) -> bool:
     if not cli:
         return False
@@ -57,7 +62,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
     def capability(self, agent_id: str) -> DeliveryCapability:
         provider_key, provider = _claude_provider_for_agent(self.config, agent_id)
         runtime = provider.get("runtime", {})
-        cli = command_exists(runtime.get("cli") or "claude")
+        cli = _claude_cli_path(self.config, runtime)
         auth_env = _claude_runtime_env(runtime)
         if cli and _claude_auth_ready(cli, env=auth_env):
             notes = "Uses non-interactive Claude CLI sessions with the local approval broker hooks."
@@ -91,7 +96,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
     def deliver(self, request: DeliveryRequest) -> DeliveryResult:
         provider_key, provider = _claude_provider_for_agent(self.config, request.agent_id)
         runtime = provider.get("runtime", {})
-        cli = command_exists(runtime.get("cli") or "claude")
+        cli = _claude_cli_path(self.config, runtime)
         env = _claude_runtime_env(runtime, ensure_dirs=True)
         auth_ready = _claude_auth_ready(cli, env=env)
         if not cli or not auth_ready:
@@ -106,7 +111,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
 
         output_format = runtime.get("output_format", "stream-json")
         command = [
-            runtime.get("cli") or cli,
+            cli,
             "-p",
             request.message,
             "--output-format",
