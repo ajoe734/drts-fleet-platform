@@ -74,6 +74,31 @@ describe("summarizeApprovalRulesForCostCenter", () => {
     });
   });
 
+  it("does not let generic owner approvers overmatch explicit conditions for another cost center", () => {
+    const summary = summarizeApprovalRulesForCostCenter("CC-FIN-04", [
+      {
+        ...baseRule,
+        ruleId: "rule-explicit-other-cost-center",
+        conditions: [
+          {
+            field: "cost_center.code",
+            operator: "eq",
+            value: "CC-OPS-07",
+          },
+        ],
+        approvers: [
+          { kind: "cost_center_owner", displayName: "Default owner" },
+        ],
+      },
+    ]);
+
+    expect(summary).toEqual({
+      totalCount: 0,
+      strictCount: 0,
+      ownerApprovalCount: 0,
+    });
+  });
+
   it("still scopes rules by explicit cost-center condition even without owner approvers", () => {
     const summary = summarizeApprovalRulesForCostCenter("CC-FIN-04", [
       {

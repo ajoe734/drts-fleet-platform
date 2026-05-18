@@ -17,6 +17,10 @@ export function conditionReferencesCostCenter(
   return scalarValues.some((value) => value === code);
 }
 
+function isCostCenterCondition(condition: TenantApprovalRuleCondition) {
+  return condition.field === "cost_center.code";
+}
+
 function approverReferencesCostCenter(
   approver: TenantRuleApproverDescriptor,
   code: string,
@@ -36,12 +40,12 @@ export function summarizeApprovalRulesForCostCenter(
   const scopedRules = rules.filter((rule) => {
     if (!rule.activeFlag) return false;
 
-    if (
-      rule.conditions.some((condition) =>
+    const costCenterConditions = rule.conditions.filter(isCostCenterCondition);
+
+    if (costCenterConditions.length > 0) {
+      return costCenterConditions.some((condition) =>
         conditionReferencesCostCenter(condition, costCenterCode),
-      )
-    ) {
-      return true;
+      );
     }
 
     if (
