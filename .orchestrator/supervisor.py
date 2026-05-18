@@ -412,6 +412,82 @@ def _candidate_worktree_path(base: Path, agent_id: str, task_id: str) -> Path:
     return base / f"{slug}-{new_runtime_id('wt')}"
 
 
+def _coordination_workspace_key(request: DeliveryRequest) -> str:
+    metadata = request.metadata if isinstance(request.metadata, dict) else {}
+    chair_review = metadata.get("chair_review") if isinstance(metadata.get("chair_review"), dict) else {}
+    raw = (
+        metadata.get("workspace_key")
+        or metadata.get("coordination_workspace_key")
+        or chair_review.get("reason")
+        or request.reason
+        or "coordination"
+    )
+    slug = re.sub(r"[^a-z0-9._-]+", "-", str(raw).lower()).strip("-")
+    return slug or "coordination"
+
+
+def _is_git_worktree(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    result = _git_capture(path, ["rev-parse", "--is-inside-work-tree"])
+    return result.returncode == 0 and (result.stdout or "").strip() == "true"
+
+
+def _candidate_coordination_worktree_path(base: Path, agent_id: str, workspace_key: str) -> Path:
+    slug = re.sub(
+        r"[^a-z0-9._-]+",
+        "-",
+        f"{normalize_agent_id(agent_id)}-coordination-{workspace_key}",
+    ).strip("-")
+    candidate = base / slug
+    if not candidate.exists() or _is_git_worktree(candidate):
+        return candidate
+    for index in range(2, 20):
+        suffixed = base / f"{slug}-{index}"
+        if not suffixed.exists() or _is_git_worktree(suffixed):
+            return suffixed
+    return base / f"{slug}-{new_runtime_id('wt')}"
+
+
+def ensure_coordination_workspace(
+    config: dict[str, Any],
+    request: DeliveryRequest,
+) -> tuple[Path, str | None, str | None, str | None]:
+    repo_root = config_path(config, "status_file").parents[0].resolve()
+    base_branch = str(
+        ((config.get("branch_strategy") or {}).get("worker_worktrees") or {}).get("coordination_base_branch")
+        or "dev"
+    )
+    base = _worker_worktree_base(config, repo_root)
+    base.mkdir(parents=True, exist_ok=True)
+    workspace_key = _coordination_workspace_key(request)
+    destination = _candidate_coordination_worktree_path(base, request.agent_id, workspace_key)
+    if _is_git_worktree(destination):
+        return destination.resolve(), None, base_branch, "existing_coordination_worktree"
+
+    base_ref = f"origin/{base_branch}" if _remote_branch_exists(repo_root, base_branch) else base_branch
+    result = _git_capture(
+        repo_root,
+        ["worktree", "add", "--detach", str(destination), base_ref],
+        timeout=90.0,
+    )
+    if result.returncode != 0:
+        write_activity_log(
+            config,
+            {
+                "type": "worker_workspace_fallback",
+                "task_id": request.task_id,
+                "target_agent": display_name_for(config, request.agent_id),
+                "message": (
+                    "Could not create isolated coordination worktree; falling back to canonical workspace. "
+                    f"key={workspace_key} stderr={(result.stderr or result.stdout or '').strip()}"
+                ),
+            },
+        )
+        return repo_root, None, base_branch, "fallback_canonical"
+    return destination.resolve(), None, base_branch, "created_coordination_worktree"
+
+
 def ensure_execution_workspace(
     config: dict[str, Any],
     request: DeliveryRequest,
@@ -419,7 +495,11 @@ def ensure_execution_workspace(
 ) -> tuple[Path, str | None, str | None, str | None]:
     repo_root = config_path(config, "status_file").parents[0].resolve()
     mode = str((request.metadata or {}).get("mode") or "").strip().lower()
-    if not request.task_id or mode in {"planning", "coordination"} or not _worker_worktrees_enabled(config):
+    if not _worker_worktrees_enabled(config):
+        return repo_root, None, None, None
+    if mode == "coordination":
+        return ensure_coordination_workspace(config, request)
+    if not request.task_id or mode == "planning":
         return repo_root, None, None, None
 
     branch = _task_branch(request.agent_id, request.task_id)
@@ -481,24 +561,35 @@ def attach_workspace_metadata(
         request.metadata["base_branch"] = base_branch
     if workspace_source:
         request.metadata["workspace_source"] = workspace_source
-    if not request.task_id or not branch:
-        return
 
-    if workspace_root == canonical_root:
-        workspace_line = (
-            f"- Worker cwd: `{workspace_root}` (canonical workspace fallback; avoid switching it to another task branch)."
+    mode = str(request.metadata.get("mode") or "").strip().lower()
+    if request.task_id and branch:
+        if workspace_root == canonical_root:
+            workspace_line = (
+                f"- Worker cwd: `{workspace_root}` (canonical workspace fallback; avoid switching it to another task branch)."
+            )
+        else:
+            workspace_line = f"- Worker cwd: `{workspace_root}` (isolated task worktree)."
+        notice = (
+            "\n\nSupervisor-assigned workspace:\n"
+            f"{workspace_line}\n"
+            f"- Task branch: `{branch}` from base `{base_branch or 'dev'}`.\n"
+            f"- Canonical machine-truth root: `{canonical_root}`.\n"
+            "- This process inherits `ORCH_STATUS_ROOT` / `AI_STATUS_ROOT`, so `scripts/ai-status.sh` "
+            "writes status back to canonical machine truth even from the task worktree.\n"
+            "- Do not `git switch` the canonical root for task code; use the assigned cwd/branch.\n"
+        )
+    elif mode == "coordination" and workspace_root != canonical_root:
+        notice = (
+            "\n\nSupervisor-assigned workspace:\n"
+            f"- Worker cwd: `{workspace_root}` (isolated coordination worktree).\n"
+            f"- Canonical machine-truth root: `{canonical_root}`.\n"
+            "- Read/write machine truth through the absolute canonical paths above or `ORCH_STATUS_ROOT`; "
+            "do not infer live status from this worktree's checked-out copy.\n"
+            "- Do not edit product code from a coordination run.\n"
         )
     else:
-        workspace_line = f"- Worker cwd: `{workspace_root}` (isolated task worktree)."
-    notice = (
-        "\n\nSupervisor-assigned workspace:\n"
-        f"{workspace_line}\n"
-        f"- Task branch: `{branch}` from base `{base_branch or 'dev'}`.\n"
-        f"- Canonical machine-truth root: `{canonical_root}`.\n"
-        "- This process inherits `ORCH_STATUS_ROOT` / `AI_STATUS_ROOT`, so `scripts/ai-status.sh` "
-        "writes status back to canonical machine truth even from the task worktree.\n"
-        "- Do not `git switch` the canonical root for task code; use the assigned cwd/branch.\n"
-    )
+        return
     if "Supervisor-assigned workspace:" not in request.message:
         request.message = request.message.rstrip() + notice
 
@@ -4923,17 +5014,31 @@ def build_chair_review_message(
         state,
         provider_report=provider_report,
     )
+    machine_truth_lines: list[str] = []
+    for label, key in (
+        ("ai-status", "status_file"),
+        ("runtime state", "state_file"),
+        ("approval queue", "approval_queue"),
+    ):
+        try:
+            path = config_path(config, key)
+        except KeyError:
+            continue
+        machine_truth_lines.append(f"- {label}: `{path.resolve()}`")
+    if not machine_truth_lines:
+        machine_truth_lines.append("- configured machine-truth paths are unavailable in this test/config context")
     return (
         "你是本輪 chairman，角色是 operational reviewer，不是主線實作者。\n\n"
-        "請閱讀 machine truth（至少包含 ai-status.json、.orchestrator/state.json、.orchestrator/approval-queue.json，以及相關 task brief），"
-        "然後只做 operational 決策，不要改主線產品實作。\n\n"
+        "請閱讀 canonical machine truth；若本次 cwd 是 isolated worktree，不要讀 worktree 內的 stale state copy。\n"
+        + "\n".join(machine_truth_lines)
+        + "\n\n然後只做 operational 決策，不要改主線產品實作。\n\n"
         f"Chair review reason: `{reason}`\n\n"
         "你必須輸出兩個檔案：\n"
-        f"- Markdown report: `{relpath(markdown_path)}`\n"
-        f"- JSON decision: `{relpath(json_path)}`\n\n"
+        f"- Markdown report: `{markdown_path.resolve()}`\n"
+        f"- JSON decision: `{json_path.resolve()}`\n\n"
         "可直接參考 repo 內範本：\n"
-        f"- Markdown template: `{relpath(CHAIRMAN_REPORT_TEMPLATE_PATH)}`\n"
-        f"- JSON template: `{relpath(CHAIRMAN_JSON_TEMPLATE_PATH)}`\n\n"
+        f"- Markdown template: `{CHAIRMAN_REPORT_TEMPLATE_PATH.resolve()}`\n"
+        f"- JSON template: `{CHAIRMAN_JSON_TEMPLATE_PATH.resolve()}`\n\n"
         "JSON 必須完整符合以下 schema：\n"
         "{\n"
         '  "version": 1,\n'
@@ -5127,14 +5232,15 @@ def queue_chair_review(
         "provider": agent_config_for(config, agent_id).get("provider", agent_id),
         "reason": f"chair_review:{reason}",
         "message": message,
-        "context_files": [relpath(path) for path in context_files if path.exists()],
-        "target_files": [relpath(markdown_path), relpath(json_path)],
+        "context_files": [str(path.resolve()) for path in context_files if path.exists()],
+        "target_files": [str(markdown_path.resolve()), str(json_path.resolve())],
         "metadata": {
             "mode": "coordination",
+            "workspace_key": f"chair-{reason}",
             "chair_review": {
                 "reason": reason,
-                "markdown_path": relpath(markdown_path),
-                "json_path": relpath(json_path),
+                "markdown_path": str(markdown_path.resolve()),
+                "json_path": str(json_path.resolve()),
             },
         },
     }
