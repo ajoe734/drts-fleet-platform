@@ -42,8 +42,14 @@ surface, but it is not itself a production cutover contract.
 - how long rollback retention must stay available
 - when the legacy repo-local route may be retired
 
-Reviewer approval on this task is the governance review for the policy above.
-It is not a production cutover approval. Any later live promotion still
+For `PBK-UI-005`, the required co-sign is:
+
+1. reviewer approval on this task, which records the governance review of the
+   coexistence policy
+2. supervisor-controlled machine-truth closeout of the task-scoped commit and
+   push evidence, which records repo-local acceptance of the policy
+
+This is not a production cutover approval. Any later live promotion still
 requires a separate cutover task or runbook with named supervisor and rollback
 sign-off.
 
