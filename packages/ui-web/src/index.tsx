@@ -4,60 +4,18 @@ export { DataTable, Tr, Td } from "./data-table";
 export { StatCard } from "./stat-card";
 export { PageHeader } from "./page-header";
 export type { PageHeaderProps } from "./page-header";
-export * as CanvasPrimitives from "./canvas-primitives";
-export {
-  Banner as CanvasBanner,
-  Btn as CanvasBtn,
-  CanvasIcon,
-  Card as CanvasCard,
-  DL as CanvasDL,
-  Field as CanvasField,
-  Input as CanvasInput,
-  KPI as CanvasKPI,
-  PageHeader as CanvasPageHeader,
-  Pill as CanvasPill,
-  Select as CanvasSelect,
-  Shell as CanvasShell,
-  Table as CanvasTable,
-  TrafficLights as CanvasTrafficLights,
-  WindowChrome as CanvasWindowChrome,
-} from "./canvas-primitives";
-export type {
-  BannerProps as CanvasBannerProps,
-  BtnProps as CanvasBtnProps,
-  CardProps as CanvasCardProps,
-  DLItem as CanvasDLItem,
-  DLProps as CanvasDLProps,
-  FieldProps as CanvasFieldProps,
-  InputProps as CanvasInputProps,
-  KPIProps as CanvasKPIProps,
-  PageHeaderProps as CanvasPageHeaderProps,
-  PillProps as CanvasPillProps,
-  SelectProps as CanvasSelectProps,
-  ShellNavItem as CanvasShellNavItem,
-  ShellProps as CanvasShellProps,
-  TableColumn as CanvasTableColumn,
-  TableProps as CanvasTableProps,
-  WindowChromeProps as CanvasWindowChromeProps,
-} from "./canvas-primitives";
-export {
-  buildCanvasTheme,
-  CANVAS_DARK_NAVY_PALETTE,
-  CANVAS_DENSITY,
-  CANVAS_LIGHT_PALETTE,
-  CANVAS_SURFACE_ACCENTS,
-  CANVAS_TYPE,
-} from "./canvas-tokens";
-export type {
-  CanvasDensity,
-  CanvasMode,
-  CanvasSurface,
-  CanvasTheme,
-  CanvasTone,
-} from "./canvas-tokens";
 export { AppShellCard } from "./app-shell-card";
 export { AppSidebar } from "./app-sidebar";
 export type { AppSidebarProps, SidebarNavItem } from "./app-sidebar";
+export {
+  ManagementThemeProvider,
+  useOptionalManagementTheme,
+  useTheme,
+} from "./management-theme-context";
+export type {
+  ManagementThemeContextValue,
+  ManagementThemeProviderProps,
+} from "./management-theme-context";
 export { ManagementSidebar } from "./management-sidebar";
 export type {
   ManagementSidebarItem,
@@ -72,22 +30,28 @@ export type {
 } from "./management-topbar";
 export {
   MANAGEMENT_COLORS,
+  MANAGEMENT_COLOR_MODES,
   MANAGEMENT_RADIUS,
   MANAGEMENT_SPACING,
   MANAGEMENT_SURFACE_TONES,
+  MANAGEMENT_SURFACE_TONE_MODES,
   MANAGEMENT_TYPOGRAPHY,
   densityValue,
+  managementColors,
   managementMainShellStyle,
   managementPageStackStyle,
+  managementSurfaceTone,
 } from "./management-theme";
-export type { ManagementDensity, ManagementTone } from "./management-theme";
-export {
-  ManagementThemeProvider,
-  useTheme as useManagementTheme,
-} from "./management-theme-context";
-export type { ManagementThemeProviderProps } from "./management-theme-context";
+export type {
+  ManagementAccent,
+  ManagementAuthority,
+  ManagementDensity,
+  ManagementMode,
+  ManagementTone,
+} from "./management-theme";
 export {
   AuthorityBadge,
+  AuthorityBanner,
   CalloutBanner,
   DataCellStack,
   DataFilterBar,
@@ -98,6 +62,7 @@ export {
   FilterPillRow,
   KpiCard,
   KpiRow,
+  PlatformBadge,
   SectionHeader,
   StatusChip,
   Stepper,
@@ -107,6 +72,8 @@ export {
   WorkflowPanel,
 } from "./management-primitives";
 export type {
+  AuthorityBadgeProps,
+  AuthorityBannerProps,
   CalloutBannerProps,
   DataFilterBarProps,
   DataFilterOption,
@@ -116,8 +83,10 @@ export type {
   FilterPillProps,
   KpiCardProps,
   PageMetaItem,
+  PlatformBadgeProps,
   SectionHeaderProps,
   StatusChipProps,
+  StatusChipLocale,
   StepState,
   StepperOrientation,
   StepperProps,
@@ -139,3 +108,12 @@ export type {
   WorkflowEmptyStateProps,
   WorkflowSplitLayoutProps,
 } from "./workflow-primitives";
+export {
+  getPartnerBookingArtboardAnchor,
+  getPartnerBookingScreenMeta,
+  isPartnerBookingScreenId,
+  partnerBookingScreens,
+  PartnerBookingPhoneScreen,
+  PartnerBookingReferenceFunnel,
+} from "./partner-booking-funnel";
+export type { PartnerBookingScreenId } from "./partner-booking-funnel";

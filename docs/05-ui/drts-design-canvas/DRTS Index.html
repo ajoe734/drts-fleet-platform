@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<title>DRTS · Design Index</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root { --bg: #0E1424; --ink: #fff; --muted: rgba(255,255,255,0.62); --line: rgba(255,255,255,0.08); --card: #161D33; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); font-family: "Inter", "Noto Sans TC", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  * { box-sizing: border-box; }
+  a { text-decoration: none; color: inherit; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 64px 32px 96px; }
+  .eyebrow { font-size: 11px; letter-spacing: 0.2em; color: var(--muted); font-weight: 600; text-transform: uppercase; }
+  h1 { font-size: 56px; line-height: 1.05; letter-spacing: -0.025em; margin: 12px 0 20px; font-weight: 700; max-width: 900px; text-wrap: balance; }
+  .lede { font-size: 18px; color: var(--muted); max-width: 720px; line-height: 1.55; margin-bottom: 56px; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 12px 32px; padding: 18px 22px; background: rgba(255,255,255,0.03); border: 1px solid var(--line); border-radius: 14px; margin-bottom: 56px; font-size: 13px; }
+  .meta-row b { color: #fff; font-weight: 600; margin-right: 6px; font-family: "JetBrains Mono", monospace; }
+  .meta-row span { color: var(--muted); }
+  .section-h { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 56px 0 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); display: flex; align-items: baseline; gap: 12px; }
+  .section-h em { font-style: normal; color: rgba(255,255,255,0.3); font-family: "JetBrains Mono", monospace; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
+  .card { display: block; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 26px 26px 22px; position: relative; overflow: hidden; transition: transform 0.18s ease, border-color 0.18s ease; }
+  .card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.2); }
+  .card .accent-strip { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--accent); }
+  .card .num { font-size: 11px; font-family: "JetBrains Mono", monospace; color: var(--muted); margin-bottom: 14px; letter-spacing: 0.06em; }
+  .card h2 { font-size: 24px; font-weight: 700; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .card .tag { font-size: 12px; color: var(--accent); font-family: "JetBrains Mono", monospace; font-weight: 600; margin-bottom: 14px; }
+  .card p { font-size: 13.5px; color: var(--muted); line-height: 1.6; margin: 0 0 18px; max-width: 50ch; }
+  .card ul { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .card li { font-size: 11px; padding: 4px 9px; background: rgba(255,255,255,0.05); border: 1px solid var(--line); border-radius: 6px; color: rgba(255,255,255,0.7); font-family: "JetBrains Mono", monospace; }
+  .card .arrow { position: absolute; right: 24px; top: 26px; color: rgba(255,255,255,0.3); transition: color 0.18s, transform 0.18s; }
+  .card:hover .arrow { color: var(--accent); transform: translate(2px, -2px); }
+  .twocol { grid-column: span 2; }
+  .single { grid-template-columns: 1fr 1fr 1fr; }
+  @media (max-width: 880px) { .grid, .single { grid-template-columns: 1fr; } .twocol { grid-column: span 1; } h1 { font-size: 38px; } }
+  .footer { margin-top: 80px; padding-top: 24px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 24px; font-size: 12px; color: var(--muted); }
+  .footer code { font-family: "JetBrains Mono", monospace; color: rgba(255,255,255,0.85); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">DRTS · Design surfaces · v0.4 draft</div>
+  <h1>多功能小客車計程車服務系統 — 完整介面提案</h1>
+  <p class="lede">乘車派遣、平台治理、租戶自助、駕駛工作 — 涵蓋四個主要使用者面與一個合作夥伴漏斗。共 <b>50 + 高保真畫面</b>、整合命名與標籤系統、客運法遵與結算邏輯內建在介面語意中。每個入口為獨立 design canvas，可雙擊任一畫面進入聚焦模式比對。</p>
+
+  <div class="meta-row">
+    <span><b>狀態：</b>提案 / 可審視</span>
+    <span><b>佈局：</b>1440 × 900 桌面 + 402 × 874 行動</span>
+    <span><b>語系：</b>繁體中文 (主) · English</span>
+    <span><b>主題：</b>淺 / 深色雙模 · compact / comfy 密度</span>
+    <span><b>字型：</b>Inter + Noto Sans TC + JetBrains Mono</span>
+  </div>
+
+  <!-- ──────────────────────────────────────────────── -->
+  <div class="section-h"><em>01</em> 駕駛工作面 · Operator-side</div>
+  <div class="grid">
+    <a class="card twocol" href="DRTS Driver App.html" style="--accent: #14B8A6;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">01 · DRIVER APP</div>
+      <h2>DRTS 駕駛 App</h2>
+      <div class="tag">Android · 10 routes · 接單 → 在行 → 結算</div>
+      <p>從工作首頁、收件夾、接單競速、在途載客、收款、班結、客訴上訴到設定。包含執照到期、排他性宣告、SOS 流程，以及 narrow / large 雙裝置版面比對。</p>
+      <ul><li>Android frame</li><li>narrow + large</li><li>race-pending 動畫</li><li>SOS 安全流程</li><li>排他性宣告</li><li>淺 / 深色</li></ul>
+    </a>
+  </div>
+
+  <!-- ──────────────────────────────────────────────── -->
+  <div class="section-h"><em>02</em> 內部工作面 · Internal consoles</div>
+  <div class="grid">
+    <a class="card" href="Platform Admin.html" style="--accent: #6366F1;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">02 · PLATFORM ADMIN</div>
+      <h2>平台治理控制平面</h2>
+      <div class="tag">indigo · 13 routes</div>
+      <p>租戶生命週期、合作夥伴 entry、車隊與法遵、計價發布、結算對帳、稽核、功能旗標、介接登錄。專為內部 PM / 工程主管 / 法遵窗口。</p>
+      <ul><li>tenants · partners</li><li>rollout flow</li><li>pricing publish</li><li>recon issues</li><li>audit · flags</li></ul>
+    </a>
+
+    <a class="card" href="Ops Console.html" style="--accent: #EF4444;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">03 · OPS CONSOLE</div>
+      <h2>即時營運工作台</h2>
+      <div class="tag">coral · 14 routes</div>
+      <p>派遣 (owned + forwarded)、客服中心、客訴 / 事故、報表、收益、班次、保修、司機 / 車輛 / 合約。SOS 詳情含 timeline 與 service recovery actions。</p>
+      <ul><li>dispatch queue</li><li>callcenter</li><li>incidents · SOS</li><li>complaints</li><li>revenue review</li></ul>
+    </a>
+
+    <a class="card" href="Tenant Console.html" style="--accent: #14B8A6;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">04 · TENANT CONSOLE</div>
+      <h2>租戶自助與整合</h2>
+      <div class="tag">teal · 15 routes · YAMATO 範例</div>
+      <p>叫車管理、乘客 / 地址 / 成本中心、審批規則、對帳單、報表、API 金鑰、Webhook 投遞紀錄、稽核、人員與角色。對應 tenant_admin / operator / approver / viewer。</p>
+      <ul><li>booking flow</li><li>cost centers</li><li>approval rules</li><li>webhooks · keys</li><li>audit</li></ul>
+    </a>
+
+    <a class="card" href="Partner Booking.html" style="--accent: #C9A356;">
+      <div class="accent-strip"></div>
+      <svg class="arrow" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg>
+      <div class="num">05 · PARTNER BOOKING</div>
+      <h2>合作夥伴叫車漏斗</h2>
+      <div class="tag">CTBC World Elite · iOS · 7 screens</div>
+      <p>嵌入合作銀行 App 的卡友禮賓接送漏斗：權益入口、卡片連結、預約、派車、行程紀錄、收據、客服。費用合併至卡片帳單、禮遇趟次計算、爭議流程。</p>
+      <ul><li>cardholder funnel</li><li>card-linked auth</li><li>quota tracking</li><li>combined billing</li><li>iOS in-app</li></ul>
+    </a>
+  </div>
+
+  <!-- ──────────────────────────────────────────────── -->
+  <div class="section-h"><em>03</em> 設計系統共享層 · Shared layer</div>
+  <div class="grid single">
+    <div class="card" style="--accent: #94A3B8; cursor: default;">
+      <div class="accent-strip"></div>
+      <div class="num">TOKENS</div>
+      <h2>色彩 · 密度 · 語系</h2>
+      <p>每個 console 以單一 accent 區分 (indigo / coral / teal / amber / emerald)，共用 surface / border / text scale 與 success / warn / danger 語意色。</p>
+    </div>
+    <div class="card" style="--accent: #94A3B8; cursor: default;">
+      <div class="accent-strip"></div>
+      <div class="num">CHROME</div>
+      <h2>側欄 · 頂欄 · 內容區</h2>
+      <p>Sidebar 224px (icon + label + badge)，topbar 46px (breadcrumb + search + env)，內容捲動。env=production / staging 自動上色。</p>
+    </div>
+    <div class="card" style="--accent: #94A3B8; cursor: default;">
+      <div class="accent-strip"></div>
+      <div class="num">PRIMITIVES</div>
+      <h2>Card · Table · Pill · Banner · KPI · Stepper · Timeline · DL</h2>
+      <p>專為密集資料設計：dense table、dot 狀態 pill、tone-aware banner、deltaTone 數字、活動 timeline。</p>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span>DRTS Design · 提案 v0.4</span>
+    <code>4 consoles + 1 funnel + 1 driver app</code>
+    <code>50+ screens · 1 design system</code>
+    <span>Tweaks 工具列可即時切換淺 / 深色與密度</span>
+  </div>
+</div>
+</body>
+</html>
