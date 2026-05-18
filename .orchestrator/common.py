@@ -187,6 +187,45 @@ def config_path(config: dict[str, Any], key: str, default: str | None = None) ->
     return path
 
 
+def canonical_workspace_root(config: dict[str, Any]) -> Path:
+    """Return the workspace that owns canonical machine-truth files."""
+    return config_path(config, "status_file").parents[0]
+
+
+def delivery_workspace_root(config: dict[str, Any], metadata: dict[str, Any] | None = None) -> Path:
+    """Return the cwd a worker should use for repository edits.
+
+    Execution dispatch may run in an isolated git worktree, while coordination
+    and fallback delivery continue to use the canonical workspace.
+    """
+    raw = (metadata or {}).get("workspace_root")
+    if raw:
+        return Path(str(raw)).expanduser().resolve()
+    return canonical_workspace_root(config)
+
+
+def apply_orchestrator_runtime_env(
+    env: dict[str, str],
+    config: dict[str, Any],
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """Stamp env vars that keep status writes pointed at machine truth."""
+    canonical_root = canonical_workspace_root(config)
+    workspace_root = delivery_workspace_root(config, metadata)
+    env.update(
+        {
+            "ORCH_STATUS_ROOT": str(canonical_root),
+            "AI_STATUS_ROOT": str(canonical_root),
+            "ORCH_CANONICAL_ROOT": str(canonical_root),
+            "ORCH_WORKSPACE_ROOT": str(workspace_root),
+        }
+    )
+    task_branch = str((metadata or {}).get("task_branch") or "").strip()
+    if task_branch:
+        env["ORCH_TASK_BRANCH"] = task_branch
+    return env
+
+
 def run_command(
     command: list[str],
     *,

@@ -125,6 +125,57 @@ class GeminiAdapterTests(unittest.TestCase):
             self.assertTrue(result.ok)
             self.assertEqual(spawn.call_args.args[0][0], str(local_cli))
 
+    def test_gemini_dispatch_uses_assigned_worker_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            status_file = tmp / "canonical" / "ai-status.json"
+            status_file.parent.mkdir()
+            status_file.write_text('{"tasks":[]}', encoding="utf-8")
+            worker_root = tmp / "worker-pbk-ui-003"
+            worker_root.mkdir()
+            config = {
+                "paths": {"status_file": str(status_file)},
+                "agents": {
+                    "gemini2": {
+                        "id": "gemini2",
+                        "display_name": "Gemini2",
+                        "provider": "gemini2",
+                        "adapter": "gemini",
+                    }
+                },
+                "providers": {
+                    "gemini2": {
+                        "delivery_mode": "gemini",
+                        "gemini": {"cli": "gemini", "include_directories": True},
+                    }
+                },
+            }
+            request = DeliveryRequest(
+                agent_id="gemini2",
+                provider="gemini2",
+                delivery_mode="gemini",
+                message="wake up",
+                task_id="PBK-UI-003",
+                metadata={"workspace_root": str(worker_root), "task_branch": "gemini2/pbk-ui-003"},
+            )
+            process = mock.Mock()
+            process.pid = 43210
+            with (
+                mock.patch("adapters.gemini.command_exists", return_value="/usr/bin/gemini"),
+                mock.patch("adapters.gemini._gemini_auth_ready", return_value=True),
+                mock.patch("adapters.gemini.spawn_background_process", return_value=(process, Path("/tmp/gemini.log"))) as spawn,
+                mock.patch("adapters.gemini.runtime_log_path", return_value=Path("/tmp/gemini.log")),
+                mock.patch("adapters.gemini.new_runtime_id", return_value="gemini2-test"),
+            ):
+                result = GeminiAdapter(config=config, provider_capabilities={}).deliver(request)
+
+            self.assertTrue(result.ok)
+            command = spawn.call_args.args[0]
+            self.assertEqual(spawn.call_args.kwargs["cwd"], worker_root)
+            self.assertIn(str(worker_root), command)
+            self.assertEqual(spawn.call_args.kwargs["env"]["ORCH_STATUS_ROOT"], str(status_file.parent))
+            self.assertEqual(spawn.call_args.kwargs["env"]["ORCH_WORKSPACE_ROOT"], str(worker_root))
+
     def test_gemini_dispatch_falls_back_when_cli_disappears_after_capability_check(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)

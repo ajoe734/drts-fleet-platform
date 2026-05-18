@@ -324,6 +324,177 @@ def format_runtime_timestamp_local(ts: str | None) -> str:
     return dt.astimezone(LOCAL_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _git_capture(repo_root: Path, args: list[str], *, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(repo_root),
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+    )
+
+
+def _task_branch(agent_id: str, task_id: str) -> str:
+    return f"{normalize_agent_id(agent_id)}/{task_id.lower()}"
+
+
+def _worktree_entries(repo_root: Path) -> list[dict[str, str]]:
+    result = _git_capture(repo_root, ["worktree", "list", "--porcelain"])
+    if result.returncode != 0:
+        return []
+    entries: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            if current:
+                entries.append(current)
+                current = {}
+            continue
+        key, _, value = line.partition(" ")
+        current[key] = value.strip()
+    if current:
+        entries.append(current)
+    return entries
+
+
+def _worktree_for_branch(repo_root: Path, branch: str) -> Path | None:
+    ref = f"refs/heads/{branch}"
+    for entry in _worktree_entries(repo_root):
+        if entry.get("branch") == ref and entry.get("worktree"):
+            return Path(entry["worktree"]).resolve()
+    return None
+
+
+def _current_branch(path: Path) -> str | None:
+    result = _git_capture(path, ["branch", "--show-current"])
+    if result.returncode != 0:
+        return None
+    return (result.stdout or "").strip() or None
+
+
+def _branch_exists(repo_root: Path, branch: str) -> bool:
+    return _git_capture(repo_root, ["show-ref", "--verify", "--quiet", f"refs/heads/{branch}"]).returncode == 0
+
+
+def _remote_branch_exists(repo_root: Path, branch: str) -> bool:
+    return _git_capture(repo_root, ["rev-parse", "--verify", "--quiet", f"origin/{branch}"]).returncode == 0
+
+
+def _worker_worktree_base(config: dict[str, Any], repo_root: Path) -> Path:
+    settings = ((config.get("branch_strategy") or {}).get("worker_worktrees") or {})
+    raw_root = str(settings.get("root") or ".artifacts/worktrees/auto").strip()
+    base = Path(raw_root).expanduser()
+    if not base.is_absolute():
+        base = repo_root / base
+    return base.resolve()
+
+
+def _worker_worktrees_enabled(config: dict[str, Any]) -> bool:
+    settings = ((config.get("branch_strategy") or {}).get("worker_worktrees") or {})
+    return settings.get("enabled", True) is not False
+
+
+def _candidate_worktree_path(base: Path, agent_id: str, task_id: str) -> Path:
+    slug = re.sub(r"[^a-z0-9._-]+", "-", f"{normalize_agent_id(agent_id)}-{task_id.lower()}").strip("-")
+    candidate = base / slug
+    if not candidate.exists():
+        return candidate
+    if _current_branch(candidate) == _task_branch(agent_id, task_id):
+        return candidate
+    for index in range(2, 20):
+        suffixed = base / f"{slug}-{index}"
+        if not suffixed.exists() or _current_branch(suffixed) == _task_branch(agent_id, task_id):
+            return suffixed
+    return base / f"{slug}-{new_runtime_id('wt')}"
+
+
+def ensure_execution_workspace(
+    config: dict[str, Any],
+    request: DeliveryRequest,
+    routing: Any | None,
+) -> tuple[Path, str | None, str | None, str | None]:
+    repo_root = config_path(config, "status_file").parents[0].resolve()
+    mode = str((request.metadata or {}).get("mode") or "").strip().lower()
+    if not request.task_id or mode in {"planning", "coordination"} or not _worker_worktrees_enabled(config):
+        return repo_root, None, None, None
+
+    branch = _task_branch(request.agent_id, request.task_id)
+    base_branch = routing.base_branch if routing else "dev"
+    existing = _worktree_for_branch(repo_root, branch)
+    if existing is not None:
+        return existing, branch, base_branch, "existing_worktree"
+
+    base = _worker_worktree_base(config, repo_root)
+    base.mkdir(parents=True, exist_ok=True)
+    destination = _candidate_worktree_path(base, request.agent_id, request.task_id)
+    if destination.exists() and _current_branch(destination) == branch:
+        return destination.resolve(), branch, base_branch, "existing_path"
+
+    if _branch_exists(repo_root, branch):
+        command = ["worktree", "add", str(destination), branch]
+    elif _remote_branch_exists(repo_root, branch):
+        command = ["worktree", "add", "-b", branch, str(destination), f"origin/{branch}"]
+    else:
+        base_ref = f"origin/{base_branch}" if _remote_branch_exists(repo_root, base_branch) else base_branch
+        command = ["worktree", "add", "-b", branch, str(destination), base_ref]
+    result = _git_capture(repo_root, command, timeout=90.0)
+    if result.returncode != 0:
+        write_activity_log(
+            config,
+            {
+                "type": "worker_workspace_fallback",
+                "task_id": request.task_id,
+                "target_agent": display_name_for(config, request.agent_id),
+                "message": (
+                    "Could not create isolated worker worktree; falling back to canonical workspace. "
+                    f"branch={branch} stderr={(result.stderr or result.stdout or '').strip()}"
+                ),
+            },
+        )
+        return repo_root, branch, base_branch, "fallback_canonical"
+    return destination.resolve(), branch, base_branch, "created_worktree"
+
+
+def attach_workspace_metadata(
+    config: dict[str, Any],
+    request: DeliveryRequest,
+    workspace_root: Path,
+    branch: str | None,
+    base_branch: str | None,
+    workspace_source: str | None,
+) -> None:
+    canonical_root = config_path(config, "status_file").parents[0].resolve()
+    request.metadata = dict(request.metadata or {})
+    request.metadata["workspace_root"] = str(workspace_root)
+    request.metadata["canonical_root"] = str(canonical_root)
+    if branch:
+        request.metadata["task_branch"] = branch
+    if base_branch:
+        request.metadata["base_branch"] = base_branch
+    if workspace_source:
+        request.metadata["workspace_source"] = workspace_source
+    if not request.task_id or not branch:
+        return
+
+    if workspace_root == canonical_root:
+        workspace_line = (
+            f"- Worker cwd: `{workspace_root}` (canonical workspace fallback; avoid switching it to another task branch)."
+        )
+    else:
+        workspace_line = f"- Worker cwd: `{workspace_root}` (isolated task worktree)."
+    notice = (
+        "\n\nSupervisor-assigned workspace:\n"
+        f"{workspace_line}\n"
+        f"- Task branch: `{branch}` from base `{base_branch or 'dev'}`.\n"
+        f"- Canonical machine-truth root: `{canonical_root}`.\n"
+        "- This process inherits `ORCH_STATUS_ROOT` / `AI_STATUS_ROOT`, so `scripts/ai-status.sh` "
+        "writes status back to canonical machine truth even from the task worktree.\n"
+        "- Do not `git switch` the canonical root for task code; use the assigned cwd/branch.\n"
+    )
+    if "Supervisor-assigned workspace:" not in request.message:
+        request.message = request.message.rstrip() + notice
+
+
 def summarize_runtime(state: dict[str, Any], approval_state: dict[str, Any]) -> dict[str, Any]:
     workers = state.get("workers", {}) or {}
     queue_events = state.get("queue", {}).get("events", {}) or {}
@@ -835,6 +1006,14 @@ def start_worker_for_request(
                 ),
             },
         )
+    routing = route_task(request.task_id, config=config) if request.task_id else None
+    workspace_root, task_branch, base_branch, workspace_source = ensure_execution_workspace(
+        config,
+        request,
+        routing,
+    )
+    attach_workspace_metadata(config, request, workspace_root, task_branch, base_branch, workspace_source)
+
     adapter_name = delivery_mode_override or agent.get("adapter", "file_inbox")
     adapter = build_adapter(adapter_name, config=config, provider_capabilities=provider_report)
     result = adapter.deliver(request)
@@ -858,7 +1037,6 @@ def start_worker_for_request(
     # track it belongs to so the dashboard, promote-nightly workflow, and
     # any downstream PR-creation can see where this work is supposed to land.
     # See docs/ops/branch-strategy.md §4 and orchestrator-integration-guide.md.
-    routing = route_task(request.task_id, config=config) if request.task_id else None
     state.setdefault("workers", {})[worker_run_id] = {
         "run_id": worker_run_id,
         "provider": request.provider,
@@ -880,6 +1058,10 @@ def start_worker_for_request(
         "pid": result.pid,
         "notes": result.notes,
         "metadata": result.metadata,
+        "workspace_root": str(workspace_root),
+        "canonical_root": str(config_path(config, "status_file").parents[0].resolve()),
+        "task_branch": task_branch,
+        "workspace_source": workspace_source,
         "request_snapshot": request_snapshot(request),
         "parent_run_id": parent_run_id,
         "retry_count": 0,
