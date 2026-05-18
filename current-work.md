@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-18T14:54:40Z
+Last updated: 2026-05-18T14:59:45Z
 
 ## Objective
 
@@ -38,7 +38,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 - `Claude`: governance-review, architecture-arbitration, control-plane; next: Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.
 - `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
-- `Codex`: contracts, schema, state-system, acceptance; next: Owner reassigned to Codex per 2026-05-18 dispatch. Repairing closeout packet references: replace stale origin/feat/claude2-ui-redesign-foundation claim, repoint canvas assets to docs/05-ui/driver-app-
+- `Codex`: contracts, schema, state-system, acceptance; next: Closeout packet repaired and pushed at 03e9a15 (docs(DRV-UI-RD-009): repair driver closeout packet references) on origin/codex/drv-ui-rd-009. Machine-truth owner/reviewer now match the 2026-05-18 disp
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
 - `Codex2`: contracts, schema, state-system, acceptance; next: Inspecting partner-booking-web baseline, CTBC 7-screen gaps, and required verification before continuing implementation.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Chairman reassigned owner from Claude to Claude2: Owner Claude is exact auth-paused in provider_pauses; backlog owner reassignment is allowed, and Claude2 is a healthy exact lane for this closeout pac
@@ -57,7 +57,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `TEN-UI-RD-013` | Wave 3 | Cost Center route 新增 | Codex | blocked | `TEN-UI-RD-001` | TN_CostCenter — 需確認 backend contract，不齊全則回 discussion_planning。 |
 | `TEN-UI-RD-014` | Wave 3 | Rules route 新增 | Codex | blocked | `TEN-UI-RD-001` | TN_Rules — 審批與配額。 |
 | `TEN-UI-RD-099` | Wave 3 | Wave 3 tenant closeout packet | Claude2 | todo | `TEN-UI-RD-001`, `TEN-UI-RD-002`, `TEN-UI-RD-003`, `TEN-UI-RD-004`, `TEN-UI-RD-010`, `TEN-UI-RD-011`, `TEN-UI-RD-012`, `TEN-UI-RD-013`, `TEN-UI-RD-014`, `TEN-UI-RD-015`, `TEN-UI-RD-016`, `TEN-UI-RD-017`, `TEN-UI-RD-018` | TEN-UI-RD-001..018 全 review_approved 後產出 closeout 文件，含 parity-fill 決策。 |
-| `DRV-UI-RD-009` | Wave 4 | Wave 4 driver closeout packet | Codex | in_progress | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008` | DRV-UI-RD-001..008 全 review_approved 後產出 closeout 文件。 |
+| `DRV-UI-RD-009` | Wave 4 | Wave 4 driver closeout packet | Codex | review | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008` | DRV-UI-RD-001..008 全 review_approved 後產出 closeout 文件。 |
 | `PBK-UI-003` | Wave 5 | CTBC reference funnel — 7 screens | Codex2 | in_progress | `PBK-UI-002` | Landing / Eligibility / Book / Confirmed / Trips / Receipt / Help — 全部 white-label component + CTBC brand demo。Mock data。 |
 | `PBK-UI-004` | Wave 5 | Authority-safe negative paths | Codex2 | todo | `PBK-UI-003` | 保留 tenant-console-web/app/partner/ 既有 5 條 negative path (eligible / ineligible / manual_review / inactive / eligibility-required) 並移植。 |
 | `PBK-UI-005` | Wave 5 | 新舊 partner mode 共存政策 (decision doc) | Codex | backlog | `PBK-UI-004` | Decision doc 簽核：何時切換 / 過渡期 / 棄置策略。Supervisor + governance reviewer 共同簽。 |
@@ -80,7 +80,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `TEN-UI-RD-013` | Wave 3 | Cost Center route 新增 | Codex | blocked | `TEN-UI-RD-001` |
 | `TEN-UI-RD-014` | Wave 3 | Rules route 新增 | Codex | blocked | `TEN-UI-RD-001` |
 | `TEN-UI-RD-099` | Wave 3 | Wave 3 tenant closeout packet | Claude2 | todo | `TEN-UI-RD-001`, `TEN-UI-RD-002`, `TEN-UI-RD-003`, `TEN-UI-RD-004`, `TEN-UI-RD-010`, `TEN-UI-RD-011`, `TEN-UI-RD-012`, `TEN-UI-RD-013`, `TEN-UI-RD-014`, `TEN-UI-RD-015`, `TEN-UI-RD-016`, `TEN-UI-RD-017`, `TEN-UI-RD-018` |
-| `DRV-UI-RD-009` | Wave 4 | Wave 4 driver closeout packet | Codex | in_progress | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008` |
+| `DRV-UI-RD-009` | Wave 4 | Wave 4 driver closeout packet | Codex | review | `DRV-UI-RD-001`, `DRV-UI-RD-002`, `DRV-UI-RD-003`, `DRV-UI-RD-004`, `DRV-UI-RD-005`, `DRV-UI-RD-006`, `DRV-UI-RD-007`, `DRV-UI-RD-008` |
 | `PBK-UI-003` | Wave 5 | CTBC reference funnel — 7 screens | Codex2 | in_progress | `PBK-UI-002` |
 | `PBK-UI-004` | Wave 5 | Authority-safe negative paths | Codex2 | todo | `PBK-UI-003` |
 | `PBK-UI-005` | Wave 5 | 新舊 partner mode 共存政策 (decision doc) | Codex | backlog | `PBK-UI-004` |
@@ -93,6 +93,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `PBK-UI-004` | Claude | Codex | Chairman reassigned reviewer from Claude to Codex: Claude lane is capacity-paused. Preemptively move the reviewer slot to healthy Codex so the task will not stall on reviewer assignment once its dependency clears. | pending | 2026-05-12T18:55:03Z |
 | `ADM-UI-RD-010` | Claude | Claude2 | Chairman reassigned owner from Claude to Claude2: Owner Claude is exact auth-paused in provider_pauses; backlog owner reassignment is allowed, and Claude2 is a healthy exact lane for this closeout packet. | pending | 2026-05-18T02:12:17Z |
 | `TEN-UI-RD-099` | Claude | Claude2 | Chairman reassigned owner from Claude to Claude2: Owner Claude is exact auth-paused in provider_pauses; backlog owner reassignment is allowed, and Claude2 keeps the closeout packet on a healthy lane without routing new work to paused Claude. | pending | 2026-05-18T02:12:34Z |
+| `DRV-UI-RD-009` | Codex | Codex2 | Closeout packet repaired and pushed at 03e9a15 (docs(DRV-UI-RD-009): repair driver closeout packet references) on origin/codex/drv-ui-rd-009. Machine-truth owner/reviewer now match the 2026-05-18 dispatch (Codex/Codex2). Replaced stale docs/05-ui/drts-design-canvas/* references with checked-in docs/05-ui/driver-app-design-20260507/* assets, replaced retired origin/feat/claude2-ui-redesign-foundation verification claims with immutable commit-hash + local historical branch feat/claude2-ui-redesign-foundation evidence, and removed the nonexistent DRV-UI-RD-008-SIDECAR-REVIEW artifact citation. Verification run in this workspace: all eight shipped commit hashes resolve and are ancestors of local feat/claude2-ui-redesign-foundation; all cited HTML anchors exist in docs/05-ui/driver-app-design-20260507/DRTS Driver App.html; all cited driver-screens-{1,2,3}.jsx files and sidecar acceptance packets exist. Review scope is limited to the repaired closeout packet + status alignment; no upstream runtime code changed and no per-surface acceptance commands were rerun. | pending | 2026-05-18T14:59:45Z |
 
 ## Blockers
 
@@ -130,3 +131,4 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 - 2026-05-18T14:54:34Z Codex: `DRV-UI-RD-009` Assigned DRV-UI-RD-009 to Codex with reviewer Codex2
 - 2026-05-18T14:54:40Z Codex: `DRV-UI-RD-009` Owner reassigned to Codex per 2026-05-18 dispatch. Repairing closeout packet references: replace stale origin/feat/claude2-ui-redesign-foundation claim, repoint canvas assets to docs/05-ui/driver-app-design-20260507/, and remove or correct nonexistent sidecar review artifact citations before re-handoff to Codex2.
+- 2026-05-18T14:59:45Z Codex: `DRV-UI-RD-009` Handoff to Codex2: Closeout packet repaired and pushed at 03e9a15 (docs(DRV-UI-RD-009): repair driver closeout packet references) on origin/codex/drv-ui-rd-009. Machine-truth owner/reviewer now match the 2026-05-18 dispatch (Codex/Codex2). Replaced stale docs/05-ui/drts-design-canvas/* references with checked-in docs/05-ui/driver-app-design-20260507/* assets, replaced retired origin/feat/claude2-ui-redesign-foundation verification claims with immutable commit-hash + local historical branch feat/claude2-ui-redesign-foundation evidence, and removed the nonexistent DRV-UI-RD-008-SIDECAR-REVIEW artifact citation. Verification run in this workspace: all eight shipped commit hashes resolve and are ancestors of local feat/claude2-ui-redesign-foundation; all cited HTML anchors exist in docs/05-ui/driver-app-design-20260507/DRTS Driver App.html; all cited driver-screens-{1,2,3}.jsx files and sidecar acceptance packets exist. Review scope is limited to the repaired closeout packet + status alignment; no upstream runtime code changed and no per-surface acceptance commands were rerun.
