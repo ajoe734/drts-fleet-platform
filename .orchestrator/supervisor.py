@@ -6711,6 +6711,7 @@ def run_once(
         changed = queue_chair_review(config, state, status, provider_report) or changed
         changed = dispatch_ready_tasks(config, state, provider_report) or changed
         changed = dispatch_underutilization_sidecars(config, state) or changed
+        changed = dispatch_underutilization_main_tasks(config, state) or changed
     changed = process_queue(config, state, provider_report) or changed
     changed = poll_workers(config, state) or changed
     status = load_status(config)
