@@ -233,7 +233,7 @@ gh workflow run deploy-staging.yml -f source_ref=main
 gh issue create --title "regression in v2026.05.18.0: bookings page blank" --label "regression:v2026.05.18.0"
 
 # Redeploy yesterday's prod tag (rollback)
-gh workflow run deploy-prod.yml -f tag=prod/v2026.05.17.0
+gh workflow run deploy-prod.yml -f tag=prod/v2026.05.17.0 -f skip_migration=true
 ```
 
 ---

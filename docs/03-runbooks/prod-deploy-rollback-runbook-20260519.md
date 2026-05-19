@@ -230,7 +230,7 @@ For any production deploy or rollback, capture at minimum:
 
 ## Reference Anchors
 
-- [`.github/workflows/deploy-prod.yml`](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-prod-rail-001/.github/workflows/deploy-prod.yml)
-- [`docs/03-runbooks/phase1-rollout.md`](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-prod-rail-001/docs/03-runbooks/phase1-rollout.md)
-- [`docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-prod-rail-001/docs/03-runbooks/phase1-workflow-acceptance-release-gates.md)
-- [`docs/ops/branch-strategy.md`](/home/edna/workspace/drts-fleet-platform/.artifacts/worktrees/auto/codex2-prod-rail-001/docs/ops/branch-strategy.md)
+- `.github/workflows/deploy-prod.yml`
+- `docs/03-runbooks/phase1-rollout.md`
+- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`
+- `docs/ops/branch-strategy.md`
