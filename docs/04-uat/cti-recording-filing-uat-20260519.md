@@ -1,7 +1,7 @@
 # CTI / Recording / Filing UAT — 2026-05-19
 
 **Task:** `COM-UAT-001`  
-**Owner:** `Codex`  
+**Owner:** `Codex2`  
 **Reviewer:** `Claude`  
 **Date:** `2026-05-19`  
 **Artifact status:** `provisional`  
@@ -26,7 +26,8 @@ As of `2026-05-19`, the correct gate read is:
   chain end-to-end.
 - `support/sidecars/COM-LIVE-001/COM-LIVE-001-EVIDENCE-PACK.md` confirms that
   live/staging CTI callback, filing scheduler, recording export activation, and
-  signed-download evidence are still incomplete.
+  signed-download evidence are still incomplete, even though the canonical
+  workflow gate already moved to `PASS (sandbox evidence)`.
 - `EXT-004-BLK-001` through `EXT-004-BLK-008` remain the binding blockers for
   any stronger live/staging claim.
 
@@ -44,7 +45,14 @@ execution have passed.
 | `tests/e2e/E2E-003-phone-recording-filing.sh` | Repo-local sandbox proof for phone order -> callback -> export -> filing -> audit path | No live CTI media or staging scheduler proof |
 | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` (`WF-COM-001`) | Canonical gate wording for the COM family | Upper bound is `PASS (sandbox evidence)` |
 | `support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md` | Binding external-gate checklist for callback, filing, export, retention, and E2E live evidence | Blockers remain open |
-| `support/sidecars/COM-LIVE-001/COM-LIVE-001-EVIDENCE-PACK.md` | Fresh `2026-05-19` live probe posture | Probe failed before callback / filing verification |
+| `support/sidecars/COM-LIVE-001/COM-LIVE-001-EVIDENCE-PACK.md` | Fresh `2026-05-19` live probe posture | Probe failed before callback / filing verification; use it for external activation posture, not to override the canonical `WF-COM-001` matrix row |
+
+Precedence note:
+
+- Treat `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` as the
+  canonical gate read for `WF-COM-001`.
+- Treat `COM-LIVE-001` as a dated live-probe sidecar showing why the stronger
+  live/staging claim remains blocked by `EXT-004-BLK-*`.
 
 ## 3. Scenario Readout
 
@@ -88,8 +96,10 @@ That is enough to justify the current canonical wording:
 ## 5. What Is Still Blocked
 
 `support/sidecars/COM-LIVE-001/COM-LIVE-001-EVIDENCE-PACK.md` documents a fresh
-probe on `2026-05-19` that did not reach any callback or filing endpoint. The
-reported boundary failures were:
+probe on `2026-05-19` that did not reach any callback or filing endpoint. That
+sidecar is evidence that the live/staging upgrade is still blocked, not a
+replacement for the current canonical `WF-COM-001 = PASS (sandbox evidence)`
+matrix row. The reported boundary failures were:
 
 - `gcloud auth print-identity-token` required interactive reauthentication
 - the older `run.app` host returned `404`
