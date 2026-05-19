@@ -1,7 +1,7 @@
 # Partner Eligibility / Airport Transfer Spec
 
-Status: formalized static-evidence spec for `PRT-SPEC-001`  
-Date: 2026-05-19  
+Status: formalized static-evidence spec for `PRT-SPEC-001`
+Date: 2026-05-19
 Scope: `apps/api/src/modules/tenant-partner`, `apps/api/src/modules/owned-mobility`, `apps/api/src/modules/billing-settlement`, `apps/api/src/modules/reporting-filing`, `apps/ops-console-web`, `tests/e2e/E2E-007-partner-airport-transfer.sh`
 
 ## Purpose
