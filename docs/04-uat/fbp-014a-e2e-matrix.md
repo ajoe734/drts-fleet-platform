@@ -299,7 +299,7 @@ Tenant Console (setup + booking/update/approval) ─► Platform Admin / Ops (di
 
 ### 4.6 E2E-011 — Platform Admin Control-Plane Full Chain
 
-**Script:** `tests/e2e/E2E-011-platform-admin-control-plane.sh`  
+**Script:** `tests/e2e/E2E-011-platform-admin-control-plane.sh`
 **Task cross-ref:** `WF-ADM-001-E2E`
 
 #### Surface Chain
