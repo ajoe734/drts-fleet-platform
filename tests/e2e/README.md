@@ -27,12 +27,17 @@ It serves three purposes:
 | `E2E-002-forwarded-order.sh`        | `WF-FWD-001`                                           | route-locked forwarded-task visibility and no-owned-assignment guard   | `EXTERNAL-GATED`; live adapter proof remains external                                                                                                                                                                                        |
 | `E2E-003-phone-recording-filing.sh` | `WF-COM-001`, `WF-FIN-001`                             | call session -> phone order -> recording callback -> export -> filing  | `PASS (sandbox evidence)` for repo-local automation; live CTI/provider activation and staging job ownership still remain explicit external/deferred gates                                                                                    |
 | `E2E-004-tenant-attribution.sh`     | `WF-TEN-001`, `WF-ORD-001`                             | tenant creation, new-tenant booking, attribution, no cross-tenant leak | `PASS (live staging evidence)` via `FBP-014B`                                                                                                                                                                                                |
+| `E2E-005-tenant-governance.sh`      | `WF-TEN-002`, `WF-ORD-001`, `WF-ADM-001`              | governance negative paths, quota/rule denial, approval-chain evidence  | `PASS (repo-local negative-path evidence)` with companion integration coverage for deterministic time-control cases                                                                                                                           |
+| `E2E-008-partner-booking-cutover.sh` | `WF-PARTNER-001`, `WF-ORD-003`, `WF-FIN-002`         | partner entry deactivate/reactivate, eligibility, booking continuity   | `PASS (sandbox/staging hybrid evidence)` when seeded partner ingress credential is available                                                                                                                                                 |
+| `E2E-009-prod-rail-dry-run.sh`      | `WF-REL-001`                                           | static production deploy rail contract and rollback command path        | `PASS (static governance check)`; verifies workflow/runbook contract, not a live deployment                                                                                                                                                 |
+| `E2E-011-platform-admin-control-plane.sh` | `WF-ADM-001`                                    | tenant create, modules, quota, partner credential, pricing, rollout, audit | `PASS (repo-local control-plane evidence)` for platform admin mutation chain and rollout gate enforcement                                                                                                                                |
 
 ## Important Boundaries
 
 - `E2E-001` and `E2E-004` are the release-grade live staging anchors.
 - `E2E-002` is allowed to skip when no forwarded-task seed or adapter data is available.
 - `E2E-003-phone-recording-filing.sh` proves the repo-local phone-order/recording/export/filing chain in sandbox mode, but does not claim live CTI provider media, staging scheduler activation, or external retention execution.
+- `E2E-011-platform-admin-control-plane.sh` mutates tenant, partner, pricing, and rollout state; prefer isolated dev/sandbox targets when cleanup matters.
 - The retired `apps/tenant-portal-web` shell is never a production verification target.
 
 ## Running
@@ -41,6 +46,7 @@ It serves three purposes:
 ./tests/e2e/run-e2e.sh
 ./tests/e2e/run-e2e.sh --suite 001,004
 ./tests/e2e/run-e2e.sh --suite 009
+./tests/e2e/run-e2e.sh --suite 011
 ./tests/e2e/run-e2e.sh --dry-run
 ```
 

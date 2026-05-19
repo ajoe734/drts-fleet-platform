@@ -9,6 +9,7 @@
 #   ./tests/e2e/run-e2e.sh --suite 001          # run only E2E-001
 #   ./tests/e2e/run-e2e.sh --suite 001,004       # run 001 and 004
 #   ./tests/e2e/run-e2e.sh --suite 009           # run prod-rail dry-run only
+#   ./tests/e2e/run-e2e.sh --suite 011           # run platform admin control-plane only
 #   ./tests/e2e/run-e2e.sh --dry-run             # list scenarios, no execution
 #   ./tests/e2e/run-e2e.sh --help
 #

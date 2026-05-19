@@ -20,8 +20,8 @@ This document defines the cross-surface E2E scenario matrix for Phase 1. It capt
 5. How the scaffold relates to the existing smoke tests and UAT scenarios.
 
 The E2E scaffold is in `tests/e2e/`. The scenarios operationalize the cross-surface flows
-defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)` plus the
-partner cutover authority flow added by `E2E-008`.
+defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)` plus later
+execution-lane additions such as `E2E-008`, `E2E-009`, and `E2E-011`.
 
 > **Relationship to smoke tests:** `tests/smoke/` verifies individual API surfaces in isolation.
 > `tests/e2e/` chains surfaces together in a single stateful run, tracking ID continuity across
@@ -297,6 +297,64 @@ Tenant Console (setup + booking/update/approval) ─► Platform Admin / Ops (di
 
 ---
 
+### 4.6 E2E-011 — Platform Admin Control-Plane Full Chain
+
+**Script:** `tests/e2e/E2E-011-platform-admin-control-plane.sh`  
+**Task cross-ref:** `WF-ADM-001-E2E`
+
+#### Surface Chain
+
+```
+Platform Admin (tenant create/settings/onboarding/rollout) ─► Partner Governance (entry + credential) ─► Platform Pricing (draft + publish) ─► Audit
+```
+
+#### Leg Breakdown
+
+| Leg | Surface            | Actor            | API Route                                                                | Assertion                                                                  |
+| --- | ------------------ | ---------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| 1   | Platform Admin     | `platform_admin` | `POST /api/platform-admin/tenants`                                       | `tenantId` + `tenantCode` captured                                         |
+| 1   | Platform Admin     | `platform_admin` | `POST /api/platform-admin/tenants/:tenantId/settings`                    | modules and quota updates persist                                           |
+| 1   | Platform Admin     | `platform_admin` | `POST /api/platform-admin/tenants/:tenantId/onboarding`                  | rollout owners / integration package persist                                |
+| 1   | Platform Admin     | `platform_admin` | `POST /api/platform-admin/tenants/:tenantId/rollout`                     | premature production promotion fails with `TENANT_PROMOTION_GATE_BLOCKED`   |
+| 1   | Platform Admin     | `platform_admin` | `POST /api/platform-admin/tenants/:tenantId/roles/invite` + acknowledge  | required roles are acknowledged before promotion                            |
+| 2   | Partner Governance | `platform_admin` | `POST /api/platform-admin/partner-entries`                               | `entrySlug` captured                                                        |
+| 2   | Partner Governance | `platform_admin` | `POST /api/platform-admin/partner-entries/:entrySlug/credentials/issue`  | plaintext credential is returned exactly once                               |
+| 2   | Partner Governance | `platform_admin` | `GET /api/platform-admin/partner-entries/:entrySlug/credentials`         | read-back preserves `keyId` but masks plaintext                             |
+| 3   | Platform Pricing   | `platform_admin` | `POST /api/platform-admin/pricing-rules`                                 | `ruleId` + `version` captured                                               |
+| 3   | Platform Pricing   | `platform_admin` | `POST /api/platform-admin/pricing-rules/:ruleId/publish`                 | rule becomes `active` with `publishedAt`                                    |
+| 3   | Rollout            | `platform_admin` | `POST /api/platform-admin/tenants/:tenantId/rollout`                     | sandbox -> pilot succeeds                                                   |
+| 3   | Rollout            | `platform_admin` | `POST /api/platform-admin/tenants/:tenantId/rollback-hold`               | rollback hold applied                                                       |
+| 3   | Rollout            | `platform_admin` | `POST /api/platform-admin/tenants/:tenantId/rollout`                     | production blocked with `TENANT_IN_ROLLBACK_HOLD` while hold is active      |
+| 3   | Rollout            | `platform_admin` | `POST /api/platform-admin/tenants/:tenantId/activate` + rollout          | production promotion succeeds after hold resolution                         |
+| 4   | Audit              | `platform_admin` | `GET /api/audit`                                                         | tenant / partner / credential / pricing / rollout mutation families exist   |
+
+#### ID Continuity Chain
+
+```
+tenantId + tenantCode (platform admin) ──► entrySlug + credentialKeyId (partner) ──► ruleId + version (pricing) ──► rolloutStage=production
+```
+
+#### Runtime Fixtures
+
+`E2E-011` builds all JSON payloads at runtime in a temp directory so tenant code,
+partner entry slug, and pricing version remain unique per run.
+
+#### Pass Criteria
+
+1. Tenant creation, settings updates, onboarding updates, and role acknowledgements all succeed and remain readable from tenant detail.
+2. Production rollout is blocked before gates are satisfied and separately blocked while rollback hold is active.
+3. Partner credential issuance returns `plaintextKey` only at issue time; the credential list route must not expose plaintext.
+4. Pricing publish returns `status=active` and a non-empty `publishedAt`.
+5. Final tenant detail reports rollout stage `production` and integration mode `api_key_and_webhook`.
+6. Audit log contains the expected action families: `create_platform_tenant`, `update_platform_tenant_settings`, `update_platform_tenant_onboarding`, `invite_tenant_role`, `acknowledge_tenant_role`, `update_platform_tenant_rollout`, `set_tenant_rollback_hold`, `update_platform_tenant_status`, `create_partner_entry`, `issue_partner_ingress_credential`, `create_platform_pricing_rule`, and `publish_platform_pricing_rule`.
+
+#### Verification Snapshot
+
+- `bash -n tests/e2e/E2E-011-platform-admin-control-plane.sh`
+- `bash tests/e2e/run-e2e.sh --suite 011 --dry-run`
+
+---
+
 ## 5. Fixture Inventory
 
 | Fixture File                     | Used By                             | Description                                                       |
@@ -380,6 +438,7 @@ Minimum evidence items required for each scenario:
 | E2E-002  | `primaryMirrorOrderId`, `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `primaryDriverCompletedStatus`, `secondaryDriverCancelledStatus`, `settlementLedgerMode` |
 | E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`                                                                                             |
 | E2E-008  | `inactiveBootstrapCode`, `eligibilityVerificationId`, `bookingId`, `receiptOwner`, `invoiceId`                                                                       |
+| E2E-011  | `tenantId`, `tenantCode`, `entrySlug`, `credentialKeyId`, `publishedAt`, `productionPromoted=true`, audit action counts                                             |
 
 ---
 
@@ -411,7 +470,7 @@ Minimum evidence items required for each scenario:
 
 ### Verification Snapshot
 
-- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/E2E-006-driver-multi-platform.sh tests/e2e/run-e2e.sh`
+- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/E2E-006-driver-multi-platform.sh tests/e2e/E2E-011-platform-admin-control-plane.sh tests/e2e/run-e2e.sh`
 - `./tests/e2e/run-e2e.sh --dry-run`
 
 ---
