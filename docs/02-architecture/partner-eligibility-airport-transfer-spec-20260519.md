@@ -7,13 +7,14 @@ Scope: `apps/api/src/modules/tenant-partner`, `apps/api/src/modules/owned-mobili
 ## Purpose
 
 This document turns the partner eligibility and airport-transfer flow into a
-formal Phase 1 architecture spec for canonical workflow `WF-PRT-001`.
+formal Phase 1 architecture spec for canonical workflow `WF-PARTNER-001`.
 
-`WF-PARTNER-001` appears in the Phase 1 v3 directive/planning materials as a
-proposed rename, but `WF-PARTNER-RENAME-DECISION` is still held pending user
-decision. Until that decision lands, this spec treats `WF-PRT-001` as the only
-canonical workflow id and mentions `WF-PARTNER-001` only as pending naming
-context, not as an accepted alias.
+`docs/00-context/phase1-v3-resolution-20260519.md` resolves the earlier naming
+conflict in favor of renaming `WF-PRT-001` to `WF-PARTNER-001` with no alias.
+Some surviving evidence anchors still use the older `WF-PRT-001` label. This
+spec therefore treats `WF-PARTNER-001` as canonical and `WF-PRT-001` only as a
+historical evidence label that must be mapped forward when reading older
+closeout and release-gate artifacts.
 
 It consolidates two evidence families:
 
@@ -31,10 +32,10 @@ the external gate packet is cleared.
 
 Naming baseline for this spec:
 
-- canonical workflow id: `WF-PRT-001`
-- pending directive-side rename candidate: `WF-PARTNER-001`
-- disallowed wording for now: any sentence that implies the rename/alias
-  decision is already accepted
+- canonical workflow id: `WF-PARTNER-001`
+- historical evidence label: `WF-PRT-001`
+- disallowed wording for now: any sentence that treats `WF-PRT-001` and
+  `WF-PARTNER-001` as two separate workflow families
 
 The current Phase 1 repo baseline supports the following claims:
 
@@ -54,14 +55,15 @@ The current repo baseline does not support the following claims:
 - no real issuer / bank sandbox or production activation is proven
 - no issuer-approved test cards or reference fixtures are attached
 - `manual_review` does not equal issuer approval
-- `PASS (static evidence)` for `WF-PRT-001` is not the same as live issuer
-  closure; `EXT-001` remains binding
+- `PASS (static evidence)` for the historical `WF-PRT-001` gate row does not
+  equal live issuer closure for canonical `WF-PARTNER-001`; `EXT-001` remains
+  binding
 
 ## Source Anchors
 
 | Concern | Binding anchor | What it contributes |
 | --- | --- | --- |
-| Workflow gate read | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` | Names `WF-PRT-001` as `PASS (static evidence)` with `EXT-001` still binding for live issuer proof. |
+| Workflow gate read | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` plus `docs/00-context/phase1-v3-resolution-20260519.md` §Q2 | The matrix still carries the historical `WF-PRT-001` row as `PASS (static evidence)`, while the v3 resolution renames the canonical workflow family to `WF-PARTNER-001`. |
 | Prior verification closeout | `docs/03-runbooks/tenant-governance-wave-closeout-20260514.md` | Records `PRT-VERIF-001` as closed and states that partner eligibility to billing/reporting propagation was verified. |
 | Partner entry topology | `docs/02-architecture/phase1-partner-channel-bank-entry-addendum-20260425.md` | Defines partner registry, ingress, eligibility verification, and carry-through fields. |
 | Issuer contract seam | `docs/02-architecture/phase1-issuer-eligibility-integration-contract-20260429.md` | Names contract snapshot fields, retry policy, manual fallback, and sensitive-data policy. |
@@ -90,6 +92,12 @@ propagation. In this spec, that sentence must be read narrowly:
 
 - it confirms that the repo's persisted partner-benefit provenance survives from
   eligibility verification into booking, trip, billing, and reporting anchors
+- the historical `partner_program_code` wording maps to the inspectable
+  repo-local provenance surface as follows:
+  `apps/api/src/modules/tenant-partner/tenant-partner.service.ts` persists both
+  `partnerProgramCode` and `partnerProgramId` on the verification record, while
+  the surviving unit/E2E anchors primarily assert the stable `partnerProgramId`
+  joins that carry through booking, billing, and reporting
 - it does not prove that a live issuer generated or approved those references
 - it does not override `EXT-001`, whose binding reading is that real issuer
   contract authority, fixtures, credentials, and business sign-off remain
@@ -108,9 +116,9 @@ instead of collapsing them into a single happy-path summary.
 
 | Task / evidence family | Surviving anchor | What remains reviewable now |
 | --- | --- | --- |
-| `PRT-VERIF-001` closeout claim | `docs/03-runbooks/tenant-governance-wave-closeout-20260514.md` §1, §2.3 | Machine-truth closeout statement that the partner eligibility to booking/trip/billing/reporting chain was verified. |
+| `PRT-VERIF-001` closeout claim | `docs/03-runbooks/tenant-governance-wave-closeout-20260514.md` §1, §2.3 | Machine-truth closeout statement that the partner eligibility to booking/trip/billing/reporting chain was verified under the historical `WF-PRT-001` label. |
 | `PRT-VERIF-001` booking-create gate | `tests/unit/owned-mobility.test.ts` | Positive gate: eligible verification can create a booking; negative gate: airport-transfer partner bookings are rejected without `eligibilityVerificationId`. |
-| `PRT-VERIF-001` provenance persistence | `tests/unit/tenant-partner-foundation.test.ts`, `tests/unit/owned-mobility.test.ts` | Verification records persist partner/program/entry provenance and the same anchor survives service reload and booking read-back. |
+| `PRT-VERIF-001` provenance persistence | `tests/unit/tenant-partner-foundation.test.ts`, `tests/unit/owned-mobility.test.ts`, `apps/api/src/modules/tenant-partner/tenant-partner.service.ts` | Verification records persist partner/program/entry provenance, including repo-local `partnerProgramCode` plus `partnerProgramId`, and the same anchor survives service reload and booking read-back. |
 | `PRT-VERIF-001` downstream carry-through | `tests/e2e/E2E-007-partner-airport-transfer.sh`, `tests/unit/billing-settlement.test.ts`, `tests/unit/reporting-filing.test.ts` | The same partner-benefit anchor continues into dispatch, completion, invoice, and reporting rows. |
 | `PRT-VERIF-001` negative path | `apps/api/tests/unit/tenant-partner.service.test.ts`, `docs/03-runbooks/partner-eligibility-manual-review-runbook.md` | `manual_review` and `ineligible` remain explicit stop states with queue/audit/evidence separation; denial cannot be silently turned into eligibility. |
 | `EXT-001` external gate | `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md`, `docs/02-architecture/phase1-issuer-eligibility-integration-contract-20260429.md` | Live issuer activation still requires external blocker clearance and manual review may not be restated as issuer approval. |
@@ -187,8 +195,9 @@ returns the same `partnerEntrySlug`, `eligibilityVerificationId`, and
 `benefitReference` that were produced during verification.
 
 This is the explicit booking-create gate anchor that keeps canonical
-`WF-PRT-001` in `PASS (static evidence)` rather than reducing it to a
-dispatch-only claim.
+`WF-PARTNER-001` mapped to the historical `WF-PRT-001`
+`PASS (static evidence)` row rather than reducing the family to a dispatch-only
+claim.
 
 ### 4. Dispatch and driver execution
 
@@ -279,17 +288,18 @@ from the formalized chain.
 
 For v3 blueprint completion, the correct release language is:
 
-- `WF-PRT-001`: `PASS (static evidence)`
+- historical gate row `WF-PRT-001`, read forward as canonical
+  `WF-PARTNER-001`: `PASS (static evidence)`
 - live issuer activation: `EXTERNAL-GATED`
 
 If readers need to map this spec back to the v3 directive wording, the safe
 reading is:
 
-- directive term `WF-PARTNER-001` currently points at the same product scope
-  as canonical `WF-PRT-001`
-- that mapping is a conflict note only, not an approved rename
-- this spec intentionally does not normalize the directive term into a formal
-  alias because `WF-PARTNER-RENAME-DECISION` is still open
+- canonical workflow family name is `WF-PARTNER-001`
+- the current release-gate matrix and older closeout wording still expose the
+  same family under historical id `WF-PRT-001`
+- reviewers must read those historical anchors as evidence for
+  `WF-PARTNER-001`, not as a second workflow family
 
 That wording is mandatory because the repo proves architecture, persistence,
 downstream propagation, and operator fallback, but it does not prove external
@@ -320,8 +330,8 @@ Until then:
 
 - confirm the spec names both `PRT-VERIF-001` and `EXT-001` instead of only the
   happy path
-- confirm the spec keeps `WF-PRT-001` as canonical and treats
-  `WF-PARTNER-001` only as a pending rename context
+- confirm the spec keeps `WF-PARTNER-001` as canonical and treats
+  `WF-PRT-001` only as a historical evidence label
 - confirm the flow contract covers ingress, verification, booking, dispatch,
   billing, and reporting
 - confirm manual-review and redaction rules are explicit
