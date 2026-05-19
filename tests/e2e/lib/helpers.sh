@@ -25,6 +25,9 @@ E2E_ACTOR_TYPE="${E2E_ACTOR_TYPE:-platform_admin}"
 E2E_ACTOR_ID="${E2E_ACTOR_ID:-e2e-platform-admin-001}"
 E2E_REALM="${E2E_REALM:-}"          # derived from actor type when blank
 E2E_TENANT_ID="${E2E_TENANT_ID:-}"  # set per-leg by switch_actor or caller
+E2E_PARTNER_ID="${E2E_PARTNER_ID:-}"
+E2E_PARTNER_PROGRAM_ID="${E2E_PARTNER_PROGRAM_ID:-}"
+E2E_PARTNER_ENTRY_SLUG="${E2E_PARTNER_ENTRY_SLUG:-}"
 
 # ── Seed data IDs — must match infra/seeds/S0002__demo_operational_seed.sql ───
 # TEN_ACME tenant; 張司機 / ABC-1234 driver+vehicle pair.
@@ -61,7 +64,8 @@ log_surface() { echo -e "\n${MAGENTA}◆ SURFACE: $* ◆${RESET}"; }
 
 # ── Actor switching ───────────────────────────────────────────────────────────
 # switch_actor TYPE ACTOR_ID [TENANT_ID]
-#   TYPE is one of: platform_admin | tenant_admin | ops_user | driver_user
+#   TYPE is one of:
+#     system | platform_admin | tenant_admin | ops_user | driver_user | partner_api_key
 #   TENANT_ID is required for tenant_admin; optional for others.
 switch_actor() {
   E2E_ACTOR_TYPE="$1"
@@ -69,6 +73,13 @@ switch_actor() {
   E2E_TENANT_ID="${3:-}"
   E2E_REALM=""   # re-derived by http_call
   log_info "Actor → type=${E2E_ACTOR_TYPE}, id=${E2E_ACTOR_ID}${E2E_TENANT_ID:+, tenantId=${E2E_TENANT_ID}}"
+}
+
+set_partner_context() {
+  E2E_PARTNER_ID="${1:-}"
+  E2E_PARTNER_PROGRAM_ID="${2:-}"
+  E2E_PARTNER_ENTRY_SLUG="${3:-}"
+  log_info "Partner context → partnerId=${E2E_PARTNER_ID:-<empty>}, programId=${E2E_PARTNER_PROGRAM_ID:-<empty>}, entrySlug=${E2E_PARTNER_ENTRY_SLUG:-<empty>}"
 }
 
 # ── HTTP helper ───────────────────────────────────────────────────────────────
@@ -84,10 +95,12 @@ http_call() {
   local realm="${E2E_REALM:-}"
   if [[ -z "$realm" ]]; then
     case "${E2E_ACTOR_TYPE:-}" in
+      system)         realm="system"   ;;
       platform_admin) realm="platform" ;;
       tenant_admin)   realm="tenant"   ;;
       ops_user)       realm="ops"      ;;
       driver_user)    realm="driver"   ;;
+      partner_api_key) realm="partner" ;;
       *)              realm="system"   ;;
     esac
   fi
@@ -123,6 +136,17 @@ http_call() {
     )
     if [[ -n "${E2E_TENANT_ID:-}" ]]; then
       curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
+    fi
+    if [[ "${E2E_ACTOR_TYPE:-}" == "partner_api_key" ]]; then
+      if [[ -n "${E2E_PARTNER_ID:-}" ]]; then
+        curl_args+=(-H "x-partner-id: ${E2E_PARTNER_ID}")
+      fi
+      if [[ -n "${E2E_PARTNER_PROGRAM_ID:-}" ]]; then
+        curl_args+=(-H "x-partner-program-id: ${E2E_PARTNER_PROGRAM_ID}")
+      fi
+      if [[ -n "${E2E_PARTNER_ENTRY_SLUG:-}" ]]; then
+        curl_args+=(-H "x-partner-entry-slug: ${E2E_PARTNER_ENTRY_SLUG}")
+      fi
     fi
   fi
 
