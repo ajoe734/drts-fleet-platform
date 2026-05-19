@@ -68,6 +68,26 @@ reviewable evidence chain for `PRT-VERIF-001`.
 This means the spec is allowed to formalize the verified runtime shape, but not
 to invent sidecar contents that are no longer directly inspectable here.
 
+## Closeout Wording Reconciliation
+
+`docs/03-runbooks/tenant-governance-wave-closeout-20260514.md` §2.3 still says
+`PRT-VERIF-001` verified a "full-chain trace" with
+`benefit_reference` / `issuer_authorization_ref` / `partner_program_code`
+propagation. In this spec, that sentence must be read narrowly:
+
+- it confirms that the repo's persisted partner-benefit provenance survives from
+  eligibility verification into booking, trip, billing, and reporting anchors
+- it does not prove that a live issuer generated or approved those references
+- it does not override `EXT-001`, whose binding reading is that real issuer
+  contract authority, fixtures, credentials, and business sign-off remain
+  external blockers
+- it does not convert `manual_review` into issuer approval or allow a timeout
+  fallback to release as benefit-sponsored service
+
+Accordingly, every use of the surviving `PRT-VERIF-001` closeout wording in this
+spec is shorthand for "repo/static provenance propagation verified" and not for
+"live issuer integration closed."
+
 ## Surviving Evidence Map
 
 The formal spec keeps `PRT-VERIF-001` and `EXT-001` as named evidence families
