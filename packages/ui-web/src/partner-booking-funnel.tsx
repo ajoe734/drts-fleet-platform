@@ -536,13 +536,16 @@ function ActionButton({
   brand,
   label,
   primary,
+  onClick,
 }: {
   brand: PartnerBrandTemplate;
   label: string;
   primary?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <div
+    <button
+      onClick={onClick}
       style={{
         width: "100%",
         minHeight: "46px",
@@ -555,10 +558,12 @@ function ActionButton({
         color: primary ? "#ffffff" : "#0e1424",
         fontSize: "14px",
         fontWeight: 700,
+        cursor: "pointer",
+        fontFamily: "inherit",
       }}
     >
       {label}
-    </div>
+    </button>
   );
 }
 
