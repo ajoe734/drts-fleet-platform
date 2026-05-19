@@ -7,7 +7,8 @@
 # Usage:
 #   ./tests/e2e/run-e2e.sh
 #   ./tests/e2e/run-e2e.sh --suite 001          # run only E2E-001
-#   ./tests/e2e/run-e2e.sh --suite 001,004,006   # run selected suites
+#   ./tests/e2e/run-e2e.sh --suite 007          # run only E2E-007
+#   ./tests/e2e/run-e2e.sh --suite 001,004       # run 001 and 004
 #   ./tests/e2e/run-e2e.sh --dry-run             # list scenarios, no execution
 #   ./tests/e2e/run-e2e.sh --help
 #
@@ -17,6 +18,8 @@
 #   E2E_SEED_TENANT_ID   TEN_ACME seed tenant (default: S0002 UUID)
 #   E2E_SEED_DRIVER_ID   張司機 seed driver   (default: S0002 UUID)
 #   E2E_SEED_VEHICLE_ID  ABC-1234 seed vehicle (default: S0002 UUID)
+#   E2E_PARTNER_ENTRY_SLUG Optional partner entry override for E2E-007
+#   E2E_PARTNER_REFERENCE_TOKEN Optional reference token override for E2E-007
 #   (See tests/e2e/lib/helpers.sh for the full variable list)
 set -euo pipefail
 

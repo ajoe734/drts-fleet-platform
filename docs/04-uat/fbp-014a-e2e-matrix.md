@@ -224,42 +224,55 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ---
 
-### 4.5 E2E-006 — Driver Multi-Platform Owned + Forwarded Chain
+### 4.5 E2E-007 — Partner Airport Transfer Benefit Propagation
 
-**Script:** `tests/e2e/E2E-006-driver-multi-platform.sh`
-**Workflow family:** `WF-DRV-MP-001`
+**Script:** `tests/e2e/E2E-007-partner-airport-transfer.sh`
+**Workflow cross-ref:** `WF-PARTNER-001`
 
 #### Surface Chain
 
 ```
-Driver App (mixed inbox) ──► Driver App (owned vs forwarded detail) ──► Ops Console (no-owned-assignment) ──► Earnings API (by-platform)
+Partner ingress (eligibility) ──► Tenant Portal (booking) ──► Ops Console (dispatch) ──► Driver App (trip) ──► Tenant Billing (invoice)
 ```
 
 #### Leg Breakdown
 
-| Leg | Surface      | Actor         | API Route                               | Assertion                                                         |
-| --- | ------------ | ------------- | --------------------------------------- | ----------------------------------------------------------------- |
-| 1   | Driver App   | `driver_user` | `GET /api/driver/tasks`                 | Same inbox contains one owned task and one forwarded task         |
-| 2   | Driver App   | `driver_user` | `GET /api/driver/tasks/:taskId`         | Owned task stays local-authority; forwarded task shows route lock |
-| 3   | Driver App   | `driver_user` | `POST /api/driver/tasks/:taskId/accept` | Forwarded task accept runs only when status is `pending_acceptance` |
-| 4   | Ops Console  | `ops_user`    | `GET /api/dispatch/tasks`               | Forwarded task did not create an owned dispatch assignment        |
-| 5   | Earnings API | `ops_user`    | `GET /api/platform-earnings/*`          | By-platform earnings breakdown remains readable                   |
+| Leg | Surface         | Actor                           | API Route                                 | Assertion                                                                        |
+| --- | --------------- | ------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------- |
+| 1   | Partner ingress | `partner_api_key`               | `GET /api/partner/entries/:entrySlug`     | Seeded partner entry is `credit_card_airport_transfer` with eligibility enabled |
+| 1   | Partner ingress | `partner_api_key`               | `POST /api/partner/eligibility/verify`    | `eligibilityVerificationId`, `benefitReference`, `issuerAuthorizationRef` set   |
+| 1   | Partner ingress | `partner_api_key`               | `GET /api/partner/eligibility/:id`        | Eligibility detail read-back matches verification result                         |
+| 2   | Tenant Portal   | `tenant_admin` (same tenant)    | `POST /api/tenant/bookings`               | Airport-transfer booking created with partner context                            |
+| 2   | Tenant Portal   | `tenant_admin`                  | `GET /api/tenant/bookings/:bookingId`     | `partnerEntrySlug`, `eligibilityVerificationId`, `benefitReference` preserved   |
+| 3   | Ops Console     | `ops_user`                      | `POST /api/orders/:orderId/dispatch`      | Dispatch job created or discoverable via queue poll                              |
+| 3   | Ops Console     | `ops_user`                      | `POST /api/dispatch/assign`               | Driver task assigned                                                             |
+| 4   | Driver App      | `driver_user`                   | `POST /api/driver/tasks/:id/*` lifecycle  | accept -> depart -> arrived_pickup -> start -> complete succeeds                 |
+| 5   | Tenant Billing  | `tenant_admin`                  | `POST /api/tenant/invoices/generate`      | invoice issued for the closed period                                             |
+| 5   | Tenant Billing  | `tenant_admin`                  | `GET /api/tenant/invoices/:invoiceId`     | matching invoice line keeps `partner_airport` channel + partner benefit fields   |
 
-#### Pass Criteria
+#### ID Continuity Chain
 
-1. Driver inbox exposes one owned task (`sourcePlatform` null/`drts`) and one forwarded task (`sourcePlatform` non-`drts`).
-2. Forwarded task detail reports `routeLocked=true`.
-3. Forwarded task detail carries a non-null, non-`drts` `sourcePlatform`.
-4. No owned `dispatch_assignment` exists for the forwarded task ID.
-5. Platform earnings summary succeeds and by-platform breakdown returns at least one platform item.
-6. **Graceful skip** when mixed owned+forwarded driver seed data is absent.
+```
+partnerEntrySlug ──► eligibilityVerificationId ──► bookingId / orderId ──► dispatchJobId ──► taskId ──► invoiceId
+```
+
+#### Propagation Assertions
+
+1. `benefitReference` from `partner/eligibility/verify` equals:
+   - `GET /tenant/bookings/:bookingId` `benefitReference`
+   - matching `GET /tenant/invoices/:invoiceId` line `benefitReference`
+2. `eligibilityVerificationId` from partner ingress equals:
+   - booking detail `eligibilityVerificationId`
+   - invoice line `eligibilityVerificationId`
+3. `partnerEntrySlug` remains stable from entry lookup through booking detail and invoice line.
+4. Invoice line `channelKey` is `partner_airport`.
 
 #### Notes
 
-This scenario extends `E2E-002` from a single forwarded-task mirror into the
-driver multi-platform workflow family. The task leg is mixed-seed dependent,
-while the earnings leg can still run against the runtime fallback seeded by the
-platform earnings service when DB-backed aggregation is unavailable.
+- Default seeded entry is `bank-demo-beta-airport` because its `reference_required`
+  path yields a deterministic, non-raw-token-derived `benefitReference`.
+- This is a repo-local propagation proof. It does **not** replace real issuer /
+  bank sandbox sign-off, which remains an external gate.
 
 ---
 
@@ -267,14 +280,14 @@ platform earnings service when DB-backed aggregation is unavailable.
 
 | Fixture File                     | Used By                          | Description                                                       |
 | -------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
-| `e2e-booking-enterprise.json`    | E2E-001, E2E-004, E2E-005        | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
-| `e2e-booking-airport.json`       | (reserved for E2E-003 expansion) | `credit_card_airport_transfer` booking                            |
+| `e2e-booking-enterprise.json`    | E2E-001, E2E-004                 | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
+| `e2e-booking-airport.json`       | E2E-007, reserved for E2E-003    | `credit_card_airport_transfer` booking                            |
 | `e2e-dispatch-assign.json`       | E2E-001                          | Dispatch assign body with `__*__` placeholders                    |
-| `e2e-driver-accept.json`         | E2E-001, E2E-002, E2E-006        | Driver task accept with `__ACCEPTED_AT__`                         |
-| `e2e-driver-depart.json`         | E2E-001                          | Driver depart pickup with `__DEPARTED_AT__`                       |
-| `e2e-driver-arrived-pickup.json` | E2E-001                          | Driver arrived at pickup with `__ARRIVED_AT__`                    |
-| `e2e-driver-start.json`          | E2E-001                          | Driver trip start with `__STARTED_AT__`                           |
-| `e2e-driver-complete.json`       | E2E-001                          | Driver task complete with signoff                                 |
+| `e2e-driver-accept.json`         | E2E-001, E2E-002, E2E-007        | Driver task accept with `__ACCEPTED_AT__`                         |
+| `e2e-driver-depart.json`         | E2E-001, E2E-007                 | Driver depart pickup with `__DEPARTED_AT__`                       |
+| `e2e-driver-arrived-pickup.json` | E2E-001, E2E-007                 | Driver arrived at pickup with `__ARRIVED_AT__`                    |
+| `e2e-driver-start.json`          | E2E-001, E2E-007                 | Driver trip start with `__STARTED_AT__`                           |
+| `e2e-driver-complete.json`       | E2E-001, E2E-007                 | Driver task complete with signoff                                 |
 | `e2e-tenant-create.json`         | E2E-004                          | Platform-admin tenant create with `__TENANT_CODE__`               |
 | `e2e-phone-booking.json`         | Reserved (E2E-003 manual flow)   | Phone booking payload stub for future CTI-backed automation       |
 | `e2e-report-compliance.json`     | Reserved (E2E-003 manual flow)   | Compliance export payload stub for future report validation       |

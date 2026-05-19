@@ -27,7 +27,7 @@ It serves three purposes:
 | `E2E-002-forwarded-order.sh`     | `WF-FWD-001`                                           | route-locked forwarded-task visibility and no-owned-assignment guard   | `EXTERNAL-GATED`; live adapter proof remains external                                                                                                                                                                                        |
 | `E2E-003` (manual only)          | `WF-COM-001`                                           | phone-order -> recording -> export boundary                            | `HOLD`; deferred pending live CTI and job activation                                                                                                                                                                                         |
 | `E2E-004-tenant-attribution.sh`  | `WF-TEN-001`, `WF-ORD-001`                             | tenant creation, new-tenant booking, attribution, no cross-tenant leak | `PASS (live staging evidence)` via `FBP-014B`                                                                                                                                                                                                |
-| `E2E-006-driver-multi-platform.sh` | `WF-DRV-MP-001`                                      | owned + forwarded inbox chain, route lock, no-owned-assignment, by-platform earnings | `MIXED-SEED-GATED`; requires one owned task and one forwarded task in the same driver inbox, while earnings can fall back to seeded platform demo data when DB-backed aggregation is absent                                                 |
+| `E2E-007-partner-airport-transfer.sh` | `WF-PARTNER-001`, `WF-ORD-001`, `WF-DSP-001`, `WF-DRV-001`, `WF-FIN-001` | partner eligibility -> airport-transfer booking -> trip -> invoice propagation | repo-local chain for `benefitReference` / `eligibilityVerificationId` / `partnerEntrySlug` carry-through; live partner-program sign-off remains separate                                                                                                                             |
 
 ## Important Boundaries
 
@@ -35,7 +35,7 @@ It serves three purposes:
 - `E2E-002` is allowed to skip when no forwarded-task seed or adapter data is available.
 - `E2E-006` is allowed to skip when the driver inbox lacks a mixed owned+forwarded task seed.
 - `E2E-003` is intentionally manual-only until CTI/recording/filing hooks are activated.
-- `E2E-005` mutates tenant governance state on the seed tenant using run-scoped codes/rule names, so it is safe to rerun but intentionally noisier than `E2E-001`/`E2E-004`.
+- `E2E-007` verifies the repo-local partner-airport propagation chain; it does not replace real issuer / bank credential sign-off.
 - The retired `apps/tenant-portal-web` shell is never a production verification target.
 
 ## Running
@@ -43,7 +43,7 @@ It serves three purposes:
 ```bash
 ./tests/e2e/run-e2e.sh
 ./tests/e2e/run-e2e.sh --suite 001,004
-./tests/e2e/run-e2e.sh --suite 005
+./tests/e2e/run-e2e.sh --suite 007
 ./tests/e2e/run-e2e.sh --dry-run
 ```
 
