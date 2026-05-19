@@ -7,7 +7,7 @@
 # Usage:
 #   ./tests/e2e/run-e2e.sh
 #   ./tests/e2e/run-e2e.sh --suite 001          # run only E2E-001
-#   ./tests/e2e/run-e2e.sh --suite 001,004       # run 001 and 004
+#   ./tests/e2e/run-e2e.sh --suite 001,004,008   # run selected scenarios
 #   ./tests/e2e/run-e2e.sh --dry-run             # list scenarios, no execution
 #   ./tests/e2e/run-e2e.sh --help
 #
@@ -40,7 +40,7 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --suite LIST    Comma-separated scenario numbers to run (e.g. 001,004)
+  --suite LIST    Comma-separated scenario numbers to run (e.g. 001,004,008)
   --dry-run       List scenarios without executing
   --verbose       Show full scenario output even on success
   --help          Show this help

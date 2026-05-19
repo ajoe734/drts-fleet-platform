@@ -20,7 +20,8 @@ This document defines the cross-surface E2E scenario matrix for Phase 1. It capt
 5. How the scaffold relates to the existing smoke tests and UAT scenarios.
 
 The E2E scaffold is in `tests/e2e/`. The scenarios operationalize the cross-surface flows
-defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)`.
+defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)` plus the
+partner cutover authority flow added by `E2E-008`.
 
 > **Relationship to smoke tests:** `tests/smoke/` verifies individual API surfaces in isolation.
 > `tests/e2e/` chains surfaces together in a single stateful run, tracking ID continuity across
@@ -223,6 +224,54 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ---
 
+### 4.5 E2E-008 — Partner Booking Cutover
+
+**Script:** `tests/e2e/E2E-008-partner-booking-cutover.sh`
+
+#### Surface Chain
+
+```
+Platform Admin (entry deactivate / activate) ──► Partner Ingress (bootstrap + eligibility) ──► Tenant Booking Authority ──► Billing / Settlement evidence
+```
+
+#### Leg Breakdown
+
+| Leg | Surface                | Actor              | API Route                                                | Assertion                                                      |
+| --- | ---------------------- | ------------------ | -------------------------------------------------------- | -------------------------------------------------------------- |
+| 1   | Platform Admin         | `platform_admin`   | `POST /api/platform-admin/partner-entries/:entrySlug/deactivate` | Entry becomes inactive for cutover negative-path proof         |
+| 1   | Partner Ingress        | open route         | `POST /api/auth/partner/bootstrap-session`               | Inactive entry rejects bootstrap with `PARTNER_ENTRY_INACTIVE` |
+| 1   | Platform Admin         | `platform_admin`   | `POST /api/platform-admin/partner-entries/:entrySlug/activate`   | Entry is restored to active (rollback-safe state)              |
+| 2   | Partner Ingress        | `partner_api_key`  | `POST /api/partner/eligibility/verify`                   | Eligible verification issued for the same entry                |
+| 2   | Partner Ingress        | `partner_api_key`  | `GET /api/partner/eligibility/:eligibilityVerificationId` | Verification read-back preserves `partnerEntrySlug`            |
+| 3   | Tenant Booking Authority | `tenant_admin`   | `POST /api/tenant/bookings`                              | Booking created with `partnerEntrySlug` + `eligibilityVerificationId` |
+| 3   | Tenant Booking Authority | `tenant_admin`   | `GET /api/tenant/bookings/:bookingId`                    | Booking read-back preserves partner linkage and status         |
+| 4   | Billing / Settlement   | `platform_admin` / `tenant_admin` | `GET /api/settlement/matrix`, `POST /api/tenant/invoices/generate`, `GET /api/tenant/invoices/:invoiceId` | Receipt ownership evidence exposed; invoice retrieval still works |
+
+#### ID Continuity Chain
+
+```
+entrySlug (partner cutover) ──► eligibilityVerificationId (partner ingress) ──► bookingId (tenant authority) ──► invoiceId (billing evidence)
+```
+
+#### Fixtures Used
+
+| Fixture                     | File                                             |
+| --------------------------- | ------------------------------------------------ |
+| Airport booking             | `tests/e2e/fixtures/e2e-booking-airport.json`    |
+| Generated tenant invoice    | runtime-generated JSON body                      |
+| Partner bootstrap / eligibility | runtime-generated JSON bodies                 |
+
+#### Pass Criteria
+
+1. Bootstrap against the inactive entry fails with `PARTNER_ENTRY_INACTIVE`.
+2. After reactivation, partner eligibility verification returns `eligible`.
+3. Booking read-back preserves `partnerEntrySlug` and `eligibilityVerificationId`.
+4. Settlement matrix returns the `partner_airport` row with a non-empty `receiptOwner`.
+5. Tenant invoice generation and invoice read-back both succeed.
+6. The entry is restored to active before exit, even on failure-path cleanup.
+
+---
+
 ## 5. Fixture Inventory
 
 | Fixture File                     | Used By                          | Description                                                       |
@@ -236,6 +285,7 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 | `e2e-driver-start.json`          | E2E-001                          | Driver trip start with `__STARTED_AT__`                           |
 | `e2e-driver-complete.json`       | E2E-001                          | Driver task complete with signoff                                 |
 | `e2e-tenant-create.json`         | E2E-004                          | Platform-admin tenant create with `__TENANT_CODE__`               |
+| `e2e-booking-airport.json`       | E2E-008, reserved for E2E-003    | Partner / airport-transfer booking with partner linkage fields    |
 | `e2e-phone-booking.json`         | Reserved (E2E-003 manual flow)   | Phone booking payload stub for future CTI-backed automation       |
 | `e2e-report-compliance.json`     | Reserved (E2E-003 manual flow)   | Compliance export payload stub for future report validation       |
 | `e2e-tenant-module-enable.json`  | Reserved (future expansion)      | Tenant module-enable payload stub for future staged cutovers      |
@@ -259,7 +309,7 @@ export E2E_API_URL=https://api-staging.drts.internal   # bare origin, no /api su
 ./tests/e2e/run-e2e.sh --suite 001
 
 # Run multiple scenarios
-./tests/e2e/run-e2e.sh --suite 001,004
+./tests/e2e/run-e2e.sh --suite 001,004,008
 
 # Dry-run: list scenarios without executing
 ./tests/e2e/run-e2e.sh --dry-run
@@ -281,6 +331,8 @@ calls `switch_actor TYPE ID [TENANT_ID]` to change the active actor between surf
 - **E2E-002:** skipped (exit 0 with warning) when no forwarded task is present in driver task list.
 - **E2E-004:** skipped beyond leg 1 (exit 0 with warning) when `POST /api/platform-admin/tenants`
   does not return a `tenantId` in its response.
+- **E2E-008:** skipped (exit 0 with warning) when `PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT`
+  is not configured for the seeded partner entry.
 
 ---
 
@@ -299,6 +351,7 @@ Minimum evidence items required for each scenario:
 | E2E-001  | `bookingId`, `dispatchJobId`, `taskId`, `invoiceId`, `auditEntryCount`      |
 | E2E-002  | `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `taskStatusAfterAccept` |
 | E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`    |
+| E2E-008  | `inactiveBootstrapCode`, `eligibilityVerificationId`, `bookingId`, `receiptOwner`, `invoiceId` |
 
 ---
 

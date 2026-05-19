@@ -27,19 +27,21 @@ It serves three purposes:
 | `E2E-002-forwarded-order.sh`     | `WF-FWD-001`                                           | route-locked forwarded-task visibility and no-owned-assignment guard   | `EXTERNAL-GATED`; live adapter proof remains external                                                                                                                                                                                        |
 | `E2E-003` (manual only)          | `WF-COM-001`                                           | phone-order -> recording -> export boundary                            | `HOLD`; deferred pending live CTI and job activation                                                                                                                                                                                         |
 | `E2E-004-tenant-attribution.sh`  | `WF-TEN-001`, `WF-ORD-001`                             | tenant creation, new-tenant booking, attribution, no cross-tenant leak | `PASS (live staging evidence)` via `FBP-014B`                                                                                                                                                                                                |
+| `E2E-008-partner-booking-cutover.sh` | `WF-PBK-001`                                      | partner entry cutover rollback, eligibility, booking persistence, receipt ownership evidence | repo-local shell coverage for partner cutover authority; live partner ingress still depends on configured seeded key                                                                                                                         |
 
 ## Important Boundaries
 
 - `E2E-001` and `E2E-004` are the release-grade live staging anchors.
 - `E2E-002` is allowed to skip when no forwarded-task seed or adapter data is available.
 - `E2E-003` is intentionally manual-only until CTI/recording/filing hooks are activated.
+- `E2E-008` is allowed to skip when the seeded partner ingress key is not configured in the target environment.
 - The retired `apps/tenant-portal-web` shell is never a production verification target.
 
 ## Running
 
 ```bash
 ./tests/e2e/run-e2e.sh
-./tests/e2e/run-e2e.sh --suite 001,004
+./tests/e2e/run-e2e.sh --suite 001,004,008
 ./tests/e2e/run-e2e.sh --dry-run
 ```
 

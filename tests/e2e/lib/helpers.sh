@@ -25,6 +25,9 @@ E2E_ACTOR_TYPE="${E2E_ACTOR_TYPE:-platform_admin}"
 E2E_ACTOR_ID="${E2E_ACTOR_ID:-e2e-platform-admin-001}"
 E2E_REALM="${E2E_REALM:-}"          # derived from actor type when blank
 E2E_TENANT_ID="${E2E_TENANT_ID:-}"  # set per-leg by switch_actor or caller
+E2E_PARTNER_ID="${E2E_PARTNER_ID:-}"
+E2E_PARTNER_PROGRAM_ID="${E2E_PARTNER_PROGRAM_ID:-}"
+E2E_PARTNER_ENTRY_SLUG="${E2E_PARTNER_ENTRY_SLUG:-}"
 
 # ── Seed data IDs — must match infra/seeds/S0002__demo_operational_seed.sql ───
 # TEN_ACME tenant; 張司機 / ABC-1234 driver+vehicle pair.
@@ -68,6 +71,9 @@ switch_actor() {
   E2E_ACTOR_ID="$2"
   E2E_TENANT_ID="${3:-}"
   E2E_REALM=""   # re-derived by http_call
+  E2E_PARTNER_ID=""
+  E2E_PARTNER_PROGRAM_ID=""
+  E2E_PARTNER_ENTRY_SLUG=""
   log_info "Actor → type=${E2E_ACTOR_TYPE}, id=${E2E_ACTOR_ID}${E2E_TENANT_ID:+, tenantId=${E2E_TENANT_ID}}"
 }
 
@@ -123,6 +129,15 @@ http_call() {
     )
     if [[ -n "${E2E_TENANT_ID:-}" ]]; then
       curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
+    fi
+    if [[ -n "${E2E_PARTNER_ID:-}" ]]; then
+      curl_args+=(-H "x-partner-id: ${E2E_PARTNER_ID}")
+    fi
+    if [[ -n "${E2E_PARTNER_PROGRAM_ID:-}" ]]; then
+      curl_args+=(-H "x-partner-program-id: ${E2E_PARTNER_PROGRAM_ID}")
+    fi
+    if [[ -n "${E2E_PARTNER_ENTRY_SLUG:-}" ]]; then
+      curl_args+=(-H "x-partner-entry-slug: ${E2E_PARTNER_ENTRY_SLUG}")
     fi
   fi
 
