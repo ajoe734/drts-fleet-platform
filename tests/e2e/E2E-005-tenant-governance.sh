@@ -22,6 +22,7 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 SCENARIO="E2E-005"
 chain_init
 
+SCENARIO_START_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 RUN_SUFFIX="$(date -u +%s | tail -c 7)"
 TENANT_ID="${E2E_SEED_TENANT_ID}"
 OPS_ACTOR_ID="e2e-ops-005-${RUN_SUFFIX}"
@@ -156,10 +157,20 @@ assert_error_code() {
 
 fetch_approval_request_id() {
   local booking_id="$1"
+  local status="${2:-}"
   switch_tenant_actor "$TENANT_ADMIN_USER_ID"
-  http_call GET "/tenant/approval-requests?bookingId=${booking_id}"
+  if [[ -n "$status" ]]; then
+    http_call GET "/tenant/approval-requests?bookingId=${booking_id}&status=${status}"
+  else
+    http_call GET "/tenant/approval-requests?bookingId=${booking_id}"
+  fi
   assert_status "200"
-  echo "$RESP_BODY" | jq -r '.data.items[0] | (.approvalRequestId // .approval_request_id // empty)' 2>/dev/null || true
+  echo "$RESP_BODY" | jq -r '
+    .data.items
+    | sort_by(.createdAt // .created_at // "")
+    | last
+    | (.approvalRequestId // .approval_request_id // empty)
+  ' 2>/dev/null || true
 }
 
 fetch_booking_field() {
@@ -423,7 +434,7 @@ if [[ -z "$APPROVED_BOOKING_ID" ]]; then
 fi
 APPROVED_ORDER_ID=$(fetch_booking_field "$APPROVED_BOOKING_ID" '.data.orderId // .data.order_id')
 APPROVED_STATE=$(fetch_booking_field "$APPROVED_BOOKING_ID" '.data.approvalState // .data.approval_state')
-APPROVED_REQUEST_ID=$(fetch_approval_request_id "$APPROVED_BOOKING_ID")
+APPROVED_REQUEST_ID=$(fetch_approval_request_id "$APPROVED_BOOKING_ID" "pending")
 
 if [[ "$APPROVED_STATE" != "pending" || -z "$APPROVED_REQUEST_ID" ]]; then
   log_fail "Expected approval-required booking to be pending with a request."
@@ -655,7 +666,7 @@ payload_file=$(booking_fixture "$CC_FIN" "E2E5 Rejected Rider" "0912050003" 7 8)
 http_call POST "/tenant/bookings" "$payload_file"
 assert_status "200|201"
 REJECTED_BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")
-REJECTED_REQUEST_ID=$(fetch_approval_request_id "$REJECTED_BOOKING_ID")
+REJECTED_REQUEST_ID=$(fetch_approval_request_id "$REJECTED_BOOKING_ID" "pending")
 switch_tenant_actor "$TENANT_FINANCE_USER_ID"
 payload_file=$(write_json <<EOF
 {"reasonCode":"finance_reject","reasonNote":"E2E-005 rejection path"}
@@ -671,7 +682,7 @@ payload_file=$(booking_fixture "$CC_FIN" "E2E5 Escalated Rider" "0912050004" 9 1
 http_call POST "/tenant/bookings" "$payload_file"
 assert_status "200|201"
 ESCALATED_BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")
-ESCALATED_REQUEST_ID=$(fetch_approval_request_id "$ESCALATED_BOOKING_ID")
+ESCALATED_REQUEST_ID=$(fetch_approval_request_id "$ESCALATED_BOOKING_ID" "pending")
 payload_file=$(write_json <<EOF
 {"reasonNote":"E2E-005 manual escalation"}
 EOF
@@ -685,7 +696,7 @@ payload_file=$(booking_fixture "$CC_EXEC" "E2E5 Fallback Rider" "0912050005" 11 
 http_call POST "/tenant/bookings" "$payload_file"
 assert_status "200|201"
 FALLBACK_BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")
-FALLBACK_REQUEST_ID=$(fetch_approval_request_id "$FALLBACK_BOOKING_ID")
+FALLBACK_REQUEST_ID=$(fetch_approval_request_id "$FALLBACK_BOOKING_ID" "pending")
 if [[ -z "$FALLBACK_REQUEST_ID" ]]; then
   log_fail "Fallback booking did not create an approval request."
   exit 1
@@ -697,37 +708,48 @@ payload_file=$(booking_fixture "$CC_OPS" "E2E5 Reeval Rider" "0912050006" 13 14)
 http_call POST "/tenant/bookings" "$payload_file"
 assert_status "200|201"
 REEVAL_BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")
-ORIGINAL_REEVAL_REQUEST_ID=$(fetch_approval_request_id "$REEVAL_BOOKING_ID")
+ORIGINAL_REEVAL_REQUEST_ID=$(fetch_approval_request_id "$REEVAL_BOOKING_ID" "pending")
 payload_file=$(write_json <<EOF
 {"costCenter":"${CC_FIN}"}
 EOF
 )
 http_call PUT "/tenant/bookings/${REEVAL_BOOKING_ID}" "$payload_file"
 assert_status "200|201"
-NEW_REEVAL_REQUEST_ID=$(fetch_approval_request_id "$REEVAL_BOOKING_ID")
+NEW_REEVAL_REQUEST_ID=$(fetch_approval_request_id "$REEVAL_BOOKING_ID" "pending")
 if [[ -z "$ORIGINAL_REEVAL_REQUEST_ID" || -z "$NEW_REEVAL_REQUEST_ID" || "$ORIGINAL_REEVAL_REQUEST_ID" == "$NEW_REEVAL_REQUEST_ID" ]]; then
   log_fail "Re-evaluation did not rotate to a new approval request."
   exit 1
 fi
 log_ok "Re-evaluation branch verified"
 
-log_step "4.8 — GET /tenant/audit (verify 21-event taxonomy)"
+log_step "4.8 — GET /tenant/audit (verify 21-event taxonomy for this run window)"
 switch_tenant_actor "$TENANT_ADMIN_USER_ID"
 http_call GET "/tenant/audit"
 assert_status "200"
 
 for action_name in "${EXPECTED_AUDIT_ACTIONS[@]}"; do
-  present=$(echo "$RESP_BODY" | jq -r --arg action "$action_name" '[.data.items[] | select(.actionName == $action)] | length' 2>/dev/null || true)
+  present=$(echo "$RESP_BODY" | jq -r \
+    --arg action "$action_name" \
+    --arg started_at "$SCENARIO_START_AT" \
+    '[.data.items[] | select(.actionName == $action and (.createdAt // .created_at // "") >= $started_at)] | length' \
+    2>/dev/null || true)
   if [[ "${present:-0}" -lt 1 ]]; then
-    log_fail "Expected tenant audit to include action '${action_name}' for E2E-005."
+    log_fail "Expected tenant audit to include action '${action_name}' for the current E2E-005 run window."
     exit 1
   fi
 done
 
 UNIQUE_EXPECTED_COUNT=$(printf '%s\n' "${EXPECTED_AUDIT_ACTIONS[@]}" | wc -l | tr -d ' ')
-OBSERVED_EXPECTED_COUNT=$(echo "$RESP_BODY" | jq -r --argjson expected "$(printf '%s\n' "${EXPECTED_AUDIT_ACTIONS[@]}" | jq -R . | jq -s .)" '[.data.items[] | select((.actionName as $a | $expected | index($a)) != null) | .actionName] | unique | length' 2>/dev/null || true)
+OBSERVED_EXPECTED_COUNT=$(echo "$RESP_BODY" | jq -r \
+  --arg started_at "$SCENARIO_START_AT" \
+  --argjson expected "$(printf '%s\n' "${EXPECTED_AUDIT_ACTIONS[@]}" | jq -R . | jq -s .)" \
+  '[.data.items[]
+    | select((.createdAt // .created_at // "") >= $started_at)
+    | select((.actionName as $a | $expected | index($a)) != null)
+    | .actionName] | unique | length' 2>/dev/null || true)
 save_evidence "$SCENARIO" "audit" "expectedActionCount" "$UNIQUE_EXPECTED_COUNT"
 save_evidence "$SCENARIO" "audit" "observedExpectedActionCount" "${OBSERVED_EXPECTED_COUNT:-0}"
+save_evidence "$SCENARIO" "audit" "runWindowStartedAt" "$SCENARIO_START_AT"
 log_ok "All ${UNIQUE_EXPECTED_COUNT} governance audit actions observed"
 
 log_step "4.9 — GET /orders/:orderId/dispatch-trace"

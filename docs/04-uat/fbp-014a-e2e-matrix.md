@@ -20,7 +20,8 @@ This document defines the cross-surface E2E scenario matrix for Phase 1. It capt
 5. How the scaffold relates to the existing smoke tests and UAT scenarios.
 
 The E2E scaffold is in `tests/e2e/`. The scenarios operationalize the cross-surface flows
-defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)`.
+defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)`, plus the
+tenant-governance extension scenario `E2E-005`.
 
 > **Relationship to smoke tests:** `tests/smoke/` verifies individual API surfaces in isolation.
 > `tests/e2e/` chains surfaces together in a single stateful run, tracking ID continuity across
@@ -280,14 +281,14 @@ Tenant Portal (governance bootstrap) ──► Tenant Portal (booking) ──►
 
 | Fixture File                     | Used By                          | Description                                                       |
 | -------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
-| `e2e-booking-enterprise.json`    | E2E-001, E2E-004                 | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
+| `e2e-booking-enterprise.json`    | E2E-001, E2E-004, E2E-005        | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
 | `e2e-booking-airport.json`       | (reserved for E2E-003 expansion) | `credit_card_airport_transfer` booking                            |
-| `e2e-dispatch-assign.json`       | E2E-001                          | Dispatch assign body with `__*__` placeholders                    |
-| `e2e-driver-accept.json`         | E2E-001, E2E-002                 | Driver task accept with `__ACCEPTED_AT__`                         |
-| `e2e-driver-depart.json`         | E2E-001                          | Driver depart pickup with `__DEPARTED_AT__`                       |
-| `e2e-driver-arrived-pickup.json` | E2E-001                          | Driver arrived at pickup with `__ARRIVED_AT__`                    |
-| `e2e-driver-start.json`          | E2E-001                          | Driver trip start with `__STARTED_AT__`                           |
-| `e2e-driver-complete.json`       | E2E-001                          | Driver task complete with signoff                                 |
+| `e2e-dispatch-assign.json`       | E2E-001, E2E-005                 | Dispatch assign body with `__*__` placeholders                    |
+| `e2e-driver-accept.json`         | E2E-001, E2E-002, E2E-005        | Driver task accept with `__ACCEPTED_AT__`                         |
+| `e2e-driver-depart.json`         | E2E-001, E2E-005                 | Driver depart pickup with `__DEPARTED_AT__`                       |
+| `e2e-driver-arrived-pickup.json` | E2E-001, E2E-005                 | Driver arrived at pickup with `__ARRIVED_AT__`                    |
+| `e2e-driver-start.json`          | E2E-001, E2E-005                 | Driver trip start with `__STARTED_AT__`                           |
+| `e2e-driver-complete.json`       | E2E-001, E2E-005                 | Driver task complete with signoff                                 |
 | `e2e-tenant-create.json`         | E2E-004                          | Platform-admin tenant create with `__TENANT_CODE__`               |
 | `e2e-phone-booking.json`         | Reserved (E2E-003 manual flow)   | Phone booking payload stub for future CTI-backed automation       |
 | `e2e-report-compliance.json`     | Reserved (E2E-003 manual flow)   | Compliance export payload stub for future report validation       |
@@ -352,6 +353,7 @@ Minimum evidence items required for each scenario:
 | E2E-001  | `bookingId`, `dispatchJobId`, `taskId`, `invoiceId`, `auditEntryCount`      |
 | E2E-002  | `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `taskStatusAfterAccept` |
 | E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`    |
+| E2E-005  | `approvedBookingId`, `approvedRequestId`, `dispatchJobId`, `taskId`, `invoiceId`, `blockedBookingId`, `observedExpectedActionCount` |
 
 ---
 
@@ -383,7 +385,7 @@ Minimum evidence items required for each scenario:
 
 ### Verification Snapshot
 
-- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/run-e2e.sh`
+- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/E2E-005-tenant-governance.sh tests/e2e/run-e2e.sh`
 - `./tests/e2e/run-e2e.sh --dry-run`
 
 ---
