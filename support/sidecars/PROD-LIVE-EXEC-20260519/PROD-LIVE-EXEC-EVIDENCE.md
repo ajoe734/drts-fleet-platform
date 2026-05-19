@@ -4,6 +4,7 @@
 **Owner:** `Claude2`
 **Reviewer:** `Codex`
 **Collected:** `2026-05-19 (UTC)`
+**Re-verified:** `2026-05-19T21:37Z (UTC)` — chair applied `resume_parent_task` at `2026-05-19T21:34:29Z` (parent `blocked → todo`); owner started at `2026-05-19T21:37:34Z` (`todo → in_progress`); external posture unchanged at re-verify.
 **Status:** `HELD (external) — no live production deploy executed, prerequisites operator-managed and still missing`
 
 ---
@@ -39,16 +40,21 @@ Current result on `2026-05-19`:
 
 Conclusion:
 
-- No live production deploy was executed in this session.
+- No live production deploy was executed in this session or in the
+  `2026-05-19T21:37Z` re-verification turn.
 - This task records dated evidence that the HELD-external prerequisites
-  have not arrived and that the deploy-prod rail is still gated on the
-  same operator-managed inputs it was gated on when the v3 wave planning
-  was authored.
-- `WF-PROD-001-LIVE-EXEC` is being re-blocked with explicit
-  `waiting_for` referencing the missing external resources, per planning
-  §9 note 6 ("The 5 HELD-external tasks remain in the queue at
-  `status=blocked` with explicit `waiting_for` set so the matrix
-  dashboard surfaces them as pending-external.").
+  have not arrived (with one narrowing — §3.5 is now confirmed present)
+  and that the deploy-prod rail is still gated on the same
+  operator-managed inputs it was gated on when the v3 wave planning was
+  authored.
+- The chairman applied `resume_parent_task` (via the orchestrator's
+  `blocked_task_triage` schema) on `2026-05-19T21:34:29Z`, returning the
+  parent from `blocked → todo`. Owner `Claude2` then started the task
+  (`todo → in_progress`) and produced this re-verification pack as the
+  canonical evidence for the iteration's closeout, rather than calling
+  `ai-status.sh blocker` again. A separate follow-on task is the
+  expected vehicle for re-dispatching the live deploy once §3.1, §3.2,
+  §3.3, §3.4, and §3.6 are operator-provisioned (see §6 and §8).
 
 ---
 
@@ -211,6 +217,39 @@ this sidecar.
   worker's reach. The operator must confirm them before this task can
   leave HELD.
 
+### 4.2.1 GitHub-side evidence (collected by Codex2 via authenticated gh — 2026-05-19)
+
+The parallel unblock probe `WF-PROD-001-LIVE-EXEC-UNBLOCK-MANUAL-UNBLOCK`
+(owner `Codex2`, reviewer `Codex`, artifact
+`support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-MANUAL-UNBLOCK.md`
+on branch `codex2/wf-prod-001-live-exec-unblock-manual-unblock`, PR #170,
+commit `30e963d`) ran an authenticated `gh`-metadata probe against
+`ajoe734/drts-fleet-platform` on `2026-05-19T21:31Z`. The cross-lane
+findings, cited here so this sidecar remains the single source of truth
+for the live-exec posture:
+
+| Check | Command (per probe artifact) | Result |
+| --- | --- | --- |
+| `production` Environment exists with reviewer rule? | `gh api repos/ajoe734/drts-fleet-platform/environments/production` | **Yes** — Environment `production` exists; reviewer rule attached (`reviewer=ajoe734`). This satisfies §3.5 of this sidecar. |
+| Repo-level `PROD_*` vars set? | `gh variable list --repo ajoe734/drts-fleet-platform` | **No** — none of `vars.PROD_GCP_PROJECT_ID`, `vars.PROD_GCP_REGION`, `vars.PROD_GCP_CLOUDSQL_INSTANCE`, `vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT`, `vars.PROD_PLATFORM_ADMIN_ORIGIN`, `vars.PROD_OPS_CONSOLE_ORIGIN`, `vars.PROD_CONTROL_PLANE_API_ORIGIN`, or `vars.PROD_IAP_CLIENT_ID` is present. §3.1 still unmet. |
+| Repo-level `PROD_*` secrets set? | `gh secret list --repo ajoe734/drts-fleet-platform` | **No** — `secrets.PROD_WIF_PROVIDER` and `secrets.PROD_WIF_SERVICE_ACCOUNT` absent. §3.2 still unmet. |
+| Any `prod/v<date>.<N>` tag on origin? | `git ls-remote --tags origin refs/tags/prod/v*` | **No tags returned** — matches §3.6 (no promotion tag published). |
+
+Implication for this sidecar:
+
+- §3.5 (`GitHub Environment production with reviewer rule`) is **now
+  operator-confirmed present**. This is the only HELD-external resource
+  that the cross-lane probe has actually verified provisioned.
+- §3.1, §3.2, §3.3, §3.4, and §3.6 remain unmet. The five remaining
+  HELD-external resource classes — repo `PROD_*` vars, repo `PROD_*`
+  secrets, GCP Secret Manager entries, GCP project resources (Cloud SQL
+  / Artifact Registry / IAM bindings), and a published `prod/v*` tag —
+  are still the gating set for live execution.
+- This sidecar's overall **HELD (external)** verdict therefore stands;
+  the only delta from the original 2026-05-19 collection is a narrowing
+  of the gating set from six classes (§3.1 – §3.6) to five (§3.1, §3.2,
+  §3.3, §3.4, §3.6).
+
 ### 4.3 GCP-side evidence (not collectible from this worker)
 
 - The worker has no `gcloud` identity that can call
@@ -228,29 +267,41 @@ To keep the gate matrix and the wave-planning doc honest, this sidecar
 
 - That any GCP prod project exists.
 - That `vars.PROD_*` or `secrets.PROD_*` are configured in repo Settings.
-- That GitHub Environment `production` exists or has a reviewer rule.
 - That any `prod/v*` tag has been published or is ready for dispatch.
 - That a live production deploy succeeded, partially succeeded, or was
-  attempted in this session.
+  attempted in this session or the 2026-05-19T21:37Z re-verification.
 - That `WF-PROD-001` has been lifted past `PASS (dry-run contract
   evidence)` — it has not, and this sidecar exists precisely to keep the
   matrix honest while the external prerequisites are still missing.
+
+This sidecar **does claim** (per §4.2.1 cross-lane evidence):
+
+- That GitHub Environment `production` exists in
+  `ajoe734/drts-fleet-platform` with a reviewer rule attached
+  (`reviewer=ajoe734`) — this is the single HELD-external resource class
+  that has been verified provisioned as of `2026-05-19T21:31Z`.
 
 ---
 
 ## 6. Resume Conditions
 
-`WF-PROD-001-LIVE-EXEC` may move out of HELD (external) only after **all**
-of the following are operator-confirmed:
+`WF-PROD-001-LIVE-EXEC` may complete its live execution only after **all**
+of the following are operator-confirmed (state at the 2026-05-19T21:37Z
+re-verification noted in `[STATUS]`):
 
-1. GCP prod project provisioned with WIF, Cloud SQL, Artifact Registry,
-   and Secret Manager entries from §3.3.
-2. Repo Settings carries every required `vars.PROD_*` and
-   `secrets.PROD_*` from §3.1 and §3.2.
-3. GitHub Environment `production` exists with the operator-approved
-   reviewer rule attached to `validate-config`.
-4. `hourly-promote.yml` has published a `prod/v<date>.<N>` tag pinned to
-   the commit the operator intends to deploy.
+1. **`[STILL MISSING]`** GCP prod project provisioned with WIF, Cloud SQL,
+   Artifact Registry, and Secret Manager entries from §3.3.
+2. **`[STILL MISSING]`** Repo Settings carries every required
+   `vars.PROD_*` and `secrets.PROD_*` from §3.1 and §3.2.
+3. **`[CONFIRMED PRESENT 2026-05-19T21:31Z]`** GitHub Environment
+   `production` exists with the operator-approved reviewer rule attached
+   to `validate-config` (verified by Codex2 via authenticated
+   `gh api repos/ajoe734/drts-fleet-platform/environments/production` —
+   reviewer = `ajoe734`).
+4. **`[STILL MISSING]`** `hourly-promote.yml` has published a
+   `prod/v<date>.<N>` tag pinned to the commit the operator intends to
+   deploy (re-verified absent at `2026-05-19T21:37Z`:
+   `git ls-remote --tags origin refs/tags/prod/v*` returns empty).
 5. The operator records the readiness signal in `ai-status.json` (e.g.
    via a follow-up unblock task) so the supervisor can re-dispatch this
    task with a clean owner/reviewer handoff.
@@ -274,8 +325,13 @@ rehearsal).
   migrate, deploy, health-check jobs).
 - `support/sidecars/PROD-RAIL-CLOSEOUT-20260519/PROD-RAIL-CLOSEOUT-EVIDENCE.md`
   (lifted `WF-PROD-001` to `PASS (dry-run contract evidence)`).
+- `support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-MANUAL-UNBLOCK.md`
+  (Codex2 cross-lane gh-metadata probe, branch
+  `codex2/wf-prod-001-live-exec-unblock-manual-unblock`, PR #170,
+  commit `30e963d`).
 - `commit 990b1ee` (PROD-RAIL-CLOSEOUT).
 - `commit 025b1dd` (WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION).
+- `commit 9ff924e` (initial evidence sidecar register).
 
 ---
 
@@ -283,8 +339,23 @@ rehearsal).
 
 - **Owner:** `Claude2`
 - **Collected:** `2026-05-19 (UTC)`
+- **Re-verified:** `2026-05-19T21:37Z (UTC)` after chair-applied
+  `resume_parent_task` returned the parent from `blocked → todo` at
+  `2026-05-19T21:34:29Z`. External posture unchanged at re-verification
+  except for §3.5 narrowing from "not collectible" to "confirmed
+  present" via Codex2's authenticated cross-lane probe (§4.2.1).
 - **Verdict:** HELD (external) — no live production deploy executed in
-  this session; prerequisites operator-managed and still missing.
-- **Next action:** Re-block via `ai-status.sh blocker` with
-  `waiting_for` = the operator-managed GCP/GitHub resources enumerated
-  in §3 and the resume conditions in §6.
+  this session or at the re-verification; five of the six HELD-external
+  resource classes (§3.1, §3.2, §3.3, §3.4, §3.6) are still
+  operator-managed and missing.
+- **Next action:** Hand off to reviewer `Codex` to acceptance-review the
+  refreshed evidence pack. The owner will not call `ai-status.sh
+  blocker` again because the chair already applied `resume_parent_task`
+  via the orchestrator's `blocked_task_triage` schema; the canonical
+  resolution path from here is reviewer-approved evidence closeout of
+  this iteration. Once the operator provisions §3.1, §3.2, §3.3, §3.4,
+  and §3.6, a follow-on unblock task can re-dispatch the live deploy
+  rail and produce the live-execution evidence (workflow run id, image
+  digests, migration job execution, Cloud Run revision ids,
+  IAP-protected health-check responses, rollback rehearsal) as a
+  separate closeout sidecar.
