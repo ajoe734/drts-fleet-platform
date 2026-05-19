@@ -14,6 +14,7 @@ export default defineConfig({
     environment: "node",
     globals: true,
     include: [
+      "tests/integ/**/*.test.ts",
       "tests/unit/**/*.test.ts",
       "tests/integration/**/*.test.ts",
       "tests/load/**/*.test.ts",

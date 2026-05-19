@@ -268,6 +268,13 @@ type TenantGovernanceMetricsSnapshot = {
   samples: TenantGovernanceMetricSample[];
 };
 
+type TenantGovernanceMutationSnapshot = {
+  approvalRequests: TenantBookingApprovalRequestRecord[];
+  approvalDecisions: TenantBookingApprovalDecisionRecord[];
+  quotaLedger: TenantQuotaLedgerEntry[];
+  quotaMonthlySnapshots: TenantQuotaMonthlySnapshotRecord[];
+};
+
 const DEFAULT_WEBHOOK_RETRY_POLICY: WebhookRetryPolicy = {
   maxAttempts: 5,
   initialBackoffSeconds: 30,
@@ -2014,6 +2021,48 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         query.bookingId ? request.bookingId === query.bookingId : true,
       )
       .map((request) => this.cloneApprovalRequest(request));
+  }
+
+  createGovernanceMutationSnapshot(): TenantGovernanceMutationSnapshot {
+    return {
+      approvalRequests: this.approvalRequests.map((request) =>
+        this.cloneApprovalRequest(request),
+      ),
+      approvalDecisions: this.approvalDecisions.map((decision) =>
+        this.cloneApprovalDecision(decision),
+      ),
+      quotaLedger: this.quotaLedger.map((entry) =>
+        this.cloneQuotaLedgerEntry(entry),
+      ),
+      quotaMonthlySnapshots: Array.from(
+        this.quotaMonthlySnapshots.values(),
+      ).map((snapshot) => this.cloneQuotaMonthlySnapshot(snapshot)),
+    };
+  }
+
+  restoreGovernanceMutationSnapshot(
+    snapshot: TenantGovernanceMutationSnapshot,
+  ) {
+    this.approvalRequests = snapshot.approvalRequests.map((request) =>
+      this.cloneApprovalRequest(request),
+    );
+    this.approvalDecisions = snapshot.approvalDecisions.map((decision) =>
+      this.cloneApprovalDecision(decision),
+    );
+    this.quotaLedger = snapshot.quotaLedger.map((entry) =>
+      this.cloneQuotaLedgerEntry(entry),
+    );
+    this.quotaMonthlySnapshots = new Map(
+      snapshot.quotaMonthlySnapshots.map((quotaSnapshot) => [
+        this.buildQuotaSnapshotKey(
+          quotaSnapshot.tenantId,
+          quotaSnapshot.costCenterCode,
+          quotaSnapshot.period,
+          quotaSnapshot.periodKey,
+        ),
+        this.cloneQuotaMonthlySnapshot(quotaSnapshot),
+      ]),
+    );
   }
 
   listOpsPendingApprovalRequests(

@@ -224,45 +224,59 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ---
 
-### 4.5 E2E-009 — Production Rail Dry-Run
+### 4.5 E2E-005 — Tenant Governance Negative-Path Pack
 
-**Script:** `tests/e2e/E2E-009-prod-rail-dry-run.sh`
+**Script:** `tests/e2e/E2E-005-tenant-governance.sh`  
+**Companion integration suite:** `tests/integ/tenant-governance-negative.test.ts`
 
-This scenario is a **static deployment-governance dry-run**. It does not invoke
-GitHub Actions or deploy to GCP. Instead, it validates that the local
-production-rail artifacts remain coherent across the workflow and runbook
-surfaces.
+This scenario packs the Phase 1 tenant-governance negative cases into one
+live/API harness, while the integration companion provides deterministic
+time-control and in-memory rollback assertions that cannot be forced safely on
+shared staging.
 
 #### Surface Chain
 
 ```
-deploy-prod.yml validate-config ──► staging build graph reference ──► deploy-prod dry-run contract ──► rollback-by-tag runbook command
+Tenant Console (setup + booking/update/approval) ─► Platform Admin / Ops (dispatch denial + governance summary) ─► Audit
 ```
 
-#### Verification Points
+#### Negative Scenario Matrix
 
-| Leg | Artifact Surface              | Assertion                                                                 |
-| --- | ----------------------------- | ------------------------------------------------------------------------- |
-| 1   | `.github/workflows/deploy-prod.yml`    | `validate-config` exists; prod tag shape and missing-config guards are explicit |
-| 2   | `.github/workflows/deploy-staging.yml` | Canonical `build-push` graph for api/migrate/platform-admin-web/ops-console-web exists |
-| 2   | `docs/ops/branch-strategy.md`          | Prod rail completion explicitly points to copying the staging build/deploy graph |
-| 3   | `.github/workflows/deploy-prod.yml`    | Manual dispatch, `deploy-prod` concurrency gate, and reserved deploy graph are explicit |
-| 4   | `docs/ops/branch-strategy.md`          | Rollback is documented as redeploying a prior `prod/v*` tag |
+| Case | Negative path                             | Primary route(s)                                                                                     | Live assertion                                                                 | Audit evidence                                        |
+| ---- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| A    | unknown cost center                       | `POST /api/tenant/bookings`                                                                          | `400 BOOKING_COST_CENTER_UNKNOWN`                                              | `booking.cost_center.validation_rejected`             |
+| B    | disabled cost center                      | `POST /api/tenant/cost-centers/disable`, `POST /api/tenant/bookings`                                 | `400 BOOKING_COST_CENTER_DISABLED`                                             | `booking.cost_center.validation_rejected`             |
+| C    | cross-tenant cost center                  | `POST /api/platform-admin/tenants`, `POST /api/tenant/cost-centers`, `POST /api/tenant/bookings`     | caller tenant sees `400 BOOKING_COST_CENTER_UNKNOWN` for another tenant's code | `booking.cost_center.validation_rejected`             |
+| D    | quota_insufficient                        | `POST /api/tenant/quotas/policies`, `POST /api/tenant/bookings`                                      | `409 QUOTA_INSUFFICIENT_AT_COMMIT`, no booking success response                | `tenant.quota_reservation.blocked`                    |
+| E    | rule block                                | `POST /api/tenant/approval-rules`, `POST /api/tenant/bookings`, `POST /api/orders/:orderId/dispatch` | booking read-back shows `approvalState=blocked`; dispatch denied               | `booking.approval_state.changed`                      |
+| F    | no approver rollback                      | `POST /api/tenant/approval-rules`, `POST /api/tenant/bookings`, `GET /api/tenant/quotas/ledger`      | `409 APPROVAL_NO_RESOLVABLE_APPROVERS`; ledger count unchanged                 | `booking.approval_rules.evaluated`                    |
+| G    | governance-sensitive update re-evaluation | `PUT /api/tenant/bookings/:bookingId`                                                                | approval request ID rotates after cost-center update                           | `booking.approval_request.cancelled_by_re_evaluation` |
+| H    | notes-only no re-evaluation               | `PUT /api/tenant/bookings/:bookingId`                                                                | approval request ID unchanged after notes-only update                          | request continuity captured in evidence log           |
+| I    | rejected booking does not dispatch        | `POST /api/tenant/approval-requests/:id/reject`, `POST /api/orders/:orderId/dispatch`                | `409 BOOKING_APPROVAL_PENDING` after rejection                                 | `booking.approval_request.rejected`                   |
+| J    | SLA escalation visible                    | `POST /api/tenant/approval-requests/:id/escalate`, `GET /api/admin/tenant-governance/summary`        | escalated request remains visible in governance summary pending counts         | `booking.approval_request.timeout_escalated`          |
 
 #### Pass Criteria
 
-1. The prod workflow still enforces `prod/v<YYYY.MM.DD>.<N>` tag input plus origin tag existence checks.
-2. The prod workflow still guards the required `PROD_*` variables and secrets.
-3. The staging workflow still carries the canonical four-image `build-push` source graph.
-4. The prod workflow and branch strategy still document the dry-run deploy contract and rollback-by-tag command.
-5. The script finishes without claiming a live prod deploy; current skeleton state is reported explicitly.
+1. Cases A through J either pass live or explicitly record a bounded environmental skip reason in the evidence log.
+2. Every failing API path preserves a machine-readable audit trail; the script records the matched `auditId` in `E2E_EVIDENCE_FILE`.
+3. The no-approver case must not increase quota-ledger count for its isolated cost center.
+4. Governance-sensitive field changes rotate approval requests; notes-only changes do not.
+5. A rejected booking or a rule-blocked booking cannot be dispatched.
+6. Manual escalation remains visible on the governance surface even without a time-travelled 48h SLA breach.
 
 #### Notes
 
-- This check is expected to remain static until the production GCP project and
-  full `deploy-prod.yml` job graph are implemented.
-- A future live prod-rail verification task can supersede this scenario once
-  production credentials and non-destructive verification hooks exist.
+- The companion integration suite is authoritative for the deterministic
+  48-hour SLA-age alert (`pending_approval_over_48h`) because live E2E cannot
+  safely time-travel shared environments.
+- `E2E-005` writes temporary JSON payloads at runtime instead of adding new
+  fixture files to `tests/e2e/fixtures/`.
+
+#### Verification Snapshot
+
+- `pnpm --filter @drts/api test:tenant-governance-negative`
+- `bash -n tests/e2e/E2E-005-tenant-governance.sh`
+- `bash tests/e2e/run-e2e.sh --suite 005 --dry-run`
 
 ---
 
