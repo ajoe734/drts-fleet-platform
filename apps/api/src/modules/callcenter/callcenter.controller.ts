@@ -17,6 +17,7 @@ import { toApiSuccessEnvelope } from "../../common/api-envelope";
 import { CurrentIdentity, RequireRealms } from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { ComplaintService } from "../complaint/complaint.service";
+import { SandboxWebhookAdapter } from "./sandbox-webhook.adapter";
 import { IncidentService } from "../incident/incident.service";
 import { CallcenterService } from "./callcenter.service";
 
@@ -26,7 +27,19 @@ export class CallcenterController {
     private readonly callcenterService: CallcenterService,
     private readonly complaintService: ComplaintService,
     private readonly incidentService: IncidentService,
+    private readonly sandboxWebhookAdapter: SandboxWebhookAdapter,
   ) {}
+
+  @Post("webhooks/sandbox")
+  ingestSandboxWebhook(
+    @Body() payload: Record<string, unknown>,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      this.sandboxWebhookAdapter.ingest(payload as never, requestId),
+      requestId,
+    );
+  }
 
   @Get("sessions")
   @RequireRealms("platform", "ops")

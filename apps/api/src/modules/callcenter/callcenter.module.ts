@@ -6,6 +6,7 @@ import { ComplaintModule } from "../complaint/complaint.module";
 import { IncidentModule } from "../incident/incident.module";
 import { CallcenterController } from "./callcenter.controller";
 import { CallcenterRepository } from "./callcenter.repository";
+import { SandboxWebhookAdapter } from "./sandbox-webhook.adapter";
 import { CallcenterService } from "./callcenter.service";
 
 @Module({
@@ -16,7 +17,7 @@ import { CallcenterService } from "./callcenter.service";
     IncidentModule,
   ],
   controllers: [CallcenterController],
-  providers: [CallcenterRepository, CallcenterService],
+  providers: [CallcenterRepository, CallcenterService, SandboxWebhookAdapter],
   exports: [CallcenterService],
 })
 export class CallcenterModule {}
