@@ -245,14 +245,14 @@ Observed key outputs:
 
 ## 8. Machine-Truth Note
 
-Canonical machine truth now records `FWD-LIVE-001` at the control-plane root
-(`/home/edna/workspace/drts-fleet-platform`) as:
-
-- owner `Codex2`
-- reviewer `Codex`
-- status `in_progress`
+Canonical machine truth for `FWD-LIVE-001` lives at the control-plane root
+`/home/edna/workspace/drts-fleet-platform/ai-status.json`.
 
 The isolated worker worktree's local `ai-status.json` remains branch-local and
-is not the authoritative dispatch view for this task. This packet therefore
-uses the canonical `AI_STATUS_ROOT` state plus the sidecar evidence above as
-the authoritative session record.
+is not the authoritative dispatch view for this task.
+
+Because task lifecycle state can advance independently of this packet, this
+document must not be read as the source of truth for current owner / reviewer /
+status fields. Readers should consult canonical `ai-status.json` for live
+control-plane state and use this packet only for the dated evidence snapshot
+recorded above.
