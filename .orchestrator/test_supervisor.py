@@ -5727,6 +5727,134 @@ class ChairmanFlowTests(unittest.TestCase):
 
         self.assertIsNone(plan)
 
+    def test_proactive_claim_respects_paused_explicit_owner(self) -> None:
+        """Don't reshuffle a task whose explicit owner is paused but not loaded.
+
+        Regression: when Gemini's lane is quota-paused (or its CLI dangling),
+        availability-first auto-claim used to drain Gemini-owned backlog onto
+        Codex2 (the only "idle" lane), even though Gemini was unavailable
+        rather than busy. The fix: when the assigned owner is paused AND has
+        no active work, leave the task waiting for that lane.
+
+        See: feedback_supervisor_ignores_explicit_owner.md +
+             feedback_cli_symlink_staleness.md
+        """
+        config = {
+            "agents": {
+                "gemini": {"display_name": "Gemini", "provider": "gemini"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            }
+        }
+        task = {
+            "id": "PROD-RAIL-001",
+            "status": "backlog",
+            "owner": "Gemini",
+            "reviewer": "Gemini2",
+            "depends_on": [],
+        }
+        # Gemini is quota-paused; Codex2 is idle.
+        state = {
+            "provider_pauses": {
+                "gemini": {
+                    "kind": "quota",
+                    "reason": "QUOTA_EXHAUSTED",
+                    "paused_at": "2026-05-19T02:07:48Z",
+                    "resume_at": 9999999999.0,
+                }
+            }
+        }
+
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            config,
+            task=task,
+            task_map={"PROD-RAIL-001": task},
+            idle_agent_name="Codex2",
+            idle_agent_names=["Codex2"],
+            agent_loads={"Gemini": [], "Codex2": []},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["backlog", "todo", "in_progress", "review", "review_approved"],
+                "availability_first": True,
+                "allow_any_idle_lane": True,
+                "prefer_assigned_when_idle": True,
+                "require_assigned_agent_busy": True,
+                "require_owner_higher_priority_load": False,
+                "respect_explicit_owner_when_paused": True,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+            state=state,
+        )
+
+        self.assertIsNone(
+            plan,
+            "Paused explicit owner with no active load must not be reshuffled; "
+            "task should wait for the assigned lane to resume.",
+        )
+
+    def test_proactive_claim_still_reshuffles_when_explicit_owner_busy(self) -> None:
+        """The paused-owner guard must not block legitimate busy reshuffling.
+
+        If the explicit owner is actually loaded with other tasks (not just
+        paused), availability-first reshuffling is still the right behavior.
+        """
+        config = {
+            "agents": {
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            }
+        }
+        task = {
+            "id": "FIN-GOV-001",
+            "status": "backlog",
+            "owner": "Codex",
+            "reviewer": "Codex2",
+            "depends_on": [],
+        }
+        # Codex is NOT paused but has 2 active tasks already.
+        state: dict = {"provider_pauses": {}}
+
+        plan = supervisor.proactive_claim_plan_for_idle_agent(
+            config,
+            task=task,
+            task_map={"FIN-GOV-001": task},
+            idle_agent_name="Codex2",
+            idle_agent_names=["Codex2"],
+            # Codex carries higher-priority load already; Codex2 is idle.
+            agent_loads={"Codex": [0, 1]},
+            helper_settings={
+                "enabled": True,
+                "task_statuses": ["backlog", "todo", "in_progress", "review", "review_approved"],
+                "availability_first": True,
+                "allow_any_idle_lane": True,
+                "prefer_assigned_when_idle": True,
+                "require_assigned_agent_busy": True,
+                "require_owner_higher_priority_load": False,
+                "respect_explicit_owner_when_paused": True,
+            },
+            review_statuses={"review"},
+            finalize_statuses={"review_approved"},
+            dependency_done_statuses={"done"},
+            state=state,
+        )
+
+        self.assertIsNotNone(
+            plan,
+            "When owner is busy (not paused), availability-first reshuffle is still valid.",
+        )
+
+    def test_helper_claim_settings_default_respects_paused_owner(self) -> None:
+        """`respect_explicit_owner_when_paused` defaults to True.
+
+        Default-true is the safer behavior — protects against the
+        availability-first cascade documented in
+        feedback_supervisor_ignores_explicit_owner.md. Operators can
+        explicitly set False in config to restore the old behavior.
+        """
+        settings = supervisor.helper_claim_settings({})
+        self.assertTrue(settings["respect_explicit_owner_when_paused"])
+
     def test_dispatch_paused_when_provider_auth_is_not_ready(self) -> None:
         config = {"agents": {"gemini2": {"display_name": "Gemini2", "provider": "gemini2"}}}
         provider_report = {"providers": {"gemini2": {"auth_ready": False}}}
