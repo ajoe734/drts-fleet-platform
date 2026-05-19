@@ -3,7 +3,7 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-19T01:14:50Z
+Last updated: 2026-05-19T01:19:35Z
 
 ## Objective
 
@@ -48,53 +48,53 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 ### Primary Project Work
 
-| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
-| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
-| _(none)_ | -     | -    | -     | -      | -          | -        |
+| ID | Phase | Task | Owner | Status | Depends On | 中文說明 |
+|---|---|---|---|---|---|---|
+| _(none)_ | - | - | - | - | - | - |
 
 ### External / Upstream Integration Work
 
-| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
-| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
-| _(none)_ | -     | -    | -     | -      | -          | -        |
+| ID | Phase | Task | Owner | Status | Depends On | 中文說明 |
+|---|---|---|---|---|---|---|
+| _(none)_ | - | - | - | - | - | - |
 
 ## Task Board (active only)
 
-| ID  | Phase | Task | Owner | Status | Depends On |
-| --- | ----- | ---- | ----- | ------ | ---------- |
+| ID | Phase | Task | Owner | Status | Depends On |
+|---|---|---|---|---|---|
 
 ## Handoff Queue
 
-| Task     | From | To  | Message | Status | Created At |
-| -------- | ---- | --- | ------- | ------ | ---------- |
-| _(none)_ | -    | -   | -       | -      | -          |
+| Task | From | To | Message | Status | Created At |
+|---|---|---|---|---|---|
+| _(none)_ | - | - | - | - | - |
 
 ## Blockers
 
-| Task     | Owner | Waiting For | Message | Status |
-| -------- | ----- | ----------- | ------- | ------ |
-| _(none)_ | -     | -           | -       | -      |
+| Task | Owner | Waiting For | Message | Status |
+|---|---|---|---|---|
+| _(none)_ | - | - | - | - |
 
 ## Review Notes (active tasks)
 
-| Task     | Reviewer | 修正重點 | Review File |
-| -------- | -------- | -------- | ----------- |
-| _(none)_ | -        | -        | -           |
+| Task | Reviewer | 修正重點 | Review File |
+|---|---|---|---|
+| _(none)_ | - | - | - |
 
 ## Completion Evidence (last 10)
 
-| Task                               | Commit                                   | Subject                                                                    | LLM Agent | Reviewer | Recorded At          |
-| ---------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------- | --------- | -------- | -------------------- |
-| `DRV-UI-RD-009`                    | 0788d754ffd7ca491b92b2bc804a1bd94a63db08 | DRV-UI-RD-009: finalize owner closeout evidence                            | Codex     | Gemini2  | 2026-05-19T01:06:46Z |
-| `PBK-UI-001`                       | 44e8d530d8e82a3758c5ba63b93bed8f27e79ba7 | feat(PBK-UI-001): bootstrap apps/partner-booking-web (white-label Next.js) | Claude2   | Codex2   | 2026-05-10T14:47:14Z |
-| `PBK-UI-002`                       | d7046eb                                  | PBK-UI-002 Partner token brand chrome                                      | Codex2    | Codex    | 2026-05-10T17:04:37Z |
-| `PBK-UI-003`                       | 7332a173a3474266a8a74065e9fc43acf0cb0a16 | PBK-UI-003: manual closeout (#151)                                         | Codex     | Gemini2  | 2026-05-19T00:30:42Z |
-| `PBK-UI-004`                       | a72748815b6a49a378c036b9a3c6025eb42e8289 | PBK-UI-004: Authority-safe negative paths for partner-booking-web (#142)   | Codex2    | Codex    | 2026-05-18T13:27:54Z |
-| `PBK-UI-005`                       | dba599b3661d1064ee733836c91141035381a2e6 | PBK-UI-005: finalize coexistence closeout policy                           | Codex     | Codex2   | 2026-05-19T01:06:46Z |
-| `TOK-UI-001-SIDECAR-ACCEPTANCE`    | -                                        | no-commit closeout                                                         | Codex     | Gemini2  | 2026-05-18T13:27:01Z |
-| `ADM-UI-RD-002-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                         | Claude    | Codex2   | 2026-05-10T21:12:31Z |
-| `TEN-UI-RD-010-SIDECAR-ACCEPTANCE` | -                                        | no-commit closeout                                                         | Claude    | Codex2   | 2026-05-12T16:20:49Z |
-| `DRV-UI-RD-008-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                         | Claude    | Codex2   | 2026-05-12T19:56:43Z |
+| Task | Commit | Subject | LLM Agent | Reviewer | Recorded At |
+|---|---|---|---|---|---|
+| `DRV-UI-RD-009` | 7673f8a4568e6ceddeadc05ce744d389a7d05b0b | OPS-STATUS: close out remaining UI work | Codex | Gemini2 | 2026-05-19T01:18:00Z |
+| `PBK-UI-001` | 44e8d530d8e82a3758c5ba63b93bed8f27e79ba7 | feat(PBK-UI-001): bootstrap apps/partner-booking-web (white-label Next.js) | Claude2 | Codex2 | 2026-05-10T14:47:14Z |
+| `PBK-UI-002` | d7046eb | PBK-UI-002 Partner token brand chrome | Codex2 | Codex | 2026-05-10T17:04:37Z |
+| `PBK-UI-003` | 7332a173a3474266a8a74065e9fc43acf0cb0a16 | PBK-UI-003: manual closeout (#151) | Codex | Gemini2 | 2026-05-19T00:30:42Z |
+| `PBK-UI-004` | a72748815b6a49a378c036b9a3c6025eb42e8289 | PBK-UI-004: Authority-safe negative paths for partner-booking-web (#142) | Codex2 | Codex | 2026-05-18T13:27:54Z |
+| `PBK-UI-005` | 7673f8a4568e6ceddeadc05ce744d389a7d05b0b | OPS-STATUS: close out remaining UI work | Codex | Gemini2 | 2026-05-19T01:18:00Z |
+| `TOK-UI-001-SIDECAR-ACCEPTANCE` | - | no-commit closeout | Codex | Gemini2 | 2026-05-18T13:27:01Z |
+| `ADM-UI-RD-002-SIDECAR-REVIEW` | - | no-commit closeout | Claude | Codex2 | 2026-05-10T21:12:31Z |
+| `TEN-UI-RD-010-SIDECAR-ACCEPTANCE` | - | no-commit closeout | Claude | Codex2 | 2026-05-12T16:20:49Z |
+| `DRV-UI-RD-008-SIDECAR-REVIEW` | - | no-commit closeout | Claude | Codex2 | 2026-05-12T19:56:43Z |
 
 ## Latest Checkpoints
 
