@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - ".ai-loop-outgoing/BACKEND_DELIVERY_NOTE.md"
+      - ".ai-loop-outgoing/contract-lock.json"
       - ".ai-loop-outgoing/CONTRACT_VERSION.lock"
 
 jobs:
@@ -23,6 +24,7 @@ jobs:
       - name: Copy outgoing files to tenant .ai-loop/
         run: |
           cp .ai-loop-outgoing/BACKEND_DELIVERY_NOTE.md /tmp/tenant/.ai-loop/BACKEND_DELIVERY_NOTE.md
+          cp .ai-loop-outgoing/contract-lock.json      /tmp/tenant/.ai-loop/contract-lock.json
           cp .ai-loop-outgoing/CONTRACT_VERSION.lock    /tmp/tenant/.ai-loop/CONTRACT_VERSION.lock
           # Also copy the latest spec if present
           if [ -f .ai-loop-outgoing/FRONTEND_CHANGE_SPEC.md ]; then

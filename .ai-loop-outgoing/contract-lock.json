@@ -1,0 +1,21 @@
+{
+  "repo": "drts-fleet-platform",
+  "iteration": 1,
+  "wave": "tenant-governance",
+  "contract_commit": "949a49fb06eb674dd27b0f4bf6db746bd3c6f8aa",
+  "contract_commit_date": "2026-05-19T01:44:32Z",
+  "locked_at": "2026-05-19T05:24:40Z",
+  "locked_by": "Codex2",
+  "boundary_doc": "docs/02-architecture/tenant-commute-hub-boundary.md",
+  "packages": {
+    "@drts/contracts": "0.1.0",
+    "@drts/api-client": "0.1.0"
+  },
+  "reject_build_if_expired": true,
+  "expires_at": "2026-06-02T00:00:00Z",
+  "consumer_rules": [
+    "tenant-commute-hub must treat this file as the only allowed contract lock for tenant governance wiring.",
+    "UI build must fail when expires_at is in the past.",
+    "UI build must fail when installed @drts/contracts or @drts/api-client versions do not match the pinned package versions above."
+  ]
+}
