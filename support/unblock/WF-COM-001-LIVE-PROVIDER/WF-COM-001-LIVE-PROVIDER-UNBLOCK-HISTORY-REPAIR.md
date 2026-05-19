@@ -203,3 +203,22 @@ Recommended machine-truth wording for the parent:
   - `9373084` `closeout(COM-BLUEPRINT-001): finalize CTI recording filing blueprint`
   - `65c0584` `WF-COM-001-LIVE-PROVIDER-UNBLOCK-MANUAL-UNBLOCK: document live CTI provider hold`
   - `7cb86c3` `wip(WF-COM-001-LIVE-PROVIDER): anchor hold-state evidence`
+
+## Canonical repair evidence
+
+After review reopen, canonical machine truth was updated additively without
+rewriting shared branch history:
+
+- `2026-05-19T19:51:26Z`
+  `AI_NAME=Codex2 scripts/ai-status.sh note WF-COM-001-LIVE-PROVIDER ...`
+  rewrote the parent task `next` field so it now blocks only on
+  `EXT-004-BLK-001..008` external activation/evidence and explicitly treats
+  `COM-BLUEPRINT-001` as already done at `9373084`.
+- the corresponding open blocker record for `WF-COM-001-LIVE-PROVIDER` inside
+  canonical `ai-status.json` was repaired to the same external-only wording,
+  then `AI_NAME=Codex2 scripts/ai-status.sh sync` regenerated
+  `current-work.md` and `docs-site/current-work.md`.
+- canonical post-repair state now shows the parent blocker summary as:
+  `Created support/sidecars/COM-LIVE-PROVIDER-20260519/COM-LIVE-PROVIDER-EVIDENCE.md`
+  from `7cb86c3`, blocked only on `EXT-004-BLK-001..008`, with
+  `COM-BLUEPRINT-001` no longer a blocker.
