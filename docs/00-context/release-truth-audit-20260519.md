@@ -42,8 +42,8 @@ The branch/tag model itself is understandable and partly healthy:
 
 The release-truth control-plane layer is where the drift appears:
 
-- `ai-status.json` marks `DEV-SYNC-001`, `REL-SYNC-001`, and
-  `WF-REL-001-MATRIX` as `done`
+- `ai-status.json` marks `DEV-SYNC-001` and `WF-REL-001-MATRIX` as `done`
+- `ai-status.json` still keeps `REL-SYNC-001` `in_progress`
 - the current `origin/dev` tree does **not** contain the claimed
   `DEV-SYNC-001` audit artifact
 - the current `origin/dev` tree does **not** contain the claimed
@@ -52,9 +52,9 @@ The release-truth control-plane layer is where the drift appears:
   matrix row
 
 That mismatch means the repo cannot honestly claim release-truth synchronization
-is complete. The machine-truth records refer to work that existed on task-scoped
-anchor commits, but those artifact contents are not present in the current
-`origin/dev` tree.
+is complete. Two prerequisite tasks are closed in machine truth without their
+artifacts appearing in `origin/dev`, while the remaining prerequisite
+(`REL-SYNC-001`) is still open and also has no landed runbook artifact.
 
 ## Git Ref Truth
 
@@ -89,13 +89,13 @@ must not be inferred from `dev` merges alone.
 | Task | Machine status | Recorded artifact |
 | --- | --- | --- |
 | `DEV-SYNC-001` | `done` | `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` |
-| `REL-SYNC-001` | `done` | `docs/03-runbooks/phase1-release-truth-sync-20260519.md` |
+| `REL-SYNC-001` | `in_progress` | `docs/03-runbooks/phase1-release-truth-sync-20260519.md` |
 | `WF-REL-001-MATRIX` | `done` | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` |
 
 This audit intentionally excludes the lifecycle state of `WF-REL-001-AUDIT`
 itself because that row changes as soon as the document is handed off for
-review. The critical contradiction is between prerequisite task closeout
-records and the actual `origin/dev` tree content.
+review. The critical contradiction is between prerequisite task state,
+historical branch evidence, and the actual `origin/dev` tree content.
 
 ### What the repo tree says
 
@@ -121,18 +121,24 @@ artifacts that did not survive into the current `origin/dev` tree.
 | `REL-SYNC-001` | `e686f13` and `ee6cfa7` | adds and extends `docs/03-runbooks/release-truth-sync-runbook-20260519.md` | no |
 | `WF-REL-001-MATRIX` | `17941e4` | adds `WF-REL-001` `HOLD` row to the gate matrix | no |
 
-The corresponding closeout commits recorded in `ai-status.json` do not restore
-those artifacts into the current tree:
+The corresponding closeout commits still recorded in `ai-status.json` do not
+restore those artifacts into the current tree:
 
 - `073c39e` for `DEV-SYNC-001`
-- `3604aa8` for `REL-SYNC-001`
 - `6da045d` for `WF-REL-001-MATRIX`
+
+`3604aa8` remains relevant only as historical `REL-SYNC-001` branch evidence:
+it is an earlier closeout attempt on `origin/codex2/rel-sync-001`, but current
+`ai-status.json` has since reopened `REL-SYNC-001` to `in_progress` and no
+longer records that commit as the active machine-truth closeout.
 
 The release-truth problem is therefore:
 
-1. task machine truth says the prerequisite artifacts are done
-2. anchor commits prove the artifacts were drafted
-3. current `origin/dev` does not carry those artifact contents
+1. machine truth closes `DEV-SYNC-001` and `WF-REL-001-MATRIX`, but their
+   artifacts are still absent from `origin/dev`
+2. machine truth keeps `REL-SYNC-001` open, and its target runbook is also
+   absent from `origin/dev`
+3. anchor commits prove drafts existed on task branches
 4. downstream readers cannot verify the claimed release-truth surfaces from the
    tree they actually check out
 
@@ -167,10 +173,11 @@ Impact:
 - `WF-PROD-001` may still remain `PASS (dry-run contract evidence)`, but live
   prod-tag language must stay non-claiming
 
-### Finding 2: machine truth overstates landed artifact truth
+### Finding 2: machine truth and landed artifact truth still diverge
 
-`DEV-SYNC-001`, `REL-SYNC-001`, and `WF-REL-001-MATRIX` are all marked `done`,
-but the current tree does not expose their required artifacts.
+`DEV-SYNC-001` and `WF-REL-001-MATRIX` are marked `done`, while `REL-SYNC-001`
+remains `in_progress`, but the current tree does not expose any of their
+required release-truth artifacts.
 
 Impact:
 
@@ -211,18 +218,20 @@ The minimum repair path is:
 
 1. restore the `DEV-SYNC-001` artifact into the checked-in tree from the
    approved audit content anchored at `0861499`
-2. restore the `REL-SYNC-001` runbook into the checked-in tree from the
-   approved runbook content anchored at `e686f13` and `ee6cfa7`
+2. complete and land the `REL-SYNC-001` runbook into the checked-in tree,
+   reconciling the draft content anchored at `e686f13` / `ee6cfa7` with the
+   reopened machine-truth state
 3. restore the `WF-REL-001` gate row into
    `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` from `17941e4`
 4. re-check that the restored docs match current branch strategy and current
    ref truth
 5. only then consider `WF-REL-001` eligible for review closeout
 
-If the intent was for those artifacts to remain absent and the tasks to close
-only in machine truth, then the machine-truth records themselves are overstated
-and should be reopened instead. Either way, the current split state is not a
-valid synchronized release-truth outcome.
+If the intent was for those artifacts to remain absent and only branch-local
+history to carry the evidence, then the machine-truth closeouts for
+`DEV-SYNC-001` and `WF-REL-001-MATRIX` are overstated and should be reopened
+instead. Either way, the current split state is not a valid synchronized
+release-truth outcome.
 
 ## Non-Claims Confirmed By This Audit
 
@@ -231,7 +240,9 @@ This audit does not claim that:
 - `origin/dev` has already been promoted to `main`
 - the latest publish snapshot has a production tag
 - `WF-REL-001` is complete
-- `DEV-SYNC-001`, `REL-SYNC-001`, and `WF-REL-001-MATRIX` are safely verifiable
+- `DEV-SYNC-001`, `REL-SYNC-001`, and `WF-REL-001-MATRIX` are all closed in
+  machine truth
+- any of the three prerequisite release-truth artifacts are safely verifiable
   from the current checked-in tree
 - machine-truth `done` alone is enough to support a release-language claim
 
