@@ -2868,6 +2868,120 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_completed")
 
+    def test_dead_owner_worker_completed_when_status_write_lands_between_loads(self) -> None:
+        """Race protection: worker writes status='review' to ai-status.json then exits
+        within the same supervisor tick. The task_map cached at the top of the tick
+        still shows 'in_progress'; only a fresh re-read sees 'review'. The supervisor
+        must not flag this as 'exited before terminal status'."""
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "PBK-UI-003",
+                    "provider": "codex",
+                    "agent_id": "codex",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 999999,
+                    "last_event_at": "2026-05-18T19:07:30Z",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+        stale_status = {"tasks": [{"id": "PBK-UI-003", "status": "in_progress", "owner": "Codex", "reviewer": "Gemini2"}]}
+        fresh_status = {"tasks": [{"id": "PBK-UI-003", "status": "review", "owner": "Codex", "reviewer": "Gemini2"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", side_effect=[stale_status, fresh_status]),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "completed")
+        self.assertNotIn("last_error", {k: v for k, v in worker.items() if k == "last_error" and v})
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_completed")
+        self.assertIn("fresh re-read", write_activity_log.call_args.args[1]["message"])
+
+    def test_dead_owner_worker_still_terminal_when_fresh_status_unchanged(self) -> None:
+        """When the fresh re-read confirms the task did not advance, the worker is
+        still flagged as 'exited before terminal status' (the race-protection re-read
+        must not paper over genuine premature exits)."""
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {},
+            "providers": {},
+            "agents": {
+                "claude": {"id": "claude", "display_name": "Claude"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-1": {"status": "started"}}},
+            "workers": {
+                "run-1": {
+                    "run_id": "run-1",
+                    "task_id": "EX-009",
+                    "provider": "codex",
+                    "agent_id": "codex",
+                    "status": "running",
+                    "queue_event_id": "evt-1",
+                    "pid": 999999,
+                    "last_event_at": "2026-05-18T19:07:30Z",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+        }
+        # Both cached and fresh agree: still in_progress (worker really did exit prematurely).
+        status = {"tasks": [{"id": "EX-009", "status": "in_progress", "owner": "Codex", "reviewer": "Claude"}]}
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "write_activity_log") as write_activity_log,
+        ):
+            changed = supervisor.poll_workers(config, state)
+
+        self.assertTrue(changed)
+        worker = state["workers"]["run-1"]
+        self.assertEqual(worker["status"], "failed")
+        self.assertEqual(worker["last_error"], "Worker exited before the task reached a terminal status.")
+        self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "failed")
+        self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_failed")
+
     def test_dead_reviewer_worker_that_advanced_task_to_review_approved_is_completed(self) -> None:
         config = {
             "schema": {
