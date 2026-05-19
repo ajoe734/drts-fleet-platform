@@ -75,7 +75,8 @@ repo-local and external prerequisites are satisfied:
 
 - Anchor commit: `271b458` — `wip(WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION): anchor planning routing`
 - Evidence clarification commit: `ecc0482` — `docs(WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION): clarify next step and evidence`
-- Pushed branch tip: `ba76f49` on `origin/codex2/wf-fwd-001-live-sandbox-unblock-planning-decision`
+- PR evidence commit: `c5d606e` — `docs(WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION): record PR evidence`
+- Pushed branch tip: `c5d606e` on `origin/codex2/wf-fwd-001-live-sandbox-unblock-planning-decision`
 - PR: `#166` — <https://github.com/ajoe734/drts-fleet-platform/pull/166>
 
 ## Scope cut
