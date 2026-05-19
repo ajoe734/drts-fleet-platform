@@ -1,7 +1,7 @@
 # Production Deploy And Rollback Runbook
 
-Last updated: 2026-05-19  
-Owner: release engineering  
+Last updated: 2026-05-19
+Owner: release engineering
 Workflow: `.github/workflows/deploy-prod.yml`
 
 ## Purpose
