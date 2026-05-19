@@ -72,10 +72,18 @@ function createHarness() {
 function createBookingCommand(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
+  // Use a reservation window in the future relative to wall-clock time so the
+  // order's `modifiableUntil` (derived from reservationWindowStart) stays in
+  // the future and update/cancel tests pass regardless of when CI runs.
+  // Originally hard-coded to 2026-05-19T10:00Z, which made the test pass only
+  // when CI happened to run before that minute.
+  const now = new Date();
+  const startMs = now.getTime() + 6 * 60 * 60 * 1000; // +6h from now
+  const endMs = startMs + 60 * 60 * 1000; // +1h window
   return {
     businessDispatchSubtype: "enterprise_dispatch",
-    reservationWindowStart: "2026-05-19T10:00:00.000Z",
-    reservationWindowEnd: "2026-05-19T11:00:00.000Z",
+    reservationWindowStart: new Date(startMs).toISOString(),
+    reservationWindowEnd: new Date(endMs).toISOString(),
     pickup: { address: "Pickup" },
     dropoff: { address: "Dropoff" },
     passenger: { name: "Negative Rider", phone: "0912000000" },

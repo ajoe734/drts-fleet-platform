@@ -77,30 +77,33 @@ assert_contains "$WORKFLOW_PROD" "secrets.PROD_WIF_PROVIDER" "PROD_WIF_PROVIDER 
 save_check "validate_config" "status" "pass"
 save_check "validate_config" "mode" "static_contract_check"
 
-log_surface "build-push — prod rail source contract"
+log_surface "build-push — prod rail real implementation"
 
 assert_contains "$WORKFLOW_STAGING" "build-push:" "staging build-push source job exists"
 assert_contains "$WORKFLOW_STAGING" "Build & push — api" "staging api image build exists"
 assert_contains "$WORKFLOW_STAGING" "Build & push — migrate" "staging migrate image build exists"
 assert_contains "$WORKFLOW_STAGING" "Build & push — platform-admin-web" "staging platform-admin-web image build exists"
 assert_contains "$WORKFLOW_STAGING" "Build & push — ops-console-web" "staging ops-console-web image build exists"
-assert_contains "$WORKFLOW_PROD" "copy/adapt the build-push + deploy steps from .github/workflows/deploy-staging.yml" "prod workflow points to staging build-push source of truth"
-assert_contains "$BRANCH_STRATEGY" "Copy \`deploy-staging.yml\`'s build-push + deploy job graph into \`deploy-prod.yml\`" "branch strategy documents prod build-push completion step"
+# PROD-RAIL-001 upgrade: deploy-prod.yml has real build-push job (no longer skeleton)
+assert_contains "$WORKFLOW_PROD" "build-push:" "prod build-push job exists (non-skeleton)"
+assert_contains "$WORKFLOW_PROD" "docker/build-push-action" "prod uses docker/build-push-action"
 
 save_check "build_push" "status" "pass"
-save_check "build_push" "mode" "documented_skeleton_contract"
+save_check "build_push" "mode" "real_implementation"
 
-log_surface "deploy dry-run — workflow dispatch and production contract"
+log_surface "deploy dry-run — workflow dispatch + real deploy graph"
 
 assert_contains "$WORKFLOW_PROD" "workflow_dispatch:" "prod workflow is manually dispatchable"
 assert_contains "$WORKFLOW_PROD" "concurrency:" "prod workflow serialises deployment runs"
 assert_contains "$WORKFLOW_PROD" "group: deploy-prod" "prod concurrency group is fixed"
-assert_contains "$WORKFLOW_PROD" "Prod config validated. Image build + deploy not yet implemented in this skeleton." "prod skeleton notice is explicit"
-assert_contains "$WORKFLOW_PROD" "build-push  → deploy-migrate → deploy-api → deploy-platform-admin-web → deploy-ops-console-web → smoke" "prod deploy graph placeholder is explicit"
+# PROD-RAIL-001 upgrade: real deploy / migrate / health-check jobs (not placeholder text)
+assert_contains "$WORKFLOW_PROD" "migrate:" "prod migrate job exists (non-skeleton)"
+assert_contains "$WORKFLOW_PROD" "deploy:" "prod deploy job exists (non-skeleton)"
+assert_contains "$WORKFLOW_PROD" "health-check:" "prod health-check job exists (non-skeleton)"
 assert_contains "$BRANCH_STRATEGY" "gh workflow run deploy-prod.yml -f tag=prod/v2026.05.18.0" "branch strategy documents deploy command"
 
 save_check "deploy_dry_run" "status" "pass"
-save_check "deploy_dry_run" "mode" "static_workflow_dispatch_contract"
+save_check "deploy_dry_run" "mode" "real_workflow_dispatch_contract"
 
 log_surface "rollback by tag — operator command path"
 
@@ -120,6 +123,6 @@ assert_chain "rollback" "status"
 print_chain_summary
 
 echo ""
-log_warn "E2E-009 is a static dry-run. It verifies the current prod rail contract and documents that deploy-prod.yml remains a skeleton until PROD_* infra is wired."
+log_warn "E2E-009 is a static dry-run. It verifies the current prod rail contract (deploy-prod.yml now carries real build-push / migrate / deploy / health-check jobs per PROD-RAIL-001). Actual prod execution still requires PROD_* GCP project + WIF + Secret Manager + Artifact Registry to be configured in repo Settings."
 log_ok "E2E-009 complete — production rail dry-run contract checks passed."
 echo -e "Evidence log: ${EVIDENCE_FILE}"
