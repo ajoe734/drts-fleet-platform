@@ -224,51 +224,45 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ---
 
-### 4.5 E2E-008 — Partner Booking Cutover
+### 4.5 E2E-009 — Production Rail Dry-Run
 
-**Script:** `tests/e2e/E2E-008-partner-booking-cutover.sh`
+**Script:** `tests/e2e/E2E-009-prod-rail-dry-run.sh`
+
+This scenario is a **static deployment-governance dry-run**. It does not invoke
+GitHub Actions or deploy to GCP. Instead, it validates that the local
+production-rail artifacts remain coherent across the workflow and runbook
+surfaces.
 
 #### Surface Chain
 
 ```
-Platform Admin (entry deactivate / activate) ──► Partner Ingress (bootstrap + eligibility) ──► Tenant Booking Authority ──► Billing / Settlement evidence
+deploy-prod.yml validate-config ──► staging build graph reference ──► deploy-prod dry-run contract ──► rollback-by-tag runbook command
 ```
 
-#### Leg Breakdown
+#### Verification Points
 
-| Leg | Surface                | Actor              | API Route                                                | Assertion                                                      |
-| --- | ---------------------- | ------------------ | -------------------------------------------------------- | -------------------------------------------------------------- |
-| 1   | Platform Admin         | `platform_admin`   | `POST /api/platform-admin/partner-entries/:entrySlug/deactivate` | Entry becomes inactive for cutover negative-path proof         |
-| 1   | Partner Ingress        | open route         | `POST /api/auth/partner/bootstrap-session`               | Inactive entry rejects bootstrap with `PARTNER_ENTRY_INACTIVE` |
-| 1   | Platform Admin         | `platform_admin`   | `POST /api/platform-admin/partner-entries/:entrySlug/activate`   | Entry is restored to active (rollback-safe state)              |
-| 2   | Partner Ingress        | `partner_api_key`  | `POST /api/partner/eligibility/verify`                   | Eligible verification issued for the same entry                |
-| 2   | Partner Ingress        | `partner_api_key`  | `GET /api/partner/eligibility/:eligibilityVerificationId` | Verification read-back preserves `partnerEntrySlug`            |
-| 3   | Tenant Booking Authority | `tenant_admin`   | `POST /api/tenant/bookings`                              | Booking created with `partnerEntrySlug` + `eligibilityVerificationId` |
-| 3   | Tenant Booking Authority | `tenant_admin`   | `GET /api/tenant/bookings/:bookingId`                    | Booking read-back preserves partner linkage and status         |
-| 4   | Billing / Settlement   | `platform_admin` / `tenant_admin` | `GET /api/settlement/matrix`, `POST /api/tenant/invoices/generate`, `GET /api/tenant/invoices/:invoiceId` | Receipt ownership evidence exposed; invoice retrieval still works |
-
-#### ID Continuity Chain
-
-```
-entrySlug (partner cutover) ──► eligibilityVerificationId (partner ingress) ──► bookingId (tenant authority) ──► invoiceId (billing evidence)
-```
-
-#### Fixtures Used
-
-| Fixture                     | File                                             |
-| --------------------------- | ------------------------------------------------ |
-| Airport booking             | `tests/e2e/fixtures/e2e-booking-airport.json`    |
-| Generated tenant invoice    | runtime-generated JSON body                      |
-| Partner bootstrap / eligibility | runtime-generated JSON bodies                 |
+| Leg | Artifact Surface              | Assertion                                                                 |
+| --- | ----------------------------- | ------------------------------------------------------------------------- |
+| 1   | `.github/workflows/deploy-prod.yml`    | `validate-config` exists; prod tag shape and missing-config guards are explicit |
+| 2   | `.github/workflows/deploy-staging.yml` | Canonical `build-push` graph for api/migrate/platform-admin-web/ops-console-web exists |
+| 2   | `docs/ops/branch-strategy.md`          | Prod rail completion explicitly points to copying the staging build/deploy graph |
+| 3   | `.github/workflows/deploy-prod.yml`    | Manual dispatch, `deploy-prod` concurrency gate, and reserved deploy graph are explicit |
+| 4   | `docs/ops/branch-strategy.md`          | Rollback is documented as redeploying a prior `prod/v*` tag |
 
 #### Pass Criteria
 
-1. Bootstrap against the inactive entry fails with `PARTNER_ENTRY_INACTIVE`.
-2. After reactivation, partner eligibility verification returns `eligible`.
-3. Booking read-back preserves `partnerEntrySlug` and `eligibilityVerificationId`.
-4. Settlement matrix returns the `partner_airport` row with a non-empty `receiptOwner`.
-5. Tenant invoice generation and invoice read-back both succeed.
-6. The entry is restored to active before exit, even on failure-path cleanup.
+1. The prod workflow still enforces `prod/v<YYYY.MM.DD>.<N>` tag input plus origin tag existence checks.
+2. The prod workflow still guards the required `PROD_*` variables and secrets.
+3. The staging workflow still carries the canonical four-image `build-push` source graph.
+4. The prod workflow and branch strategy still document the dry-run deploy contract and rollback-by-tag command.
+5. The script finishes without claiming a live prod deploy; current skeleton state is reported explicitly.
+
+#### Notes
+
+- This check is expected to remain static until the production GCP project and
+  full `deploy-prod.yml` job graph are implemented.
+- A future live prod-rail verification task can supersede this scenario once
+  production credentials and non-destructive verification hooks exist.
 
 ---
 
