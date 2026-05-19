@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 import os
@@ -9,6 +10,16 @@ from pathlib import Path
 from unittest import mock
 
 import supervisor
+
+
+def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        text=True,
+        capture_output=True,
+        check=True,
+    )
 
 
 class DetectWorkerFailureTests(unittest.TestCase):
@@ -42,6 +53,21 @@ class DetectWorkerFailureTests(unittest.TestCase):
                     "Reviewing provider pause records.",
                     '7198-      "reason": "Failed to authenticate. API Error: 401 authentication_error: Invalid authentication credentials",',
                     '7890:      "summary": "\\"gemini2 auth is IneligibleTierError (permanent?) — consider reassigning ORX-GV-003 owner in next review.\\",",',
+                    "No live auth error was emitted by this worker.",
+                ]
+            )
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_embedded_auth_error_from_log_context_line(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "Reviewing archived worker logs.",
+                    ".orchestrator/logs/20260430T232445367572Z-codex-codex2-b9e02e.log:1888:"
+                    '.orchestrator/evidence/codex-20260430T142635Z-221ee21d.json:11: "raw_message": '
+                    '"Failed to authenticate. API Error: 401 authentication_error"',
                     "No live auth error was emitted by this worker.",
                 ]
             )
@@ -99,6 +125,63 @@ class DetectWorkerFailureTests(unittest.TestCase):
         )
 
         self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_chair_narrative_that_mentions_codex_refresh_reuse(self) -> None:
+        worker = self._worker_for_log(
+            '"Codex2 remains auth-paused after repeated 401 Unauthorized, '
+            'token_invalidated, and refresh_token_reused failures and requires manual re-login '
+            'before any further dispatch.",\n'
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_shell_search_command_that_mentions_auth_markers(self) -> None:
+        worker = self._worker_for_log(
+            "/bin/bash -lc \"rg -n 'dispatch_pauses|paused|quota|401 Unauthorized|"
+            "token_invalidated|refresh_token_reused|Failed to authenticate' "
+            "ai-status.json .orchestrator/state.json\" in /home/edna/workspace/drts-fleet-platform\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_provider_error_inside_captured_exec_output(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "exec",
+                    '/bin/bash -lc "cat .orchestrator/logs/old-worker.log" in /repo',
+                    " succeeded in 0ms:",
+                    "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+                    "",
+                    "tokens used",
+                    "Reviewed old logs; no live auth error happened in this worker.",
+                ]
+            )
+            + "\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure_signal(worker))
+        self.assertIsNone(supervisor.detect_worker_failure(worker))
+
+    def test_ignores_assistant_json_auth_text_as_state_authority(self) -> None:
+        worker = self._worker_for_log(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+                            }
+                        ]
+                    },
+                }
+            )
+            + "\n"
+        )
+
+        self.assertIsNone(supervisor.detect_worker_failure_signal(worker))
 
     def test_ignores_embedded_auth_error_from_claude_tool_result_json(self) -> None:
         worker = self._worker_for_log(
@@ -195,6 +278,43 @@ class DetectWorkerFailureTests(unittest.TestCase):
         )
 
         self.assertIn("Failed to authenticate", supervisor.detect_worker_failure(worker) or "")
+        signal = supervisor.detect_worker_failure_signal(worker)
+        self.assertIsNotNone(signal)
+        self.assertTrue(signal.provider_pause_authorized)
+        self.assertEqual(signal.source, "json_result_error")
+
+    def test_detects_codex_refresh_token_reuse_as_auth_failure(self) -> None:
+        worker = self._worker_for_log(
+            "\n".join(
+                [
+                    "Error: Your authentication token has been invalidated. Please log out and sign in again.",
+                    "reason: refresh_token_reused",
+                ]
+            )
+            + "\n"
+        )
+
+        detected = supervisor.detect_worker_failure(worker)
+        self.assertEqual(detected, "reason: refresh_token_reused")
+        signal = supervisor.detect_worker_failure_signal(worker)
+        self.assertIsNotNone(signal)
+        self.assertTrue(signal.provider_pause_authorized)
+        self.assertEqual(signal.source, "raw_process_line")
+        result = supervisor.classify_worker_failure({}, {"provider": "codex2"}, detected)
+        self.assertEqual(result["kind"], "auth")
+
+    def test_detects_codex_token_invalidated_error_line(self) -> None:
+        worker = self._worker_for_log(
+            "Error: Your authentication token has been invalidated. Please log out and sign in again.\n"
+        )
+
+        detected = supervisor.detect_worker_failure(worker)
+        self.assertEqual(
+            detected,
+            "Error: Your authentication token has been invalidated. Please log out and sign in again.",
+        )
+        result = supervisor.classify_worker_failure({}, {"provider": "codex"}, detected)
+        self.assertEqual(result["kind"], "auth")
 
     def test_detects_copilot_no_quota_plain_text_log(self) -> None:
         worker = self._worker_for_log("402 You have no quota (Request ID: test)\n")
@@ -344,6 +464,186 @@ class DetectWorkerFailureTests(unittest.TestCase):
             supervisor.format_runtime_timestamp_local("2026-04-06T14:35:42Z"),
             "2026-04-06 22:35:42",
         )
+
+
+class ExecutionWorkspaceTests(unittest.TestCase):
+    def _repo_config(self, root: Path) -> dict:
+        (root / "ai-status.json").write_text('{"tasks":[]}\n', encoding="utf-8")
+        return {
+            "paths": {"status_file": str(root / "ai-status.json")},
+            "agents": {
+                "codex2": {
+                    "id": "codex2",
+                    "display_name": "Codex2",
+                    "provider": "codex2",
+                    "adapter": "codex",
+                }
+            },
+            "providers": {"codex2": {"delivery_mode": "codex"}},
+            "branch_strategy": {
+                "worker_worktrees": {
+                    "enabled": True,
+                    "root": ".artifacts/worktrees/auto",
+                }
+            },
+        }
+
+    def _init_repo(self, root: Path) -> None:
+        _git(root, "init", "-b", "dev")
+        _git(root, "config", "user.email", "test@example.com")
+        _git(root, "config", "user.name", "Test User")
+        (root / "README.md").write_text("test\n", encoding="utf-8")
+        _git(root, "add", "README.md")
+        _git(root, "commit", "-m", "init")
+
+    def test_reuses_existing_worktree_for_task_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            existing = root / ".artifacts/worktrees/auto/codex2-pbk-ui-003"
+            _git(root, "worktree", "add", "-b", "codex2/pbk-ui-003", str(existing), "dev")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="PBK-UI-003",
+                metadata={"mode": "execution"},
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("PBK-UI-003"),
+            )
+
+            self.assertEqual(workspace, existing.resolve())
+            self.assertEqual(branch, "codex2/pbk-ui-003")
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "existing_worktree")
+
+    def test_does_not_reuse_unmanaged_worktree_for_task_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            unmanaged = Path(tmpdir) / "pbk-ui-003"
+            _git(root, "worktree", "add", "-b", "codex2/pbk-ui-003", str(unmanaged), "dev")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="PBK-UI-003",
+                metadata={"mode": "execution"},
+            )
+            workspace, branch, _base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("PBK-UI-003"),
+            )
+
+            self.assertEqual(branch, "codex2/pbk-ui-003")
+            self.assertEqual(source, "created_worktree")
+            self.assertNotEqual(workspace, unmanaged.resolve())
+            self.assertEqual(workspace, (root / ".artifacts/worktrees/auto/codex2-pbk-ui-003").resolve())
+            self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "codex2/pbk-ui-003")
+
+    def test_creates_isolated_worktree_for_new_task_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="PBK-UI-004",
+                metadata={"mode": "execution"},
+            )
+            workspace, branch, _base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("PBK-UI-004"),
+            )
+
+            self.assertEqual(branch, "codex2/pbk-ui-004")
+            self.assertEqual(source, "created_worktree")
+            self.assertEqual(workspace, (root / ".artifacts/worktrees/auto/codex2-pbk-ui-004").resolve())
+            self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "codex2/pbk-ui-004")
+
+    def test_does_not_reuse_canonical_root_when_task_branch_is_checked_out_there(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            _git(root, "switch", "-c", "codex2/pbk-ui-003")
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="wake",
+                task_id="PBK-UI-003",
+                metadata={"mode": "execution"},
+            )
+            workspace, branch, _base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                supervisor.route_task("PBK-UI-003"),
+            )
+
+            self.assertEqual(branch, "codex2/pbk-ui-003")
+            self.assertEqual(source, "created_worktree")
+            self.assertNotEqual(workspace, root.resolve())
+            self.assertEqual(workspace, (root / ".artifacts/worktrees/auto/codex2-pbk-ui-003").resolve())
+            self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "codex2/pbk-ui-003")
+
+    def test_creates_isolated_worktree_for_coordination_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+
+            request = supervisor.DeliveryRequest(
+                agent_id="codex2",
+                provider="codex2",
+                delivery_mode="codex",
+                message="chair wake",
+                task_id=None,
+                reason="chair_review:provider_health_triage",
+                metadata={"mode": "coordination", "workspace_key": "chair-provider_health_triage"},
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                self._repo_config(root),
+                request,
+                None,
+            )
+            supervisor.attach_workspace_metadata(
+                self._repo_config(root),
+                request,
+                workspace,
+                branch,
+                base_branch,
+                source,
+            )
+
+            self.assertIsNone(branch)
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "created_coordination_worktree")
+            self.assertEqual(
+                workspace,
+                (root / ".artifacts/worktrees/auto/codex2-coordination-chair-provider_health_triage").resolve(),
+            )
+            self.assertNotEqual(workspace, root.resolve())
+            self.assertEqual(_git(workspace, "rev-parse", "--is-inside-work-tree").stdout.strip(), "true")
+            self.assertEqual(_git(workspace, "branch", "--show-current").stdout.strip(), "")
+            self.assertIn("isolated coordination worktree", request.message)
+            self.assertEqual(request.metadata["workspace_root"], str(workspace))
 
 
 class ProcessQueueDispatchGuardTests(unittest.TestCase):
@@ -555,6 +855,64 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
         self.assertEqual(event["reason"], "owned_ready_dispatch")
         self.assertEqual(event["task_id"], "BUS-VAL-003")
 
+    def test_dispatcher_honors_codex2_lane_capacity_override(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "status_field": "status",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "ready_dispatcher": {
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"codex2": 3},
+                "max_dispatches_per_tick": 4,
+            },
+            "agents": {
+                "codex2": {
+                    "id": "codex2",
+                    "display_name": "Codex2",
+                    "provider": "codex2",
+                    "adapter": "codex",
+                }
+            },
+            "providers": {"codex2": {"delivery_mode": "codex"}},
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "run-active": {
+                    "run_id": "run-active",
+                    "task_id": "CODEX2-ACTIVE",
+                    "agent_id": "codex2",
+                    "provider": "codex2",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_in_progress_dispatch"},
+                }
+            },
+            "seen_event_keys": {},
+        }
+        status = {
+            "tasks": [
+                {"id": "CODEX2-ACTIVE", "status": "in_progress", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-NEXT-1", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-NEXT-2", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+                {"id": "CODEX2-NEXT-3", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_event_queue", return_value=[]),
+            mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as queue_delivery_event,
+        ):
+            changed = supervisor.dispatch_ready_tasks(config, state, provider_report={})
+
+        self.assertTrue(changed)
+        queued_task_ids = [call.args[1]["task_id"] for call in queue_delivery_event.call_args_list]
+        self.assertEqual(queued_task_ids, ["CODEX2-NEXT-1", "CODEX2-NEXT-2"])
+
     def test_prune_completed_dispatch_pauses_removes_done_task_entries(self) -> None:
         state = {
             "dispatch_pauses": [
@@ -615,6 +973,63 @@ class ProcessQueueDispatchGuardTests(unittest.TestCase):
 
         self.assertTrue(changed)
         self.assertEqual(state["dispatch_pauses"], [{"task_id": "CURRENT-1", "worker_run_id": "run-2", "paused_at": "2026-04-19T16:10:43Z"}])
+
+    def test_prune_completed_dispatch_pauses_removes_recovered_taskless_auth_pause(self) -> None:
+        state = {
+            "provider_pauses": {
+                "gemini": {
+                    "kind": "quota",
+                    "reason": "quota exhausted",
+                    "paused_at": "2026-05-17T13:51:45Z",
+                    "resume_at": 9999999999,
+                }
+            },
+            "dispatch_pauses": [
+                {
+                    "provider": "codex",
+                    "task_id": None,
+                    "worker_run_id": "codex-stale-auth",
+                    "failure_kind": "auth",
+                    "summary": "auth: archived log context mentioned token_invalidated",
+                    "paused_at": "2026-05-17T15:27:57Z",
+                },
+                {
+                    "provider": "gemini",
+                    "task_id": None,
+                    "worker_run_id": "gemini-quota",
+                    "failure_kind": "quota/terminal",
+                    "summary": "quota/terminal: reason: 'QUOTA_EXHAUSTED'",
+                    "paused_at": "2026-05-17T13:51:45Z",
+                },
+            ],
+            "workers": {},
+        }
+        provider_report = {
+            "providers": {"codex": {"auth_ready": True}, "gemini": {"auth_ready": True}},
+            "agent_adapters": {"codex": {"supported": True}, "gemini": {"supported": True}},
+        }
+
+        changed = supervisor.prune_completed_dispatch_pauses(
+            state,
+            {"tasks": []},
+            config=self.config,
+            provider_report=provider_report,
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(
+            state["dispatch_pauses"],
+            [
+                {
+                    "provider": "gemini",
+                    "task_id": None,
+                    "worker_run_id": "gemini-quota",
+                    "failure_kind": "quota/terminal",
+                    "summary": "quota/terminal: reason: 'QUOTA_EXHAUSTED'",
+                    "paused_at": "2026-05-17T13:51:45Z",
+                }
+            ],
+        )
 
     def test_starts_current_owned_dispatch_event(self) -> None:
         current_task = {
@@ -1245,6 +1660,8 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
             mock.patch.object(supervisor, "reconcile_queue_records", return_value=False),
             mock.patch.object(supervisor, "prune_event_queue", return_value=False),
             mock.patch.object(supervisor, "dispatch_ready_tasks", return_value=False),
+            mock.patch.object(supervisor, "dispatch_underutilization_sidecars", return_value=False),
+            mock.patch.object(supervisor, "dispatch_underutilization_main_tasks", return_value=False) as main_backfill,
             mock.patch.object(supervisor, "process_queue", return_value=False),
             mock.patch.object(supervisor, "sync_github_bus", return_value=False),
             mock.patch.object(supervisor, "trim_worker_history"),
@@ -1256,6 +1673,7 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
         self.assertEqual(saved_state["supervisor"]["pid"], os.getpid())
         self.assertIsNotNone(saved_state["supervisor"]["last_heartbeat_at"])
         self.assertEqual(saved_state["supervisor"]["started_at"], saved_state["supervisor"]["last_heartbeat_at"])
+        main_backfill.assert_called_once()
 
     def test_run_once_can_skip_pid_file_management(self) -> None:
         config = {
@@ -1283,6 +1701,8 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
             mock.patch.object(supervisor, "reconcile_queue_records", return_value=False),
             mock.patch.object(supervisor, "prune_event_queue", return_value=False),
             mock.patch.object(supervisor, "dispatch_ready_tasks", return_value=False),
+            mock.patch.object(supervisor, "dispatch_underutilization_sidecars", return_value=False),
+            mock.patch.object(supervisor, "dispatch_underutilization_main_tasks", return_value=False) as main_backfill,
             mock.patch.object(supervisor, "process_queue", return_value=False),
             mock.patch.object(supervisor, "sync_github_bus", return_value=False),
             mock.patch.object(supervisor, "trim_worker_history"),
@@ -1292,6 +1712,7 @@ class RunOnceSupervisorStateTests(unittest.TestCase):
             supervisor.run_once(config, watch=False, replay=False, once=True, manage_pid_file=False)
 
         write_pid.assert_not_called()
+        main_backfill.assert_called_once()
 
     def test_main_once_skips_daemon_pid_management(self) -> None:
         args = mock.Mock(
@@ -1728,7 +2149,7 @@ class PollWorkersRecoveryTests(unittest.TestCase):
                     "status": "running",
                     "queue_event_id": "evt-1",
                     "pid": 12345,
-                    "last_event_at": "2026-04-06T09:00:00Z",
+                    "last_event_at": "2999-01-01T00:00:00Z",
                     "request_snapshot": {"reason": "owned_ready_dispatch"},
                 }
             },
@@ -1759,6 +2180,131 @@ class PollWorkersRecoveryTests(unittest.TestCase):
         self.assertEqual(state["queue"]["events"]["evt-1"]["status"], "completed")
         terminate_worker_pid.assert_called_once_with(12345)
         self.assertEqual(write_activity_log.call_args.args[1]["type"], "worker_superseded")
+
+    def test_lower_priority_worker_kept_when_lane_capacity_available(self) -> None:
+        config = {
+            "schema": {
+                "tasks_path": "tasks",
+                "task_id_field": "id",
+                "assignee_field": "owner",
+                "reviewer_field": "reviewer",
+            },
+            "supervisor": {"stall_after_seconds": 300},
+            "ready_dispatcher": {
+                "active_worker_statuses": ["running", "started", "waiting_approval", "manual_pending", "retry_backoff", "suspended_approval", "stalled", "fallback"],
+                "finalize_statuses": ["review_approved"],
+                "dependency_done_statuses": ["done"],
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"codex2": 3},
+            },
+            "providers": {},
+            "agents": {
+                "codex2": {"id": "codex2", "display_name": "Codex2"},
+                "codex": {"id": "codex", "display_name": "Codex"},
+            },
+        }
+        state = {
+            "queue": {
+                "events": {
+                    "evt-low": {"status": "started"},
+                    "evt-high": {"status": "started"},
+                }
+            },
+            "workers": {
+                "run-low": {
+                    "run_id": "run-low",
+                    "task_id": "PBK-UI-004",
+                    "provider": "codex2",
+                    "agent_id": "codex2",
+                    "status": "running",
+                    "queue_event_id": "evt-low",
+                    "pid": 12345,
+                    "last_event_at": "2999-01-01T00:00:00Z",
+                    "request_snapshot": {"reason": "owned_ready_dispatch"},
+                },
+                "run-high": {
+                    "run_id": "run-high",
+                    "task_id": "PBK-UI-003-SIDECAR-REVIEW",
+                    "provider": "codex2",
+                    "agent_id": "codex2",
+                    "status": "running",
+                    "queue_event_id": "evt-high",
+                    "pid": 12346,
+                    "last_event_at": "2999-01-01T00:00:00Z",
+                    "request_snapshot": {"reason": "owned_finalize_dispatch"},
+                },
+            },
+        }
+        status = {
+            "tasks": [
+                {"id": "PBK-UI-003-SIDECAR-REVIEW", "status": "review_approved", "owner": "Codex2", "reviewer": "Claude2", "depends_on": []},
+                {"id": "PBK-UI-004", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": ["PBK-UI-003"]},
+                {"id": "PBK-UI-003", "status": "done", "owner": "Claude2", "reviewer": "Codex", "depends_on": []},
+            ]
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "load_provider_report", return_value={}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+            mock.patch.object(supervisor, "terminate_worker_pid") as terminate_worker_pid,
+            mock.patch.object(supervisor, "detect_worker_failure", return_value=None),
+            mock.patch.object(supervisor, "utc_now", return_value="2026-04-06T09:01:00Z"),
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            supervisor.poll_workers(config, state)
+
+        self.assertEqual(state["workers"]["run-low"]["status"], "running")
+        self.assertEqual(state["workers"]["run-high"]["status"], "running")
+        terminate_worker_pid.assert_not_called()
+
+    def test_covered_higher_priority_worker_does_not_supersede_full_lane(self) -> None:
+        config = {
+            "ready_dispatcher": {
+                "active_worker_statuses": ["running"],
+                "finalize_statuses": ["review_approved"],
+                "dependency_done_statuses": ["done"],
+                "max_tasks_per_agent": 1,
+                "max_tasks_per_agent_by_lane": {"codex2": 2},
+            },
+            "agents": {"codex2": {"id": "codex2", "display_name": "Codex2"}},
+        }
+        low_worker = {
+            "task_id": "PBK-UI-004",
+            "provider": "codex2",
+            "agent_id": "codex2",
+            "status": "running",
+            "request_snapshot": {"reason": "owned_ready_dispatch"},
+        }
+        state = {
+            "queue": {"events": {}},
+            "workers": {
+                "run-low": low_worker,
+                "run-high": {
+                    "task_id": "PBK-UI-003-SIDECAR-REVIEW",
+                    "provider": "codex2",
+                    "agent_id": "codex2",
+                    "status": "running",
+                    "request_snapshot": {"reason": "owned_finalize_dispatch"},
+                },
+            },
+        }
+        task_map = {
+            "PBK-UI-003-SIDECAR-REVIEW": {"id": "PBK-UI-003-SIDECAR-REVIEW", "status": "review_approved", "owner": "Codex2", "reviewer": "Claude2", "depends_on": []},
+            "PBK-UI-004": {"id": "PBK-UI-004", "status": "todo", "owner": "Codex2", "reviewer": "Codex", "depends_on": []},
+        }
+
+        self.assertFalse(
+            supervisor.higher_priority_ready_task_exists(
+                config,
+                low_worker,
+                task_map,
+                state=state,
+                active_statuses={"running"},
+            )
+        )
 
     def test_dead_worker_for_open_task_is_marked_failed_not_completed(self) -> None:
         config = {
@@ -2534,6 +3080,36 @@ class PollWorkersRecoveryTests(unittest.TestCase):
 
 
 class SingleSupervisorGuardTests(unittest.TestCase):
+    def test_supervisor_cmdline_matches_actual_python_process(self) -> None:
+        repo_root = str(supervisor.THIS_DIR.parent.resolve())
+
+        self.assertTrue(
+            supervisor.supervisor_cmdline_matches_current_script(
+                ["/usr/bin/python3", ".orchestrator/supervisor.py", "--config", "config.json"],
+                repo_root,
+            )
+        )
+
+    def test_supervisor_cmdline_ignores_timeout_parent_wrapper(self) -> None:
+        repo_root = str(supervisor.THIS_DIR.parent.resolve())
+
+        self.assertFalse(
+            supervisor.supervisor_cmdline_matches_current_script(
+                ["timeout", "15", "/usr/bin/python3", ".orchestrator/supervisor.py", "--verbose"],
+                repo_root,
+            )
+        )
+
+    def test_supervisor_cmdline_ignores_shell_launcher(self) -> None:
+        repo_root = str(supervisor.THIS_DIR.parent.resolve())
+
+        self.assertFalse(
+            supervisor.supervisor_cmdline_matches_current_script(
+                ["/bin/bash", "-lc", "python3 .orchestrator/supervisor.py --verbose"],
+                repo_root,
+            )
+        )
+
     def test_terminate_older_supervisors_kills_only_older_matching_processes(self) -> None:
         config = {"activity_log": "/tmp/fake-log.jsonl"}
         killed: list[tuple[int, int]] = []
@@ -2919,8 +3495,12 @@ class WorkerReassignmentTests(unittest.TestCase):
             mock.patch.object(supervisor, "pid_is_alive", return_value=True),
             mock.patch.object(
                 supervisor,
-                "detect_worker_failure",
-                return_value="status: 429 RESOURCE_EXHAUSTED No capacity available for model gemini-2.5-pro",
+                "detect_worker_failure_signal",
+                return_value=supervisor.WorkerFailureSignal(
+                    "status: 429 RESOURCE_EXHAUSTED No capacity available for model gemini-2.5-pro",
+                    source="raw_process_line",
+                    provider_pause_authorized=True,
+                ),
             ),
             mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
             mock.patch.object(supervisor, "request_for_worker", return_value={"task_id": None}),
@@ -2936,6 +3516,69 @@ class WorkerReassignmentTests(unittest.TestCase):
         self.assertEqual(worker["status"], "failed")
         self.assertEqual(state["queue"]["events"]["evt-live-capacity"]["status"], "failed")
         self.assertEqual(state["provider_pauses"]["gemini2"]["kind"], "capacity")
+
+    def test_live_coordination_log_excerpt_does_not_pause_provider(self) -> None:
+        handle = tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False)
+        handle.write(
+            "\n".join(
+                [
+                    "exec",
+                    '/bin/bash -lc "cat .orchestrator/logs/old-worker.log" in /repo',
+                    " succeeded in 0ms:",
+                    "Failed to authenticate. API Error: 401 Invalid authentication credentials",
+                    "",
+                    "tokens used",
+                    "Reviewed archived auth failures; no live auth error happened in this worker.",
+                ]
+            )
+            + "\n"
+        )
+        handle.flush()
+        handle.close()
+        self.addCleanup(Path(handle.name).unlink, missing_ok=True)
+        config = {
+            "agents": {
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            },
+            "ready_dispatch": {
+                "active_worker_statuses": ["running", "retry_backoff", "stalled", "waiting_approval", "manual_pending"],
+            },
+        }
+        state = {
+            "queue": {"events": {"evt-chair": {"status": "started"}}},
+            "workers": {
+                "codex2-chair": {
+                    "run_id": "codex2-chair",
+                    "provider": "codex2",
+                    "agent_id": "codex2",
+                    "task_id": None,
+                    "pid": 4243,
+                    "status": "running",
+                    "mode": "coordination",
+                    "request_snapshot": {"reason": "chair_review:provider_health_triage", "metadata": {"mode": "coordination"}},
+                    "queue_event_id": "evt-chair",
+                    "last_event_at": "2999-01-01T00:00:00Z",
+                    "retry_count": 0,
+                    "log_path": handle.name,
+                }
+            },
+        }
+
+        with (
+            mock.patch.object(supervisor, "load_approval_state", return_value={"pending": [], "history": []}),
+            mock.patch.object(supervisor, "load_status", return_value={"tasks": []}),
+            mock.patch.object(supervisor, "load_provider_report", return_value={"providers": {"codex2": {"auth_ready": True}}}),
+            mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+            mock.patch.object(supervisor, "update_from_log"),
+            mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+            mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
+            mock.patch.object(supervisor, "write_activity_log"),
+        ):
+            supervisor.poll_workers(config, state)
+
+        terminate.assert_not_called()
+        self.assertNotIn("provider_pauses", state)
+        self.assertEqual(state["workers"]["codex2-chair"]["status"], "running")
 
     def test_finalize_terminal_wrapper_passes_state_into_reassignment(self) -> None:
         config = dict(self.config)
@@ -3723,6 +4366,65 @@ class ChairmanFlowTests(unittest.TestCase):
             self.assertEqual(state["chair_reassignment_guards"]["OPX-MD-003:owner"]["to"], "Codex")
             self.assertEqual(state["chair_reassignment_guards"]["OPX-MD-003:reviewer"]["to"], "Claude")
 
+    def test_chair_reassignment_rejects_owner_move_to_current_reviewer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            status_path = root / "ai-status.json"
+            status_path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "id": "PBK-UI-004",
+                                "owner": "Codex",
+                                "reviewer": "Codex2",
+                                "status": "in_progress",
+                                "last_update": "2026-05-18T00:00:00Z",
+                            }
+                        ],
+                        "handoffs": [],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            config = {
+                "paths": {
+                    "status_file": str(status_path),
+                    "state_file": str(root / "state.json"),
+                    "approval_queue": str(root / "approval-queue.json"),
+                    "activity_log": str(root / "activity-log.jsonl"),
+                    "event_queue": str(root / "event-queue.jsonl"),
+                },
+                "agents": {
+                    "codex": {"display_name": "Codex", "provider": "codex"},
+                    "codex2": {"display_name": "Codex2", "provider": "codex2"},
+                    "claude2": {"display_name": "Claude2", "provider": "claude2"},
+                },
+            }
+            state = {"queue": {"events": {}}, "workers": {}, "failure_streaks": {}}
+
+            with mock.patch.object(supervisor, "sync_status_pipeline", return_value=True) as sync:
+                changed = supervisor.apply_chair_reassignment_action(
+                    config,
+                    state,
+                    {
+                        "task_id": "PBK-UI-004",
+                        "role": "owner",
+                        "from": "Codex",
+                        "to": "Codex2",
+                        "reason": "Codex hit repeated terminal failures.",
+                    },
+                    provider_report={},
+                )
+
+            self.assertFalse(changed)
+            sync.assert_not_called()
+            task = json.loads(status_path.read_text(encoding="utf-8"))["tasks"][0]
+            self.assertEqual(task["owner"], "Codex")
+            self.assertEqual(task["reviewer"], "Codex2")
+
     def test_refresh_chair_review_state_reassigns_backlog_owner_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -4179,6 +4881,187 @@ class ChairmanFlowTests(unittest.TestCase):
         self.assertEqual(expired, [])
         self.assertIn("claude", state["provider_pauses"])
         self.assertTrue(supervisor.is_agent_dispatch_paused(config, state, "claude", provider_report=provider_report))
+
+
+class WorkerTreeGuardSettingsTests(unittest.TestCase):
+    def test_defaults_off_with_canonical_blocking_globs(self) -> None:
+        settings = supervisor.worker_tree_guard_settings({})
+        self.assertFalse(settings["enabled"])
+        self.assertFalse(settings["log_only"])
+        # All fragile surfaces from branch-strategy.md §11.1.
+        for needed in [
+            ".orchestrator/supervisor.py",
+            ".orchestrator/skills/**",
+            ".orchestrator/templates/*",
+            ".orchestrator/config*.json",
+            ".orchestrator/branch_routing.py",
+            "docs/ops/branch-strategy.md",
+            ".github/workflows/**",
+            ".husky/**",
+        ]:
+            self.assertIn(needed, settings["blocking_globs"])
+
+    def test_override_overrides_globs_completely(self) -> None:
+        config = {
+            "branch_strategy": {
+                "worker_tree_guard": {
+                    "enabled": True,
+                    "blocking_globs": ["my-special-file.txt"],
+                }
+            }
+        }
+        settings = supervisor.worker_tree_guard_settings(config)
+        self.assertTrue(settings["enabled"])
+        self.assertEqual(settings["blocking_globs"], ["my-special-file.txt"])
+
+    def test_empty_globs_list_falls_back_to_defaults(self) -> None:
+        config = {"branch_strategy": {"worker_tree_guard": {"blocking_globs": []}}}
+        settings = supervisor.worker_tree_guard_settings(config)
+        self.assertIn(".orchestrator/supervisor.py", settings["blocking_globs"])
+
+
+class WorkerTreeGuardMatchingTests(unittest.TestCase):
+    GLOBS = [
+        ".orchestrator/supervisor.py",
+        ".orchestrator/skills/**",
+        ".orchestrator/templates/*",
+        ".orchestrator/config*.json",
+        "docs/**",
+        ".husky/**",
+    ]
+
+    def test_exact_file_matches(self) -> None:
+        self.assertEqual(
+            supervisor._worker_tree_guard_matches(".orchestrator/supervisor.py", self.GLOBS),
+            ".orchestrator/supervisor.py",
+        )
+
+    def test_double_star_matches_direct_child(self) -> None:
+        self.assertEqual(
+            supervisor._worker_tree_guard_matches(".orchestrator/skills/task-closeout.md", self.GLOBS),
+            ".orchestrator/skills/**",
+        )
+
+    def test_double_star_matches_nested_child(self) -> None:
+        self.assertEqual(
+            supervisor._worker_tree_guard_matches("docs/ops/branch-strategy.md", self.GLOBS),
+            "docs/**",
+        )
+
+    def test_single_star_matches_one_level_only(self) -> None:
+        self.assertEqual(
+            supervisor._worker_tree_guard_matches(".orchestrator/templates/wakeup.txt", self.GLOBS),
+            ".orchestrator/templates/*",
+        )
+
+    def test_runtime_state_files_do_not_match(self) -> None:
+        for path in ["ai-status.json", "current-work.md", "docs-site/index.html"]:
+            with self.subTest(path=path):
+                # docs-site is outside the docs/** blocking pattern when
+                # treated as a separate top-level directory.
+                self.assertIsNone(
+                    supervisor._worker_tree_guard_matches(path, self.GLOBS)
+                )
+
+    def test_unrelated_paths_do_not_match(self) -> None:
+        self.assertIsNone(
+            supervisor._worker_tree_guard_matches("apps/driver/src/index.tsx", self.GLOBS)
+        )
+
+
+class CheckWorkerTreeGuardTests(unittest.TestCase):
+    def _enabled_config(self, log_only: bool = False) -> dict:
+        return {
+            "branch_strategy": {
+                "worker_tree_guard": {
+                    "enabled": True,
+                    "log_only": log_only,
+                    "blocking_globs": [
+                        ".orchestrator/supervisor.py",
+                        ".orchestrator/skills/**",
+                        "docs/**",
+                    ],
+                }
+            }
+        }
+
+    def _porcelain(self, paths: list[str]) -> mock.MagicMock:
+        proc = mock.MagicMock()
+        proc.returncode = 0
+        proc.stdout = "\n".join(f" M {p}" for p in paths)
+        proc.stderr = ""
+        return proc
+
+    def test_disabled_returns_none(self) -> None:
+        result = supervisor.check_worker_tree_guard({}, reason="owned_in_progress_dispatch")
+        self.assertIsNone(result)
+
+    def test_skip_reason_owned_finalize_dispatch_returns_none(self) -> None:
+        with mock.patch.object(
+            supervisor.subprocess, "run", return_value=self._porcelain([".orchestrator/supervisor.py"])
+        ):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(), reason="owned_finalize_dispatch"
+            )
+        self.assertIsNone(result)
+
+    def test_dirty_fragile_surface_returns_block_payload(self) -> None:
+        with mock.patch.object(
+            supervisor.subprocess, "run", return_value=self._porcelain([".orchestrator/skills/foo.md"])
+        ):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(), reason="owned_in_progress_dispatch"
+            )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["dirty_paths"], [".orchestrator/skills/foo.md"])
+        self.assertIn(".orchestrator/skills/**", result["matched_globs"])
+        self.assertFalse(result["log_only"])
+
+    def test_dirty_only_runtime_state_returns_none(self) -> None:
+        with mock.patch.object(
+            supervisor.subprocess,
+            "run",
+            return_value=self._porcelain(["ai-status.json", "current-work.md"]),
+        ):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(), reason="owned_in_progress_dispatch"
+            )
+        self.assertIsNone(result)
+
+    def test_log_only_mode_carries_flag_through(self) -> None:
+        with mock.patch.object(
+            supervisor.subprocess,
+            "run",
+            return_value=self._porcelain([".orchestrator/supervisor.py"]),
+        ):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(log_only=True), reason="owned_in_progress_dispatch"
+            )
+        self.assertIsNotNone(result)
+        self.assertTrue(result["log_only"])
+
+    def test_git_command_failure_fails_open(self) -> None:
+        proc = mock.MagicMock()
+        proc.returncode = 128
+        proc.stdout = ""
+        proc.stderr = "fatal: not a git repository"
+        with mock.patch.object(supervisor.subprocess, "run", return_value=proc):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(), reason="owned_in_progress_dispatch"
+            )
+        self.assertIsNone(result, "guard must not block on its own diagnostic failure")
+
+    def test_rename_porcelain_format_takes_new_path(self) -> None:
+        proc = mock.MagicMock()
+        proc.returncode = 0
+        proc.stdout = "R  old/path.md -> .orchestrator/skills/renamed.md"
+        proc.stderr = ""
+        with mock.patch.object(supervisor.subprocess, "run", return_value=proc):
+            result = supervisor.check_worker_tree_guard(
+                self._enabled_config(), reason="owned_in_progress_dispatch"
+            )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["dirty_paths"], [".orchestrator/skills/renamed.md"])
 
 
 if __name__ == "__main__":

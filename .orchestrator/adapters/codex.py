@@ -3,7 +3,15 @@ from __future__ import annotations
 import os
 
 from adapters.base import BaseAdapter, DeliveryCapability, DeliveryRequest, DeliveryResult
-from common import agent_config_for, command_exists, config_path, new_runtime_id, runtime_log_path, spawn_background_process
+from common import (
+    agent_config_for,
+    apply_orchestrator_runtime_env,
+    command_exists,
+    delivery_workspace_root,
+    new_runtime_id,
+    runtime_log_path,
+    spawn_background_process,
+)
 
 
 class CodexAdapter(BaseAdapter):
@@ -43,11 +51,12 @@ class CodexAdapter(BaseAdapter):
         provider = self.config.get("providers", {}).get(provider_key, {})
         codex_settings = provider.get("codex", {})
         cli = codex_settings.get("cli") or "codex"
+        workspace_root = delivery_workspace_root(self.config, request.metadata)
         command = [
             cli,
             "exec",
             "-C",
-            str(config_path(self.config, "status_file").parents[0]),
+            str(workspace_root),
             "-c",
             f'ask_for_approval="{codex_settings.get("ask_for_approval", "never")}"',
             "-s",
@@ -62,12 +71,13 @@ class CodexAdapter(BaseAdapter):
         config_home = codex_settings.get("config_home")
         if config_home:
             env["CODEX_HOME"] = os.path.expanduser(config_home)
+        apply_orchestrator_runtime_env(env, self.config, request.metadata)
 
         run_id = new_runtime_id("codex")
         log_path = runtime_log_path("codex", request.agent_id)
         process, _ = spawn_background_process(
             command,
-            cwd=config_path(self.config, "status_file").parents[0],
+            cwd=workspace_root,
             log_path=log_path,
             env=env,
         )

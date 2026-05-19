@@ -183,5 +183,113 @@ class WatcherBookkeepingTests(unittest.TestCase):
             self.assertIn("do not stage repo-external paths from this repository", payload["message"])
 
 
+class RenderWakeupMessageTests(unittest.TestCase):
+    """Coverage for the branch-protocol block injected by OPS-GIT-WORKFLOW-005.
+
+    The block must appear with concrete lane/task_id_kebab/base_branch values
+    when all three facts are available, and degrade to a blank string when any
+    are missing (e.g. planning baton dispatch with no task_id).
+    """
+
+    def _config(self, agent_id: str = "claude") -> dict:
+        return {
+            "agents": {
+                agent_id: {
+                    "id": agent_id,
+                    "display_name": agent_id.capitalize(),
+                    "provider": agent_id,
+                    "adapter": "claude_cli",
+                    "wake_template": ".orchestrator/templates/wakeup.txt",
+                }
+            },
+            "providers": {agent_id: {"delivery_mode": "claude_cli"}},
+        }
+
+    def test_backend_task_emits_concrete_branch_block(self) -> None:
+        config = self._config(agent_id="claude")
+        event = {
+            "task_id": "BE-APR-NOTIFY-001",
+            "target_agent": "claude",
+            "reason": "owned_in_progress_dispatch",
+            "task": {"id": "BE-APR-NOTIFY-001"},
+            "target_files": [],
+        }
+        with mock.patch.object(watch_events, "selected_shared_files", return_value=[]):
+            rendered = watch_events.render_wakeup_message(config, event, "claude")
+
+        self.assertIn("`claude/be-apr-notify-001`", rendered)
+        # v4: backend track now routes to the single `dev` trunk.
+        self.assertIn("origin/dev", rendered)
+        self.assertIn("git worktree list --porcelain", rendered)
+        self.assertIn("git show-ref --verify --quiet refs/heads/claude/be-apr-notify-001", rendered)
+        self.assertIn('LLM-Agent: claude', rendered)
+        self.assertIn("Task-ID: BE-APR-NOTIFY-001", rendered)
+        self.assertIn(".orchestrator/skills/worker-anchor-commit.md", rendered)
+        self.assertNotIn("{{branch_protocol}}", rendered)
+
+    def test_frontend_task_routes_to_frontend_trunk(self) -> None:
+        config = self._config(agent_id="gemini2")
+        event = {
+            "task_id": "UI-CANVAS-OC-PAGE-INCIDENTS-001",
+            "target_agent": "gemini2",
+            "reason": "owned_in_progress_dispatch",
+            "task": {"id": "UI-CANVAS-OC-PAGE-INCIDENTS-001"},
+            "target_files": [],
+        }
+        with mock.patch.object(watch_events, "selected_shared_files", return_value=[]):
+            rendered = watch_events.render_wakeup_message(config, event, "gemini2")
+
+        self.assertIn("`gemini2/ui-canvas-oc-page-incidents-001`", rendered)
+        # v4: frontend track also routes to the single `dev` trunk.
+        self.assertIn("origin/dev", rendered)
+        # Lane substitution uses the agent id, not the display name.
+        self.assertIn("LLM-Agent: gemini2", rendered)
+
+    def test_missing_task_id_degrades_to_blank_block(self) -> None:
+        """Planning-baton or other task-less dispatches must NOT print a
+        garbage `git switch -c lane/` line. The block should collapse."""
+        config = self._config(agent_id="claude")
+        event = {
+            "task_id": "",
+            "target_agent": "claude",
+            "reason": "planning",
+            "task": {},
+            "target_files": [],
+        }
+        with mock.patch.object(watch_events, "selected_shared_files", return_value=[]):
+            rendered = watch_events.render_wakeup_message(config, event, "claude")
+
+        self.assertNotIn("git switch -c claude/", rendered)
+        self.assertNotIn("anchor commit", rendered)
+        self.assertNotIn("{{branch_protocol}}", rendered)
+
+    def test_build_branch_protocol_block_requires_all_facts(self) -> None:
+        block = watch_events.build_branch_protocol_block(
+            task_id="OPS-GIT-WORKFLOW-005",
+            lane="claude",
+            task_id_kebab="ops-git-workflow-005",
+            base_branch="dev",
+        )
+        self.assertIn("claude/ops-git-workflow-005", block)
+        self.assertIn("origin/dev", block)
+        self.assertIn("worker-anchor-commit.md", block)
+
+        # Missing any one fact → empty.
+        for missing in [
+            {"task_id": ""},
+            {"lane": ""},
+            {"task_id_kebab": ""},
+            {"base_branch": ""},
+        ]:
+            kwargs = {
+                "task_id": "OPS-GIT-WORKFLOW-005",
+                "lane": "claude",
+                "task_id_kebab": "ops-git-workflow-005",
+                "base_branch": "backend-dev",
+            }
+            kwargs.update(missing)
+            self.assertEqual(watch_events.build_branch_protocol_block(**kwargs), "")
+
+
 if __name__ == "__main__":
     unittest.main()

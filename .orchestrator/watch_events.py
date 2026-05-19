@@ -31,6 +31,7 @@ from common import (
     utc_now,
     write_activity_log,
 )
+from branch_routing import route_task
 from runtime_state import enqueue_event, load_runtime_state, save_runtime_state
 
 
@@ -271,6 +272,7 @@ def render_wakeup_message(
     template_path = resolve_path(agent.get("wake_template") or ".orchestrator/templates/wakeup.txt")
     if template_path is None:
         raise RuntimeError("Unable to resolve wake-up template path")
+    raw_task_id = str(event.get("task_id") or "").strip()
     task_payload = event.get("task", {}) or {}
     shared_paths = selected_shared_files(
         config,
@@ -337,17 +339,87 @@ def render_wakeup_message(
             "- push 成功後才能用 `COMMIT_HASH`、`COMMIT_SUBJECT`、`PUSH_REMOTE`、`PUSH_BRANCH` 呼叫 `scripts/ai-status.sh done`。\n"
             "- 如果不能安全 push，請改用 blocker/progress 說清楚原因，不要標 `done`。\n"
         )
+    lane = str(agent.get("id") or target_agent or "").strip()
+    task_id_kebab = raw_task_id.lower() if raw_task_id else ""
+    if raw_task_id:
+        routing = route_task(raw_task_id, config=config)
+        base_branch = routing.base_branch
+    else:
+        base_branch = ""
+    branch_protocol = build_branch_protocol_block(
+        task_id=raw_task_id,
+        lane=lane,
+        task_id_kebab=task_id_kebab,
+        base_branch=base_branch,
+    )
+    task_commit_guardrails = ""
+    if raw_task_id:
+        task_commit_guardrails = (
+            "\n若本次變更碰到 `docs/ops/branch-strategy.md` §11.1 的 fragile surface，或跨多檔共享 design intent，"
+            "不能把 diff 只留在 working tree；在 yield / 換 task / 結束 session 前，"
+            "先做 task-scoped anchor commit 或正式 closeout commit。\n"
+            "工作樹已有不相關修改不是跳過 commit 的理由；只 stage 你 own 的檔案，必要時切到乾淨 branch/worktree 再繼續。\n"
+            "若安全 commit 或普通 non-force push 做不到，必須明確回報 `progress` / `blocker` 與原因，不能把工作描述成已完成。"
+        )
     variables = {
         "shared_files": shared_files,
-        "task_id": event.get("task_id") or "(none)",
+        "task_id": raw_task_id or "(none)",
+        "task_id_kebab": task_id_kebab,
+        "lane": lane,
+        "base_branch": base_branch,
         "target_agent": display_name_for(config, str(target_agent or "")) or str(target_agent or ""),
         "reason": event.get("reason") or "wakeup",
         "target_files": "\n".join(f"- {path}" for path in display_target_files) if display_target_files else "- (none inferred)",
         "sidecar_guardrails": sidecar_guardrails.rstrip(),
         "closeout_guardrails": closeout_guardrails.rstrip(),
+        "branch_protocol": branch_protocol.rstrip(),
+        "task_commit_guardrails": task_commit_guardrails.rstrip(),
         "task_brief_inline": task_brief_inline.rstrip(),
     }
     return render_template(template_path, variables).strip() + "\n"
+
+
+def build_branch_protocol_block(
+    *,
+    task_id: str,
+    lane: str,
+    task_id_kebab: str,
+    base_branch: str,
+) -> str:
+    """Render the anchor-commit / branch-hygiene block injected into wakeup.txt.
+
+    Returns "" when any of the three positional facts (task id, lane, base
+    branch) is missing — without all three we can't print concrete commands,
+    and the abstract protocol already lives in
+    `.orchestrator/skills/worker-anchor-commit.md`, so a blank block is the
+    correct degradation (e.g. for planning baton dispatches that have no
+    task-scoped branch).
+    """
+    if not (task_id and lane and task_id_kebab and base_branch):
+        return ""
+    return (
+        "\n分支與 anchor commit（依 `docs/ops/branch-strategy.md` §11，工作期間遵守）：\n"
+        f"- 預期 branch：`{lane}/{task_id_kebab}`，base 為 `{base_branch}`。\n"
+        "- 若 supervisor 已指定 isolated worker cwd，留在該 cwd；不要切換 canonical root。\n"
+        "- 若當前 branch 不是預期 branch，先復用既有 branch/worktree；只有 branch 不存在才建立：\n"
+        "  ```bash\n"
+        "  git fetch origin\n"
+        f"  existing=$(git worktree list --porcelain | awk 'BEGIN{{p=\"\"}} /^worktree /{{p=substr($0,10)}} /^branch refs\\/heads\\/{lane}\\/{task_id_kebab}$/{{print p; exit}}')\n"
+        "  if [ -n \"$existing\" ]; then cd \"$existing\"; "
+        f"elif git show-ref --verify --quiet refs/heads/{lane}/{task_id_kebab}; then git switch {lane}/{task_id_kebab}; "
+        f"else git switch -c {lane}/{task_id_kebab} origin/{base_branch}; fi\n"
+        "  ```\n"
+        "- working tree 不是暫存區。改動觸及 fragile surface（`.orchestrator/supervisor.py`、"
+        "`.orchestrator/skills/**`、`.orchestrator/templates/*`、`docs/**`、`.github/workflows/**`、"
+        "`.husky/*`、`config*.json`），或跨檔案、預計跨 supervisor cycle、即將 yield 時，"
+        "立即 anchor commit：\n"
+        f"  `git commit -m \"wip({task_id}): anchor <scope>\" -m \"LLM-Agent: {lane}\" "
+        f"-m \"Task-ID: {task_id}\" -m \"Reviewer: <reviewer>\"`\n"
+        "- 不要 `git stash` 帶有設計意圖的 diff。supervisor 把你切到別的 task 前，**先 commit**，不靠 stash。\n"
+        f"- `{base_branch}` 前進過：`git fetch origin && git rebase origin/{base_branch}`，"
+        "不要 `git stash pop` 在 moved trunk 上。\n"
+        "- 完整協議與 trigger checklist：`.orchestrator/skills/worker-anchor-commit.md`。\n"
+    )
 
 
 def queue_delivery_event(config: dict[str, Any], event: dict[str, Any]) -> bool:

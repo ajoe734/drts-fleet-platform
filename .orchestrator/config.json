@@ -446,6 +446,12 @@
       }
     }
   },
+  "branch_strategy": {
+    "worker_worktrees": {
+      "enabled": true,
+      "root": ".artifacts/worktrees/auto"
+    }
+  },
   "ready_dispatcher": {
     "enabled": true,
     "review_statuses": ["review"],
@@ -477,6 +483,10 @@
       "require_owner_higher_priority_load": false
     },
     "max_tasks_per_agent": 1,
+    "max_tasks_per_agent_by_lane": {
+      "codex": 3,
+      "codex2": 3
+    },
     "max_dispatches_per_tick": 4
   }
 }
