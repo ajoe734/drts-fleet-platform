@@ -1,9 +1,9 @@
 # FIN-GOV-001 - Governance-Aware Billing & Reporting Evidence Pack
 
-**Task:** `FIN-GOV-001` - governance-aware billing and reporting live evidence pack  
-**Intended owner:** `Codex2`  
-**Intended reviewer:** `Codex`  
-**Collected:** `2026-05-19 (UTC)`  
+**Task:** `FIN-GOV-001` - governance-aware billing and reporting live evidence pack
+**Intended owner:** `Codex2`
+**Intended reviewer:** `Codex`
+**Collected:** `2026-05-19 (UTC)`
 **Current read:** `PARTIAL - static evidence consolidated; 2026-05-19 live rerun reconfirmed blocked by credential/ingress gates`
 
 ---
