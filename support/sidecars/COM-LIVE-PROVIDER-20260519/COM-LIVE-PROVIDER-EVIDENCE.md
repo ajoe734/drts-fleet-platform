@@ -22,8 +22,9 @@ Current result on `2026-05-19`:
   - provider or approved stub environment is still missing
   - callback contract and webhook security proof are still missing
   - no fresh callback sample, filing run, or recording export artifact exists
-- `COM-BLUEPRINT-001` is still `in_progress`; it can consolidate the design and
-  prior evidence, but it does not itself activate the provider.
+- `COM-BLUEPRINT-001` is already `done` at closeout commit `9373084`; it
+  consolidates the design and prior evidence, but it does not itself activate
+  the provider.
 
 Conclusion:
 
@@ -76,11 +77,24 @@ This task found no newer artifact that supersedes those conclusions.
 
 ### 2.4 Dependency status
 
-`COM-BLUEPRINT-001` is currently `in_progress` in `ai-status.json`.
+`COM-BLUEPRINT-001` is currently `done` in `ai-status.json`, with closeout
+commit `9373084` on `origin/codex2/com-blueprint-001`.
 
 Its scope is blueprint consolidation for CTI / recording / filing. That
-dependency helps document the seam, but it does not satisfy the live provider
-activation prerequisite required by `WF-COM-001-LIVE-PROVIDER`.
+completed dependency documents the seam, but it does not satisfy the live
+provider activation prerequisite required by `WF-COM-001-LIVE-PROVIDER`.
+
+### 2.5 Latest unblock resolution
+
+`WF-COM-001-LIVE-PROVIDER-UNBLOCK-PLANNING-DECISION` is already `done` in
+canonical machine truth, with commit `981a417` on
+`origin/codex/wf-com-001-live-provider-unblock-planning-decision`.
+
+That helper closed the remaining repo-side planning question: approved CTI
+stub or sandbox proof may preserve the base `WF-COM-001` evidence posture, but
+it does not clear this live-provider follow-on. The remaining gate is external
+activation and evidence only under `EXT-004-BLK-001` through
+`EXT-004-BLK-008`.
 
 ---
 
