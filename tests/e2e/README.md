@@ -27,12 +27,14 @@ It serves three purposes:
 | `E2E-002-forwarded-order.sh`        | `WF-FWD-001`                                           | route-locked forwarded-task visibility and no-owned-assignment guard   | `EXTERNAL-GATED`; live adapter proof remains external                                                                                                                                                                                        |
 | `E2E-003-phone-recording-filing.sh` | `WF-COM-001`, `WF-FIN-001`                             | call session -> phone order -> recording callback -> export -> filing  | `PASS (sandbox evidence)` for repo-local automation; live CTI/provider activation and staging job ownership still remain explicit external/deferred gates                                                                                    |
 | `E2E-004-tenant-attribution.sh`     | `WF-TEN-001`, `WF-ORD-001`                             | tenant creation, new-tenant booking, attribution, no cross-tenant leak | `PASS (live staging evidence)` via `FBP-014B`                                                                                                                                                                                                |
+| `E2E-010-governance-aware-billing-reporting.sh` | `WF-FIN-GOV-001` (depends on `WF-TGV-001` + `WF-FIN-001`) | governed booking → quota → approval snapshot → completion → invoice/report → settlement/platform-earnings → audited download | `SHELL` (FG-01..FG-09 field-presence probe); per `FIN-GOV-UAT-001` most enrichment fields remain `BLOCKED FOR LIVE` until invoice/report rows ship the governance projection — script records each field as `NOT_POPULATED` instead of failing |
 
 ## Important Boundaries
 
 - `E2E-001` and `E2E-004` are the release-grade live staging anchors.
 - `E2E-002` is allowed to skip when no forwarded-task seed or adapter data is available.
 - `E2E-003-phone-recording-filing.sh` proves the repo-local phone-order/recording/export/filing chain in sandbox mode, but does not claim live CTI provider media, staging scheduler activation, or external retention execution.
+- `E2E-010-governance-aware-billing-reporting.sh` is a SHELL: per `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` §4 most `WF-FIN-GOV-001` enrichment cases (`FG-01`, `FG-04`–`FG-07`) remain `BLOCKED FOR LIVE` until invoice/report rows ship the governance projection. The script records each governance field as `NOT_POPULATED` rather than failing, so the reviewer can read field-presence evidence without rewriting the script as each enrichment lands.
 - The retired `apps/tenant-portal-web` shell is never a production verification target.
 
 ## Running
