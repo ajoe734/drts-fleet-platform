@@ -26,6 +26,10 @@ Current result on `2026-05-19`:
     `404` for `/`, `/health`, and `/api/health`.
   - The newer documented host `api-staging.drts.internal` returned `NXDOMAIN`
     from this machine.
+- A follow-up probe at `2026-05-19T03:33Z` to `2026-05-19T03:34Z` reconfirmed
+  the same environment boundary: active `gcloud` account present, identity
+  token mint still blocked by reauthentication, old `run.app` host still `404`,
+  and `api-staging.drts.internal` still unresolved.
 
 Conclusion:
 
@@ -223,11 +227,14 @@ Observed key outputs:
 
 ## 8. Machine-Truth Note
 
-The dispatch assigned `FWD-LIVE-001`, but during this session the task ID did
-not appear in repo-local `ai-status.json`, `current-work.md`, or
-`ai-activity-log.jsonl`.
+Canonical machine truth now records `FWD-LIVE-001` at the control-plane root
+(`/home/edna/workspace/drts-fleet-platform`) as:
 
-That mismatch does not change the forwarder gate verdict, but it does mean the
-supervisor/control-plane record should be reconciled before anyone expects a
-normal owner `handoff -> review -> review_approved -> done` lifecycle for this
-task.
+- owner `Codex2`
+- reviewer `Codex`
+- status `in_progress`
+
+The isolated worker worktree's local `ai-status.json` remains branch-local and
+is not the authoritative dispatch view for this task. This packet therefore
+uses the canonical `AI_STATUS_ROOT` state plus the sidecar evidence above as
+the authoritative session record.
