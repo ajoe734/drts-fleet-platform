@@ -61,20 +61,22 @@ now explicitly states:
 
 ## Parent next step
 
-Keep `WF-FWD-001-LIVE-SANDBOX` out of live-evidence execution until both the
-repo-local and external prerequisites are satisfied:
+`FWD-SPEC-001` is now complete in machine truth, so the repo-local proof-spec
+dependency is no longer the blocker.
 
-1. Finish `FWD-SPEC-001` so the canonical forwarder proof spec records the
-   sandbox boundary and non-claim language in repo truth.
-2. Keep `WF-FWD-001-LIVE-SANDBOX` blocked on the external owner path:
+Keep `WF-FWD-001-LIVE-SANDBOX` out of live-evidence execution until the
+external prerequisites are satisfied:
+
+1. Keep `WF-FWD-001-LIVE-SANDBOX` blocked on the external owner path:
    confirm the concrete live partner contract authority for the forwarder proof
    run and supply `EXT-002-BLK-001` to `EXT-002-BLK-007`.
-3. Only then resume the parent task to collect the live sandbox evidence pack.
+2. Only then resume the parent task to collect the live sandbox evidence pack.
 
 ## Delivery evidence
 
 - Anchor commit: `271b458` — `wip(WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION): anchor planning routing`
 - Evidence clarification commit: `ecc0482` — `docs(WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION): clarify next step and evidence`
+- Machine-truth refresh commit: pending this closeout update
 - Push remote/branch: `origin/codex2/wf-fwd-001-live-sandbox-unblock-planning-decision`
 - PR: `#166` — <https://github.com/ajoe734/drts-fleet-platform/pull/166>
 
