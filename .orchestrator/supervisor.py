@@ -2576,6 +2576,19 @@ def proactive_claim_plan_for_idle_agent(
     if helper_settings.get("prefer_assigned_when_idle", True) and assigned_agent in idle_agent_names:
         return None
 
+    # Respect explicit owner when their lane is paused (not just busy).
+    # `idle_agent_names` excludes both paused and at-capacity agents, so
+    # `assigned_agent not in idle_agent_names` conflates the two. Without
+    # this guard, a task explicitly owned by a paused lane (e.g. Gemini
+    # under quota_exhausted, or Codex with broken CLI) gets reshuffled
+    # to whoever is idle — typically cascading the entire queue onto a
+    # single lane. See feedback_supervisor_ignores_explicit_owner.md.
+    if helper_settings.get("respect_explicit_owner_when_paused", True) and state is not None:
+        if is_agent_dispatch_paused(config, state, assigned_agent):
+            assigned_load = len(agent_loads.get(assigned_agent, []))
+            if assigned_load == 0:
+                return None
+
     current_priority = dispatch_reason_priority(reason)
     assigned_loads = agent_loads.get(assigned_agent, [])
     has_higher_priority_load = current_priority is not None and any(priority < current_priority for priority in assigned_loads)
@@ -4047,6 +4060,7 @@ def helper_claim_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("prefer_assigned_when_idle", True)
     settings.setdefault("require_assigned_agent_busy", True)
     settings.setdefault("require_owner_higher_priority_load", False)
+    settings.setdefault("respect_explicit_owner_when_paused", True)
     return settings
 
 
