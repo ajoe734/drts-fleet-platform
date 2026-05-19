@@ -179,5 +179,6 @@ gate requirement in addition to the baseline positive-path matrix.
 - `support/sidecars/ADM-UI-GOV-001/ADM-UI-GOV-001-SIDECAR-ACCEPTANCE.md`
 - `support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md`
 - `support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md`
-- `docs/03-runbooks/partner-booking-pilot-cutover-runbook-20260519.md` (`WF-PBK-001`)
+- `docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md` (`WF-PBK-001`)
+- `docs/03-runbooks/partner-booking-pilot-cutover-runbook-20260519.md` (`WF-PBK-001` detailed operating procedure)
 - `docs/01-decisions/SD-DP-20260512-006-partner-booking-app-cutover-topology.md`
