@@ -723,6 +723,7 @@ export class OwnedMobilityService implements OnModuleInit {
     };
 
     const previousApprovalState = order.approvalState;
+    const governanceSnapshot = this.captureTenantGovernanceSnapshot();
     const applyGovernance = (tx?: OwnedMobilityQueryExecutor | null) =>
       this.afterMaybePromise(
         this.evaluateTenantBookingGovernance({
@@ -757,8 +758,12 @@ export class OwnedMobilityService implements OnModuleInit {
       });
     }
 
-    return this.afterMaybePromise(applyGovernance(null), (approvalRequest) =>
-      finalizeCreation(previousApprovalState, approvalRequest),
+    return this.withRollback(
+      () =>
+        this.afterMaybePromise(applyGovernance(null), (approvalRequest) =>
+          finalizeCreation(previousApprovalState, approvalRequest),
+        ),
+      () => this.restoreTenantGovernanceSnapshot(governanceSnapshot),
     );
   }
 
@@ -994,6 +999,8 @@ export class OwnedMobilityService implements OnModuleInit {
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
     const order = this.requireBookingOrder(bookingId, tenantId);
+    const originalOrder = this.cloneOrder(order);
+    const governanceSnapshot = this.captureTenantGovernanceSnapshot();
     this.assertBookingModifiable(order);
     const previousApprovalState = order.approvalState;
     const previousApprovalSnapshot =
@@ -1239,18 +1246,30 @@ export class OwnedMobilityService implements OnModuleInit {
       this.ownedMobilityRepository?.isEnabled() &&
       this.tenantPartnerService?.isPersistenceEnabled()
     ) {
-      return this.ownedMobilityRepository.withTransaction(async (tx) => {
-        await applyReevaluation(tx);
-        await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
-          orders: [this.cloneOrder(order)],
-          dispatchTraceLogs: [traceLog],
-        });
-        return finalizeUpdate(false);
-      });
+      return this.withRollback(
+        () =>
+          this.ownedMobilityRepository!.withTransaction(async (tx) => {
+            await applyReevaluation(tx);
+            await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+              orders: [this.cloneOrder(order)],
+              dispatchTraceLogs: [traceLog],
+            });
+            return finalizeUpdate(false);
+          }),
+        () => {
+          this.restoreTenantGovernanceSnapshot(governanceSnapshot);
+          this.restoreOrderSnapshot(originalOrder);
+        },
+      );
     }
 
-    return this.afterMaybePromise(applyReevaluation(null), () =>
-      finalizeUpdate(),
+    return this.withRollback(
+      () =>
+        this.afterMaybePromise(applyReevaluation(null), () => finalizeUpdate()),
+      () => {
+        this.restoreTenantGovernanceSnapshot(governanceSnapshot);
+        this.restoreOrderSnapshot(originalOrder);
+      },
     );
   }
 
@@ -4474,7 +4493,11 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       params.requestId,
     );
-    if (evaluation.outcome?.blocked) {
+    const blockedByRule = evaluation.matchedRules.some(
+      (rule) => rule.action === "block",
+    );
+
+    if (evaluation.outcome?.blocked && blockedByRule) {
       return evaluation;
     }
 
@@ -4603,6 +4626,50 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       requestId,
     );
+  }
+
+  private captureTenantGovernanceSnapshot() {
+    return (
+      this.tenantPartnerService?.createGovernanceMutationSnapshot() ?? null
+    );
+  }
+
+  private restoreTenantGovernanceSnapshot(
+    snapshot: ReturnType<
+      TenantPartnerService["createGovernanceMutationSnapshot"]
+    > | null,
+  ) {
+    if (snapshot && this.tenantPartnerService) {
+      this.tenantPartnerService.restoreGovernanceMutationSnapshot(snapshot);
+    }
+  }
+
+  private restoreOrderSnapshot(snapshot: OwnedOrderRecord) {
+    this.orders = [
+      this.cloneOrder(snapshot),
+      ...this.orders.filter(
+        (candidate) => candidate.orderId !== snapshot.orderId,
+      ),
+    ];
+  }
+
+  private withRollback<T>(
+    run: () => MaybePromise<T>,
+    rollback: () => void,
+  ): MaybePromise<T> {
+    try {
+      const result = run();
+      if (result instanceof Promise) {
+        return result.catch((error) => {
+          rollback();
+          throw error;
+        });
+      }
+      return result;
+    } catch (error) {
+      rollback();
+      throw error;
+    }
   }
 
   private afterMaybePromise<T, TResult>(

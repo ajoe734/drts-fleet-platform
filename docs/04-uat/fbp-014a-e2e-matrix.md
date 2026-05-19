@@ -223,6 +223,56 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ---
 
+### 4.5 E2E-005 — Tenant Governance Negative-Path Pack
+
+**Script:** `tests/e2e/E2E-005-tenant-governance.sh`  
+**Companion integration suite:** `tests/integ/tenant-governance-negative.test.ts`
+
+This scenario packs the Phase 1 tenant-governance negative cases into one
+live/API harness, while the integration companion provides deterministic
+time-control and in-memory rollback assertions that cannot be forced safely on
+shared staging.
+
+#### Surface Chain
+
+```
+Tenant Console (setup + booking/update/approval) ─► Platform Admin / Ops (dispatch denial + governance summary) ─► Audit
+```
+
+#### Negative Scenario Matrix
+
+| Case | Negative path                             | Primary route(s)                                                                                     | Live assertion                                                                 | Audit evidence                                        |
+| ---- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| A    | unknown cost center                       | `POST /api/tenant/bookings`                                                                          | `400 BOOKING_COST_CENTER_UNKNOWN`                                              | `booking.cost_center.validation_rejected`             |
+| B    | disabled cost center                      | `POST /api/tenant/cost-centers/disable`, `POST /api/tenant/bookings`                                 | `400 BOOKING_COST_CENTER_DISABLED`                                             | `booking.cost_center.validation_rejected`             |
+| C    | cross-tenant cost center                  | `POST /api/platform-admin/tenants`, `POST /api/tenant/cost-centers`, `POST /api/tenant/bookings`     | caller tenant sees `400 BOOKING_COST_CENTER_UNKNOWN` for another tenant's code | `booking.cost_center.validation_rejected`             |
+| D    | quota_insufficient                        | `POST /api/tenant/quotas/policies`, `POST /api/tenant/bookings`                                      | `409 QUOTA_INSUFFICIENT_AT_COMMIT`, no booking success response                | `tenant.quota_reservation.blocked`                    |
+| E    | rule block                                | `POST /api/tenant/approval-rules`, `POST /api/tenant/bookings`, `POST /api/orders/:orderId/dispatch` | booking read-back shows `approvalState=blocked`; dispatch denied               | `booking.approval_state.changed`                      |
+| F    | no approver rollback                      | `POST /api/tenant/approval-rules`, `POST /api/tenant/bookings`, `GET /api/tenant/quotas/ledger`      | `409 APPROVAL_NO_RESOLVABLE_APPROVERS`; ledger count unchanged                 | `booking.approval_rules.evaluated`                    |
+| G    | governance-sensitive update re-evaluation | `PUT /api/tenant/bookings/:bookingId`                                                                | approval request ID rotates after cost-center update                           | `booking.approval_request.cancelled_by_re_evaluation` |
+| H    | notes-only no re-evaluation               | `PUT /api/tenant/bookings/:bookingId`                                                                | approval request ID unchanged after notes-only update                          | request continuity captured in evidence log           |
+| I    | rejected booking does not dispatch        | `POST /api/tenant/approval-requests/:id/reject`, `POST /api/orders/:orderId/dispatch`                | `409 BOOKING_APPROVAL_PENDING` after rejection                                 | `booking.approval_request.rejected`                   |
+| J    | SLA escalation visible                    | `POST /api/tenant/approval-requests/:id/escalate`, `GET /api/admin/tenant-governance/summary`        | escalated request remains visible in governance summary pending counts         | `booking.approval_request.timeout_escalated`          |
+
+#### Pass Criteria
+
+1. Cases A through J either pass live or explicitly record a bounded environmental skip reason in the evidence log.
+2. Every failing API path preserves a machine-readable audit trail; the script records the matched `auditId` in `E2E_EVIDENCE_FILE`.
+3. The no-approver case must not increase quota-ledger count for its isolated cost center.
+4. Governance-sensitive field changes rotate approval requests; notes-only changes do not.
+5. A rejected booking or a rule-blocked booking cannot be dispatched.
+6. Manual escalation remains visible on the governance surface even without a time-travelled 48h SLA breach.
+
+#### Notes
+
+- The companion integration suite is authoritative for the deterministic
+  48-hour SLA-age alert (`pending_approval_over_48h`) because live E2E cannot
+  safely time-travel shared environments.
+- `E2E-005` writes temporary JSON payloads at runtime instead of adding new
+  fixture files to `tests/e2e/fixtures/`.
+
+---
+
 ## 5. Fixture Inventory
 
 | Fixture File                     | Used By                          | Description                                                       |
