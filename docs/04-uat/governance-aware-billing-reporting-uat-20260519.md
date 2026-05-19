@@ -166,7 +166,7 @@ Minimum rerun command set:
 
 ```bash
 ./scripts/run-smoke-tests.sh --suite '05|06'
-./tests/e2e/run-e2e.sh --scenario E2E-005
+./tests/e2e/run-e2e.sh --suite 005
 ```
 
 Governance API readback targets called out by `FIN-GOV-001`:
