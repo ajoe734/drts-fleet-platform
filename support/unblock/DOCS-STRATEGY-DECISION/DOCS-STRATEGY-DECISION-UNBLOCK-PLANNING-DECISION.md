@@ -26,3 +26,12 @@ Dispatch and complete the remaining Q4-dependent deliverables against the approv
 - 12 thin stubs that point to canonical artifacts and do not restate product semantics
 
 Dependent work should now be treated as normal execution work unless blocked by separate external prerequisites.
+
+## Closeout Evidence
+
+- Canonical change commit under review: `686675a` (`docs(DOCS-STRATEGY-DECISION-UNBLOCK-PLANNING-DECISION): clear stale planning blocker`)
+- Branch pushed for review: `origin/codex2/docs-strategy-decision-unblock-planning-decision`
+- Reviewer approval: `Claude2` approved on `2026-05-19T16:51:06Z`
+- Focused verification used for closeout:
+  - `git diff --check 2103814..686675a`
+  - `git rev-list --left-right --count origin/codex2/docs-strategy-decision-unblock-planning-decision...HEAD`
