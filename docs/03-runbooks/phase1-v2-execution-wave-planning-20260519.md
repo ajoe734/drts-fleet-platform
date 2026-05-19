@@ -1,6 +1,6 @@
 # Phase 1 v2 Execution Wave — Planning Packet (2026-05-19)
 
-**Date:** 2026-05-19
+**Date:** 2026-05-19 (extended 2026-05-19 with worklist additions)
 **Mode:** `supervisor_managed_execution`
 **Wave name:** `phase1-v2-business-flow-gates`
 **Product source:**
@@ -8,6 +8,7 @@
 - `phase1_complete_sa_v2_20260519.md` (system analysis v2)
 - `phase1_complete_sd_v2_20260519.md` (system design v2)
 - `phase1_complete_sasd_package_index_20260519.md` (package index)
+- [`docs/00-context/phase1-origin-dev-execution-worklist-20260519.md`](../00-context/phase1-origin-dev-execution-worklist-20260519.md) — granular execution worklist (added 2026-05-19)
 
 **Predecessor waves (closed):**
 
@@ -53,7 +54,7 @@ What is still missing per SA v2 §5 "Phase 1 完成定義":
   rollback drill evidence.
 - Production deploy rail completion.
 
-This packet materializes those gaps into 14 P0 tasks.
+This packet materializes those gaps into 24 P0 tasks (14 from the initial registration on 2026-05-19, plus 10 added later the same day from the worklist in `docs/00-context/phase1-origin-dev-execution-worklist-20260519.md`).
 
 ## 2. Current Truth (per origin/dev @ 2026-05-19)
 
@@ -92,13 +93,13 @@ Every worker on this wave must:
 
 ## 4. Dispatch Graph
 
-| Order | Tasks                                                                                                                        | Dispatch rule                                                |
-| ----- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| 1     | `DEV-STATUS-001`, `WF-TGV-001`, `WF-DRV-MP-001`, `WF-PARTNER-001`, `PROD-RAIL-001`                                           | Can start immediately. Independent design/matrix work.       |
-| 2     | `TST-E2E-005-TGV`, `TST-E2E-006-DRV-MP`, `TST-E2E-007-PRT`, `PBK-CUTOVER-001`, `COM-LIVE-001`, `FWD-LIVE-001`, `FIN-GOV-001` | Wait for the relevant matrix row (WF-\*) to land.            |
-| 3     | `TST-E2E-008-PBK-CUTOVER`, `TST-E2E-009-PROD-RAIL`                                                                           | Wait for `PBK-CUTOVER-001` and `PROD-RAIL-001` respectively. |
+| Order | Tasks                                                                                                                                                                        | Dispatch rule                                                                               |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 1     | `DEV-STATUS-001`, `WF-TGV-001`, `WF-DRV-MP-001`, `WF-PARTNER-001`, `PROD-RAIL-001`, `FWD-SBX-001`, `COM-CTI-SBX-001`, `PBK-BFF-001`, `TCH-CONTRACT-001`, `TCH-AUTHORITY-001` | Can start immediately. Design/matrix/harness/wiring work with no dependencies.              |
+| 2     | `TST-E2E-005-TGV`, `TST-E2E-006-DRV-MP`, `TST-E2E-007-PRT`, `PBK-CUTOVER-001`, `COM-LIVE-001`, `FWD-LIVE-001`, `FIN-GOV-001`                                                 | Wait for the relevant matrix row (WF-\*) to land.                                           |
+| 3     | `TST-E2E-008-PBK-CUTOVER`, `TST-E2E-009-PROD-RAIL`, `TGV-NEG-001`, `FWD-E2E-001`, `COM-E2E-003`, `DRV-DEVICE-001`, `QA-MATRIX-001`                                           | Wait on Order-1/Order-2 prerequisites (cutover runbook, E2E scripts, harnesses, gate rows). |
 
-## 5. Materialized Tasks (P0 — 14 total)
+## 5. Materialized Tasks (P0 — 24 total: 14 initial + 10 worklist additions)
 
 ### Group A — Workflow Family Gates (5 tasks)
 
@@ -133,6 +134,42 @@ Every worker on this wave must:
 | ID               | Owner  | Reviewer | What                                                                                                                                                         |
 | ---------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `DEV-STATUS-001` | Claude | Copilot  | Anchor `phase1-v2-status-truth-20260519.md` summarizing v2 gate reads, sprint switch to `phase1-v2-business-flow-gates`, and active slice plan for the wave. |
+
+### Group E — Worklist Additions (10 tasks, added 2026-05-19)
+
+Sourced from [`docs/00-context/phase1-origin-dev-execution-worklist-20260519.md`](../00-context/phase1-origin-dev-execution-worklist-20260519.md). These cover gaps not in the initial 14: negative-path coverage, sandbox harnesses, BFF wiring, real-device verification, cross-repo hardening, and a verification dashboard.
+
+| ID                  | Owner   | Reviewer | What                                                                                                    |
+| ------------------- | ------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `TGV-NEG-001`       | Codex2  | Codex    | 10 Tenant Governance negative-path tests (worklist B2). Each must emit audit evidence.                  |
+| `DRV-DEVICE-001`    | Claude2 | Codex2   | Real-device verification on Android + iPhone (worklist C2). Likely requires human-in-the-loop.          |
+| `FWD-SBX-001`       | Codex   | Codex2   | Generic Forwarder Sandbox Provider harness (worklist D1). Unblocks `FWD-E2E-001`.                       |
+| `FWD-E2E-001`       | Codex2  | Codex    | Update `E2E-002` to use sandbox; lift `WF-FWD-001` from EXTERNAL-GATED to PASS (sandbox) (worklist D2). |
+| `PBK-BFF-001`       | Claude2 | Codex    | Wire `apps/partner-booking-web` to backend authority — no mock-only (worklist E2).                      |
+| `COM-CTI-SBX-001`   | Codex   | Codex2   | CTI sandbox webhook harness for call/recording lifecycle (worklist F1).                                 |
+| `COM-E2E-003`       | Codex2  | Claude   | Phone recording filing E2E via sandbox; lift `WF-COM-001` from HOLD to PASS (sandbox) (worklist F2).    |
+| `TCH-CONTRACT-001`  | Claude2 | Codex    | Update `.ai-loop` contract lock + `BACKEND_DELIVERY_NOTE` (worklist I1). Repo-side only — no Lovable.   |
+| `TCH-AUTHORITY-001` | Claude2 | Claude   | CI check forbidding direct-DB / Supabase / legacy authority imports from production UI (worklist I2).   |
+| `QA-MATRIX-001`     | Codex2  | Claude   | Business-flow verification dashboard rolling up all `WF-*` gate reads (worklist J1).                    |
+
+Worklist tasks deliberately NOT added as separate P0 (already covered):
+
+- `SD-DEV-STATUS-001` → covered by `DEV-STATUS-001`.
+- `SD-GATE-001` → covered by `WF-TGV-001` + `WF-DRV-MP-001` + `WF-PARTNER-001` + `PBK-CUTOVER-001` + `PROD-RAIL-001`.
+- `TGV-REPORT-001` → folded into `FIN-GOV-001` acceptance criteria.
+- `TGV-E2E-001` → `TST-E2E-005-TGV`.
+- `DRV-MP-E2E-001` → `TST-E2E-006-DRV-MP`.
+- `PBK-LIVE-PLAN-001` → `PBK-CUTOVER-001`.
+- `PBK-E2E-001` → `TST-E2E-008-PBK-CUTOVER`.
+- `PROD-INFRA-001` / `PROD-DEPLOY-001` → both covered by `PROD-RAIL-001`.
+- `PROD-DRYRUN-001` → covered by `TST-E2E-009-PROD-RAIL`.
+- `FWD-LIVE-001` worklist version → same as `FWD-LIVE-001` already in wave.
+
+Worklist tasks tracked as P1 follow-ons (out of this wave):
+
+- `QA-NEG-001` — meta-task to expand negative-path audit for every WF-\* family. Covered by `TGV-NEG-001` for tenant governance; remaining families pick up post-wave.
+- `FIN-FWD-001` — external platform settlement integration. Depends on `FWD-SBX-001` and a real settlement file; defer until forwarder rail is sandbox-proven.
+- `DRV-DIST-001` — mobile distribution gate. Depends on `DRV-DEVICE-001` succeeding first.
 
 ## 6. Workload Distribution
 
@@ -177,7 +214,7 @@ yearly quota), `RULE-TIME-001` (time-of-day / weekend), `BULK-IMPORT-001`
 
 This wave is officially `done` when **all** of the following are true:
 
-1. All 14 P0 tasks reach `done` in `ai-status.json`.
+1. All 24 P0 tasks reach `done` in `ai-status.json`.
 2. `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` carries
    rows for `WF-TGV-001`, `WF-DRV-MP-001`, `WF-PARTNER-001`, `WF-PBK-001`,
    `WF-PROD-001` with explicit gate reads.
