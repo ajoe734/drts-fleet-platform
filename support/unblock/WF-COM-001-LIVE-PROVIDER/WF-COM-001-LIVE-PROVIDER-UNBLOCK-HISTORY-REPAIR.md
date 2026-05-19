@@ -222,3 +222,15 @@ rewriting shared branch history:
   `Created support/sidecars/COM-LIVE-PROVIDER-20260519/COM-LIVE-PROVIDER-EVIDENCE.md`
   from `7cb86c3`, blocked only on `EXT-004-BLK-001..008`, with
   `COM-BLUEPRINT-001` no longer a blocker.
+
+## Closeout evidence
+
+Owner closeout remains non-destructive and branch-scoped:
+
+- closeout commit will retain the same task branch
+  `origin/codex2/wf-com-001-live-provider-unblock-history-repair`
+- published history remains additive only:
+  `4452eae` documents the repair path,
+  `1e92126` records the canonical machine-truth correction, and
+  the closeout commit exists only to satisfy owner-finalize protocol
+- no force-push, branch rewrite, or commit deletion is part of this repair
