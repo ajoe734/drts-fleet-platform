@@ -168,6 +168,88 @@ class UnblockParentResolutionTest(unittest.TestCase):
         self.assertEqual(len(state["blockers"]), 1)
         self.assertEqual(state["blockers"][0]["status"], "open")
 
+    def test_unblock_done_keeps_done_parent_done(self) -> None:
+        state = {
+            "tasks": [
+                {
+                    "id": "DOCS-STRATEGY-DECISION",
+                    "owner": "Claude",
+                    "reviewer": "Copilot",
+                    "status": "done",
+                    "next": "Q4 = C (hybrid: 5 substantive + 12 thin stubs). See phase1-v3-resolution-20260519.md §Q4.",
+                },
+                {
+                    "id": "DOCS-STRATEGY-DECISION-UNBLOCK-PLANNING-DECISION",
+                    "owner": "Codex",
+                    "reviewer": "Claude",
+                    "status": "review_approved",
+                    "task_class": "unblock",
+                    "helper_parent": "DOCS-STRATEGY-DECISION",
+                    "helper_kind": "planning_decision",
+                    "mutates_canonical": False,
+                },
+            ],
+            "blockers": [],
+            "handoffs": [],
+        }
+
+        with mock.patch.dict(os.environ, {"AI_NAME": "Codex"}, clear=True), mock.patch.object(ai_status, "append_log"):
+            ai_status.command_done(
+                state,
+                [
+                    "DOCS-STRATEGY-DECISION-UNBLOCK-PLANNING-DECISION",
+                    "Resolution already landed; closing stale helper without reopening the parent task.",
+                ],
+            )
+
+        parent = next(task for task in state["tasks"] if task["id"] == "DOCS-STRATEGY-DECISION")
+        child = next(task for task in state["tasks"] if task["id"] == "DOCS-STRATEGY-DECISION-UNBLOCK-PLANNING-DECISION")
+        self.assertEqual(parent["status"], "done")
+        self.assertEqual(
+            parent["next"],
+            "Q4 = C (hybrid: 5 substantive + 12 thin stubs). See phase1-v3-resolution-20260519.md §Q4.",
+        )
+        self.assertEqual(child["status"], "done")
+        self.assertEqual(child["resolved_parent_status"], "done")
+        self.assertEqual(len(state["handoffs"]), 0)
+        self.assertEqual(len(state["blockers"]), 0)
+
+    def test_unblock_done_cannot_promote_non_done_parent_to_done(self) -> None:
+        state = {
+            "tasks": [
+                {
+                    "id": "ADM-UI-RD-006",
+                    "owner": "Codex",
+                    "reviewer": "Claude",
+                    "status": "blocked",
+                    "next": "Waiting on history repair.",
+                },
+                {
+                    "id": "ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR",
+                    "owner": "Claude2",
+                    "reviewer": "Codex",
+                    "status": "review_approved",
+                    "task_class": "unblock",
+                    "helper_parent": "ADM-UI-RD-006",
+                    "helper_kind": "history_repair",
+                    "mutates_canonical": False,
+                },
+            ],
+            "blockers": [],
+            "handoffs": [],
+        }
+
+        env = {
+            "AI_NAME": "Claude2",
+            "PARENT_STATUS": "done",
+        }
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(ai_status, "append_log"):
+            with self.assertRaisesRegex(SystemExit, "only allowed when the parent task is already done"):
+                ai_status.command_done(
+                    state,
+                    ["ADM-UI-RD-006-UNBLOCK-HISTORY-REPAIR", "Attempted invalid parent completion."],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
