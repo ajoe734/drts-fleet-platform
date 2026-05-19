@@ -19,6 +19,16 @@ Current branch truth after refresh:
 - No live partner sandbox credentials, signed webhook contract, or forwarded
   task seed are available in this repo.
 
+## Machine Truth Refresh
+
+The earlier review-failed wording for this task is now obsolete.
+
+- `FWD-SPEC-001` is machine-truth `done` in `ai-status.json`.
+- `docs/02-architecture/forwarder-adapter-proof-spec-20260519.md` exists in
+  this branch and defines the non-live proof boundary.
+- The remaining reason this task cannot close is external partner sandbox
+  sourcing, not an unmet repo-side dependency.
+
 ## Blocking Inputs
 
 The remaining blockers are the external gate items already tracked by
