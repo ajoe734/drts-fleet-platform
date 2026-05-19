@@ -5,6 +5,7 @@
 **Reviewer:** `Codex`
 **Collected:** `2026-05-19 (UTC)`
 **Re-verified:** `2026-05-19T21:37Z (UTC)` — chair applied `resume_parent_task` at `2026-05-19T21:34:29Z` (parent `blocked → todo`); owner started at `2026-05-19T21:37:34Z` (`todo → in_progress`); external posture unchanged at re-verify.
+**Re-verified (second pass):** `2026-05-19T21:50Z (UTC)` — reviewer `Codex` reopened the task at `2026-05-19T21:43:53Z` because the prior sidecar wording (`gh auth status` reports no logged-in host; GitHub-side evidence "not collectible from this worker"; cross-lane-only framing) was incorrect for the current worker environment. Owner re-verified all GitHub-side evidence with first-hand authenticated `gh` from this Claude2 worker after exporting `GH_CONFIG_DIR=/home/edna/.config/gh` (Claude2 runs under `HOME=/home/edna/.claude2-home`, so its default `$XDG_CONFIG_HOME` does not resolve the existing gh credentials without that export). All four §4.2 probes succeeded directly; external posture unchanged.
 **Status:** `HELD (external) — no live production deploy executed, prerequisites operator-managed and still missing`
 
 ---
@@ -34,25 +35,37 @@ Current result on `2026-05-19`:
 - No GCP project ID, region, Cloud SQL instance, WIF provider, or runtime
   service account is committed anywhere in the repository — they live in
   GitHub Actions `vars` / `secrets`, which are operator-managed.
-- `gh auth status` reports no logged-in host from this worker, so the live
-  set of repo-Settings variables/secrets and Environment reviewer rules
-  cannot be enumerated from this evidence collection point.
+- GitHub-side evidence (repo-Settings vars/secrets, Environment reviewer
+  rule, prod tags) is **directly collectible from this worker** when
+  `GH_CONFIG_DIR=/home/edna/.config/gh` is exported. Without that export,
+  `gh auth status` reports "not logged into any GitHub hosts" because
+  Claude2 runs under `HOME=/home/edna/.claude2-home` and the canonical gh
+  credentials live at `/home/edna/.config/gh/hosts.yml`. With the export,
+  this worker reads the same authenticated token (`gho_***`, scopes
+  `gist, read:org, repo, workflow`) as any reviewer lane. See §4.2 for
+  first-hand probe output.
 
 Conclusion:
 
-- No live production deploy was executed in this session or in the
-  `2026-05-19T21:37Z` re-verification turn.
+- No live production deploy was executed in this session, in the
+  `2026-05-19T21:37Z` re-verification, or in the `2026-05-19T21:50Z`
+  second-pass re-verification.
 - This task records dated evidence that the HELD-external prerequisites
-  have not arrived (with one narrowing — §3.5 is now confirmed present)
-  and that the deploy-prod rail is still gated on the same
-  operator-managed inputs it was gated on when the v3 wave planning was
-  authored.
+  have not arrived (with one narrowing — §3.5 is now confirmed present
+  by direct first-hand authenticated `gh api` from this worker) and that
+  the deploy-prod rail is still gated on the same operator-managed
+  inputs it was gated on when the v3 wave planning was authored.
 - The chairman applied `resume_parent_task` (via the orchestrator's
   `blocked_task_triage` schema) on `2026-05-19T21:34:29Z`, returning the
   parent from `blocked → todo`. Owner `Claude2` then started the task
   (`todo → in_progress`) and produced this re-verification pack as the
   canonical evidence for the iteration's closeout, rather than calling
-  `ai-status.sh blocker` again. A separate follow-on task is the
+  `ai-status.sh blocker` again. Reviewer `Codex` then reopened the
+  iteration at `2026-05-19T21:43:53Z` because the sidecar's "GitHub-side
+  evidence not collectible from this worker" wording was incorrect in
+  the current worker environment; owner re-verified all GitHub-side
+  evidence directly via authenticated `gh` from this Claude2 worker on
+  `2026-05-19T21:50Z` (see §4.2). A separate follow-on task is the
   expected vehicle for re-dispatching the live deploy once §3.1, §3.2,
   §3.3, §3.4, and §3.6 are operator-provisioned (see §6 and §8).
 
@@ -206,57 +219,83 @@ this sidecar.
 | `deploy-prod.yml` carries the gate names? | `Read .github/workflows/deploy-prod.yml` | yes — validate-config enumerates all required vars/secrets and references the `production` environment |
 | Phase 1 gate matrix says external-gated? | `Read docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` line 63 | yes — verbatim text quoted in §2.1 above |
 
-### 4.2 GitHub-side evidence (not collectible from this worker)
+### 4.2 GitHub-side evidence (directly collected by this owner via authenticated gh — 2026-05-19T21:50Z)
 
-- `gh auth status` from this worker reports **not logged into any GitHub
-  hosts**. The owner therefore cannot enumerate the live set of
-  `vars.PROD_*` and `secrets.PROD_*` values, nor confirm whether the
-  `production` Environment exists or which reviewers are attached.
-- This boundary is consistent with the planning-doc classification: the
-  HELD-external resources are operator-provisioned outside any LLM
-  worker's reach. The operator must confirm them before this task can
-  leave HELD.
+Reviewer `Codex` reopened the prior iteration at `2026-05-19T21:43:53Z`
+because the earlier wording — "`gh auth status` from this worker reports
+**not logged into any GitHub hosts**" and "GitHub-side evidence not
+collectible from this worker" — was incorrect in the current worker
+environment. The owner re-ran every relevant probe from this Claude2
+worker on `2026-05-19T21:50Z` after exporting
+`GH_CONFIG_DIR=/home/edna/.config/gh` (Claude2 runs under
+`HOME=/home/edna/.claude2-home`, so its default `$XDG_CONFIG_HOME` does
+not resolve the canonical gh credentials at
+`/home/edna/.config/gh/hosts.yml` without that export; with the export,
+gh reports `Logged in to github.com account ajoe734`, token scopes
+`gist, read:org, repo, workflow`). The probe results below are
+first-hand authenticated evidence from this owner, not cross-lane
+recitations.
 
-### 4.2.1 GitHub-side evidence (collected by Codex2 via authenticated gh — 2026-05-19)
+| Check | Command (this worker) | Result |
+| --- | --- | --- |
+| Worker can auth as ajoe734? | `GH_CONFIG_DIR=/home/edna/.config/gh gh auth status` | **Yes** — `Logged in to github.com account ajoe734` (token `gho_***`, scopes `gist, read:org, repo, workflow`). |
+| `production` Environment exists with reviewer rule? | `GH_CONFIG_DIR=/home/edna/.config/gh gh api repos/ajoe734/drts-fleet-platform/environments/production` | **Yes** — Environment `production` (id `15434985743`, created `2026-05-17T03:34:30Z`) returned; protection rules include `required_reviewers` with reviewer `ajoe734` (`prevent_self_review: false`) and a `branch_policy` rule (`custom_branch_policies: true`, `can_admins_bypass: true`). §3.5 directly confirmed present. |
+| Repo-level `PROD_*` vars set? | `GH_CONFIG_DIR=/home/edna/.config/gh gh variable list --repo ajoe734/drts-fleet-platform` | **No** — the variable list contains only `DEV_*`, `STAGING_*`, and legacy `GCP_*` entries. None of `vars.PROD_GCP_PROJECT_ID`, `vars.PROD_GCP_REGION`, `vars.PROD_GCP_CLOUDSQL_INSTANCE`, `vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT`, `vars.PROD_PLATFORM_ADMIN_ORIGIN`, `vars.PROD_OPS_CONSOLE_ORIGIN`, `vars.PROD_CONTROL_PLANE_API_ORIGIN`, or `vars.PROD_IAP_CLIENT_ID` is present. §3.1 still unmet. |
+| Repo-level `PROD_*` secrets set? | `GH_CONFIG_DIR=/home/edna/.config/gh gh secret list --repo ajoe734/drts-fleet-platform` | **No** — secret list returned only `CORE_REPO_PAT`, `DEV_WIF_SERVICE_ACCOUNT`, `STAGING_WIF_SERVICE_ACCOUNT`, `WIF_PROVIDER`, `WIF_SERVICE_ACCOUNT`. `secrets.PROD_WIF_PROVIDER` and `secrets.PROD_WIF_SERVICE_ACCOUNT` are absent. §3.2 still unmet. |
+| Any `prod/v<date>.<N>` tag on origin? | `git ls-remote --tags origin 'refs/tags/prod/*'` | **No tags returned** (empty output, exit 0). §3.6 still unmet. |
 
-The parallel unblock probe `WF-PROD-001-LIVE-EXEC-UNBLOCK-MANUAL-UNBLOCK`
+Implications for this sidecar:
+
+- §3.5 (`GitHub Environment production with reviewer rule`) is directly
+  confirmed present by first-hand authenticated probe from this owner
+  at `2026-05-19T21:50Z` — no longer a cross-lane-only assertion.
+- §3.1, §3.2, §3.3, §3.4, and §3.6 remain unmet. Five HELD-external
+  resource classes — repo `PROD_*` vars, repo `PROD_*` secrets, GCP
+  Secret Manager entries, GCP project resources (Cloud SQL / Artifact
+  Registry / IAM bindings), and a published `prod/v*` tag — are still
+  the gating set for live execution. The first two are confirmed
+  missing from first-hand authenticated probes; §3.6 is confirmed
+  missing from a direct unauthenticated `git ls-remote`. §3.3 and §3.4
+  remain not directly collectible from this worker (see §4.3).
+- This sidecar's overall **HELD (external)** verdict therefore stands.
+  The delta from the previous iteration is that GitHub-side evidence is
+  no longer framed as "not collectible from this worker" — it has been
+  collected first-hand under authenticated `gh`, and the stale "not
+  logged into any GitHub hosts" wording has been replaced with the
+  accurate boundary (worker can authenticate; the `GH_CONFIG_DIR` env
+  var must be exported because Claude2's `HOME` differs from `edna`).
+
+### 4.2.1 Cross-lane confirmation (informational, not authoritative)
+
+A parallel unblock probe `WF-PROD-001-LIVE-EXEC-UNBLOCK-MANUAL-UNBLOCK`
 (owner `Codex2`, reviewer `Codex`, artifact
 `support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-MANUAL-UNBLOCK.md`
 on branch `codex2/wf-prod-001-live-exec-unblock-manual-unblock`, PR #170,
-commit `30e963d`) ran an authenticated `gh`-metadata probe against
-`ajoe734/drts-fleet-platform` on `2026-05-19T21:31Z`. The cross-lane
-findings, cited here so this sidecar remains the single source of truth
-for the live-exec posture:
+commits `d71a6ff` / `3351bab` per `parent_resume` log on
+`2026-05-19T21:45:52Z`) independently performed the same `gh api` and
+`gh variable list` / `gh secret list` probes on `2026-05-19T21:31Z` and
+reported the same posture: production Environment present, repo
+`PROD_*` vars/secrets absent, no `prod/v*` tag on origin. This
+cross-lane probe is now informational only — the authoritative evidence
+for this sidecar is the §4.2 first-hand authenticated probe set above.
 
-| Check | Command (per probe artifact) | Result |
-| --- | --- | --- |
-| `production` Environment exists with reviewer rule? | `gh api repos/ajoe734/drts-fleet-platform/environments/production` | **Yes** — Environment `production` exists; reviewer rule attached (`reviewer=ajoe734`). This satisfies §3.5 of this sidecar. |
-| Repo-level `PROD_*` vars set? | `gh variable list --repo ajoe734/drts-fleet-platform` | **No** — none of `vars.PROD_GCP_PROJECT_ID`, `vars.PROD_GCP_REGION`, `vars.PROD_GCP_CLOUDSQL_INSTANCE`, `vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT`, `vars.PROD_PLATFORM_ADMIN_ORIGIN`, `vars.PROD_OPS_CONSOLE_ORIGIN`, `vars.PROD_CONTROL_PLANE_API_ORIGIN`, or `vars.PROD_IAP_CLIENT_ID` is present. §3.1 still unmet. |
-| Repo-level `PROD_*` secrets set? | `gh secret list --repo ajoe734/drts-fleet-platform` | **No** — `secrets.PROD_WIF_PROVIDER` and `secrets.PROD_WIF_SERVICE_ACCOUNT` absent. §3.2 still unmet. |
-| Any `prod/v<date>.<N>` tag on origin? | `git ls-remote --tags origin refs/tags/prod/v*` | **No tags returned** — matches §3.6 (no promotion tag published). |
+### 4.3 GCP-side evidence (not directly collectible from this worker)
 
-Implication for this sidecar:
-
-- §3.5 (`GitHub Environment production with reviewer rule`) is **now
-  operator-confirmed present**. This is the only HELD-external resource
-  that the cross-lane probe has actually verified provisioned.
-- §3.1, §3.2, §3.3, §3.4, and §3.6 remain unmet. The five remaining
-  HELD-external resource classes — repo `PROD_*` vars, repo `PROD_*`
-  secrets, GCP Secret Manager entries, GCP project resources (Cloud SQL
-  / Artifact Registry / IAM bindings), and a published `prod/v*` tag —
-  are still the gating set for live execution.
-- This sidecar's overall **HELD (external)** verdict therefore stands;
-  the only delta from the original 2026-05-19 collection is a narrowing
-  of the gating set from six classes (§3.1 – §3.6) to five (§3.1, §3.2,
-  §3.3, §3.4, §3.6).
-
-### 4.3 GCP-side evidence (not collectible from this worker)
-
-- The worker has no `gcloud` identity that can call
+- `gcloud auth list` from this worker shows the active credential is
+  the GCE instance default service account
+  `384772941419-compute@developer.gserviceaccount.com`.
+- `gcloud projects list --limit=20` fails with
+  `PERMISSION_DENIED: Request had insufficient authentication scopes`
+  (reason `ACCESS_TOKEN_SCOPE_INSUFFICIENT` on
+  `cloudresourcemanager.googleapis.com`). The active SA cannot reach
   `gcloud projects describe`, `gcloud secrets list`, or
-  `gcloud run services list` against any prod project.
-- No prod project name has been recorded in the repo, so even an
-  authenticated worker would not know which project to introspect.
+  `gcloud run services list` against any prod project from this worker.
+- No prod project name has been recorded in the repo, so even a
+  worker with broader scopes would not know which project to
+  introspect. This boundary is the actual gating constraint for §3.3
+  and §3.4 — those resources remain operator-managed and outside any
+  LLM worker's reach until the operator provisions them and records
+  the project ID in repo Settings.
 
 ---
 
@@ -274,34 +313,49 @@ To keep the gate matrix and the wave-planning doc honest, this sidecar
   evidence)` — it has not, and this sidecar exists precisely to keep the
   matrix honest while the external prerequisites are still missing.
 
-This sidecar **does claim** (per §4.2.1 cross-lane evidence):
+This sidecar **does claim** (per §4.2 first-hand authenticated evidence
+from this owner at `2026-05-19T21:50Z`):
 
 - That GitHub Environment `production` exists in
-  `ajoe734/drts-fleet-platform` with a reviewer rule attached
-  (`reviewer=ajoe734`) — this is the single HELD-external resource class
-  that has been verified provisioned as of `2026-05-19T21:31Z`.
+  `ajoe734/drts-fleet-platform` with a `required_reviewers` protection
+  rule attached (`reviewer=ajoe734`) and a `branch_policy` rule
+  (`custom_branch_policies: true`, `can_admins_bypass: true`) — this is
+  the single HELD-external resource class that has been verified
+  provisioned by direct first-hand authenticated `gh api` from this
+  worker.
+- That repo-level `PROD_*` variables (§3.1) and `PROD_*` secrets (§3.2)
+  are absent — confirmed first-hand by `gh variable list` and
+  `gh secret list` against `ajoe734/drts-fleet-platform`.
+- That no `prod/v<date>.<N>` tag exists on `origin` (§3.6) — confirmed
+  first-hand by `git ls-remote --tags origin 'refs/tags/prod/*'`.
 
 ---
 
 ## 6. Resume Conditions
 
 `WF-PROD-001-LIVE-EXEC` may complete its live execution only after **all**
-of the following are operator-confirmed (state at the 2026-05-19T21:37Z
-re-verification noted in `[STATUS]`):
+of the following are operator-confirmed (state at the
+`2026-05-19T21:50Z` second-pass re-verification noted in `[STATUS]`):
 
 1. **`[STILL MISSING]`** GCP prod project provisioned with WIF, Cloud SQL,
-   Artifact Registry, and Secret Manager entries from §3.3.
-2. **`[STILL MISSING]`** Repo Settings carries every required
-   `vars.PROD_*` and `secrets.PROD_*` from §3.1 and §3.2.
-3. **`[CONFIRMED PRESENT 2026-05-19T21:31Z]`** GitHub Environment
-   `production` exists with the operator-approved reviewer rule attached
-   to `validate-config` (verified by Codex2 via authenticated
+   Artifact Registry, and Secret Manager entries from §3.3 (not directly
+   collectible from this worker per §4.3).
+2. **`[STILL MISSING — DIRECTLY VERIFIED 2026-05-19T21:50Z]`** Repo
+   Settings carries every required `vars.PROD_*` and `secrets.PROD_*`
+   from §3.1 and §3.2 (first-hand authenticated `gh variable list` /
+   `gh secret list` from this worker show only `DEV_*` / `STAGING_*` /
+   legacy `WIF_*` / `CORE_REPO_PAT` entries; no `PROD_*` of either kind).
+3. **`[CONFIRMED PRESENT — DIRECTLY VERIFIED 2026-05-19T21:50Z]`**
+   GitHub Environment `production` exists with the operator-approved
+   reviewer rule attached to `validate-config` (verified by this owner
+   via authenticated
    `gh api repos/ajoe734/drts-fleet-platform/environments/production` —
-   reviewer = `ajoe734`).
-4. **`[STILL MISSING]`** `hourly-promote.yml` has published a
-   `prod/v<date>.<N>` tag pinned to the commit the operator intends to
-   deploy (re-verified absent at `2026-05-19T21:37Z`:
-   `git ls-remote --tags origin refs/tags/prod/v*` returns empty).
+   reviewer = `ajoe734`, prevent_self_review=false, plus a `branch_policy`
+   rule with `custom_branch_policies: true`).
+4. **`[STILL MISSING — DIRECTLY VERIFIED 2026-05-19T21:50Z]`**
+   `hourly-promote.yml` has published a `prod/v<date>.<N>` tag pinned to
+   the commit the operator intends to deploy (re-verified absent:
+   `git ls-remote --tags origin 'refs/tags/prod/*'` returns empty).
 5. The operator records the readiness signal in `ai-status.json` (e.g.
    via a follow-up unblock task) so the supervisor can re-dispatch this
    task with a clean owner/reviewer handoff.
@@ -328,10 +382,16 @@ rehearsal).
 - `support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-MANUAL-UNBLOCK.md`
   (Codex2 cross-lane gh-metadata probe, branch
   `codex2/wf-prod-001-live-exec-unblock-manual-unblock`, PR #170,
-  commit `30e963d`).
+  commits `d71a6ff` / `3351bab` per Codex2 `parent_resume` /`done`
+  activity log on 2026-05-19T21:45:52Z; demoted to informational
+  cross-lane confirmation in §4.2.1).
 - `commit 990b1ee` (PROD-RAIL-CLOSEOUT).
 - `commit 025b1dd` (WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION).
 - `commit 9ff924e` (initial evidence sidecar register).
+- `commit d82c91b` (first chair-resume re-verification refresh).
+- Reviewer reopen note `2026-05-19T21:43:53Z` (Codex `reopen` on
+  `WF-PROD-001-LIVE-EXEC`) demanding direct first-hand authenticated gh
+  evidence — addressed by §4.2 of this iteration.
 
 ---
 
@@ -343,11 +403,28 @@ rehearsal).
   `resume_parent_task` returned the parent from `blocked → todo` at
   `2026-05-19T21:34:29Z`. External posture unchanged at re-verification
   except for §3.5 narrowing from "not collectible" to "confirmed
-  present" via Codex2's authenticated cross-lane probe (§4.2.1).
+  present" via Codex2's authenticated cross-lane probe (now demoted to
+  §4.2.1 informational status).
+- **Re-verified (second pass):** `2026-05-19T21:50Z (UTC)` after
+  reviewer `Codex` reopened the iteration at `2026-05-19T21:43:53Z`
+  with a correction: the prior sidecar wording "GitHub-side evidence not
+  collectible from this worker" / "`gh auth status` reports not logged
+  into any GitHub hosts" was inaccurate. The owner re-ran every relevant
+  probe directly from this Claude2 worker with
+  `GH_CONFIG_DIR=/home/edna/.config/gh` exported (the canonical gh
+  hosts.yml is at that path; Claude2's `HOME=/home/edna/.claude2-home`
+  means the default `$XDG_CONFIG_HOME` does not pick it up, hence the
+  earlier misreading). All §4.2 probes now reflect first-hand
+  authenticated evidence; external posture unchanged from the previous
+  re-verification.
 - **Verdict:** HELD (external) — no live production deploy executed in
-  this session or at the re-verification; five of the six HELD-external
-  resource classes (§3.1, §3.2, §3.3, §3.4, §3.6) are still
-  operator-managed and missing.
+  this session, at the first re-verification, or at the second-pass
+  re-verification. Five of the six HELD-external resource classes
+  (§3.1, §3.2, §3.3, §3.4, §3.6) are still operator-managed and missing;
+  §3.1 / §3.2 / §3.6 are confirmed missing by direct first-hand probes
+  from this worker, §3.3 / §3.4 remain not directly collectible from
+  this worker (worker `gcloud` identity has insufficient scopes and no
+  prod project ID is recorded anywhere in the repo).
 - **Next action:** Hand off to reviewer `Codex` to acceptance-review the
   refreshed evidence pack. The owner will not call `ai-status.sh
   blocker` again because the chair already applied `resume_parent_task`
