@@ -64,6 +64,14 @@ jobs:
         if: steps.ctx.outputs.skip == 'true'
         run: echo "Commit trailers gate bypassed for auto-publish PR. (Trailers were enforced when the source commits entered dev.)"
 
+  bff-only-imports:
+    name: BFF-only imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce BFF-only imports for protected UI surfaces
+        run: ./scripts/ci/check-bff-only-imports.sh
+
   runtime-mirror-guard:
     name: Runtime mirror guard
     runs-on: ubuntu-latest
