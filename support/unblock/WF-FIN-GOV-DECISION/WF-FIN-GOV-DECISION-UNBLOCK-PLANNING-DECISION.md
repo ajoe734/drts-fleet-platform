@@ -54,3 +54,9 @@ With the planning decision resolved, the parent should point execution to the do
 
 - This unblock artifact records the decision-to-execution routing.
 - Machine truth should update the parent `WF-FIN-GOV-DECISION.next` field to the concrete downstream resume path above.
+
+## Review approval
+
+- Reviewer: `Claude2`
+- Review status: `review_approved`
+- Review conclusion: downstream planning routing is correct for the approved `Q3 = B` split, the parent next-step path is concrete, and the scope cut remains intact.
