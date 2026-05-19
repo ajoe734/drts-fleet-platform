@@ -53,6 +53,42 @@ thing, workflow gates say another, and machine truth claims a third.
 | release gate matrix | Workflow-family release claim truth | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` |
 | runbooks / audits / sidecars | Narrative + evidence interpretation | checked-in docs under `docs/**`, `support/sidecars/**` |
 
+## Decision Mirrors From Phase 1 v3 Conflicts
+
+This runbook must mirror the current Phase 1 v3 conflict decisions rather than
+invent a parallel naming scheme.
+
+### Q1. E2E numbering mirror
+
+Until a human approves a different outcome, this runbook follows the
+recommended mirror from
+`docs/00-context/phase1-v3-conflicts-and-open-questions-20260519.md` §1 Q1:
+
+- keep shipped numbering for `E2E-007`, `E2E-008`, and `E2E-009`
+- treat `E2E-007` as partner-airport-transfer
+- treat `E2E-008` as partner-booking-cutover
+- treat `E2E-009` as prod-rail-dry-run
+- reserve `E2E-010` for governance-billing-reporting
+- reserve `E2E-011` for platform-admin-control-plane
+
+Release-truth documents must therefore not reassign `E2E-009` away from the
+production-rail dry-run path unless the conflicts doc decision itself changes.
+
+### Q2. Workflow-family naming mirror
+
+Until a human approves a different outcome, this runbook mirrors the
+recommended naming direction from the same conflicts doc §2 Q2:
+
+- directive name: `WF-PARTNER-001`
+- current matrix/source name: `WF-PRT-001`
+- sync rule: treat them as the same workflow scope for release-truth reading
+- pending cleanup: rename the matrix row and any direct sidecar references when
+  the naming decision is executed
+
+Before that rename lands, release-truth closeouts must cite the current checked
+in identifier and may add the directive name in parentheses, for example:
+`WF-PRT-001` (`WF-PARTNER-001` in the directive).
+
 ## Invariants That Must Stay True
 
 ### Branch / tag invariants
@@ -80,6 +116,28 @@ thing, workflow gates say another, and machine truth claims a third.
 - "merged to dev" is not the same as "promoted to main".
 - "promoted to main" is not the same as "deployed to production".
 - "prod tag exists" is not the same as "production deploy completed".
+
+## Source-Of-Truth Rule
+
+When release surfaces disagree, resolve them in this order and record the higher
+precedence source in the repair note:
+
+1. git object truth for branch/tag/SHA/tree questions
+2. workflow definitions for what a branch/tag/workflow is allowed to mean
+3. `ai-status.json` for task lifecycle / owner / handoff / done state
+4. `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` for gate
+   vocabulary and workflow-family claim status
+5. checked-in runbooks / audits / sidecars for narrative interpretation and
+   evidence packaging
+6. `current-work.md` as human-readable summary only
+
+Corollaries:
+
+- A runbook may explain git/workflow truth, but it cannot override it.
+- A sidecar may package evidence, but it cannot upgrade a gate matrix row by
+  itself.
+- `current-work.md` may summarize `REL-SYNC-001`, but it cannot assign owner,
+  reviewer, or completion truth when `ai-status.json` disagrees.
 
 ## Standard Sync Protocol
 
@@ -171,6 +229,45 @@ Expected outputs:
 
 This step updates live deployment truth, but it does not by itself change the
 workflow-family gate wording unless new evidence justifies a gate uplift.
+
+## Release Gate Row Mapping
+
+`REL-SYNC-001` is a release-truth interpretation runbook, so every closeout
+should explicitly map the checked surface to the gate row that governs the
+claim.
+
+| Surface or claim being made | Gate row or release-truth row to read | Why |
+| --- | --- | --- |
+| staging/runtime release foundation is healthy | `WF-RLS-001` | This row carries the baseline staging deploy / smoke / rollout truth |
+| `prod/v*` tag can be used for a deliberate production deploy | `WF-PROD-001` | This row defines the production rail and its dry-run / live non-claims |
+| release-truth branch/tag/doc sync itself is aligned | `WF-REL-001` once added; until then, use this runbook plus `REL-SYNC-001` machine truth | The matrix currently lacks a dedicated `WF-REL-001` row, so the sync interpretation stays provisional until `WF-REL-001-MATRIX` lands |
+| partner-eligibility release wording | current row `WF-PRT-001` (`WF-PARTNER-001` directive alias) | Q2 naming is not yet fully normalized in-tree |
+
+Row-mapping rule:
+
+- do not cite `WF-RLS-001` as proof of live production deployment
+- do not cite `WF-PROD-001` as proof that a release-truth doc is synchronized
+- do not claim `WF-REL-001` matrix closure before the row exists in
+  `phase1-workflow-acceptance-release-gates.md`
+
+## Sidecar Evidence Mapping
+
+Release truth is not carried by one sidecar. Reviewers must read the matching
+evidence pack for the claim they are making.
+
+| Claim or surface | Evidence anchor to cite |
+| --- | --- |
+| dev/staging release foundation and rollout wording | `support/sidecars/FBP-013A/FBP-013A-STAGING-DEPLOY-EVIDENCE-PACK.md` and `support/sidecars/FBP-013D/FBP-013D-FINAL-EVIDENCE-CLOSEOUT.md` |
+| current live staging workflow-family proofs | `support/sidecars/FBP-014B/FBP-014B-LIVE-EVIDENCE-PACK.md` when the matrix row cites live staging evidence |
+| production rail dry-run contract | `support/sidecars/PROD-RAIL-CLOSEOUT-20260519/PROD-RAIL-CLOSEOUT-EVIDENCE.md` plus `tests/e2e/E2E-009-prod-rail-dry-run.sh` |
+| release-truth sync narrative itself | this runbook and the future `WF-REL-001-AUDIT` artifact, not a fabricated sidecar |
+
+Sidecar rule:
+
+- if no dedicated sidecar exists for a release-truth claim, say that directly
+  and cite the checked-in runbook/audit instead
+- do not imply a sidecar exists merely because a workflow family exists
+- do not let a sidecar reference outrun the gate row's current status wording
 
 ## Required Sync Checks
 
@@ -370,6 +467,8 @@ Any release-truth sync closeout should name at least:
 - current promoted `main` / `prod/v*` relationship
 - the machine-truth task / docs / gate-matrix surfaces checked
 - any known intentional drift or remaining non-claim
+- any row-mapping exception such as "WF-REL-001 row not landed yet"
+- whether the cited evidence came from matrix-linked sidecars, runbooks, or both
 
 Recommended closeout shape:
 
@@ -391,7 +490,11 @@ This runbook does not claim that:
 
 - every `dev` merge is automatically deployed everywhere
 - a `prod/v*` tag means production already runs that version
+- a `release/v*` tag means `main` or production already contains that tree
 - workflow-family gates become `PASS` solely because a branch or tag exists
+- `WF-RLS-001` and `WF-PROD-001` can be merged into one generic "release green"
+- a renamed directive term is already machine truth before the matrix / sidecars / tasks are updated
+- a future `WF-REL-001` row may be cited as present before it actually exists
 - `current-work.md` is reliable enough to override `ai-status.json`
 
 ## Reference Anchors
