@@ -798,13 +798,24 @@ def apply_unblock_parent_resolution(
     if parent is None:
         return
 
-    resume_status = os.environ.get("PARENT_STATUS", "").strip().lower() or "todo"
-    if resume_status not in {"backlog", "todo", "in_progress", "blocked"}:
-        raise SystemExit("PARENT_STATUS must be backlog, todo, in_progress, or blocked")
-    parent_message = (
-        os.environ.get("PARENT_NEXT", "").strip()
-        or f"Unblock resolution complete via {task.get('id')}: {message}"
+    current_parent_status = str(parent.get("status") or "").strip().lower()
+    resume_status = os.environ.get("PARENT_STATUS", "").strip().lower() or (
+        "done" if current_parent_status == "done" else "todo"
     )
+    if resume_status not in {"backlog", "todo", "in_progress", "blocked", "done"}:
+        raise SystemExit("PARENT_STATUS must be backlog, todo, in_progress, blocked, or done")
+    if resume_status == "done" and current_parent_status != "done":
+        raise SystemExit("PARENT_STATUS=done is only allowed when the parent task is already done")
+
+    explicit_parent_next = os.environ.get("PARENT_NEXT", "").strip()
+    if explicit_parent_next:
+        parent_message = explicit_parent_next
+    elif resume_status == "done":
+        parent_message = str(parent.get("next") or "").strip() or (
+            f"Unblock resolution complete via {task.get('id')}: {message}"
+        )
+    else:
+        parent_message = f"Unblock resolution complete via {task.get('id')}: {message}"
     parent_waiting_for_raw = os.environ.get("PARENT_WAITING_FOR", "").strip()
     parent_waiting_for = canonical_agent_name(parent_waiting_for_raw) if parent_waiting_for_raw else ""
     if parent_waiting_for:
@@ -838,6 +849,9 @@ def apply_unblock_parent_resolution(
                 "created_at": timestamp,
             }
         )
+        mark_handoffs_done(state, parent_id)
+    elif resume_status == "done":
+        mark_blockers_resolved(state, parent_id)
         mark_handoffs_done(state, parent_id)
     else:
         mark_blockers_resolved(state, parent_id)
