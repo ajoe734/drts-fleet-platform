@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import { sandboxFixtures } from "../../src/modules/callcenter/sandbox.fixtures";
@@ -108,5 +109,41 @@ describe("SandboxWebhookAdapter", () => {
       complianceFlags: ["recording_missing"],
       queueEntryReason: "recording_missing_for_dispatch",
     });
+  });
+
+  it("rejects recording.ready without recording_id before mutating session state", () => {
+    const { adapter, callcenterService } = createOwnedMobilityHarness();
+
+    try {
+      adapter.ingest(
+        {
+          ...sandboxFixtures.recordingReady,
+          recording_id: "   ",
+        },
+        "req-sbx-008",
+      );
+      throw new Error(
+        "Expected adapter.ingest to reject invalid recording.ready payload.",
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).response.error.code).toBe(
+        "RECORDING_ID_REQUIRED",
+      );
+    }
+
+    try {
+      callcenterService.getCallSession(
+        sandboxFixtures.recordingReady.provider_call_id,
+      );
+      throw new Error(
+        "Expected no session to be created for invalid recording.ready payload.",
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiRequestError);
+      expect((error as ApiRequestError).response.error.code).toBe(
+        "CALL_SESSION_NOT_FOUND",
+      );
+    }
   });
 });

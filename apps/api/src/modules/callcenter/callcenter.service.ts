@@ -365,8 +365,7 @@ export class CallcenterService implements OnModuleInit {
     session.endedAt = endedAt;
     this.addFlag(session, "closed");
     if (session.linkedOrderId && !session.recordingId) {
-      this.removeFlag(session, "recording_pending");
-      this.addFlag(session, "recording_missing");
+      this.syncRecordingFlagsWithoutAttachment(session);
     }
     this.persistSessions([session], "close_call_session");
     this.notifyRecordingStateChange(session, requestId);
@@ -436,13 +435,7 @@ export class CallcenterService implements OnModuleInit {
     const session = this.requireSession(callId);
     session.linkedOrderId = orderId;
     if (!session.recordingId) {
-      if (session.status === "closed") {
-        this.removeFlag(session, "recording_pending");
-        this.addFlag(session, "recording_missing");
-      } else {
-        this.removeFlag(session, "recording_missing");
-        this.addFlag(session, "recording_pending");
-      }
+      this.syncRecordingFlagsWithoutAttachment(session);
     }
     if (session.callbackTask) {
       session.callbackTask = {
@@ -510,6 +503,7 @@ export class CallcenterService implements OnModuleInit {
     session.recordingUrl = nextRecordingUrl;
     session.startedAt = nextStartedAt;
     session.endedAt = nextEndedAt;
+    this.removeFlag(session, "recording_pending_callback");
     this.removeFlag(session, "recording_pending");
     this.removeFlag(session, "recording_missing");
     this.addFlag(session, "recording_bound");
@@ -575,6 +569,7 @@ export class CallcenterService implements OnModuleInit {
     session.recordingUrl = null;
     this.removeFlag(session, "recording_bound");
     this.removeFlag(session, "recording_missing");
+    this.addFlag(session, "recording_pending_callback");
     this.addFlag(session, "recording_pending");
     this.persistSessions([session], "mark_recording_pending");
     this.notifyRecordingStateChange(session, requestId);
@@ -617,6 +612,7 @@ export class CallcenterService implements OnModuleInit {
     session.recordingUrl = null;
     this.addFlag(session, "closed");
     this.removeFlag(session, "recording_bound");
+    this.removeFlag(session, "recording_pending_callback");
     this.removeFlag(session, "recording_pending");
     this.addFlag(session, "recording_missing");
     this.persistSessions([session], "mark_recording_failed");
@@ -818,13 +814,7 @@ export class CallcenterService implements OnModuleInit {
       this.addFlag(existingSession, "recording_bound");
     } else {
       this.removeFlag(existingSession, "recording_bound");
-      if (existingSession.status === "closed") {
-        this.removeFlag(existingSession, "recording_pending");
-        this.addFlag(existingSession, "recording_missing");
-      } else {
-        this.removeFlag(existingSession, "recording_missing");
-        this.addFlag(existingSession, "recording_pending");
-      }
+      this.syncRecordingFlagsWithoutAttachment(existingSession);
     }
 
     if (existingSession.callbackTask) {
@@ -1041,6 +1031,22 @@ export class CallcenterService implements OnModuleInit {
       return "missing";
     }
     return "pending";
+  }
+
+  private syncRecordingFlagsWithoutAttachment(session: CallSessionRecord) {
+    const keepPending =
+      session.status !== "closed" ||
+      session.flags.includes("recording_pending_callback");
+
+    if (keepPending) {
+      this.removeFlag(session, "recording_missing");
+      this.addFlag(session, "recording_pending");
+      return;
+    }
+
+    this.removeFlag(session, "recording_pending_callback");
+    this.removeFlag(session, "recording_pending");
+    this.addFlag(session, "recording_missing");
   }
 
   private notifyRecordingStateChange(

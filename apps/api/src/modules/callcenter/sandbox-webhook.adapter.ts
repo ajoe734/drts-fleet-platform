@@ -92,6 +92,13 @@ export class SandboxWebhookAdapter {
           ),
         };
       case "recording.ready":
+        if (!payload.recording_id?.trim()) {
+          throw new ApiRequestError(
+            HttpStatus.BAD_REQUEST,
+            "RECORDING_ID_REQUIRED",
+            "recording_id is required for recording.ready.",
+          );
+        }
         this.callcenterService.upsertExternalSession(
           {
             callId,
@@ -103,13 +110,6 @@ export class SandboxWebhookAdapter {
           },
           requestId,
         );
-        if (!payload.recording_id?.trim()) {
-          throw new ApiRequestError(
-            HttpStatus.BAD_REQUEST,
-            "RECORDING_ID_REQUIRED",
-            "recording_id is required for recording.ready.",
-          );
-        }
         return {
           accepted: true,
           eventType,
@@ -117,7 +117,7 @@ export class SandboxWebhookAdapter {
           session: this.callcenterService.attachRecordingCallback(
             callId,
             {
-              recordingId: payload.recording_id,
+              recordingId: payload.recording_id.trim(),
               ...(payload.provider_recording_ref
                 ? {
                     providerRecordingRef: payload.provider_recording_ref,
