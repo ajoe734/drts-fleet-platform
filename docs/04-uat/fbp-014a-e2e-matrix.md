@@ -223,6 +223,45 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ---
 
+### 4.5 E2E-006 — Driver Multi-Platform Owned + Forwarded Chain
+
+**Script:** `tests/e2e/E2E-006-driver-multi-platform.sh`
+**Workflow family:** `WF-DRV-MP-001`
+
+#### Surface Chain
+
+```
+Driver App (mixed inbox) ──► Driver App (owned vs forwarded detail) ──► Ops Console (no-owned-assignment) ──► Earnings API (by-platform)
+```
+
+#### Leg Breakdown
+
+| Leg | Surface      | Actor         | API Route                               | Assertion                                                         |
+| --- | ------------ | ------------- | --------------------------------------- | ----------------------------------------------------------------- |
+| 1   | Driver App   | `driver_user` | `GET /api/driver/tasks`                 | Same inbox contains one owned task and one forwarded task         |
+| 2   | Driver App   | `driver_user` | `GET /api/driver/tasks/:taskId`         | Owned task stays local-authority; forwarded task shows route lock |
+| 3   | Driver App   | `driver_user` | `POST /api/driver/tasks/:taskId/accept` | Forwarded task accept runs only when status is `pending_acceptance` |
+| 4   | Ops Console  | `ops_user`    | `GET /api/dispatch/tasks`               | Forwarded task did not create an owned dispatch assignment        |
+| 5   | Earnings API | `ops_user`    | `GET /api/platform-earnings/*`          | By-platform earnings breakdown remains readable                   |
+
+#### Pass Criteria
+
+1. Driver inbox exposes one owned task (`sourcePlatform` null/`drts`) and one forwarded task (`sourcePlatform` non-`drts`).
+2. Forwarded task detail reports `routeLocked=true`.
+3. Forwarded task detail carries a non-null, non-`drts` `sourcePlatform`.
+4. No owned `dispatch_assignment` exists for the forwarded task ID.
+5. Platform earnings summary succeeds and by-platform breakdown returns at least one platform item.
+6. **Graceful skip** when mixed owned+forwarded driver seed data is absent.
+
+#### Notes
+
+This scenario extends `E2E-002` from a single forwarded-task mirror into the
+driver multi-platform workflow family. The task leg is mixed-seed dependent,
+while the earnings leg can still run against the runtime fallback seeded by the
+platform earnings service when DB-backed aggregation is unavailable.
+
+---
+
 ## 5. Fixture Inventory
 
 | Fixture File                     | Used By                          | Description                                                       |
@@ -230,7 +269,7 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 | `e2e-booking-enterprise.json`    | E2E-001, E2E-004                 | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
 | `e2e-booking-airport.json`       | (reserved for E2E-003 expansion) | `credit_card_airport_transfer` booking                            |
 | `e2e-dispatch-assign.json`       | E2E-001                          | Dispatch assign body with `__*__` placeholders                    |
-| `e2e-driver-accept.json`         | E2E-001, E2E-002                 | Driver task accept with `__ACCEPTED_AT__`                         |
+| `e2e-driver-accept.json`         | E2E-001, E2E-002, E2E-006        | Driver task accept with `__ACCEPTED_AT__`                         |
 | `e2e-driver-depart.json`         | E2E-001                          | Driver depart pickup with `__DEPARTED_AT__`                       |
 | `e2e-driver-arrived-pickup.json` | E2E-001                          | Driver arrived at pickup with `__ARRIVED_AT__`                    |
 | `e2e-driver-start.json`          | E2E-001                          | Driver trip start with `__STARTED_AT__`                           |
@@ -279,6 +318,7 @@ calls `switch_actor TYPE ID [TENANT_ID]` to change the active actor between surf
 - **E2E-001 legs 2–4:** skipped (exit 0 with warning) when staging DB has no open dispatch jobs.
   This is expected when testing against a fresh staging environment with no booking seed propagated.
 - **E2E-002:** skipped (exit 0 with warning) when no forwarded task is present in driver task list.
+- **E2E-006:** skipped (exit 0 with warning) when the driver task list does not contain both an owned task and a forwarded task.
 - **E2E-004:** skipped beyond leg 1 (exit 0 with warning) when `POST /api/platform-admin/tenants`
   does not return a `tenantId` in its response.
 
@@ -299,6 +339,7 @@ Minimum evidence items required for each scenario:
 | E2E-001  | `bookingId`, `dispatchJobId`, `taskId`, `invoiceId`, `auditEntryCount`      |
 | E2E-002  | `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `taskStatusAfterAccept` |
 | E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`    |
+| E2E-006  | `ownedTaskId`, `forwardedTaskId`, `forwardedSourcePlatform`, `forwardedRouteLocked`, `platformCodes` |
 
 ---
 
@@ -330,7 +371,7 @@ Minimum evidence items required for each scenario:
 
 ### Verification Snapshot
 
-- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/run-e2e.sh`
+- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/E2E-006-driver-multi-platform.sh tests/e2e/run-e2e.sh`
 - `./tests/e2e/run-e2e.sh --dry-run`
 
 ---
