@@ -140,7 +140,8 @@ booking_fixture() {
 
 switch_tenant_actor() {
   local actor_id="$1"
-  switch_actor "tenant_admin" "$actor_id" "$TENANT_ID"
+  local actor_type="${2:-tenant_admin}"
+  switch_actor "$actor_type" "$actor_id" "$TENANT_ID"
 }
 
 assert_error_code() {
@@ -488,7 +489,7 @@ fi
 assert_error_code "BOOKING_APPROVAL_PENDING"
 
 log_step "1.6 — POST /tenant/approval-requests/:id/approve"
-switch_tenant_actor "$TENANT_FINANCE_USER_ID"
+switch_tenant_actor "$TENANT_FINANCE_USER_ID" "tenant_finance_admin"
 http_call POST "/tenant/approval-requests/${APPROVED_REQUEST_ID}/approve" "$(write_json <<< '{}')"
 assert_status "200|201"
 
@@ -667,7 +668,7 @@ http_call POST "/tenant/bookings" "$payload_file"
 assert_status "200|201"
 REJECTED_BOOKING_ID=$(json_get_first ".data.bookingId" ".data.booking_id")
 REJECTED_REQUEST_ID=$(fetch_approval_request_id "$REJECTED_BOOKING_ID" "pending")
-switch_tenant_actor "$TENANT_FINANCE_USER_ID"
+switch_tenant_actor "$TENANT_FINANCE_USER_ID" "tenant_finance_admin"
 payload_file=$(write_json <<EOF
 {"reasonCode":"finance_reject","reasonNote":"E2E-005 rejection path"}
 EOF
