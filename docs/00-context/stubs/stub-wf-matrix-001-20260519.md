@@ -1,9 +1,11 @@
 # Workflow Acceptance Matrix Stub
 
-Status: directive-required thin stub  
+Status: directive-required thin stub
 Canonical artifact: `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md`
 
-This file does not redefine product semantics. It points reviewers to the current source of truth.
+This stub exists to satisfy the directive's required design-artifact path without
+duplicating the maintained workflow acceptance matrix. Reviewers should treat
+the canonical artifact above as the only maintained source of truth.
 
 ## Do not restate
 
