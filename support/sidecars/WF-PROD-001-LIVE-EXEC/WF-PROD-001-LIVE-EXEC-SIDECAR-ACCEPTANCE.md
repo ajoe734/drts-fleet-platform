@@ -6,8 +6,8 @@
 - **Assigned Sidecar Reviewer:** `Codex2`
 - **Parent Owner At Snapshot:** `Claude2`
 - **Parent Reviewer At Snapshot:** `Codex`
-- **Last Revised:** `2026-05-19T21:26:12Z`
-- **Status:** `Refreshed support-only acceptance packet against canonical AI_STATUS_ROOT after the second review failure; parent snapshot now matches the 2026-05-19T21:20:53Z blocked/HELD-external control-plane state.`
+- **Last Revised:** `2026-05-19T21:39:28Z`
+- **Status:** `Refreshed support-only acceptance packet against canonical AI_STATUS_ROOT after stale commit cf7bcc4. The parent has since advanced beyond the old blocked snapshot: it was routed through todo by the unblock child and is now in_progress for evidence refresh while still operationally external-gated.`
 
 ---
 
@@ -22,36 +22,49 @@ This sidecar stays support-only.
 
 ## 2) Canonical Machine-Truth Snapshot
 
-The authoritative control-plane source for this packet is canonical `ai-status.json` at `AI_STATUS_ROOT=/home/edna/workspace/drts-fleet-platform`, with `current-work.md` used only as the derived human view.
+The authoritative control-plane source for this packet is canonical `ai-status.json` at `AI_STATUS_ROOT=/home/edna/workspace/drts-fleet-platform`, with `current-work.md` treated only as a derived human summary.
+
+### Snapshot drift this refresh fixes
+
+- Commit `cf7bcc4` on this branch still captured the older parent snapshot: `status=blocked`, `waiting_for=Codex`, `last_update=2026-05-19T21:20:53Z`.
+- Canonical machine truth later recorded the unblock child `WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION` as `done` with `resolved_parent_status=todo`.
+- Canonical machine truth now shows the parent resumed to `status=in_progress` at `2026-05-19T21:37:34Z` with no open `waiting_for`, no open blocker entry, and no open handoff entry.
 
 ### Parent `WF-PROD-001-LIVE-EXEC`
 
 - title=`Production deploy live execution (HELD)`
 - owner=`Claude2`
 - reviewer=`Codex`
-- status=`blocked`
-- waiting_for=`Codex`
+- status=`in_progress`
+- waiting_for=`<none>`
 - depends_on=`["PROD-SPEC-001","PROD-DRILL-001"]`
 - artifact target=`support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md`
-- last_update=`2026-05-19T21:20:53Z`
-- next=`HELD (external). Evidence sidecar anchored at support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md (commit 9ff924e, pushed to origin/claude2/wf-prod-001-live-exec). Live production deploy cannot fire until operator provisions: (1) vars.PROD_GCP_PROJECT_ID/REGION/CLOUDSQL_INSTANCE/RUNTIME_SERVICE_ACCOUNT/PLATFORM_ADMIN_ORIGIN/OPS_CONSOLE_ORIGIN/CONTROL_PLANE_API_ORIGIN/IAP_CLIENT_ID and secrets.PROD_WIF_PROVIDER/PROD_WIF_SERVICE_ACCOUNT in repo Settings; (2) GCP prod project with WIF + Cloud SQL + Artifact Registry + Secret Manager entries drts-prod-db-url/api-key-salt/jwt-secret/controlled-download-signing-secret; (3) GitHub Environment 'production' reviewer rule; (4) a published prod/v<date>.<N> tag from hourly-promote.yml. Per phase1-v3 wave planning §9 note 6, this task stays at status=blocked with explicit waiting_for until those external resources arrive.`
+- last_update=`2026-05-19T21:37:34Z`
+- next=`Resuming after chair-applied resume_parent_task: re-verifying HELD-external posture from this worker and refreshing the live-exec evidence sidecar with a 2026-05-19 re-verification stamp; live prod deploy still cannot fire (PROD_* vars/secrets absent, no prod/v* tag on origin, worker not authenticated to gh/gcloud).`
 
 ### Sidecar `WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE`
 
 - owner=`Codex`
 - reviewer=`Codex2`
-- status=`in_progress`
+- status=`in_progress` at draft time
 - helper kind=`acceptance_packet`
 - support artifact path=`support/sidecars/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE.md`
-- last_update=`2026-05-19T21:23:35Z`
+- last_update=`2026-05-19T21:36:51Z`
 - `mutates_canonical=false`
 
 ### Important posture that this packet must preserve
 
-- The parent is currently `blocked`, not `in_progress`, and that blocked state is the correct machine-truth snapshot for this packet.
-- The control-plane field `waiting_for=Codex` is a machine-truth routing value, but the blocker body itself is explicit that the real gate is **external operator GitHub/GCP readiness**.
-- `current-work.md` agrees on the parent's blocked `Claude2/Codex` snapshot and the sidecar's `Codex/Codex2` in-progress snapshot.
-- The parent evidence path, dependency docs, and unblock artifact are still absent from canonical root and this task worktree, so this packet must rely on canonical task closeout metadata rather than pretending those files are locally visible here.
+- The parent is currently `in_progress`, not `blocked` and not `todo`.
+- Operationally, the parent is still HELD-external. The `in_progress` state reflects owner-side re-verification and evidence refresh, not live production readiness.
+- The old `waiting_for=Codex` field is no longer current and must not be reused in downstream acceptance language.
+- `PROD-SPEC-001` and `PROD-DRILL-001` remain `done`, and the unblock child remains `done`; the remaining gap is external operator/runtime readiness plus missing live evidence.
+- The parent evidence path and dependency docs are still absent from canonical root and this task worktree, so this packet must rely on canonical task closeout metadata rather than pretending those files are locally visible here.
+
+### Current externally gated signals observed during this refresh
+
+- `git ls-remote --tags origin 'refs/tags/prod/v*'` returned no matching tags.
+- The parent `next` field still records missing `PROD_*` repo vars/secrets and missing worker `gh`/`gcloud` authentication.
+- `support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md` is still absent in both this worktree and canonical root.
 
 ---
 
@@ -68,7 +81,7 @@ The authoritative control-plane source for this packet is canonical `ai-status.j
 
 | Supporting task | Shared-truth status | Closeout evidence | Current branch/root visibility | Why it matters |
 | --- | --- | --- | --- | --- |
-| `WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION` | `done` | commit `025b1dd3cea63ed41d6814f9be0f2424c92a5d72`, push `origin/codex/wf-prod-001-live-exec-unblock-planning-decision` | `support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.md` is still missing in both canonical root and this task worktree | Confirms the parent is **external-gated operator work**, not a missing product/contract decision. The later `Claude2` blocker at `2026-05-19T21:20:53Z` is consistent with that routing: the task is blocked by missing external prerequisites, not by unresolved semantics. |
+| `WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION` | `done` | commit `025b1dd3cea63ed41d6814f9be0f2424c92a5d72`, push `origin/codex/wf-prod-001-live-exec-unblock-planning-decision` | `support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.md` is still missing in both canonical root and this task worktree | Confirms the parent is not blocked by unresolved product semantics. The child closed with `resolved_parent_status=todo`, and the parent later resumed to `in_progress`; the remaining gate is external operator/GitHub/GCP readiness plus live evidence collection. |
 
 ### In-branch anchors that are present right now
 
@@ -85,7 +98,7 @@ The authoritative control-plane source for this packet is canonical `ai-status.j
 | `docs/03-runbooks/production-deploy-rail-spec-20260519.md` | missing | The deploy-rail spec is closed in machine truth but not merged into this branch/root view. |
 | `docs/03-runbooks/production-rollback-drill-20260519.md` | missing | The rollback drill protocol is closed in machine truth but not merged into this branch/root view. |
 | `support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.md` | missing | The unblock decision is authoritative through task closeout metadata, not through a locally visible file on this branch/root. |
-| `support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md` | missing | Expected for this branch/root view even though the parent blocker message cites commit `9ff924e` on `origin/claude2/wf-prod-001-live-exec`. |
+| `support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md` | missing | The parent owner is actively refreshing this evidence sidecar, but the artifact is not visible on this branch/root yet. |
 
 ---
 
@@ -96,16 +109,16 @@ The parent still has no explicit `acceptance` array in canonical `ai-status.json
 ### AC-1: Dependency truth is consumed honestly
 
 - `PROD-SPEC-001` and `PROD-DRILL-001` must remain `done` in the acceptance framing even though their docs are not visible on this branch/root.
-- The unblock child must remain `done` and must keep the parent classified as external-gated rather than semantically blocked.
-- The parent must stay on the current blocked snapshot: owner=`Claude2`, reviewer=`Codex`, status=`blocked`, waiting_for=`Codex`, last_update=`2026-05-19T21:20:53Z`.
+- The unblock child must remain `done` and must keep the parent classified as resolved for planning/contract semantics.
+- The parent must stay on the current resumed snapshot: owner=`Claude2`, reviewer=`Codex`, status=`in_progress`, no `waiting_for`, last_update=`2026-05-19T21:37:34Z`.
 
-**PASS condition for parent:** the live-exec evidence or held-state packet cites the current machine-truth dependency closure without inventing new canonical blockers or regressing to the earlier `in_progress` snapshot.
+**PASS condition for parent:** the live-exec evidence or held-state packet cites the current machine-truth dependency closure and current resumed owner state without regressing to the stale blocked snapshot from `cf7bcc4`.
 
 ### AC-2: External GitHub and GCP prerequisites are proven for the actual run
 
 Before any real production deploy is treated as accepted evidence, the operator lane must prove:
 
-- GitHub repo variables exist for `PROD_GCP_PROJECT_ID`, `PROD_GCP_REGION`, `PROD_GCP_CLOUDSQL_INSTANCE`, `PROD_GCP_RUNTIME_SERVICE_ACCOUNT`, `PROD_PLATFORM_ADMIN_ORIGIN`, `PROD_OPS_CONSOLE_ORIGIN`, `PROD_CONTROL_PLANE_API_ORIGIN`, and `PROD_IAP_CLIENT_ID`.
+- GitHub repo variables exist for the production values called out by the runbook, including `PROD_GCP_PROJECT_ID`, `PROD_GCP_REGION`, `PROD_GCP_CLOUDSQL_INSTANCE`, `PROD_GCP_RUNTIME_SERVICE_ACCOUNT`, `PROD_PLATFORM_ADMIN_ORIGIN`, `PROD_OPS_CONSOLE_ORIGIN`, `PROD_CONTROL_PLANE_API_ORIGIN`, and `PROD_IAP_CLIENT_ID`.
 - GitHub repo secrets exist for `PROD_WIF_PROVIDER` and `PROD_WIF_SERVICE_ACCOUNT`.
 - GitHub Environment `production` is configured with a human reviewer path.
 - GCP wiring is live for WIF, runtime service account separation, Artifact Registry push, Cloud SQL target, Secret Manager entries, and Cloud Run/IAP rights or an explicit manual fallback.
@@ -145,23 +158,24 @@ The rollback companion must capture:
 
 | Item | Required result |
 | --- | --- |
-| Parent snapshot is current | packet says parent owner=`Claude2`, reviewer=`Codex`, status=`blocked`, waiting_for=`Codex`, last_update=`2026-05-19T21:20:53Z`, and still HELD-external in meaning |
-| Sidecar snapshot is current | packet says sidecar owner=`Codex`, reviewer=`Codex2`, status=`in_progress`, last_update=`2026-05-19T21:23:35Z` |
+| Parent snapshot is current | packet says parent owner=`Claude2`, reviewer=`Codex`, status=`in_progress`, no `waiting_for`, last_update=`2026-05-19T21:37:34Z`, and `next` still says live prod deploy cannot fire yet |
+| Sidecar routing is current | packet says sidecar owner=`Codex`, reviewer=`Codex2`, and the owner handoff target is still `Codex2` |
 | Dependency state is honest | `PROD-SPEC-001`, `PROD-DRILL-001`, and the unblock child all remain `done` via canonical machine truth |
-| Visibility gaps are explicit | packet states that the dependency docs, unblock artifact, and parent evidence artifact are still missing from canonical root and this task worktree |
+| Visibility gaps are explicit | packet states that the dependency docs, unblock artifact, and parent live-exec evidence artifact are still missing from canonical root and this task worktree |
 | Runbook/gate anchors are present | packet points to the existing prod deploy/rollback runbook, gate row, and PROD-RAIL closeout evidence |
-| External blocker meaning is preserved | packet does not confuse `waiting_for=Codex` with the real blocker cause, which remains external GitHub/GCP/operator readiness |
+| External gating meaning is preserved | packet does not confuse machine-truth `in_progress` with live readiness; it preserves the real blocker cause as external GitHub/GCP/operator readiness plus missing prod tag/evidence |
 | Reviewer commands are current | owner handoff targets `Codex2`, and approve/reopen commands target the same reviewer |
 
 ---
 
 ## 6) Reviewer Hotspots For `Codex2`
 
-1. Confirm the packet now matches canonical machine truth after the second review failure: parent is `blocked` at `2026-05-19T21:20:53Z` under `Claude2/Codex`, while the sidecar remains `Codex/Codex2` in progress.
-2. Confirm the packet is honest about visibility: dependency docs, unblock artifact, and parent live-exec evidence are authoritative in machine truth but still absent from canonical root and this task worktree.
-3. Confirm the packet preserves the HELD-external reading from the unblock decision and from the later `Claude2` blocker instead of reopening a resolved semantic blocker.
-4. Confirm the reviewer checklist demands actual production workflow evidence plus rollback evidence, not dry-run proof.
-5. Confirm the packet remains support-only and does not mutate any canonical truth file, workflow, or runtime implementation.
+1. Confirm the packet now matches current canonical machine truth after stale commit `cf7bcc4`: parent is `in_progress` at `2026-05-19T21:37:34Z` under `Claude2/Codex`, with no `waiting_for`.
+2. Confirm the packet is honest about chronology: the unblock child closed with `resolved_parent_status=todo`, and the parent later resumed to `in_progress` for evidence refresh.
+3. Confirm the packet is honest about visibility: dependency docs, unblock artifact, and parent live-exec evidence are authoritative in machine truth but still absent from canonical root and this task worktree.
+4. Confirm the packet preserves the HELD-external interpretation even though the control-plane status is currently `in_progress`.
+5. Confirm the reviewer checklist demands actual production workflow evidence plus rollback evidence, not dry-run proof.
+6. Confirm the packet remains support-only and does not mutate any canonical truth file, workflow, or runtime implementation.
 
 ---
 
@@ -175,7 +189,7 @@ The rollback companion must capture:
 
 ### AC-S2 - Machine-truth aligned dependency map
 
-- [x] Parent and sidecar owner/reviewer/status fields match canonical `AI_STATUS_ROOT/ai-status.json`
+- [x] Parent and sidecar owner/reviewer/status fields match canonical `AI_STATUS_ROOT/ai-status.json` at draft time
 - [x] Formal dependencies remain exactly `PROD-SPEC-001` and `PROD-DRILL-001`
 - [x] The unblock child remains included as the routing decision that preserves HELD-external classification
 - [x] The packet explicitly records the current branch/root visibility gap for dependency artifacts and the parent evidence artifact
@@ -194,19 +208,19 @@ The rollback companion must capture:
 ### Owner -> Reviewer (`Codex` -> `Codex2`)
 
 ```bash
-AI_NAME=Codex scripts/ai-status.sh handoff WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE Codex2 "Refreshed support/sidecars/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE.md against canonical AI_STATUS_ROOT after the latest review failure. Packet now matches parent WF-PROD-001-LIVE-EXEC owner=Claude2 reviewer=Codex status=blocked waiting_for=Codex last_update=2026-05-19T21:20:53Z, keeps the HELD-external blocker semantics explicit, and records current dependency closeout metadata for PROD-SPEC-001, PROD-DRILL-001, and the unblock child. It also records the honest branch/root visibility gap for those dependency docs, the unblock artifact, and the parent live-exec evidence path."
+AI_NAME=Codex scripts/ai-status.sh handoff WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE Codex2 "Refreshed support/sidecars/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE.md against canonical AI_STATUS_ROOT after stale commit cf7bcc4. Packet now matches parent WF-PROD-001-LIVE-EXEC owner=Claude2 reviewer=Codex status=in_progress last_update=2026-05-19T21:37:34Z with no waiting_for, preserves the HELD-external meaning from the parent next step, records dependency closeout metadata for PROD-SPEC-001, PROD-DRILL-001, and the unblock child, and notes the current visibility gap plus the absence of prod/v* tags on origin during this refresh."
 ```
 
 ### Reviewer Approve (`Codex2`)
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh approve WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE "Approved refreshed support-only packet. The sidecar now matches canonical machine truth for the blocked parent snapshot, keeps the dependency docs/unblock artifact/live-exec evidence honest as done-or-anchored in status but still absent on this branch/root, preserves the HELD-external interpretation, and provides a reviewer-usable acceptance checklist for live deploy and rollback evidence."
+AI_NAME=Codex2 scripts/ai-status.sh approve WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE "Approved refreshed support-only packet. The sidecar now matches canonical machine truth for the resumed parent snapshot, keeps the dependency docs/unblock artifact/live-exec evidence honest as done-or-anchored in status but still absent on this branch/root, preserves the HELD-external interpretation while the parent is in_progress, and provides a reviewer-usable acceptance checklist for live deploy and rollback evidence."
 ```
 
 ### Reviewer Reopen (`Codex2`)
 
 ```bash
-AI_NAME=Codex2 scripts/ai-status.sh reopen WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE "Please refresh the WF-PROD-001 live-exec sidecar packet: <describe any remaining machine-truth mismatch, reviewer-routing error, or missing evidence requirement>."
+AI_NAME=Codex2 scripts/ai-status.sh reopen WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE "Please refresh the WF-PROD-001 live-exec sidecar packet: <describe any remaining machine-truth mismatch, reviewer-routing error, stale parent snapshot, or missing evidence requirement>."
 ```
 
 Owner closeout happens only after `review_approved` and after the support-artifact commit/push metadata is available for `done`.
@@ -215,9 +229,11 @@ Owner closeout happens only after `review_approved` and after the support-artifa
 
 ## 9) Verification Notes
 
-- Verified canonical machine truth from `/home/edna/workspace/drts-fleet-platform/ai-status.json` and derived `/home/edna/workspace/drts-fleet-platform/current-work.md`.
-- Verified canonical parent `WF-PROD-001-LIVE-EXEC` is `blocked` with owner=`Claude2`, reviewer=`Codex`, waiting_for=`Codex`, and last_update=`2026-05-19T21:20:53Z`.
+- Verified canonical machine truth from `/home/edna/workspace/drts-fleet-platform/ai-status.json`.
+- Verified canonical parent `WF-PROD-001-LIVE-EXEC` is `in_progress` with owner=`Claude2`, reviewer=`Codex`, no `waiting_for`, and last_update=`2026-05-19T21:37:34Z`.
+- Verified there are no open handoff or blocker entries for either `WF-PROD-001-LIVE-EXEC` or `WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE`.
 - Verified canonical dependency closeout metadata for `PROD-SPEC-001`, `PROD-DRILL-001`, and `WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION`.
 - Verified both canonical root and this task worktree still lack `production-deploy-rail-spec-20260519.md`, `production-rollback-drill-20260519.md`, `WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.md`, and `PROD-LIVE-EXEC-EVIDENCE.md`.
 - Verified the current branch/root does contain `docs/03-runbooks/prod-deploy-rollback-runbook-20260519.md`, the `WF-PROD-001` gate row, and `support/sidecars/PROD-RAIL-CLOSEOUT-20260519/PROD-RAIL-CLOSEOUT-EVIDENCE.md`.
+- Verified `git ls-remote --tags origin 'refs/tags/prod/v*'` returned no matching tags during this refresh.
 - No runtime tests or live workflow checks were run because this sidecar task updates support documentation only.
