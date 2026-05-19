@@ -3930,20 +3930,43 @@ def poll_workers(config: dict[str, Any], state: dict[str, Any]) -> bool:
                     },
                 )
                 finalize_queue_event_record(config, state, worker, "completed")
-            elif task_status in redispatch_statuses:
-                finalize_terminal_worker_outcome(
-                    config,
-                    state,
-                    worker,
-                    "Worker exited before the task reached a terminal status.",
-                )
             else:
-                finalize_terminal_worker_outcome(
-                    config,
-                    state,
-                    worker,
-                    "Worker exited before the task reached a terminal status.",
-                )
+                # Race protection: the worker may have written status='review' (or another
+                # expected_completion status) to ai-status.json moments before exiting.
+                # The task_map cached at the start of this tick can predate that write, so
+                # re-read fresh before declaring "exited before terminal status".
+                fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
+                fresh_status = str(fresh_task.get("status") or "").lower()
+                if (
+                    fresh_status
+                    and fresh_status != task_status
+                    and fresh_status in expected_completion_statuses
+                ):
+                    worker["status"] = "completed"
+                    worker["last_event_at"] = utc_now()
+                    write_activity_log(
+                        config,
+                        {
+                            "type": "worker_completed",
+                            "provider": worker.get("provider"),
+                            "task_id": worker.get("task_id"),
+                            "message": (
+                                f"Background worker process exited after advancing the task to `{fresh_status}` "
+                                "(observed on fresh re-read; cached snapshot predated the worker's status write)."
+                            ),
+                            "worker_run_id": worker["run_id"],
+                            "pr_url": worker.get("pr_url"),
+                            "session_url": worker.get("session_url"),
+                        },
+                    )
+                    finalize_queue_event_record(config, state, worker, "completed")
+                else:
+                    finalize_terminal_worker_outcome(
+                        config,
+                        state,
+                        worker,
+                        "Worker exited before the task reached a terminal status.",
+                    )
             changed = True
     return changed
 
