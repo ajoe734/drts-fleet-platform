@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { TenantPassengerRecord } from "@drts/contracts";
 import {
   buildTenantBookingCreateCommand,
+  formatDateTimeLocalInputValue,
+  getDefaultDateTimeLocalValue,
   getBlockingTenantBookingDraftErrors,
   isMissingRequiredBookingFields,
   isReadyForTenantBookingPolicyPreview,
@@ -55,6 +57,11 @@ const passenger: TenantPassengerRecord = {
   createdAt: "2026-05-01T00:00:00.000Z",
   updatedAt: "2026-05-01T00:00:00.000Z",
 };
+
+function formatExpectedLocalValue(value: Date) {
+  const pad = (segment: number) => String(segment).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
 
 describe("tenant booking create form utils", () => {
   it("keeps estimated spend out of the create-booking command", () => {
@@ -120,5 +127,18 @@ describe("tenant booking create form utils", () => {
         true,
       ),
     ).toBe(true);
+  });
+
+  it("formats datetime-local defaults without UTC slicing drift", () => {
+    const now = new Date("2026-05-15T01:02:33.000Z");
+    const expectedNow = formatExpectedLocalValue(now);
+    const expectedOffset = new Date(now.getTime());
+    expectedOffset.setMinutes(expectedOffset.getMinutes() + 30);
+    expectedOffset.setSeconds(0, 0);
+
+    expect(formatDateTimeLocalInputValue(now)).toBe(expectedNow);
+    expect(getDefaultDateTimeLocalValue(30, now)).toBe(
+      formatExpectedLocalValue(expectedOffset),
+    );
   });
 });
