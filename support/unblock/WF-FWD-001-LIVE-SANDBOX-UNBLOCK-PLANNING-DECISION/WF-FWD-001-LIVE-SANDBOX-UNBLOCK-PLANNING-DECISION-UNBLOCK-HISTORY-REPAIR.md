@@ -162,3 +162,15 @@ metadata-only closeout notes.
 - `origin/dev@2103814`
 - `origin/codex2/wf-fwd-001-live-sandbox-unblock-planning-decision@e190c2b`
 - `origin/codex/wf-fwd-001-live-sandbox-unblock-history-repair@58cfdd8`
+
+## Closeout evidence
+
+- reviewer approval recorded in canonical `ai-activity-log.jsonl` at
+  `2026-05-19T19:15:27Z` by `Claude`
+- task branch already pushed as
+  `origin/codex/wf-fwd-001-live-sandbox-unblock-planning-decision-unblock-history-repair`
+  with anchor commit `a91bfe5` and PR `#168` targeting `dev`
+- canonical `ai-status.json` now carries the parent replay sequence in
+  `WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION.next`, so the next owner
+  action after this closeout is operational replay rather than new planning
+  content
