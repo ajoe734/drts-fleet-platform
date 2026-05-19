@@ -2,7 +2,7 @@
 
 **Task:** `PRT-UAT-001`
 **Owner:** `Codex2`
-**Reviewer:** `Claude2`
+**Reviewer:** `Codex`
 **Date:** `2026-05-19`
 **Primary evidence:** `TST-E2E-007-PRT`, `docs/03-runbooks/partner-eligibility-manual-review-runbook.md`
 **Workflow family:** `WF-PARTNER-001`
