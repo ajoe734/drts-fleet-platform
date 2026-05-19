@@ -61,12 +61,21 @@ now explicitly states:
 
 ## Parent next step
 
-Keep `WF-FWD-001-LIVE-SANDBOX` blocked and route it to the external owner path:
+Keep `WF-FWD-001-LIVE-SANDBOX` out of live-evidence execution until both the
+repo-local and external prerequisites are satisfied:
 
-- Confirm the concrete live partner contract authority for the forwarder proof
-  run.
-- Supply `EXT-002-BLK-001` to `EXT-002-BLK-007`.
-- Then resume the parent task to collect the live sandbox evidence pack.
+1. Finish `FWD-SPEC-001` so the canonical forwarder proof spec records the
+   sandbox boundary and non-claim language in repo truth.
+2. Keep `WF-FWD-001-LIVE-SANDBOX` blocked on the external owner path:
+   confirm the concrete live partner contract authority for the forwarder proof
+   run and supply `EXT-002-BLK-001` to `EXT-002-BLK-007`.
+3. Only then resume the parent task to collect the live sandbox evidence pack.
+
+## Delivery evidence
+
+- Canonical docs commit: `271b458` — `wip(WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION): anchor planning routing`
+- Push target: `origin/codex2/wf-fwd-001-live-sandbox-unblock-planning-decision`
+- PR: pending creation in this task closeout flow
 
 ## Scope cut
 
