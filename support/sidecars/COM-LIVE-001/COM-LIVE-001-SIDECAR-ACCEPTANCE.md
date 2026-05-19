@@ -1,32 +1,29 @@
 # COM-LIVE-001 SIDECAR ACCEPTANCE
 
-## 1. Parent Scope Anchoring
-- Parent Task: COM-LIVE-001 (CTI / Recording / Filing Live Activation).
-- Sidecar Purpose: Support artifact delivery for COM-LIVE-001 live activation evidence.
-- Status: This document confirms support readiness while WF-COM-001 remains HOLD against EXT-004 blockers.
+## 1. Parent Scope Anchoring (Machine-Truth Snapshots)
+- Sidecar: `support/sidecars/COM-LIVE-001/COM-LIVE-001-SIDECAR-ACCEPTANCE.md` (This document)
+- Parent Task: COM-LIVE-001 (CTI / Recording / Filing Live Activation)
+- Status: The COM-LIVE-001 effort is currently `HOLD` in the Phase 1 release gate matrix.
+- Reference: `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` (Family ID `WF-COM-001`)
 
 ## 2. Acceptance Checklist
 - [x] Support artifacts created (this document).
-- [x] Dependency map defined (referencing Phase 1 canonical contracts).
-- [x] No changes made to canonical truth (verified against phase1_prd_detailed_v1.md).
-- [x] Acceptance packet handed off to reviewer (Codex).
+- [x] Dependency map defined (keyed to parent evidence anchors).
+- [x] No changes made to canonical truth (Boundary Verified).
+- [x] Acceptance packet prepared for Codex reviewer.
 
 ## 3. Dependency Map
-- COM-LIVE-001 functional dependencies (Anchored to Evidence):
-    - **API Surface**: `Callcenter Service` (Reference: `phase1_service_contracts_v1.md`, Section 3.9).
-        - Core handling for CTI webhook intake, session metadata, recording indexing, and callback orchestration.
-    - **Frontend Surface**:
-        - `apps/concierge-portal-web/app/callbacks`: Primary frontend implementation for CTI-to-callback intake and recording index lifecycle management.
-        - `apps/concierge-portal-web/app/recording-unavailable`: Handling interface for degraded recording states.
-        - `apps/tenant-console-web`: General call operator surface interfacing with `Callcenter Service` commands for session and order orchestration.
-    - **Governance & Integration**:
-        - Registry Validation: Dependent on `Regulatory Registry Service` (`3.3`) for compliance states required for bookings initiated via CTI.
-        - Audit/Compliance: `Audit Service` (`3.13`) for immutable logging of call-to-order audit events.
+| Component | Dependency Anchor | Status/Gate |
+| :--- | :--- | :--- |
+| Live Activation Evidence | `support/sidecars/COM-LIVE-001/COM-LIVE-001-EVIDENCE-PACK.md` | Required |
+| Workflow Acceptance | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` (WF-COM-001 row) | HOLD |
+| CTI Recording/Filing Gate | `support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md` (Blockers EXT-004-BLK-001..008) | HOLD |
 
-## 4. Support Artifacts
-- This acceptance document.
-- Dependency Mapping Matrix: Derived from `phase1_service_contracts_v1.md` and `phase1_prd_detailed_v1.md`.
+## 4. Boundary Note
+- **SUPPORT-ONLY PACKET**: This document is a support artifact for the COM-LIVE-001 parent task.
+- **NO CANONICAL EDIT**: This document does not modify canonical truth, contracts, or production runtime configurations. It acts strictly as an acceptance packet for the reviewer (Codex) to bridge the gap between sidecar support work and the main repository's release-gate runbooks.
 
 ## 5. Hand-off
 - Status: Ready for Review
 - Reviewer: Codex
+- Task: Closeout acceptance of support-only artifacts for COM-LIVE-001.
