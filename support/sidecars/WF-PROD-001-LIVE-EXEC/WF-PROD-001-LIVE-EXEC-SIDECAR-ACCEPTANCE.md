@@ -54,6 +54,16 @@ At packet refresh time, shared machine truth records:
 `current-work.md` matches that row: `WF-PROD-001-LIVE-EXEC` is still `blocked`
 and still depends on `PROD-SPEC-001` and `PROD-DRILL-001`.
 
+Artifact resolution snapshot in this worktree:
+
+| Path from machine truth | Resolution |
+| --- | --- |
+| `support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md` | missing |
+| `docs/03-runbooks/production-deploy-rail-spec-20260519.md` | missing |
+| `docs/03-runbooks/production-rollback-drill-20260519.md` | missing |
+| `docs/03-runbooks/prod-deploy-rollback-runbook-20260519.md` | present |
+| `support/sidecars/PROD-RAIL-CLOSEOUT-20260519/PROD-RAIL-CLOSEOUT-EVIDENCE.md` | present |
+
 ### 2.2 Dispatch mismatch that the reviewer must know
 
 The dispatch brief embedded in this session is not current:
@@ -131,6 +141,9 @@ Reviewer implication:
 - the parent task cannot be accepted as live-execution ready while
   `PROD-DRILL-001` remains `backlog`
 - this is a hard machine-truth dependency, not a soft follow-up
+- the recorded artifact path
+  `docs/03-runbooks/production-rollback-drill-20260519.md` is also missing in
+  this worktree, so there is no local drill protocol to review yet
 
 ### 3.3 Existing production rail evidence already in repo
 
@@ -214,6 +227,11 @@ Verification performed for this packet:
 - read `support/sidecars/PROD-RAIL-CLOSEOUT-20260519/PROD-RAIL-CLOSEOUT-EVIDENCE.md`
 - confirmed that `docs/03-runbooks/production-deploy-rail-spec-20260519.md`
   is missing in this worktree despite being referenced by `PROD-SPEC-001`
+- confirmed that `docs/03-runbooks/production-rollback-drill-20260519.md` is
+  missing in this worktree despite being referenced by `PROD-DRILL-001`
+- confirmed that `support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md`
+  is missing in this worktree despite being referenced by
+  `WF-PROD-001-LIVE-EXEC`
 - confirmed that `WF-PROD-001-LIVE-EXEC-SIDECAR-ACCEPTANCE` is absent from
   `ai-status.json`
 
