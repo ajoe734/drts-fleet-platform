@@ -135,7 +135,7 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 | `WF-PROD-001-LIVE-EXEC`         | Needs prod GCP project + WIF + Cloud SQL + Secret Manager + GitHub Environment `production` reviewer rule |
 | `WF-FWD-001-LIVE-SANDBOX`       | Needs real partner platform sandbox credentials (Grab Taiwan or equivalent)                               |
 | `WF-COM-001-LIVE-PROVIDER`      | Needs CTI provider activation + webhook environment                                                       |
-| `PARTNER-ELIG-LIVE-001`         | Needs real issuer/bank sandbox credentials                                                                |
+| `PARTNER-ELIG-LIVE-001`         | External gate only after `PRT-SPEC-001`: collect `EXT-001-BLK-001` through `EXT-001-BLK-006` evidence (issuer API authority, sandbox credentials, allowed fixtures, retry confirmation, manual-review sign-off, sensitive-data approval) and attach it to `support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md`. |
 | `E2E-NUMBERING-DECISION`        | User decision per conflicts doc §1 Q1                                                                     |
 | `WF-PARTNER-RENAME-DECISION`    | User decision per conflicts doc §2 Q2                                                                     |
 | `WF-FIN-GOV-DECISION`           | User decision per conflicts doc §2 Q3                                                                     |
