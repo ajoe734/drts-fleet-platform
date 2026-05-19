@@ -72,6 +72,9 @@ switch_actor() {
   E2E_ACTOR_ID="$2"
   E2E_TENANT_ID="${3:-}"
   E2E_REALM=""   # re-derived by http_call
+  E2E_PARTNER_ID=""
+  E2E_PARTNER_PROGRAM_ID=""
+  E2E_PARTNER_ENTRY_SLUG=""
   log_info "Actor → type=${E2E_ACTOR_TYPE}, id=${E2E_ACTOR_ID}${E2E_TENANT_ID:+, tenantId=${E2E_TENANT_ID}}"
 }
 
@@ -137,16 +140,14 @@ http_call() {
     if [[ -n "${E2E_TENANT_ID:-}" ]]; then
       curl_args+=(-H "x-tenant-id: ${E2E_TENANT_ID}")
     fi
-    if [[ "${E2E_ACTOR_TYPE:-}" == "partner_api_key" ]]; then
-      if [[ -n "${E2E_PARTNER_ID:-}" ]]; then
-        curl_args+=(-H "x-partner-id: ${E2E_PARTNER_ID}")
-      fi
-      if [[ -n "${E2E_PARTNER_PROGRAM_ID:-}" ]]; then
-        curl_args+=(-H "x-partner-program-id: ${E2E_PARTNER_PROGRAM_ID}")
-      fi
-      if [[ -n "${E2E_PARTNER_ENTRY_SLUG:-}" ]]; then
-        curl_args+=(-H "x-partner-entry-slug: ${E2E_PARTNER_ENTRY_SLUG}")
-      fi
+    if [[ -n "${E2E_PARTNER_ID:-}" ]]; then
+      curl_args+=(-H "x-partner-id: ${E2E_PARTNER_ID}")
+    fi
+    if [[ -n "${E2E_PARTNER_PROGRAM_ID:-}" ]]; then
+      curl_args+=(-H "x-partner-program-id: ${E2E_PARTNER_PROGRAM_ID}")
+    fi
+    if [[ -n "${E2E_PARTNER_ENTRY_SLUG:-}" ]]; then
+      curl_args+=(-H "x-partner-entry-slug: ${E2E_PARTNER_ENTRY_SLUG}")
     fi
   fi
 

@@ -20,8 +20,8 @@ This document defines the cross-surface E2E scenario matrix for Phase 1. It capt
 5. How the scaffold relates to the existing smoke tests and UAT scenarios.
 
 The E2E scaffold is in `tests/e2e/`. The scenarios operationalize the cross-surface flows
-defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)`, plus the
-tenant-governance extension scenario `E2E-005`.
+defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)` plus the
+partner cutover authority flow added by `E2E-008`.
 
 > **Relationship to smoke tests:** `tests/smoke/` verifies individual API surfaces in isolation.
 > `tests/e2e/` chains surfaces together in a single stateful run, tracking ID continuity across
@@ -224,55 +224,51 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ---
 
-### 4.5 E2E-007 — Partner Airport Transfer Benefit Propagation
+### 4.5 E2E-008 — Partner Booking Cutover
 
-**Script:** `tests/e2e/E2E-007-partner-airport-transfer.sh`
-**Workflow cross-ref:** `WF-PARTNER-001`
+**Script:** `tests/e2e/E2E-008-partner-booking-cutover.sh`
 
 #### Surface Chain
 
 ```
-Partner ingress (eligibility) ──► Tenant Portal (booking) ──► Ops Console (dispatch) ──► Driver App (trip) ──► Tenant Billing (invoice)
+Platform Admin (entry deactivate / activate) ──► Partner Ingress (bootstrap + eligibility) ──► Tenant Booking Authority ──► Billing / Settlement evidence
 ```
 
 #### Leg Breakdown
 
-| Leg | Surface         | Actor                           | API Route                                 | Assertion                                                                        |
-| --- | --------------- | ------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------- |
-| 1   | Partner ingress | `partner_api_key`               | `GET /api/partner/entries/:entrySlug`     | Seeded partner entry is `credit_card_airport_transfer` with eligibility enabled |
-| 1   | Partner ingress | `partner_api_key`               | `POST /api/partner/eligibility/verify`    | `eligibilityVerificationId`, `benefitReference`, `issuerAuthorizationRef` set   |
-| 1   | Partner ingress | `partner_api_key`               | `GET /api/partner/eligibility/:id`        | Eligibility detail read-back matches verification result                         |
-| 2   | Tenant Portal   | `tenant_admin` (same tenant)    | `POST /api/tenant/bookings`               | Airport-transfer booking created with partner context                            |
-| 2   | Tenant Portal   | `tenant_admin`                  | `GET /api/tenant/bookings/:bookingId`     | `partnerEntrySlug`, `eligibilityVerificationId`, `benefitReference` preserved   |
-| 3   | Ops Console     | `ops_user`                      | `POST /api/orders/:orderId/dispatch`      | Dispatch job created or discoverable via queue poll                              |
-| 3   | Ops Console     | `ops_user`                      | `POST /api/dispatch/assign`               | Driver task assigned                                                             |
-| 4   | Driver App      | `driver_user`                   | `POST /api/driver/tasks/:id/*` lifecycle  | accept -> depart -> arrived_pickup -> start -> complete succeeds                 |
-| 5   | Tenant Billing  | `tenant_admin`                  | `POST /api/tenant/invoices/generate`      | invoice issued for the closed period                                             |
-| 5   | Tenant Billing  | `tenant_admin`                  | `GET /api/tenant/invoices/:invoiceId`     | matching invoice line keeps `partner_airport` channel + partner benefit fields   |
+| Leg | Surface                | Actor              | API Route                                                | Assertion                                                      |
+| --- | ---------------------- | ------------------ | -------------------------------------------------------- | -------------------------------------------------------------- |
+| 1   | Platform Admin         | `platform_admin`   | `POST /api/platform-admin/partner-entries/:entrySlug/deactivate` | Entry becomes inactive for cutover negative-path proof         |
+| 1   | Partner Ingress        | open route         | `POST /api/auth/partner/bootstrap-session`               | Inactive entry rejects bootstrap with `PARTNER_ENTRY_INACTIVE` |
+| 1   | Platform Admin         | `platform_admin`   | `POST /api/platform-admin/partner-entries/:entrySlug/activate`   | Entry is restored to active (rollback-safe state)              |
+| 2   | Partner Ingress        | `partner_api_key`  | `POST /api/partner/eligibility/verify`                   | Eligible verification issued for the same entry                |
+| 2   | Partner Ingress        | `partner_api_key`  | `GET /api/partner/eligibility/:eligibilityVerificationId` | Verification read-back preserves `partnerEntrySlug`            |
+| 3   | Tenant Booking Authority | `tenant_admin`   | `POST /api/tenant/bookings`                              | Booking created with `partnerEntrySlug` + `eligibilityVerificationId` |
+| 3   | Tenant Booking Authority | `tenant_admin`   | `GET /api/tenant/bookings/:bookingId`                    | Booking read-back preserves partner linkage and status         |
+| 4   | Billing / Settlement   | `platform_admin` / `tenant_admin` | `GET /api/settlement/matrix`, `POST /api/tenant/invoices/generate`, `GET /api/tenant/invoices/:invoiceId` | Receipt ownership evidence exposed; invoice retrieval still works |
 
 #### ID Continuity Chain
 
 ```
-partnerEntrySlug ──► eligibilityVerificationId ──► bookingId / orderId ──► dispatchJobId ──► taskId ──► invoiceId
+entrySlug (partner cutover) ──► eligibilityVerificationId (partner ingress) ──► bookingId (tenant authority) ──► invoiceId (billing evidence)
 ```
 
-#### Propagation Assertions
+#### Fixtures Used
 
-1. `benefitReference` from `partner/eligibility/verify` equals:
-   - `GET /tenant/bookings/:bookingId` `benefitReference`
-   - matching `GET /tenant/invoices/:invoiceId` line `benefitReference`
-2. `eligibilityVerificationId` from partner ingress equals:
-   - booking detail `eligibilityVerificationId`
-   - invoice line `eligibilityVerificationId`
-3. `partnerEntrySlug` remains stable from entry lookup through booking detail and invoice line.
-4. Invoice line `channelKey` is `partner_airport`.
+| Fixture                     | File                                             |
+| --------------------------- | ------------------------------------------------ |
+| Airport booking             | `tests/e2e/fixtures/e2e-booking-airport.json`    |
+| Generated tenant invoice    | runtime-generated JSON body                      |
+| Partner bootstrap / eligibility | runtime-generated JSON bodies                 |
 
-#### Notes
+#### Pass Criteria
 
-- Default seeded entry is `bank-demo-beta-airport` because its `reference_required`
-  path yields a deterministic, non-raw-token-derived `benefitReference`.
-- This is a repo-local propagation proof. It does **not** replace real issuer /
-  bank sandbox sign-off, which remains an external gate.
+1. Bootstrap against the inactive entry fails with `PARTNER_ENTRY_INACTIVE`.
+2. After reactivation, partner eligibility verification returns `eligible`.
+3. Booking read-back preserves `partnerEntrySlug` and `eligibilityVerificationId`.
+4. Settlement matrix returns the `partner_airport` row with a non-empty `receiptOwner`.
+5. Tenant invoice generation and invoice read-back both succeed.
+6. The entry is restored to active before exit, even on failure-path cleanup.
 
 ---
 
@@ -289,6 +285,7 @@ partnerEntrySlug ──► eligibilityVerificationId ──► bookingId / order
 | `e2e-driver-start.json`          | E2E-001, E2E-007                 | Driver trip start with `__STARTED_AT__`                           |
 | `e2e-driver-complete.json`       | E2E-001, E2E-007                 | Driver task complete with signoff                                 |
 | `e2e-tenant-create.json`         | E2E-004                          | Platform-admin tenant create with `__TENANT_CODE__`               |
+| `e2e-booking-airport.json`       | E2E-008, reserved for E2E-003    | Partner / airport-transfer booking with partner linkage fields    |
 | `e2e-phone-booking.json`         | Reserved (E2E-003 manual flow)   | Phone booking payload stub for future CTI-backed automation       |
 | `e2e-report-compliance.json`     | Reserved (E2E-003 manual flow)   | Compliance export payload stub for future report validation       |
 | `e2e-tenant-module-enable.json`  | Reserved (future expansion)      | Tenant module-enable payload stub for future staged cutovers      |
@@ -312,7 +309,7 @@ export E2E_API_URL=https://api-staging.drts.internal   # bare origin, no /api su
 ./tests/e2e/run-e2e.sh --suite 001
 
 # Run multiple scenarios
-./tests/e2e/run-e2e.sh --suite 001,004
+./tests/e2e/run-e2e.sh --suite 001,004,008
 
 # Dry-run: list scenarios without executing
 ./tests/e2e/run-e2e.sh --dry-run
@@ -335,6 +332,8 @@ calls `switch_actor TYPE ID [TENANT_ID]` to change the active actor between surf
 - **E2E-006:** skipped (exit 0 with warning) when the driver task list does not contain both an owned task and a forwarded task.
 - **E2E-004:** skipped beyond leg 1 (exit 0 with warning) when `POST /api/platform-admin/tenants`
   does not return a `tenantId` in its response.
+- **E2E-008:** skipped (exit 0 with warning) when `PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT`
+  is not configured for the seeded partner entry.
 
 ---
 
@@ -353,7 +352,7 @@ Minimum evidence items required for each scenario:
 | E2E-001  | `bookingId`, `dispatchJobId`, `taskId`, `invoiceId`, `auditEntryCount`      |
 | E2E-002  | `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `taskStatusAfterAccept` |
 | E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`    |
-| E2E-006  | `ownedTaskId`, `forwardedTaskId`, `forwardedSourcePlatform`, `forwardedRouteLocked`, `platformCodes` |
+| E2E-008  | `inactiveBootstrapCode`, `eligibilityVerificationId`, `bookingId`, `receiptOwner`, `invoiceId` |
 
 ---
 
