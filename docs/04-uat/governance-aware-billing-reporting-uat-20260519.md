@@ -1,10 +1,10 @@
 # Governance-Aware Billing / Reporting UAT - 2026-05-19
 
-**Task:** `FIN-GOV-UAT-001`  
-**Planned owner:** `Codex`  
-**Planned reviewer:** `Codex2`  
-**Date:** `2026-05-19`  
-**Artifact status:** `provisional`  
+**Task:** `FIN-GOV-UAT-001`
+**Owner:** `Codex2`
+**Reviewer:** `Codex`
+**Date:** `2026-05-19`
+**Artifact status:** `ready_for_review`
 **Workflow read:** `WF-FIN-001` baseline remains `PASS (static evidence)`; `WF-FIN-GOV-001` governance enrichment is documented here but not yet promoted to a separate live pass
 
 ## 1. Purpose
