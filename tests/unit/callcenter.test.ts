@@ -128,6 +128,40 @@ describe("callcenter service", () => {
     );
   });
 
+  it("keeps late-linked closed sessions in recording_pending when sandbox already marked recording pending", () => {
+    const auditService = new AuditNotificationService();
+    const callcenterService = new CallcenterService(auditService);
+
+    callcenterService.upsertExternalSession({
+      callId: "cti-sandbox-call-001",
+      callType: "booking",
+      callerPhone: "0911000001",
+      agentId: "ops-001",
+      startedAt: "2026-05-19T05:00:00.000Z",
+      endedAt: "2026-05-19T05:08:00.000Z",
+    });
+
+    const pending = callcenterService.markRecordingPending(
+      "cti-sandbox-call-001",
+      {
+        agentId: "ops-001",
+        startedAt: "2026-05-19T05:00:00.000Z",
+        endedAt: "2026-05-19T05:08:00.000Z",
+      },
+    );
+    const linked = callcenterService.linkOrderToExistingSession(
+      "cti-sandbox-call-001",
+      {
+        orderId: "order-late-link-001",
+      },
+    );
+
+    expect(pending.recordingState).toBe("pending");
+    expect(linked.recordingState).toBe("pending");
+    expect(linked.flags).toContain("recording_pending");
+    expect(linked.flags).not.toContain("recording_missing");
+  });
+
   it("rehydrates persisted sessions and writes new sessions through the repository", async () => {
     const auditService = new AuditNotificationService();
     const upsertSession = vi.fn(async () => undefined);

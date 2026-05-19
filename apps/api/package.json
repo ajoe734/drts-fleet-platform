@@ -10,6 +10,7 @@
     "start": "node dist/main.js",
     "seed:tenant-governance": "tsx --tsconfig tsconfig.seed.json seed/tenant-governance-default.ts",
     "test": "vitest run --passWithNoTests",
+    "test:tenant-governance-negative": "pnpm --dir ../.. exec vitest run tests/integ/tenant-governance-negative.test.ts",
     "typecheck": "pnpm --filter @drts/contracts build && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

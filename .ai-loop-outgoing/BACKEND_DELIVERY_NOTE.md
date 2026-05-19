@@ -1,53 +1,65 @@
-# Backend Delivery Note — Iteration 0
+# Backend Delivery Note — Iteration 1
 
-> Written by: VS Code LLM (drts-fleet-platform)
-> Date: 2026-04-15
-> Contract commit: 013be16d04113485050bbc833dd5c26778bf4350
+> Written by: Codex2 (drts-fleet-platform)
+> Date: 2026-05-19
+> Contract commit: 949a49fb06eb674dd27b0f4bf6db746bd3c6f8aa
+> Contract lock: `.ai-loop/contract-lock.json`
 
 ## What's available now
 
-All Wave A–E tasks in `drts-fleet-platform` are **done** as of 2026-04-15.
+Tenant Governance wave contracts are available in `drts-fleet-platform` and are the canonical backend surface for tenant booking governance.
 
-### Tenant Portal endpoints (available)
+### Tenant Governance endpoints (available)
 
-| Method | Path                                 | Description               |
-| ------ | ------------------------------------ | ------------------------- |
-| POST   | `/api/bookings`                      | Create booking            |
-| GET    | `/api/bookings`                      | List bookings (paginated) |
-| GET    | `/api/bookings/:id`                  | Get booking detail        |
-| POST   | `/api/bookings/:id/cancel`           | Cancel booking            |
-| GET    | `/api/passengers`                    | List passengers           |
-| POST   | `/api/passengers`                    | Create passenger          |
-| PUT    | `/api/passengers/:id`                | Update passenger          |
-| DELETE | `/api/passengers/:id`                | Delete passenger          |
-| GET    | `/api/addresses`                     | List addresses            |
-| POST   | `/api/addresses`                     | Create address            |
-| GET    | `/api/reports`                       | Tenant reports            |
-| GET    | `/api/api-keys`                      | List API keys             |
-| POST   | `/api/api-keys`                      | Create API key            |
-| DELETE | `/api/api-keys/:id`                  | Revoke API key            |
-| GET    | `/api/webhooks`                      | List webhook endpoints    |
-| POST   | `/api/webhooks`                      | Register webhook          |
-| DELETE | `/api/webhooks/:id`                  | Delete webhook            |
-| GET    | `/api/billing/invoices`              | List invoices             |
-| GET    | `/api/billing/invoices/:id/download` | Download invoice PDF      |
-| GET    | `/api/audit`                         | Audit trail (append-only) |
+| Method | Path                                                        | Description                        |
+| ------ | ----------------------------------------------------------- | ---------------------------------- |
+| GET    | `/api/tenant/cost-centers`                                  | List tenant cost centers           |
+| GET    | `/api/tenant/cost-centers/:code`                            | Read one cost center               |
+| GET    | `/api/tenant/cost-centers/coverage`                         | Cost-center coverage report        |
+| POST   | `/api/tenant/cost-centers`                                  | Create or update cost center       |
+| POST   | `/api/tenant/cost-centers/disable`                          | Disable cost center                |
+| GET    | `/api/tenant/quotas`                                        | Tenant quota summary               |
+| GET    | `/api/tenant/cost-centers/:code/quota`                      | Cost-center quota summary          |
+| POST   | `/api/tenant/quotas/policies`                               | Upsert tenant quota policy         |
+| POST   | `/api/tenant/quotas/preview`                                | Preview quota impact before submit |
+| GET    | `/api/tenant/quotas/ledger`                                 | Quota ledger entries               |
+| GET    | `/api/tenant/approval-rules`                                | List approval rules                |
+| POST   | `/api/tenant/approval-rules`                                | Create approval rule               |
+| PUT    | `/api/tenant/approval-rules/:ruleId`                        | Update approval rule               |
+| POST   | `/api/tenant/approval-rules/reorder`                        | Reorder approval rules             |
+| POST   | `/api/tenant/approval-rules/evaluate`                       | Dry-run rule evaluation            |
+| POST   | `/api/tenant/approval-rules/:ruleId/disable`                | Disable approval rule              |
+| GET    | `/api/tenant/approval-requests`                             | List booking approval requests     |
+| GET    | `/api/tenant/approval-requests/:approvalRequestId`          | Read one approval request          |
+| POST   | `/api/tenant/approval-requests/:approvalRequestId/approve`  | Approve request                    |
+| POST   | `/api/tenant/approval-requests/:approvalRequestId/reject`   | Reject request                     |
+| POST   | `/api/tenant/approval-requests/:approvalRequestId/escalate` | Escalate request                   |
+| GET    | `/api/tenant/integration-governance`                        | API-key/webhook governance package |
 
-### Auth
+### Booking flow impact
 
-- Bearer token from Supabase auth is forwarded as `Authorization: Bearer <token>`
-- All endpoints require authentication
+- `createTenantBooking()` in `@drts/api-client` now runs against backend-owned tenant governance.
+- Cost-center validation, quota reservation, approval evaluation, and approval-request creation are backend-owned.
+- Dispatch rejects bookings that remain in approval state `pending`, `blocked`, or `rejected`.
 
 ### Contracts package
 
-TypeScript types are published from `@drts/contracts`. Not yet installable as npm package — for now, copy type definitions from `drts-fleet-platform/packages/contracts/src/`.
+- Canonical SDK versions for this handoff are `@drts/contracts@0.1.0` and `@drts/api-client@0.1.0`.
+- In this repo, `@drts/api-client` is pinned to `@drts/contracts@0.1.0`.
+- Consumer UI code must not fork schema or define parallel tenant-governance types.
+- `.ai-loop/CONTRACT_VERSION.lock` is a compatibility mirror only; treat `.ai-loop/contract-lock.json` as canonical.
 
-## What's NOT yet available
+### Canonical error codes the UI must preserve
 
-- Real-time push notifications (Phase 2)
-- Driver location stream (Phase 2)
-- Platform admin cross-tenant endpoints (available but tenant UI doesn't need them)
+- `BOOKING_COST_CENTER_INVALID`
+- `BOOKING_COST_CENTER_UNKNOWN`
+- `BOOKING_COST_CENTER_DISABLED`
+- `QUOTA_INSUFFICIENT_AT_COMMIT`
+- `BOOKING_APPROVAL_PENDING`
 
-## Next delivery
+### Contract-lock requirements
 
-Will be announced in the next iteration's `BACKEND_DELIVERY_NOTE.md` after Lovable reports gaps in `API_GAP_REQUESTS.json`.
+- Read `.ai-loop/contract-lock.json` before build.
+- Reject the build if the lock is expired.
+- Reject the build if the installed `@drts/contracts` or `@drts/api-client` version differs from the pinned lock.
+- Treat this note plus the JSON lock file as authoritative for Tenant Governance wiring; do not infer missing semantics from legacy Supabase behavior.

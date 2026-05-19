@@ -6,6 +6,11 @@ import {
   GrabTaiwanAdapter,
 } from "../../src/modules/forwarder/grab-taiwan.adapter";
 import type { ForwarderAdapterInterface } from "../../src/modules/forwarder/forwarder-adapter.interface";
+import {
+  FORWARDER_SANDBOX_FIXTURES,
+  FORWARDER_SANDBOX_PLATFORM_CODE,
+} from "../../src/modules/forwarder/sandbox.fixtures";
+import { SandboxAdapter } from "../../src/modules/forwarder/sandbox.adapter";
 
 function createAdapter(
   overrides: Partial<ForwarderAdapterInterface> = {},
@@ -170,6 +175,40 @@ describe("ForwarderService", () => {
         rateLimitStatus: "stub",
         capabilitySummary: expect.objectContaining({
           productionStatus: "stub",
+        }),
+      }),
+    ]);
+  });
+
+  it("labels the sandbox adapter as a non-production stub on module init", async () => {
+    const regulatoryRegistryService = {
+      getEligibleCandidates: vi.fn(() => []),
+    };
+    const auditNotificationService = {
+      recordAuditLog: vi.fn(),
+    };
+    const service = new ForwarderService(
+      regulatoryRegistryService as never,
+      auditNotificationService as never,
+      [new SandboxAdapter()],
+    );
+
+    await service.onModuleInit();
+
+    expect(service.listAdapterHealth()).toEqual([
+      expect.objectContaining({
+        platformCode: FORWARDER_SANDBOX_PLATFORM_CODE,
+        status: "healthy",
+        reason: "stub",
+        credentialStatus: "stub",
+        authStatus: "stub",
+        webhookStatus: "stub",
+        rateLimitStatus: "stub",
+        capabilitySummary: expect.objectContaining({
+          productionStatus: "stub",
+          notes: expect.arrayContaining([
+            expect.stringContaining("Non-production only"),
+          ]),
         }),
       }),
     ]);
@@ -718,6 +757,37 @@ describe("ForwarderService", () => {
     });
 
     expect(ownedMobilityService.cancelForwarderTasks).not.toHaveBeenCalled();
+  });
+
+  it("maps completed native sync into a completed local forwarded status", () => {
+    const { service } = createService({
+      adapter: new SandboxAdapter(),
+      eligibleDriverIds: [FORWARDER_SANDBOX_FIXTURES.accept.driverId],
+    });
+
+    const order = service.ingestExternalOrder(
+      FORWARDER_SANDBOX_FIXTURES.inboundOrder,
+    );
+    service.broadcastOrder(
+      order.mirrorOrderId,
+      FORWARDER_SANDBOX_FIXTURES.broadcast,
+    );
+    service.syncNativeStatus(
+      order.mirrorOrderId,
+      FORWARDER_SANDBOX_FIXTURES.completedSync,
+    );
+
+    expect(service.listOrders()).toEqual([
+      expect.objectContaining({
+        mirrorOrderId: order.mirrorOrderId,
+        platformCode: FORWARDER_SANDBOX_PLATFORM_CODE,
+        status: "completed_synced",
+        authoritativeSnapshot: expect.objectContaining({
+          nativeStatus: "completed",
+          settlementReference: "SBX-STL-001",
+        }),
+      }),
+    ]);
   });
 
   it("closes mirrored driver tasks when reconciliation completes with a terminal status", async () => {

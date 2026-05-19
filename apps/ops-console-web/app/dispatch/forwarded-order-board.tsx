@@ -189,6 +189,8 @@ function getForwardedStatusVariant(status: ForwardedOrderStatus): BadgeVariant {
       return "yellow";
     case "confirmed_by_platform":
       return "green";
+    case "completed_synced":
+      return "green";
     case "lost_race":
       return "gray";
     case "cancelled_by_platform":

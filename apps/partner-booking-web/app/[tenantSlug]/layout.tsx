@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { TenantShell } from "@/components/tenant-shell";
-import { getBrandForSlug } from "@/lib/brand";
+import {
+  PartnerAuthorityError,
+  getPartnerRouteContext,
+} from "@/lib/api-client";
 
 type LayoutProps = {
   children: ReactNode;
@@ -15,22 +18,39 @@ export async function generateMetadata({
   params: Promise<{ tenantSlug: string }>;
 }): Promise<Metadata> {
   const { tenantSlug } = await params;
-  const brand = getBrandForSlug(tenantSlug);
-  if (!brand) {
-    return { title: "Partner Booking" };
+  try {
+    const { brand } = await getPartnerRouteContext(tenantSlug, {
+      allowInactive: true,
+    });
+    return {
+      title: `${brand.displayName} · Partner Booking`,
+      description: brand.tagline,
+    };
+  } catch (error) {
+    if (
+      error instanceof PartnerAuthorityError &&
+      error.code === "PARTNER_ENTRY_NOT_FOUND"
+    ) {
+      return { title: "Partner Booking" };
+    }
+    throw error;
   }
-  return {
-    title: `${brand.displayName} · Partner Booking`,
-    description: brand.tagline,
-  };
 }
 
 export default async function TenantLayout({ children, params }: LayoutProps) {
   const { tenantSlug } = await params;
-  const brand = getBrandForSlug(tenantSlug);
-  if (!brand) {
-    notFound();
+  try {
+    const { brand } = await getPartnerRouteContext(tenantSlug, {
+      allowInactive: true,
+    });
+    return <TenantShell brand={brand}>{children}</TenantShell>;
+  } catch (error) {
+    if (
+      error instanceof PartnerAuthorityError &&
+      error.code === "PARTNER_ENTRY_NOT_FOUND"
+    ) {
+      notFound();
+    }
+    throw error;
   }
-
-  return <TenantShell brand={brand}>{children}</TenantShell>;
 }
