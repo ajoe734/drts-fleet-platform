@@ -5,7 +5,7 @@ This packet is the support-only acceptance companion for
 truth, runtime behavior, or the parent helper diagnosis. Live lifecycle truth
 remains authoritative in `AI_STATUS_ROOT=/home/edna/workspace/drts-fleet-platform`
 via `ai-status.json`; this document only assembles the reviewer-facing checklist
-and dependency map.
+and dependency map as a reviewer-handoff and closeout snapshot.
 
 ## 1. Scope Boundary
 
@@ -14,7 +14,7 @@ In scope:
 - summarize the acceptance bar for
   `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK`
 - map the dependency chain from `PRT-SPEC-001` through the unblock helper to
-  the still-blocked grandparent `PARTNER-ELIG-LIVE-001`
+  the grandparent `PARTNER-ELIG-LIVE-001` hold-state evidence
 - inventory the exact commits, artifacts, and blocker records the reviewer
   should inspect
 
@@ -49,6 +49,12 @@ At reviewer handoff time, canonical machine truth records:
 - depends_on = `PRT-SPEC-001`
 - artifact =
   `support/sidecars/PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK/PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK-SIDECAR-ACCEPTANCE.md`
+
+Closeout note:
+
+- canonical machine truth now marks this sidecar task `review_approved`
+- the row above intentionally preserves the reviewer-handoff state that
+  `Codex2` approved against owner anchor `e48ee3b`
 
 ### 2.2 Parent helper row
 
@@ -87,19 +93,24 @@ The reviewed-content anchor for the parent helper remains:
 - closeout commit = `bea9ffe`
 - push ref = `origin/codex2/prt-spec-001`
 
-### 2.4 Grandparent row
+### 2.4 Grandparent hold-state anchor
 
-`PARTNER-ELIG-LIVE-001` remains blocked for external reasons only:
+For this packet, the stable dependency anchor is the grandparent hold-state
+evidence, not the mutable live routing row:
 
-- owner = `Codex`
-- reviewer = `Claude2`
-- status = `blocked`
-- depends_on = `PRT-SPEC-001`
+- parent helper closeout `8d5c47c` records `resolved_parent_status = blocked`
+- parent helper closeout `8d5c47c` records `resolved_parent_next =` wait for
+  `EXT-001-BLK-001..006` before live issuer proof resumes
 - artifact = `support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md`
 - evidence anchor = `2628fc7`
-- push ref = `origin/codex/partner-elig-live-001`
-- current next = wait for `EXT-001-BLK-001..006`, then attach redacted issuer
-  evidence under the sidecar path and rerun live issuer proof
+- external blocker family = `EXT-001-BLK-001` through `EXT-001-BLK-006`
+
+Reviewer implication:
+
+- use canonical `AI_STATUS_ROOT` machine truth for the current owner/status of
+  `PARTNER-ELIG-LIVE-001`
+- use `2628fc7` plus the `EXT-001` blocker family for the acceptance dependency
+  chain captured by this packet
 
 ### 2.5 External gate row
 
@@ -175,12 +186,14 @@ The parent helper has four acceptance items in canonical machine truth.
 
 ### AC-4. Update the parent task with the concrete unblocked next step
 
-- [x] Canonical `PARTNER-ELIG-LIVE-001.next` now explicitly says the task
-  remains on hold until `EXT-001-BLK-001..006` are satisfied.
-- [x] Canonical `PARTNER-ELIG-LIVE-001.next` also points to the reserved grandparent
-  evidence sidecar at commit `2628fc7`.
-- [x] The helper's diagnosis and the grandparent's current `next` field now
-  agree: repo/spec work is complete; only external issuer inputs remain.
+- [x] Parent helper closeout `8d5c47c` records `resolved_parent_status=blocked`
+  and a `resolved_parent_next` string that explicitly waits on
+  `EXT-001-BLK-001..006`.
+- [x] The resolved-parent note from `8d5c47c` still points to the grandparent
+  hold-state evidence sidecar at commit `2628fc7`.
+- [x] Later owner/status routing churn on `PARTNER-ELIG-LIVE-001` does not
+  change the acceptance conclusion: repo/spec work is complete; only external
+  issuer inputs remain before live proof can resume.
 
 ## 4. Dependency Map
 
@@ -198,7 +211,7 @@ PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK
     |
     v
 PARTNER-ELIG-LIVE-001
-  status: blocked
+  status at parent closeout: blocked
   commit: 2628fc7 (hold-state evidence anchor)
   artifact: support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md
     |
