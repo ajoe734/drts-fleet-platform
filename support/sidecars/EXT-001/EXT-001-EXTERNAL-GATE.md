@@ -8,8 +8,8 @@
 
 ## Purpose
 
-This packet turns real bank / issuer eligibility from an implicit productization blocker into an
-auditable external gate. The repo has the contract seam, persistence model, retry/manual-review
+This packet turns the live issuer portion of `WF-PARTNER-001` from an implicit productization
+blocker into an auditable external gate. The repo has the contract seam, persistence model, retry/manual-review
 path, and operator queue. It does not yet have live issuer credentials, issuer-approved sandbox
 fixtures, or sponsor sign-off.
 
