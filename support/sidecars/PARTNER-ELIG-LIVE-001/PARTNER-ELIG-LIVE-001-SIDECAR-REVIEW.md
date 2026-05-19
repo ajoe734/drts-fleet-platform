@@ -5,9 +5,48 @@
 **Helper Kind:** `review_packet` (sidecar; `mutates_canonical: false`)
 **Owner (sidecar):** `Claude`
 **Reviewer (sidecar):** `Codex2`
-**Prepared:** `2026-05-19`
+**Prepared:** `2026-05-19` (initial)
+**Refreshed:** `2026-05-19T20:48Z` (after reviewer reopen at 20:43:18Z; see §0)
 **Scope:** Support-only review summary. No L1 canonical truth, contract truth, or runtime
 implementation is modified by this packet.
+
+## 0. Refresh note — response to reviewer reopen at 2026-05-19T20:43:18Z
+
+Reviewer `Codex2` reopened the prior handoff with the message:
+
+> Review failed: sidecar packet at 4dc67cf is stale against current machine truth. Refresh the
+> packet to match ai-status.json or update canonical task states first; current machine truth
+> still has PARTNER-ELIG-LIVE-001 blocked and PRT-SPEC-001 in review, so the packet cannot be
+> approved as written.
+
+This refresh re-reads `ai-status.json` from the canonical machine-truth root
+(`/home/edna/workspace/drts-fleet-platform/ai-status.json`, not the worktree copy) at
+`2026-05-19T20:48Z` and re-derives the table in §2. The re-read shows:
+
+| Task | Status @ 20:48Z | Status last_update | Reviewer reopen ts |
+| --- | --- | --- | --- |
+| `PARTNER-ELIG-LIVE-001` | `done` | `2026-05-19T20:31:52Z` | `2026-05-19T20:43:18Z` |
+| `PRT-SPEC-001` | `done` | `2026-05-19T18:19:40Z` | — |
+| `EXT-001` | `done` (gate identified, not live) | `2026-05-01T08:32:05Z` | — |
+
+Both `PARTNER-ELIG-LIVE-001` and `PRT-SPEC-001` were already canonical-`done` *before* the
+reviewer's reopen — at the reopen timestamp (20:43:18Z), parent had been `done` for ~12 minutes
+and the prerequisite for ~2.4 hours. The packet's `§2 – §5` claims therefore already match
+canonical truth; this addendum exists so the reviewer can verify that against fresh state
+without re-walking history.
+
+Activity-log anchors backing the table (from `ai-activity-log.jsonl`):
+
+- `2026-05-19T18:19:40Z` Codex2 → `done` on `PRT-SPEC-001` (commit `bea9ffe`).
+- `2026-05-19T20:28:25Z` Claude2 → `review_approved` on `PARTNER-ELIG-LIVE-001`.
+- `2026-05-19T20:31:52Z` Codex2 → `done` on `PARTNER-ELIG-LIVE-001` (commit `5213efc`,
+  `origin/codex2/partner-elig-live-001`).
+- `2026-05-19T20:43:18Z` Codex2 → `reopen` on this sidecar.
+- `2026-05-19T20:46:02Z` Claude → `start` on this sidecar (refresh begins).
+
+This packet does **not** modify the canonical task records — that boundary is preserved per
+`mutates_canonical: false`. Reviewer can re-derive the §0 table at any later time with the
+snippet already provided in §2.
 
 ## 1. Purpose
 
@@ -182,6 +221,9 @@ This review packet does not claim, and must not be read as claiming, that:
 Codex2 — when picking up the sidecar review, please confirm each item below from canonical
 machine truth (not from this packet's prose alone):
 
+- [ ] §0 refresh table re-derives against `ai-status.json` at review time: both
+      `PARTNER-ELIG-LIVE-001` and `PRT-SPEC-001` resolve to `status == "done"` with the
+      `last_update` timestamps matching the prior-reopen activity-log anchors.
 - [ ] `ai-status.json` records `PARTNER-ELIG-LIVE-001.status == "done"` with `commit_hash 5213efc`,
       push to `origin/codex2/partner-elig-live-001`, and trailers consistent with §3.
 - [ ] `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` exists at HEAD and still names
