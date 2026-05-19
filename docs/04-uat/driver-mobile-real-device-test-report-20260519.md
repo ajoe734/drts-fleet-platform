@@ -32,6 +32,44 @@ The correct interpretation is therefore:
   `expo-notifications` or a mobile push-token integration. Native push delivery
   should remain `NOT VERIFIED`.
 
+The unblock closeout at
+`support/unblock/WF-DRV-MP-001-DEVICE-EVIDENCE/WF-DRV-MP-001-DEVICE-EVIDENCE-UNBLOCK-MANUAL-UNBLOCK.md`
+confirmed that the remaining hold is external sourcing and scheduling, not a
+missing repo-side implementation. The parent task should only be resumed for
+live execution after Android + iPhone hardware, a weak-network test
+environment, a credentialed human-in-loop operator, and `EXT-003-BLK-001`
+through `EXT-003-BLK-007` are all available.
+
+## 1.1 Current Hold Posture
+
+| Field                               | Current value                    |
+| ----------------------------------- | -------------------------------- |
+| Android handset secured             | `not scheduled`                  |
+| iPhone handset secured              | `not scheduled`                  |
+| Weak-network test environment       | `not scheduled`                  |
+| Credentialed human-in-loop operator | `not scheduled`                  |
+| Expo / Apple / Android distribution | `external-gated` via `EXT-003`   |
+| Native-push scope decision          | `not decided`                    |
+
+Until those rows move out of `not scheduled` / `external-gated`, this report
+must remain `provisional` and the task must not claim a real-device PASS.
+
+## 1.2 Resume Gate
+
+When the missing hardware, credentials, and operator are available, resume this
+task in this order:
+
+1. Resolve `EXT-003-BLK-001` through `EXT-003-BLK-007` and attach the install
+   artifacts, tester-group evidence, and release-channel owner proof under
+   `support/sidecars/EXT-003/`.
+2. Decide whether `RD-08` is satisfied by in-app refresh / badge only or
+   whether native push delivery is a release requirement.
+3. Execute `RD-01` through `RD-13` on both Android and iPhone with device-side
+   capture and operator notes.
+4. Promote this report from `provisional` to a real-device pass artifact and
+   update the workflow matrix evidence cell to replace the HOLD note with a
+   PASS citation.
+
 ## 2. Evidence Baseline
 
 | Area                               | Current read              | Repo / task anchors                                                                                                                                                                     | Notes                                                                                                            |
@@ -146,16 +184,19 @@ the local implementation and scripted evidence remain coherent.
 The main blockers preventing a `PASS` read for Android and iPhone real-device
 verification are:
 
-1. `EXT-003-BLK-007` install evidence is still missing.
+1. `EXT-003-BLK-001` through `EXT-003-BLK-007` are not all resolved, and the
+   install evidence gate remains open.
 2. Expo / Apple / Android signing and tester-group evidence are not attached in
    this repo session.
-3. Forwarded-task real-device validation still depends on seeded or live
+3. Physical Android + iPhone hardware, a weak-network test environment, and a
+   credentialed human-in-loop operator are not yet scheduled.
+4. Forwarded-task real-device validation still depends on seeded or live
    adapter data.
-4. Native push-notification proof is absent; current repo evidence only supports
+5. Native push-notification proof is absent; current repo evidence only supports
    in-app notification state.
-5. No fresh human-executed screenshots, recordings, or operator notes are filed
+6. No fresh human-executed screenshots, recordings, or operator notes are filed
    under `docs/04-uat/` or `support/sidecars/` for this task.
-6. Repo-local `pnpm` verification that depends on `tsc` / `vitest` is blocked in
+7. Repo-local `pnpm` verification that depends on `tsc` / `vitest` is blocked in
    this isolated worktree because `node_modules` are not present.
 
 ## 7. Required Human Follow-Up To Convert This Report To PASS
@@ -165,11 +206,15 @@ To upgrade this report from `provisional` to a true real-device pass, attach:
 1. Android install artifact + install log + first-launch screenshot.
 2. iPhone install artifact/TestFlight-or-dev-client proof + first-launch
    screenshot.
-3. Registration/binding evidence on both device families.
-4. Platform presence toggle and re-auth capture on at least one bound platform.
-5. One owned task accept flow and one forwarded-task route-locked flow.
-6. One completion negative-path proof sample and one successful completion
+3. Evidence that `EXT-003-BLK-001` through `EXT-003-BLK-007` are resolved for
+   the actual build under test.
+4. Confirmation that one Android handset, one iPhone, a weak-network setup, and
+   a credentialed operator were scheduled for the run.
+5. Registration/binding evidence on both device families.
+6. Platform presence toggle and re-auth capture on at least one bound platform.
+7. One owned task accept flow and one forwarded-task route-locked flow.
+8. One completion negative-path proof sample and one successful completion
    replay-under-weak-network sample with request-id continuity.
-7. One earnings-by-platform capture after task completion.
-8. An explicit note whether `task notify` is satisfied by in-app refresh/badge
+9. One earnings-by-platform capture after task completion.
+10. An explicit note whether `task notify` is satisfied by in-app refresh/badge
    only or whether native push is a release requirement.
