@@ -5,6 +5,7 @@
 **Wave name:** `phase1-v3-design-blueprint-completion`
 **Source directive:** [`docs/00-context/phase1-design-blueprint-completion-directive-20260519.md`](../00-context/phase1-design-blueprint-completion-directive-20260519.md)
 **Conflicts and open questions:** [`docs/00-context/phase1-v3-conflicts-and-open-questions-20260519.md`](../00-context/phase1-v3-conflicts-and-open-questions-20260519.md)
+**Approved resolution:** [`docs/00-context/phase1-v3-resolution-20260519.md`](../00-context/phase1-v3-resolution-20260519.md)
 
 **Predecessor waves (closed):**
 
@@ -30,9 +31,9 @@ This is not "redo Phase 1 v2 work." Most of the v3 deliverables are **formalizat
 | `WF-DRV-MP-001`  | Row missing                                                                          | Add row + multi-platform UAT doc + mobile-distribution-gate doc                                  |
 | `WF-FWD-001`     | Row present, gate read `EXTERNAL-GATED`                                              | Add forwarder-adapter-proof-spec + UAT scenarios; gate read uplift gated on real partner sandbox |
 | `WF-PBK-001`     | Row present                                                                          | Existing pilot-cutover-runbook covers; add live-cutover-plan doc + UAT scenarios                 |
-| `WF-PARTNER-001` | **Conflict:** matrix has `WF-PRT-001` covering same scope                            | **Decision needed** (see conflicts doc §2 Q2)                                                    |
+| `WF-PARTNER-001` | Resolution approved: rename existing `WF-PRT-001` row to `WF-PARTNER-001`            | Update matrix row + related sidecar wording per resolution doc §Q2                               |
 | `WF-COM-001`     | Row present, gate read `PASS (sandbox evidence)` after v2                            | Add formal cti-recording-filing-blueprint + UAT scenarios                                        |
-| `WF-FIN-GOV-001` | **Conflict:** matrix has `WF-FIN-001` baseline; v3 wants governance-aware enrichment | **Decision needed** (see conflicts doc §2 Q3)                                                    |
+| `WF-FIN-GOV-001` | Resolution approved: keep `WF-FIN-001` baseline and add `WF-FIN-GOV-001` enrichment  | Add new governance-aware row depending on `WF-TGV-001` + `WF-FIN-001` per resolution doc §Q3    |
 | `WF-ADM-001`     | Row missing                                                                          | Add row + UAT doc + new E2E shell                                                                |
 | `WF-PROD-001`    | Row present, gate read `PASS (dry-run contract evidence)` after v2                   | Add production-deploy-rail-spec + production-rollback-drill docs                                 |
 | `WF-REL-001`     | Row missing                                                                          | Add row + release-truth-sync-runbook + blueprint alignment audit                                 |
@@ -44,11 +45,11 @@ This is not "redo Phase 1 v2 work." Most of the v3 deliverables are **formalizat
 | `E2E-005-tenant-governance.sh`                    | present                                                   | ✓                                   |
 | `E2E-006-driver-multi-platform.sh`                | present                                                   | ✓                                   |
 | `E2E-002-forwarded-order.sh`                      | present                                                   | ✓ (sandbox-driven post-FWD-SBX-001) |
-| `E2E-007-partner-booking-pilot.sh`                | conflict — existing `E2E-007` is partner-airport-transfer | **Numbering decision needed**       |
-| `E2E-008-partner-eligibility-airport-transfer.sh` | conflict — existing `E2E-008` is partner-booking-cutover  | **Numbering decision needed**       |
+| `E2E-007-partner-booking-pilot.sh`                | directive name conflicts with shipped `E2E-007`           | Resolution approved: keep shipped numbering; see resolution doc §Q1 |
+| `E2E-008-partner-eligibility-airport-transfer.sh` | directive name conflicts with shipped `E2E-008`           | Resolution approved: keep shipped numbering; see resolution doc §Q1 |
 | `E2E-003-phone-recording-filing.sh`               | present (added by `COM-E2E-003`)                          | ✓                                   |
-| `E2E-009-governance-billing-reporting.sh`         | conflict — existing `E2E-009` is prod-rail-dry-run        | **Numbering decision needed**       |
-| `E2E-010-platform-admin-control-plane.sh`         | missing                                                   | new, no conflict                    |
+| `E2E-009-governance-billing-reporting.sh`         | directive slot conflicts with shipped `E2E-009`           | Resolution approved: implement as `E2E-010`; see resolution doc §Q1 |
+| `E2E-010-platform-admin-control-plane.sh`         | directive slot reserved by Q1 remap                       | Resolution approved: implement as `E2E-011`; see resolution doc §Q1 |
 
 ### 2.3 Design docs (directive §6)
 
@@ -59,8 +60,8 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 1. **Don't redo v2 work.** Where an artifact already exists in dev under a slightly different name, write a thin pointer doc instead of duplicating.
 2. **No over-claim.** Any gate uplift requires real evidence (`PASS (sandbox)` requires a sandbox callback; `PASS (live staging)` requires staging run; etc.).
 3. **Branch + anchor commit + PR.** No working-tree parking.
-4. **Conflict tasks held.** Tasks that depend on naming/numbering decisions are not dispatched until the user resolves the conflicts in `phase1-v3-conflicts-and-open-questions-20260519.md` §6.
-5. **Recommended conflict resolution (applied unless overridden by user):**
+4. **Decision tasks are resolved.** The user approved `A / A / B / C`; use `phase1-v3-resolution-20260519.md` as the planning truth and do not keep naming/numbering work in HELD for these four questions.
+5. **Approved conflict resolution:**
    - E2E numbering: keep existing dev; v3's E2E-009 (gov-billing) becomes E2E-010, E2E-010 (admin) becomes E2E-011.
    - `WF-PRT-001` renamed to `WF-PARTNER-001`.
    - `WF-FIN-001` baseline kept, `WF-FIN-GOV-001` added as governance enrichment row.
@@ -75,7 +76,7 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 | 3               | `FWD-SPEC-001`, `PRT-SPEC-001`, `COM-BLUEPRINT-001`, `FIN-GOV-SPEC-001`                                                                  | Architecture specs. Mostly formalization of existing capabilities.                         |
 | 4               | `TGV-UAT-001`, `DRV-MP-UAT-001`, `PBK-UAT-001`, `PRT-UAT-001`, `COM-UAT-001`, `FIN-GOV-UAT-001`, `ADM-UAT-001`                           | UAT scenario docs. Can run in parallel.                                                    |
 | 5               | `WF-ADM-001-E2E`, `WF-REL-001-AUDIT`                                                                                                     | New E2E scripts + audit reports.                                                           |
-| HELD            | `E2E-NUMBERING-DECISION`, `WF-PARTNER-RENAME-DECISION`, `WF-FIN-GOV-DECISION`                                                            | Hold pending human decision.                                                               |
+| RESOLVED        | `E2E-NUMBERING-DECISION`, `WF-PARTNER-RENAME-DECISION`, `WF-FIN-GOV-DECISION`, `DOCS-STRATEGY-DECISION`                                   | User approved `A / A / B / C`; execute per resolution doc and keep only external-resource holds. |
 | HELD (external) | `WF-DRV-MP-001-DEVICE-EVIDENCE`, `WF-PROD-001-LIVE-EXEC`, `WF-FWD-001-LIVE-SANDBOX`, `WF-COM-001-LIVE-PROVIDER`, `PARTNER-ELIG-LIVE-001` | Hold pending external resources (physical devices, GCP prod project, partner credentials). |
 
 ## 5. Materialized P0 tasks (Phase 1 v3 wave)
@@ -85,7 +86,7 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 | ID                     | Owner  | Reviewer | What                                                                                                                                                                                |
 | ---------------------- | ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DEV-SYNC-001`         | Claude | Copilot  | Produce `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md`. Audit dev vs directive vs existing matrix.                                                              |
-| `WF-ADM-001-MATRIX`    | Codex  | Codex2   | Add `WF-ADM-001` row to release-gate matrix. Cite forthcoming `E2E-010` (or `E2E-011` per numbering decision) + UAT doc.                                                            |
+| `WF-ADM-001-MATRIX`    | Codex  | Codex2   | Add `WF-ADM-001` row to release-gate matrix. Cite forthcoming `E2E-011` + UAT doc.                                                                                                     |
 | `WF-REL-001-MATRIX`    | Codex  | Codex2   | Add `WF-REL-001` row to release-gate matrix. Cite forthcoming release-truth-sync runbook + alignment audit.                                                                         |
 | `WF-DRV-MP-001-MATRIX` | Codex2 | Codex    | Add `WF-DRV-MP-001` row to release-gate matrix. Cite `E2E-006` + existing DRV-DEVICE-001 evidence pack. Remaining-non-claim explicit: real Android/iOS still HOLD pending hardware. |
 
@@ -97,7 +98,7 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 | `PBK-RUNBOOK-001` | Claude2 | Claude   | `docs/03-runbooks/partner-booking-live-cutover-plan-20260519.md`. Either alias the existing `partner-booking-pilot-cutover-runbook-20260519.md` or merge content.                |
 | `PROD-SPEC-001`   | Gemini  | Gemini2  | `docs/03-runbooks/production-deploy-rail-spec-20260519.md`. Formalize what's in `prod-deploy-rollback-runbook-20260519.md` + `PROD-RAIL-CLOSEOUT-EVIDENCE.md`.                   |
 | `PROD-DRILL-001`  | Gemini2 | Gemini   | `docs/03-runbooks/production-rollback-drill-20260519.md`. New drill doc (commands exist in existing runbook; need formal drill protocol + evidence template).                    |
-| `REL-SYNC-001`    | Claude  | Codex    | `docs/03-runbooks/release-truth-sync-runbook-20260519.md`. Net-new. Document dev/publish/main/prod-tag synchronization protocol.                                                 |
+| `REL-SYNC-001`    | Claude  | Codex    | `docs/03-runbooks/phase1-release-truth-sync-20260519.md`. Net-new. Document dev/publish/main/prod-tag synchronization protocol plus the approved numbering / workflow-ID mappings. |
 
 ### Group C — Architecture specs (Order 3, 4 tasks)
 
@@ -124,7 +125,7 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 
 | ID                 | Owner  | Reviewer | What                                                                                                                                                                                                   |
 | ------------------ | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `WF-ADM-001-E2E`   | Codex2 | Codex    | New `tests/e2e/E2E-010-platform-admin-control-plane.sh` (or `E2E-011` per numbering decision). Cover tenant create → modules → quota → partner entry → credential → pricing publish → rollout → audit. |
+| `WF-ADM-001-E2E`   | Codex2 | Codex    | New `tests/e2e/E2E-011-platform-admin-control-plane.sh`. Cover tenant create → modules → quota → partner entry → credential → pricing publish → rollout → audit. |
 | `WF-REL-001-AUDIT` | Claude | Codex    | New release-truth audit report. Cross-check dev / publish / main / prod-tag vs ai-status vs gate matrix.                                                                                               |
 
 ### HELD — Pending human resources / external resolution
@@ -136,10 +137,10 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 | `WF-FWD-001-LIVE-SANDBOX`       | Needs real partner platform sandbox credentials (Grab Taiwan or equivalent)                               |
 | `WF-COM-001-LIVE-PROVIDER`      | Needs CTI provider activation + webhook environment                                                       |
 | `PARTNER-ELIG-LIVE-001`         | Needs real issuer/bank sandbox credentials                                                                |
-| `E2E-NUMBERING-DECISION`        | User decision per conflicts doc §1 Q1                                                                     |
-| `WF-PARTNER-RENAME-DECISION`    | User decision per conflicts doc §2 Q2                                                                     |
-| `WF-FIN-GOV-DECISION`           | User decision per conflicts doc §2 Q3                                                                     |
-| `DOCS-STRATEGY-DECISION`        | User decision per conflicts doc §3 Q4 (Options A/B/C for 17 directive docs)                               |
+| `E2E-NUMBERING-DECISION`        | Resolved: Q1 = A. Keep shipped `E2E-007/008/009`; add `E2E-010` and `E2E-011`.                            |
+| `WF-PARTNER-RENAME-DECISION`    | Resolved: Q2 = A. Rename `WF-PRT-001` to `WF-PARTNER-001`; no alias.                                      |
+| `WF-FIN-GOV-DECISION`           | Resolved: Q3 = B. Keep `WF-FIN-001` baseline + add `WF-FIN-GOV-001` enrichment row.                       |
+| `DOCS-STRATEGY-DECISION`        | Resolved: Q4 = C. Produce 5 substantive docs + 12 thin stubs.                                              |
 
 ## 6. Workload distribution
 
@@ -163,9 +164,9 @@ This wave is officially `done` when:
 
 1. All 22 dispatchable P0 tasks above reach `done` in `ai-status.json`.
 2. All 17 directive design-doc paths (§6) exist in dev — either as full docs or as stubs that explicitly point to the existing artifact closing their intent.
-3. `phase1-workflow-acceptance-release-gates.md` carries rows for `WF-ADM-001`, `WF-REL-001`, and `WF-DRV-MP-001`. (`WF-PARTNER-001` / `WF-FIN-GOV-001` rows depend on the user's conflict decisions.)
-4. `tests/e2e/E2E-010-platform-admin-control-plane.sh` (or `E2E-011`, per numbering decision) exists and passes locally.
-5. Conflicts doc §6 is resolved by user (4 decisions).
+3. `phase1-workflow-acceptance-release-gates.md` carries rows for `WF-ADM-001`, `WF-REL-001`, `WF-DRV-MP-001`, `WF-PARTNER-001`, and `WF-FIN-GOV-001` per the approved resolution.
+4. `tests/e2e/E2E-011-platform-admin-control-plane.sh` exists and passes locally.
+5. Conflicts doc §6 remains closed with the approved `A / A / B / C` decisions mirrored into execution artifacts.
 6. A v3 closeout packet is written and merged.
 
 The HELD tasks (real-device, live prod, live forwarder, live CTI, live issuer) remain HELD until external resources arrive. They are not blockers for the wave's documentation-and-rail-completion definition of done.
@@ -182,5 +183,5 @@ The HELD tasks (real-device, live prod, live forwarder, live CTI, live issuer) r
 
 - Each P0 task respects the planning-doc owner. The supervisor's auto-claim guard (`respect_explicit_owner_when_paused`, added by PR #158) prevents the paused-owner cascade.
 - All design-intent changes (this runbook, conflicts doc, directive archive) follow branch + anchor commit + PR rule.
-- The 4 HELD-pending-decision tasks must not be dispatched until the user's decisions are recorded.
+- The 4 decision tasks are already recorded as resolved; only external-resource holds should remain blocked.
 - The 5 HELD-external tasks remain in the queue at `status=blocked` with explicit `waiting_for` set so the matrix dashboard surfaces them as pending-external.
