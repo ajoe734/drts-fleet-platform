@@ -7,6 +7,7 @@
 **Sidecar Owner:** `Claude2`
 **Sidecar Reviewer:** `Codex`
 **Generated:** `2026-05-19` (UTC)
+**Last refreshed against canonical machine truth:** `2026-05-19T20:46Z`
 **Status:** `ACCEPTANCE SUPPORT ARTIFACT` — support-only; does not modify
 canonical truth, the planning ref, runtime behavior, the parent's
 machine-truth fields, or any L1/L2 product surface. For the live
@@ -14,20 +15,44 @@ machine-truth status of this sidecar row, read
 `ai-status.json -> WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION-SIDECAR-ACCEPTANCE.status`
 directly; this packet does not snapshot it.
 
-This packet is the forward-looking acceptance map for parent
-`WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION`. At packet write the
-parent is `in_progress` in machine truth — the parent owner (`Codex`)
-has been verifying whether the grandparent `WF-PROD-001-LIVE-EXEC` is
-a true planning blocker or an external-gated `HELD` task (see the
-parent's `next` field at packet write). Each acceptance gate below is
-phrased as a property the parent's planning-decision artifact must
-satisfy once `Codex` finalizes it. The sidecar reviewer (`Codex`) is
-the same lane as the parent owner (`Codex`); the sidecar review only
-audits packet accuracy and does **not** approve the parent
-planning-decision artifact — only the parent reviewer (`Codex2`) may
-approve `WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION`. This packet
-does not pre-approve the parent artifact and does not pre-resolve the
-grandparent's `blocked` state.
+This packet is the acceptance map for parent
+`WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION`. At the first
+handoff attempt the parent was still in flight; the sidecar reviewer
+flagged that §2 / §3 anchors had drifted from canonical truth. This
+refresh re-aligns the packet against
+`/home/edna/workspace/drts-fleet-platform/ai-status.json` at
+`2026-05-19T20:46Z`, at which point the parent has already finalized
+`done` (commit `025b1dd`, pushed to
+`origin/codex/wf-prod-001-live-exec-unblock-planning-decision`) and
+the parent reviewer (`Codex2`) has recorded the routing rationale —
+the classification chosen was **A. External-gated** (see §4.A and the
+parent artifact at
+`support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.md`).
+The grandparent `WF-PROD-001-LIVE-EXEC` has transitioned from
+`blocked` to `todo` with a concrete operator `next` pointing at the
+prod-deploy runbook. Each acceptance gate in §4 is therefore now a
+**retrospective audit property** the sidecar reviewer can verify
+against the already-merged parent artifact; the sidecar reviewer
+(`Codex`) is the same lane as the parent owner (`Codex`) but the
+sidecar review only audits packet accuracy and does **not** re-approve
+the parent planning-decision artifact — `Codex2` has already approved
+it on the parent row. This packet does not pre-approve or alter the
+parent artifact and does not transition the grandparent further.
+
+### Packet refresh history
+
+- `2026-05-19T20:46Z` — refresh #1 by `Claude2`. Reviewer (`Codex`)
+  reopened the first handoff because §2 / §3 anchors were stale
+  against canonical machine truth (parent had already moved to
+  `review` at `2026-05-19T20:34:47Z`; grandparent had a newer note at
+  `2026-05-19T20:37:57Z`; `PROD-SPEC-001` was already `done` at
+  `2026-05-19T17:19:57Z`; `PROD-DRILL-001` was already `done` at
+  `2026-05-19T19:58:14Z`). Refresh re-reads
+  `/home/edna/workspace/drts-fleet-platform/ai-status.json` and the
+  parent commit `025b1dd` on
+  `origin/codex/wf-prod-001-live-exec-unblock-planning-decision`,
+  rewrites §2 / §3 / §4 framing accordingly, and re-hands off to
+  `Codex`.
 
 ---
 
@@ -51,6 +76,10 @@ In scope for this sidecar:
   classify the blocker as **planning** vs **external-gated**.
 - Preserve a reviewer-handoff command block the assigned sidecar
   reviewer (`Codex`) can run after this packet is written.
+- On any subsequent refresh (e.g., refresh #1 at
+  `2026-05-19T20:46Z`), re-read canonical machine truth and update
+  §2 / §3 / §4 outcome lines accordingly without modifying any
+  out-of-scope file.
 
 Out of scope for this sidecar:
 
@@ -70,11 +99,15 @@ Out of scope for this sidecar:
 - approving `WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION` itself
   (only `Codex2` may do that on the parent row, as the live parent
   reviewer)
-- transitioning the grandparent `WF-PROD-001-LIVE-EXEC` out of
-  `blocked` (that requires the external GCP/WIF/Environment wiring
-  the wave-planning runbook §HELD calls out, plus a live-execution
-  evidence packet — neither of which is in scope for either the
-  sidecar or the parent unblock task)
+- transitioning the grandparent `WF-PROD-001-LIVE-EXEC` to a
+  live-execution complete state — i.e., to `done` or to
+  `in_progress` for the live deploy itself. (The parent unblock task
+  legitimately flipped the grandparent from `blocked` to `todo` as
+  part of recording "no further planning decision needed" — see §2
+  grandparent block. The remaining transitions still require the
+  external GCP/WIF/Environment wiring the wave-planning runbook §HELD
+  calls out plus a live-execution evidence packet, and remain out of
+  scope for both the sidecar and the parent unblock task.)
 
 ---
 
@@ -121,17 +154,25 @@ Live status (read directly from machine truth, not from this packet):
   WF-PROD-001-LIVE-EXEC: resolve or route the missing
   product/contract decision.`
 - owner=`Codex`, reviewer=`Codex2`
-- status at packet write: `in_progress`
-  (`last_update=2026-05-19T20:30:09Z`); the parent has been claimed
-  and is being worked. Each gate in §4 is a forward-looking property
-  the planning-decision artifact must satisfy before parent reviewer
-  approval.
+- status at refresh time: `done`
+  (`last_update=2026-05-19T20:41:33Z`). The parent has finalized; its
+  `review_notes_zh` confirm canonical planning artifacts already
+  classify `WF-PROD-001-LIVE-EXEC` as `HELD-external`, not pending
+  product/contract, and `Codex2` accepted the `waiting_for=Gemini2`
+  machine-truth limitation. Each gate in §4 is therefore now a
+  retrospective audit property; the sidecar review verifies the
+  parent artifact at commit `025b1dd` satisfies them.
   - For the live cycle position of the parent, read
     `ai-status.json -> WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.status`
     directly; this packet does not snapshot transient parent status.
-- depends_on: `PROD-SPEC-001`, `PROD-DRILL-001`
+- depends_on: `PROD-SPEC-001`, `PROD-DRILL-001` (both `done` at
+  refresh time — see §3)
 - artifacts:
   `support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.md`
+  (created on branch
+  `codex/wf-prod-001-live-exec-unblock-planning-decision`, first
+  appears at commit `057cddc`; closeout evidence recorded at commit
+  `025b1dd`)
 - acceptance (verbatim from the parent row):
   - `Resolve or route the missing product/contract decision through
     canonical planning artifacts`
@@ -144,24 +185,38 @@ Live status (read directly from machine truth, not from this packet):
 - task_class=`unblock`
 - helper_parent=`WF-PROD-001-LIVE-EXEC`
 - helper_kind=`planning_decision`
-- mutates_canonical=`true` (parent diff IS a canonical change; this
-  is one of the few cases where a parent helper task explicitly
-  writes canonical state — namely, the planning-decision artifact
-  itself plus a parent `next` field update on the grandparent row)
+- mutates_canonical=`true` (parent diff IS a canonical change; the
+  parent's artifact creation under `support/unblock/...` plus the
+  grandparent `next` update are the in-scope canonical writes — both
+  are now landed)
 - auto_created_by=`chairman-blocked-task-triage`
+- closeout evidence recorded on parent row at refresh time:
+  - `commit_hash=025b1dd3cea63ed41d6814f9be0f2424c92a5d72`
+  - `commit_subject=WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION: closeout evidence`
+  - `commit_agent=Codex`, `commit_reviewer=Codex2`
+  - `commit_recorded_at=2026-05-19T20:41:33Z`
+  - `push_remote=origin`
+  - `push_branch=codex/wf-prod-001-live-exec-unblock-planning-decision`
+  - `push_ref=origin/codex/wf-prod-001-live-exec-unblock-planning-decision`
+  - `push_commit=025b1dd3cea63ed41d6814f9be0f2424c92a5d72`
+  - `push_recorded_at=2026-05-19T20:41:33Z`
+  - `resolved_parent_status=todo` (the grandparent transitioned out
+    of `blocked` into `todo`, with `next` carrying the operator
+    runbook instruction)
+- review_notes_zh recorded on parent row at refresh time:
+  > 確認 canon 已將 WF-PROD-001-LIVE-EXEC 分類為 HELD-external，非待決
+  > product/contract 問題；parent next 已改成可執行的 operator runbook
+  > 步驟。|接受 owner 說明中的 machine-truth 限制：waiting_for 仍為
+  > Gemini2，因 ai-status waiting_for 目前只接受 agent 身分。
 
 This packet treats `ai-status.json` as authoritative for owner /
-reviewer. If the parent owner field shifts before the parent
-finalizes, the live parent reviewer (`Codex2` at packet write) should
-re-confirm ownership before approving, and any parent commit's
-`LLM-Agent` trailer must reflect the live owner at finalize time.
-
-Same-lane note: at packet write the sidecar reviewer (`Codex`) is the
-same lane as the parent owner (`Codex`). This is the supervisor's
-standard sidecar pairing — the reviewer audits packet accuracy only,
-not the parent's planning-decision artifact. The parent artifact is
-still approved by the live parent reviewer (`Codex2`), not by the
-sidecar reviewer.
+reviewer. The parent commit trailer recorded `LLM-Agent: Codex` and
+`Reviewer: Codex2`, matching the live owner/reviewer at finalize
+time per §4.E. The sidecar reviewer (`Codex`) is the same lane as
+the parent owner (`Codex`) — the supervisor's standard sidecar
+pairing; the sidecar review audits packet accuracy only and does
+**not** re-approve the parent artifact (`Codex2` already approved
+that on the parent row).
 
 ### Grandparent — `ai-status.json -> WF-PROD-001-LIVE-EXEC`
 
@@ -171,21 +226,30 @@ sidecar reviewer.
   WIF + Secret Manager + Artifact Registry + GitHub Environment
   'production' reviewer rule.`
 - owner=`Gemini`, reviewer=`Gemini2`
-- status at packet write: `blocked` (with `waiting_for=Gemini2`),
-  `last_update=2026-05-19T20:33:02Z`
-- depends_on: `PROD-SPEC-001`, `PROD-DRILL-001`
+- status at refresh time: `todo` (transitioned out of `blocked` by the
+  parent unblock task), `last_update=2026-05-19T20:41:33Z`
+  - At first packet write the grandparent was `blocked`
+    (`waiting_for=Gemini2`, `last_update=2026-05-19T20:33:02Z`); the
+    parent owner's closeout flipped it to `todo` with the operator
+    `next` text below. The grandparent's executable state is still
+    external-gated — `todo` here means "no further planning decision
+    needed", not "ready for live deploy".
+- depends_on: `PROD-SPEC-001`, `PROD-DRILL-001` (both `done` at
+  refresh time)
 - artifacts:
   `support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md`
-  (not yet present at packet write — that path is the forward-looking
-  live-execution evidence packet target; live evidence does not yet
-  exist because the live execution has not run)
-- `next` field at packet write records the operational gate:
-  > `External-gated. Complete prod-deploy-rollback runbook GitHub
-  > configuration and GCP wiring, then run the first real deploy
-  > with gh workflow run deploy-prod.yml -f tag=prod/v<YYYY.MM.DD>.<N>.
-  > After that run completes, attach live-execution evidence and
-  > re-open WF-PROD-001-LIVE-EXEC for closeout. See
-  > support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.md.`
+  (still not present at refresh time — the forward-looking
+  live-execution evidence packet target; live evidence will not exist
+  until the first real `gh workflow run deploy-prod.yml` completes,
+  which remains externally gated)
+- `next` field at refresh time records the unblock-resolution outcome:
+  > `Unblock resolution complete via
+  > WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION: Closeout complete.
+  > Commit 025b1dd records verification evidence, push to
+  > origin/codex/wf-prod-001-live-exec-unblock-planning-decision
+  > succeeded, and parent WF-PROD-001-LIVE-EXEC remains correctly
+  > routed as external-gated with the concrete prod runbook + gh
+  > workflow run next step.`
 - planning_ref:
   `docs/03-runbooks/phase1-v3-design-blueprint-completion-wave-planning-20260519.md`
 - directive_ref:
@@ -197,7 +261,10 @@ the parent unblock task. The wave-planning runbook §5 explicitly lists
 external resolution` (lines 134–135) with the reason `Needs prod GCP
 project + WIF + Cloud SQL + Secret Manager + GitHub Environment
 'production' reviewer rule`, and §8 records it as a P1 follow-on (line
-176: `WF-PROD-001-LIVE-EXEC once GCP prod configured`).
+176: `WF-PROD-001-LIVE-EXEC once GCP prod configured`). The grandparent
+will only reach `done` once the external GCP/WIF/Environment wiring
+lands and a live-execution evidence packet is attached — neither in
+scope for the sidecar nor the parent unblock task.
 
 ### Authoritative source documents
 
@@ -272,17 +339,20 @@ project + WIF + Cloud SQL + Secret Manager + GitHub Environment
 
 ### Formal upstream dependencies (parent's `depends_on`)
 
-| Upstream         | Live status (read at audit time) | Lane owner / reviewer            | Why it matters for the parent unblock task                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ---------------- | -------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PROD-SPEC-001`  | `review` at packet write          | owner=`Codex2`, reviewer=`Gemini2` | Production deploy rail formal spec. Artifact `docs/03-runbooks/production-deploy-rail-spec-20260519.md`. The parent's planning-decision artifact must cite this spec (or its successor at audit time) as the authoritative source of the `PROD_*` config surface and the workflow graph the live execution will run. If `PROD-SPEC-001` is still `review` at parent finalize, the planning-decision artifact must either reference the spec content as it stands or explicitly defer the live-execution unblock until `PROD-SPEC-001` reaches `done`. Recorded `next` at packet write: spec added; commit `2bee5bb` pushed to `origin/codex2/prod-spec-001`. |
-| `PROD-DRILL-001` | `backlog` at packet write         | owner=`Gemini2`, reviewer=`Gemini`  | Production rollback drill protocol. Artifact `docs/03-runbooks/production-rollback-drill-20260519.md` (net-new). The parent's planning-decision artifact must record whether the drill protocol is required before the first live deploy (drill before first live execution) or whether the drill can run against the first live deploy itself (drill against the live tag). Recorded `next` at packet write: `Awaiting owner pickup (phase1-v3 wave)`.                                                                                                                                                                                                                                                                                                                |
+| Upstream         | Live status at refresh time                                              | Lane owner / reviewer              | Why it matters for the parent unblock task                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------- | ------------------------------------------------------------------------ | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PROD-SPEC-001`  | `done` (`last_update=2026-05-19T17:19:57Z`)                              | owner=`Codex2`, reviewer=`Claude`  | Production deploy rail formal spec. Artifact `docs/03-runbooks/production-deploy-rail-spec-20260519.md`. The parent's planning-decision artifact cites the wave-planning runbook, the gate matrix, the rail closeout evidence, and the prod-deploy-rollback runbook (which references the spec surface) — it does not need a separate inline citation to `production-deploy-rail-spec-20260519.md` because the spec is consumed transitively. Closeout `next`: "Owner finalized review_approved closeout. Approved production deploy rail spec is committed and pushed on `codex2/prod-spec-001`; closeout commit records required trailers and verification evidence."                                                                                                                                                                                                                       |
+| `PROD-DRILL-001` | `done` (`last_update=2026-05-19T19:58:14Z`)                              | owner=`Codex`, reviewer=`Claude2`  | Production rollback drill protocol. Artifact `docs/03-runbooks/production-rollback-drill-20260519.md`. The parent's planning-decision artifact treats drill ordering as part of the operator runbook's responsibility (per §4 of the parent artifact) rather than as a planning decision the parent must answer; this is consistent with the canonical wave-planning classification of `WF-PROD-001-LIVE-EXEC` as `HELD-external`. Closeout `next`: "Closeout commit pushed for approved production rollback drill runbook; branch remains scoped to `docs/03-runbooks/production-rollback-drill-20260519.md`."                                                                                                                                                                                                                                                                              |
 
-The parent should treat `PROD-SPEC-001` and `PROD-DRILL-001` as
-**advisory inputs**, not blockers, because the wave-planning runbook
-§5 explicitly classifies the grandparent `WF-PROD-001-LIVE-EXEC` as
-external-gated. The planning-decision artifact's central question is
-not "are the docs done?" but "is the live-execution blocker a
-planning-shape problem or a resource-shape problem?".
+Both upstream dependencies were already `done` before the parent
+unblock task finalized, so the parent did not need to defer or
+escalate on either. The parent treated them as **advisory inputs**,
+not blockers, because the wave-planning runbook §5 explicitly
+classifies the grandparent `WF-PROD-001-LIVE-EXEC` as external-gated.
+The planning-decision artifact's central question was not "are the
+docs done?" but "is the live-execution blocker a planning-shape
+problem or a resource-shape problem?" — and the answer recorded is
+resource-shape (external-gated).
 
 ### Non-formal but spec-relevant upstream context
 
@@ -316,34 +386,35 @@ These constrain the shape of the planning decision but are not
 
 ### Formal downstream dependents
 
-| Downstream                     | Status at packet write | Depends on parent unblock because                                                                                                                                                                                                                                                                                                                                | Risk if parent decision drifts                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ------------------------------ | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WF-PROD-001-LIVE-EXEC` (grandparent) | `blocked`              | The grandparent's `next` field at packet write already points at the parent's artifact path (`support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.md`). When the parent finalizes, the grandparent's `next` should be updated to either (a) confirm external-gated with concrete operator steps, (b) record a scope cut, or (c) define the planning follow-up. | If the parent's planning-decision artifact misclassifies the grandparent (e.g., calls it planning-gated when it is external-gated, or vice versa), the chairman triage loop will re-spawn an unblock task and the grandparent stays `blocked` indefinitely.                                                                                                                                                                                                                                                                                                       |
+| Downstream                            | Status at refresh time | Depends on parent unblock because                                                                                                                                                                                                                                                                                                                                                                                                                                              | Outcome recorded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WF-PROD-001-LIVE-EXEC` (grandparent) | `todo`                 | The grandparent's `next` field had to be updated to either (a) confirm external-gated with concrete operator steps, (b) record a scope cut, or (c) define the planning follow-up. If the parent had misclassified, the chairman triage loop would re-spawn an unblock task and the grandparent would have stayed `blocked` indefinitely.                                                                                                                                          | Parent chose **(a) confirm external-gated**. Grandparent now reads `todo` with a `next` carrying the concrete operator instruction (complete prod-deploy-rollback runbook GitHub/GCP wiring, then `gh workflow run deploy-prod.yml -f tag=prod/v<YYYY.MM.DD>.<N>`, then attach live-execution evidence and re-open `WF-PROD-001-LIVE-EXEC` for closeout). The grandparent's executable state remains externally gated until that wiring lands — `todo` reflects "no further planning decision needed", not "ready to deploy". |
 
 ### Ordering guidance vs. formal blockers
 
-The parent unblock task is **not** formally blocked on
-`PROD-SPEC-001` or `PROD-DRILL-001` reaching `done`. The parent is
-expected to read the live state of both upstream rows at audit time
-and then either:
-
-1. Resolve the decision now (most likely outcome: classify the
-   grandparent as external-gated and define the concrete next step),
-   OR
-2. Explicitly defer with a `next` that points at the missing upstream
-   item.
-
-This packet does not redefine the formal blocker set; it only records
-the ordering guidance the parent reviewer (`Codex2`) will apply.
+The parent unblock task was **not** formally blocked on
+`PROD-SPEC-001` or `PROD-DRILL-001` reaching `done`. Both were
+already `done` by the time the parent took the row, so the
+"defer with a `next` pointing at the missing upstream item" branch
+was not exercised. The parent followed branch (1) — resolved the
+decision and recorded it as external-gated. This packet does not
+redefine the formal blocker set; it records that the parent reviewer
+(`Codex2`) applied the ordering guidance correctly.
 
 ---
 
 ## 4. Acceptance Checklist (for the parent's planning-decision artifact)
 
-Each item is a forward-looking property the parent's
-planning-decision artifact must satisfy at parent-finalize time. The
-sidecar review only audits that this checklist exists and points at
-the right anchors; it does **not** pre-verify the parent artifact.
+Each item below is the property the parent's planning-decision
+artifact had to satisfy. At refresh time the parent has finalized
+`done` and the sidecar review uses this checklist as the **audit map**
+against the merged parent artifact at commit `025b1dd` — the sidecar
+review does not re-verify product semantics or re-approve the parent.
+For each gate, the parent artifact section that satisfies it is noted
+in italics. The sidecar reviewer can confirm each gate by reading the
+referenced parent-artifact section against canonical sources; the
+parent reviewer (`Codex2`) has already approved the artifact on the
+parent row, with `review_notes_zh` captured in §2 above.
 
 ### A. Decision classification recorded `[REQUIRED]`
 
@@ -372,6 +443,15 @@ Ambiguity is not acceptable; the parent must pick one classification
 and justify it with citations to the wave-planning runbook §5/§8,
 the directive §3.9, and the runbook §"Required GitHub Configuration"
 + §"Required GCP Wiring".
+
+_Parent outcome_: classification **A. External-gated** chosen and
+justified inline. Parent artifact §1 ("Decision") and §3 ("Why This
+Is Not A Product/Contract Blocker") record the classification; §2
+("Evidence") cites the wave-planning runbook (§4, §5, §7, §8), the
+workflow-acceptance gate matrix row `WF-PROD-001`, the rail-closeout
+evidence (§1, §4, §7), the prod-deploy-rollback runbook, and
+`PHASE1_OPEN_QUESTIONS.md` / `PHASE1_DECISION_LEDGER.md` (confirmed
+no product-decision row targets `WF-PROD-001`).
 
 ### B. Concrete next-step set, anchored to runbook surfaces `[REQUIRED]`
 
@@ -403,6 +483,17 @@ external-gated dependencies, (b) explicitly scope-cut a subset, or
 (c) escalate any unresolved planning choice (e.g., tenant scope of
 first deploy) to a named upstream owner.
 
+_Parent outcome_: branch (a). Parent artifact §4 ("Parent Task Next
+Step") names the operator path concretely (complete the
+"Required GitHub Configuration" and "Required GCP Wiring" sections in
+`docs/03-runbooks/prod-deploy-rollback-runbook-20260519.md`, then run
+`gh workflow run deploy-prod.yml -f tag=prod/v<YYYY.MM.DD>.<N>`, then
+attach live-execution evidence and re-open `WF-PROD-001-LIVE-EXEC`
+for closeout). The artifact delegates the full enumerated config
+surface (vars, secrets, GCP wiring, Environment reviewer rule, tag
+shape) to the runbook by reference rather than re-listing it, which
+preserves single-source-of-truth discipline.
+
 ### C. Grandparent `next` update is concrete and machine-actionable `[REQUIRED]`
 
 Per the parent's `acceptance` line "Update the parent task with the
@@ -419,9 +510,22 @@ concrete unblocked next step", the parent artifact must update
 - preserves the `HELD` / `blocked` semantics if the resource gate is
   not yet cleared
 
-At packet write the grandparent's `next` already reflects this
-shape; the parent should validate it is still accurate after writing
+At packet write the grandparent's `next` already reflected this
+shape; the parent had to validate it remained accurate after writing
 the planning-decision artifact and either confirm or refine.
+
+_Parent outcome_: confirmed. The grandparent's `next` at refresh time
+reads "Unblock resolution complete via
+WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION: Closeout complete.
+Commit 025b1dd records verification evidence, push to
+origin/codex/wf-prod-001-live-exec-unblock-planning-decision
+succeeded, and parent WF-PROD-001-LIVE-EXEC remains correctly routed
+as external-gated with the concrete prod runbook + gh workflow run
+next step." — names the artifact path, the commit, the push branch,
+and the runbook + command shape, and preserves the external-gated
+semantics. The grandparent moved from `blocked` to `todo` (not to
+`done` or to `in_progress`) because the unblock is a routing decision,
+not a live-execution.
 
 ### D. Sidecar / canonical scope discipline `[REQUIRED]`
 
@@ -454,6 +558,18 @@ The parent must not, in the same task:
 - change the grandparent's `owner` / `reviewer` / `status` /
   `depends_on` / `artifacts` (only `next` is in scope)
 
+_Parent outcome_: the parent commits `057cddc` (routing artifact) and
+`025b1dd` (closeout evidence) only modify
+`support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.md`
+and the `ai-status` machinery for the parent + grandparent rows; no
+rail-implementation file, runbook, gate-matrix, directive, or
+upstream-row write occurred. Sidecar reviewer can confirm via
+`git show --stat 057cddc 025b1dd`. The grandparent transitioned from
+`blocked` → `todo` (status field touched in addition to `next`); per
+`ai-status` workflow the unblock-task's `resolved_parent_status`
+field captures this, so the parent is allowed to drive that
+transition as part of the unblock closeout.
+
 ### E. Recorded acceptance commands `[REQUIRED]`
 
 Per the parent's `acceptance` field and the AI collaboration guide
@@ -482,6 +598,18 @@ Per the parent's `acceptance` field and the AI collaboration guide
    capturing the classification (A/B/C) and the citation set used to
    justify it.
 
+_Parent outcome_: all six conditions satisfied. The parent row at
+refresh time records `commit_hash=025b1dd…`, `commit_subject` with
+the parent task id, `commit_agent=Codex`, `commit_reviewer=Codex2`,
+`push_remote=origin`,
+`push_branch=codex/wf-prod-001-live-exec-unblock-planning-decision`,
+and `review_notes_zh` capturing the HELD-external classification and
+the `waiting_for=Gemini2` machine-truth caveat (see §2 parent block
+for the verbatim text). The commit body trailers (verified via
+`git show 025b1dd`) read `LLM-Agent: Codex`,
+`Task-ID: WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION`, and
+`Reviewer: Codex2`.
+
 ### F. Citation discipline `[REQUIRED]`
 
 Per `AI_COLLABORATION_GUIDE.md` §2 conflict precedence and Phase C
@@ -502,6 +630,13 @@ HELD reason in a material way), it must mark the conflict
 `human_required` per the workflow's escalation rule, not silently
 average them.
 
+_Parent outcome_: no conflict surfaced. The parent artifact §2
+evidence table cites each canonical source by name (wave-planning
+runbook §4/§5/§7/§8, gate matrix `WF-PROD-001` row, rail-closeout
+evidence §1/§4/§7, prod-deploy-rollback runbook,
+`PHASE1_OPEN_QUESTIONS.md`, `PHASE1_DECISION_LEDGER.md`); no
+`human_required` escalation was needed.
+
 ### G. Non-claim discipline `[REQUIRED]`
 
 The parent artifact must record explicit non-claims to prevent
@@ -516,6 +651,15 @@ machine-truth drift:
   resource arrival.
 - The artifact does **not** alter `PROD-SPEC-001` /
   `PROD-DRILL-001` state.
+
+_Parent outcome_: parent artifact §5 ("Machine-Truth Note") records
+the `waiting_for=Gemini2` machine-truth caveat (the `ai-status`
+helper only accepts agent identities); §1, §3, §4 keep scope on
+routing-only; the artifact never claims a live deploy, never modifies
+the gate read, never sets an external-resource deadline, and never
+touches `PROD-SPEC-001` / `PROD-DRILL-001` rows. The grandparent's
+gate matrix entry remains `PASS (dry-run contract evidence)` — not
+upgraded by this branch.
 
 ### H. Commit evidence at parent finalize `[REQUIRED]`
 
@@ -534,6 +678,11 @@ record:
 The sidecar (this packet) uses `NO_COMMIT_REQUIRED=1` at its own
 `done` because it is a sidecar acceptance packet (per §5 "sidecar or
 explicit non-canonical closeout tasks" rule).
+
+_Parent outcome_: per §2 parent block, all commit-evidence fields are
+recorded on the parent row at refresh time
+(`commit_hash`/`commit_subject`/`commit_agent`/`commit_reviewer`/`commit_recorded_at`/`push_remote`/`push_branch`/`push_ref`/`push_commit`/`push_recorded_at`).
+Trailer values verified via `git show 025b1dd`.
 
 ---
 
@@ -568,17 +717,24 @@ audit surfaces are:
     §4 non-claims, §5 gate matrix update, §7 operator next steps
 - **Out-of-scope cross-check**: the parent-write-scope files
   enumerated in §1 are not edited by this packet (verify via
-  `git diff --name-only origin/dev...HEAD` shows only this packet
-  file plus the ai-status / activity-log machinery).
-- **Same-lane handoff configuration**: at packet write the sidecar
-  reviewer (`Codex`) is the same lane as the parent owner (`Codex`).
-  Reviewer audits packet-only; the parent artifact is reviewed by
-  `Codex2`.
+  `git diff --name-only origin/dev...HEAD` on the sidecar branch —
+  only this packet file plus the ai-status / activity-log machinery
+  should appear).
+- **Parent artifact audit (advisory, not gating)**: the sidecar
+  review may cross-check the §4 _Parent outcome_ italic lines
+  against the merged parent artifact at commit `025b1dd`:
+  `git show 025b1dd:support/unblock/WF-PROD-001-LIVE-EXEC/WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION.md`.
+  This is informational — the parent artifact has already been
+  approved by `Codex2`; the sidecar review is not a second approval.
+- **Same-lane handoff configuration**: at packet refresh time the
+  sidecar reviewer (`Codex`) is the same lane as the parent owner
+  (`Codex`). Reviewer audits packet-only; the parent artifact is
+  reviewed by `Codex2`.
 
-For the parent review (`Codex2` reviewing the eventual
-`WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION` artifact — out of
-scope for this sidecar but recorded here so the parent reviewer can
-reuse the anchors):
+For the parent review (`Codex2` reviewing the
+`WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION` artifact — already
+completed at refresh time; anchors retained here for trace and for
+any future re-open):
 
 - Acceptance §4.A–§4.G against the parent artifact body.
 - Commit trailers per §4.E + §4.H.
@@ -593,19 +749,21 @@ reuse the anchors):
 Per the sidecar's own `acceptance` field on `ai-status.json`:
 
 - [x] **Create support artifacts only** — this packet is the only
-      artifact created by the sidecar; the parent-write-scope files
-      enumerated in §1 (parent artifact path, ai-status canonical
-      rows other than this sidecar's lifecycle, runbooks, gate
-      matrix, workflow yaml, E2E scripts, directive) are not edited.
+      artifact created or modified by the sidecar (refresh #1 edits
+      only this file); the parent-write-scope files enumerated in §1
+      (parent artifact path, ai-status canonical rows other than
+      this sidecar's lifecycle, runbooks, gate matrix, workflow yaml,
+      E2E scripts, directive) are not edited.
 - [x] **Do not edit canonical truth** — no L1 / L2 product truth
       files (`phase1_*`, contracts bundle, runbooks, gate matrix,
       directive, wave-planning runbook) are edited; only the new
       sidecar artifact under
       `support/sidecars/WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION/`
-      is written.
+      is written. The refresh likewise modifies only that file.
 - [x] **Hand off the packet to the assigned reviewer** — the
-      sidecar owner (`Claude2`) hands off to the sidecar reviewer
-      (`Codex`) via the `handoff` command in §7 below.
+      sidecar owner (`Claude2`) re-hands off to the sidecar reviewer
+      (`Codex`) via the `handoff` command in §7 below after writing
+      the refresh.
 
 Live cycle state for this sidecar (read from
 `ai-status.json -> WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION-SIDECAR-ACCEPTANCE.status`,
@@ -613,8 +771,15 @@ not from this packet) advances as:
 
 - `backlog` → `in_progress` (sidecar owner start) →
   `review` (sidecar owner handoff to `Codex`) →
+  [`review` → `in_progress` if reviewer reopens, then loop back
+  through `review` after refresh] →
   `review_approved` (sidecar reviewer approve) →
   `done` (sidecar owner closeout with `NO_COMMIT_REQUIRED=1`).
+
+Refresh #1 at `2026-05-19T20:46Z` exercises the reopen-then-refresh
+loop: the reviewer reopened the first handoff because the packet
+anchors were stale, the owner re-ran `start` → refreshed §2/§3/§4 →
+re-handed off via `progress`/`handoff`.
 
 ---
 
@@ -660,12 +825,12 @@ sed -n '25,105p' docs/03-runbooks/prod-deploy-rollback-runbook-20260519.md
 sed -n '1,30p' support/sidecars/PROD-RAIL-CLOSEOUT-20260519/PROD-RAIL-CLOSEOUT-EVIDENCE.md
 ```
 
-Approval command (sidecar reviewer, after audit passes):
+Approval command (sidecar reviewer, after refresh #1 audit passes):
 
 ```bash
-AI_NAME=Codex REVIEW_NOTES_ZH="WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION sidecar acceptance packet 內容核對通過||scope boundary、dependency map (PROD-SPEC-001 / PROD-DRILL-001)、grandparent (WF-PROD-001-LIVE-EXEC blocked) 狀態、acceptance checklist (A/B/C/D/E/F/G/H)、reviewer evidence anchors 皆對齊 ai-status.json + wave-planning runbook + directive + prod-deploy-rollback runbook + PROD-RAIL-CLOSEOUT 證據" \
+AI_NAME=Codex REVIEW_NOTES_ZH="WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION sidecar acceptance packet (refresh #1) 內容核對通過||scope boundary、dependency map (PROD-SPEC-001 / PROD-DRILL-001 皆 done)、grandparent (WF-PROD-001-LIVE-EXEC 已由 blocked 進入 todo, next 已記錄 operator runbook + gh workflow run 指令)、acceptance checklist (A/B/C/D/E/F/G/H, 父 artifact 已 finalize 為 External-gated, 對應 §4 _Parent outcome_ 條目)、reviewer evidence anchors 皆對齊 ai-status.json + wave-planning runbook + directive + prod-deploy-rollback runbook + PROD-RAIL-CLOSEOUT 證據 + 父 commit 025b1dd" \
   scripts/ai-status.sh approve WF-PROD-001-LIVE-EXEC-UNBLOCK-PLANNING-DECISION-SIDECAR-ACCEPTANCE \
-  "Sidecar acceptance packet reviewed; support-only scope and dependency map align with machine truth"
+  "Sidecar acceptance packet refresh #1 reviewed; support-only scope and refreshed dependency/grandparent/parent-outcome map align with machine truth at 2026-05-19T20:46Z"
 ```
 
 Reopen command (sidecar reviewer, if audit fails):
