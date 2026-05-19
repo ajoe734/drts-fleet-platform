@@ -20,7 +20,8 @@ This document defines the cross-surface E2E scenario matrix for Phase 1. It capt
 5. How the scaffold relates to the existing smoke tests and UAT scenarios.
 
 The E2E scaffold is in `tests/e2e/`. The scenarios operationalize the cross-surface flows
-defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)`.
+defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)`, plus the
+tenant-governance extension scenario `E2E-005`.
 
 > **Relationship to smoke tests:** `tests/smoke/` verifies individual API surfaces in isolation.
 > `tests/e2e/` chains surfaces together in a single stateful run, tracking ID continuity across
@@ -223,18 +224,71 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ---
 
+### 4.5 E2E-005 — Tenant Governance Lifecycle
+
+**Script:** `tests/e2e/E2E-005-tenant-governance.sh`
+
+#### Surface Chain
+
+```
+Tenant Portal (governance bootstrap) ──► Tenant Portal (booking) ──► Ops Console (approval queue + dispatch)
+──► Driver App (task lifecycle) ──► Tenant Portal (quota ledger + invoice + tenant audit)
+```
+
+#### Leg Breakdown
+
+| Leg | Surface       | Actor                     | API Route                                             | Assertion                                                                              |
+| --- | ------------- | ------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| 0   | Tenant Portal | `tenant_admin`            | `GET /api/tenant/users`                               | resolve real tenant admin / finance / ops actors for approver-auth actions            |
+| 0   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/cost-centers`                       | create/update governance directory entries                                             |
+| 0   | Tenant Portal | `tenant_admin`            | `GET /api/tenant/cost-centers/coverage`               | coverage audit event emitted                                                           |
+| 0   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/cost-centers/disable`               | disabled cost center available for validation-negative path                            |
+| 0   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/quotas/policies`                    | tenant-wide + blocked-scope quota policies stored                                      |
+| 0   | Tenant Portal | `tenant_admin`            | `POST/PUT /api/tenant/approval-rules*`                | create / update / reorder / disable rule events emitted                                |
+| 0   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/quotas/preview`                     | quota preview evidence captured                                                        |
+| 0   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/approval-rules/evaluate`            | dry-run rule evaluation emits audit event                                              |
+| 0   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/bookings` (disabled cost center)    | validation-negative path emits `BOOKING_COST_CENTER_DISABLED` audit evidence           |
+| 1   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/bookings`                           | finance booking enters `approvalState=pending` and creates `approvalRequestId`         |
+| 1   | Ops Console   | `ops_user`                | `GET/POST /api/ops/approval-requests*`                | request visible; nudge + SLA-breach acknowledgement events emitted                     |
+| 1   | Ops Console   | `ops_user`                | `POST /api/orders/:orderId/dispatch`                  | pending booking is blocked with `BOOKING_APPROVAL_PENDING`                             |
+| 1   | Tenant Portal | `tenant_finance_admin`    | `POST /api/tenant/approval-requests/:id/approve`      | request resolves approved                                                              |
+| 2   | Ops Console   | `ops_user`                | `POST /api/orders/:orderId/dispatch`                  | approved booking dispatches                                                            |
+| 2   | Ops Console   | `ops_user`                | `GET /api/dispatch/tasks/:dispatchJobId/candidates`   | candidate pool readable                                                                |
+| 2   | Ops Console   | `ops_user`                | `POST /api/dispatch/assign`                           | task assigned to driver                                                                |
+| 3   | Driver App    | `driver_user`             | `POST /api/driver/tasks/:id/{accept,depart,...}`      | task completes through the driver lifecycle                                            |
+| 4   | Tenant Portal | `tenant_admin`            | `GET /api/tenant/quotas/ledger?bookingId=...`         | quota ledger entries recorded for approved booking                                     |
+| 4   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/invoices/generate`                  | billing continuity preserved after governed dispatch                                   |
+| 4   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/bookings` (blocked quota scope)     | blocked branch yields `approvalState=blocked` and still blocks dispatch                |
+| 4   | Tenant Portal | `tenant_finance_admin`    | `POST /api/tenant/approval-requests/:id/reject`       | rejected branch emits rejection event                                                  |
+| 4   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/approval-requests/:id/escalate`     | manual escalation emits timeout-escalated event                                        |
+| 4   | Tenant Portal | `tenant_admin`            | `POST /api/tenant/bookings` (ownerless exec center)   | approver fallback path emits `approver_fallback_used`                                  |
+| 4   | Tenant Portal | `tenant_admin`            | `PUT /api/tenant/bookings/:bookingId`                 | re-evaluation cancels stale request and creates a replacement                          |
+| 4   | Tenant Portal | `tenant_admin`            | `GET /api/tenant/audit`                               | all 21 generated tenant-governance audit action names present for the run              |
+| 4   | Ops Console   | `ops_user`                | `GET /api/orders/:orderId/dispatch-trace`             | approved booking keeps the dispatch trace readable through completion                   |
+
+#### Pass Criteria
+
+1. The script resolves live tenant approvers from `GET /api/tenant/users`; it does not hard-code finance/admin user ids.
+2. Governance setup emits the full audit taxonomy scaffolding: cost-center upsert/disable/coverage, quota policy update, rule create/update/reorder/disable, dry-run evaluation, and disabled-cost-center validation rejection.
+3. The approval-required booking blocks dispatch before approval, then dispatches and completes after approval.
+4. The blocked quota booking persists with `approvalState=blocked` and cannot dispatch.
+5. Reject, manual-escalate, fallback-approver, and re-evaluation branches all emit their expected approval-request audit events.
+6. `GET /api/tenant/audit` contains all 21 generated action names listed in `docs/04-api/audit-event-taxonomy.md`.
+
+---
+
 ## 5. Fixture Inventory
 
 | Fixture File                     | Used By                          | Description                                                       |
 | -------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
-| `e2e-booking-enterprise.json`    | E2E-001, E2E-004                 | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
+| `e2e-booking-enterprise.json`    | E2E-001, E2E-004, E2E-005        | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
 | `e2e-booking-airport.json`       | (reserved for E2E-003 expansion) | `credit_card_airport_transfer` booking                            |
-| `e2e-dispatch-assign.json`       | E2E-001                          | Dispatch assign body with `__*__` placeholders                    |
-| `e2e-driver-accept.json`         | E2E-001, E2E-002                 | Driver task accept with `__ACCEPTED_AT__`                         |
-| `e2e-driver-depart.json`         | E2E-001                          | Driver depart pickup with `__DEPARTED_AT__`                       |
-| `e2e-driver-arrived-pickup.json` | E2E-001                          | Driver arrived at pickup with `__ARRIVED_AT__`                    |
-| `e2e-driver-start.json`          | E2E-001                          | Driver trip start with `__STARTED_AT__`                           |
-| `e2e-driver-complete.json`       | E2E-001                          | Driver task complete with signoff                                 |
+| `e2e-dispatch-assign.json`       | E2E-001, E2E-005                 | Dispatch assign body with `__*__` placeholders                    |
+| `e2e-driver-accept.json`         | E2E-001, E2E-002, E2E-005        | Driver task accept with `__ACCEPTED_AT__`                         |
+| `e2e-driver-depart.json`         | E2E-001, E2E-005                 | Driver depart pickup with `__DEPARTED_AT__`                       |
+| `e2e-driver-arrived-pickup.json` | E2E-001, E2E-005                 | Driver arrived at pickup with `__ARRIVED_AT__`                    |
+| `e2e-driver-start.json`          | E2E-001, E2E-005                 | Driver trip start with `__STARTED_AT__`                           |
+| `e2e-driver-complete.json`       | E2E-001, E2E-005                 | Driver task complete with signoff                                 |
 | `e2e-tenant-create.json`         | E2E-004                          | Platform-admin tenant create with `__TENANT_CODE__`               |
 | `e2e-phone-booking.json`         | Reserved (E2E-003 manual flow)   | Phone booking payload stub for future CTI-backed automation       |
 | `e2e-report-compliance.json`     | Reserved (E2E-003 manual flow)   | Compliance export payload stub for future report validation       |
@@ -299,6 +353,7 @@ Minimum evidence items required for each scenario:
 | E2E-001  | `bookingId`, `dispatchJobId`, `taskId`, `invoiceId`, `auditEntryCount`      |
 | E2E-002  | `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `taskStatusAfterAccept` |
 | E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`    |
+| E2E-005  | `approvedBookingId`, `approvedRequestId`, `dispatchJobId`, `taskId`, `invoiceId`, `blockedBookingId`, `observedExpectedActionCount` |
 
 ---
 
@@ -330,7 +385,7 @@ Minimum evidence items required for each scenario:
 
 ### Verification Snapshot
 
-- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/run-e2e.sh`
+- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/E2E-005-tenant-governance.sh tests/e2e/run-e2e.sh`
 - `./tests/e2e/run-e2e.sh --dry-run`
 
 ---
