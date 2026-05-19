@@ -1,9 +1,9 @@
 # Partner Eligibility / Airport Transfer UAT
 
-**Status:** draft  
-**Task:** `PRT-UAT-001`  
-**Owner:** `Codex`  
-**Reviewer:** `Claude2`  
+**Status:** draft
+**Task:** `PRT-UAT-001`
+**Owner:** `Codex`
+**Reviewer:** `Codex2`
 **Created:** `2026-05-19`
 
 ## 1. Purpose
