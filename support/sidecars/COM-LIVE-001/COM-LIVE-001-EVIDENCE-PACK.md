@@ -209,7 +209,8 @@ Canonical machine truth currently records `COM-LIVE-001` as:
 
 - owner `Codex2`
 - reviewer `Claude`
-- status `in_progress`
+- status `review_approved`
 
-This packet therefore records a partial evidence snapshot for the current
-session. It is not a review handoff and it does not upgrade the gate status.
+This packet records the partial evidence snapshot that reached review approval.
+Owner closeout may mark the task `done`, but it still must not upgrade the
+workflow gate beyond `HOLD`.
