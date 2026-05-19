@@ -30,6 +30,10 @@ Current result on `2026-05-19`:
   the same environment boundary: active `gcloud` account present, identity
   token mint still blocked by reauthentication, old `run.app` host still `404`,
   and `api-staging.drts.internal` still unresolved.
+- A second revalidation at `2026-05-19T04:18Z` reconfirmed the same boundary:
+  active `gcloud` account still present, token mint still requires
+  reauthentication, all three old `run.app` probes still return `404`, and
+  `api-staging.drts.internal` still fails DNS resolution from this machine.
 
 Conclusion:
 
@@ -136,7 +140,21 @@ Observed result from this machine on `2026-05-19`:
 - DNS lookup returned `NXDOMAIN`
 - `curl` could not resolve the host
 
-### 3.5 Interpretation
+### 3.5 Revalidation snapshot at 2026-05-19T04:18Z
+
+Observed result from a second probe pass in this session:
+
+- active `gcloud` account still resolves to `bobo.du@cctech-support.com`
+- `gcloud auth print-identity-token` still fails with non-interactive
+  reauthentication required
+- `https://drts-api-kdhu6wzufa-uc.a.run.app/`
+  `https://drts-api-kdhu6wzufa-uc.a.run.app/health`
+  and `https://drts-api-kdhu6wzufa-uc.a.run.app/api/health` still return HTTP
+  `404`
+- `curl -I -sS https://api-staging.drts.internal/api/health` still fails with
+  host resolution error
+
+### 3.6 Interpretation
 
 This session did not fail because `E2E-002` found no forwarded task and
 gracefully skipped. It failed earlier at the environment boundary:
