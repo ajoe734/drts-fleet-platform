@@ -4,7 +4,7 @@
 **Intended owner:** `Codex2`  
 **Intended reviewer:** `Codex`  
 **Collected:** `2026-05-19 (UTC)`  
-**Current read:** `PARTIAL - static evidence consolidated; fresh staging live rerun blocked by credential/ingress gates`
+**Current read:** `PARTIAL - static evidence consolidated; 2026-05-19 live rerun reconfirmed blocked by credential/ingress gates`
 
 ---
 
@@ -107,15 +107,20 @@ justify a gate upgrade on its own.
 
 ## 4. 2026-05-19 Live Collection Attempt
 
+This workspace re-ran the minimum live access probes on `2026-05-19T03:59Z`
+to determine whether the governance-aware `WF-FIN-001` evidence could be
+refreshed from staging during this dispatch.
+
 ### 4.1 Protected staging host
 
 Probe target:
 
 `https://api.staging.drts-fleet.cctech-support.com/api/health`
 
-Observed result:
+Observed result from `curl -i -sS --max-time 20`:
 
 - HTTP `302`
+- `location: https://accounts.google.com/o/oauth2/v2/auth?...`
 - body: `Invalid IAP credentials: empty token`
 
 Interpretation:
@@ -124,6 +129,10 @@ Interpretation:
 - fresh live evidence now requires a valid IAP/OIDC bearer token
 
 ### 4.2 Token helper failure on this machine
+
+Active CLI account:
+
+- `bobo.du@cctech-support.com`
 
 Attempted helper:
 
@@ -134,6 +143,11 @@ Underlying failure:
 `gcloud auth print-access-token` returned:
 
 `Reauthentication failed. cannot prompt during non-interactive execution.`
+
+The impersonated fallback path failed with the same reauthentication error when
+running:
+
+`gcloud auth print-identity-token --include-email --project drts-staging-bobo-20260502 --impersonate-service-account github-actions-deployer@drts-staging-bobo-20260502.iam.gserviceaccount.com --audiences 1071409254673-nabnvfu9hr89s1acue6fcfoomn9g1v5k.apps.googleusercontent.com`
 
 Interpretation:
 
@@ -147,8 +161,9 @@ Probe target:
 
 `https://drts-api-kdhu6wzufa-uc.a.run.app`
 
-Observed result for smoke probes against `/api/health`,
-`/api/tenant/invoices/generate`, and `/api/reports/jobs`:
+Observed result from `curl -i -sS --max-time 20
+https://drts-api-kdhu6wzufa-uc.a.run.app/api/health` and matching smoke-path
+checks against `/api/tenant/invoices/generate` and `/api/reports/jobs`:
 
 - HTTP `404`
 - body: Google frontend `Page not found`
@@ -173,7 +188,9 @@ currently blocked by two concrete environment issues:
    routes as a usable fallback
 
 Until one of those is resolved, this task can only deliver a consolidated
-static-evidence packet plus a reproducible blocker record.
+static-evidence packet plus a reproducible blocker record. The 2026-05-19
+rerun did not surface a hidden alternate ingress or a valid non-interactive
+token path from this machine.
 
 ---
 
