@@ -36,12 +36,12 @@ worktree copy.
 
 ### 2.1 Sidecar task row
 
-At authoring time, canonical machine truth records:
+At reviewer handoff time, canonical machine truth records:
 
 - id = `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK-SIDECAR-ACCEPTANCE`
 - owner = `Codex`
 - reviewer = `Codex2`
-- status = `in_progress`
+- status = `review`
 - task_class = `sidecar`
 - helper_parent = `PARTNER-ELIG-LIVE-001-UNBLOCK-MANUAL-UNBLOCK`
 - helper_kind = `acceptance_packet`
@@ -113,10 +113,21 @@ still govern live issuer activation:
 ### 2.6 History-repair note
 
 Canonical machine truth also carries
-`PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR` in `review_approved`. Its `next`
-field records that earlier isolated worktrees preserved stale
-`ai-status.json/current-work.md` snapshots and cites the additive repair chain
-`052de19`, `61b7960`, `bea9ffe`, `8d5c47c`, `2628fc7`, and `e4dcbb1`.
+`PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR` as complete:
+
+- owner = `Codex`
+- reviewer = `Codex2`
+- status = `done`
+- artifact =
+  `support/unblock/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR.md`
+- closeout commit = `fc2b9bf`
+- closeout subject =
+  `closeout(PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR): append review-approved evidence`
+- push ref = `origin/codex/partner-elig-live-001-unblock-history-repair`
+
+That repair packet documents why some isolated worktrees still preserve stale
+`ai-status.json/current-work.md` snapshots and redirects reviewers back to
+`AI_STATUS_ROOT` plus commit-anchored evidence.
 
 Reviewer implication:
 
@@ -220,6 +231,8 @@ Reviewer-ready anchors:
   `git show bea9ffe:docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md`
 - grandparent hold-state evidence:
   `git show 2628fc7:support/sidecars/PARTNER-ELIG-LIVE-001/PARTNER-ELIG-LIVE-EVIDENCE.md`
+- history-repair closeout record:
+  `git show --stat fc2b9bf`
 - external gate:
   `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md`
 - process rules:
@@ -257,7 +270,7 @@ This sidecar used source-anchor verification only:
 - read canonical `ai-status.json` from `AI_STATUS_ROOT`
 - read the parent helper anchor content at `052de19`
 - confirmed commit/stat existence for `052de19`, `8d5c47c`, `0b4edb4`,
-  `bea9ffe`, `2628fc7`, and `6917284`
+  `bea9ffe`, `2628fc7`, and `fc2b9bf`
 - read `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md`
 
 No runtime test, live issuer probe, or canonical-truth edit was performed for
