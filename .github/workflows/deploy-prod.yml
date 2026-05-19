@@ -441,6 +441,41 @@ jobs:
           echo "api_origin=${api_origin}" >> "$GITHUB_OUTPUT"
           echo "iap_client_id=${iap_client_id}" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve API secret mounts
+        id: api_secrets
+        run: |
+          set -euo pipefail
+
+          secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest,CONTROLLED_DOWNLOAD_SIGNING_SECRET=${SECRET_PREFIX}-controlled-download-signing-secret:latest"
+
+          if gcloud secrets describe "${SECRET_PREFIX}-internal-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            secret_args="${secret_args},DRTS_INTERNAL_KEY=${SECRET_PREFIX}-internal-key:latest"
+            echo "::notice::Including optional DRTS_INTERNAL_KEY secret in drts-api deploy."
+          else
+            echo "::warning::Optional secret ${SECRET_PREFIX}-internal-key not found; deploying drts-api without DRTS_INTERNAL_KEY."
+          fi
+
+          printf 'api=%s\n' "$secret_args" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy — api
+        run: |
+          IMAGE="${{ env.REGISTRY }}/api:${{ needs.build-push.outputs.image_tag }}"
+          # Use deploy for both create and update so bootstrap flows create drts-api
+          # before post-deploy IAM / IAP bindings are applied.
+          gcloud run deploy drts-api \
+            --region "$REGION" \
+            --image "$IMAGE" \
+            --port 3001 \
+            --ingress internal-and-cloud-load-balancing \
+            --set-cloudsql-instances "$CLOUDSQL" \
+            --service-account "${{ steps.runtime_sa.outputs.email }}" \
+            --set-secrets "${{ steps.api_secrets.outputs.api }}" \
+            --set-env-vars "NODE_ENV=production,API_PORT=3001" \
+            ${{ steps.exposure.outputs.api }} \
+            --min-instances 1 \
+            --max-instances 6 \
+            --project "$PROJECT_ID"
+
       - name: Ensure control-plane runtime can invoke drts-api
         run: |
           gcloud run services add-iam-policy-binding drts-api \
@@ -465,39 +500,6 @@ jobs:
         if: steps.api_iap_access.outcome == 'failure'
         run: |
           echo "::warning::GitHub deploy identity cannot mutate API IAP policy; continuing because runtime access may already be provisioned manually."
-
-      - name: Resolve API secret mounts
-        id: api_secrets
-        run: |
-          set -euo pipefail
-
-          secret_args="DATABASE_URL=${SECRET_PREFIX}-db-url:latest,API_KEY_SALT=${SECRET_PREFIX}-api-key-salt:latest,JWT_SECRET=${SECRET_PREFIX}-jwt-secret:latest,CONTROLLED_DOWNLOAD_SIGNING_SECRET=${SECRET_PREFIX}-controlled-download-signing-secret:latest"
-
-          if gcloud secrets describe "${SECRET_PREFIX}-internal-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
-            secret_args="${secret_args},DRTS_INTERNAL_KEY=${SECRET_PREFIX}-internal-key:latest"
-            echo "::notice::Including optional DRTS_INTERNAL_KEY secret in drts-api deploy."
-          else
-            echo "::warning::Optional secret ${SECRET_PREFIX}-internal-key not found; deploying drts-api without DRTS_INTERNAL_KEY."
-          fi
-
-          printf 'api=%s\n' "$secret_args" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy — api
-        run: |
-          IMAGE="${{ env.REGISTRY }}/api:${{ needs.build-push.outputs.image_tag }}"
-          gcloud run deploy drts-api \
-            --region "$REGION" \
-            --image "$IMAGE" \
-            --port 3001 \
-            --ingress internal-and-cloud-load-balancing \
-            --set-cloudsql-instances "$CLOUDSQL" \
-            --service-account "${{ steps.runtime_sa.outputs.email }}" \
-            --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "NODE_ENV=production,API_PORT=3001" \
-            ${{ steps.exposure.outputs.api }} \
-            --min-instances 1 \
-            --max-instances 6 \
-            --project "$PROJECT_ID"
 
       - name: Deploy — platform-admin-web
         run: |
