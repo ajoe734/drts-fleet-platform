@@ -4493,9 +4493,8 @@ export class OwnedMobilityService implements OnModuleInit {
       },
       params.requestId,
     );
-    const blockedByRule = evaluation.matchedRules.some(
-      (rule) => rule.action === "block",
-    );
+    const matchedRules = evaluation.matchedRules ?? [];
+    const blockedByRule = matchedRules.some((rule) => rule.action === "block");
 
     if (evaluation.outcome?.blocked && blockedByRule) {
       return evaluation;
@@ -4630,7 +4629,7 @@ export class OwnedMobilityService implements OnModuleInit {
 
   private captureTenantGovernanceSnapshot() {
     return (
-      this.tenantPartnerService?.createGovernanceMutationSnapshot() ?? null
+      this.tenantPartnerService?.createGovernanceMutationSnapshot?.() ?? null
     );
   }
 
@@ -4640,7 +4639,7 @@ export class OwnedMobilityService implements OnModuleInit {
     > | null,
   ) {
     if (snapshot && this.tenantPartnerService) {
-      this.tenantPartnerService.restoreGovernanceMutationSnapshot(snapshot);
+      this.tenantPartnerService.restoreGovernanceMutationSnapshot?.(snapshot);
     }
   }
 
