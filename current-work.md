@@ -3,11 +3,11 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-19T03:48:51Z
+Last updated: 2026-05-19T08:05:43Z
 
 ## Objective
 
-Phase 1 v2 wave is now scored as workflow-family gate completion: add the five missing business-flow gate rows, their E2E shells, live evidence packs, and the production deploy rail while preserving explicit EXTERNAL-GATED / HOLD release language where live systems are still pending.
+Phase 1 v2 business-flow gate wave: 14 P0 tasks lift the system from feature-complete in repo to business-flow complete with named gates. See docs/03-runbooks/phase1-v2-execution-wave-planning-20260519.md.
 
 ## Current Sprint
 
@@ -38,32 +38,19 @@ Phase 1 v2 wave is now scored as workflow-family gate completion: add the five m
 
 - `Claude`: governance-review, architecture-arbitration, control-plane; next: Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.
 - `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
-- `Codex`: contracts, schema, state-system, acceptance; next: Runbook and WF-PBK-001 row approved; owner closeout to dev still required before done.
+- `Codex`: contracts, schema, state-system, acceptance; next: Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
-- `Codex2`: contracts, schema, state-system, acceptance; next: Anchoring SA/SD v2.0 completion to origin/dev truth; surveying Phase 1 v2 backlog and dependencies.
+- `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Blocked until WF-DRV-MP-001 lands.
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
 
 ## Delivery Layers
 
 ### Primary Project Work
 
-| ID | Phase | Task | Owner | Status | Depends On | 中文說明 |
-|---|---|---|---|---|---|---|
-| `DEV-STATUS-001` | Phase 1 v2 | Phase 1 v2 status truth anchor | Codex2 | in_progress | - | 把 SA/SD v2.0 完成定義錨定到 origin/dev 真實狀態；產 phase1-v2-status-truth doc + 切 sprint。 |
-| `WF-TGV-001` | Phase 1 v2 | Tenant Governance — workflow family gate row | Codex | backlog | `BE-CC-001`, `BE-RULE-001`, `BE-QUOTA-001`, `BE-APR-001` | 把 governance backend + UI 升格為 phase1-workflow-acceptance-release-gates.md 內的 WF-TGV-001 row。 |
-| `WF-DRV-MP-001` | Phase 1 v2 | Driver Multi-Platform — workflow family gate row | Codex2 | backlog | `DRV-MP-001`, `DRV-MP-010` | 把 driver multi-platform 實作升格為 workflow family gate row；live device proof 留給 DRV-DIST-001。 |
-| `WF-PARTNER-001` | Phase 1 v2 | Partner Eligibility / Airport Transfer — workflow family gate row | Codex | backlog | - | 把 partner eligibility 鏈路升格為 workflow family gate row；live issuer 留給 PARTNER-ELIG-LIVE-001。 |
-| `PBK-CUTOVER-001` | Phase 1 v2 | Partner Booking pilot cutover runbook (WF-PBK-001) | Codex | review_approved | `PBK-UI-005` | 依 SD-DP-20260512-006 寫 partner-entry pilot cutover runbook + 新增 WF-PBK-001 row。 |
-| `PROD-RAIL-001` | Phase 1 v2 | Production deploy rail completion (WF-PROD-001) | Codex2 | backlog | - | 把 deploy-prod.yml 從 SKELETON 升級到 production-ready；配置 WIF/Cloud SQL/Secret Manager；新增 WF-PROD-001 row。 |
-| `TST-E2E-005-TGV` | Phase 1 v2 | Tenant Governance E2E shell | Codex | backlog | `WF-TGV-001` | 補 tests/e2e/E2E-005-tenant-governance.sh，覆蓋 governance workflow 家族。 |
-| `TST-E2E-006-DRV-MP` | Phase 1 v2 | Driver Multi-Platform E2E shell | Gemini2 | backlog | `WF-DRV-MP-001` | 補 tests/e2e/E2E-006-driver-multi-platform.sh，覆蓋 driver multi-platform workflow 家族。 |
-| `TST-E2E-007-PRT` | Phase 1 v2 | Partner Eligibility / Airport Transfer E2E shell | Codex | backlog | `WF-PARTNER-001` | 補 tests/e2e/E2E-007-partner-eligibility.sh，覆蓋 partner eligibility workflow 家族。 |
-| `TST-E2E-008-PBK-CUTOVER` | Phase 1 v2 | Partner Booking cutover E2E shell | Codex2 | backlog | `PBK-CUTOVER-001` | 補 tests/e2e/E2E-008-partner-booking-cutover.sh，覆蓋 pilot cutover / rollback drill。 |
-| `TST-E2E-009-PROD-RAIL` | Phase 1 v2 | Production rail dry-run E2E shell | Gemini2 | backlog | `PROD-RAIL-001` | 補 tests/e2e/E2E-009-prod-rail-dry-run.sh，驗 deploy-prod.yml dry-run 與 validate-config。 |
-| `FWD-LIVE-001` | Phase 1 v2 | Forwarder live evidence pack | Codex | backlog | - | 補 forwarder live/partial-mode evidence pack；若外部憑證未齊，保留 EXTERNAL-GATED 並明列 blocker。 |
-| `COM-LIVE-001` | Phase 1 v2 | CTI / recording / filing live evidence pack | Codex | backlog | - | 補 CTI / recording / filing live activation evidence；若 webhook/環境未齊，保留 partial-mode 與 HOLD/EXTERNAL-GATED 語言。 |
-| `FIN-GOV-001` | Phase 1 v2 | Governance-aware billing/reporting evidence pack | Codex | backlog | - | 補 cost-center enriched invoice、quota usage report、approval audit chain 的 live/static evidence pack。 |
+| ID       | Phase | Task | Owner | Status | Depends On | 中文說明 |
+| -------- | ----- | ---- | ----- | ------ | ---------- | -------- |
+| _(none)_ | -     | -    | -     | -      | -          | -        |
 
 ### External / Upstream Integration Work
 
@@ -73,28 +60,14 @@ Phase 1 v2 wave is now scored as workflow-family gate completion: add the five m
 
 ## Task Board (active only)
 
-| ID | Phase | Task | Owner | Status | Depends On |
-|---|---|---|---|---|---|
-| `DEV-STATUS-001` | Phase 1 v2 | Phase 1 v2 status truth anchor | Codex2 | in_progress | - |
-| `WF-TGV-001` | Phase 1 v2 | Tenant Governance — workflow family gate row | Codex | backlog | `BE-CC-001`, `BE-RULE-001`, `BE-QUOTA-001`, `BE-APR-001` |
-| `WF-DRV-MP-001` | Phase 1 v2 | Driver Multi-Platform — workflow family gate row | Codex2 | backlog | `DRV-MP-001`, `DRV-MP-010` |
-| `WF-PARTNER-001` | Phase 1 v2 | Partner Eligibility / Airport Transfer — workflow family gate row | Codex | backlog | - |
-| `PBK-CUTOVER-001` | Phase 1 v2 | Partner Booking pilot cutover runbook (WF-PBK-001) | Codex | review_approved | `PBK-UI-005` |
-| `PROD-RAIL-001` | Phase 1 v2 | Production deploy rail completion (WF-PROD-001) | Codex2 | backlog | - |
-| `TST-E2E-005-TGV` | Phase 1 v2 | Tenant Governance E2E shell | Codex | backlog | `WF-TGV-001` |
-| `TST-E2E-006-DRV-MP` | Phase 1 v2 | Driver Multi-Platform E2E shell | Gemini2 | backlog | `WF-DRV-MP-001` |
-| `TST-E2E-007-PRT` | Phase 1 v2 | Partner Eligibility / Airport Transfer E2E shell | Codex | backlog | `WF-PARTNER-001` |
-| `TST-E2E-008-PBK-CUTOVER` | Phase 1 v2 | Partner Booking cutover E2E shell | Codex2 | backlog | `PBK-CUTOVER-001` |
-| `TST-E2E-009-PROD-RAIL` | Phase 1 v2 | Production rail dry-run E2E shell | Gemini2 | backlog | `PROD-RAIL-001` |
-| `FWD-LIVE-001` | Phase 1 v2 | Forwarder live evidence pack | Codex | backlog | - |
-| `COM-LIVE-001` | Phase 1 v2 | CTI / recording / filing live evidence pack | Codex | backlog | - |
-| `FIN-GOV-001` | Phase 1 v2 | Governance-aware billing/reporting evidence pack | Codex | backlog | - |
+| ID  | Phase | Task | Owner | Status | Depends On |
+| --- | ----- | ---- | ----- | ------ | ---------- |
 
 ## Handoff Queue
 
-| Task | From | To | Message | Status | Created At |
-|---|---|---|---|---|---|
-| `PBK-CUTOVER-001` | Claude | Codex | Runbook and WF-PBK-001 row approved; owner closeout to dev still required before done. | pending | 2026-05-19T03:48:51Z |
+| Task     | From | To  | Message | Status | Created At |
+| -------- | ---- | --- | ------- | ------ | ---------- |
+| _(none)_ | -    | -   | -       | -      | -          |
 
 ## Blockers
 
@@ -125,23 +98,23 @@ Phase 1 v2 wave is now scored as workflow-family gate completion: add the five m
 
 ## Latest Checkpoints
 
-- 2026-05-19T04:20:27Z Orchestrator: PostToolUse: Bash
-- 2026-05-19T04:20:30Z Orchestrator: `PBK-CUTOVER-001` Wake-up queued for supervisor: owned_finalize_dispatch
-- 2026-05-19T04:20:30Z Orchestrator: `FWD-LIVE-001` Wake-up queued for supervisor: review_ready_dispatch
-- 2026-05-19T04:20:31Z Orchestrator: `PBK-CUTOVER-001` Worker started via claude_cli: owned_finalize_dispatch
-- 2026-05-19T04:20:31Z Orchestrator: `FWD-LIVE-001` Worker started via codex: review_ready_dispatch
-- 2026-05-19T04:20:32Z Codex: `TST-E2E-007-PRT` Handoff to Claude2: Implemented E2E-007 partner airport transfer shell flow plus partner actor helper support and matrix/README/runner updates. Verified: bash -n tests/e2e/E2E-007-partner-airport-transfer.sh tests/e2e/lib/helpers.sh tests/e2e/run-e2e.sh; git diff --check; ./tests/e2e/run-e2e.sh --suite 007 --dry-run. Live scenario execution not run because localhost:3001/api/health was unreachable in this workspace.
-- 2026-05-19T04:20:49Z Orchestrator: `TST-E2E-007-PRT` Worker superseded after task responsibility moved to another agent.
-- 2026-05-19T04:20:49Z Orchestrator: `PBK-CUTOVER-001` Worker superseded to prioritize higher-priority review/finalize work.
-- 2026-05-19T04:20:50Z Orchestrator: `TST-E2E-007-PRT` Wake-up queued for supervisor: review_ready_dispatch
-- 2026-05-19T04:20:50Z Orchestrator: `COM-LIVE-001` Wake-up queued for supervisor: owned_ready_dispatch
-- 2026-05-19T04:20:51Z Orchestrator: `TST-E2E-007-PRT` Worker started via claude_cli: review_ready_dispatch
-- 2026-05-19T04:20:51Z Orchestrator: `COM-LIVE-001` Worker started via codex: owned_ready_dispatch
-- 2026-05-19T04:20:56Z Orchestrator: `TST-E2E-007-PRT` Background worker process exited after advancing the task to `review`.
-- 2026-05-19T04:20:56Z Orchestrator: `PBK-CUTOVER-001` Worker exited before the task reached a terminal status. (raw_ref: .orchestrator/evidence/claude2-20260519T042031Z-4caf4014.json)
-- 2026-05-19T04:20:58Z Codex2: `WF-DRV-MP-001` Resumed WF gate-row promotion; validating machine-truth status and evidence anchors before handoff.
-- 2026-05-19T04:21:07Z Codex2: `WF-TGV-001` Review passed against owner commit 02d4ef8 on origin/codex/wf-tgv-001. Revalidated that the release-gates doc diff adds the WF-TGV-001 baseline row, the ORX-GV-001 governance negative-path row, the scenario-inventory note, and matching reference anchors only; origin/codex/wf-tgv-001 still resolves to 02d4ef8; all cited closeout/sidecar/test artifacts in the new rows exist in-tree; and git diff --check passes for docs/03-runbooks/phase1-workflow-acceptance-release-gates.md. This reviewer worktree tracks dev and does not carry the owner doc diff locally, so review was performed read-only against the pushed owner commit. I could not rerun the referenced vitest suite here because this isolated worktree lacks apps/api node_modules; approval is based on commit diff integrity plus artifact/readback verification.
-- 2026-05-19T04:21:16Z Codex: `COM-LIVE-001` Reading collaboration guide, checking branch/task state, and collecting CTI/recording/filing live evidence context.
-- 2026-05-19T04:21:18Z Orchestrator: PreToolUse: Bash
-- 2026-05-19T04:21:19Z Orchestrator: PostToolUse: Bash
-- 2026-05-19T04:21:20Z Codex2: `WF-DRV-MP-001` Resumed WF gate-row promotion; validating machine-truth status and evidence anchors before handoff.
+- 2026-05-19T08:02:50Z Orchestrator: PostToolUse: Bash
+- 2026-05-19T08:03:07Z Orchestrator: PreToolUse: Bash
+- 2026-05-19T08:03:07Z Orchestrator: PostToolUse: Bash
+- 2026-05-19T08:03:22Z Orchestrator: PreToolUse: Bash
+- 2026-05-19T08:03:22Z Orchestrator: PostToolUse: Bash
+- 2026-05-19T08:03:54Z Orchestrator: PreToolUse: Bash
+- 2026-05-19T08:04:06Z Orchestrator: PreToolUse: Bash
+- 2026-05-19T08:04:14Z Orchestrator: PreToolUse: Bash
+- 2026-05-19T08:04:14Z Orchestrator: PostToolUse: Bash
+- 2026-05-19T08:04:18Z Orchestrator: PreToolUse: Bash
+- 2026-05-19T08:04:19Z Orchestrator: PostToolUse: Bash
+- 2026-05-19T08:04:40Z Orchestrator: PreToolUse: Bash
+- 2026-05-19T08:04:56Z Orchestrator: PreToolUse: TodoWrite
+- 2026-05-19T08:04:56Z Orchestrator: PostToolUse: TodoWrite
+- 2026-05-19T08:05:02Z Orchestrator: PreToolUse: Bash
+- 2026-05-19T08:05:02Z Orchestrator: PostToolUse: Bash
+- 2026-05-19T08:05:21Z Orchestrator: PreToolUse: Bash
+- 2026-05-19T08:05:22Z Orchestrator: PostToolUse: Bash
+- 2026-05-19T08:05:43Z Orchestrator: PreToolUse: Bash
+- 2026-05-19T08:05:43Z Claude: `PHASE1-V2-WAVE` Wave merge campaign cleanup: 24 P0 task branches merged into aggregate; ai-status restored from b6768e5 + all 24 wave tasks marked done.
