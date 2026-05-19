@@ -9,6 +9,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@drts/contracts": "workspace:*"
+    "@drts/contracts": "0.1.0"
   }
 }
