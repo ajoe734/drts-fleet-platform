@@ -2,7 +2,7 @@
 
 **Task:** `TGV-UAT-001`  
 **Owner:** `Codex2`  
-**Reviewer:** `Claude2`  
+**Reviewer:** `Codex`  
 **Date:** `2026-05-19`  
 **Source tasks:** `TGV-NEG-001`, `TST-E2E-005-TGV`  
 **Primary automation:** `tests/e2e/E2E-005-tenant-governance.sh`, `tests/integ/tenant-governance-negative.test.ts`
