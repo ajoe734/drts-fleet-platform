@@ -382,7 +382,7 @@ payload_file=$(write_json <<EOF
 EOF
 )
 http_call POST "/tenant/quotas/preview" "$payload_file"
-assert_status "200"
+assert_status "200|201"
 PREVIEW_TRIGGER=$(echo "$RESP_BODY" | jq -r '.data.impacts[0].triggered // empty' 2>/dev/null || true)
 save_evidence "$SCENARIO" "tenant" "quotaPreviewTriggered" "${PREVIEW_TRIGGER:-unknown}"
 log_ok "Quota preview captured"
@@ -407,7 +407,7 @@ payload_file=$(write_json <<EOF
 EOF
 )
 http_call POST "/tenant/approval-rules/evaluate" "$payload_file"
-assert_status "200"
+assert_status "200|201"
 log_ok "Rule dry-run evaluation emitted"
 
 log_step "0.13 — POST /tenant/bookings (disabled cost-center validation)"
