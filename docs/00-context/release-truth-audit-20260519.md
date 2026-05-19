@@ -44,7 +44,6 @@ The release-truth control-plane layer is where the drift appears:
 
 - `ai-status.json` marks `DEV-SYNC-001`, `REL-SYNC-001`, and
   `WF-REL-001-MATRIX` as `done`
-- the same machine truth marks this task `WF-REL-001-AUDIT` as `in_progress`
 - the current `origin/dev` tree does **not** contain the claimed
   `DEV-SYNC-001` audit artifact
 - the current `origin/dev` tree does **not** contain the claimed
@@ -92,11 +91,10 @@ must not be inferred from `dev` merges alone.
 | `DEV-SYNC-001` | `done` | `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` |
 | `REL-SYNC-001` | `done` | `docs/03-runbooks/phase1-release-truth-sync-20260519.md` |
 | `WF-REL-001-MATRIX` | `done` | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` |
-| `WF-REL-001-AUDIT` | `in_progress` | `docs/00-context/release-truth-audit-20260519.md` |
 
-`current-work.md` is consistent with `WF-REL-001-AUDIT` being in progress under
-`Codex2`, which is acceptable because it is a derived human summary. The
-critical contradiction is not there; it is between machine-truth task closeout
+This audit intentionally excludes the lifecycle state of `WF-REL-001-AUDIT`
+itself because that row changes as soon as the document is handed off for
+review. The critical contradiction is between prerequisite task closeout
 records and the actual `origin/dev` tree content.
 
 ### What the repo tree says
@@ -183,9 +181,9 @@ Impact:
 
 ### Finding 3: `current-work.md` is not the issue; artifact landing is
 
-`current-work.md` correctly behaves as a summary of machine truth and does show
-this audit task in progress. The real defect is that machine-truth closeout
-metadata refers to artifacts absent from the checked-in tree.
+`current-work.md` behaves as a summary of machine truth. The real defect is
+that machine-truth closeout metadata for prerequisite release-sync work refers
+to artifacts absent from the checked-in tree.
 
 Impact:
 
