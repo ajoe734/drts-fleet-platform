@@ -77,8 +77,15 @@ external prerequisites are satisfied:
 - Anchor commit: `271b458` — `wip(WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION): anchor planning routing`
 - Evidence clarification commit: `ecc0482` — `docs(WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION): clarify next step and evidence`
 - Machine-truth refresh commit: `556dc59` — `docs(WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION): refresh machine truth routing`
+- Machine-truth evidence commit: `27bb2ed` — `docs(WF-FWD-001-LIVE-SANDBOX-UNBLOCK-PLANNING-DECISION): record machine truth refresh evidence`
 - Push remote/branch: `origin/codex2/wf-fwd-001-live-sandbox-unblock-planning-decision`
 - PR: `#166` — <https://github.com/ajoe734/drts-fleet-platform/pull/166>
+
+Machine-truth closeout status:
+
+- Branch evidence is pushed and synced to `origin`.
+- `ai-status.json` still needs the reviewer `approve` transition before the
+  owner can legally record `done`.
 
 ## Scope cut
 
