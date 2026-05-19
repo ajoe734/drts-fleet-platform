@@ -3,7 +3,7 @@
 > Written by: Codex2 (drts-fleet-platform)
 > Date: 2026-05-19
 > Contract commit: 949a49fb06eb674dd27b0f4bf6db746bd3c6f8aa
-> Contract lock: `.ai-loop/CONTRACT_VERSION.lock`
+> Contract lock: `.ai-loop/contract-lock.json`
 
 ## What's available now
 
@@ -47,6 +47,7 @@ Tenant Governance wave contracts are available in `drts-fleet-platform` and are 
 - Canonical SDK versions for this handoff are `@drts/contracts@0.1.0` and `@drts/api-client@0.1.0`.
 - In this repo, `@drts/api-client` is pinned to `@drts/contracts@0.1.0`.
 - Consumer UI code must not fork schema or define parallel tenant-governance types.
+- `.ai-loop/CONTRACT_VERSION.lock` is a compatibility mirror only; treat `.ai-loop/contract-lock.json` as canonical.
 
 ### Canonical error codes the UI must preserve
 
@@ -58,7 +59,7 @@ Tenant Governance wave contracts are available in `drts-fleet-platform` and are 
 
 ### Contract-lock requirements
 
-- Read `.ai-loop/CONTRACT_VERSION.lock` before build.
+- Read `.ai-loop/contract-lock.json` before build.
 - Reject the build if the lock is expired.
 - Reject the build if the installed `@drts/contracts` or `@drts/api-client` version differs from the pinned lock.
-- Treat this note plus the lock file as authoritative for Tenant Governance wiring; do not infer missing semantics from legacy Supabase behavior.
+- Treat this note plus the JSON lock file as authoritative for Tenant Governance wiring; do not infer missing semantics from legacy Supabase behavior.
