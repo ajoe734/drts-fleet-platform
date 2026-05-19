@@ -3,15 +3,15 @@
 This file is generated from `ai-status.json` and `ai-activity-log.jsonl`.
 Do not treat this file as the machine-readable source of truth.
 
-Last updated: 2026-05-19T01:19:35Z
+Last updated: 2026-05-19T03:48:51Z
 
 ## Objective
 
-Repo/runtime closeout is now synced: protected control-plane auth cutover is closed on staging, tenant cross-repo hardening is merged, and the remaining visible delta is limited to external-gated integrations plus consciously deferred passenger / concierge / live-board scope.
+Phase 1 v2 wave is now scored as workflow-family gate completion: add the five missing business-flow gate rows, their E2E shells, live evidence packs, and the production deploy rail while preserving explicit EXTERNAL-GATED / HOLD release language where live systems are still pending.
 
 ## Current Sprint
 
-- Sprint: `{'name': 'ui-redesign-wave-202605', 'phase': 'UI Redesign', 'wave': 'ui-redesign-202605', 'started_at': '2026-05-10T11:08:04Z', 'objective': 'UI redesign wave: convert design canvas under docs/05-ui/drts-design-canvas/ into shipped UI across management consoles, driver app, and partner-booking, via Wave 0 foundation, Wave 1 token + primitive substrate, Wave 2 reference console (ops-console-web), Wave 3 mirror to platform-admin + tenant console, Wave 4 driver app reskin, Wave 5 partner-booking skeleton.', 'predecessor': {'name': 'master-closeout-wave', 'phase': 'System Closeout', 'wave': 'master-closeout', 'started_at': '2026-04-20T00:25:00Z', 'objective': 'Operational closeout wave: rollout evidence, tenant boundary, product-surface decision, finance/reporting completeness, integration hardening, and final narrative sync.'}}`
+- Sprint: `{'name': 'phase1-v2-business-flow-gates', 'phase': 'Phase 1 v2 — Business Flow Gates', 'wave': 'phase1-v2-business-flow-gates', 'started_at': '2026-05-19T02:33:50Z', 'objective': "Convert remaining repo-local closeouts into workflow-family release gates with E2E coverage, live evidence packs, and a non-skeleton production deploy rail. Wave 'done' = all 14 P0 tasks merged + workflow gate matrix carries WF-TGV-001 / WF-DRV-MP-001 / WF-PARTNER-001 / WF-PBK-001 / WF-PROD-001 + closeout packet written.", 'predecessor': {'name': 'ui-redesign-wave-202605', 'phase': 'UI Redesign', 'wave': 'ui-redesign-202605', 'started_at': '2026-05-10T11:08:04Z', 'objective': 'UI redesign wave: convert design canvas under docs/05-ui/drts-design-canvas/ into shipped UI across management consoles, driver app, and partner-booking, via Wave 0 foundation, Wave 1 token + primitive substrate, Wave 2 reference console (ops-console-web), Wave 3 mirror to platform-admin + tenant console, Wave 4 driver app reskin, Wave 5 partner-booking skeleton.'}}`
 - Canonical files: `AI_COLLABORATION_GUIDE.md`, `ai-status.json`, `phase1_system_analysis_v1.md`, `docs/02-architecture/phase1-operational-sa-gap-supplement-20260429.md`, `phase1_prd_detailed_v1.md`, `phase1_service_contracts_v1.md`, `phase1_migration_plan_v1.md`, `docs/01-decisions/SD-DP-20260422-001-phase1-entry-and-receipt-topology.md`, `docs/01-decisions/SD-DP-20260422-002-identity-cutover-topology.md`, `docs/01-decisions/SD-DP-20260422-003-design-truth-supersession-rule.md`, `docs/01-decisions/SD-DP-20260429-001-plane-separation-auth-matrix.md`, `docs/02-architecture/phase1-operational-system-design-blueprint-20260429.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/README.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/00_source_of_truth_and_glossary.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/01_decision_tables.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/02_acceptance_scenarios_gherkin.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/03_api_examples_and_error_contracts.md`, `phase1_llm_dev_pack_extracted/phase1_llm_dev_pack/05_engineering_conventions_and_ai_dev_playbook.md`, `phase1_db_migration_extracted/README.md`
 - Canonical tiers: `L0 Collaboration`, `L1 Product Truth`, `L1.5 Accepted System Design Decisions`, `L2 Execution Rules`
 - Supervisor operating model: `SUPERVISOR_OPERATING_MODEL.md`
@@ -38,11 +38,11 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 - `Claude`: governance-review, architecture-arbitration, control-plane; next: Review incoming implementation slices and route unresolved semantic conflicts back to discussion mode.
 - `Gemini`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
-- `Codex`: contracts, schema, state-system, acceptance; next: Pick the next contracts, schema, or state-system slice that is unblocked and ready to implement.
+- `Codex`: contracts, schema, state-system, acceptance; next: Runbook and WF-PBK-001 row approved; owner closeout to dev still required before done.
 - `Copilot`: research-ingest, external-search, spec-review, critique; next: Critique active implementation slices for contradictions, testing gaps, and weak assumptions.
-- `Codex2`: contracts, schema, state-system, acceptance; next: Wait for the next execution slice.
+- `Codex2`: contracts, schema, state-system, acceptance; next: Anchoring SA/SD v2.0 completion to origin/dev truth; surveying Phase 1 v2 backlog and dependencies.
 - `Claude2`: integration, api-implementation, adapter-execution, acceptance; next: Pick the next API or integration slice that is unblocked and ready to implement.
-- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Pick the next infra, rollout, or runtime slice that is ready for execution review.
+- `Gemini2`: runtime-packaging, ci-cd, infra, worker-ops; next: Blocked until WF-DRV-MP-001 lands.
 
 ## Delivery Layers
 
@@ -50,7 +50,20 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 | ID | Phase | Task | Owner | Status | Depends On | 中文說明 |
 |---|---|---|---|---|---|---|
-| _(none)_ | - | - | - | - | - | - |
+| `DEV-STATUS-001` | Phase 1 v2 | Phase 1 v2 status truth anchor | Codex2 | in_progress | - | 把 SA/SD v2.0 完成定義錨定到 origin/dev 真實狀態；產 phase1-v2-status-truth doc + 切 sprint。 |
+| `WF-TGV-001` | Phase 1 v2 | Tenant Governance — workflow family gate row | Codex | backlog | `BE-CC-001`, `BE-RULE-001`, `BE-QUOTA-001`, `BE-APR-001` | 把 governance backend + UI 升格為 phase1-workflow-acceptance-release-gates.md 內的 WF-TGV-001 row。 |
+| `WF-DRV-MP-001` | Phase 1 v2 | Driver Multi-Platform — workflow family gate row | Codex2 | backlog | `DRV-MP-001`, `DRV-MP-010` | 把 driver multi-platform 實作升格為 workflow family gate row；live device proof 留給 DRV-DIST-001。 |
+| `WF-PARTNER-001` | Phase 1 v2 | Partner Eligibility / Airport Transfer — workflow family gate row | Codex | backlog | - | 把 partner eligibility 鏈路升格為 workflow family gate row；live issuer 留給 PARTNER-ELIG-LIVE-001。 |
+| `PBK-CUTOVER-001` | Phase 1 v2 | Partner Booking pilot cutover runbook (WF-PBK-001) | Codex | review_approved | `PBK-UI-005` | 依 SD-DP-20260512-006 寫 partner-entry pilot cutover runbook + 新增 WF-PBK-001 row。 |
+| `PROD-RAIL-001` | Phase 1 v2 | Production deploy rail completion (WF-PROD-001) | Codex2 | backlog | - | 把 deploy-prod.yml 從 SKELETON 升級到 production-ready；配置 WIF/Cloud SQL/Secret Manager；新增 WF-PROD-001 row。 |
+| `TST-E2E-005-TGV` | Phase 1 v2 | Tenant Governance E2E shell | Codex | backlog | `WF-TGV-001` | 補 tests/e2e/E2E-005-tenant-governance.sh，覆蓋 governance workflow 家族。 |
+| `TST-E2E-006-DRV-MP` | Phase 1 v2 | Driver Multi-Platform E2E shell | Gemini2 | backlog | `WF-DRV-MP-001` | 補 tests/e2e/E2E-006-driver-multi-platform.sh，覆蓋 driver multi-platform workflow 家族。 |
+| `TST-E2E-007-PRT` | Phase 1 v2 | Partner Eligibility / Airport Transfer E2E shell | Codex | backlog | `WF-PARTNER-001` | 補 tests/e2e/E2E-007-partner-eligibility.sh，覆蓋 partner eligibility workflow 家族。 |
+| `TST-E2E-008-PBK-CUTOVER` | Phase 1 v2 | Partner Booking cutover E2E shell | Codex2 | backlog | `PBK-CUTOVER-001` | 補 tests/e2e/E2E-008-partner-booking-cutover.sh，覆蓋 pilot cutover / rollback drill。 |
+| `TST-E2E-009-PROD-RAIL` | Phase 1 v2 | Production rail dry-run E2E shell | Gemini2 | backlog | `PROD-RAIL-001` | 補 tests/e2e/E2E-009-prod-rail-dry-run.sh，驗 deploy-prod.yml dry-run 與 validate-config。 |
+| `FWD-LIVE-001` | Phase 1 v2 | Forwarder live evidence pack | Codex | backlog | - | 補 forwarder live/partial-mode evidence pack；若外部憑證未齊，保留 EXTERNAL-GATED 並明列 blocker。 |
+| `COM-LIVE-001` | Phase 1 v2 | CTI / recording / filing live evidence pack | Codex | backlog | - | 補 CTI / recording / filing live activation evidence；若 webhook/環境未齊，保留 partial-mode 與 HOLD/EXTERNAL-GATED 語言。 |
+| `FIN-GOV-001` | Phase 1 v2 | Governance-aware billing/reporting evidence pack | Codex | backlog | - | 補 cost-center enriched invoice、quota usage report、approval audit chain 的 live/static evidence pack。 |
 
 ### External / Upstream Integration Work
 
@@ -62,12 +75,26 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 
 | ID | Phase | Task | Owner | Status | Depends On |
 |---|---|---|---|---|---|
+| `DEV-STATUS-001` | Phase 1 v2 | Phase 1 v2 status truth anchor | Codex2 | in_progress | - |
+| `WF-TGV-001` | Phase 1 v2 | Tenant Governance — workflow family gate row | Codex | backlog | `BE-CC-001`, `BE-RULE-001`, `BE-QUOTA-001`, `BE-APR-001` |
+| `WF-DRV-MP-001` | Phase 1 v2 | Driver Multi-Platform — workflow family gate row | Codex2 | backlog | `DRV-MP-001`, `DRV-MP-010` |
+| `WF-PARTNER-001` | Phase 1 v2 | Partner Eligibility / Airport Transfer — workflow family gate row | Codex | backlog | - |
+| `PBK-CUTOVER-001` | Phase 1 v2 | Partner Booking pilot cutover runbook (WF-PBK-001) | Codex | review_approved | `PBK-UI-005` |
+| `PROD-RAIL-001` | Phase 1 v2 | Production deploy rail completion (WF-PROD-001) | Codex2 | backlog | - |
+| `TST-E2E-005-TGV` | Phase 1 v2 | Tenant Governance E2E shell | Codex | backlog | `WF-TGV-001` |
+| `TST-E2E-006-DRV-MP` | Phase 1 v2 | Driver Multi-Platform E2E shell | Gemini2 | backlog | `WF-DRV-MP-001` |
+| `TST-E2E-007-PRT` | Phase 1 v2 | Partner Eligibility / Airport Transfer E2E shell | Codex | backlog | `WF-PARTNER-001` |
+| `TST-E2E-008-PBK-CUTOVER` | Phase 1 v2 | Partner Booking cutover E2E shell | Codex2 | backlog | `PBK-CUTOVER-001` |
+| `TST-E2E-009-PROD-RAIL` | Phase 1 v2 | Production rail dry-run E2E shell | Gemini2 | backlog | `PROD-RAIL-001` |
+| `FWD-LIVE-001` | Phase 1 v2 | Forwarder live evidence pack | Codex | backlog | - |
+| `COM-LIVE-001` | Phase 1 v2 | CTI / recording / filing live evidence pack | Codex | backlog | - |
+| `FIN-GOV-001` | Phase 1 v2 | Governance-aware billing/reporting evidence pack | Codex | backlog | - |
 
 ## Handoff Queue
 
 | Task | From | To | Message | Status | Created At |
 |---|---|---|---|---|---|
-| _(none)_ | - | - | - | - | - |
+| `PBK-CUTOVER-001` | Claude | Codex | Runbook and WF-PBK-001 row approved; owner closeout to dev still required before done. | pending | 2026-05-19T03:48:51Z |
 
 ## Blockers
 
