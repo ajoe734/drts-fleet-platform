@@ -2,10 +2,10 @@
 
 **Task:** `PRT-UAT-001`
 **Owner:** `Codex2`
-**Reviewer:** `Codex`
+**Reviewer:** `Claude2`
 **Date:** `2026-05-19`
 **Primary evidence:** `TST-E2E-007-PRT`, `docs/03-runbooks/partner-eligibility-manual-review-runbook.md`
-**Workflow family:** `WF-PRT-001`
+**Workflow family:** `WF-PARTNER-001`
 **Artifact status:** `review-ready`
 **Overall read:** `PASS (static evidence)` with live issuer proof still `EXTERNAL-GATED`
 
@@ -24,11 +24,15 @@ retry case.
 
 The correct gate read is therefore:
 
-- `WF-PRT-001` is `PASS (static evidence)`.
+- `WF-PARTNER-001` is `PASS (static evidence)`.
 - Repo-local evidence names both the positive path and the operator-controlled
   negative path.
 - Real issuer sandbox/live proof remains `EXTERNAL-GATED` under `EXT-001`; this
   document does not claim live bank/issuer activation.
+
+Per `docs/00-context/phase1-v3-resolution-20260519.md`, the v3 canonical
+workflow-family ID is `WF-PARTNER-001`. Older repo artifacts may still show the
+superseded `WF-PRT-001` label until the companion matrix rename lands.
 
 ## 2. Evidence Baseline
 
@@ -38,7 +42,7 @@ The correct gate read is therefore:
 | UAT checklist anchors | `docs/04-uat/phase1-uat-checklist.md` (`TP-003`, `TP-030` to `TP-032`) | `STATIC EVIDENCE` | Names the booking happy path plus bootstrap and inactive-entry negative gates. |
 | Manual-review operator lane | `docs/03-runbooks/partner-eligibility-manual-review-runbook.md` | `STATIC EVIDENCE` | Defines `manual_review` and `ineligible` handling; explicitly forbids releasing benefit trips on unresolved reviews. |
 | Contract and persistence model | `docs/02-architecture/phase1-issuer-eligibility-integration-contract-20260429.md` | `STATIC EVIDENCE` | Names contract snapshot, retry/fallback behavior, sensitive-data rules, and persisted verification fields. |
-| Workflow-family release language | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` (`WF-PRT-001`) | `STATIC EVIDENCE` | Binds this family to `PASS (static evidence)` and forbids overclaiming live issuer closure. |
+| Workflow-family release language | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` (`WF-PRT-001`, pending rename to `WF-PARTNER-001` per v3 resolution) | `STATIC EVIDENCE` | Binds this family to `PASS (static evidence)` and forbids overclaiming live issuer closure. |
 | Live issuer activation gate | `support/sidecars/EXT-001/EXT-001-EXTERNAL-GATE.md` | `EXTERNAL-GATED` | Missing issuer contract authority, credentials, approved fixtures, timeout confirmation, business sign-off, and security approval. |
 
 ## 3. Scenario Matrix
@@ -133,7 +137,7 @@ would require the external inputs tracked by `EXT-001`.
 partner eligibility / airport transfer flow. The release-language outcome
 remains:
 
-- `WF-PRT-001`: `PASS (static evidence)`
+- `WF-PARTNER-001`: `PASS (static evidence)`
 - Live issuer activation: `EXTERNAL-GATED`
 
 That wording must remain explicit in any downstream wave closeout or release
