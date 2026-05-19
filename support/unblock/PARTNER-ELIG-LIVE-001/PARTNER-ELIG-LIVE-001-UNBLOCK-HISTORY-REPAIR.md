@@ -168,6 +168,26 @@ Canonical next step as of `2026-05-19T19:16:57Z`:
 No further branch repair or force-push is required for the parent to stay on
 the correct unblock path.
 
+## Review approval and closeout evidence
+
+This follow-up closeout note is documentary only. It does not change the
+diagnosis, contamination chain, or external-only next step that `Codex2`
+already approved on `origin/codex/partner-elig-live-001-unblock-history-repair`
+at `6917284`.
+
+- `2026-05-19T19:42:23Z`: `Codex2` marked
+  `PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR` as `review_approved`
+- approved content commit:
+  - `6917284`
+  - subject:
+    `PARTNER-ELIG-LIVE-001-UNBLOCK-HISTORY-REPAIR: document non-force repair path`
+- reviewer confirmation recorded:
+  - this note exists on `6917284`
+  - cited stale-path and additive repair commits `052de19`, `61b7960`,
+    `bea9ffe`, `8d5c47c`, `2628fc7`, and `e4dcbb1` all verify
+  - `git diff --check 6917284^ 6917284` is clean
+  - no force-push is required for the repair chain
+
 ## Evidence checked
 
 - canonical machine truth:
