@@ -102,7 +102,7 @@ Repo/runtime closeout is now synced: protected control-plane auth cutover is clo
 | `DRV-UI-RD-008`                    | c6c7373acbde8872422110631094f19d984d2d51 | Task ID: DRV-UI-RD-008 Reskin Settings                                     | Codex2    | Codex    | 2026-05-12T19:44:41Z |
 | `PBK-UI-001`                       | 44e8d530d8e82a3758c5ba63b93bed8f27e79ba7 | feat(PBK-UI-001): bootstrap apps/partner-booking-web (white-label Next.js) | Claude2   | Codex2   | 2026-05-10T14:47:14Z |
 | `PBK-UI-002`                       | d7046eb                                  | PBK-UI-002 Partner token brand chrome                                      | Codex2    | Codex    | 2026-05-10T17:04:37Z |
-| `PBK-UI-003`                       | f601ff5ec7769a8fee8c39341b7e04ebe1a4453d | PBK-UI-003: stabilize partner funnel acceptance                            | Codex     | Gemini2  | 2026-05-19T00:30:42Z |
+| `PBK-UI-003`                       | 7332a173a3474266a8a74065e9fc43acf0cb0a16 | PBK-UI-003: manual closeout (#151)                                         | Codex     | Gemini2  | 2026-05-19T00:30:42Z |
 | `PBK-UI-004`                       | a72748815b6a49a378c036b9a3c6025eb42e8289 | PBK-UI-004: Authority-safe negative paths for partner-booking-web (#142)   | Codex2    | Codex    | 2026-05-18T13:27:54Z |
 | `TOK-UI-001-SIDECAR-ACCEPTANCE`    | -                                        | no-commit closeout                                                         | Codex     | Gemini2  | 2026-05-18T13:27:01Z |
 | `ADM-UI-RD-002-SIDECAR-REVIEW`     | -                                        | no-commit closeout                                                         | Claude    | Codex2   | 2026-05-10T21:12:31Z |

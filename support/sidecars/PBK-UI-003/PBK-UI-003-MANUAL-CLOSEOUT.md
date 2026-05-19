@@ -10,7 +10,8 @@ worker lanes stopped dispatching safely.
 - Owner lane at takeover: `Codex`
 - Reviewer of record: `Gemini2`
 - Implementation commit: `f601ff5ec7769a8fee8c39341b7e04ebe1a4453d`
-- Remote branch: `origin/codex/pbk-ui-003-manual-closeout`
+- Dev merge commit: `7332a173a3474266a8a74065e9fc43acf0cb0a16`
+- Remote branch: `origin/dev`
 
 ## What Was Verified
 
