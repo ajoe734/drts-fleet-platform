@@ -179,3 +179,9 @@ Most of v3's "gate uplift" goals depend on environment-external steps (real GCP 
 | 4   | The 17 design docs               | **Option C: hybrid — 5 net-new docs + 12 thin "see also" stubs**                        |
 
 If you approve these recommendations as-is, the dispatch list in §5 of the planning runbook is ready to fire. If you prefer different choices, the planning runbook's task list needs to be re-shaped before dispatch.
+
+---
+
+## 7. Final resolution (2026-05-19, APPROVED)
+
+**User approved `A / A / B / C` on 2026-05-19.** Authoritative record + 12 stub-to-canonical mappings: [`phase1-v3-resolution-20260519.md`](phase1-v3-resolution-20260519.md). The recommended defaults this wave was running on are now formally adopted. No further open questions; this document is closed for revision.
