@@ -20,7 +20,8 @@ This document defines the cross-surface E2E scenario matrix for Phase 1. It capt
 5. How the scaffold relates to the existing smoke tests and UAT scenarios.
 
 The E2E scaffold is in `tests/e2e/`. The scenarios operationalize the cross-surface flows
-defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)`.
+defined in `docs/04-uat/phase1-uat-scenarios.md §5 (E2E-001 through E2E-004)` plus the
+partner cutover authority flow added by `E2E-008`.
 
 > **Relationship to smoke tests:** `tests/smoke/` verifies individual API surfaces in isolation.
 > `tests/e2e/` chains surfaces together in a single stateful run, tracking ID continuity across
@@ -129,53 +130,70 @@ bookingId (tenant) ──► dispatchJobId (ops) ──► taskId (driver) ─�
 #### Surface Chain
 
 ```
-Driver App (visibility) ──► Driver App (accept) ──► Ops Console (no-owned-assignment check)
+Ops Console (sandbox mirror) ──► Driver App (visibility + accept) ──► Ops Console (status sync + cancel) ──► Finance/Ops (settlement row + no-owned-assignment)
 ```
 
 #### Leg Breakdown
 
-| Leg | Surface     | Actor            | API Route                               | Assertion                                       |
-| --- | ----------- | ---------------- | --------------------------------------- | ----------------------------------------------- |
-| 1   | Driver App  | `driver_user`    | `GET /api/driver/tasks`                 | Find task with `routeLocked=true`               |
-| 2   | Driver App  | `driver_user`    | `GET /api/driver/tasks/:taskId`         | Verify `routeLocked`, `sourcePlatform`          |
-| 3   | Driver App  | `driver_user`    | `POST /api/driver/tasks/:taskId/accept` | Accept succeeds                                 |
-| 4   | Ops Console | `platform_admin` | `GET /api/dispatch/tasks`               | No owned dispatch_assignment for forwarded task |
+| Leg | Surface       | Actor            | API Route                                          | Assertion                                                            |
+| --- | ------------- | ---------------- | -------------------------------------------------- | -------------------------------------------------------------------- |
+| 1   | Ops Console   | `platform_admin` | `POST /api/forwarder/orders/inbound`               | Create deterministic `forwarder_sandbox` mirror order                |
+| 1   | Ops Console   | `platform_admin` | `POST /api/forwarder/orders/:orderId/broadcast`    | Mirror is broadcast to seeded local driver                           |
+| 1   | Ops Console   | `platform_admin` | `GET /api/forwarder/orders`                        | Mirror row visible with `status=broadcasted`                         |
+| 2   | Driver App    | `driver_user`    | `GET /api/driver/task-views`                       | Sandbox forwarded task visible to the seeded driver                  |
+| 2   | Driver App    | `driver_user`    | `GET /api/driver/task-views/:taskId`               | Verify `routeLocked`, `sourcePlatform`, and action state             |
+| 3   | Driver App    | `driver_user`    | `POST /api/driver/forwarded-orders/:taskId/accept` | Accept relay returns `accept_pending`                                |
+| 3   | Ops Console   | `platform_admin` | `POST /api/forwarder/orders/:orderId/sync-status`  | Sync to `confirmed_by_platform`, then `completed`                    |
+| 3   | Driver App    | `driver_user`    | `GET /api/driver/task-views/:taskId`               | Driver view reflects `confirmed_by_platform` then `completed_synced` |
+| 4   | Ops Console   | `platform_admin` | `POST /api/forwarder/orders/:orderId/sync-status`  | Second sandbox order syncs to `cancelled_by_platform`                |
+| 4   | Driver App    | `driver_user`    | `GET /api/driver/task-views/:taskId`               | Driver view reflects cancelled mirror state                          |
+| 5   | Finance / Ops | `platform_admin` | `GET /api/settlement/matrix`                       | `forwarded_shadow` row remains `shadow_only`                         |
+| 5   | Ops Console   | `platform_admin` | `GET /api/dispatch/tasks`                          | No owned dispatch_assignment for either sandbox mirror               |
 
 #### Pass Criteria
 
-1. `routeLocked=true` on the forwarded task.
-2. `sourcePlatform` present and not null.
-3. Accept call succeeds.
-4. No owned `dispatch_assignment` with the forwarded task's ID in ops dispatch queue.
-5. **Graceful skip** when no forwarded task seed data is present.
+1. Sandbox inbound order yields a non-empty `mirrorOrderId` and becomes `broadcasted`.
+2. Driver sees the sandbox forwarded task with `routeLocked=true` and `sourcePlatform=forwarder_sandbox`.
+3. Accept relay succeeds with `outcome=accept_pending`.
+4. Status sync advances the primary mirror to `confirmed_by_platform` and then `completed_synced`, both reflected in driver task views.
+5. A second sandbox mirror can be accepted and later reflected as `cancelled_by_platform`.
+6. Settlement matrix exposes the canonical `forwarded_shadow` row with `localLedgerMode=shadow_only`.
+7. No owned `dispatch_assignment` exists for either sandbox mirror.
 
 #### Notes
 
-This scenario is environment-dependent: it requires a seeded forwarded task or a live external
-platform adapter. In dry-run / staging-without-adapters it will warn and exit 0 (skip), not fail.
-Treat this as `EXTERNAL-GATED` until that seed or adapter evidence is attached.
+This scenario now uses the `forwarder_sandbox` provider from `FWD-SBX-001`.
+It is deterministic and executable without partner credentials, but it remains
+**sandbox evidence only**. Do not restate it as live Grab Taiwan or other
+partner-adapter proof.
 
 ---
 
-### 4.3 E2E-003 — Phone Booking to Compliance Export _(manual only in scaffold)_
+### 4.3 E2E-003 — Phone Recording Filing _(sandbox-proven automation)_
 
 **UAT cross-ref:** `docs/04-uat/phase1-uat-scenarios.md §5 E2E-003`
 
-This scenario requires a live CTI session (`call_id`) and a recording callback webhook. It is
-**not automated in the scaffold** because both dependencies are environment-gated (external CTI
-environment or stub). It is covered by the WE-004 smoke harness guidance and the UAT checklist
-pending items (`OC-021`, `OC-022`, `OC-024`).
-Treat this as `DEFERRED` until CTI callback plus filing / recording export evidence is attached.
-The exact activation evidence is tracked in
-`support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md` as
-`EXT-004-BLK-001` to `EXT-004-BLK-008`.
+This scenario is now automated by
+`tests/e2e/E2E-003-phone-recording-filing.sh` against the repo-local sandbox
+authority. It proves the end-to-end chain for call session creation, phone
+order linkage, `recording_pending` to `ready` transition, dispatch recording
+index export, filing package generation, retention-policy lookup, and audited
+signed-download issuance.
 
-**Manual steps** (reference only):
+This is still **not** a claim that live CTI/provider media, staging scheduler
+activation, or external retention execution are closed. Those activation gates
+remain tracked in `support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md`
+as `EXT-004-BLK-001` to `EXT-004-BLK-008`.
 
-1. Ops agent creates phone booking via `POST /api/call-center/orders` with `call_id`.
-2. Recording callback delivers `recording_id` via webhook.
-3. Driver completes trip with proof.
-4. Export includes `call_id` + `recording_id` row.
+**Automated steps**:
+
+1. Ops agent opens `POST /api/callcenter/sessions`, captures `callId`.
+2. Ops agent creates `POST /api/call-center/orders` from that call, order stays `recording_pending`.
+3. Recording callback binds `recording_id` via `POST /api/callcenter/sessions/:callId/recording-callback`.
+4. Order and session both clear `recording_pending` and move to recording-bound / ready state.
+5. `POST /api/reports/jobs` exports `dispatch_recording_index`; row includes masked call/recording refs.
+6. `POST /api/filing-packages/generate` yields immutable manifest plus signed ZIP/PDF downloads.
+7. `GET /api/audit/evidence-policies/*` and `GET /api/audit` prove retention metadata and audited issuance.
 
 ---
 
@@ -223,25 +241,85 @@ newTenantId (platform_admin) ──► bookingId2 (tenant_newco) ──► [cros
 
 ---
 
+### 4.5 E2E-005 — Tenant Governance Negative-Path Pack
+
+**Script:** `tests/e2e/E2E-005-tenant-governance.sh`  
+**Companion integration suite:** `tests/integ/tenant-governance-negative.test.ts`
+
+This scenario packs the Phase 1 tenant-governance negative cases into one
+live/API harness, while the integration companion provides deterministic
+time-control and in-memory rollback assertions that cannot be forced safely on
+shared staging.
+
+#### Surface Chain
+
+```
+Tenant Console (setup + booking/update/approval) ─► Platform Admin / Ops (dispatch denial + governance summary) ─► Audit
+```
+
+#### Negative Scenario Matrix
+
+| Case | Negative path                             | Primary route(s)                                                                                     | Live assertion                                                                 | Audit evidence                                        |
+| ---- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| A    | unknown cost center                       | `POST /api/tenant/bookings`                                                                          | `400 BOOKING_COST_CENTER_UNKNOWN`                                              | `booking.cost_center.validation_rejected`             |
+| B    | disabled cost center                      | `POST /api/tenant/cost-centers/disable`, `POST /api/tenant/bookings`                                 | `400 BOOKING_COST_CENTER_DISABLED`                                             | `booking.cost_center.validation_rejected`             |
+| C    | cross-tenant cost center                  | `POST /api/platform-admin/tenants`, `POST /api/tenant/cost-centers`, `POST /api/tenant/bookings`     | caller tenant sees `400 BOOKING_COST_CENTER_UNKNOWN` for another tenant's code | `booking.cost_center.validation_rejected`             |
+| D    | quota_insufficient                        | `POST /api/tenant/quotas/policies`, `POST /api/tenant/bookings`                                      | `409 QUOTA_INSUFFICIENT_AT_COMMIT`, no booking success response                | `tenant.quota_reservation.blocked`                    |
+| E    | rule block                                | `POST /api/tenant/approval-rules`, `POST /api/tenant/bookings`, `POST /api/orders/:orderId/dispatch` | booking read-back shows `approvalState=blocked`; dispatch denied               | `booking.approval_state.changed`                      |
+| F    | no approver rollback                      | `POST /api/tenant/approval-rules`, `POST /api/tenant/bookings`, `GET /api/tenant/quotas/ledger`      | `409 APPROVAL_NO_RESOLVABLE_APPROVERS`; ledger count unchanged                 | `booking.approval_rules.evaluated`                    |
+| G    | governance-sensitive update re-evaluation | `PUT /api/tenant/bookings/:bookingId`                                                                | approval request ID rotates after cost-center update                           | `booking.approval_request.cancelled_by_re_evaluation` |
+| H    | notes-only no re-evaluation               | `PUT /api/tenant/bookings/:bookingId`                                                                | approval request ID unchanged after notes-only update                          | request continuity captured in evidence log           |
+| I    | rejected booking does not dispatch        | `POST /api/tenant/approval-requests/:id/reject`, `POST /api/orders/:orderId/dispatch`                | `409 BOOKING_APPROVAL_PENDING` after rejection                                 | `booking.approval_request.rejected`                   |
+| J    | SLA escalation visible                    | `POST /api/tenant/approval-requests/:id/escalate`, `GET /api/admin/tenant-governance/summary`        | escalated request remains visible in governance summary pending counts         | `booking.approval_request.timeout_escalated`          |
+
+#### Pass Criteria
+
+1. Cases A through J either pass live or explicitly record a bounded environmental skip reason in the evidence log.
+2. Every failing API path preserves a machine-readable audit trail; the script records the matched `auditId` in `E2E_EVIDENCE_FILE`.
+3. The no-approver case must not increase quota-ledger count for its isolated cost center.
+4. Governance-sensitive field changes rotate approval requests; notes-only changes do not.
+5. A rejected booking or a rule-blocked booking cannot be dispatched.
+6. Manual escalation remains visible on the governance surface even without a time-travelled 48h SLA breach.
+
+#### Notes
+
+- The companion integration suite is authoritative for the deterministic
+  48-hour SLA-age alert (`pending_approval_over_48h`) because live E2E cannot
+  safely time-travel shared environments.
+- `E2E-005` writes temporary JSON payloads at runtime instead of adding new
+  fixture files to `tests/e2e/fixtures/`.
+
+#### Verification Snapshot
+
+- `pnpm --filter @drts/api test:tenant-governance-negative`
+- `bash -n tests/e2e/E2E-005-tenant-governance.sh`
+- `bash tests/e2e/run-e2e.sh --suite 005 --dry-run`
+
+---
+
 ## 5. Fixture Inventory
 
-| Fixture File                     | Used By                          | Description                                                       |
-| -------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
-| `e2e-booking-enterprise.json`    | E2E-001, E2E-004                 | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
-| `e2e-booking-airport.json`       | (reserved for E2E-003 expansion) | `credit_card_airport_transfer` booking                            |
-| `e2e-dispatch-assign.json`       | E2E-001                          | Dispatch assign body with `__*__` placeholders                    |
-| `e2e-driver-accept.json`         | E2E-001, E2E-002                 | Driver task accept with `__ACCEPTED_AT__`                         |
-| `e2e-driver-depart.json`         | E2E-001                          | Driver depart pickup with `__DEPARTED_AT__`                       |
-| `e2e-driver-arrived-pickup.json` | E2E-001                          | Driver arrived at pickup with `__ARRIVED_AT__`                    |
-| `e2e-driver-start.json`          | E2E-001                          | Driver trip start with `__STARTED_AT__`                           |
-| `e2e-driver-complete.json`       | E2E-001                          | Driver task complete with signoff                                 |
-| `e2e-tenant-create.json`         | E2E-004                          | Platform-admin tenant create with `__TENANT_CODE__`               |
-| `e2e-phone-booking.json`         | Reserved (E2E-003 manual flow)   | Phone booking payload stub for future CTI-backed automation       |
-| `e2e-report-compliance.json`     | Reserved (E2E-003 manual flow)   | Compliance export payload stub for future report validation       |
-| `e2e-tenant-module-enable.json`  | Reserved (future expansion)      | Tenant module-enable payload stub for future staged cutovers      |
+| Fixture File                     | Used By                             | Description                                                       |
+| -------------------------------- | ----------------------------------- | ----------------------------------------------------------------- |
+| `e2e-booking-enterprise.json`    | E2E-001, E2E-004                    | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
+| `e2e-booking-airport.json`       | (reserved for future E2E expansion) | `credit_card_airport_transfer` booking                            |
+| `e2e-dispatch-assign.json`       | E2E-001                             | Dispatch assign body with `__*__` placeholders                    |
+| `e2e-driver-accept.json`         | E2E-001, E2E-002                    | Driver task accept with `__ACCEPTED_AT__`                         |
+| `e2e-driver-depart.json`         | E2E-001                             | Driver depart pickup with `__DEPARTED_AT__`                       |
+| `e2e-driver-arrived-pickup.json` | E2E-001                             | Driver arrived at pickup with `__ARRIVED_AT__`                    |
+| `e2e-driver-start.json`          | E2E-001                             | Driver trip start with `__STARTED_AT__`                           |
+| `e2e-driver-complete.json`       | E2E-001                             | Driver task complete with signoff                                 |
+| `e2e-tenant-create.json`         | E2E-004                             | Platform-admin tenant create with `__TENANT_CODE__`               |
+| `e2e-phone-booking.json`         | E2E-003                             | Phone booking payload for call-center order creation              |
+| `e2e-report-compliance.json`     | E2E-003                             | Dispatch recording index report-job payload                       |
+| `e2e-tenant-module-enable.json`  | Reserved (future expansion)         | Tenant module-enable payload stub for future staged cutovers      |
 
 All `__PLACEHOLDER__` values are replaced at runtime by the scenario scripts before the fixture
 is passed to curl.
+
+`E2E-002` now builds its `forwarder_sandbox` inbound / broadcast / accept /
+sync payloads as deterministic runtime JSON instead of relying on static fixture
+files, so the mirror order IDs remain unique per run.
 
 ---
 
@@ -259,7 +337,7 @@ export E2E_API_URL=https://api-staging.drts.internal   # bare origin, no /api su
 ./tests/e2e/run-e2e.sh --suite 001
 
 # Run multiple scenarios
-./tests/e2e/run-e2e.sh --suite 001,004
+./tests/e2e/run-e2e.sh --suite 001,004,008
 
 # Dry-run: list scenarios without executing
 ./tests/e2e/run-e2e.sh --dry-run
@@ -278,9 +356,11 @@ calls `switch_actor TYPE ID [TENANT_ID]` to change the active actor between surf
 
 - **E2E-001 legs 2–4:** skipped (exit 0 with warning) when staging DB has no open dispatch jobs.
   This is expected when testing against a fresh staging environment with no booking seed propagated.
-- **E2E-002:** skipped (exit 0 with warning) when no forwarded task is present in driver task list.
+- **E2E-002:** deterministic via `forwarder_sandbox`; not a live partner-adapter claim.
 - **E2E-004:** skipped beyond leg 1 (exit 0 with warning) when `POST /api/platform-admin/tenants`
   does not return a `tenantId` in its response.
+- **E2E-008:** skipped (exit 0 with warning) when `PARTNER_INGRESS_KEY_BANK_DEMO_ALPHA_AIRPORT`
+  is not configured for the seeded partner entry.
 
 ---
 
@@ -294,11 +374,12 @@ and the evidence log must be committed alongside the FBP-014B evidence pack.
 
 Minimum evidence items required for each scenario:
 
-| Scenario | Required Evidence Items                                                     |
-| -------- | --------------------------------------------------------------------------- |
-| E2E-001  | `bookingId`, `dispatchJobId`, `taskId`, `invoiceId`, `auditEntryCount`      |
-| E2E-002  | `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `taskStatusAfterAccept` |
-| E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`    |
+| Scenario | Required Evidence Items                                                                                                                                              |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| E2E-001  | `bookingId`, `dispatchJobId`, `taskId`, `invoiceId`, `auditEntryCount`                                                                                               |
+| E2E-002  | `primaryMirrorOrderId`, `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `primaryDriverCompletedStatus`, `secondaryDriverCancelledStatus`, `settlementLedgerMode` |
+| E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`                                                                                             |
+| E2E-008  | `inactiveBootstrapCode`, `eligibilityVerificationId`, `bookingId`, `receiptOwner`, `invoiceId`                                                                       |
 
 ---
 
@@ -321,7 +402,7 @@ Minimum evidence items required for each scenario:
 
 - [x] **AC-1:** `tests/e2e/lib/helpers.sh` exists with `switch_actor`, `chain_set/get`, `assert_chain`, `save_evidence`, shared `http_call`, and canonical command headers on write calls.
 - [x] **AC-2:** `tests/e2e/E2E-001-enterprise-dispatch.sh` exercises all 4 surface legs (tenant booking, ops dispatch assign, driver lifecycle, billing+audit) and captures the full ID continuity chain.
-- [x] **AC-3:** `tests/e2e/E2E-002-forwarded-order.sh` verifies `routeLocked` metadata and absence of owned dispatch_assignment, with graceful skip when no forwarded task is seeded.
+- [x] **AC-3:** `tests/e2e/E2E-002-forwarded-order.sh` verifies sandbox mirror creation, driver visibility, accept/status sync, cancel propagation, forwarded settlement row, and absence of owned dispatch_assignment.
 - [x] **AC-4:** `tests/e2e/E2E-004-tenant-attribution.sh` verifies correct `tenantId` attribution and **hard-fails on cross-tenant leak**.
 - [x] **AC-5:** `tests/e2e/run-e2e.sh` runs all scenarios, emits pass/fail summary, and prints the evidence log.
 - [x] **AC-6:** Fixtures cover all automated scenario legs plus reserved manual-expansion payloads under `tests/e2e/fixtures/`.
@@ -330,7 +411,7 @@ Minimum evidence items required for each scenario:
 
 ### Verification Snapshot
 
-- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/run-e2e.sh`
+- `bash -n tests/e2e/lib/helpers.sh tests/e2e/E2E-001-enterprise-dispatch.sh tests/e2e/E2E-002-forwarded-order.sh tests/e2e/E2E-004-tenant-attribution.sh tests/e2e/E2E-006-driver-multi-platform.sh tests/e2e/run-e2e.sh`
 - `./tests/e2e/run-e2e.sh --dry-run`
 
 ---

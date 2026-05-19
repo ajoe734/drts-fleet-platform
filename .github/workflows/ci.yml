@@ -13,7 +13,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - main
-      - 'dev'
+      - "dev"
   push:
     branches: [main]
   workflow_dispatch: {}
@@ -64,6 +64,14 @@ jobs:
         if: steps.ctx.outputs.skip == 'true'
         run: echo "Commit trailers gate bypassed for auto-publish PR. (Trailers were enforced when the source commits entered dev.)"
 
+  bff-only-imports:
+    name: BFF-only imports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce BFF-only imports for protected UI surfaces
+        run: ./scripts/ci/check-bff-only-imports.sh
+
   runtime-mirror-guard:
     name: Runtime mirror guard
     runs-on: ubuntu-latest
@@ -93,7 +101,12 @@ jobs:
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
       - name: Install
         run: pnpm install --frozen-lockfile
       - name: Lint

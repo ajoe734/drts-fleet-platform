@@ -3,6 +3,7 @@ export const PLATFORM_CODE_GRAB = "grab";
 export const PLATFORM_CODE_LINE_TAXI = "line-taxi";
 export const PLATFORM_CODE_GRAB_TAIWAN = "grab_taiwan";
 export const PLATFORM_CODE_INDRIVER = "indriver";
+export const PLATFORM_CODE_FORWARDER_SANDBOX = "forwarder_sandbox";
 
 export const PLATFORM_CODES = [
   PLATFORM_CODE_UBER,
@@ -10,6 +11,7 @@ export const PLATFORM_CODES = [
   PLATFORM_CODE_LINE_TAXI,
   PLATFORM_CODE_GRAB_TAIWAN,
   PLATFORM_CODE_INDRIVER,
+  PLATFORM_CODE_FORWARDER_SANDBOX,
 ] as const;
 export type PlatformCode = (typeof PLATFORM_CODES)[number];
 
@@ -58,5 +60,11 @@ export const PLATFORM_CODE_REGISTRY: Record<
     displayName: "InDriver",
     status: "catalog_only",
     forwarderAdapterKey: null,
+  },
+  [PLATFORM_CODE_FORWARDER_SANDBOX]: {
+    code: PLATFORM_CODE_FORWARDER_SANDBOX,
+    displayName: "Forwarder Sandbox",
+    status: "forwarder_stub",
+    forwarderAdapterKey: PLATFORM_CODE_FORWARDER_SANDBOX,
   },
 };
