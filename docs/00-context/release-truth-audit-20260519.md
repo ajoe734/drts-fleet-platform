@@ -3,7 +3,9 @@
 Date: 2026-05-19
 Task: `WF-REL-001-AUDIT`
 Method: repo-first audit of git refs, workflow definitions, machine truth, and
-checked-in release-gate artifacts.
+checked-in release-gate artifacts. Git tree-presence claims in this report are
+branch-qualified against `origin/dev`, not inferred from the local task-branch
+working tree.
 
 ## Scope
 
@@ -97,15 +99,25 @@ itself because that row changes as soon as the document is handed off for
 review. The critical contradiction is between prerequisite task state,
 historical branch evidence, and the actual `origin/dev` tree content.
 
-### What the repo tree says
+There is also a naming drift inside the `REL-SYNC-001` evidence chain:
 
-At current `HEAD == origin/dev`:
+- machine truth records `docs/03-runbooks/phase1-release-truth-sync-20260519.md`
+- directive §3.10 and the historical anchor commits point to
+  `docs/03-runbooks/release-truth-sync-runbook-20260519.md`
+
+That means the release-truth story is currently split not only by missing
+content, but also by disagreement over the canonical artifact path.
+
+### What the `origin/dev` tree says
+
+Using explicit `origin/dev:<path>` lookups instead of local working-tree file
+presence:
 
 - `docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md` is absent
 - `docs/03-runbooks/phase1-release-truth-sync-20260519.md` is absent
 - `docs/03-runbooks/release-truth-sync-runbook-20260519.md` is absent
-- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` still has no
-  `WF-REL-001` row
+- `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` at
+  `origin/dev` still has no `WF-REL-001` row
 
 So the checked-in release surfaces do not match the task-closeout claims.
 
@@ -138,8 +150,10 @@ The release-truth problem is therefore:
    artifacts are still absent from `origin/dev`
 2. machine truth keeps `REL-SYNC-001` open, and its target runbook is also
    absent from `origin/dev`
-3. anchor commits prove drafts existed on task branches
-4. downstream readers cannot verify the claimed release-truth surfaces from the
+3. machine truth, directive text, and anchor history disagree on the canonical
+   `REL-SYNC-001` artifact path
+4. anchor commits prove drafts existed on task branches
+5. downstream readers cannot verify the claimed release-truth surfaces from the
    tree they actually check out
 
 ## Gate Matrix Read
@@ -186,7 +200,19 @@ Impact:
 - the release-truth story splits across machine truth, anchor commits, and the
   actual branch contents
 
-### Finding 3: `current-work.md` is not the issue; artifact landing is
+### Finding 3: `REL-SYNC-001` has canonical artifact-path drift
+
+`REL-SYNC-001` is not just "not landed yet." Its machine-truth artifact path
+(`phase1-release-truth-sync-20260519.md`) does not match the directive and
+anchor-commit path (`release-truth-sync-runbook-20260519.md`).
+
+Impact:
+
+- even after landing the runbook, reviewers would still need a single canonical
+  filename to avoid future release-truth drift
+- the release-sync repair should reconcile both content and artifact naming
+
+### Finding 4: `current-work.md` is not the issue; artifact landing is
 
 `current-work.md` behaves as a summary of machine truth. The real defect is
 that machine-truth closeout metadata for prerequisite release-sync work refers
@@ -219,13 +245,16 @@ The minimum repair path is:
 1. restore the `DEV-SYNC-001` artifact into the checked-in tree from the
    approved audit content anchored at `0861499`
 2. complete and land the `REL-SYNC-001` runbook into the checked-in tree,
-   reconciling the draft content anchored at `e686f13` / `ee6cfa7` with the
-   reopened machine-truth state
-3. restore the `WF-REL-001` gate row into
+   reconciling the draft content anchored at `e686f13` / `ee6cfa7`, the
+   directive-required filename `release-truth-sync-runbook-20260519.md`, and
+   the current machine-truth artifact path `phase1-release-truth-sync-20260519.md`
+3. choose one canonical `REL-SYNC-001` artifact path and update machine truth,
+   closeout wording, and docs references to that single path
+4. restore the `WF-REL-001` gate row into
    `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` from `17941e4`
-4. re-check that the restored docs match current branch strategy and current
+5. re-check that the restored docs match current branch strategy and current
    ref truth
-5. only then consider `WF-REL-001` eligible for review closeout
+6. only then consider `WF-REL-001` eligible for review closeout
 
 If the intent was for those artifacts to remain absent and only branch-local
 history to carry the evidence, then the machine-truth closeouts for
@@ -254,6 +283,10 @@ git rev-list --left-right --count origin/main...origin/dev
 git ls-remote --heads origin 'refs/heads/publish/v*'
 git ls-remote --tags origin 'refs/tags/release/v*^{}'
 git ls-remote --tags origin 'refs/tags/prod/v*^{}'
+git cat-file -e origin/dev:docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md
+git cat-file -e origin/dev:docs/03-runbooks/phase1-release-truth-sync-20260519.md
+git cat-file -e origin/dev:docs/03-runbooks/release-truth-sync-runbook-20260519.md
+git show origin/dev:docs/03-runbooks/phase1-workflow-acceptance-release-gates.md | grep 'WF-REL-001'
 git show --stat --patch 0861499 -- docs/00-context/origin-dev-blueprint-alignment-audit-20260519.md
 git show --stat --patch e686f13 -- docs/03-runbooks/release-truth-sync-runbook-20260519.md
 git show --stat --patch ee6cfa7 -- docs/03-runbooks/release-truth-sync-runbook-20260519.md
