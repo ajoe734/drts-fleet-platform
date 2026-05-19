@@ -37,22 +37,33 @@ packs. It explains how to read them together.
 | `packages/contracts/src/index.ts` | repo contract snapshot | call session, recording state, report job, filing package, controlled download shapes |
 | `support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md` | live activation gate | blocker model `EXT-004-BLK-001` to `EXT-004-BLK-008` |
 | `support/sidecars/COM-LIVE-001/COM-LIVE-001-EVIDENCE-PACK.md` | current live evidence posture | dated 2026-05-19 probe result and non-claim boundary |
+| `docs/00-context/phase1-origin-dev-execution-worklist-20260519.md` | sandbox task baseline | `COM-CTI-SBX-001` webhook-harness deliverables and acceptance language |
 | `docs/04-uat/phase1-uat-scenarios.md` | UAT semantics | `OC-021` to `OC-025`, `NP-COM-001`, `NP-COM-002` |
 | `docs/04-uat/fbp-014a-e2e-matrix.md` | sandbox proof shape | `E2E-003` step-by-step automated verification chain |
 | `docs/03-runbooks/evidence-retention-and-evidentiary-access-policy.md` | retention and access authority | evidence families, read controls, audit expectations |
 | `docs/03-runbooks/phase1-workflow-acceptance-release-gates.md` | release-language authority | `WF-COM-001` gate interpretation |
 
-### 2.1 Provenance note on `EVD-VERIF-001`
+### 2.1 Historical verification note on `EVD-VERIF-001`
 
 The task brief asks this blueprint to consolidate `EVD-VERIF-001`. In the
 current worktree, there is no standalone `support/sidecars/EVD-VERIF-001/*`
-artifact to quote directly. The only present trace is the closeout reference in
-`docs/03-runbooks/tenant-governance-wave-closeout-20260514.md`, which records
-`EVD-VERIF-001` as a previously closed verification sidecar at commit
-`646ff01`.
+path checked out. However, the historical verification report is still
+inspectable at commit `646ff01`
+(`support/sidecars/EVD-VERIF-001/EVD-VERIF-001-VERIFICATION.md`).
 
-This blueprint therefore treats `EVD-VERIF-001` as historical provenance, not
-as a locally inspectable primary source. Current binding evidence remains
+That historical report matters because it states more than provenance:
+
+- the repo can simulate a fixture chain for call session, phone order, delayed
+  recording attachment, complaint transfer, and filing generation
+- the chain is still repo-local and stitched, not a live adapter-backed
+  external evidence pipeline
+- the highest-signal repo-local gap is the filing package itself: current
+  implementation emits a generic immutable manifest plus signed-download URLs,
+  not a regulator-ready packet that assembles complaint, call, order, and
+  recording evidence into one schema-aware bundle
+
+This blueprint therefore uses `EVD-VERIF-001` as historical verification input
+with still-relevant findings. Current binding evidence for gate posture remains
 `EXT-004`, `COM-LIVE-001`, the UAT/E2E docs, and the repo contract/runtime
 anchors.
 
@@ -116,7 +127,27 @@ blueprint: `recording_pending` is visible in the same workbench as dispatch and
 complaint handoff, and it is not allowed to disappear as an implicit side
 effect.
 
-### 4.3 Operational consequences
+### 4.3 Filing package boundary
+
+The current filing implementation is authoritative for immutable package
+metadata, manifest hashing, and controlled download issuance. It is not yet
+authoritative for a regulator-specific evidence envelope.
+
+Today the repo-local package builder still stops at:
+
+- package item lists
+- manifest entries with `itemType`, `artifactId`, and `manifestHash`
+- package checksum
+- signed zip/pdf download metadata
+
+For `audit_request`, the package item types are still only
+`audit_summary` and `statistics`. The package does not yet assemble complaint
+case data, call-session metadata, linked order identifiers, recording
+references, retention annotations, legal-hold state, or regulator submission
+receipts into one complaint-aware packet. That is the core architecture gap
+carried forward from `EVD-VERIF-001`.
+
+### 4.4 Operational consequences
 
 - dispatch queue is a projection, not a separate authority
 - `recording_pending` is a dispatch/compliance gate, not a cosmetic label
@@ -144,13 +175,20 @@ claim live activation.
 
 Sandbox proof is the intended operational baseline for the repo itself.
 
-`COM-CTI-SBX-001` established the sandbox webhook harness for:
+`COM-CTI-SBX-001` defines the sandbox webhook-harness baseline for:
 
 - call started
 - call ended
 - recording pending
 - recording ready
 - recording failed
+
+Its acceptance language is the current sandbox contract for this workflow:
+
+- call center can create a phone booking with `callId`
+- `recording_pending` is visible before callback resolution
+- recording-ready callback attaches `recordingId`
+- missing recording remains visible as a compliance flag
 
 `E2E-003` then defines the end-to-end sandbox chain:
 
@@ -275,6 +313,6 @@ compliance workflow:
 - callback resolution is a first-class state transition, not hidden plumbing
 - export and filing preserve both success and incomplete-compliance cases
 - evidence access is permissioned, retention-aware, and audited
-- sandbox proof is sufficient for repo closure
+- sandbox proof is sufficient for repo-local closure
 - live/staging proof remains governed by `EXT-004` and is still open as of
   2026-05-19
