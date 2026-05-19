@@ -102,7 +102,7 @@ The `prod/v<date>` tag is created when `hourly-promote.yml` successfully merges 
 | `hourly-promote.yml` (promote job)      | cron `15 * * * *`; workflow_dispatch                      | open auto-PR `publish/v<date> → main`, auto-merge                                                             |
 | `hourly-promote.yml` (tag-on-merge job) | push to main                                              | tag `prod/v<date>` if main's tree matches a publish snapshot                                                  |
 | `deploy-staging.yml`                    | workflow_dispatch only                                    | operator picks any ref → staging                                                                              |
-| `deploy-prod.yml`                       | workflow_dispatch only, required `prod/v<date>` tag input | operator picks a prod tag → production (currently skeleton, see §7)                                           |
+| `deploy-prod.yml`                       | workflow_dispatch only, required `prod/v<date>` tag input | operator picks a prod tag → production deploy + protected health verification                                   |
 
 ---
 
@@ -161,18 +161,50 @@ Applied via `scripts/branch-strategy/apply-branch-protection.sh --apply`.
 
 ---
 
-## 7. Production deploy (skeleton)
+## 7. Production deploy rail
 
-`deploy-prod.yml` validates the tag input format and existence, then calls into a build+deploy job graph that uses `PROD_*` GitHub variables and secrets that are **not yet configured**. The workflow will fail in `validate-config` with the list of missing vars/secrets.
+`deploy-prod.yml` is now the production-ready manual rail.
 
-To complete the prod rail:
+It requires a `prod/v<date>` tag, validates the tag against origin, validates the
+required `PROD_*` GitHub variables and secrets, confirms required Secret Manager
+entries exist in the production GCP project, then runs the same core graph as
+staging:
 
-1. Provision a `prod` GCP project + Workload Identity Federation
-2. Set repo variables: `PROD_GCP_PROJECT_ID`, `PROD_GCP_REGION`, `PROD_GCP_CLOUDSQL_INSTANCE`, `PROD_GCP_RUNTIME_SERVICE_ACCOUNT` (+ optional `PROD_ARTIFACT_*`, `PROD_SECRET_PREFIX`)
-3. Set repo secrets: `PROD_WIF_PROVIDER`, `PROD_WIF_SERVICE_ACCOUNT`
-4. Copy `deploy-staging.yml`'s build-push + deploy job graph into `deploy-prod.yml`, swapping `STAGING_*` → `PROD_*` and `environment: staging` → `environment: production`
+- `validate-config`
+- `build-push`
+- `migrate` unless `skip_migration=true`
+- `deploy`
+- `health-check`
 
-The `production` GitHub environment is already created. Add required reviewers if you want a deploy-time human gate on top of the prod tag selection.
+The production rail is wired around:
+
+1. Workload Identity Federation via `PROD_WIF_PROVIDER` + `PROD_WIF_SERVICE_ACCOUNT`
+2. Cloud SQL attachment via `PROD_GCP_CLOUDSQL_INSTANCE`
+3. Secret Manager mounts under `PROD_SECRET_PREFIX` (default `drts-prod`)
+4. IAP-protected health verification via `PROD_CONTROL_PLANE_API_ORIGIN` and `PROD_IAP_CLIENT_ID`
+
+Required repository variables:
+
+- `PROD_GCP_PROJECT_ID`
+- `PROD_GCP_REGION`
+- `PROD_GCP_CLOUDSQL_INSTANCE`
+- `PROD_GCP_RUNTIME_SERVICE_ACCOUNT`
+- `PROD_PLATFORM_ADMIN_ORIGIN`
+- `PROD_OPS_CONSOLE_ORIGIN`
+- `PROD_CONTROL_PLANE_API_ORIGIN`
+- `PROD_IAP_CLIENT_ID`
+
+Required repository secrets:
+
+- `PROD_WIF_PROVIDER`
+- `PROD_WIF_SERVICE_ACCOUNT`
+
+The `production` GitHub environment remains the human approval gate. Add or keep
+required reviewers there if prod dispatch must pause for explicit operator sign-off.
+
+Rollback is an operator re-dispatch of the previous known-good `prod/v<date>` tag,
+normally with `skip_migration=true`. The detailed procedure lives in
+`docs/03-runbooks/prod-deploy-rollback-runbook-20260519.md`.
 
 ---
 
@@ -201,7 +233,7 @@ gh workflow run deploy-staging.yml -f source_ref=main
 gh issue create --title "regression in v2026.05.18.0: bookings page blank" --label "regression:v2026.05.18.0"
 
 # Redeploy yesterday's prod tag (rollback)
-gh workflow run deploy-prod.yml -f tag=prod/v2026.05.17.0
+gh workflow run deploy-prod.yml -f tag=prod/v2026.05.17.0 -f skip_migration=true
 ```
 
 ---
