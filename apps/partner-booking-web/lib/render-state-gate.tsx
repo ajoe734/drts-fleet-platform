@@ -1,9 +1,12 @@
-import { notFound } from "next/navigation";
 import {
   PartnerBookingStateGate,
   type PartnerBookingStateScreenId,
 } from "@drts/ui-web/partner-booking";
-import { getBrandForSlug } from "@/lib/brand";
+import {
+  PartnerAuthorityError,
+  getPartnerRouteContext,
+} from "@/lib/api-client";
+import { notFound, redirect } from "next/navigation";
 
 type PageProps = {
   params: Promise<{ tenantSlug: string }>;
@@ -14,16 +17,26 @@ export async function renderPartnerStateGate(
   state: PartnerBookingStateScreenId,
 ) {
   const { tenantSlug } = await params;
-  const brand = getBrandForSlug(tenantSlug);
-  if (!brand) {
-    notFound();
+  try {
+    const { brand } = await getPartnerRouteContext(tenantSlug, {
+      allowInactive: state === "inactive",
+    });
+    return (
+      <PartnerBookingStateGate
+        brand={brand}
+        state={state}
+        basePath={`/${tenantSlug}`}
+      />
+    );
+  } catch (error) {
+    if (error instanceof PartnerAuthorityError) {
+      if (error.code === "PARTNER_ENTRY_NOT_FOUND") {
+        notFound();
+      }
+      if (error.code === "PARTNER_ENTRY_INACTIVE") {
+        redirect(`/${tenantSlug}/inactive`);
+      }
+    }
+    throw error;
   }
-
-  return (
-    <PartnerBookingStateGate
-      brand={brand}
-      state={state}
-      basePath={`/${tenantSlug}`}
-    />
-  );
 }

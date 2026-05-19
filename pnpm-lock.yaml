@@ -264,6 +264,12 @@ importers:
 
   apps/partner-booking-web:
     dependencies:
+      "@drts/api-client":
+        specifier: workspace:*
+        version: link:../../packages/api-client
+      "@drts/contracts":
+        specifier: workspace:*
+        version: link:../../packages/contracts
       "@drts/ui-tokens":
         specifier: workspace:*
         version: link:../../packages/ui-tokens

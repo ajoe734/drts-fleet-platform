@@ -8,10 +8,12 @@
     "dev": "next dev --hostname 0.0.0.0 --port 3007",
     "lint": "eslint . --max-warnings=0",
     "start": "next start --port 3007",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --config vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@drts/api-client": "workspace:*",
+    "@drts/contracts": "workspace:*",
     "@drts/ui-web": "workspace:*",
     "@drts/ui-tokens": "workspace:*",
     "next": "^16.2.3",
