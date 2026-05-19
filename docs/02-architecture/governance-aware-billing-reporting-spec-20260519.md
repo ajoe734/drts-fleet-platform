@@ -28,6 +28,7 @@ booking with costCenterCode
 The directive also sets the acceptance bar:
 
 - tenant invoice / report includes cost-center governance fields
+- tenant invoice / report exposes `approvalState` and quota-impact readback
 - platform earnings can be aggregated by `platformCode`
 - partner reporting can be aggregated by `programId`,
   `benefitReference`, and `issuerAuthorizationRef`
@@ -89,6 +90,9 @@ However, the runtime is only partially enriched today:
 - `reporting-filing.service.ts` emits partner revenue rows with
   `costCenterName: null`, `ownerUserId: null`, `activeFlag: null`, and
   `legacy_unmapped: false`
+- `InvoiceLineRecord` and `PartnerRevenueSummaryRowRecord` do not yet expose
+  explicit `approvalState` or quota-impact output fields even though the
+  upstream governance snapshot already carries those facts
 - `apps/api/tests/integration/tenant-governance-e2e.test.ts` explicitly records
   the current baseline that invoice lines do not yet carry cost-center / owner
   metadata, and that governance continuity is still proven mainly by upstream
@@ -144,12 +148,19 @@ business-dispatch bookings, each `InvoiceLineRecord` should carry:
 - `costCenterCode`
 - `costCenterName`
 - `ownerUserId`
+- explicit `approvalState`
 - `activeFlag`
 - `legacy_unmapped`
 - `partnerId`, `partnerProgramId`, `partnerEntrySlug`
 - `eligibilityVerificationId`
 - `issuerAuthorizationRef`
 - `benefitReference`
+
+In addition to line-level fields, the invoice artifact or adjacent invoice
+governance summary must expose the booking's quota result in a reviewer-readable
+form. The preferred representation is the persisted
+`TenantBookingQuotaImpactResult[]` (or a lossless projection of it) rather than
+an inferred free-text note.
 
 Masking rule:
 
@@ -165,7 +176,10 @@ Governance-aware reporting must support at least three finance views.
 Tenant revenue / billing view:
 
 - cost-center attribution by code, name, owner, active/disabled state
-- approval state continuity for the billed booking
+- explicit `approvalState` column or equivalent structured field for the billed
+  booking
+- explicit quota-impact readback sourced from the persisted
+  `TenantBookingQuotaImpactResult[]` snapshot
 - explicit unresolved legacy mapping flag
 
 Partner-program view:
@@ -207,8 +221,9 @@ The required control model is:
 
 | Output | Required governance fields | Notes |
 | --- | --- | --- |
-| Tenant invoice line | `costCenterCode`, `costCenterName`, `ownerUserId`, `activeFlag`, `legacy_unmapped`, partner references when applicable | Current code only guarantees partner references; cost-center enrichment is still the required follow-up |
-| Partner revenue summary row | invoice fields above plus masked `issuerAuthorizationRef` and masked `benefitReference` | `reporting-filing.service.ts` already masks partner references but still leaves cost-center enrichment null |
+| Tenant invoice line | `costCenterCode`, `costCenterName`, `ownerUserId`, `approvalState`, `activeFlag`, `legacy_unmapped`, partner references when applicable | Current code only guarantees partner references; cost-center enrichment and explicit `approvalState` remain required follow-up |
+| Tenant invoice governance summary | `quotaImpacts` from persisted `TenantBookingQuotaImpactResult[]` (or a lossless structured projection), plus any invoice-level approval/audit correlation keys | The directive requires quota-impact readback; this may live beside line items if repeating per line is not practical |
+| Partner revenue summary row | invoice fields above plus masked `issuerAuthorizationRef` and masked `benefitReference` | `reporting-filing.service.ts` already masks partner references but still leaves cost-center enrichment null and does not expose explicit `approvalState` |
 | Platform earnings summary | `platformCode` aggregation, driver/platform earnings totals, forwarded-vs-owned context | Reuse the existing platform earnings service rather than duplicating platform classification in finance code |
 | Cost-center coverage report | `totalBookings`, `resolvedCount`, `unresolvedCount`, `disabledHits`, `unresolvedSamples[]` | Migration and cleanup visibility, not a settlement artifact |
 
@@ -240,13 +255,17 @@ The `WF-FIN-GOV-001` row content should require all of the following:
 
 1. cost-center directory resolution is visible in billing and reporting outputs
 2. unresolved / disabled cost centers are explicit rather than silently dropped
-3. quota / approval continuity is reviewable from booking governance artifacts
+3. `approvalState` is an explicit finance output field rather than a fact that
+   can only be inferred from upstream approval artifacts
+4. quota impacts are visible in invoice/report outputs via persisted
+   `TenantBookingQuotaImpactResult[]` data or a lossless structured projection
+5. quota / approval continuity is reviewable from booking governance artifacts
    into finance artifacts
-4. partner-program references remain available and masked appropriately on
+6. partner-program references remain available and masked appropriately on
    export surfaces
-5. platform earnings can be grouped by `platformCode` for forwarded /
+7. platform earnings can be grouped by `platformCode` for forwarded /
    multi-platform flows
-6. invoice/report download actions remain auditable and time-bounded
+8. invoice/report download actions remain auditable and time-bounded
 
 ## Open Gaps
 
@@ -255,9 +274,11 @@ As of this spec date, the remaining substantive gaps are:
 1. invoice generation does not yet populate cost-center enrichment fields even
    though the contract allows them
 2. partner revenue summary rows still default cost-center enrichment to null
-3. approval-state visibility in finance outputs is still mostly indirect via
-   upstream audit / approval records rather than explicit report columns
-4. no fresh live staging evidence currently proves the fully enriched
+3. `approvalState` is still mostly indirect via upstream audit / approval
+   records rather than an explicit invoice/report output field
+4. quota impacts are persisted upstream but not yet surfaced as a formal
+   invoice/report output block
+5. no fresh live staging evidence currently proves the fully enriched
    governance-aware finance chain end to end
 
 Those gaps are consistent with the v2 status-truth note that `FIN-GOV-001`
