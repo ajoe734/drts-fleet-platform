@@ -9,6 +9,7 @@ import { ForwarderController } from "./forwarder.controller";
 import { ForwarderRepository } from "./forwarder.repository";
 import { ForwarderService } from "./forwarder.service";
 import { GrabTaiwanAdapter } from "./grab-taiwan.adapter";
+import { SandboxAdapter } from "./sandbox.adapter";
 
 @Module({
   imports: [
@@ -22,10 +23,14 @@ import { GrabTaiwanAdapter } from "./grab-taiwan.adapter";
     ForwarderService,
     ForwarderRepository,
     GrabTaiwanAdapter,
+    SandboxAdapter,
     {
       provide: FORWARDER_ADAPTERS,
-      useFactory: (grabTaiwanAdapter: GrabTaiwanAdapter) => [grabTaiwanAdapter],
-      inject: [GrabTaiwanAdapter],
+      useFactory: (
+        grabTaiwanAdapter: GrabTaiwanAdapter,
+        sandboxAdapter: SandboxAdapter,
+      ) => [grabTaiwanAdapter, sandboxAdapter],
+      inject: [GrabTaiwanAdapter, SandboxAdapter],
     },
   ],
   exports: [ForwarderService],

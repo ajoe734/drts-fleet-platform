@@ -3844,6 +3844,7 @@ export const FORWARDED_ORDER_STATUSES = [
   "broadcasted",
   "accept_pending",
   "confirmed_by_platform",
+  "completed_synced",
   "lost_race",
   "cancelled_by_platform",
   "sync_failed",
@@ -4031,6 +4032,7 @@ export interface ForwardedOrderRecord {
 export const FORWARDED_DRIVER_ACTION_OUTCOMES = [
   "accept_pending",
   "confirmed_by_platform",
+  "completed_synced",
   "lost_race",
   "cancelled_by_platform",
   "sync_failed",

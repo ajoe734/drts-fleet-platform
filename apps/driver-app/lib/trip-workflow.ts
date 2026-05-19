@@ -12,6 +12,7 @@ export type TripExperienceState =
   | "forwarded_offered"
   | "forwarded_pending"
   | "forwarded_confirmed"
+  | "forwarded_completed"
   | "forwarded_lost"
   | "forwarded_cancelled"
   | "sync_failed";
@@ -26,6 +27,7 @@ export interface TripPrimaryActionDescriptor {
 type ForwardedBlockingTripState =
   | "forwarded_offered"
   | "forwarded_pending"
+  | "forwarded_completed"
   | "forwarded_lost"
   | "forwarded_cancelled"
   | "sync_failed";
@@ -131,6 +133,8 @@ export function getTripExperienceState(
     case "confirmed_by_platform":
     case "confirmed":
       return "forwarded_confirmed";
+    case "completed_synced":
+      return "forwarded_completed";
     case "lost_race":
     case "taken":
       return "forwarded_lost";
@@ -142,6 +146,10 @@ export function getTripExperienceState(
 
   if (runtimeStatus === "cancelled" || runtimeStatus === "rejected") {
     return "forwarded_cancelled";
+  }
+
+  if (runtimeStatus === "completed") {
+    return "forwarded_completed";
   }
 
   if (
@@ -169,6 +177,7 @@ export function getPrimaryTripAction(
   const blockedForwardedStates: ForwardedBlockingTripState[] = [
     "forwarded_offered",
     "forwarded_pending",
+    "forwarded_completed",
     "forwarded_lost",
     "forwarded_cancelled",
     "sync_failed",
