@@ -62,4 +62,28 @@ describe("trip forwarded workflow actions", () => {
 
     expect(getPrimaryTripAction(task, effectiveState)?.action).toBe("depart");
   });
+
+  it("treats completed sandbox sync as a terminal forwarded state", () => {
+    const task = makeTask({
+      sourcePlatform: "fleet_partner",
+      status: "completed",
+      completedAt: "2026-05-19T05:00:00.000Z",
+    });
+
+    expect(getTripExperienceState(task)).toBe("forwarded_completed");
+    expect(getPrimaryTripAction(task)).toBeNull();
+    expect(shouldShowTripCompletionProof(task)).toBe(false);
+  });
+
+  it("keeps stale accepted tasks blocked after forwarded completion sync", () => {
+    const task = makeTask({
+      sourcePlatform: "fleet_partner",
+      status: "accepted",
+      forwardedStatus: "completed_synced",
+    });
+
+    expect(getTripExperienceState(task)).toBe("forwarded_completed");
+    expect(getPrimaryTripAction(task)).toBeNull();
+    expect(shouldShowTripCompletionProof(task)).toBe(false);
+  });
 });
