@@ -7,28 +7,28 @@ Parent task: `WF-PROD-001-LIVE-EXEC`
 
 ## Summary
 
-`WF-PROD-001-LIVE-EXEC` should remain `blocked`, but the blocker is more specific than the current machine-truth `next` string.
+`WF-PROD-001-LIVE-EXEC` is no longer blocked on task dependencies.
 
-The parent is blocked by three separate conditions:
+The remaining blockers are external production-readiness gates:
 
-1. Dependency completion is not finished.
-   - `PROD-SPEC-001` is still `review`.
-   - `PROD-DRILL-001` is still `backlog`.
-2. Production GitHub configuration is still incomplete.
+1. Production GitHub configuration is still incomplete.
    - The GitHub `production` environment already exists and already has a required reviewer rule for `ajoe734`.
    - Required production repo variables and secrets are not present yet.
+2. Production GCP resources referenced by the deploy rail still need operator provisioning.
 3. No production release tag exists yet.
    - `origin` currently has `main` and `publish/v*` branches, but no `refs/tags/prod/v*` tag for `deploy-prod.yml`.
+4. No live production deploy evidence exists yet.
+   - `deploy-prod.yml` has not been dispatched with a valid `prod/v*` tag, so `support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md` is still pending.
 
 ## Evidence
 
 ## 1. Dependency state in canonical machine truth
 
-- `WF-PROD-001-LIVE-EXEC` is `blocked` and depends on `PROD-SPEC-001`, `PROD-DRILL-001`.
-- `PROD-SPEC-001` is `review` with pending reviewer `Gemini2`.
-- `PROD-DRILL-001` is `backlog` and has not been picked up by `Gemini2`.
+- Canonical `AI_STATUS_ROOT` shows `PROD-SPEC-001` as `done` at `2026-05-19T17:19:57Z`.
+- Canonical `AI_STATUS_ROOT` shows `PROD-DRILL-001` as `done` at `2026-05-19T19:58:14Z`.
+- Canonical `AI_STATUS_ROOT` shows `WF-PROD-001-LIVE-EXEC` resumed after the planning unblock and now focused on re-verifying its HELD-external posture.
 
-This means the parent is not actually dependency-ready yet.
+This means the parent is dependency-ready and the remaining gap is external readiness, not unfinished upstream tasks.
 
 ## 2. GitHub production environment status
 
@@ -108,15 +108,24 @@ So the publish rail has advanced, but the prod deploy input tag has not been cre
 
 The next actionable path for `WF-PROD-001-LIVE-EXEC` is:
 
-1. `Gemini2` reviews and closes `PROD-SPEC-001`.
-2. `Gemini2` authors and hands off `PROD-DRILL-001`.
-3. Human operator provisions the missing production repo variables and secrets.
-4. Human operator provisions the referenced prod GCP project resources described in `docs/03-runbooks/prod-deploy-rollback-runbook-20260519.md`.
-5. `hourly-promote.yml` or the release operator produces the first `prod/vYYYY.MM.DD.N` tag on `origin`.
-6. The assigned owner runs `gh workflow run deploy-prod.yml -f tag=prod/vYYYY.MM.DD.N` and records live evidence in `support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md`.
+1. Human operator provisions the missing required production repo variables:
+   - `PROD_GCP_PROJECT_ID`
+   - `PROD_GCP_REGION`
+   - `PROD_GCP_CLOUDSQL_INSTANCE`
+   - `PROD_GCP_RUNTIME_SERVICE_ACCOUNT`
+   - `PROD_PLATFORM_ADMIN_ORIGIN`
+   - `PROD_OPS_CONSOLE_ORIGIN`
+   - `PROD_CONTROL_PLANE_API_ORIGIN`
+   - `PROD_IAP_CLIENT_ID`
+2. Human operator provisions the missing required production repo secrets:
+   - `PROD_WIF_PROVIDER`
+   - `PROD_WIF_SERVICE_ACCOUNT`
+3. Human operator provisions the referenced prod GCP project resources described in `docs/03-runbooks/prod-deploy-rollback-runbook-20260519.md`, including the Secret Manager entries expected under the production secret prefix.
+4. `hourly-promote.yml` or the release operator produces the first `prod/vYYYY.MM.DD.N` tag on `origin`.
+5. The assigned owner runs `gh workflow run deploy-prod.yml -f tag=prod/vYYYY.MM.DD.N` and records live evidence in `support/sidecars/PROD-LIVE-EXEC-20260519/PROD-LIVE-EXEC-EVIDENCE.md`.
 
 ## Scope decision
 
 No live deploy was attempted in this task.
 No canonical contract or workflow file needed to change.
-The required task-scoped action is to refresh the operator handoff and parent `next` text so machine truth points at the real remaining steps.
+The required task-scoped action is to refresh the operator handoff and task summary so they point only at the real remaining external blockers.
