@@ -271,6 +271,12 @@ Tenant Console (setup + booking/update/approval) ─► Platform Admin / Ops (di
 - `E2E-005` writes temporary JSON payloads at runtime instead of adding new
   fixture files to `tests/e2e/fixtures/`.
 
+#### Verification Snapshot
+
+- `pnpm --filter @drts/api test:tenant-governance-negative`
+- `bash -n tests/e2e/E2E-005-tenant-governance.sh`
+- `bash tests/e2e/run-e2e.sh --suite 005 --dry-run`
+
 ---
 
 ## 5. Fixture Inventory
