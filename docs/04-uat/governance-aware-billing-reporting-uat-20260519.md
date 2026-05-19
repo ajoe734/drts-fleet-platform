@@ -1,14 +1,14 @@
 # Governance-Aware Billing / Reporting UAT — 2026-05-19
 
-**Task:** `FIN-GOV-UAT-001`  
-**Owner:** `Codex`  
-**Reviewer:** `Codex2`  
-**Workflow family:** `WF-FIN-GOV-001`  
-**Depends on:** `WF-FIN-001`, `WF-TGV-001`  
-**Companion automation:** `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (named in `docs/00-context/phase1-v3-resolution-20260519.md`, not present in this worktree yet)  
-**Primary evidence pack:** `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`  
-**Artifact status:** `provisional`  
-**Overall read:** `governance-aware finance UAT is defined; current proof remains mostly static evidence plus an older baseline live finance chain`
+- **Task:** `FIN-GOV-UAT-001`
+- **Owner:** `Codex`
+- **Reviewer:** `Codex2`
+- **Workflow family:** `WF-FIN-GOV-001`
+- **Depends on:** `WF-FIN-001`, `WF-TGV-001`
+- **Companion automation:** `tests/e2e/E2E-010-governance-aware-billing-reporting.sh` (named by the v3 numbering decision in `docs/00-context/phase1-v3-conflicts-and-open-questions-20260519.md` and carried into `docs/03-runbooks/phase1-v3-design-blueprint-completion-wave-planning-20260519.md`, not present in this worktree yet)
+- **Primary evidence pack:** `support/sidecars/FIN-GOV-001/FIN-GOV-001-EVIDENCE-PACK.md`
+- **Artifact status:** `provisional`
+- **Overall read:** `governance-aware finance UAT is defined; current proof remains mostly static evidence plus an older baseline live finance chain`
 
 This document defines the UAT scenarios for the governance enrichment row
 `WF-FIN-GOV-001`. It does not replace baseline finance semantics from
@@ -20,7 +20,8 @@ proven.
 
 ## 1. Scope and authority
 
-Per `docs/00-context/phase1-v3-resolution-20260519.md`:
+Per `docs/00-context/phase1-v3-conflicts-and-open-questions-20260519.md` and
+`docs/03-runbooks/phase1-v3-design-blueprint-completion-wave-planning-20260519.md`:
 
 - `WF-FIN-001` remains the baseline billing / invoice / report-export row.
 - `WF-FIN-GOV-001` is a separate governance-aware enrichment row.
