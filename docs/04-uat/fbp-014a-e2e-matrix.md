@@ -169,25 +169,31 @@ partner-adapter proof.
 
 ---
 
-### 4.3 E2E-003 — Phone Booking to Compliance Export _(manual only in scaffold)_
+### 4.3 E2E-003 — Phone Recording Filing _(sandbox-proven automation)_
 
 **UAT cross-ref:** `docs/04-uat/phase1-uat-scenarios.md §5 E2E-003`
 
-This scenario requires a live CTI session (`call_id`) and a recording callback webhook. It is
-**not automated in the scaffold** because both dependencies are environment-gated (external CTI
-environment or stub). It is covered by the WE-004 smoke harness guidance and the UAT checklist
-pending items (`OC-021`, `OC-022`, `OC-024`).
-Treat this as `DEFERRED` until CTI callback plus filing / recording export evidence is attached.
-The exact activation evidence is tracked in
-`support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md` as
-`EXT-004-BLK-001` to `EXT-004-BLK-008`.
+This scenario is now automated by
+`tests/e2e/E2E-003-phone-recording-filing.sh` against the repo-local sandbox
+authority. It proves the end-to-end chain for call session creation, phone
+order linkage, `recording_pending` to `ready` transition, dispatch recording
+index export, filing package generation, retention-policy lookup, and audited
+signed-download issuance.
 
-**Manual steps** (reference only):
+This is still **not** a claim that live CTI/provider media, staging scheduler
+activation, or external retention execution are closed. Those activation gates
+remain tracked in `support/sidecars/EXT-004/EXT-004-CTI-RECORDING-FILING-GATE.md`
+as `EXT-004-BLK-001` to `EXT-004-BLK-008`.
 
-1. Ops agent creates phone booking via `POST /api/call-center/orders` with `call_id`.
-2. Recording callback delivers `recording_id` via webhook.
-3. Driver completes trip with proof.
-4. Export includes `call_id` + `recording_id` row.
+**Automated steps**:
+
+1. Ops agent opens `POST /api/callcenter/sessions`, captures `callId`.
+2. Ops agent creates `POST /api/call-center/orders` from that call, order stays `recording_pending`.
+3. Recording callback binds `recording_id` via `POST /api/callcenter/sessions/:callId/recording-callback`.
+4. Order and session both clear `recording_pending` and move to recording-bound / ready state.
+5. `POST /api/reports/jobs` exports `dispatch_recording_index`; row includes masked call/recording refs.
+6. `POST /api/filing-packages/generate` yields immutable manifest plus signed ZIP/PDF downloads.
+7. `GET /api/audit/evidence-policies/*` and `GET /api/audit` prove retention metadata and audited issuance.
 
 ---
 
@@ -293,21 +299,20 @@ Tenant Console (setup + booking/update/approval) ─► Platform Admin / Ops (di
 
 ## 5. Fixture Inventory
 
-| Fixture File                     | Used By                          | Description                                                       |
-| -------------------------------- | -------------------------------- | ----------------------------------------------------------------- |
-| `e2e-booking-enterprise.json`    | E2E-001, E2E-004                 | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
-| `e2e-booking-airport.json`       | E2E-007, reserved for E2E-003    | `credit_card_airport_transfer` booking                            |
-| `e2e-dispatch-assign.json`       | E2E-001                          | Dispatch assign body with `__*__` placeholders                    |
-| `e2e-driver-accept.json`         | E2E-001                          | Driver task accept with `__ACCEPTED_AT__`                         |
-| `e2e-driver-depart.json`         | E2E-001                          | Driver depart pickup with `__DEPARTED_AT__`                       |
-| `e2e-driver-arrived-pickup.json` | E2E-001                          | Driver arrived at pickup with `__ARRIVED_AT__`                    |
-| `e2e-driver-start.json`          | E2E-001                          | Driver trip start with `__STARTED_AT__`                           |
-| `e2e-driver-complete.json`       | E2E-001                          | Driver task complete with signoff                                 |
-| `e2e-tenant-create.json`         | E2E-004                          | Platform-admin tenant create with `__TENANT_CODE__`               |
-| `e2e-booking-airport.json`       | E2E-008, reserved for E2E-003    | Partner / airport-transfer booking with partner linkage fields    |
-| `e2e-phone-booking.json`         | Reserved (E2E-003 manual flow)   | Phone booking payload stub for future CTI-backed automation       |
-| `e2e-report-compliance.json`     | Reserved (E2E-003 manual flow)   | Compliance export payload stub for future report validation       |
-| `e2e-tenant-module-enable.json`  | Reserved (future expansion)      | Tenant module-enable payload stub for future staged cutovers      |
+| Fixture File                     | Used By                             | Description                                                       |
+| -------------------------------- | ----------------------------------- | ----------------------------------------------------------------- |
+| `e2e-booking-enterprise.json`    | E2E-001, E2E-004                    | `enterprise_dispatch` booking with `__RESERVATION_*__` timestamps |
+| `e2e-booking-airport.json`       | (reserved for future E2E expansion) | `credit_card_airport_transfer` booking                            |
+| `e2e-dispatch-assign.json`       | E2E-001                             | Dispatch assign body with `__*__` placeholders                    |
+| `e2e-driver-accept.json`         | E2E-001, E2E-002                    | Driver task accept with `__ACCEPTED_AT__`                         |
+| `e2e-driver-depart.json`         | E2E-001                             | Driver depart pickup with `__DEPARTED_AT__`                       |
+| `e2e-driver-arrived-pickup.json` | E2E-001                             | Driver arrived at pickup with `__ARRIVED_AT__`                    |
+| `e2e-driver-start.json`          | E2E-001                             | Driver trip start with `__STARTED_AT__`                           |
+| `e2e-driver-complete.json`       | E2E-001                             | Driver task complete with signoff                                 |
+| `e2e-tenant-create.json`         | E2E-004                             | Platform-admin tenant create with `__TENANT_CODE__`               |
+| `e2e-phone-booking.json`         | E2E-003                             | Phone booking payload for call-center order creation              |
+| `e2e-report-compliance.json`     | E2E-003                             | Dispatch recording index report-job payload                       |
+| `e2e-tenant-module-enable.json`  | Reserved (future expansion)         | Tenant module-enable payload stub for future staged cutovers      |
 
 All `__PLACEHOLDER__` values are replaced at runtime by the scenario scripts before the fixture
 is passed to curl.
