@@ -143,6 +143,19 @@ These items are unambiguous, dispatch-ready:
 | Production rollback drill doc + actual drill run                                     | Existing prod-deploy-rollback-runbook covers commands; no separate "drill" doc + no drill run evidence                             |
 | Live forwarder sandbox / partner-eligibility issuer / CTI provider activation        | All three remain `EXTERNAL-GATED` / `HOLD` pending external credentials                                                            |
 
+### Resolved routing note: live forwarder sandbox partner authority
+
+This item does not need a new in-repo product contract before the v3 docs wave
+continues.
+
+- `FWD-SPEC-001` is the design-doc formalization task for the generic
+  `forwarder_sandbox` proof boundary.
+- `WF-FWD-001-LIVE-SANDBOX` stays `HELD` and routes through
+  `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md`.
+- "Grab Taiwan or equivalent" remains acceptable planning shorthand until the
+  external owner names the concrete partner contract authority, but no live
+  proof claim may be made from sandbox/stub evidence alone.
+
 ## 5. Phase 1 v2 completion status (for context)
 
 Before answering Phase 1 v3's questions, note where v2 actually got us:

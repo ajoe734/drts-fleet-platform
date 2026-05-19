@@ -103,7 +103,7 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 
 | ID                  | Owner  | Reviewer | What                                                                                                                                                                        |
 | ------------------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FWD-SPEC-001`      | Codex  | Codex2   | `docs/02-architecture/forwarder-adapter-proof-spec-20260519.md`. Build on existing `forwarder-sandbox-provider.md` + `FWD-VERIF-001` + `FWD-LIVE-001` sidecars.             |
+| `FWD-SPEC-001`      | Codex  | Codex2   | `docs/02-architecture/forwarder-adapter-proof-spec-20260519.md`. Build on existing `forwarder-sandbox-provider.md` + `FWD-VERIF-001` + `FWD-LIVE-001` sidecars; formalize sandbox proof boundaries only and keep live partner activation routed to `EXT-002` / `WF-FWD-001-LIVE-SANDBOX`. |
 | `PRT-SPEC-001`      | Codex  | Claude2  | `docs/02-architecture/partner-eligibility-airport-transfer-spec-20260519.md`. Consolidate `PRT-VERIF-001` + `EXT-001` evidence into formal spec.                            |
 | `COM-BLUEPRINT-001` | Codex2 | Claude   | `docs/02-architecture/cti-recording-filing-blueprint-20260519.md`. Consolidate `EVD-VERIF-001` + `EXT-004` + `COM-CTI-SBX-001` + `COM-LIVE-001` artifacts.                  |
 | `FIN-GOV-SPEC-001`  | Codex  | Codex2   | `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md`. Build on `BE-CC-001-FU-BILLING` + `FIN-GOV-001` sidecar. Resolves `WF-FIN-GOV-001` row content. |
@@ -133,13 +133,19 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 | ------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `WF-DRV-MP-001-DEVICE-EVIDENCE` | Needs physical Android + iPhone, weak-network test environment, human-in-loop                             |
 | `WF-PROD-001-LIVE-EXEC`         | Needs prod GCP project + WIF + Cloud SQL + Secret Manager + GitHub Environment `production` reviewer rule |
-| `WF-FWD-001-LIVE-SANDBOX`       | Needs real partner platform sandbox credentials (Grab Taiwan or equivalent)                               |
+| `WF-FWD-001-LIVE-SANDBOX`       | Needs the real partner contract authority plus sandbox credentials, webhook-signature rules, and callback evidence per `EXT-002`; `forwarder_sandbox` and `FWD-SPEC-001` do not clear this gate |
 | `WF-COM-001-LIVE-PROVIDER`      | Needs CTI provider activation + webhook environment                                                       |
 | `PARTNER-ELIG-LIVE-001`         | Needs real issuer/bank sandbox credentials                                                                |
 | `E2E-NUMBERING-DECISION`        | User decision per conflicts doc §1 Q1                                                                     |
 | `WF-PARTNER-RENAME-DECISION`    | User decision per conflicts doc §2 Q2                                                                     |
 | `WF-FIN-GOV-DECISION`           | User decision per conflicts doc §2 Q3                                                                     |
 | `DOCS-STRATEGY-DECISION`        | User decision per conflicts doc §3 Q4 (Options A/B/C for 17 directive docs)                               |
+
+### Forwarder live-sandbox routing decision
+
+- `FWD-SPEC-001` closes only the directive's design-doc requirement for the forwarder proof spec. Its canonical scope is the generic `forwarder_sandbox` harness, the repo-local proof boundary, and the non-claim language that keeps stub/sandbox evidence separate from live partner proof.
+- `WF-FWD-001-LIVE-SANDBOX` remains a separate `HELD` execution task. It is not unblocked by the sandbox harness itself and must continue through `support/sidecars/EXT-002/EXT-002-FORWARDER-ADAPTER-GATE.md` until a specific external partner contract authority, sandbox credentials, webhook signature scheme, and callback lifecycle evidence are supplied.
+- Planning consequence: the v3 documentation wave may proceed with `FWD-SPEC-001` even if the real partner is still "Grab Taiwan or equivalent." The live sandbox task resumes only when the external owner names the concrete partner contract and provides the `EXT-002-BLK-001` to `EXT-002-BLK-007` inputs.
 
 ## 6. Workload distribution
 
