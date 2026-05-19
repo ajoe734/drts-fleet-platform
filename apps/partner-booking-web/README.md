@@ -32,7 +32,7 @@ This app now carries the PBK-UI-003 CTBC reference funnel baseline. Per
   `landing` (the tenant root), `eligibility`, and `help` sit in
   `(public)/`; `book`, `confirmed`, `trips`, and `receipt` sit in
   `(authenticated)/`. Each page renders the shared
-  `PartnerBookingReferenceFunnel` (`@drts/ui-web`) with a fixed
+  `PartnerBookingReferenceFunnel` (`@drts/ui-web/partner-booking`) with a fixed
   `activeScreen`, so the funnel navigator's hrefs map one-to-one onto
   those routes.
 - `app/[tenantSlug]/layout.tsx` resolves the brand via `lib/brand.ts`. An

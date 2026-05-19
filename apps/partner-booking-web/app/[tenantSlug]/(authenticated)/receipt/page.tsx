@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { PartnerBookingReferenceFunnel } from "@drts/ui-web";
+import { PartnerBookingReferenceFunnel } from "@drts/ui-web/partner-booking";
 import { getBrandForSlug } from "@/lib/brand";
 
 type PageProps = {

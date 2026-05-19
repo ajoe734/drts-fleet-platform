@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import {
   PartnerBookingStateGate,
   type PartnerBookingStateScreenId,
-} from "@drts/ui-web";
+} from "@drts/ui-web/partner-booking";
 import { getBrandForSlug } from "@/lib/brand";
 
 type PageProps = {
