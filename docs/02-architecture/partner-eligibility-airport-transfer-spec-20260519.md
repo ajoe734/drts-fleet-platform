@@ -7,7 +7,13 @@ Scope: `apps/api/src/modules/tenant-partner`, `apps/api/src/modules/owned-mobili
 ## Purpose
 
 This document turns the partner eligibility and airport-transfer flow into a
-formal Phase 1 architecture spec for `WF-PRT-001` / `WF-PARTNER-001`.
+formal Phase 1 architecture spec for canonical workflow `WF-PRT-001`.
+
+`WF-PARTNER-001` appears in the Phase 1 v3 directive/planning materials as a
+proposed rename, but `WF-PARTNER-RENAME-DECISION` is still held pending user
+decision. Until that decision lands, this spec treats `WF-PRT-001` as the only
+canonical workflow id and mentions `WF-PARTNER-001` only as pending naming
+context, not as an accepted alias.
 
 It consolidates two evidence families:
 
@@ -22,6 +28,13 @@ operator fallback is named, and live issuer closure remains out of scope until
 the external gate packet is cleared.
 
 ## Canonical Outcome
+
+Naming baseline for this spec:
+
+- canonical workflow id: `WF-PRT-001`
+- pending directive-side rename candidate: `WF-PARTNER-001`
+- disallowed wording for now: any sentence that implies the rename/alias
+  decision is already accepted
 
 The current Phase 1 repo baseline supports the following claims:
 
@@ -173,8 +186,9 @@ The surviving evidence chain for this gate is two-sided:
 returns the same `partnerEntrySlug`, `eligibilityVerificationId`, and
 `benefitReference` that were produced during verification.
 
-This is the explicit booking-create gate anchor that keeps `WF-PRT-001` in
-`PASS (static evidence)` rather than reducing it to a dispatch-only claim.
+This is the explicit booking-create gate anchor that keeps canonical
+`WF-PRT-001` in `PASS (static evidence)` rather than reducing it to a
+dispatch-only claim.
 
 ### 4. Dispatch and driver execution
 
@@ -265,8 +279,17 @@ from the formalized chain.
 
 For v3 blueprint completion, the correct release language is:
 
-- `WF-PRT-001` / `WF-PARTNER-001`: `PASS (static evidence)`
+- `WF-PRT-001`: `PASS (static evidence)`
 - live issuer activation: `EXTERNAL-GATED`
+
+If readers need to map this spec back to the v3 directive wording, the safe
+reading is:
+
+- directive term `WF-PARTNER-001` currently points at the same product scope
+  as canonical `WF-PRT-001`
+- that mapping is a conflict note only, not an approved rename
+- this spec intentionally does not normalize the directive term into a formal
+  alias because `WF-PARTNER-RENAME-DECISION` is still open
 
 That wording is mandatory because the repo proves architecture, persistence,
 downstream propagation, and operator fallback, but it does not prove external
@@ -297,6 +320,8 @@ Until then:
 
 - confirm the spec names both `PRT-VERIF-001` and `EXT-001` instead of only the
   happy path
+- confirm the spec keeps `WF-PRT-001` as canonical and treats
+  `WF-PARTNER-001` only as a pending rename context
 - confirm the flow contract covers ingress, verification, booking, dispatch,
   billing, and reporting
 - confirm manual-review and redaction rules are explicit
