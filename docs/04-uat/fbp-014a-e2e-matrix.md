@@ -297,6 +297,67 @@ Tenant Console (setup + booking/update/approval) ─► Platform Admin / Ops (di
 
 ---
 
+### 4.6 E2E-010 — Governance-Aware Billing / Reporting Shell
+
+**Script:** `tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+**Workflow family:** `WF-FIN-GOV-001` (depends on `WF-TGV-001` + `WF-FIN-001`)
+**Spec / UAT cross-ref:**
+
+- `docs/02-architecture/governance-aware-billing-reporting-spec-20260519.md` (`FIN-GOV-SPEC-001`)
+- `docs/04-uat/governance-aware-billing-reporting-uat-20260519.md` (`FIN-GOV-UAT-001`, sub-cases `FG-01`–`FG-09`)
+- `docs/00-context/phase1-design-blueprint-completion-directive-20260519.md` §3.7
+
+#### Surface Chain
+
+```
+Tenant Console (cost-center + quota + approval rule)
+  ─► Tenant Console (governed booking with costCenterCode)
+  ─► Tenant Console (quota summary + ledger)
+  ─► Tenant Console (approval snapshot)
+  ─► Ops Console (best-effort dispatch to drive completion)
+  ─► Tenant Console (invoice generation + line read-back)
+  ─► Tenant / Platform reporting (report job + governance columns)
+  ─► Platform Admin (settlement matrix + platform-earnings by-platform)
+  ─► Platform Admin (audit entry for sensitive generation/download)
+  ─► Tenant Console (cost-center coverage / legacy_unmapped probe)
+  ─► Tenant Console (unauthorized finance access denial)
+```
+
+#### Sub-Case Matrix
+
+| Case   | Probe                                          | Primary route(s)                                                                                              | Probe outcome                                                                                                                  |
+| ------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `FG-01` | Booking → invoice carries cost-center attribution | `POST /api/tenant/bookings`, `GET /api/tenant/bookings/:id`, `POST /api/tenant/invoices/generate`, `GET /api/tenant/invoices/:id` | Hard-fails if `costCenter` is dropped from booking read-back; records `costCenterCode/Name/ownerUserId/approvalState/activeFlag/legacy_unmapped` presence on invoice lines |
+| `FG-02` | Quota reservation + ledger continuity          | `GET /api/tenant/cost-centers/:code/quota`, `GET /api/tenant/quotas/ledger`                                   | Records usage/limit and ledger entry count; missing endpoints recorded as `NOT_POPULATED`                                       |
+| `FG-03` | Approval evaluation snapshot                   | `GET /api/tenant/approval-requests?bookingId=…`                                                               | Records `approvalRequestId`, `state`, `evaluatedAt`, `decision` from the booking's approval request                             |
+| `FG-04` | Governance-aware report export                 | `POST /api/tenant/reports/jobs` (fallback `POST /api/reports/jobs`), `GET /api/(tenant/)reports/:jobId`        | Records presence of `costCenterCode/Name/ownerUserId/approvalState/quotaImpacts/partnerProgramId/legacy_unmapped` in the job row |
+| `FG-05` | Partner-program reconciliation references      | `GET /api/settlement/matrix`                                                                                  | Records partner-row count and any observed `programId`; pairs with invoice-level `partnerId/partnerProgramId` recording          |
+| `FG-06` | Platform earnings separation by `platformCode` | `GET /api/platform-earnings/by-platform`                                                                      | Records platform item count and joined `platformCode` list                                                                       |
+| `FG-07` | Legacy unmapped cost-center labelling          | `GET /api/tenant/cost-centers/coverage`                                                                       | Records `totalBookings`, `resolvedCount`, `unresolvedCount`, `disabledHits`, first `unresolvedSamples[]` entry                   |
+| `FG-08` | Sensitive invoice/report download audit        | `GET /api/audit`                                                                                              | Records the matched `auditId` for the generated invoice; falls back to any invoice-related action when direct join is missing   |
+| `FG-09` | Unauthorized finance access denied             | `GET /api/tenant/invoices` as `ops_user`                                                                      | Logs `PASS` on `401/403`; otherwise records observed status for reviewer follow-up (integration suite owns the deterministic read) |
+
+#### Pass Criteria
+
+1. Booking creation with `costCenterCode` must round-trip through booking read-back — a dropped cost-center is a hard fail.
+2. Invoice and report job creation must either succeed (≥1 `200/201`) or be recorded as not-available with the observed HTTP status; the script does not assert governance enrichment is populated, because the spec marks several fields as still partially enriched.
+3. Each governance enrichment field is recorded in `E2E_EVIDENCE_FILE` as either `<value>` or `NOT_POPULATED`, so a reviewer can read the field-presence delta over time without rewriting the script.
+4. Audit lookup for the generated invoice records a matched `auditId` (direct or invoice-related action) when `/audit` is available.
+5. Unauthorized finance access is recorded as `PASS` when the API returns `401/403`; a softer denial is logged for reviewer follow-up.
+
+#### Notes
+
+- This script is a **shell**: per `FIN-GOV-UAT-001` the live promotion for `WF-FIN-GOV-001` is currently `BLOCKED FOR LIVE`. The script's `record_field` helper marks each unpopulated governance field as `NOT_POPULATED` so the field-presence delta becomes the reviewable evidence as enrichment lands incrementally.
+- Hard failures are reserved for contract regressions (cost-center dropped from booking, unauthorized finance access widening, audit chain broken), matching the conservative posture in `phase1-workflow-acceptance-release-gates.md` for `WF-FIN-GOV-001`.
+- Negative-path governance assertions (unknown / disabled / cross-tenant cost centers, rule block, rejected booking, escalation visibility) remain owned by `E2E-005-tenant-governance.sh` and `tests/integ/tenant-governance-negative.test.ts`.
+
+#### Verification Snapshot
+
+- `bash -n tests/e2e/E2E-010-governance-aware-billing-reporting.sh`
+- `bash tests/e2e/run-e2e.sh --suite 010 --dry-run`
+
+---
+
 ## 5. Fixture Inventory
 
 | Fixture File                     | Used By                             | Description                                                       |
@@ -320,6 +381,12 @@ is passed to curl.
 `E2E-002` now builds its `forwarder_sandbox` inbound / broadcast / accept /
 sync payloads as deterministic runtime JSON instead of relying on static fixture
 files, so the mirror order IDs remain unique per run.
+
+`E2E-005` and `E2E-010` likewise build their tenant-governance payloads
+(cost-center, quota policy, approval rule, governed booking, invoice period,
+report job filter) as deterministic runtime JSON under `/tmp/drts-e2e-005-*` /
+`/tmp/drts-e2e-010-*` so the suffix-scoped fixtures stay unique per run and
+nothing is committed under `tests/e2e/fixtures/`.
 
 ---
 
@@ -380,6 +447,7 @@ Minimum evidence items required for each scenario:
 | E2E-002  | `primaryMirrorOrderId`, `forwardedTaskId`, `routeLocked`, `sourcePlatform`, `primaryDriverCompletedStatus`, `secondaryDriverCancelledStatus`, `settlementLedgerMode` |
 | E2E-004  | `newTenantId`, `bookingId` (new tenant), `crossTenantLeakDetected=false`                                                                                             |
 | E2E-008  | `inactiveBootstrapCode`, `eligibilityVerificationId`, `bookingId`, `receiptOwner`, `invoiceId`                                                                       |
+| E2E-010  | `bookingId`, `costCenter`, `approvalState`, `quotaBookingCountUsed`, `approvalRequestId`, `invoiceId`, `invoiceCostCenterCode`, `invoiceApprovalState`, `reportJobId`, `platformCodes`, `coverageUnresolvedCount`, `invoiceAuditId` — each governance field recorded with the literal value or the `NOT_POPULATED` marker |
 
 ---
 
@@ -395,6 +463,9 @@ Minimum evidence items required for each scenario:
 | FBP-012  | done        | Regulatory / reporting routes (available for future E2E-003 expansion)                   |
 | FBP-013  | in_progress | Staging evidence closeout; E2E-001/004 count as rollout-grade only after FBP-013 closes  |
 | FBP-014B | todo        | Blocked on FBP-013 + FBP-014A; will execute live integrated evidence run against staging |
+| FIN-GOV-SPEC-001 | done | Defines the governance-aware billing/reporting field expectations consumed by `E2E-010` |
+| FIN-GOV-UAT-001  | done | Defines sub-cases `FG-01`..`FG-09` and the conservative `BLOCKED FOR LIVE` read enforced by the `E2E-010` shell |
+| WF-FIN-GOV-001-MATRIX | done | Registers the `WF-FIN-GOV-001` row in the release-gate matrix; `E2E-010` is the companion automated shell |
 
 ---
 
