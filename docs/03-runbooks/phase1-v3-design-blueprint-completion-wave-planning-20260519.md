@@ -134,7 +134,7 @@ All 17 files in directive §6 are missing from dev. See conflicts doc §3 for th
 | `WF-DRV-MP-001-DEVICE-EVIDENCE` | Needs physical Android + iPhone, weak-network test environment, human-in-loop                             |
 | `WF-PROD-001-LIVE-EXEC`         | Needs prod GCP project + WIF + Cloud SQL + Secret Manager + GitHub Environment `production` reviewer rule |
 | `WF-FWD-001-LIVE-SANDBOX`       | Needs real partner platform sandbox credentials (Grab Taiwan or equivalent)                               |
-| `WF-COM-001-LIVE-PROVIDER`      | Needs CTI provider activation + webhook environment                                                       |
+| `WF-COM-001-LIVE-PROVIDER`      | Needs actual CTI provider activation + webhook environment; approved stub or sandbox proof only closes the base `WF-COM-001` evidence path, not this live-provider follow-on |
 | `PARTNER-ELIG-LIVE-001`         | Needs real issuer/bank sandbox credentials                                                                |
 | `E2E-NUMBERING-DECISION`        | User decision per conflicts doc §1 Q1                                                                     |
 | `WF-PARTNER-RENAME-DECISION`    | User decision per conflicts doc §2 Q2                                                                     |
@@ -175,7 +175,7 @@ The HELD tasks (real-device, live prod, live forwarder, live CTI, live issuer) r
 - `WF-DRV-MP-001-DEVICE-EVIDENCE` once devices arrive
 - `WF-PROD-001-LIVE-EXEC` once GCP prod configured
 - `WF-FWD-001-LIVE-SANDBOX` once partner sandbox credentials arrive
-- `WF-COM-001-LIVE-PROVIDER` once CTI provider activates
+- `WF-COM-001-LIVE-PROVIDER` once the CTI provider owner resolves `EXT-004-BLK-001` through `EXT-004-BLK-008` with an actual provider environment, callback/security details, and staging/live evidence; `COM-BLUEPRINT-001` is already closed and is not the remaining gate
 - `PARTNER-ELIG-LIVE-001` once issuer credentials arrive
 
 ## 9. Notes for supervisor
@@ -184,3 +184,4 @@ The HELD tasks (real-device, live prod, live forwarder, live CTI, live issuer) r
 - All design-intent changes (this runbook, conflicts doc, directive archive) follow branch + anchor commit + PR rule.
 - The 4 HELD-pending-decision tasks must not be dispatched until the user's decisions are recorded.
 - The 5 HELD-external tasks remain in the queue at `status=blocked` with explicit `waiting_for` set so the matrix dashboard surfaces them as pending-external.
+- Treat approved CTI stub or sandbox proof as sufficient only for the base `WF-COM-001` sandbox/static evidence posture. `WF-COM-001-LIVE-PROVIDER` stays blocked until a real provider activation path exists.
