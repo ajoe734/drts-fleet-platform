@@ -8,9 +8,11 @@ import {
   CanvasCard as Card,
   CanvasDL as DL,
   CanvasField as Field,
+  CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
   CanvasShell as Shell,
+  CanvasTable as Table,
   Timeline,
   buildCanvasTheme,
   type CanvasShellNavItem,
@@ -31,6 +33,7 @@ const theme = buildCanvasTheme({
   surface: "platform",
   density: "compact",
 });
+type EvidenceArtifactRow = { artifactId: string };
 
 function parseArtifactIds(value: string) {
   return value
@@ -62,6 +65,9 @@ function getStatusTone(status: ReconciliationIssueRecord["status"]) {
   }
   if (status === "assigned") {
     return "warn" as const;
+  }
+  if (status === "reopened") {
+    return "danger" as const;
   }
   return "neutral" as const;
 }
@@ -375,6 +381,13 @@ export default function PaymentReconciliationIssueDetailPage() {
     () => (issue ? buildTimelineItems(issue, locale, t) : []),
     [issue, locale, t],
   );
+  const evidenceRows = useMemo<EvidenceArtifactRow[]>(
+    () =>
+      issue?.evidenceArtifactIds.map((artifactId) => ({
+        artifactId,
+      })) ?? [],
+    [issue],
+  );
 
   useEffect(() => {
     if (!issue) {
@@ -513,11 +526,25 @@ export default function PaymentReconciliationIssueDetailPage() {
   }
 
   const headerTitle = issue
-    ? `${issue.issueId} · ${issue.summary}`
+    ? `${issue.issueId} · ${formatPlatformCodeLabel(locale, issue.issueType)}`
     : issueId || t("payments.reconciliation.title");
   const headerSubtitle = issue
     ? formatIssueSubtitle(issue, locale)
     : t("payments.reconciliation.subtitle");
+  const resolutionCardSubtitle =
+    issue?.status === "resolved"
+      ? locale === "zh"
+        ? "此 issue 已結案；若有新證據或外部修正，可從此卡片重開。"
+        : "This issue is resolved; reopen it from this card when new evidence arrives."
+      : locale === "zh"
+        ? "在同一卡片內完成指派、補證據與正式結案。"
+        : "Keep assignment, evidence capture, and resolution in one workflow.";
+
+  function scrollToSection(sectionId: string) {
+    document
+      .getElementById(sectionId)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <>
@@ -559,39 +586,37 @@ export default function PaymentReconciliationIssueDetailPage() {
           title={headerTitle}
           subtitle={headerSubtitle}
           actions={
-            <>
+            <div className="headerActions">
               <Btn
                 theme={theme}
                 variant="secondary"
-                icon="payments"
-                onClick={() => router.push("/payments")}
+                icon="copy"
+                onClick={() => scrollToSection("assignment-section")}
+                disabled={!issue}
               >
-                {locale === "zh" ? "返回佇列" : "Back to queue"}
+                {t("payments.reconciliation.assign")}
               </Btn>
               <Btn
                 theme={theme}
                 variant="secondary"
-                onClick={() => void loadIssues()}
-                disabled={loading}
+                icon="plus"
+                onClick={() => scrollToSection("evidence-section")}
+                disabled={!issue}
               >
-                {t("common.refresh")}
+                {locale === "zh" ? "補 evidence" : "Add evidence"}
               </Btn>
               <Btn
                 theme={theme}
                 variant="primary"
                 icon={issue?.status === "resolved" ? "plus" : "check"}
-                onClick={() =>
-                  document
-                    .getElementById("resolution-card")
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" })
-                }
+                onClick={() => scrollToSection("resolution-card")}
                 disabled={!issue}
               >
                 {issue?.status === "resolved"
                   ? t("payments.reconciliation.reopen")
                   : t("payments.reconciliation.resolve")}
               </Btn>
-            </>
+            </div>
           }
         />
 
@@ -657,7 +682,45 @@ export default function PaymentReconciliationIssueDetailPage() {
 
               <div className="contentGrid">
                 <div className="contentColumn">
-                  <Card theme={theme} title="Issue summary">
+                  <Card
+                    theme={theme}
+                    title="Issue summary"
+                    subtitle={issue.summary}
+                  >
+                    <div className="summaryMetricGrid">
+                      <KPI
+                        theme={theme}
+                        label="STATUS"
+                        value={formatPlatformCodeLabel(locale, issue.status)}
+                        sub={formatPlatformCodeLabel(locale, issue.source)}
+                        hint={describeChannel(t, issue.channelKey)}
+                      />
+                      <KPI
+                        theme={theme}
+                        label="OWNER"
+                        value={textOrDash(issue.ownerId)}
+                        sub={issue.openedBy}
+                        hint={formatDateTime(issue.createdAt)}
+                      />
+                      <KPI
+                        theme={theme}
+                        label="EVIDENCE"
+                        value={issue.evidenceArtifactIds.length}
+                        delta={
+                          issue.reopenCount > 0
+                            ? t("payments.reconciliation.reopenCount", {
+                                count: String(issue.reopenCount),
+                              })
+                            : undefined
+                        }
+                        deltaTone={issue.reopenCount > 0 ? "down" : "neutral"}
+                        sub={t("payments.reconciliation.commentCount", {
+                          count: String(issue.comments.length),
+                        })}
+                        hint={formatDateTime(issue.updatedAt)}
+                      />
+                    </div>
+
                     <DL
                       theme={theme}
                       cols={3}
@@ -668,16 +731,8 @@ export default function PaymentReconciliationIssueDetailPage() {
                           mono: true,
                         },
                         {
-                          k: "STATUS",
-                          v: (
-                            <Pill
-                              theme={theme}
-                              tone={getStatusTone(issue.status)}
-                              dot
-                            >
-                              {formatPlatformCodeLabel(locale, issue.status)}
-                            </Pill>
-                          ),
+                          k: "CHANNEL",
+                          v: describeChannel(t, issue.channelKey),
                         },
                         {
                           k: "OWNER",
@@ -718,6 +773,26 @@ export default function PaymentReconciliationIssueDetailPage() {
                       ]}
                     />
 
+                    {evidenceRows.length > 0 ? (
+                      <div className="inlineSection">
+                        <div className="sectionLabel">ARTIFACT IDS</div>
+                        <div className="artifactTable">
+                          <Table
+                            theme={theme}
+                            dense
+                            columns={[
+                              {
+                                h: "ARTIFACT ID",
+                                k: "artifactId",
+                                mono: true,
+                              },
+                            ]}
+                            rows={evidenceRows}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+
                     {issue.forwardedFinanceContext ? (
                       <div className="cardNote">
                         <Banner
@@ -753,7 +828,15 @@ export default function PaymentReconciliationIssueDetailPage() {
                 </div>
 
                 <div className="contentColumn">
-                  <Card theme={theme} title="Linked references">
+                  <Card
+                    theme={theme}
+                    title="Linked references"
+                    subtitle={
+                      locale === "zh"
+                        ? "保留跨系統對帳、發票與報銷追蹤錨點。"
+                        : "Cross-system anchors retained for audit and payout follow-up."
+                    }
+                  >
                     <DL
                       theme={theme}
                       cols={1}
@@ -808,97 +891,130 @@ export default function PaymentReconciliationIssueDetailPage() {
                   </Card>
 
                   <div id="resolution-card">
-                    <Card theme={theme} title="Resolution">
-                      <div className="fieldStack">
-                        <Field
-                          theme={theme}
-                          label={t("payments.reconciliation.actorId")}
-                        >
-                          <input
-                            value={financeActorId}
-                            onChange={(event) =>
-                              setFinanceActorId(event.target.value)
-                            }
-                            style={controlStyle(theme)}
+                    <Card
+                      theme={theme}
+                      title="Resolution"
+                      subtitle={resolutionCardSubtitle}
+                    >
+                      {issue.status === "resolved" ? (
+                        <div className="cardNote">
+                          <Banner
+                            theme={theme}
+                            tone="success"
+                            icon="check"
+                            title={formatPlatformCodeLabel(
+                              locale,
+                              issue.resolutionCode ?? "resolved_other",
+                            )}
+                            body={issue.resolutionSummary ?? "—"}
                           />
-                        </Field>
+                        </div>
+                      ) : null}
 
-                        <Field
-                          theme={theme}
-                          label={t("payments.reconciliation.assignee")}
-                        >
-                          <div className="splitField">
-                            <input
-                              value={assigneeId}
+                      <div className="fieldStack">
+                        <div id="assignment-section" className="sectionBlock">
+                          <div className="sectionLabel">OWNER ACTION</div>
+                          <div className="fieldGrid">
+                            <Field
+                              theme={theme}
+                              label={t("payments.reconciliation.actorId")}
+                            >
+                              <input
+                                id="finance-actor-input"
+                                value={financeActorId}
+                                onChange={(event) =>
+                                  setFinanceActorId(event.target.value)
+                                }
+                                style={controlStyle(theme)}
+                              />
+                            </Field>
+
+                            <Field
+                              theme={theme}
+                              label={t("payments.reconciliation.assignee")}
+                            >
+                              <div className="splitField">
+                                <input
+                                  id="assignee-input"
+                                  value={assigneeId}
+                                  onChange={(event) =>
+                                    setAssigneeId(event.target.value)
+                                  }
+                                  style={controlStyle(theme)}
+                                />
+                                <Btn
+                                  theme={theme}
+                                  variant="secondary"
+                                  icon="copy"
+                                  onClick={() => void handleAssignIssue()}
+                                  disabled={actionPending !== null}
+                                >
+                                  {t("payments.reconciliation.assign")}
+                                </Btn>
+                              </div>
+                            </Field>
+                          </div>
+                        </div>
+
+                        <div id="evidence-section" className="sectionBlock">
+                          <div className="sectionLabel">COMMENT / EVIDENCE</div>
+                          <Field
+                            theme={theme}
+                            label={t("payments.reconciliation.comment")}
+                            hint={t("payments.reconciliation.commentCount", {
+                              count: String(issue.comments.length),
+                            })}
+                          >
+                            <textarea
+                              id="comment-message-input"
+                              value={commentMessage}
                               onChange={(event) =>
-                                setAssigneeId(event.target.value)
+                                setCommentMessage(event.target.value)
+                              }
+                              style={controlStyle(theme, true)}
+                            />
+                          </Field>
+
+                          <Field
+                            theme={theme}
+                            label={t("payments.reconciliation.artifactIds")}
+                            hint={t(
+                              "payments.reconciliation.artifactPlaceholder",
+                            )}
+                          >
+                            <input
+                              id="comment-artifacts-input"
+                              value={commentArtifactIds}
+                              onChange={(event) =>
+                                setCommentArtifactIds(event.target.value)
                               }
                               style={controlStyle(theme)}
                             />
+                          </Field>
+
+                          <div className="actionRow">
                             <Btn
                               theme={theme}
                               variant="secondary"
-                              icon="copy"
-                              onClick={() => void handleAssignIssue()}
+                              icon="plus"
+                              onClick={() => void handleAddComment()}
                               disabled={actionPending !== null}
                             >
-                              {t("payments.reconciliation.assign")}
+                              {t("payments.reconciliation.addComment")}
                             </Btn>
                           </div>
-                        </Field>
-
-                        <Field
-                          theme={theme}
-                          label={t("payments.reconciliation.comment")}
-                          hint={t("payments.reconciliation.commentCount", {
-                            count: String(issue.comments.length),
-                          })}
-                        >
-                          <textarea
-                            value={commentMessage}
-                            onChange={(event) =>
-                              setCommentMessage(event.target.value)
-                            }
-                            style={controlStyle(theme, true)}
-                          />
-                        </Field>
-
-                        <Field
-                          theme={theme}
-                          label={t("payments.reconciliation.artifactIds")}
-                          hint={t(
-                            "payments.reconciliation.artifactPlaceholder",
-                          )}
-                        >
-                          <input
-                            value={commentArtifactIds}
-                            onChange={(event) =>
-                              setCommentArtifactIds(event.target.value)
-                            }
-                            style={controlStyle(theme)}
-                          />
-                        </Field>
-
-                        <div className="actionRow">
-                          <Btn
-                            theme={theme}
-                            variant="secondary"
-                            icon="plus"
-                            onClick={() => void handleAddComment()}
-                            disabled={actionPending !== null}
-                          >
-                            {t("payments.reconciliation.addComment")}
-                          </Btn>
                         </div>
 
                         {issue.status !== "resolved" ? (
-                          <>
+                          <div className="sectionBlock">
+                            <div className="sectionLabel">RESOLUTION</div>
                             <Field
                               theme={theme}
                               label={t("payments.reconciliation.resolveCode")}
                               required
                             >
                               <select
+                                id="resolution-code-select"
                                 value={resolutionCode}
                                 onChange={(event) =>
                                   setResolutionCode(
@@ -928,6 +1044,7 @@ export default function PaymentReconciliationIssueDetailPage() {
                               required
                             >
                               <textarea
+                                id="resolution-summary-input"
                                 value={resolutionSummary}
                                 onChange={(event) =>
                                   setResolutionSummary(event.target.value)
@@ -944,6 +1061,7 @@ export default function PaymentReconciliationIssueDetailPage() {
                               )}
                             >
                               <input
+                                id="resolution-artifacts-input"
                                 value={resolutionArtifactIds}
                                 onChange={(event) =>
                                   setResolutionArtifactIds(event.target.value)
@@ -973,15 +1091,17 @@ export default function PaymentReconciliationIssueDetailPage() {
                                 {t("payments.reconciliation.resolve")}
                               </Btn>
                             </div>
-                          </>
+                          </div>
                         ) : (
-                          <>
+                          <div className="sectionBlock">
+                            <div className="sectionLabel">REOPEN</div>
                             <Field
                               theme={theme}
                               label={t("payments.reconciliation.reopenReason")}
                               required
                             >
                               <textarea
+                                id="reopen-reason-input"
                                 value={reopenReason}
                                 onChange={(event) =>
                                   setReopenReason(event.target.value)
@@ -998,6 +1118,7 @@ export default function PaymentReconciliationIssueDetailPage() {
                               )}
                             >
                               <input
+                                id="reopen-artifacts-input"
                                 value={reopenArtifactIds}
                                 onChange={(event) =>
                                   setReopenArtifactIds(event.target.value)
@@ -1017,7 +1138,7 @@ export default function PaymentReconciliationIssueDetailPage() {
                                 {t("payments.reconciliation.reopen")}
                               </Btn>
                             </div>
-                          </>
+                          </div>
                         )}
                       </div>
                     </Card>
@@ -1034,6 +1155,13 @@ export default function PaymentReconciliationIssueDetailPage() {
           padding: 24px;
           display: grid;
           gap: 16px;
+        }
+
+        .headerActions {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+          gap: 8px;
         }
 
         .pillRow {
@@ -1055,9 +1183,49 @@ export default function PaymentReconciliationIssueDetailPage() {
           align-content: start;
         }
 
+        .summaryMetricGrid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 16px;
+        }
+
         .fieldStack {
           display: grid;
-          gap: 4px;
+          gap: 0;
+        }
+
+        .sectionBlock + .sectionBlock {
+          border-top: 1px solid ${theme.border};
+          margin-top: 4px;
+          padding-top: 16px;
+        }
+
+        .fieldGrid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+        }
+
+        .inlineSection {
+          display: grid;
+          gap: 8px;
+          margin-top: 16px;
+        }
+
+        .sectionLabel {
+          font-size: 10.5px;
+          font-weight: 700;
+          color: ${theme.textMuted};
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          margin-bottom: 8px;
+        }
+
+        .artifactTable {
+          overflow: hidden;
+          border-radius: 8px;
+          border: 1px solid ${theme.border};
         }
 
         .splitField {
@@ -1096,6 +1264,11 @@ export default function PaymentReconciliationIssueDetailPage() {
 
         @media (max-width: 1080px) {
           .contentGrid {
+            grid-template-columns: 1fr;
+          }
+
+          .summaryMetricGrid,
+          .fieldGrid {
             grid-template-columns: 1fr;
           }
         }
