@@ -14,7 +14,6 @@ import {
   buildCanvasTheme,
   type CanvasShellNavItem,
   type CanvasTableColumn,
-  type CanvasTone,
 } from "@drts/ui-web";
 
 const theme = buildCanvasTheme({
@@ -32,58 +31,29 @@ const pageStackStyle = {
 
 type VehicleTableRow = Record<string, unknown> & {
   plate: string;
-  profile: string;
-  operatingArea: string;
-  serviceBuckets: string;
+  model: string;
+  modelMeta: string;
+  year: string;
   dispatchable: boolean;
   dispatchableLabel: string;
-  blockedBy: string;
-  blockedTone: CanvasTone;
   contract: string;
-  contractTone: CanvasTone;
   insurance: string;
-  insuranceTone: CanvasTone;
-  offboarding: string;
-  offboardingTone: CanvasTone;
-  lastChange: string;
-  debrandingPending: boolean;
-  _selected?: boolean;
+  debrandDue: string;
+  debrandTone: "neutral" | "warn" | "success";
 };
 
-function lifecycleTone(status: string): CanvasTone {
-  if (status === "active" || status === "valid" || status === "completed") {
-    return "success";
-  }
-  if (
-    status === "expired" ||
-    status === "terminated" ||
-    status === "revoked" ||
-    status === "rejected" ||
-    status === "cancelled"
-  ) {
-    return "danger";
-  }
-  if (status === "none" || status === "not_required" || status === "missing") {
-    return "neutral";
-  }
-  return "warn";
-}
-
-function formatShortDateTime(locale: Locale, value: string | null | undefined) {
+function formatShortDate(locale: Locale, value: string | null | undefined) {
   if (!value) {
     return "—";
   }
 
   return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    year: "numeric",
     month: "2-digit",
     day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
     timeZone: "UTC",
   })
-    .format(new Date(value))
-    .replace(",", "");
+    .format(new Date(value));
 }
 
 function buildShellNav(locale: Locale): CanvasShellNavItem[] {
@@ -185,76 +155,58 @@ function buildVehicleRows(
   locale: Locale,
 ): VehicleTableRow[] {
   return [...vehicles]
-    .sort((left, right) => {
-      const leftPriority =
-        (left.supplyLifecycle.dispatch.blockedReasons.length > 0 ? 0 : 1) +
-        (left.supplyLifecycle.offboarding.debrandingStatus === "pending"
-          ? -1
-          : 0);
-      const rightPriority =
-        (right.supplyLifecycle.dispatch.blockedReasons.length > 0 ? 0 : 1) +
-        (right.supplyLifecycle.offboarding.debrandingStatus === "pending"
-          ? -1
-          : 0);
-
-      if (leftPriority !== rightPriority) {
-        return leftPriority - rightPriority;
-      }
-
-      return left.plateNo.localeCompare(right.plateNo);
-    })
+    .sort((left, right) => left.plateNo.localeCompare(right.plateNo))
     .map((vehicle) => ({
       plate: vehicle.plateNo,
-      profile: vehicle.vehicleId,
-      operatingArea: vehicle.operatingArea,
-      serviceBuckets: vehicle.supportedServiceBuckets
-        .map((bucket) => formatOpsCodeLabel(locale, bucket))
-        .join(" · "),
+      model: vehicle.vehicleId,
+      modelMeta: vehicle.operatingArea,
+      year: "—",
       dispatchable: vehicle.dispatchableFlag,
       dispatchableLabel: vehicle.dispatchableFlag
         ? t("common.yes", locale)
         : t("common.no", locale),
-      blockedBy:
-        vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0
-          ? vehicle.supplyLifecycle.dispatch.blockedReasons
-              .map((reason) => formatOpsCodeLabel(locale, reason))
-              .join(" / ")
-          : t("vehicles.noneBlocked", locale),
-      blockedTone:
-        vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0
-          ? "warn"
-          : "neutral",
       contract: formatOpsCodeLabel(
         locale,
-        vehicle.supplyLifecycle.contract.lifecycleStatus,
-      ),
-      contractTone: lifecycleTone(
         vehicle.supplyLifecycle.contract.lifecycleStatus,
       ),
       insurance: formatOpsCodeLabel(
         locale,
         vehicle.supplyLifecycle.insurance.lifecycleStatus,
       ),
-      insuranceTone: lifecycleTone(
-        vehicle.supplyLifecycle.insurance.lifecycleStatus,
-      ),
-      offboarding: formatOpsCodeLabel(
-        locale,
-        vehicle.supplyLifecycle.offboarding.status,
-      ),
-      offboardingTone: lifecycleTone(vehicle.supplyLifecycle.offboarding.status),
-      lastChange: vehicle.supplyLifecycle.lastTrace
-        ? `${vehicle.supplyLifecycle.lastTrace.message} · ${formatShortDateTime(
+      debrandDue: vehicle.supplyLifecycle.offboarding.debrandingRequired
+        ? formatShortDate(
             locale,
-            vehicle.supplyLifecycle.lastTrace.occurredAt,
-          )}`
-        : t("vehicles.lastChangeNone", locale),
-      debrandingPending:
-        vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending",
-      _selected:
-        vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0 ||
-        vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending",
+            vehicle.supplyLifecycle.offboarding.debrandingDueAt,
+          )
+        : "—",
+      debrandTone:
+        vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending"
+          ? "warn"
+          : vehicle.supplyLifecycle.offboarding.debrandingStatus ===
+              "completed"
+            ? "success"
+            : "neutral",
     }));
+}
+
+function buildDebrandLabel(row: VehicleTableRow, locale: Locale) {
+  if (row.debrandDue === "—") {
+    return locale === "en" ? "not due" : "無";
+  }
+
+  if (row.debrandTone === "warn") {
+    return locale === "en"
+      ? `due ${row.debrandDue}`
+      : `到期 ${row.debrandDue}`;
+  }
+
+  if (row.debrandTone === "neutral") {
+    return row.debrandDue;
+  }
+
+  return locale === "en"
+    ? `cleared ${row.debrandDue}`
+    : `已完成 ${row.debrandDue}`;
 }
 
 export default async function VehiclesPage() {
@@ -275,20 +227,6 @@ export default async function VehiclesPage() {
         : t("common.unknown", locale);
   }
 
-  const warningVehicles = vehicles.filter(
-    (vehicle) => vehicle.supplyLifecycle.dispatch.blockedReasons.length > 0,
-  );
-  const dispatchableCount = vehicles.filter(
-    (vehicle) => vehicle.dispatchableFlag,
-  ).length;
-  const offboardingCount = vehicles.filter(
-    (vehicle) => vehicle.supplyLifecycle.offboarding.status !== "none",
-  ).length;
-  const debrandingPendingCount = vehicles.filter(
-    (vehicle) =>
-      vehicle.supplyLifecycle.offboarding.debrandingStatus === "pending",
-  ).length;
-
   const rows = buildVehicleRows(vehicles, locale);
 
   const columns: CanvasTableColumn<VehicleTableRow>[] = [
@@ -299,40 +237,35 @@ export default async function VehiclesPage() {
       r: (row) => <span style={{ fontWeight: 600 }}>{row.plate}</span>,
     },
     {
-      h: t("vehicles.col.vehicleId", locale),
+      h: locale === "en" ? "MODEL" : "車型 / 車輛",
       w: 210,
       r: (row) => (
         <div style={{ display: "grid", gap: 2 }}>
           <span
             style={{
-              fontFamily: theme.monoFamily,
-              fontSize: 11.5,
+              fontSize: 12,
+              fontWeight: 600,
               color: theme.text,
             }}
           >
-            {row.profile}
+            {row.model}
           </span>
           <span style={{ fontSize: 11.5, color: theme.textMuted }}>
-            {row.serviceBuckets}
+            {row.modelMeta}
           </span>
         </div>
       ),
     },
     {
-      h: t("vehicles.col.operatingArea", locale),
-      w: 180,
-      r: (row) => (
-        <div style={{ display: "grid", gap: 4 }}>
-          <span>{row.operatingArea}</span>
-          <Pill theme={theme} tone={row.blockedTone}>
-            {row.blockedBy}
-          </Pill>
-        </div>
-      ),
+      h: locale === "en" ? "YEAR" : "年份",
+      w: 80,
+      mono: true,
+      align: "right",
+      r: (row) => row.year,
     },
     {
       h: t("vehicles.col.dispatchable", locale),
-      w: 120,
+      w: 140,
       r: (row) => (
         <Pill
           theme={theme}
@@ -345,45 +278,29 @@ export default async function VehiclesPage() {
     },
     {
       h: t("vehicles.col.contract", locale),
+      k: "contract",
       w: 130,
-      r: (row) => (
-        <Pill theme={theme} tone={row.contractTone} dot>
-          {row.contract}
-        </Pill>
-      ),
+      mono: true,
     },
     {
       h: t("vehicles.col.insurance", locale),
+      k: "insurance",
       w: 130,
-      r: (row) => (
-        <Pill theme={theme} tone={row.insuranceTone} dot>
-          {row.insurance}
-        </Pill>
-      ),
+      mono: true,
     },
     {
-      h: t("vehicles.col.offboarding", locale),
-      w: 150,
-      r: (row) => {
-        if (row.debrandingPending) {
-          return (
-            <div style={{ display: "grid", gap: 4 }}>
-              <Pill theme={theme} tone={row.offboardingTone} dot>
-                {row.offboarding}
-              </Pill>
-              <span style={{ fontSize: 11.5, color: theme.warn }}>
-                {t("vehicles.debrandingPending", locale)}
-              </span>
-            </div>
-          );
-        }
-
-        return (
-          <Pill theme={theme} tone={row.offboardingTone} dot>
-            {row.offboarding}
-          </Pill>
-        );
-      },
+      h: locale === "en" ? "DEBRAND DUE" : "除標識期限",
+      w: 160,
+      mono: true,
+      r: (row) => (
+        <Pill
+          theme={theme}
+          tone={row.debrandTone}
+          dot={row.debrandTone !== "neutral"}
+        >
+          {buildDebrandLabel(row, locale)}
+        </Pill>
+      ),
     },
   ];
 
@@ -442,29 +359,8 @@ export default async function VehiclesPage() {
             />
           ) : null}
 
-          {warningVehicles.length > 0 ? (
-            <Banner
-              theme={theme}
-              tone="warn"
-              icon="warn"
-              title={t("vehicles.warningTitle", locale)}
-              body={t("vehicles.registrySummary", locale, {
-                dispatchable: dispatchableCount,
-                blocked: warningVehicles.length,
-                offboarding: offboardingCount,
-                debranding: debrandingPendingCount,
-              })}
-            />
-          ) : null}
-
           <Card
             theme={theme}
-            title={t("vehicles.title", locale)}
-            subtitle={
-              locale === "en"
-                ? "dispatchable · contract · insurance · debrand"
-                : "dispatchable · 合約 · 保險 · debrand"
-            }
             padding={0}
           >
             {rows.length > 0 ? (
