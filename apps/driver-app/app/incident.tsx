@@ -363,23 +363,29 @@ export default function IncidentScreen() {
   };
 
   const selectedSituationLabel = getSituationLabel(selectedSituation);
-  const orderContextSubtitle = incidentContextPreview
-    ? "平台與訂單資訊會跟著 SOS 一起送到安全事件。"
-    : "若目前沒有外部平台任務，SOS 仍會以一般安全事件建立。";
+  const contextDisplayId =
+    incidentContextPreview?.externalOrderId ??
+    incidentContextPreview?.mirrorOrderId ??
+    null;
   const contextDetailItems: DLItem[] = incidentContextPreview
     ? [
-        {
-          label: "外部訂單",
-          value: incidentContextPreview.externalOrderId ?? "未提供",
-          mono: true,
-        },
+        ...(incidentContextPreview.externalOrderId
+          ? [
+              {
+                label: "鏡像訂單",
+                value: incidentContextPreview.mirrorOrderId,
+                mono: true,
+              },
+            ]
+          : []),
         ...(incidentContextPreview.nativeStatus
           ? [
               {
                 label: "平台狀態",
                 value:
-                  formatPlatformStatusLabel(incidentContextPreview.nativeStatus) ??
-                  incidentContextPreview.nativeStatus,
+                  formatPlatformStatusLabel(
+                    incidentContextPreview.nativeStatus,
+                  ) ?? incidentContextPreview.nativeStatus,
               },
             ]
           : []),
@@ -497,25 +503,19 @@ export default function IncidentScreen() {
               {submitting ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
-                <Text style={styles.footerDangerButtonLabel}>
-                  {driverStrings.incident.confirmAction}
-                </Text>
+                <View style={styles.footerDangerButtonContent}>
+                  <Ionicons name="warning-outline" size={16} color="#FFFFFF" />
+                  <Text style={styles.footerDangerButtonLabel}>
+                    {driverStrings.incident.confirmAction}
+                  </Text>
+                </View>
               )}
             </Pressable>
           </View>
         </View>
       }
     >
-      <PageHeader
-        theme={THEME}
-        title={driverStrings.incident.title}
-        subtitle={driverStrings.incident.subtitle}
-        actions={
-          <Pill theme={THEME} tone="danger" dot>
-            {driverStrings.incident.urgentTitle}
-          </Pill>
-        }
-      />
+      <PageHeader theme={THEME} title={driverStrings.incident.title} />
 
       <Card
         theme={THEME}
@@ -538,14 +538,11 @@ export default function IncidentScreen() {
             <Ionicons name="warning-outline" size={20} color="#FFFFFF" />
           </View>
           <View style={styles.heroCopy}>
-            <Text style={styles.heroEyebrow}>
-              {driverStrings.incident.heroEyebrow}
-            </Text>
             <Text style={[styles.heroTitle, { color: THEME.danger }]}>
               {driverStrings.incident.heroTitle}
             </Text>
             <Text style={styles.heroBody}>
-              送出後將立即通知安全官與派車台，並建立重大安全事件優先處理。
+              {driverStrings.incident.subtitle}
             </Text>
           </View>
         </View>
@@ -608,7 +605,6 @@ export default function IncidentScreen() {
         <Text style={styles.sectionTitle}>
           {driverStrings.incident.sections.context}
         </Text>
-        <Text style={styles.sectionSubtitle}>{orderContextSubtitle}</Text>
         {incidentContextReady ? (
           <Card theme={THEME} padding={14} style={styles.contextCard}>
             {incidentContextPreview ? (
@@ -624,9 +620,7 @@ export default function IncidentScreen() {
                     {driverStrings.incident.orderContextForwarded}
                   </Pill>
                 </View>
-                <Text style={styles.contextTitle}>
-                  {incidentContextPreview.mirrorOrderId}
-                </Text>
+                <Text style={styles.contextTitle}>{contextDisplayId}</Text>
                 <Text style={styles.contextBody}>
                   平台訂單編號將隨求援一同送出，安全官可直接對照鏡像與外部單號。
                 </Text>
@@ -646,9 +640,12 @@ export default function IncidentScreen() {
                     {driverStrings.incident.orderContextOwned}
                   </Pill>
                 </View>
-                <Text style={styles.contextTitle}>目前未偵測到外部平台訂單</Text>
+                <Text style={styles.contextTitle}>
+                  目前未偵測到外部平台訂單
+                </Text>
                 <Text style={styles.contextBody}>
-                  若此刻是自營任務或非訂單情境，SOS 仍會照常建立，並在成功後返回行程頁。
+                  若此刻是自營任務或非訂單情境，SOS
+                  仍會照常建立，並在成功後返回行程頁。
                 </Text>
               </View>
             )}
@@ -657,7 +654,9 @@ export default function IncidentScreen() {
           <Card theme={THEME} padding={14} style={styles.contextCard}>
             <View style={styles.loadingRow}>
               <ActivityIndicator size="small" color={THEME.accent} />
-              <Text style={styles.loadingInlineLabel}>正在檢查目前訂單情境…</Text>
+              <Text style={styles.loadingInlineLabel}>
+                正在檢查目前訂單情境…
+              </Text>
             </View>
           </Card>
         )}
@@ -667,10 +666,7 @@ export default function IncidentScreen() {
         <Text style={styles.sectionTitle}>
           {driverStrings.incident.sections.details}
         </Text>
-        <Text style={styles.sectionSubtitle}>
-          可補充目前位置、乘客狀況或即時風險。
-        </Text>
-        <Card theme={THEME} padding={14}>
+        <Card theme={THEME} padding={14} style={styles.detailsCard}>
           <Field
             theme={THEME}
             label="現場補充（選填）"
@@ -717,8 +713,8 @@ export default function IncidentScreen() {
 const styles = StyleSheet.create({
   shellContent: {
     paddingTop: 16,
-    paddingBottom: 20,
-    gap: 16,
+    paddingBottom: 18,
+    gap: 14,
   },
   loadingState: {
     alignItems: "center",
@@ -760,7 +756,7 @@ const styles = StyleSheet.create({
   heroRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
   },
   heroIconBox: {
     width: 40,
@@ -772,13 +768,7 @@ const styles = StyleSheet.create({
   },
   heroCopy: {
     flex: 1,
-    gap: 2,
-  },
-  heroEyebrow: {
-    color: THEME.textMuted,
-    fontFamily: THEME.fontFamily,
-    fontSize: 12.5,
-    lineHeight: 16,
+    gap: 3,
   },
   heroTitle: {
     fontFamily: THEME.fontFamily,
@@ -789,16 +779,16 @@ const styles = StyleSheet.create({
   heroBody: {
     color: THEME.textMuted,
     fontFamily: THEME.fontFamily,
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
   sectionBlock: {
-    gap: 8,
+    gap: 10,
   },
   sectionTitle: {
     color: THEME.text,
     fontFamily: THEME.fontFamily,
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: "700",
     lineHeight: 16,
   },
@@ -815,7 +805,7 @@ const styles = StyleSheet.create({
   },
   situationButton: {
     width: "48.8%",
-    minHeight: 50,
+    minHeight: 54,
     paddingHorizontal: 12,
     paddingVertical: 14,
     borderWidth: 1.5,
@@ -831,8 +821,11 @@ const styles = StyleSheet.create({
   contextCard: {
     borderRadius: 14,
   },
+  detailsCard: {
+    borderRadius: 14,
+  },
   contextStack: {
-    gap: 10,
+    gap: 8,
   },
   contextBadgeRow: {
     flexDirection: "row",
@@ -843,9 +836,9 @@ const styles = StyleSheet.create({
   contextTitle: {
     color: THEME.text,
     fontFamily: THEME.fontFamily,
-    fontSize: 13,
+    fontSize: 13.5,
     fontWeight: "600",
-    lineHeight: 17,
+    lineHeight: 18,
   },
   contextBody: {
     color: THEME.textMuted,
@@ -865,7 +858,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   detailsInput: {
-    minHeight: 112,
+    minHeight: 96,
     borderWidth: 1,
     borderRadius: 12,
     paddingHorizontal: 12,
@@ -903,6 +896,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 14,
     paddingVertical: 10,
+  },
+  footerDangerButtonContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   footerDangerButtonLabel: {
     color: "#FFFFFF",
