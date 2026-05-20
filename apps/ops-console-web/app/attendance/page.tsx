@@ -8,10 +8,12 @@ import { getServerOpsClient } from "@/lib/api-client.server";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
 import {
+  CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
   CanvasShell as Shell,
   buildCanvasTheme,
   type CanvasShellNavItem,
@@ -28,7 +30,6 @@ type AttendanceView = "today" | "week" | "exceptions";
 type GanttRow = {
   shiftId: string;
   driverLabel: string;
-  vehicleLabel: string;
   status: ShiftRecord["status"];
   segmentLeft: number;
   segmentWidth: number;
@@ -51,7 +52,7 @@ const pageBodyStyle = {
 
 const kpiGridStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
   gap: 12,
 };
 
@@ -64,7 +65,7 @@ const ganttGridStyle = {
 
 const ganttHeaderStyle = {
   display: "grid",
-  gridTemplateColumns: "repeat(24, minmax(28px, 1fr))",
+  gridTemplateColumns: "repeat(24, minmax(0, 1fr))",
   color: theme.textDim,
   paddingBottom: 4,
   borderBottom: `1px solid ${theme.border}`,
@@ -75,7 +76,7 @@ const ganttTrackStyle = {
   position: "absolute" as const,
   inset: 0,
   display: "grid",
-  gridTemplateColumns: "repeat(24, minmax(28px, 1fr))",
+  gridTemplateColumns: "repeat(24, minmax(0, 1fr))",
 };
 
 const ganttSegmentBaseStyle = {
@@ -166,14 +167,18 @@ function isAttendanceInRange(
     : false;
 }
 
-function formatDateLabel(locale: Locale, value: Date) {
-  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    weekday: "short",
+function formatCanvasDateLabel(locale: Locale, value: Date) {
+  const year = value.getUTCFullYear();
+  const month = `${value.getUTCMonth() + 1}`.padStart(2, "0");
+  const day = `${value.getUTCDate()}`.padStart(2, "0");
+  const weekday = new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
+    weekday: locale === "zh" ? "short" : "short",
     timeZone: "UTC",
   }).format(value);
+
+  return locale === "zh"
+    ? `${year}-${month}-${day} (${weekday})`
+    : `${year}-${month}-${day} (${weekday})`;
 }
 
 function formatHourTick(hour: number) {
@@ -185,6 +190,9 @@ function formatSegmentHour(value: number) {
   const minutes = Math.round((value - whole) * 60);
   const normalizedMinutes = minutes === 60 ? 0 : minutes;
   const normalizedHour = minutes === 60 ? whole + 1 : whole;
+  if (normalizedMinutes === 0) {
+    return normalizedHour.toString().padStart(2, "0");
+  }
   return `${normalizedHour.toString().padStart(2, "0")}:${normalizedMinutes
     .toString()
     .padStart(2, "0")}`;
@@ -304,7 +312,6 @@ function buildShellNav(locale: Locale): CanvasShellNavItem[] {
 function renderTabLink(
   href: string,
   label: string,
-  count: number,
   selected: boolean,
   activeTheme: CanvasTheme,
 ) {
@@ -316,19 +323,10 @@ function renderTabLink(
         textDecoration: "none",
         display: "inline-flex",
         alignItems: "center",
-        gap: 6,
+        gap: 8,
       }}
     >
       <span>{label}</span>
-      <span
-        style={{
-          fontSize: 10.5,
-          fontFamily: activeTheme.monoFamily,
-          color: selected ? activeTheme.text : activeTheme.textDim,
-        }}
-      >
-        {count}
-      </span>
     </Link>
   );
 }
@@ -346,7 +344,12 @@ function buildGanttRows(
 ): GanttRow[] {
   return shifts
     .filter((shift) =>
-      intersectsRange(shift.clockedInAt, shift.clockedOutAt, rangeStart, rangeEnd),
+      intersectsRange(
+        shift.clockedInAt,
+        shift.clockedOutAt,
+        rangeStart,
+        rangeEnd,
+      ),
     )
     .sort((left, right) => {
       const leftPriority =
@@ -361,18 +364,28 @@ function buildGanttRows(
     .slice(0, 8)
     .map((shift) => {
       const driver = driversById.get(shift.driverId);
-      const startTime = Math.max(asTime(shift.clockedInAt) ?? rangeStart, rangeStart);
+      const startTime = Math.max(
+        asTime(shift.clockedInAt) ?? rangeStart,
+        rangeStart,
+      );
       const rawEndTime =
         asTime(shift.clockedOutAt) ??
-        (shift.status === "active" ? Math.min(now, rangeEnd) : startTime + 60 * 60 * 1000);
-      const endTime = Math.max(startTime + 30 * 60 * 1000, Math.min(rawEndTime, rangeEnd));
+        (shift.status === "active"
+          ? Math.min(now, rangeEnd)
+          : startTime + 60 * 60 * 1000);
+      const endTime = Math.max(
+        startTime + 30 * 60 * 1000,
+        Math.min(rawEndTime, rangeEnd),
+      );
       const leftHours = (startTime - rangeStart) / (60 * 60 * 1000);
-      const widthHours = Math.max((endTime - startTime) / (60 * 60 * 1000), 0.5);
+      const widthHours = Math.max(
+        (endTime - startTime) / (60 * 60 * 1000),
+        0.5,
+      );
 
       return {
         shiftId: shift.shiftId,
         driverLabel: driver?.name ?? shift.driverId,
-        vehicleLabel: shift.vehicleId ?? "—",
         status: shift.status,
         segmentLeft: (leftHours / 24) * 100,
         segmentWidth: (Math.min(widthHours, 24) / 24) * 100,
@@ -388,7 +401,8 @@ export default async function AttendancePage({
   const [locale, client, params] = await Promise.all([
     getServerLocale(),
     getServerOpsClient(),
-    searchParams ?? Promise.resolve({}),
+    searchParams ??
+      Promise.resolve({} as Record<string, string | string[] | undefined>),
   ]);
 
   const view = resolveView(firstParam(params.view));
@@ -407,7 +421,12 @@ export default async function AttendancePage({
 
   const driversById = buildDriverLookup(drivers);
   const todayShifts = shifts.filter((shift) =>
-    intersectsRange(shift.clockedInAt, shift.clockedOutAt, todayStart, todayEnd),
+    intersectsRange(
+      shift.clockedInAt,
+      shift.clockedOutAt,
+      todayStart,
+      todayEnd,
+    ),
   );
   const weekShifts = shifts.filter((shift) =>
     intersectsRange(shift.clockedInAt, shift.clockedOutAt, weekStart, weekEnd),
@@ -421,7 +440,8 @@ export default async function AttendancePage({
 
   const scopeShifts = view === "week" ? weekShifts : todayShifts;
   const scopeAttendance = view === "week" ? weekAttendance : todayAttendance;
-  const scheduledDrivers = new Set(scopeShifts.map((shift) => shift.driverId)).size;
+  const scheduledDrivers = new Set(scopeShifts.map((shift) => shift.driverId))
+    .size;
   const activeShifts = scopeShifts.filter((shift) => shift.status === "active");
   const completedShifts = scopeShifts.filter(
     (shift) => shift.status === "completed",
@@ -441,44 +461,29 @@ export default async function AttendancePage({
     now,
   );
 
-  const scopeLabel =
-    view === "week"
-      ? locale === "en"
-        ? "This week"
-        : "本週"
-      : view === "exceptions"
-        ? locale === "en"
-          ? "Exceptions"
-          : "異常"
-        : locale === "en"
-          ? "Today"
-          : "今日";
-
-  const subtitle = `${formatDateLabel(locale, nowDate)} · ${scopeLabel}`;
+  const subtitle = formatCanvasDateLabel(locale, nowDate);
   const tabConfigs = [
     {
       key: "today" as const,
       href: "/attendance",
       label: locale === "en" ? "Today" : "今日",
-      count: todayShifts.length,
     },
     {
       key: "week" as const,
       href: "/attendance?view=week",
       label: locale === "en" ? "This week" : "本週",
-      count: weekShifts.length,
     },
     {
       key: "exceptions" as const,
       href: "/attendance?view=exceptions",
       label: locale === "en" ? "Exceptions" : "異常",
-      count: todayAttendance.filter((record) => record.status !== "present").length,
     },
   ];
   const tabs = tabConfigs.map((tab) =>
-    renderTabLink(tab.href, tab.label, tab.count, tab.key === view, theme),
+    renderTabLink(tab.href, tab.label, tab.key === view, theme),
   );
   const activeTab = tabs[tabConfigs.findIndex((tab) => tab.key === view)];
+  const lateCount = partialCount;
 
   return (
     <div
@@ -520,13 +525,38 @@ export default async function AttendancePage({
         />
 
         <div style={pageBodyStyle}>
+          {view === "exceptions" && exceptionCount > 0 ? (
+            <Banner
+              theme={theme}
+              tone={absentCount > 0 ? "danger" : "warn"}
+              title={
+                locale === "en"
+                  ? `${exceptionCount} attendance exceptions need follow-up`
+                  : `${exceptionCount} 筆出勤異常待追蹤`
+              }
+              body={
+                locale === "en"
+                  ? `${absentCount} absent, ${lateCount} partial attendance in the current service day.`
+                  : `目前服務日有 ${absentCount} 筆未到、${lateCount} 筆部分出勤。`
+              }
+            />
+          ) : null}
+
           <div style={kpiGridStyle}>
-            <KPI theme={theme} label={locale === "en" ? "Scheduled drivers" : "排班司機"} value={scheduledDrivers} />
+            <KPI
+              theme={theme}
+              label={locale === "en" ? "Scheduled drivers" : "排班司機"}
+              value={scheduledDrivers}
+            />
             <KPI
               theme={theme}
               label={t("attendance.activeShifts", locale)}
               value={activeShifts.length}
-              sub={formatAttendanceRate(activeShifts.length, scopeShifts.length, locale)}
+              sub={formatAttendanceRate(
+                activeShifts.length,
+                scopeShifts.length,
+                locale,
+              )}
             />
             <KPI
               theme={theme}
@@ -555,7 +585,26 @@ export default async function AttendancePage({
             />
           </div>
 
-          <Card theme={theme} title={locale === "en" ? "On-duty gantt" : "當班甘特"} padding={16}>
+          <Card
+            theme={theme}
+            title={locale === "en" ? "On-duty gantt" : "當班甘特"}
+            actions={
+              <>
+                <Pill theme={theme} tone="info" dot>
+                  {locale === "en" ? "active" : "進行中"}
+                </Pill>
+                <Pill theme={theme} tone="success" dot>
+                  {locale === "en" ? "completed" : "已完成"}
+                </Pill>
+                {scopeShifts.some((shift) => shift.status === "abandoned") ? (
+                  <Pill theme={theme} tone="danger" dot>
+                    {locale === "en" ? "abandoned" : "中止"}
+                  </Pill>
+                ) : null}
+              </>
+            }
+            padding={16}
+          >
             {ganttRows.length > 0 ? (
               <div style={{ overflowX: "auto" }}>
                 <div style={ganttGridStyle}>
@@ -589,22 +638,12 @@ export default async function AttendancePage({
                           style={{
                             padding: "6px 0",
                             borderBottom: `1px dashed ${theme.border}`,
-                            display: "grid",
-                            gap: 2,
+                            fontSize: 12,
+                            display: "flex",
+                            alignItems: "center",
                           }}
                         >
-                          <span style={{ fontSize: 12, fontWeight: 600 }}>
-                            {row.driverLabel}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: 10,
-                              color: theme.textDim,
-                              fontFamily: theme.monoFamily,
-                            }}
-                          >
-                            {row.vehicleLabel}
-                          </span>
+                          {row.driverLabel}
                         </div>
                         <div
                           style={{
@@ -635,9 +674,14 @@ export default async function AttendancePage({
                               border: `1px solid ${borderColor}`,
                               background: backgroundColor,
                               color: borderColor,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
                             }}
                           >
-                            {row.startLabel}–{row.endLabel}
+                            <span>
+                              {row.startLabel}–{row.endLabel}
+                            </span>
                           </div>
                         </div>
                       </div>
