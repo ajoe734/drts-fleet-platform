@@ -52,7 +52,7 @@ const shellStyle = {
 
 const pageStackStyle = {
   display: "grid",
-  gap: 16,
+  gap: 24,
   padding: 24,
 } satisfies CSSProperties;
 
@@ -331,10 +331,11 @@ export default function PartnersPage() {
       ? {
           title: "Partner entry",
           subtitle:
-            "Bank, hotel, and enterprise-facing partner entry programs, auth posture, eligibility, and branding metadata.",
+            "Bank / hotel / enterprise partner entry routing, auth, eligibility, and branding.",
           breadcrumbRoot: "Tenant Governance",
           searchPlaceholder: "Search entries, tenants, credentials...",
           filterAction: "Filter",
+          createAction: "Create entry",
           filterTitle: "Entry filters",
           filterSubtitle:
             "Narrow the roster, refresh the dataset, and keep readiness gaps visible before promotion.",
@@ -344,9 +345,6 @@ export default function PartnersPage() {
           refresh: "Refresh",
           last30Days: "last 30 days",
           errorTitle: "Unable to load partner entries",
-          attentionTitle: "Promotion readiness has gaps",
-          attentionBody: (count: number) =>
-            `${count} partner entr${count === 1 ? "y" : "ies"} still have readiness gaps and should not be promoted blindly.`,
           filters: {
             all: "all",
             active: "active",
@@ -370,10 +368,11 @@ export default function PartnersPage() {
       : {
           title: "合作夥伴 entry",
           subtitle:
-            "銀行、飯店與企業 partner 入口、auth 模式、eligibility 與品牌治理資料。",
+            "銀行 / 飯店 / 企業 partner 入口、auth 模式、eligibility、品牌。",
           breadcrumbRoot: "租戶治理",
           searchPlaceholder: "搜尋 entry、租戶、憑證...",
           filterAction: "篩選",
+          createAction: "建立 entry",
           filterTitle: "Entry 篩選",
           filterSubtitle:
             "收斂治理清單、重新整理資料，並在 promotion 前保留 readiness 缺口視角。",
@@ -383,9 +382,6 @@ export default function PartnersPage() {
           refresh: "重新整理",
           last30Days: "近 30 天",
           errorTitle: "無法載入 partner entries",
-          attentionTitle: "Promotion readiness 尚未完整",
-          attentionBody: (count: number) =>
-            `${count} 筆 partner entry 仍有 readiness 缺口，不應直接推進。`,
           filters: {
             all: "全部",
             active: "active",
@@ -566,7 +562,7 @@ export default function PartnersPage() {
               icon={showCreate ? "x" : "plus"}
               onClick={() => setShowCreate((current) => !current)}
             >
-              {showCreate ? t("common.cancel") : t("partners.newEntry")}
+              {showCreate ? t("common.cancel") : copy.createAction}
             </CanvasBtn>
           </>
         }
@@ -579,15 +575,6 @@ export default function PartnersPage() {
             tone="danger"
             title={copy.errorTitle}
             body={error}
-          />
-        ) : null}
-
-        {!error && counts.attention > 0 ? (
-          <CanvasBanner
-            theme={theme}
-            tone="warn"
-            title={copy.attentionTitle}
-            body={copy.attentionBody(counts.attention)}
           />
         ) : null}
 
@@ -1056,14 +1043,10 @@ export default function PartnersPage() {
                 {
                   h: "PROGRAM",
                   w: 140,
-                  r: (entry) => (
-                    <div style={{ display: "flex", flexDirection: "column" }}>
-                      <span>{entry.programId}</span>
-                      {entry.programCode ? (
-                        <span style={monoSubtleStyle}>{entry.programCode}</span>
-                      ) : null}
-                    </div>
-                  ),
+                  r: (entry) =>
+                    entry.programCode
+                      ? `${entry.programId} · ${entry.programCode}`
+                      : entry.programId,
                 },
                 {
                   h: "SUBTYPE",
