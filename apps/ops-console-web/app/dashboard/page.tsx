@@ -1,10 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type {
-  CrossAppResourceLink,
+  ComplaintCaseRecord,
   DispatchJobRecord,
   DriverRegistryRecord,
-  DriverStatementRecord,
   DriverTaskRecord,
   EmptyReason,
   EmptyStateEnvelope,
@@ -26,9 +25,7 @@ import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import {
   buildDispatchInsights,
   buildOperationsOverview,
-  buildRevenueInsights,
   formatCompactNumber,
-  formatMinorCurrency,
 } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
@@ -36,8 +33,6 @@ import {
   CanvasBanner as Banner,
   CanvasBtn as Btn,
   CanvasCard as Card,
-  CanvasDL as DL,
-  CanvasField as Field,
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
@@ -46,11 +41,9 @@ import {
   buildCanvasTheme,
   type CanvasShellNavItem,
   type CanvasTableColumn,
-  type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
 
-type IdentitySummary = { realm?: string; actorType?: string } | null;
 type HealthPayload = {
   service: string;
   status: string;
@@ -173,13 +166,6 @@ const signalLabelStyle = {
   minWidth: 0,
   fontSize: 12,
   color: theme.text,
-};
-
-const fieldBodyStyle = {
-  padding: "10px 12px",
-  borderRadius: 8,
-  background: theme.surfaceLo,
-  border: `1px solid ${theme.border}`,
 };
 
 function buildShellNav(
@@ -496,6 +482,12 @@ function getHealthTone(status: string): CanvasTone {
   return "info";
 }
 
+function isComplaintActive(status: ComplaintCaseRecord["status"]) {
+  return ["new", "assigned", "under_investigation", "reopened"].includes(
+    status,
+  );
+}
+
 function pickCurrentTask(tasks: DriverTaskRecord[]) {
   return (
     [...tasks].sort((left, right) => {
@@ -570,45 +562,6 @@ function getAlertSummary(
     default:
       return "";
   }
-}
-
-function actionLinkStyle(
-  themeValue: CanvasTheme,
-  variant: "primary" | "secondary" = "secondary",
-) {
-  if (variant === "primary") {
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      height: 28,
-      padding: "5px 10px",
-      borderRadius: 7,
-      border: `1px solid ${themeValue.accent}`,
-      background: themeValue.accent,
-      color: "#ffffff",
-      textDecoration: "none",
-      fontSize: 12,
-      fontWeight: 500,
-      lineHeight: 1,
-    } as const;
-  }
-
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 28,
-    padding: "5px 10px",
-    borderRadius: 7,
-    border: `1px solid ${themeValue.border}`,
-    background: themeValue.surface,
-    color: themeValue.text,
-    textDecoration: "none",
-    fontSize: 12,
-    fontWeight: 500,
-    lineHeight: 1,
-  } as const;
 }
 
 async function resolveOrFallback<T>(
@@ -714,24 +667,19 @@ export default async function DashboardPage() {
   const client = await getServerOpsClient();
   const locale = await getServerLocale();
   const [
-    identity,
     health,
-    ordersResponse,
-    dispatchJobsResponse,
-    driverTasksResponse,
-    vehiclesResponse,
-    driversResponse,
-    shiftsResponse,
-    incidentsResponse,
-    maintenanceResponse,
-    reportJobsResponse,
-    driverStatementsResponse,
-    observabilityResponse,
+    orders,
+    dispatchJobs,
+    driverTasks,
+    vehicles,
+    drivers,
+    shifts,
+    incidents,
+    maintenance,
+    complaints,
+    reportJobs,
+    observability,
   ] = await Promise.all([
-    resolveOrFallback<IdentitySummary>(
-      () => client.getIdentityContext() as Promise<IdentitySummary>,
-      null,
-    ),
     resolveOrFallback(loadHealthPayload, {
       service: "api",
       status: "degraded",
@@ -740,9 +688,26 @@ export default async function DashboardPage() {
       timestamp: new Date().toISOString(),
     }),
     resolveOrFallback(
-      () => client.getListEnvelope<OwnedOrderRecord>("/api/orders"),
-      createFallbackListEnvelope([] as OwnedOrderRecord[]),
+      () => client.listDispatchJobs(),
+      [] as DispatchJobRecord[],
     ),
+    resolveOrFallback(() => client.listDriverTasks(), [] as DriverTaskRecord[]),
+    resolveOrFallback(
+      () => client.listVehicles(),
+      [] as VehicleRegistryRecord[],
+    ),
+    resolveOrFallback(() => client.listDrivers(), [] as DriverRegistryRecord[]),
+    resolveOrFallback(() => client.listShifts(), [] as ShiftRecord[]),
+    resolveOrFallback(() => client.listIncidents(), [] as IncidentRecord[]),
+    resolveOrFallback(
+      () => client.listMaintenance(),
+      [] as MaintenanceRecord[],
+    ),
+    resolveOrFallback(
+      () => client.listComplaints(),
+      [] as ComplaintCaseRecord[],
+    ),
+    resolveOrFallback(() => client.listReportJobs(), [] as ReportJobRecord[]),
     resolveOrFallback(
       () => client.getListEnvelope<DispatchJobRecord>("/api/dispatch/tasks"),
       createFallbackListEnvelope([] as DispatchJobRecord[]),
@@ -816,16 +781,17 @@ export default async function DashboardPage() {
     maintenance,
     reportJobs,
   });
-  const todayRevenue = buildRevenueInsights(
-    orders,
-    driverTasks,
-    driverStatements,
-    {
-      period: "today",
-      serviceBucket: "all",
-      vehicleId: "all",
-    },
-  );
+  const activeComplaintCount = complaints.filter((record) =>
+    isComplaintActive(record.status),
+  ).length;
+  const complaintSlaBreachCount = complaints.filter(
+    (record) => isComplaintActive(record.status) && record.slaBreach,
+  ).length;
+  const criticalIncidentCount = incidents.filter(
+    (incident) =>
+      (incident.status === "open" || incident.status === "investigating") &&
+      incident.severity === "critical",
+  ).length;
 
   const opsAlertKeys = new Set(
     observability.roleViews.find(
@@ -1069,60 +1035,25 @@ export default async function DashboardPage() {
     tone: CanvasTone;
   }> = [
     {
-      label: locale === "en" ? "Supply buffer" : "供給緩衝",
-      value:
-        eligibleVehicleGap >= 0
-          ? locale === "en"
-            ? `+${eligibleVehicleGap} vehicles`
-            : `+${eligibleVehicleGap} 輛`
-          : locale === "en"
-            ? `${eligibleVehicleGap} vehicles`
-            : `${eligibleVehicleGap} 輛`,
-      tone: eligibleVehicleGap >= 0 ? "success" : "danger",
-    },
-    {
-      label: locale === "en" ? "Identity" : "身分摘要",
-      value: `${identity?.realm ?? "ops"} / ${identity?.actorType ?? "ops_user"}`,
-      tone: "neutral",
-    },
-    {
-      label: locale === "en" ? "Online / eligible drivers" : "在線 / 可派司機",
-      value: `${formatCompactNumber(onlineDrivers)} / ${formatCompactNumber(dispatchEligibleDrivers)}`,
-      tone: dispatchEligibleDrivers > 0 ? "success" : "warn",
-    },
-    {
-      label:
-        locale === "en" ? "Dispatchable / offline vehicles" : "可派 / 離線車輛",
-      value: `${formatCompactNumber(operations.dispatchableVehicles)} / ${formatCompactNumber(operations.offlineVehicles)}`,
-      tone: operations.offlineVehicles > 0 ? "warn" : "success",
-    },
-    {
-      label: locale === "en" ? "Open / critical incidents" : "未結 / 重大事故",
-      value: `${formatCompactNumber(operations.openIncidents)} / ${formatCompactNumber(criticalIncidentCount)}`,
-      tone: criticalIncidentCount > 0 ? "danger" : "info",
-    },
-    {
-      label: locale === "en" ? "Overdue maintenance" : "逾期保養",
-      value: formatCompactNumber(operations.overdueMaintenance),
-      tone: operations.overdueMaintenance > 0 ? "warn" : "success",
-    },
-    {
-      label: t("dashboard.runtime.apiStatus", locale),
-      value: health.status,
-      tone: getHealthTone(health.status),
-    },
-    {
-      label: t("dashboard.queueDepth", locale),
-      value: formatCompactNumber(dispatch.queueDepth),
-      tone: dispatch.queueDepth > 0 ? "info" : "success",
-    },
-    {
       label: t("dashboard.alert.dispatch_lag.title", locale),
       value: formatCompactNumber(observability.dispatch.laggedOrders),
       tone:
         observability.dispatch.laggedOrders > 0
           ? "warn"
           : ("success" as CanvasTone),
+    },
+    {
+      label: locale === "en" ? "Webhook queued deliveries" : "Webhook 排隊投遞",
+      value: formatCompactNumber(observability.webhook.queuedDeliveries),
+      tone:
+        observability.webhook.queuedDeliveries > 0
+          ? "warn"
+          : ("success" as CanvasTone),
+    },
+    {
+      label: t("dashboard.runtime.apiStatus", locale),
+      value: health.status,
+      tone: getHealthTone(health.status),
     },
     ...observability.adapterDetails.slice(0, 2).map((adapter) => ({
       label: formatOpsCodeLabel(locale, adapter.platformCode),
@@ -1225,70 +1156,6 @@ export default async function DashboardPage() {
     { h: "ETA", k: "eta", w: 78, mono: true },
   ];
 
-  const runtimeItems = [
-    {
-      k: t("dashboard.runtime.service", locale),
-      v: health.service,
-      mono: true,
-    },
-    {
-      k: t("dashboard.runtime.mode", locale),
-      v: health.mode,
-      mono: true,
-    },
-    {
-      k: t("dashboard.runtime.execution", locale),
-      v: health.execution_mode,
-      mono: true,
-    },
-    {
-      k: t("dashboard.runtime.realm", locale),
-      v: identity?.realm ?? t("dashboard.runtime.anonymous", locale),
-      mono: true,
-    },
-    {
-      k: t("dashboard.runtime.actor", locale),
-      v: identity?.actorType ?? t("dashboard.runtime.anonymous", locale),
-      mono: true,
-    },
-  ];
-  const queueEmptyState: EmptyStateEnvelope | null =
-    queueRows.length > 0
-      ? null
-      : healthEnvelope.status === "down"
-        ? {
-            reason: "fetch_failed",
-            messageCode: "dashboard.queue.fetch_failed",
-          }
-        : identity?.actorType
-          ? {
-              reason: "no_data",
-              messageCode: "dashboard.queue.no_data",
-            }
-          : {
-              reason: "permission_denied",
-              messageCode: "dashboard.queue.permission_denied",
-            };
-  const signalEmptyState: EmptyStateEnvelope | null =
-    healthSignals.length > 0
-      ? null
-      : adapterAttentionCount > 0
-        ? {
-            reason: "external_unavailable",
-            messageCode: "dashboard.signals.external_unavailable",
-          }
-        : {
-            reason: "not_provisioned",
-            messageCode: "dashboard.signals.not_provisioned",
-          };
-  const bannerEmptyState: EmptyStateEnvelope | null =
-    banners.length > 0
-      ? null
-      : {
-          reason: "no_data",
-          messageCode: "dashboard.attention.no_data",
-        };
-
   return (
     <Shell
       theme={theme}
@@ -1352,42 +1219,77 @@ export default async function DashboardPage() {
           />
           <KPI
             theme={theme}
-            label={t("dashboard.onlineDrivers", locale)}
-            value={formatCompactNumber(operations.onlineDrivers)}
+            label={locale === "en" ? "Dispatch Eligible Drivers" : "可派司機"}
+            value={formatCompactNumber(
+              observability.driverState.dispatchEligibleDrivers,
+            )}
+            delta={
+              locale === "en"
+                ? `${formatCompactNumber(operations.onlineDrivers)} online`
+                : `${formatCompactNumber(operations.onlineDrivers)} 在線`
+            }
+            deltaTone="neutral"
             sub={t("dashboard.onlineDriversSub", locale)}
-            hint={`${formatCompactNumber(operations.dispatchableVehicles)} dispatchable`}
           />
           <KPI
             theme={theme}
-            label={t("dashboard.dispatchableVehicles", locale)}
-            value={formatCompactNumber(operations.dispatchableVehicles)}
-            delta={`${formatCompactNumber(operations.offlineVehicles)} offline`}
-            deltaTone={operations.offlineVehicles > 0 ? "down" : "neutral"}
-            sub={t("dashboard.dispatchableVehiclesSub", locale, {
-              count: operations.offlineVehicles,
-            })}
+            label={locale === "en" ? "Location Stale" : "位置失聯"}
+            value={formatCompactNumber(
+              observability.driverState.staleLocationDrivers,
+            )}
+            delta={
+              observability.driverState.missingLocationDrivers > 0
+                ? locale === "en"
+                  ? `${formatCompactNumber(
+                      observability.driverState.missingLocationDrivers,
+                    )} missing`
+                  : `${formatCompactNumber(
+                      observability.driverState.missingLocationDrivers,
+                    )} 缺樣本`
+                : undefined
+            }
+            deltaTone={
+              observability.driverState.staleLocationDrivers > 0
+                ? "down"
+                : "neutral"
+            }
+            sub={
+              locale === "en"
+                ? "Drivers with stale location samples"
+                : "位置樣本逾時司機"
+            }
+          />
+          <KPI
+            theme={theme}
+            label={locale === "en" ? "Open Complaints" : "客訴未結"}
+            value={formatCompactNumber(activeComplaintCount)}
+            delta={
+              complaintSlaBreachCount > 0
+                ? locale === "en"
+                  ? `${formatCompactNumber(complaintSlaBreachCount)} SLA breach`
+                  : `${formatCompactNumber(complaintSlaBreachCount)} SLA 違規`
+                : undefined
+            }
+            deltaTone={complaintSlaBreachCount > 0 ? "down" : "neutral"}
+            sub={t("complaints.activeCasesSub", locale)}
           />
           <KPI
             theme={theme}
             label={t("dashboard.openIncidents", locale)}
             value={formatCompactNumber(operations.openIncidents)}
             delta={
-              operations.overdueMaintenance > 0
-                ? `${formatCompactNumber(operations.overdueMaintenance)} breach`
+              criticalIncidentCount > 0
+                ? locale === "en"
+                  ? `${formatCompactNumber(criticalIncidentCount)} critical`
+                  : `${formatCompactNumber(criticalIncidentCount)} 重大`
                 : undefined
             }
-            deltaTone={operations.overdueMaintenance > 0 ? "down" : "neutral"}
-            sub={t("dashboard.openIncidentsSub", locale, {
-              count: operations.overdueMaintenance,
-            })}
-          />
-          <KPI
-            theme={theme}
-            label={t("dashboard.todayRevenue", locale)}
-            value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
-            sub={t("dashboard.todayRevenueSub", locale, {
-              trips: formatCompactNumber(todayRevenue.completedTrips),
-            })}
+            deltaTone={criticalIncidentCount > 0 ? "down" : "neutral"}
+            sub={
+              locale === "en"
+                ? "Active incidents requiring recovery"
+                : "需追蹤處置的進行中事故"
+            }
           />
         </div>
 
@@ -1418,12 +1320,16 @@ export default async function DashboardPage() {
                     actions={
                       <Link
                         href={banner.href}
-                        style={actionLinkStyle(
-                          theme,
-                          banner.tone === "danger" ? "primary" : "secondary",
-                        )}
+                        style={{ textDecoration: "none" }}
                       >
-                        {banner.cta}
+                        <Btn
+                          theme={theme}
+                          variant={
+                            banner.tone === "danger" ? "primary" : "secondary"
+                          }
+                        >
+                          {banner.cta}
+                        </Btn>
                       </Link>
                     }
                   />
@@ -1442,7 +1348,6 @@ export default async function DashboardPage() {
           <Card
             theme={theme}
             title={locale === "en" ? "Health Signals" : "健康訊號"}
-            subtitle={t("dashboard.operational.subtitle", locale)}
           >
             <div style={signalListStyle}>
               {healthSignals.map((signal, index) => (
@@ -1454,17 +1359,6 @@ export default async function DashboardPage() {
                 </div>
               ))}
             </div>
-            <div style={{ marginTop: 14 }}>
-              <Field
-                theme={theme}
-                label={t("dashboard.runtime.title", locale)}
-                hint={t("dashboard.runtime.subtitle", locale)}
-              >
-                <div style={fieldBodyStyle}>
-                  <DL theme={theme} cols={2} monoVal items={runtimeItems} />
-                </div>
-              </Field>
-            </div>
           </Card>
         </div>
 
@@ -1473,11 +1367,15 @@ export default async function DashboardPage() {
           title={
             locale === "en" ? "Current Dispatch Queue" : "當前 dispatch 隊列"
           }
-          subtitle={t("dashboard.dispatchBoards.subtitle", locale)}
           padding={0}
           actions={
-            <Link href="/dispatch?view=owned" style={actionLinkStyle(theme)}>
-              {t("dashboard.dispatchBoards.openOwned", locale)}
+            <Link
+              href="/dispatch?view=owned"
+              style={{ textDecoration: "none" }}
+            >
+              <Btn theme={theme} variant="ghost">
+                {locale === "en" ? "Open dispatch" : "前往派遣"}
+              </Btn>
             </Link>
           }
         >
