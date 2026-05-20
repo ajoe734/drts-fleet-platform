@@ -1,13 +1,12 @@
 import type { CSSProperties, ReactNode } from "react";
 import type {
   BookingRecord,
+  FeatureFlagSummary,
   IdentityContext,
-  TenantBillingProfile,
-  TenantBookingApprovalRequestRecord,
+  NotificationRecord,
+  TenantIntegrationGovernancePackage,
   TenantInvoiceRecord,
   TenantQuotaSummary,
-  TenantUserRoleRecord,
-  TenantWebhookEndpoint,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -106,13 +105,12 @@ const numberFormatter = new Intl.NumberFormat("en-US");
 
 type HomeData = {
   identity: IdentityContext | null;
-  users: TenantUserRoleRecord[];
-  billingProfile: TenantBillingProfile | null;
+  featureFlags: FeatureFlagSummary | null;
   quotaSummary: TenantQuotaSummary | null;
   bookings: BookingRecord[];
   invoices: TenantInvoiceRecord[];
-  webhooks: TenantWebhookEndpoint[];
-  approvalRequests: TenantBookingApprovalRequestRecord[];
+  notifications: NotificationRecord[];
+  governance: TenantIntegrationGovernancePackage | null;
   errors: string[];
 };
 
@@ -134,24 +132,22 @@ async function loadHomeData(): Promise<HomeData> {
   const client = getTenantClient();
   const [
     identity,
-    users,
-    billingProfile,
+    featureFlags,
     quotaSummary,
     bookings,
     invoices,
-    webhooks,
-    approvalRequests,
+    notifications,
+    governance,
   ] = await Promise.allSettled([
     client.getIdentityContext() as Promise<IdentityContext>,
-    client.listTenantUsers() as Promise<TenantUserRoleRecord[]>,
-    client.getBillingProfile() as Promise<TenantBillingProfile>,
+    client.getFeatureFlags({
+      tenantId: "tenant-demo-001",
+    }) as Promise<FeatureFlagSummary>,
     client.getTenantQuotaSummary() as Promise<TenantQuotaSummary>,
     client.listTenantBookings() as Promise<BookingRecord[]>,
     client.listInvoices() as Promise<TenantInvoiceRecord[]>,
-    client.listWebhooks() as Promise<TenantWebhookEndpoint[]>,
-    client.listApprovalRequests({
-      status: "pending",
-    }) as Promise<TenantBookingApprovalRequestRecord[]>,
+    client.listTenantNotificationFeed() as Promise<NotificationRecord[]>,
+    client.getTenantIntegrationGovernancePackage() as Promise<TenantIntegrationGovernancePackage>,
   ]);
 
   const errors: string[] = [];
@@ -160,9 +156,8 @@ async function loadHomeData(): Promise<HomeData> {
 
   if (identity.status === "rejected")
     errors.push(tag("租戶身分", identity.reason));
-  if (users.status === "rejected") errors.push(tag("成員清單", users.reason));
-  if (billingProfile.status === "rejected") {
-    errors.push(tag("計費設定", billingProfile.reason));
+  if (featureFlags.status === "rejected") {
+    errors.push(tag("模組旗標", featureFlags.reason));
   }
   if (quotaSummary.status === "rejected") {
     errors.push(tag("租戶配額", quotaSummary.reason));
@@ -171,24 +166,24 @@ async function loadHomeData(): Promise<HomeData> {
     errors.push(tag("叫車清單", bookings.reason));
   if (invoices.status === "rejected")
     errors.push(tag("對帳單", invoices.reason));
-  if (webhooks.status === "rejected")
-    errors.push(tag("Webhook", webhooks.reason));
-  if (approvalRequests.status === "rejected") {
-    errors.push(tag("待簽核叫車", approvalRequests.reason));
+  if (notifications.status === "rejected") {
+    errors.push(tag("提醒通知", notifications.reason));
+  }
+  if (governance.status === "rejected") {
+    errors.push(tag("整合治理", governance.reason));
   }
 
   return {
     identity: identity.status === "fulfilled" ? identity.value : null,
-    users: users.status === "fulfilled" ? users.value : [],
-    billingProfile:
-      billingProfile.status === "fulfilled" ? billingProfile.value : null,
+    featureFlags:
+      featureFlags.status === "fulfilled" ? featureFlags.value : null,
     quotaSummary:
       quotaSummary.status === "fulfilled" ? quotaSummary.value : null,
     bookings: bookings.status === "fulfilled" ? bookings.value : [],
     invoices: invoices.status === "fulfilled" ? invoices.value : [],
-    webhooks: webhooks.status === "fulfilled" ? webhooks.value : [],
-    approvalRequests:
-      approvalRequests.status === "fulfilled" ? approvalRequests.value : [],
+    notifications:
+      notifications.status === "fulfilled" ? notifications.value : [],
+    governance: governance.status === "fulfilled" ? governance.value : null,
     errors,
   };
 }
@@ -321,17 +316,7 @@ function getQuotaTone(summary: TenantQuotaSummary | null): CanvasTone {
 }
 
 function getGreetingName(data: HomeData) {
-  const activeUser = [...data.users]
-    .filter((user) => user.status === "active")
-    .sort((left, right) =>
-      left.displayName.localeCompare(right.displayName, "zh-Hant"),
-    )[0];
-
-  if (activeUser?.displayName) return activeUser.displayName;
-  if (data.billingProfile?.contactName) return data.billingProfile.contactName;
-  if (data.billingProfile?.invoiceTitle)
-    return data.billingProfile.invoiceTitle;
-  if (data.identity?.actorType === "tenant_admin") return "租戶管理員";
+  if (data.identity?.actorType === "tenant_admin") return "YAMATO 團隊";
   return "YAMATO 團隊";
 }
 
@@ -381,47 +366,60 @@ function getBookingStateLabel(status: BookingRecord["orderStatus"]) {
   }
 }
 
+function getNotificationTone(
+  notification: NotificationRecord,
+): ReminderBanner["tone"] {
+  switch (notification.channel) {
+    case "tenant_approval":
+    case "tenant_sla":
+      return "warn";
+    case "ops_notice":
+      return "info";
+    default:
+      return "success";
+  }
+}
+
 function buildReminderBanners(data: HomeData): ReminderBanner[] {
   const banners: ReminderBanner[] = [];
+  const latestNotification = data.notifications[0];
+  const enabledFlags =
+    data.featureFlags?.flags.filter((flag) => flag.enabled) ?? [];
 
-  const pausedWebhook = data.webhooks.find(
-    (webhook) => webhook.status === "disabled",
-  );
-  if (pausedWebhook) {
-    const pausedSince =
-      formatDateTime(
-        pausedWebhook.runtimeMetadata?.disabledAt ?? pausedWebhook.updatedAt,
-      ) || "最近";
+  if (latestNotification) {
     banners.push({
-      tone: "warn",
-      title: `Webhook ${pausedWebhook.webhookId} 已暫停`,
-      body: `${pausedSince} 起停止投遞，恢復前不會收到事件。`,
+      tone: getNotificationTone(latestNotification),
+      title: latestNotification.title,
+      body: `${latestNotification.message} · ${formatDateTime(latestNotification.createdAt)}`,
     });
   }
 
-  if (data.approvalRequests.length > 0) {
+  if ((data.governance?.onboardingChecklist.length ?? 0) > 0) {
     banners.push({
       tone: "info",
-      title: `${formatCount(data.approvalRequests.length)} 筆叫車等待簽核`,
-      body: "審批與配額頁面可檢視 pending requests、quota impact 與規則命中結果。",
+      title: `${formatCount(data.governance?.onboardingChecklist.length ?? 0)} 項整合待辦`,
+      body: `${data.governance?.onboardingChecklist[0] ?? "請完成租戶整合治理基線。"}${enabledFlags.length > 0 ? ` · 已啟用 ${formatCount(enabledFlags.length)} 個模組` : ""}`,
     });
   } else {
     banners.push({
-      tone: "info",
-      title: "目前沒有待簽核叫車",
-      body: "租戶叫車目前沒有落在 require_approval 的待辦項目。",
+      tone: "success",
+      title: "Integration baseline ready",
+      body:
+        enabledFlags.length > 0
+          ? `目前已啟用 ${formatCount(enabledFlags.length)} 個租戶模組，webhook 與通知基線已就緒。`
+          : "Webhook 與通知基線目前沒有額外待辦。",
     });
   }
 
-  if (data.quotaSummary?.usage.remainingPercent !== null) {
-    const remaining = data.quotaSummary?.usage.remainingPercent ?? 0;
+  if (data.quotaSummary?.usage.remainingPercent !== null && data.quotaSummary) {
+    const remaining = data.quotaSummary.usage.remainingPercent;
     banners.push({
       tone: remaining >= 20 ? "success" : "warn",
       title:
         remaining >= 20
           ? `本月配額仍有 ${remaining}%`
           : `本月配額僅剩 ${remaining}%`,
-      body: `已使用 ${formatQuotaUsage(data.quotaSummary)}，目前強制模式為 ${data.quotaSummary?.limit.enforcementMode ?? "—"}。`,
+      body: `已使用 ${formatQuotaUsage(data.quotaSummary)}，目前強制模式為 ${data.quotaSummary.limit.enforcementMode ?? "—"}。`,
     });
   } else if (data.invoices[0]) {
     banners.push({
