@@ -18,12 +18,15 @@ import {
 import type { CanvasTone } from "@drts/ui-web/canvas-tokens";
 
 import {
-  Banner,
-  Btn,
-  KPI,
-  PageHeader,
-  Pill,
-  Shell,
+  Banner as CanvasBanner,
+  Btn as CanvasBtn,
+  Card as CanvasCard,
+  DL as CanvasDL,
+  Field as CanvasField,
+  KPI as CanvasKPI,
+  PageHeader as CanvasPageHeader,
+  Pill as CanvasPill,
+  Shell as CanvasShell,
   driverCanvasTheme,
 } from "@/components/canvas-primitives";
 import {
@@ -198,6 +201,19 @@ function getTodayTripCount(item: EnrichedPresence): number {
   return isPlatformSwitchOn(item.record) ? 1 : 0;
 }
 
+function getReauthMessage(item: EnrichedPresence): string {
+  const blockingReason = item.adapterStatus?.blockingReason?.trim();
+  if (blockingReason) {
+    return blockingReason;
+  }
+
+  if (item.assessment.tokenInfo.urgency === "expired") {
+    return "Token 已過期，請重新授權";
+  }
+
+  return "平台需要重新授權，完成後才可恢復接單。";
+}
+
 function PlatformCard({
   item,
   busy,
@@ -223,198 +239,261 @@ function PlatformCard({
   );
   const tokenExpiry = formatTokenExpiry(record.tokenExpiresAt);
   const todayCount = getTodayTripCount(item);
+  const reauthMessage = getReauthMessage(item);
   const codeColor = forwarded ? THEME.warn : THEME.accentHi;
   const codeBg = forwarded ? THEME.warnBg : THEME.accentBg;
 
   return (
-    <View
+    <CanvasCard
+      theme={THEME}
+      padding={0}
       style={[
         styles.platformCard,
         {
-          backgroundColor: THEME.surface,
           borderColor: isReauth ? `${THEME.warn}60` : THEME.border,
         },
       ]}
     >
-      <View style={styles.platformCardRow}>
-        <View style={[styles.platformMark, { backgroundColor: codeBg }]}>
-          <Text
-            style={[
-              styles.platformMarkText,
-              { color: codeColor, fontFamily: THEME.monoFamily },
-            ]}
-          >
-            {String(record.platformCode).slice(0, 3).toUpperCase()}
-          </Text>
-        </View>
-
-        <View style={styles.platformMain}>
-          <View style={styles.platformNameRow}>
-            <Text style={[styles.platformName, { color: THEME.text }]}>
-              {displayName}
-            </Text>
-            {forwarded ? (
-              <Pill theme={THEME} tone="warn">
-                {driverStrings.platformPresence.external}
-              </Pill>
-            ) : null}
-          </View>
-
-          <View style={styles.platformMetaRow}>
-            <View
-              style={[styles.platformStatusDot, { backgroundColor: statusColor }]}
-            />
-            <Text style={[styles.platformMetaText, { color: THEME.textMuted }]}>
-              {getStatusLabel(item)}
-            </Text>
-            <View
-              style={[
-                styles.platformMetaDivider,
-                { backgroundColor: THEME.borderStrong },
-              ]}
-            />
+      <View style={styles.platformCardBody}>
+        <View style={styles.platformCardRow}>
+          <View style={[styles.platformMark, { backgroundColor: codeBg }]}>
             <Text
               style={[
-                styles.platformMetaTime,
-                { color: THEME.textMuted, fontFamily: THEME.monoFamily },
+                styles.platformMarkText,
+                { color: codeColor, fontFamily: THEME.monoFamily },
               ]}
             >
-              {lastSyncCompact}
+              {String(record.platformCode).slice(0, 3).toUpperCase()}
             </Text>
+          </View>
+
+          <View style={styles.platformMain}>
+            <View style={styles.platformNameRow}>
+              <Text style={[styles.platformName, { color: THEME.text }]}>
+                {displayName}
+              </Text>
+              {forwarded ? (
+                <CanvasPill theme={THEME} tone="warn">
+                  {driverStrings.platformPresence.external}
+                </CanvasPill>
+              ) : null}
+            </View>
+
+            <View style={styles.platformMetaRow}>
+              <View
+                style={[
+                  styles.platformStatusDot,
+                  { backgroundColor: statusColor },
+                ]}
+              />
+              <Text
+                style={[styles.platformMetaText, { color: THEME.textMuted }]}
+              >
+                {getStatusLabel(item)}
+              </Text>
+              <View
+                style={[
+                  styles.platformMetaDivider,
+                  { backgroundColor: THEME.borderStrong },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.platformMetaTime,
+                  { color: THEME.textMuted, fontFamily: THEME.monoFamily },
+                ]}
+              >
+                {lastSyncCompact}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.platformSwitchColumn}>
+            {busy ? (
+              <ActivityIndicator size="small" color={THEME.accent} />
+            ) : null}
+            <Switch
+              accessibilityLabel={`${displayName} 平台上線切換`}
+              value={isOnline}
+              onValueChange={onToggle}
+              disabled={busy || isReauth}
+              trackColor={{
+                false: THEME.borderStrong,
+                true: THEME.accentHi,
+              }}
+              thumbColor={isOnline ? THEME.accent : "#FFFFFF"}
+            />
           </View>
         </View>
 
-        <View style={styles.platformSwitchColumn}>
-          {busy ? (
-            <ActivityIndicator size="small" color={THEME.accent} />
-          ) : null}
-          <Switch
-            accessibilityLabel={`${displayName} 平台上線切換`}
-            value={isOnline}
-            onValueChange={onToggle}
-            disabled={busy || isReauth}
-            trackColor={{
-              false: THEME.borderStrong,
-              true: THEME.accentHi,
-            }}
-            thumbColor={isOnline ? THEME.accent : "#FFFFFF"}
+        {isReauth ? (
+          <View style={styles.platformReauthBannerWrap}>
+            <CanvasBanner
+              theme={THEME}
+              tone="warn"
+              icon={
+                <Ionicons
+                  name="lock-open-outline"
+                  size={14}
+                  color={THEME.warn}
+                />
+              }
+              body={
+                <View style={styles.platformReauth}>
+                  <Text
+                    style={[
+                      styles.platformReauthText,
+                      { color: THEME.warn, fontFamily: THEME.fontFamily },
+                    ]}
+                  >
+                    {reauthMessage}
+                  </Text>
+                  <CanvasBtn
+                    theme={THEME}
+                    variant="primary"
+                    size="sm"
+                    onPress={onReauth}
+                    disabled={busy}
+                    style={{
+                      backgroundColor: THEME.warn,
+                      borderColor: THEME.warn,
+                    }}
+                  >
+                    重新授權
+                  </CanvasBtn>
+                </View>
+              }
+            />
+          </View>
+        ) : null}
+
+        <View
+          style={[styles.platformFooter, { borderTopColor: THEME.border }]}
+        >
+          <CanvasDL
+            theme={THEME}
+            cols={2}
+            monoVal
+            items={[
+              {
+                label: "Token",
+                value: tokenExpiry,
+              },
+              {
+                label: "今日趟次",
+                value: `${todayCount} 單`,
+              },
+            ]}
           />
         </View>
       </View>
+    </CanvasCard>
+  );
+}
 
-      {isReauth ? (
-        <View
-          style={[
-            styles.platformReauth,
-            {
-              backgroundColor: THEME.warnBg,
-              borderTopColor: `${THEME.warn}30`,
-            },
-          ]}
-        >
-          <Ionicons name="lock-open-outline" size={14} color={THEME.warn} />
+function ReauthRequiredBanner({
+  items,
+  busyPlatform,
+  onReauth,
+}: {
+  items: EnrichedPresence[];
+  busyPlatform: string | null;
+  onReauth: (record: PlatformPresenceRecord) => void;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  const primaryItem = items[0];
+  const affectedNames = items.map((item) => item.displayName).join("、");
+
+  return (
+    <CanvasBanner
+      theme={THEME}
+      tone="warn"
+      title={
+        items.length === 1
+          ? `${primaryItem.displayName} 需要重新授權`
+          : `${items.length} 個平台需要重新授權`
+      }
+      icon={<Ionicons name="alert-circle" size={16} color={THEME.warn} />}
+      body={
+        <View style={styles.warningBannerBody}>
           <Text
             style={[
-              styles.platformReauthText,
+              styles.warningBannerText,
+              { color: THEME.text, fontFamily: THEME.fontFamily },
+            ]}
+          >
+            {affectedNames} 目前不會收到新訂單。完成重新授權後才會恢復平台派單。
+          </Text>
+          <Text
+            style={[
+              styles.warningBannerHint,
               { color: THEME.warn, fontFamily: THEME.fontFamily },
             ]}
           >
-            Token 已過期，請重新授權
-          </Text>
-          <Btn
-            theme={THEME}
-            variant="primary"
-            size="sm"
-            onPress={onReauth}
-            disabled={busy}
-            style={{
-              backgroundColor: THEME.warn,
-              borderColor: THEME.warn,
-            }}
-          >
-            重新授權
-          </Btn>
-        </View>
-      ) : null}
-
-      <View style={[styles.platformFooter, { borderTopColor: THEME.border }]}>
-        <View style={styles.platformFooterToken}>
-          <Text
-            style={[styles.platformFooterLabel, { color: THEME.textMuted }]}
-          >
-            Token：
-          </Text>
-          <Text
-            style={[
-              styles.platformFooterValue,
-              { color: THEME.textMuted, fontFamily: THEME.monoFamily },
-            ]}
-          >
-            {tokenExpiry}
+            {getReauthMessage(primaryItem)}
           </Text>
         </View>
-
-        <View style={styles.platformFooterToday}>
-          <Text
-            style={[styles.platformFooterLabel, { color: THEME.textMuted }]}
-          >
-            今日
-          </Text>
-          <Text
-            style={[
-              styles.platformFooterTodayCount,
-              { color: THEME.text, fontFamily: THEME.monoFamily },
-            ]}
-          >
-            {todayCount}
-          </Text>
-          <Text
-            style={[styles.platformFooterLabel, { color: THEME.textMuted }]}
-          >
-            單
-          </Text>
-        </View>
-      </View>
-    </View>
+      }
+      actions={
+        <CanvasBtn
+          theme={THEME}
+          variant="primary"
+          size="sm"
+          onPress={() => onReauth(primaryItem.record)}
+          disabled={busyPlatform === primaryItem.record.platformCode}
+          style={{
+            backgroundColor: THEME.warn,
+            borderColor: THEME.warn,
+          }}
+        >
+          立即處理
+        </CanvasBtn>
+      }
+    />
   );
 }
 
 function PlatformRulesBanner({ notes = [] }: { notes?: string[] }) {
   return (
-    <Banner
+    <CanvasBanner
       theme={THEME}
       tone="info"
       icon={
         <Ionicons name="information-circle" size={16} color={THEME.info} />
       }
       body={
-        <View style={styles.infoBannerBody}>
-          <Text
-            style={[
-              styles.infoBannerRule,
-              { color: THEME.text, fontFamily: THEME.fontFamily },
-            ]}
-          >
-            {PLATFORM_RULES_COPY}
-          </Text>
-          {notes.length > 0 ? (
-            <View style={styles.infoBannerNotes}>
-              {notes.map((note) => (
-                <View key={note} style={styles.infoBannerNoteRow}>
-                  <Ionicons name="sync-outline" size={12} color={THEME.info} />
-                  <Text
-                    style={[
-                      styles.infoBannerNoteText,
-                      { color: THEME.text, fontFamily: THEME.fontFamily },
-                    ]}
-                  >
-                    {note}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </View>
+        <CanvasField theme={THEME} label={driverStrings.platformPresence.notesTitle}>
+          <View style={styles.infoBannerBody}>
+            <Text
+              style={[
+                styles.infoBannerRule,
+                { color: THEME.text, fontFamily: THEME.fontFamily },
+              ]}
+            >
+              {PLATFORM_RULES_COPY}
+            </Text>
+            {notes.length > 0 ? (
+              <View style={styles.infoBannerNotes}>
+                {notes.map((note) => (
+                  <View key={note} style={styles.infoBannerNoteRow}>
+                    <Ionicons name="sync-outline" size={12} color={THEME.info} />
+                    <Text
+                      style={[
+                        styles.infoBannerNoteText,
+                        { color: THEME.text, fontFamily: THEME.fontFamily },
+                      ]}
+                    >
+                      {note}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        </CanvasField>
       }
     />
   );
@@ -566,17 +645,20 @@ export default function PlatformPresenceScreen() {
     (total, item) => total + getTodayTripCount(item),
     0,
   );
+  const reauthRequiredItems = enrichedPresences.filter(
+    (item) => item.record.reauthRequired,
+  );
   const headerSubtitle = `${enrichedPresences.length} 個平台 · ${onlineCount} 上線 · ${attentionCount} 需處理`;
 
   if (!isProvisioned) {
     return (
-      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
-        <PageHeader
+      <CanvasShell theme={THEME} contentContainerStyle={styles.shellContent}>
+        <CanvasPageHeader
           theme={THEME}
           title={driverStrings.platformPresence.title}
           subtitle="裝置尚未配置司機身份"
         />
-        <Banner
+        <CanvasBanner
           theme={THEME}
           tone="warn"
           title="裝置尚未配置"
@@ -589,14 +671,17 @@ export default function PlatformPresenceScreen() {
             />
           }
         />
-      </Shell>
+      </CanvasShell>
     );
   }
 
   if (loading && !summary) {
     return (
-      <Shell theme={THEME} contentContainerStyle={styles.loadingShellContent}>
-        <PageHeader
+      <CanvasShell
+        theme={THEME}
+        contentContainerStyle={styles.loadingShellContent}
+      >
+        <CanvasPageHeader
           theme={THEME}
           title={driverStrings.platformPresence.title}
           subtitle="載入中…"
@@ -607,19 +692,19 @@ export default function PlatformPresenceScreen() {
             載入平台連線資料中…
           </Text>
         </View>
-      </Shell>
+      </CanvasShell>
     );
   }
 
   if (error && !summary) {
     return (
-      <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
-        <PageHeader
+      <CanvasShell theme={THEME} contentContainerStyle={styles.shellContent}>
+        <CanvasPageHeader
           theme={THEME}
           title={driverStrings.platformPresence.title}
           subtitle="暫時無法取得平台資料"
           actions={
-            <Btn
+            <CanvasBtn
               theme={THEME}
               variant="secondary"
               size="sm"
@@ -628,28 +713,28 @@ export default function PlatformPresenceScreen() {
               disabled={refreshing}
             >
               重新整理
-            </Btn>
+            </CanvasBtn>
           }
         />
-        <Banner
+        <CanvasBanner
           theme={THEME}
           tone="danger"
           title="平台連線資料載入失敗"
           body={error}
           icon={<Ionicons name="alert-circle" size={16} color={THEME.danger} />}
         />
-      </Shell>
+      </CanvasShell>
     );
   }
 
   return (
-    <Shell theme={THEME} contentContainerStyle={styles.shellContent}>
-      <PageHeader
+    <CanvasShell theme={THEME} contentContainerStyle={styles.shellContent}>
+      <CanvasPageHeader
         theme={THEME}
         title={driverStrings.platformPresence.title}
         subtitle={headerSubtitle}
         actions={
-          <Btn
+          <CanvasBtn
             theme={THEME}
             variant="ghost"
             size="xs"
@@ -658,40 +743,50 @@ export default function PlatformPresenceScreen() {
             disabled={refreshing}
           >
             {refreshing ? "同步中" : "重新整理"}
-          </Btn>
+          </CanvasBtn>
         }
       />
 
       <View style={styles.kpiRow}>
-        <KPI
+        <CanvasKPI
           theme={THEME}
           label={driverStrings.platformPresence.kpis.available}
           value={String(availableCount)}
         />
-        <KPI theme={THEME} label="今日完成" value={String(todayCompletedTotal)} />
-        <KPI
+        <CanvasKPI
+          theme={THEME}
+          label="今日完成"
+          value={String(todayCompletedTotal)}
+        />
+        <CanvasKPI
           theme={THEME}
           label={driverStrings.platformPresence.kpis.attention}
           value={String(attentionCount)}
         />
       </View>
 
+      <ReauthRequiredBanner
+        items={reauthRequiredItems}
+        busyPlatform={busyPlatform}
+        onReauth={handleReauth}
+      />
+
       {enrichedPresences.length === 0 ? (
-        <Banner
+        <CanvasBanner
           theme={THEME}
           tone="info"
           title="尚未連接任何平台"
           body="先到設定完成平台帳號綁定，再回來檢查每個平台的接單狀態。"
           icon={<Ionicons name="link-outline" size={16} color={THEME.info} />}
           actions={
-            <Btn
+            <CanvasBtn
               theme={THEME}
               variant="primary"
               size="sm"
               onPress={() => router.push("/settings")}
             >
-              前往設定
-            </Btn>
+              {driverStrings.platformPresence.bindAction}
+            </CanvasBtn>
           }
         />
       ) : (
@@ -709,7 +804,7 @@ export default function PlatformPresenceScreen() {
       )}
 
       <PlatformRulesBanner notes={summary?.notes ?? []} />
-    </Shell>
+    </CanvasShell>
   );
 }
 
@@ -740,8 +835,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   platformCard: {
-    borderRadius: 14,
-    borderWidth: 1,
+    overflow: "hidden",
+  },
+  platformCardBody: {
     overflow: "hidden",
   },
   platformCardRow: {
@@ -808,13 +904,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
   },
+  platformReauthBannerWrap: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+  },
   platformReauth: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderTopWidth: 1,
   },
   platformReauthText: {
     flex: 1,
@@ -823,37 +920,21 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   platformFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderTopWidth: 1,
   },
-  platformFooterToken: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
+  warningBannerBody: {
+    gap: 8,
   },
-  platformFooterLabel: {
-    fontSize: 11,
+  warningBannerText: {
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  warningBannerHint: {
+    fontSize: 12,
+    lineHeight: 17,
     fontWeight: "600",
-    lineHeight: 14,
-  },
-  platformFooterValue: {
-    fontSize: 11.5,
-    lineHeight: 15,
-  },
-  platformFooterToday: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  platformFooterTodayCount: {
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: -0.2,
   },
   infoBannerBody: {
     gap: 8,
