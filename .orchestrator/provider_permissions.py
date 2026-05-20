@@ -69,6 +69,21 @@ def _qwen_settings() -> dict[str, Any]:
     return load_json(QWEN_SETTINGS_PATH, default={}) or {}
 
 
+def _codex_home(runtime: dict[str, Any] | None = None) -> Path:
+    config_home = str((runtime or {}).get("config_home") or "").strip()
+    if config_home:
+        return Path(os.path.expandvars(os.path.expanduser(config_home)))
+    return Path.home() / ".codex"
+
+
+def _codex_env(runtime: dict[str, Any] | None = None) -> dict[str, str]:
+    env = os.environ.copy()
+    home = _codex_home(runtime)
+    if runtime and str(runtime.get("config_home") or "").strip():
+        env["CODEX_HOME"] = str(home)
+    return env
+
+
 def _truthy_env(name: str, env: dict[str, str] | None = None) -> bool:
     source = env or os.environ
     return source.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
@@ -181,6 +196,14 @@ def _claude_auth_ready(binary: str | None, *, env: dict[str, str] | None = None)
         return False
     payload = _json_command([binary, "auth", "status"], env=env)
     return bool(payload.get("loggedIn"))
+
+
+def _codex_auth_ready(binary: str | None, *, env: dict[str, str] | None = None) -> bool:
+    if not binary:
+        return False
+    result = run_command([binary, "login", "status"], env=env)
+    output = ((result.stdout or "") + (result.stderr or "")).lower()
+    return result.returncode == 0 and "logged in" in output and "not logged in" not in output
 
 
 def _gh_auth_token(binary: str | None) -> str | None:
@@ -514,6 +537,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
     gh_version = _gh_version(gh_binary)
     gh_auth_ready = _gh_auth_ready(gh_binary)
     claude_auth_ready = _claude_auth_ready(claude_binary)
+    codex_auth_ready = _codex_auth_ready(codex_binary, env=_codex_env(config.get("providers", {}).get("codex", {}).get("codex", {})))
     copilot_auth_ready = _copilot_auth_ready(gh_binary)
     copilot_settings = config.get("providers", {}).get("copilot", {})
     qwen_runtime = config.get("providers", {}).get("qwen", {}).get("qwen", {})
@@ -556,6 +580,7 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
     )
 
     codex_profile = config.get("providers", {}).get("codex", {}).get("codex", {})
+    codex_home = _codex_home(codex_profile)
     codex_applied = (
         codex_profile.get("ask_for_approval", "never") == "never"
         and codex_profile.get("sandbox_mode", "workspace-write") == "workspace-write"
@@ -688,24 +713,27 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
                 "default_auto_approve_supported": True,
                 "full_access_supported": True,
                 "per_tool_allow_supported": False,
-                "local_cli_worker_supported": bool(codex_binary),
+                "local_cli_worker_supported": bool(codex_binary and codex_auth_ready),
                 "vscode_link_supported": bool(openai_path),
                 "cloud_agent_supported": False,
-                "supports_auto_approve": bool(codex_binary),
+                "supports_auto_approve": bool(codex_binary and codex_auth_ready),
                 "supports_defer_resume": False,
+                "auth_ready": codex_auth_ready,
                 "supported_models": [],
                 "selected_model": None,
                 "applied": codex_applied,
-                "verified": "partial" if codex_installed else "unavailable",
+                "verified": "verified" if (codex_binary and codex_auth_ready) else ("partial" if codex_installed else "unavailable"),
                 "version": openai_version,
                 "paths": {
                     "extension": str(openai_path) if openai_path else None,
-                    "config": str(CODEX_CONFIG_PATH),
+                    "config": str(codex_home / "config.toml"),
+                    "auth_json": str(codex_home / "auth.json") if (codex_home / "auth.json").exists() else None,
                     "binary": codex_binary,
                 },
                 "settings": {
                     "orchestrator.ask_for_approval": codex_profile.get("ask_for_approval", "never"),
                     "orchestrator.sandbox_mode": codex_profile.get("sandbox_mode", "workspace-write"),
+                    "runtime.config_home": codex_profile.get("config_home"),
                     "dangerously_bypass": codex_profile.get("dangerously_bypass", False),
                 },
                 "notes": [
@@ -840,6 +868,54 @@ def provider_capabilities(config: dict[str, Any] | None = None) -> dict[str, Any
     }
     if "qwen" not in (config.get("providers", {}) or {}):
         report["providers"].pop("qwen", None)
+    codex_template = report["providers"].get("codex", {})
+    for provider_key, provider_cfg in (config.get("providers", {}) or {}).items():
+        if provider_key == "codex" or provider_cfg.get("delivery_mode") != "codex":
+            continue
+        codex_runtime = provider_cfg.get("codex", {})
+        runtime_cli = command_exists(codex_runtime.get("cli") or "codex", search_roots=cli_search_roots)
+        runtime_env = _codex_env(codex_runtime)
+        runtime_auth_ready = _codex_auth_ready(runtime_cli, env=runtime_env)
+        runtime_home = _codex_home(codex_runtime)
+        paths = dict(codex_template.get("paths", {}) or {})
+        paths.update(
+            {
+                "binary": runtime_cli,
+                "config": str(runtime_home / "config.toml"),
+                "auth_json": str(runtime_home / "auth.json") if (runtime_home / "auth.json").exists() else None,
+                "config_home": codex_runtime.get("config_home"),
+                "resolved_codex_home": str(runtime_home),
+            }
+        )
+        settings = dict(codex_template.get("settings", {}) or {})
+        settings.update(
+            {
+                "runtime.config_home": codex_runtime.get("config_home"),
+                "runtime.ask_for_approval": codex_runtime.get("ask_for_approval"),
+                "runtime.sandbox_mode": codex_runtime.get("sandbox_mode"),
+                "runtime.dangerously_bypass": codex_runtime.get("dangerously_bypass"),
+            }
+        )
+        notes = list(codex_template.get("notes", []) or [])
+        if codex_runtime.get("config_home"):
+            notes.append(
+                "This Codex lane is isolated with codex.config_home, so CLI auth/quota can differ from the primary Codex provider."
+            )
+        report["providers"][provider_key] = {
+            **codex_template,
+            "installed": bool(openai_path or runtime_cli),
+            "host_layer": "CLI + VS Code extension" if openai_path and runtime_cli else ("CLI" if runtime_cli else "VS Code extension"),
+            "delivery_mode": provider_cfg.get("delivery_mode", "codex"),
+            "approval_mode": f"orchestrator:{codex_runtime.get('ask_for_approval', 'never')}",
+            "local_cli_worker_supported": bool(runtime_cli and runtime_auth_ready),
+            "supports_auto_approve": bool(runtime_cli and runtime_auth_ready),
+            "supports_defer_resume": False,
+            "auth_ready": runtime_auth_ready,
+            "verified": "verified" if (runtime_cli and runtime_auth_ready) else ("partial" if runtime_cli else "unavailable"),
+            "paths": paths,
+            "settings": settings,
+            "notes": notes,
+        }
     claude_template = report["providers"].get("claude", {})
     for provider_key, provider_cfg in (config.get("providers", {}) or {}).items():
         if provider_key == "claude" or provider_cfg.get("delivery_mode") != "claude_cli":
