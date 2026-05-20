@@ -1,9 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type {
-  ComplaintCaseRecord,
   DispatchJobRecord,
   DriverRegistryRecord,
+  DriverStatementRecord,
   DriverTaskRecord,
   EmptyReason,
   EmptyStateEnvelope,
@@ -25,7 +25,9 @@ import { formatOpsCodeLabel } from "@/lib/localized-labels";
 import {
   buildDispatchInsights,
   buildOperationsOverview,
+  buildRevenueInsights,
   formatCompactNumber,
+  formatMinorCurrency,
 } from "@/lib/ops-analytics";
 import { getServerLocale } from "@/lib/server-locale";
 import { t, type Locale } from "@/lib/translations";
@@ -44,6 +46,7 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
+type IdentitySummary = { realm?: string; actorType?: string } | null;
 type HealthPayload = {
   service: string;
   status: string;
@@ -536,12 +539,6 @@ function getHealthTone(status: string): CanvasTone {
   return "info";
 }
 
-function isComplaintActive(status: ComplaintCaseRecord["status"]) {
-  return ["new", "assigned", "under_investigation", "reopened"].includes(
-    status,
-  );
-}
-
 function pickCurrentTask(tasks: DriverTaskRecord[]) {
   return (
     [...tasks].sort((left, right) => {
@@ -721,6 +718,7 @@ export default async function DashboardPage() {
   const client = await getServerOpsClient();
   const locale = await getServerLocale();
   const [
+    identity,
     health,
     orders,
     dispatchJobs,
@@ -730,10 +728,14 @@ export default async function DashboardPage() {
     shifts,
     incidents,
     maintenance,
-    complaints,
     reportJobs,
+    driverStatements,
     observability,
   ] = await Promise.all([
+    resolveOrFallback<IdentitySummary>(
+      () => client.getIdentityContext() as Promise<IdentitySummary>,
+      null,
+    ),
     resolveOrFallback(loadHealthPayload, {
       service: "api",
       status: "degraded",
@@ -757,60 +759,14 @@ export default async function DashboardPage() {
       () => client.listMaintenance(),
       [] as MaintenanceRecord[],
     ),
-    resolveOrFallback(
-      () => client.listComplaints(),
-      [] as ComplaintCaseRecord[],
-    ),
     resolveOrFallback(() => client.listReportJobs(), [] as ReportJobRecord[]),
     resolveOrFallback(
-      () => client.getListEnvelope<DispatchJobRecord>("/api/dispatch/tasks"),
-      createFallbackListEnvelope([] as DispatchJobRecord[]),
+      () => client.listDriverStatements(),
+      [] as DriverStatementRecord[],
     ),
     resolveOrFallback(
-      () => client.getListEnvelope<DriverTaskRecord>("/api/driver/tasks"),
-      createFallbackListEnvelope([] as DriverTaskRecord[]),
-    ),
-    resolveOrFallback(
-      () =>
-        client.getListEnvelope<VehicleRegistryRecord>(
-          "/api/regulatory-registry/vehicles",
-        ),
-      createFallbackListEnvelope([] as VehicleRegistryRecord[]),
-    ),
-    resolveOrFallback(
-      () =>
-        client.getListEnvelope<DriverRegistryRecord>(
-          "/api/regulatory-registry/drivers",
-        ),
-      createFallbackListEnvelope([] as DriverRegistryRecord[]),
-    ),
-    resolveOrFallback(
-      () => client.getListEnvelope<ShiftRecord>("/api/shift-attendance/shifts"),
-      createFallbackListEnvelope([] as ShiftRecord[]),
-    ),
-    resolveOrFallback(
-      () => client.getListEnvelope<IncidentRecord>("/api/incidents"),
-      createFallbackListEnvelope([] as IncidentRecord[]),
-    ),
-    resolveOrFallback(
-      () => client.getListEnvelope<MaintenanceRecord>("/api/maintenance"),
-      createFallbackListEnvelope([] as MaintenanceRecord[]),
-    ),
-    resolveOrFallback(
-      () => client.getListEnvelope<ReportJobRecord>("/api/reports/jobs"),
-      createFallbackListEnvelope([] as ReportJobRecord[]),
-    ),
-    resolveOrFallback(
-      () =>
-        client.getListEnvelope<DriverStatementRecord>("/api/driver-statements"),
-      createFallbackListEnvelope([] as DriverStatementRecord[]),
-    ),
-    resolveOrFallback(
-      () =>
-        client.getEnvelope<OperationalObservabilitySnapshot>(
-          "/api/operational-observability",
-        ),
-      createFallbackEnvelope(createFallbackObservabilitySnapshot()),
+      () => client.getOperationalObservability(),
+      createFallbackObservabilitySnapshot(),
     ),
   ]);
 
@@ -835,12 +791,16 @@ export default async function DashboardPage() {
     maintenance,
     reportJobs,
   });
-  const activeComplaintCount = complaints.filter((record) =>
-    isComplaintActive(record.status),
-  ).length;
-  const complaintSlaBreachCount = complaints.filter(
-    (record) => isComplaintActive(record.status) && record.slaBreach,
-  ).length;
+  const todayRevenue = buildRevenueInsights(
+    orders,
+    driverTasks,
+    driverStatements,
+    {
+      period: "today",
+      serviceBucket: "all",
+      vehicleId: "all",
+    },
+  );
   const criticalIncidentCount = incidents.filter(
     (incident) =>
       (incident.status === "open" || incident.status === "investigating") &&
@@ -1089,6 +1049,16 @@ export default async function DashboardPage() {
     tone: CanvasTone;
   }> = [
     {
+      label: t("dashboard.runtime.apiStatus", locale),
+      value: health.status,
+      tone: getHealthTone(health.status),
+    },
+    {
+      label: t("dashboard.queueDepth", locale),
+      value: formatCompactNumber(dispatch.queueDepth),
+      tone: dispatch.queueDepth > 0 ? "info" : "success",
+    },
+    {
       label: t("dashboard.alert.dispatch_lag.title", locale),
       value: formatCompactNumber(observability.dispatch.laggedOrders),
       tone:
@@ -1096,24 +1066,16 @@ export default async function DashboardPage() {
           ? "warn"
           : ("success" as CanvasTone),
     },
-    {
-      label: locale === "en" ? "Webhook queued deliveries" : "Webhook 排隊投遞",
-      value: formatCompactNumber(observability.webhook.queuedDeliveries),
-      tone:
-        observability.webhook.queuedDeliveries > 0
-          ? "warn"
-          : ("success" as CanvasTone),
-    },
-    {
-      label: t("dashboard.runtime.apiStatus", locale),
-      value: health.status,
-      tone: getHealthTone(health.status),
-    },
-    ...observability.adapterDetails.slice(0, 2).map((adapter) => ({
+    ...observability.adapterDetails.slice(0, 1).map((adapter) => ({
       label: formatOpsCodeLabel(locale, adapter.platformCode),
       value: adapter.status,
       tone: getHealthTone(adapter.status),
     })),
+    {
+      label: t("dashboard.runtime.title", locale),
+      value: `${identity?.realm ?? t("dashboard.runtime.anonymous", locale)} / ${identity?.actorType ?? t("dashboard.runtime.anonymous", locale)}`,
+      tone: "neutral",
+    },
   ];
 
   const jobByOrderId = new Map(dispatchJobs.map((job) => [job.orderId, job]));
@@ -1286,64 +1248,39 @@ export default async function DashboardPage() {
           />
           <KPI
             theme={theme}
-            label={locale === "en" ? "Dispatch Eligible Drivers" : "可派司機"}
-            value={formatCompactNumber(
-              observability.driverState.dispatchEligibleDrivers,
-            )}
-            delta={
-              locale === "en"
-                ? `${formatCompactNumber(operations.onlineDrivers)} online`
-                : `${formatCompactNumber(operations.onlineDrivers)} 在線`
-            }
-            deltaTone="neutral"
+            label={t("dashboard.onlineDrivers", locale)}
+            value={formatCompactNumber(operations.onlineDrivers)}
             sub={t("dashboard.onlineDriversSub", locale)}
+            hint={`${formatCompactNumber(operations.dispatchableVehicles)} dispatchable`}
           />
           <KPI
             theme={theme}
-            label={locale === "en" ? "Location Stale" : "位置失聯"}
-            value={formatCompactNumber(
-              observability.driverState.staleLocationDrivers,
-            )}
-            delta={
-              observability.driverState.missingLocationDrivers > 0
-                ? locale === "en"
-                  ? `${formatCompactNumber(
-                      observability.driverState.missingLocationDrivers,
-                    )} missing`
-                  : `${formatCompactNumber(
-                      observability.driverState.missingLocationDrivers,
-                    )} 缺樣本`
-                : undefined
-            }
-            deltaTone={
-              observability.driverState.staleLocationDrivers > 0
-                ? "down"
-                : "neutral"
-            }
-            sub={
-              locale === "en"
-                ? "Drivers with stale location samples"
-                : "位置樣本逾時司機"
-            }
-          />
-          <KPI
-            theme={theme}
-            label={locale === "en" ? "Open Complaints" : "客訴未結"}
-            value={formatCompactNumber(activeComplaintCount)}
-            delta={
-              complaintSlaBreachCount > 0
-                ? locale === "en"
-                  ? `${formatCompactNumber(complaintSlaBreachCount)} SLA breach`
-                  : `${formatCompactNumber(complaintSlaBreachCount)} SLA 違規`
-                : undefined
-            }
-            deltaTone={complaintSlaBreachCount > 0 ? "down" : "neutral"}
-            sub={t("complaints.activeCasesSub", locale)}
+            label={t("dashboard.dispatchableVehicles", locale)}
+            value={formatCompactNumber(operations.dispatchableVehicles)}
+            delta={`${formatCompactNumber(operations.offlineVehicles)} offline`}
+            deltaTone={operations.offlineVehicles > 0 ? "down" : "neutral"}
+            sub={t("dashboard.dispatchableVehiclesSub", locale, {
+              count: operations.offlineVehicles,
+            })}
           />
           <KPI
             theme={theme}
             label={t("dashboard.openIncidents", locale)}
             value={formatCompactNumber(operations.openIncidents)}
+            delta={
+              operations.overdueMaintenance > 0
+                ? `${formatCompactNumber(operations.overdueMaintenance)} breach`
+                : undefined
+            }
+            deltaTone={operations.overdueMaintenance > 0 ? "down" : "neutral"}
+            sub={t("dashboard.openIncidentsSub", locale, {
+              count: operations.overdueMaintenance,
+            })}
+          />
+          <KPI
+            theme={theme}
+            label={t("dashboard.todayRevenue", locale)}
+            value={formatMinorCurrency(todayRevenue.totalRevenueMinor)}
             delta={
               criticalIncidentCount > 0
                 ? locale === "en"
@@ -1352,11 +1289,9 @@ export default async function DashboardPage() {
                 : undefined
             }
             deltaTone={criticalIncidentCount > 0 ? "down" : "neutral"}
-            sub={
-              locale === "en"
-                ? "Active incidents requiring recovery"
-                : "需追蹤處置的進行中事故"
-            }
+            sub={t("dashboard.todayRevenueSub", locale, {
+              trips: formatCompactNumber(todayRevenue.completedTrips),
+            })}
           />
         </div>
 
