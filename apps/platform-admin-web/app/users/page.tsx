@@ -22,7 +22,6 @@ import {
   CanvasCard,
   CanvasDL,
   CanvasField,
-  CanvasKPI,
   CanvasPageHeader,
   CanvasPill,
   CanvasShell,
@@ -40,10 +39,7 @@ const ROLE_CODES: PlatformAdminUserRole[] = [
   "viewer",
 ];
 
-type UserTableRow = PlatformAdminUserRecord &
-  Record<string, unknown> & {
-    _selected?: boolean;
-  };
+type UserTableRow = PlatformAdminUserRecord & Record<string, unknown>;
 
 const theme = buildCanvasTheme({ surface: "platform", density: "compact" });
 
@@ -62,26 +58,75 @@ const tableCardStyle = {
   overflow: "hidden",
 } satisfies CSSProperties;
 
-const detailStackStyle = {
-  display: "grid",
-  gap: 14,
+const emptyStateStyle = {
+  padding: 24,
+  color: theme.textMuted,
+  fontSize: 12.5,
+  textAlign: "center",
 } satisfies CSSProperties;
 
-const editorSplitStyle = {
+const nameCellButtonStyle = {
   display: "flex",
-  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
+  width: "100%",
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  color: theme.text,
+  cursor: "pointer",
+  textAlign: "left",
+  fontFamily: theme.fontFamily,
+  fontSize: 12.5,
+  fontWeight: 500,
+} satisfies CSSProperties;
+
+const avatarStyle = {
+  width: 22,
+  height: 22,
+  borderRadius: 11,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: theme.accentBg,
+  color: theme.accent,
+  fontSize: 10,
+  fontWeight: 700,
+  flexShrink: 0,
+} satisfies CSSProperties;
+
+const namePrimaryStyle = {
+  color: theme.text,
+  fontWeight: 500,
+  lineHeight: 1.2,
+} satisfies CSSProperties;
+
+const roleCodeStyle = {
+  fontFamily: theme.monoFamily,
+  fontSize: 11.5,
+  color: theme.text,
+} satisfies CSSProperties;
+
+const dialogOverlayStyle = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 50,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 24,
+  background: "rgba(15, 23, 42, 0.28)",
+} satisfies CSSProperties;
+
+const dialogFrameStyle = {
+  width: "min(720px, calc(100vw - 32px))",
+  maxHeight: "calc(100vh - 48px)",
+  overflowY: "auto",
+} satisfies CSSProperties;
+
+const dialogStackStyle = {
+  display: "grid",
   gap: 16,
-  alignItems: "flex-start",
-} satisfies CSSProperties;
-
-const formCardStyle = {
-  flex: "1.4 1 640px",
-  minWidth: 0,
-} satisfies CSSProperties;
-
-const sideCardStyle = {
-  flex: "1 1 320px",
-  minWidth: 280,
 } satisfies CSSProperties;
 
 const formGridStyle = {
@@ -95,81 +140,6 @@ const actionRowStyle = {
   flexWrap: "wrap",
   gap: 8,
   alignItems: "center",
-} satisfies CSSProperties;
-
-const kpiGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-  gap: 12,
-} satisfies CSSProperties;
-
-const rolePillGridStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 6,
-} satisfies CSSProperties;
-
-const emptyStateStyle = {
-  padding: 24,
-  color: theme.textMuted,
-  fontSize: 12.5,
-  textAlign: "center",
-} satisfies CSSProperties;
-
-const nameCellButtonStyle = (selected: boolean): CSSProperties => ({
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  width: "100%",
-  padding: 0,
-  border: "none",
-  background: "transparent",
-  color: theme.text,
-  cursor: "pointer",
-  textAlign: "left",
-  fontFamily: theme.fontFamily,
-  fontSize: 12.5,
-  fontWeight: selected ? 600 : 500,
-});
-
-const avatarStyle = (selected: boolean): CSSProperties => ({
-  width: 22,
-  height: 22,
-  borderRadius: 11,
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background: selected ? theme.accent : theme.accentBg,
-  color: selected ? "#fff" : theme.accent,
-  border: `1px solid ${selected ? theme.accent : theme.accentBorder}`,
-  fontSize: 10,
-  fontWeight: 700,
-  flexShrink: 0,
-});
-
-const nameTextStyle = {
-  display: "grid",
-  gap: 2,
-  minWidth: 0,
-} satisfies CSSProperties;
-
-const namePrimaryStyle = {
-  color: theme.text,
-  fontWeight: 500,
-  lineHeight: 1.2,
-} satisfies CSSProperties;
-
-const nameMetaStyle = {
-  color: theme.textMuted,
-  fontSize: 10.5,
-  fontFamily: theme.monoFamily,
-  lineHeight: 1.2,
-} satisfies CSSProperties;
-
-const roleCodeStyle = {
-  fontFamily: theme.monoFamily,
-  fontSize: 11.5,
-  color: theme.text,
 } satisfies CSSProperties;
 
 const inputStyle = (mono = false): CSSProperties => ({
@@ -386,10 +356,9 @@ export default function UsersPage() {
           createTitle: "Invite platform staff",
           createSubtitle:
             "Create an internal staff identity and assign the initial platform role before workflow access begins.",
-          summaryTitle: "Roster summary",
-          summarySubtitle: "Live platform staff mix and role catalog",
           detailTitle: "Access controls",
-          detailSubtitle: "Select a staff record to adjust role or access state.",
+          detailSubtitle:
+            "Adjust the selected staff record without leaving the roster.",
         }
       : {
           title: "平台人員",
@@ -402,10 +371,8 @@ export default function UsersPage() {
           createTitle: "邀請平台人員",
           createSubtitle:
             "先建立平台內部身分與初始角色，再讓該使用者進入後續治理流程。",
-          summaryTitle: "人員摘要",
-          summarySubtitle: "平台人員組成與角色目錄",
           detailTitle: "存取調整",
-          detailSubtitle: "選取一筆人員資料後，再調整角色或存取狀態。",
+          detailSubtitle: "直接在名單上查看與調整選取人員的角色或狀態。",
         };
 
   const navItems = useMemo(() => buildPlatformNav(locale), [locale]);
@@ -427,27 +394,6 @@ export default function UsersPage() {
     void loadUsers();
   }, [loadUsers]);
 
-  const counts = useMemo(
-    () => ({
-      all: users.length,
-      active: users.filter((user) => user.status === "active").length,
-      invited: users.filter((user) => user.status === "invited").length,
-      suspended: users.filter((user) => user.status === "suspended").length,
-    }),
-    [users],
-  );
-
-  const latestUpdated = useMemo(() => {
-    return users.reduce<string | null>((latest, user) => {
-      if (!latest) {
-        return user.updatedAt;
-      }
-      return new Date(user.updatedAt) > new Date(latest)
-        ? user.updatedAt
-        : latest;
-    }, null);
-  }, [users]);
-
   useEffect(() => {
     if (selectedUserId && !users.some((user) => user.userId === selectedUserId)) {
       setSelectedUserId(null);
@@ -458,52 +404,41 @@ export default function UsersPage() {
     users.find((user) => user.userId === selectedUserId) ?? null;
 
   const tableRows = useMemo<UserTableRow[]>(
-    () =>
-      users.map((user) => ({
-        ...user,
-        _selected: user.userId === selectedUserId,
-      })),
-    [selectedUserId, users],
+    () => users.map((user) => ({ ...user })),
+    [users],
   );
 
   const columns = useMemo<CanvasTableColumn<UserTableRow>[]>(
     () => [
       {
         h: "NAME",
-        w: 220,
+        w: 200,
         r: (row) => (
           <button
             type="button"
             onClick={() => setSelectedUserId(row.userId)}
-            style={nameCellButtonStyle(Boolean(row._selected))}
+            style={nameCellButtonStyle}
           >
-            <span style={avatarStyle(Boolean(row._selected))}>
-              {getInitials(row.displayName)}
-            </span>
-            <span style={nameTextStyle}>
-              <span style={namePrimaryStyle}>{row.displayName}</span>
-              {row._selected ? (
-                <span style={nameMetaStyle}>{row.userId}</span>
-              ) : null}
-            </span>
+            <span style={avatarStyle}>{getInitials(row.displayName)}</span>
+            <span style={namePrimaryStyle}>{row.displayName}</span>
           </button>
         ),
       },
       {
         h: "EMAIL",
         k: "email",
-        w: 260,
+        w: 240,
         mono: true,
       },
       {
         h: "ROLE",
-        w: 180,
+        w: 200,
         mono: true,
         r: (row) => <span style={roleCodeStyle}>{row.roleCode}</span>,
       },
       {
         h: "STATUS",
-        w: 110,
+        w: 100,
         r: (row) => (
           <CanvasPill theme={theme} tone={getStatusTone(row.status)} dot>
             {row.status}
@@ -512,7 +447,7 @@ export default function UsersPage() {
       },
       {
         h: locale === "en" ? "UPDATED" : "更新",
-        w: 130,
+        w: 120,
         mono: true,
         r: (row) => formatRosterDate(row.updatedAt),
       },
@@ -587,11 +522,11 @@ export default function UsersPage() {
         actions={
           <CanvasBtn
             theme={theme}
-            variant={showCreate ? "secondary" : "primary"}
-            icon={showCreate ? "x" : "plus"}
-            onClick={() => setShowCreate((current) => !current)}
+            variant="primary"
+            icon="plus"
+            onClick={() => setShowCreate(true)}
           >
-            {showCreate ? t("common.cancel") : copy.add}
+            {copy.add}
           </CanvasBtn>
         }
       />
@@ -624,138 +559,34 @@ export default function UsersPage() {
             <div style={emptyStateStyle}>{t("users.empty")}</div>
           )}
         </CanvasCard>
+      </div>
 
-        {selectedUser ? (
-          <CanvasCard
-            theme={theme}
-            title={copy.detailTitle}
-            subtitle={copy.detailSubtitle}
-          >
-            <div style={detailStackStyle}>
-              <CanvasDL
-                theme={theme}
-                cols={4}
-                items={[
-                  {
-                    k: locale === "en" ? "NAME" : "姓名",
-                    v: selectedUser.displayName,
-                  },
-                  {
-                    k: "EMAIL",
-                    v: selectedUser.email,
-                    mono: true,
-                  },
-                  {
-                    k: "ROLE",
-                    v: selectedUser.roleCode,
-                    mono: true,
-                  },
-                  {
-                    k: locale === "en" ? "UPDATED" : "更新",
-                    v: formatDateTime(selectedUser.updatedAt),
-                    mono: true,
-                  },
-                ]}
-              />
-
-              <CanvasField
-                theme={theme}
-                label={locale === "en" ? "Role reassignment" : "角色調整"}
-                hint={
-                  locale === "en"
-                    ? "Role commands call the existing platform admin update endpoint."
-                    : "角色調整沿用既有 platform admin update endpoint。"
-                }
-              >
-                <div style={actionRowStyle}>
-                  {ROLE_CODES.map((roleCode) => (
-                    <CanvasBtn
-                      key={roleCode}
-                      theme={theme}
-                      size="xs"
-                      variant={
-                        selectedUser.roleCode === roleCode
-                          ? "primary"
-                          : "secondary"
-                      }
-                      disabled={
-                        updatingUserId === selectedUser.userId ||
-                        selectedUser.roleCode === roleCode
-                      }
-                      onClick={() =>
-                        void handleUpdate(selectedUser.userId, {
-                          roleCode,
-                          status: selectedUser.status,
-                        })
-                      }
-                    >
-                      {formatPlatformCodeLabel(locale, roleCode)}
-                    </CanvasBtn>
-                  ))}
-                </div>
-              </CanvasField>
-
-              <CanvasField
-                theme={theme}
-                label={locale === "en" ? "Access state" : "存取狀態"}
-                hint={
-                  locale === "en"
-                    ? "Suspended users can be reactivated without changing their current role."
-                    : "停用中的使用者可直接恢復啟用，不會改變目前角色。"
-                }
-              >
-                <div style={actionRowStyle}>
-                  <CanvasPill
-                    theme={theme}
-                    tone={getStatusTone(selectedUser.status)}
-                    dot
-                  >
-                    {selectedUser.status}
-                  </CanvasPill>
-                  {selectedUser.status === "suspended" ? (
-                    <CanvasBtn
-                      theme={theme}
-                      size="xs"
-                      disabled={updatingUserId === selectedUser.userId}
-                      onClick={() =>
-                        void handleUpdate(selectedUser.userId, {
-                          roleCode: selectedUser.roleCode,
-                          status: "active",
-                        })
-                      }
-                    >
-                      {locale === "en" ? "Activate" : "啟用"}
-                    </CanvasBtn>
-                  ) : (
-                    <CanvasBtn
-                      theme={theme}
-                      size="xs"
-                      disabled={updatingUserId === selectedUser.userId}
-                      onClick={() =>
-                        void handleUpdate(selectedUser.userId, {
-                          roleCode: selectedUser.roleCode,
-                          status: "suspended",
-                        })
-                      }
-                    >
-                      {locale === "en" ? "Suspend" : "停用"}
-                    </CanvasBtn>
-                  )}
-                </div>
-              </CanvasField>
-            </div>
-          </CanvasCard>
-        ) : null}
-
-        {showCreate ? (
-          <div style={editorSplitStyle}>
+      {showCreate ? (
+        <div
+          style={dialogOverlayStyle}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowCreate(false);
+            }
+          }}
+        >
+          <div style={dialogFrameStyle}>
             <CanvasCard
               theme={theme}
               title={copy.createTitle}
               subtitle={copy.createSubtitle}
-              style={formCardStyle}
+              actions={
+                <CanvasBtn
+                  theme={theme}
+                  size="xs"
+                  variant="secondary"
+                  onClick={() => setShowCreate(false)}
+                >
+                  {t("common.close")}
+                </CanvasBtn>
+              }
             >
-              <form onSubmit={handleCreate} style={{ display: "grid", gap: 4 }}>
+              <form onSubmit={handleCreate} style={dialogStackStyle}>
                 <div style={formGridStyle}>
                   <CanvasField theme={theme} label={t("users.form.email")} required>
                     <input
@@ -799,94 +630,168 @@ export default function UsersPage() {
                   </CanvasField>
                 </div>
 
-                <button
-                  type="submit"
-                  style={submitButtonStyle(createDisabled)}
-                  disabled={createDisabled}
-                >
-                  {creating ? t("common.adding") : copy.add}
-                </button>
+                <div style={actionRowStyle}>
+                  <button
+                    type="submit"
+                    style={submitButtonStyle(createDisabled)}
+                    disabled={createDisabled}
+                  >
+                    {creating ? t("common.adding") : copy.add}
+                  </button>
+                </div>
               </form>
             </CanvasCard>
+          </div>
+        </div>
+      ) : null}
 
+      {selectedUser ? (
+        <div
+          style={dialogOverlayStyle}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedUserId(null);
+            }
+          }}
+        >
+          <div style={dialogFrameStyle}>
             <CanvasCard
               theme={theme}
-              title={copy.summaryTitle}
-              subtitle={copy.summarySubtitle}
-              style={sideCardStyle}
+              title={copy.detailTitle}
+              subtitle={copy.detailSubtitle}
+              actions={
+                <CanvasBtn
+                  theme={theme}
+                  size="xs"
+                  variant="secondary"
+                  onClick={() => setSelectedUserId(null)}
+                >
+                  {t("common.close")}
+                </CanvasBtn>
+              }
             >
-              <div style={kpiGridStyle}>
-                <CanvasKPI
+              <div style={dialogStackStyle}>
+                <CanvasDL
                   theme={theme}
-                  label="ACTIVE"
-                  value={counts.active}
-                  sub={locale === "en" ? "platform access" : "平台存取"}
+                  cols={2}
+                  items={[
+                    {
+                      k: locale === "en" ? "NAME" : "姓名",
+                      v: selectedUser.displayName,
+                    },
+                    {
+                      k: "EMAIL",
+                      v: selectedUser.email,
+                      mono: true,
+                    },
+                    {
+                      k: "ROLE",
+                      v: selectedUser.roleCode,
+                      mono: true,
+                    },
+                    {
+                      k: locale === "en" ? "STATUS" : "狀態",
+                      v: (
+                        <CanvasPill
+                          theme={theme}
+                          tone={getStatusTone(selectedUser.status)}
+                          dot
+                        >
+                          {selectedUser.status}
+                        </CanvasPill>
+                      ),
+                    },
+                    {
+                      k: locale === "en" ? "UPDATED" : "更新",
+                      v: formatDateTime(selectedUser.updatedAt),
+                      mono: true,
+                    },
+                  ]}
                 />
-                <CanvasKPI
+
+                <CanvasField
                   theme={theme}
-                  label="INVITED"
-                  value={counts.invited}
-                  sub={locale === "en" ? "pending acceptance" : "等待接受"}
-                />
-                <CanvasKPI
+                  label={locale === "en" ? "Role reassignment" : "角色調整"}
+                  hint={
+                    locale === "en"
+                      ? "Role commands call the existing platform admin update endpoint."
+                      : "角色調整沿用既有 platform admin update endpoint。"
+                  }
+                >
+                  <div style={actionRowStyle}>
+                    {ROLE_CODES.map((roleCode) => (
+                      <CanvasBtn
+                        key={roleCode}
+                        theme={theme}
+                        size="xs"
+                        variant={
+                          selectedUser.roleCode === roleCode
+                            ? "primary"
+                            : "secondary"
+                        }
+                        disabled={
+                          updatingUserId === selectedUser.userId ||
+                          selectedUser.roleCode === roleCode
+                        }
+                        onClick={() =>
+                          void handleUpdate(selectedUser.userId, {
+                            roleCode,
+                            status: selectedUser.status,
+                          })
+                        }
+                      >
+                        {formatPlatformCodeLabel(locale, roleCode)}
+                      </CanvasBtn>
+                    ))}
+                  </div>
+                </CanvasField>
+
+                <CanvasField
                   theme={theme}
-                  label="SUSPENDED"
-                  value={counts.suspended}
-                  sub={locale === "en" ? "manual hold" : "人工停用"}
-                />
+                  label={locale === "en" ? "Access state" : "存取狀態"}
+                  hint={
+                    locale === "en"
+                      ? "Suspended users can be reactivated without changing their current role."
+                      : "停用中的使用者可直接恢復啟用，不會改變目前角色。"
+                  }
+                >
+                  <div style={actionRowStyle}>
+                    {selectedUser.status === "suspended" ? (
+                      <CanvasBtn
+                        theme={theme}
+                        size="xs"
+                        disabled={updatingUserId === selectedUser.userId}
+                        onClick={() =>
+                          void handleUpdate(selectedUser.userId, {
+                            roleCode: selectedUser.roleCode,
+                            status: "active",
+                          })
+                        }
+                      >
+                        {locale === "en" ? "Activate" : "啟用"}
+                      </CanvasBtn>
+                    ) : (
+                      <CanvasBtn
+                        theme={theme}
+                        size="xs"
+                        disabled={updatingUserId === selectedUser.userId}
+                        onClick={() =>
+                          void handleUpdate(selectedUser.userId, {
+                            roleCode: selectedUser.roleCode,
+                            status: "suspended",
+                          })
+                        }
+                      >
+                        {locale === "en" ? "Suspend" : "停用"}
+                      </CanvasBtn>
+                    )}
+                  </div>
+                </CanvasField>
               </div>
-
-              <div style={{ height: 16 }} />
-
-              <CanvasDL
-                theme={theme}
-                cols={2}
-                items={[
-                  {
-                    k: locale === "en" ? "STAFF" : "人員總數",
-                    v: counts.all,
-                    mono: true,
-                  },
-                  {
-                    k: locale === "en" ? "LATEST UPDATE" : "最後更新",
-                    v: latestUpdated ? formatRosterDate(latestUpdated) : "—",
-                    mono: true,
-                  },
-                  {
-                    k: locale === "en" ? "ROLE COUNT" : "角色數",
-                    v: ROLE_CODES.length,
-                    mono: true,
-                  },
-                  {
-                    k: locale === "en" ? "SELECTED" : "目前選取",
-                    v: selectedUser ? selectedUser.displayName : "—",
-                  },
-                ]}
-              />
-
-              <div style={{ height: 16 }} />
-
-              <CanvasField
-                theme={theme}
-                label={locale === "en" ? "Role catalog" : "角色目錄"}
-                hint={
-                  locale === "en"
-                    ? "Displayed labels are localized, but update commands still use the underlying role codes."
-                    : "畫面顯示可本地化，但 update command 仍沿用底層 role code。"
-                }
-              >
-                <div style={rolePillGridStyle}>
-                  {ROLE_CODES.map((roleCode) => (
-                    <CanvasPill key={roleCode} theme={theme} tone="accent">
-                      {formatPlatformCodeLabel(locale, roleCode)}
-                    </CanvasPill>
-                  ))}
-                </div>
-              </CanvasField>
             </CanvasCard>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </CanvasShell>
   );
 }
