@@ -1,17 +1,25 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import type { CSSProperties } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type {
   TenantApiKeyRecord,
   TenantIntegrationGovernancePackage,
 } from "@drts/contracts";
 import {
-  CalloutPanel,
-  PageHero,
-  SurfaceCard,
-} from "@/components/page-primitives";
-import { formatCount, formatDateTime } from "@/lib/formatters";
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasDL,
+  CanvasField,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasTable,
+  type CanvasTableColumn,
+  type CanvasTone,
+  buildCanvasTheme,
+} from "@drts/ui-web";
 import {
   issueTenantApiKeyAction,
   revokeTenantApiKeyAction,
@@ -25,11 +33,204 @@ type ApiKeyManagerProps = {
   errors: string[];
 };
 
+type ApiKeyState = "active" | "expiring" | "expired" | "revoked";
+type ApiKeyRow = TenantApiKeyRecord & Record<string, unknown>;
+
+const th = buildCanvasTheme({
+  surface: "tenant",
+  dark: true,
+  density: "compact",
+});
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const actionCardGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
+  gap: 16,
+};
+
+const fieldGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+};
+
+const scopeGridStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 8,
+};
+
+const nativeInputStyle: CSSProperties = {
+  width: "100%",
+  background: th.bgRaised,
+  border: `1px solid ${th.border}`,
+  borderRadius: 7,
+  padding: "8px 10px",
+  fontSize: 12.5,
+  color: th.text,
+  outline: "none",
+  fontFamily: th.fontFamily,
+  boxSizing: "border-box",
+};
+
+const nativeMonoInputStyle: CSSProperties = {
+  ...nativeInputStyle,
+  fontFamily: th.monoFamily,
+  fontSize: 11.5,
+};
+
+const formFooterStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  alignItems: "center",
+  flexWrap: "wrap",
+  marginTop: 4,
+};
+
+const formNoteStyle: CSSProperties = {
+  fontSize: 11,
+  color: th.textMuted,
+  lineHeight: 1.45,
+};
+
+const primaryButtonStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+  padding: "5px 10px",
+  fontSize: 12,
+  height: 28,
+  fontWeight: 500,
+  background: th.accent,
+  color: "#fff",
+  border: `1px solid ${th.accent}`,
+  borderRadius: 7,
+  cursor: "pointer",
+  lineHeight: 1,
+  fontFamily: th.fontFamily,
+};
+
+const nameCellStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 4,
+  minWidth: 0,
+};
+
+const namePrimaryStyle: CSSProperties = {
+  color: th.text,
+  fontWeight: 600,
+};
+
+const nameMetaRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 11,
+  color: th.textDim,
+  fontFamily: th.monoFamily,
+};
+
+const inlineActionStyle: CSSProperties = {
+  padding: 0,
+  border: 0,
+  background: "transparent",
+  color: th.accent,
+  fontSize: 11,
+  fontFamily: th.fontFamily,
+  cursor: "pointer",
+};
+
+const inlineDangerActionStyle: CSSProperties = {
+  ...inlineActionStyle,
+  color: th.danger,
+};
+
+const dividerStyle: CSSProperties = {
+  color: th.textDim,
+};
+
+const scopeTextStyle: CSSProperties = {
+  whiteSpace: "normal",
+  lineHeight: 1.4,
+};
+
+const bannerBodyStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
+
+const plaintextKeyStyle: CSSProperties = {
+  display: "block",
+  background: "rgba(6, 11, 19, 0.72)",
+  border: `1px solid ${th.border}`,
+  borderRadius: 7,
+  padding: "10px 12px",
+  color: th.text,
+  fontSize: 12,
+  fontFamily: th.monoFamily,
+  overflowX: "auto",
+};
+
+const tableEmptyStyle: CSSProperties = {
+  padding: 24,
+  color: th.textMuted,
+  fontSize: 12.5,
+  textAlign: "center",
+};
+
+const sectionLabelStyle: CSSProperties = {
+  marginTop: 14,
+  marginBottom: 8,
+  fontSize: 10.5,
+  fontWeight: 600,
+  letterSpacing: 0.4,
+  textTransform: "uppercase",
+  color: th.textMuted,
+};
+
+const aliasListStyle: CSSProperties = {
+  margin: 0,
+  paddingLeft: 16,
+  color: th.text,
+  fontSize: 12,
+  lineHeight: 1.5,
+};
+
+const dateTimeFormatter = new Intl.DateTimeFormat("zh-Hant", {
+  dateStyle: "short",
+  timeStyle: "short",
+});
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "—";
+  }
+
+  return dateTimeFormatter.format(parsed);
+}
+
 function isRevoked(apiKey: TenantApiKeyRecord) {
   return Boolean(apiKey.revokedAt);
 }
 
-function resolveApiKeyStatus(apiKey: TenantApiKeyRecord) {
+function resolveApiKeyState(apiKey: TenantApiKeyRecord): ApiKeyState {
   if (isRevoked(apiKey)) {
     return "revoked";
   }
@@ -48,49 +249,78 @@ function resolveApiKeyStatus(apiKey: TenantApiKeyRecord) {
   return "active";
 }
 
-function isApiKeyUsable(apiKey: TenantApiKeyRecord) {
-  const status = resolveApiKeyStatus(apiKey);
-  return status !== "revoked" && status !== "expired";
+function getApiKeyStateTone(state: ApiKeyState): CanvasTone {
+  switch (state) {
+    case "revoked":
+      return "danger";
+    case "expired":
+      return "neutral";
+    case "expiring":
+      return "warn";
+    default:
+      return "success";
+  }
 }
 
-function getApiKeyStateClassName(apiKey: TenantApiKeyRecord) {
-  const status = resolveApiKeyStatus(apiKey);
-  return status === "active" || status === "expiring"
-    ? "status-chip is-active"
-    : "status-chip";
-}
-
-function getApiKeyStateLabel(apiKey: TenantApiKeyRecord) {
-  switch (resolveApiKeyStatus(apiKey)) {
+function getApiKeyStateLabel(state: ApiKeyState) {
+  switch (state) {
     case "revoked":
       return "revoked";
     case "expired":
       return "expired";
     case "expiring":
-      return "expiring soon";
+      return "expiring";
     default:
       return "active";
   }
 }
 
-function renderScopeInput(scope: string, defaultChecked = true) {
-  return (
-    <label className="scope-option" key={scope}>
-      <input
-        defaultChecked={defaultChecked}
-        name="scopes"
-        type="checkbox"
-        value={scope}
-      />
-      <span>{scope}</span>
-    </label>
-  );
+function getScopeChipStyle(selected: boolean): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "6px 10px",
+    borderRadius: 999,
+    border: `1px solid ${selected ? th.accent : th.border}`,
+    background: selected ? "rgba(34, 197, 94, 0.14)" : th.surface,
+    color: selected ? th.text : th.textMuted,
+    cursor: "pointer",
+    fontSize: 11.5,
+    fontFamily: th.monoFamily,
+  };
 }
 
-function renderHiddenScopeInputs(scopes: string[]) {
-  return scopes.map((scope) => (
-    <input key={scope} name="scopes" type="hidden" value={scope} />
-  ));
+function buildCreateFormData(
+  keyName: string,
+  expiresAt: string,
+  scopes: string[],
+) {
+  const formData = new FormData();
+  formData.set("keyName", keyName);
+  if (expiresAt.trim().length > 0) {
+    formData.set("expiresAt", expiresAt);
+  }
+  scopes.forEach((scope) => formData.append("scopes", scope));
+  return formData;
+}
+
+function buildRotateFormData(apiKey: TenantApiKeyRecord) {
+  const formData = new FormData();
+  formData.set("apiKeyId", apiKey.apiKeyId);
+  formData.set("keyName", apiKey.keyName);
+  if (apiKey.expiresAt) {
+    formData.set("expiresAt", apiKey.expiresAt);
+  }
+  apiKey.scopes.forEach((scope) => formData.append("scopes", scope));
+  return formData;
+}
+
+function buildRevokeFormData(apiKey: TenantApiKeyRecord) {
+  const formData = new FormData();
+  formData.set("apiKeyId", apiKey.apiKeyId);
+  formData.set("keyName", apiKey.keyName);
+  return formData;
 }
 
 export function ApiKeyManager({
@@ -99,28 +329,51 @@ export function ApiKeyManager({
   errors,
 }: ApiKeyManagerProps) {
   const router = useRouter();
-  const issueFormRef = useRef<HTMLFormElement>(null);
   const [flash, setFlash] = useState<ApiKeyFlashPayload | null>(null);
   const [pending, startTransition] = useTransition();
-
-  const sortedKeys = [...apiKeys].sort((left, right) =>
-    right.createdAt.localeCompare(left.createdAt),
-  );
-  const activeKeys = sortedKeys.filter((apiKey) => isApiKeyUsable(apiKey));
-  const revokedKeys = sortedKeys.filter((apiKey) => isRevoked(apiKey));
-  const expiringKeys = activeKeys.filter(
-    (apiKey) => resolveApiKeyStatus(apiKey) === "expiring",
-  );
+  const [showCreateCard, setShowCreateCard] = useState(false);
+  const [showPolicyCard, setShowPolicyCard] = useState(false);
   const allowedScopes = governance?.apiKeyPolicy.allowedScopes ?? [];
   const compatibilityAliases = Object.entries(
     governance?.apiKeyPolicy.compatibilityAliases ?? {},
   );
+  const [draftName, setDraftName] = useState("");
+  const [draftExpiresAt, setDraftExpiresAt] = useState("");
+  const [draftScopes, setDraftScopes] = useState<string[]>(allowedScopes);
+
+  useEffect(() => {
+    setDraftScopes((current) => {
+      const filtered = current.filter((scope) => allowedScopes.includes(scope));
+      if (filtered.length > 0) {
+        return filtered;
+      }
+      return [...allowedScopes];
+    });
+  }, [allowedScopes]);
+
+  const sortedKeys = [...apiKeys].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt),
+  );
+
+  function resetCreateDraft() {
+    setDraftName("");
+    setDraftExpiresAt("");
+    setDraftScopes([...allowedScopes]);
+  }
+
+  function toggleScope(scope: string) {
+    setDraftScopes((current) =>
+      current.includes(scope)
+        ? current.filter((value) => value !== scope)
+        : [...current, scope],
+    );
+  }
 
   function runAction(
     action: (formData: FormData) => Promise<ApiKeyFlashPayload>,
     formData: FormData,
     options?: {
-      resetIssueForm?: boolean;
+      onSuccess?: () => void;
     },
   ) {
     startTransition(async () => {
@@ -128,366 +381,454 @@ export function ApiKeyManager({
       setFlash(result);
 
       if (result.tone === "default") {
-        if (options?.resetIssueForm) {
-          issueFormRef.current?.reset();
-        }
+        options?.onSuccess?.();
         router.refresh();
       }
     });
   }
 
+  function renderPrimaryBanner() {
+    if (flash?.plaintextKey) {
+      return (
+        <CanvasBanner
+          theme={th}
+          tone="info"
+          icon="warn"
+          title="新的完整金鑰只顯示一次"
+          body={
+            <div style={bannerBodyStyle}>
+              <span>{flash.description}</span>
+              <code style={plaintextKeyStyle}>{flash.plaintextKey}</code>
+            </div>
+          }
+        />
+      );
+    }
+
+    if (flash) {
+      return (
+        <CanvasBanner
+          theme={th}
+          tone={flash.tone === "warning" ? "warn" : "success"}
+          icon="warn"
+          title={flash.title}
+          body={flash.description}
+        />
+      );
+    }
+
+    return (
+      <CanvasBanner
+        theme={th}
+        tone="info"
+        icon="warn"
+        title="只在建立當下顯示完整金鑰"
+        body="關閉視窗後僅顯示 mask；遺失須重新建立。請務必妥善保存。"
+      />
+    );
+  }
+
+  const columns: CanvasTableColumn<ApiKeyRow>[] = [
+    {
+      h: "NAME",
+      w: 280,
+      r: (row) => {
+        const state = resolveApiKeyState(row);
+
+        return (
+          <div style={nameCellStyle}>
+            <span style={namePrimaryStyle}>{row.keyName}</span>
+            <div style={nameMetaRowStyle}>
+              <span>{row.apiKeyId}</span>
+              {state === "revoked" ? (
+                <span>revoked {formatDateTime(row.revokedAt)}</span>
+              ) : (
+                <>
+                  <button
+                    disabled={pending}
+                    onClick={() => {
+                      setFlash(null);
+                      runAction(
+                        rotateTenantApiKeyAction,
+                        buildRotateFormData(row),
+                      );
+                    }}
+                    style={{
+                      ...inlineActionStyle,
+                      cursor: pending ? "not-allowed" : "pointer",
+                      opacity: pending ? 0.55 : 1,
+                    }}
+                    type="button"
+                  >
+                    輪替
+                  </button>
+                  <span style={dividerStyle}>/</span>
+                  <button
+                    disabled={pending}
+                    onClick={() => {
+                      setFlash(null);
+                      runAction(
+                        revokeTenantApiKeyAction,
+                        buildRevokeFormData(row),
+                      );
+                    }}
+                    style={{
+                      ...inlineDangerActionStyle,
+                      cursor: pending ? "not-allowed" : "pointer",
+                      opacity: pending ? 0.55 : 1,
+                    }}
+                    type="button"
+                  >
+                    撤銷
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      h: "PREFIX",
+      k: "keyPrefix",
+      w: 110,
+      mono: true,
+    },
+    {
+      h: "MASK",
+      w: 120,
+      mono: true,
+      r: (row) => `••••${row.maskedSuffix}`,
+    },
+    {
+      h: "SCOPE",
+      w: 280,
+      mono: true,
+      r: (row) => (
+        <div style={scopeTextStyle}>
+          {row.scopes.length > 0 ? row.scopes.join(" · ") : "—"}
+        </div>
+      ),
+    },
+    {
+      h: "LAST",
+      w: 144,
+      mono: true,
+      r: (row) => formatDateTime(row.lastUsedAt),
+    },
+    {
+      h: "EXPIRES",
+      w: 144,
+      mono: true,
+      r: (row) => formatDateTime(row.expiresAt),
+    },
+    {
+      h: "STATE",
+      w: 108,
+      r: (row) => {
+        const state = resolveApiKeyState(row);
+        return (
+          <CanvasPill theme={th} tone={getApiKeyStateTone(state)} dot>
+            {getApiKeyStateLabel(state)}
+          </CanvasPill>
+        );
+      },
+    },
+  ];
+
   return (
-    <div className="page-shell">
-      <PageHero
-        eyebrow="API keys"
-        title="Tenant API credential lifecycle is now a first-class management surface."
-        description="This route issues, rotates, and revokes tenant API keys against the published tenant contracts, while keeping plaintext key material one-time visible only and leaving authority with the backend."
+    <div>
+      <CanvasPageHeader
+        theme={th}
+        title="API 金鑰"
+        subtitle="Live 與 sandbox · scope · last seen · 撤銷後永久不可復原"
+        actions={
+          <>
+            <CanvasBtn
+              theme={th}
+              icon="ext"
+              onClick={() => setShowPolicyCard((current) => !current)}
+              size="sm"
+            >
+              API 文件
+            </CanvasBtn>
+            <CanvasBtn
+              theme={th}
+              variant="primary"
+              icon="plus"
+              onClick={() => setShowCreateCard((current) => !current)}
+              size="sm"
+            >
+              建立金鑰
+            </CanvasBtn>
+          </>
+        }
       />
 
-      {flash ? (
-        <CalloutPanel
-          title={flash.title}
-          description={flash.description}
-          tone={flash.tone}
-        >
-          {flash.plaintextKey ? (
-            <div className="action-copy">
-              <p className="surface-kicker">Shown once</p>
-              <code className="plaintext-key">{flash.plaintextKey}</code>
-            </div>
-          ) : null}
-        </CalloutPanel>
-      ) : null}
+      <div style={pageBodyStyle}>
+        {renderPrimaryBanner()}
 
-      {errors.length > 0 ? (
-        <CalloutPanel
-          title="API key data could not be fully loaded"
-          description="The management surface stays visible, but one or more tenant integration reads failed."
-          tone="warning"
-        >
-          <ul className="panel-list">
-            {errors.map((error) => (
-              <li key={error}>{error}</li>
-            ))}
-          </ul>
-        </CalloutPanel>
-      ) : null}
+        {errors.length > 0 ? (
+          <CanvasBanner
+            theme={th}
+            tone="warn"
+            icon="warn"
+            title="部分 API 金鑰資料無法載入"
+            body={errors.join(" · ")}
+          />
+        ) : null}
 
-      <section className="metric-grid">
-        <article className="metric-card">
-          <span className="metric-label">Active keys</span>
-          <strong>{formatCount(activeKeys.length)}</strong>
-          <p>Tenant credentials currently able to authenticate.</p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Revoked</span>
-          <strong>{formatCount(revokedKeys.length)}</strong>
-          <p>
-            Keys permanently invalidated and retained only as governance rows.
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Scoped</span>
-          <strong>{formatCount(allowedScopes.length)}</strong>
-          <p>
-            Published tenant API scopes currently allowed by governance policy.
-          </p>
-        </article>
-        <article className="metric-card">
-          <span className="metric-label">Expiry</span>
-          <strong>{formatCount(expiringKeys.length)}</strong>
-          <p>Active keys with a published expiration timestamp.</p>
-        </article>
-      </section>
+        {showCreateCard || showPolicyCard ? (
+          <div style={actionCardGridStyle}>
+            {showCreateCard ? (
+              <CanvasCard
+                theme={th}
+                title="建立金鑰"
+                subtitle="Plaintext 只在成功建立或輪替時揭露一次。"
+                actions={
+                  <CanvasBtn
+                    theme={th}
+                    variant="ghost"
+                    onClick={() => setShowCreateCard(false)}
+                    size="xs"
+                  >
+                    收合
+                  </CanvasBtn>
+                }
+              >
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    setFlash(null);
+                    runAction(
+                      issueTenantApiKeyAction,
+                      buildCreateFormData(
+                        draftName,
+                        draftExpiresAt,
+                        draftScopes,
+                      ),
+                      {
+                        onSuccess: () => {
+                          resetCreateDraft();
+                          setShowCreateCard(false);
+                        },
+                      },
+                    );
+                  }}
+                >
+                  <div style={fieldGridStyle}>
+                    <CanvasField theme={th} label="名稱" required>
+                      <input
+                        onChange={(event) => setDraftName(event.target.value)}
+                        placeholder="Operations reporting integration"
+                        required
+                        style={nativeInputStyle}
+                        value={draftName}
+                      />
+                    </CanvasField>
+                    <CanvasField
+                      theme={th}
+                      hint={
+                        governance
+                          ? `請填入 ISO 8601 與時區；留空則使用預設 ${governance.apiKeyPolicy.defaultLifetimeDays} 天。`
+                          : "請填入 ISO 8601 與時區，例如 2026-08-09T01:52:30Z。"
+                      }
+                      label="到期時間"
+                    >
+                      <input
+                        onChange={(event) =>
+                          setDraftExpiresAt(event.target.value)
+                        }
+                        placeholder="2026-08-09T01:52:30Z"
+                        spellCheck={false}
+                        style={nativeMonoInputStyle}
+                        value={draftExpiresAt}
+                      />
+                    </CanvasField>
+                  </div>
 
-      <section className="surface-grid surface-grid-wide">
-        <SurfaceCard
-          kicker="Issue"
-          title="Create a tenant API key"
-          description="The confirmation surface returns the plaintext key once, then future list reads fall back to prefix and masked suffix only."
-        >
-          <form
-            action="#"
-            className="query-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setFlash(null);
-              runAction(
-                issueTenantApiKeyAction,
-                new FormData(event.currentTarget),
-                { resetIssueForm: true },
-              );
-            }}
-            ref={issueFormRef}
-          >
-            <div className="form-grid">
-              <label className="field-stack">
-                <span>Label</span>
-                <input
-                  name="keyName"
-                  placeholder="Operations reporting integration"
-                  required
-                />
-              </label>
-              <label className="field-stack">
-                <span>Expires at</span>
-                <input
-                  name="expiresAt"
-                  placeholder="2026-08-09T01:52:30Z"
-                  spellCheck={false}
-                  type="text"
-                />
-                <span className="field-hint">
-                  Enter an ISO 8601 timestamp with timezone, or leave blank to
-                  use the backend default of{" "}
-                  {governance?.apiKeyPolicy.defaultLifetimeDays ??
-                    "the published"}{" "}
-                  days from issue time.
-                </span>
-              </label>
-            </div>
-            <div className="field-stack">
-              <span>Scopes</span>
-              <div className="scope-grid">
-                {allowedScopes.length > 0 ? (
-                  allowedScopes.map((scope) => renderScopeInput(scope))
+                  <CanvasField
+                    theme={th}
+                    hint="至少選擇一個已發布 scope；輪替時會沿用該金鑰當前的 scope。"
+                    label="Scopes"
+                    required
+                  >
+                    <div style={scopeGridStyle}>
+                      {allowedScopes.length > 0 ? (
+                        allowedScopes.map((scope) => {
+                          const selected = draftScopes.includes(scope);
+
+                          return (
+                            <label
+                              key={scope}
+                              style={getScopeChipStyle(selected)}
+                            >
+                              <input
+                                checked={selected}
+                                onChange={() => toggleScope(scope)}
+                                style={{ display: "none" }}
+                                type="checkbox"
+                              />
+                              <span>{scope}</span>
+                            </label>
+                          );
+                        })
+                      ) : (
+                        <div style={formNoteStyle}>
+                          Governance policy 尚未載入，暫時無法建立新金鑰。
+                        </div>
+                      )}
+                    </div>
+                  </CanvasField>
+
+                  <div style={formFooterStyle}>
+                    <div style={formNoteStyle}>
+                      {governance
+                        ? `Default ${governance.apiKeyPolicy.defaultLifetimeDays} days · Max ${governance.apiKeyPolicy.maxLifetimeDays} days`
+                        : "Integration governance unavailable"}
+                    </div>
+                    <button
+                      disabled={
+                        pending ||
+                        draftName.trim().length === 0 ||
+                        draftScopes.length === 0
+                      }
+                      style={{
+                        ...primaryButtonStyle,
+                        cursor:
+                          pending ||
+                          draftName.trim().length === 0 ||
+                          draftScopes.length === 0
+                            ? "not-allowed"
+                            : "pointer",
+                        opacity:
+                          pending ||
+                          draftName.trim().length === 0 ||
+                          draftScopes.length === 0
+                            ? 0.55
+                            : 1,
+                      }}
+                      type="submit"
+                    >
+                      {pending ? "建立中..." : "建立金鑰"}
+                    </button>
+                  </div>
+                </form>
+              </CanvasCard>
+            ) : null}
+
+            {showPolicyCard ? (
+              <CanvasCard
+                theme={th}
+                title="API 文件"
+                subtitle="Published tenant integration governance package"
+                actions={
+                  <CanvasBtn
+                    theme={th}
+                    variant="ghost"
+                    onClick={() => setShowPolicyCard(false)}
+                    size="xs"
+                  >
+                    收合
+                  </CanvasBtn>
+                }
+              >
+                {governance ? (
+                  <>
+                    <CanvasDL
+                      theme={th}
+                      cols={2}
+                      items={[
+                        {
+                          k: "Default",
+                          v: `${governance.apiKeyPolicy.defaultLifetimeDays} days`,
+                          mono: true,
+                        },
+                        {
+                          k: "Maximum",
+                          v: `${governance.apiKeyPolicy.maxLifetimeDays} days`,
+                          mono: true,
+                        },
+                        {
+                          k: "Expiry",
+                          v: governance.apiKeyPolicy.requireExpiry
+                            ? "required"
+                            : "optional",
+                          mono: true,
+                        },
+                        {
+                          k: "Revoke",
+                          v: governance.apiKeyPolicy.revokeEffect,
+                          mono: true,
+                        },
+                        {
+                          k: "Break-glass",
+                          v: governance.apiKeyPolicy
+                            .breakGlassRequiresPlatformApproval
+                            ? "platform approval"
+                            : "not published",
+                          mono: true,
+                        },
+                        {
+                          k: "Generated",
+                          v: formatDateTime(governance.generatedAt),
+                          mono: true,
+                        },
+                      ]}
+                    />
+
+                    <div style={sectionLabelStyle}>Allowed scopes</div>
+                    <div style={scopeGridStyle}>
+                      {allowedScopes.map((scope) => (
+                        <CanvasPill key={scope} theme={th} tone="info">
+                          {scope}
+                        </CanvasPill>
+                      ))}
+                    </div>
+
+                    {compatibilityAliases.length > 0 ? (
+                      <>
+                        <div style={sectionLabelStyle}>
+                          Compatibility aliases
+                        </div>
+                        <ul style={aliasListStyle}>
+                          {compatibilityAliases.map(([alias, target]) => (
+                            <li key={`${alias}-${target}`}>
+                              <code style={{ fontFamily: th.monoFamily }}>
+                                {alias}
+                              </code>{" "}
+                              {"->"}{" "}
+                              <code style={{ fontFamily: th.monoFamily }}>
+                                {target}
+                              </code>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : null}
+                  </>
                 ) : (
-                  <div className="empty-panel">
-                    Scope policy is unavailable until integration governance
-                    loads.
+                  <div style={formNoteStyle}>
+                    Integration governance could not be loaded for this tenant.
                   </div>
                 )}
-              </div>
-            </div>
-            <div className="form-actions">
-              <p className="action-note">
-                Plaintext keys are displayed once at issue time only. Reloading
-                this route clears the reveal.
-              </p>
-              <button
-                className="action-button action-button-primary"
-                disabled={allowedScopes.length === 0 || pending}
-                type="submit"
-              >
-                Create key
-              </button>
-            </div>
-          </form>
-        </SurfaceCard>
+              </CanvasCard>
+            ) : null}
+          </div>
+        ) : null}
 
-        <SurfaceCard
-          kicker="Governance"
-          title="Contract-backed credential policy"
-          description="The UI surfaces only the published tenant integration governance package instead of inventing local expiry or break-glass semantics."
-        >
-          {governance ? (
-            <>
-              <dl className="definition-grid">
-                <div>
-                  <dt>Default lifetime</dt>
-                  <dd>{governance.apiKeyPolicy.defaultLifetimeDays} days</dd>
-                </div>
-                <div>
-                  <dt>Maximum lifetime</dt>
-                  <dd>{governance.apiKeyPolicy.maxLifetimeDays} days</dd>
-                </div>
-                <div>
-                  <dt>Expiry required</dt>
-                  <dd>
-                    {governance.apiKeyPolicy.requireExpiry
-                      ? "Required"
-                      : "Optional"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Revoke effect</dt>
-                  <dd>{governance.apiKeyPolicy.revokeEffect}</dd>
-                </div>
-                <div>
-                  <dt>Break-glass</dt>
-                  <dd>
-                    {governance.apiKeyPolicy.breakGlassRequiresPlatformApproval
-                      ? "Platform approval required"
-                      : "No extra approval published"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Generated</dt>
-                  <dd>{formatDateTime(governance.generatedAt)}</dd>
-                </div>
-              </dl>
-              {compatibilityAliases.length > 0 ? (
-                <ul className="panel-list">
-                  {compatibilityAliases.map(([alias, target]) => (
-                    <li key={`${alias}-${target}`}>
-                      <strong>{alias}</strong>
-                      <span className="list-note">maps to {target}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </>
+        <CanvasCard theme={th} padding={0}>
+          {sortedKeys.length > 0 ? (
+            <CanvasTable<ApiKeyRow>
+              theme={th}
+              columns={columns}
+              rows={sortedKeys as ApiKeyRow[]}
+            />
           ) : (
-            <div className="empty-panel">
-              Integration governance could not be loaded for this tenant.
-            </div>
+            <div style={tableEmptyStyle}>目前尚未建立任何租戶 API 金鑰。</div>
           )}
-        </SurfaceCard>
-      </section>
-
-      <SurfaceCard
-        kicker="Register"
-        title="API key register and lifecycle commands"
-        description="Active and revoked rows stay together for auditability. Rotation reissues a one-time plaintext key and revocation is immediate."
-      >
-        <div className="table-wrap">
-          <table className="data-grid">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Prefix</th>
-                <th>Mask</th>
-                <th>Scopes</th>
-                <th>Last used</th>
-                <th>Expires</th>
-                <th>State</th>
-                <th>Created</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedKeys.length > 0 ? (
-                sortedKeys.map((apiKey) => {
-                  const revoked = isRevoked(apiKey);
-
-                  return (
-                    <tr key={apiKey.apiKeyId}>
-                      <td>
-                        <div className="table-primary">
-                          <strong>{apiKey.keyName}</strong>
-                          <span className="table-secondary">
-                            {apiKey.apiKeyId}
-                          </span>
-                        </div>
-                      </td>
-                      <td>
-                        <code>{apiKey.keyPrefix}</code>
-                      </td>
-                      <td>
-                        <code>••••{apiKey.maskedSuffix}</code>
-                      </td>
-                      <td>
-                        <div className="chip-row">
-                          {apiKey.scopes.map((scope) => (
-                            <span className="status-chip" key={scope}>
-                              {scope}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td>{formatDateTime(apiKey.lastUsedAt)}</td>
-                      <td>{formatDateTime(apiKey.expiresAt)}</td>
-                      <td>
-                        <span className={getApiKeyStateClassName(apiKey)}>
-                          {getApiKeyStateLabel(apiKey)}
-                        </span>
-                      </td>
-                      <td>{formatDateTime(apiKey.createdAt)}</td>
-                      <td>
-                        {revoked ? (
-                          <span className="table-secondary">
-                            Revoked {formatDateTime(apiKey.revokedAt)}
-                          </span>
-                        ) : (
-                          <div className="row-actions">
-                            <form
-                              action="#"
-                              onSubmit={(event) => {
-                                event.preventDefault();
-                                setFlash(null);
-                                runAction(
-                                  rotateTenantApiKeyAction,
-                                  new FormData(event.currentTarget),
-                                );
-                              }}
-                            >
-                              <input
-                                name="apiKeyId"
-                                type="hidden"
-                                value={apiKey.apiKeyId}
-                              />
-                              <input
-                                name="keyName"
-                                type="hidden"
-                                value={apiKey.keyName}
-                              />
-                              <input
-                                name="expiresAt"
-                                type="hidden"
-                                value={apiKey.expiresAt ?? ""}
-                              />
-                              {renderHiddenScopeInputs(apiKey.scopes)}
-                              <button
-                                className="action-button action-button-secondary"
-                                disabled={pending}
-                                type="submit"
-                              >
-                                Rotate
-                              </button>
-                            </form>
-                            <form
-                              action="#"
-                              onSubmit={(event) => {
-                                event.preventDefault();
-                                setFlash(null);
-                                runAction(
-                                  revokeTenantApiKeyAction,
-                                  new FormData(event.currentTarget),
-                                );
-                              }}
-                            >
-                              <input
-                                name="apiKeyId"
-                                type="hidden"
-                                value={apiKey.apiKeyId}
-                              />
-                              <input
-                                name="keyName"
-                                type="hidden"
-                                value={apiKey.keyName}
-                              />
-                              <button
-                                className="action-button action-button-danger"
-                                disabled={pending}
-                                type="submit"
-                              >
-                                Revoke
-                              </button>
-                            </form>
-                          </div>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan={9}>
-                    <div className="empty-panel">
-                      No tenant API key has been issued yet.
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </SurfaceCard>
-
-      <CalloutPanel
-        title="Shared integration band"
-        description="API keys and webhooks stay adjacent in tenant navigation because both are tenant-managed integrations, but they keep separate command vocabularies and secret-handling rules."
-      />
+        </CanvasCard>
+      </div>
     </div>
   );
 }
