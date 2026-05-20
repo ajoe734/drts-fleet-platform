@@ -1019,6 +1019,14 @@ export default function TenantDetailPage() {
   }: ${tenant.rollout.cutoverOwner ?? copy.noCutoverOwner} · ${
     locale === "en" ? "rollback owner" : "rollback owner"
   }: ${tenant.rollout.rollbackOwner ?? copy.noRollbackOwner}`;
+  const tenantConsoleActionLabel =
+    locale === "en" ? "Open in Tenant Console" : "在 Tenant Console 開啟";
+  const governanceDetailTitle =
+    locale === "en" ? "Governance detail" : "治理詳情";
+  const governanceDetailSubtitle =
+    locale === "en"
+      ? "Control-plane settings, webhook and billing baselines, audit evidence, and lifecycle controls remain below the rollout handoff section."
+      : "Rollout handoff 首屏下方保留 control-plane 設定、webhook 與 billing baseline、audit 證據與 lifecycle controls。";
 
   const breadcrumb =
     locale === "en"
@@ -1042,6 +1050,43 @@ export default function TenantDetailPage() {
           background: ${CANVAS_THEME.bg} !important;
         }
       `}</style>
+      <style jsx>{`
+        .tenant-detail-page {
+          padding: 24px;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+        }
+
+        .tenant-detail-primary-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);
+          gap: 16px;
+          align-items: start;
+        }
+
+        .tenant-detail-secondary-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+          gap: 16px;
+          align-items: start;
+        }
+
+        .tenant-detail-support-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 16px;
+          align-items: start;
+        }
+
+        @media (max-width: 1120px) {
+          .tenant-detail-primary-grid,
+          .tenant-detail-secondary-grid,
+          .tenant-detail-support-grid {
+            grid-template-columns: minmax(0, 1fr);
+          }
+        }
+      `}</style>
       <CanvasShell {...shellProps} breadcrumb={breadcrumb}>
         <CanvasPageHeader
           theme={CANVAS_THEME}
@@ -1054,11 +1099,18 @@ export default function TenantDetailPage() {
               <CanvasBtn
                 theme={CANVAS_THEME}
                 variant="secondary"
+                icon="ext"
                 onClick={() => {
-                  void loadTenant();
+                  if (typeof window !== "undefined") {
+                    window.open(
+                      window.location.pathname,
+                      "_blank",
+                      "noopener,noreferrer",
+                    );
+                  }
                 }}
               >
-                {copy.refresh}
+                {tenantConsoleActionLabel}
               </CanvasBtn>
               <CanvasBtn
                 theme={CANVAS_THEME}
@@ -1081,14 +1133,7 @@ export default function TenantDetailPage() {
           }
         />
 
-        <div
-          style={{
-            padding: 24,
-            display: "flex",
-            flexDirection: "column",
-            gap: 16,
-          }}
-        >
+        <div className="tenant-detail-page">
           {error ? (
             <CanvasBanner
               theme={CANVAS_THEME}
@@ -1172,452 +1217,109 @@ export default function TenantDetailPage() {
                 body={tenant.rollout.notes ?? copy.noRolloutNotes}
               />
             </div>
-            <div
-              style={{
-                display: "flex",
-                gap: 8,
-                flexWrap: "wrap",
-                marginTop: 16,
-              }}
-            >
-              {PLATFORM_TENANT_ROLLOUT_STAGES.map((stage) => (
-                <CanvasBtn
-                  key={stage}
-                  theme={CANVAS_THEME}
-                  variant="secondary"
-                  disabled={promotingStage === stage}
-                  onClick={() => {
-                    void promoteStage(stage);
-                  }}
-                >
-                  {promotingStage === stage
-                    ? t("common.saving")
-                    : `${copy.promote} ${formatPlatformCodeLabel(locale, stage)}`}
-                </CanvasBtn>
-              ))}
-            </div>
           </CanvasCard>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "minmax(0, 1.4fr) minmax(320px, 1fr)",
-              gap: 16,
-              alignItems: "start",
-            }}
-          >
-            <div style={sectionStackStyle}>
-              <CanvasCard
-                theme={CANVAS_THEME}
-                title={copy.overviewTitle}
-                subtitle={copy.overviewSubtitle}
-              >
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 12,
-                    marginBottom: 16,
-                  }}
-                >
-                  <CanvasKPI
-                    theme={CANVAS_THEME}
-                    label={locale === "en" ? "Enabled modules" : "啟用模組"}
-                    value={tenant.enabledModules.length}
-                    sub={listText(
-                      tenant.enabledModules.map(
-                        (moduleCode) => moduleLabels[moduleCode],
-                      ),
-                    )}
-                  />
-                  <CanvasKPI
-                    theme={CANVAS_THEME}
-                    label={
-                      locale === "en" ? "Monthly bookings" : "每月 bookings"
-                    }
-                    value={tenant.quotas.monthlyBookings.toLocaleString()}
-                    sub={`${tenant.quotas.activeDrivers.toLocaleString()} drivers · ${tenant.quotas.monthlyApiCalls.toLocaleString()} API`}
-                  />
-                  <CanvasKPI
-                    theme={CANVAS_THEME}
-                    label={
-                      locale === "en" ? "Role acknowledgements" : "角色確認"
-                    }
-                    value={`${acknowledgedRoles}/${tenant.bootstrapDefaults.roleDefaults.length}`}
-                    delta={`${requiredRoles} ${locale === "en" ? "required" : "必要"}`}
-                    deltaTone="neutral"
-                    sub={`${invitedRoles} ${locale === "en" ? "invited" : "已邀請"}`}
-                  />
-                  <CanvasKPI
-                    theme={CANVAS_THEME}
-                    label={locale === "en" ? "Approved gates" : "已通過 gate"}
-                    value={`${approvedGateCount}/${PLATFORM_TENANT_ROLLOUT_STAGES.length}`}
-                    delta={
-                      tenant.rollout.rollbackPrepared
-                        ? locale === "en"
-                          ? "rollback ready"
-                          : "rollback ready"
-                        : locale === "en"
-                          ? "rollback pending"
-                          : "rollback 待補"
-                    }
-                    deltaTone={tenant.rollout.rollbackPrepared ? "up" : "down"}
-                    hint={
-                      tenant.rollout.lastPromotedAt
-                        ? formatDateTime(tenant.rollout.lastPromotedAt)
-                        : undefined
-                    }
-                  />
-                </div>
-                <CanvasDL theme={CANVAS_THEME} cols={2} items={overviewItems} />
-              </CanvasCard>
+          <div className="tenant-detail-primary-grid">
+            <CanvasCard theme={CANVAS_THEME} title={copy.onboardingTitle}>
+              <CanvasDL theme={CANVAS_THEME} cols={2} items={onboardingItems} />
+            </CanvasCard>
 
-              <CanvasCard
+            <CanvasCard
+              theme={CANVAS_THEME}
+              title={copy.rolesTitle}
+              padding={0}
+            >
+              <CanvasTable
                 theme={CANVAS_THEME}
-                title={copy.modulesTitle}
-                subtitle={copy.modulesSubtitle}
-              >
-                <CanvasDL theme={CANVAS_THEME} cols={2} items={moduleItems} />
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    marginTop: 16,
-                  }}
-                >
-                  {PLATFORM_TENANT_MODULES.map((moduleCode) => {
-                    const enabled = tenant.enabledModules.includes(moduleCode);
-                    return (
-                      <CanvasPill
-                        key={moduleCode}
-                        theme={CANVAS_THEME}
-                        tone={enabled ? "success" : "neutral"}
-                        dot={enabled}
-                      >
-                        {moduleLabels[moduleCode]}
-                      </CanvasPill>
-                    );
-                  })}
-                </div>
-              </CanvasCard>
-
-              <CanvasCard
-                theme={CANVAS_THEME}
-                title={copy.onboardingTitle}
-                subtitle={copy.onboardingSubtitle}
-                style={{ order: -1 }}
-              >
-                <CanvasDL
-                  theme={CANVAS_THEME}
-                  cols={2}
-                  items={onboardingItems}
-                />
-              </CanvasCard>
-
-              <CanvasCard
-                theme={CANVAS_THEME}
-                title={copy.webhooksTitle}
-                subtitle={copy.webhooksSubtitle}
-              >
-                <CanvasDL theme={CANVAS_THEME} cols={2} items={webhookItems} />
-                <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
-                  {tenant.bootstrapDefaults.notificationSubscriptions.length >
-                  0 ? (
-                    tenant.bootstrapDefaults.notificationSubscriptions.map(
-                      (subscription, index) => (
+                dense
+                columns={[
+                  {
+                    h: locale === "en" ? "Contact" : "聯絡人",
+                    w: 188,
+                    r: (row: RoleRow) => (
+                      <div style={{ minWidth: 0 }}>
                         <div
-                          key={`${subscription.channel}-${subscription.eventType}-${index}`}
                           style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: 12,
-                            padding: "10px 12px",
-                            borderRadius: 8,
-                            background: CANVAS_THEME.surfaceLo,
-                            border: `1px solid ${CANVAS_THEME.border}`,
+                            fontSize: 12.5,
+                            color: CANVAS_THEME.text,
+                            fontWeight: 600,
                           }}
                         >
-                          <div style={{ minWidth: 0 }}>
-                            <div
-                              style={{
-                                fontSize: 12.5,
-                                color: CANVAS_THEME.text,
-                                fontWeight: 600,
-                              }}
-                            >
-                              {subscription.channel}
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 11.5,
-                                color: CANVAS_THEME.textDim,
-                                fontFamily: CANVAS_THEME.monoFamily,
-                              }}
-                            >
-                              {subscription.eventType}
-                            </div>
-                          </div>
-                          <CanvasPill
-                            theme={CANVAS_THEME}
-                            tone={subscription.enabled ? "info" : "neutral"}
-                            dot={subscription.enabled}
-                          >
-                            {subscription.enabled
-                              ? t("common.enabled")
-                              : t("common.disabled")}
-                          </CanvasPill>
+                          {row.displayName}
                         </div>
-                      ),
-                    )
-                  ) : (
-                    <CanvasBanner
-                      theme={CANVAS_THEME}
-                      tone="warn"
-                      icon="warn"
-                      title={copy.webhooksTitle}
-                      body={copy.noSubscriptions}
-                    />
-                  )}
-                </div>
-              </CanvasCard>
-
-              <CanvasCard
-                theme={CANVAS_THEME}
-                title={copy.billingTitle}
-                subtitle={copy.billingSubtitle}
-              >
-                <CanvasDL theme={CANVAS_THEME} cols={2} items={billingItems} />
-                <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
-                  {tenant.bootstrapDefaults.notificationSubscriptions.length >
-                  0 ? (
-                    tenant.bootstrapDefaults.notificationSubscriptions.map(
-                      (subscription, index) => (
                         <div
-                          key={`${subscription.eventType}-${subscription.channel}-${index}`}
                           style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: 12,
-                            padding: "10px 12px",
-                            borderRadius: 8,
-                            background: CANVAS_THEME.surfaceLo,
-                            border: `1px solid ${CANVAS_THEME.border}`,
+                            fontSize: 11.5,
+                            color: CANVAS_THEME.textDim,
                           }}
                         >
-                          <div style={{ minWidth: 0 }}>
-                            <div
-                              style={{
-                                fontSize: 12.5,
-                                color: CANVAS_THEME.text,
-                                fontWeight: 600,
-                              }}
-                            >
-                              {subscription.eventType}
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 11.5,
-                                color: CANVAS_THEME.textDim,
-                              }}
-                            >
-                              {subscription.channel}
-                            </div>
-                          </div>
+                          {row.required ? copy.required : copy.optional}
+                        </div>
+                      </div>
+                    ),
+                  },
+                  {
+                    h: locale === "en" ? "Role" : "角色",
+                    w: 144,
+                    r: (row: RoleRow) => (
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 11.5,
+                            color: CANVAS_THEME.text,
+                            fontFamily: CANVAS_THEME.monoFamily,
+                          }}
+                        >
+                          {row.roleCode}
+                        </div>
+                        <div style={{ marginTop: 6 }}>
                           <CanvasPill
                             theme={CANVAS_THEME}
-                            tone={subscription.enabled ? "success" : "neutral"}
-                            dot={subscription.enabled}
+                            tone={row.required ? "warn" : "neutral"}
                           >
-                            {subscription.enabled
-                              ? t("common.enabled")
-                              : t("common.disabled")}
+                            {row.required ? copy.required : copy.optional}
                           </CanvasPill>
                         </div>
-                      ),
-                    )
-                  ) : (
-                    <CanvasBanner
-                      theme={CANVAS_THEME}
-                      tone="warn"
-                      icon="warn"
-                      title={copy.billingTitle}
-                      body={copy.noSubscriptions}
-                    />
-                  )}
-                </div>
-              </CanvasCard>
+                      </div>
+                    ),
+                  },
+                  {
+                    h: locale === "en" ? "State" : "狀態",
+                    w: 210,
+                    r: (row: RoleRow) => {
+                      const actionId = row.invitedAt
+                        ? `ack:${row.roleCode}`
+                        : `invite:${row.roleCode}`;
 
-              <CanvasCard
-                theme={CANVAS_THEME}
-                title={copy.auditTitle}
-                subtitle={copy.auditSubtitle}
-                padding={0}
-                actions={
-                  <CanvasBtn
-                    theme={CANVAS_THEME}
-                    variant="secondary"
-                    onClick={() => router.push("/audit")}
-                  >
-                    {copy.auditLedger}
-                  </CanvasBtn>
-                }
-              >
-                {auditRows.length > 0 ? (
-                  <CanvasTable
-                    theme={CANVAS_THEME}
-                    dense
-                    columns={[
-                      {
-                        h: locale === "en" ? "Time" : "時間",
-                        k: "createdAt",
-                        w: 156,
-                        mono: true,
-                      },
-                      {
-                        h: locale === "en" ? "Module" : "模組",
-                        k: "moduleLabel",
-                        w: 150,
-                      },
-                      {
-                        h: locale === "en" ? "Action" : "動作",
-                        k: "actionLabel",
-                        w: 180,
-                      },
-                      {
-                        h: locale === "en" ? "Resource" : "資源",
-                        w: 220,
-                        r: (row: AuditRow) => (
-                          <div style={{ minWidth: 0 }}>
-                            <div
-                              style={{
-                                fontSize: 12.5,
-                                color: CANVAS_THEME.text,
-                              }}
-                            >
-                              {row.resourceType}
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 11.5,
-                                color: CANVAS_THEME.textDim,
-                                fontFamily: CANVAS_THEME.monoFamily,
-                              }}
-                            >
-                              {row.resourceId}
-                            </div>
-                          </div>
-                        ),
-                      },
-                      {
-                        h: "REQUEST",
-                        k: "requestId",
-                        mono: true,
-                        w: 120,
-                      },
-                    ]}
-                    rows={auditRows}
-                  />
-                ) : (
-                  <div style={{ padding: 16 }}>
-                    <CanvasBanner
-                      theme={CANVAS_THEME}
-                      tone="info"
-                      icon="warn"
-                      title={copy.auditTitle}
-                      body={copy.noAudit}
-                    />
-                  </div>
-                )}
-              </CanvasCard>
-            </div>
-
-            <div style={sectionStackStyle}>
-              <CanvasCard
-                theme={CANVAS_THEME}
-                title={copy.rolesTitle}
-                subtitle={copy.rolesSubtitle}
-                padding={0}
-              >
-                <CanvasTable
-                  theme={CANVAS_THEME}
-                  dense
-                  columns={[
-                    {
-                      h: locale === "en" ? "Role" : "角色",
-                      w: 210,
-                      r: (row: RoleRow) => (
-                        <div style={{ minWidth: 0 }}>
-                          <div
-                            style={{
-                              fontSize: 12.5,
-                              color: CANVAS_THEME.text,
-                              fontWeight: 600,
-                            }}
+                      return (
+                        <div
+                          style={{
+                            display: "grid",
+                            gap: 8,
+                            alignItems: "start",
+                          }}
+                        >
+                          <CanvasPill
+                            theme={CANVAS_THEME}
+                            tone={roleStateTone(row)}
+                            dot={Boolean(row.invitedAt || row.acknowledgedAt)}
                           >
-                            {row.displayName}
-                          </div>
+                            {roleStateLabel(locale, t, row)}
+                          </CanvasPill>
                           <div
                             style={{
                               fontSize: 11.5,
                               color: CANVAS_THEME.textDim,
-                              fontFamily: CANVAS_THEME.monoFamily,
+                              lineHeight: 1.45,
                             }}
                           >
-                            {row.roleCode}
+                            {row.acknowledgedAt
+                              ? `${locale === "en" ? "Acknowledged" : "已確認"} · ${formatDateTime(row.acknowledgedAt)}`
+                              : row.invitedAt
+                                ? `${locale === "en" ? "Invited" : "已邀請"} · ${formatDateTime(row.invitedAt)}`
+                                : copy.pending}
                           </div>
-                        </div>
-                      ),
-                    },
-                    {
-                      h: locale === "en" ? "Required" : "必要",
-                      w: 92,
-                      r: (row: RoleRow) => (
-                        <CanvasPill
-                          theme={CANVAS_THEME}
-                          tone={row.required ? "warn" : "neutral"}
-                        >
-                          {row.required ? copy.required : copy.optional}
-                        </CanvasPill>
-                      ),
-                    },
-                    {
-                      h: locale === "en" ? "State" : "狀態",
-                      w: 110,
-                      r: (row: RoleRow) => (
-                        <CanvasPill
-                          theme={CANVAS_THEME}
-                          tone={roleStateTone(row)}
-                          dot={Boolean(row.invitedAt || row.acknowledgedAt)}
-                        >
-                          {roleStateLabel(locale, t, row)}
-                        </CanvasPill>
-                      ),
-                    },
-                    {
-                      h: locale === "en" ? "Invited" : "邀請",
-                      w: 110,
-                      mono: true,
-                      r: (row: RoleRow) =>
-                        row.invitedAt ? formatDateTime(row.invitedAt) : "—",
-                    },
-                    {
-                      h: locale === "en" ? "Acknowledged" : "確認",
-                      w: 128,
-                      mono: true,
-                      r: (row: RoleRow) =>
-                        row.acknowledgedAt
-                          ? formatDateTime(row.acknowledgedAt)
-                          : "—",
-                    },
-                    {
-                      h: locale === "en" ? "Action" : "操作",
-                      w: 120,
-                      r: (row: RoleRow) => {
-                        if (row.acknowledgedAt) {
-                          return (
+                          {row.acknowledgedAt ? (
                             <span
                               style={{
                                 fontSize: 11.5,
@@ -1626,214 +1328,675 @@ export default function TenantDetailPage() {
                             >
                               {t("tenants.role.acknowledged")}
                             </span>
-                          );
-                        }
-
-                        const actionId = row.invitedAt
-                          ? `ack:${row.roleCode}`
-                          : `invite:${row.roleCode}`;
-
-                        return row.invitedAt ? (
-                          <CanvasBtn
-                            theme={CANVAS_THEME}
-                            variant="secondary"
-                            size="xs"
-                            disabled={roleAction === actionId}
-                            onClick={() => {
-                              void acknowledgeRole(row.roleCode);
-                            }}
-                          >
-                            {roleAction === actionId
-                              ? t("common.saving")
-                              : t("tenants.role.acknowledge")}
-                          </CanvasBtn>
-                        ) : (
-                          <CanvasBtn
-                            theme={CANVAS_THEME}
-                            variant="secondary"
-                            size="xs"
-                            disabled={roleAction === actionId}
-                            onClick={() => {
-                              void inviteRole(row.roleCode);
-                            }}
-                          >
-                            {roleAction === actionId
-                              ? t("common.saving")
-                              : t("tenants.role.invite")}
-                          </CanvasBtn>
-                        );
-                      },
+                          ) : row.invitedAt ? (
+                            <CanvasBtn
+                              theme={CANVAS_THEME}
+                              variant="secondary"
+                              size="xs"
+                              disabled={roleAction === actionId}
+                              onClick={() => {
+                                void acknowledgeRole(row.roleCode);
+                              }}
+                            >
+                              {roleAction === actionId
+                                ? t("common.saving")
+                                : t("tenants.role.acknowledge")}
+                            </CanvasBtn>
+                          ) : (
+                            <CanvasBtn
+                              theme={CANVAS_THEME}
+                              variant="secondary"
+                              size="xs"
+                              disabled={roleAction === actionId}
+                              onClick={() => {
+                                void inviteRole(row.roleCode);
+                              }}
+                            >
+                              {roleAction === actionId
+                                ? t("common.saving")
+                                : t("tenants.role.invite")}
+                            </CanvasBtn>
+                          )}
+                        </div>
+                      );
                     },
-                  ]}
-                  rows={roleRows}
-                />
-              </CanvasCard>
+                  },
+                ]}
+                rows={roleRows}
+              />
+            </CanvasCard>
+          </div>
 
-              <form onSubmit={handleSaveSettings}>
-                <CanvasCard
-                  theme={CANVAS_THEME}
-                  title={locale === "en" ? "Tenant settings" : "租戶設定"}
-                  subtitle={
-                    locale === "en"
-                      ? "Identity, enabled modules, and quota allocations remain control-plane truth."
-                      : "租戶身分、啟用模組與配額配置仍以 control-plane truth 為準。"
-                  }
-                  actions={
-                    <button
-                      type="submit"
-                      style={buttonStyle(
-                        CANVAS_THEME,
-                        "primary",
-                        savingSettings,
-                      )}
-                      disabled={savingSettings || !editForm.name.trim()}
-                    >
-                      {savingSettings ? t("common.saving") : copy.saveSettings}
-                    </button>
-                  }
-                >
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns:
-                        "repeat(auto-fit, minmax(180px, 1fr))",
-                      gap: 12,
-                    }}
-                  >
-                    <CanvasField
-                      theme={CANVAS_THEME}
-                      label={t("tenants.form.name")}
-                      required
-                    >
-                      <input
-                        value={editForm.name}
-                        onChange={(event) =>
-                          setEditForm((current) => ({
-                            ...current,
-                            name: event.target.value,
-                          }))
-                        }
-                        style={inputStyle(CANVAS_THEME)}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={CANVAS_THEME}
-                      label={t("tenants.form.activeDrivers")}
-                    >
-                      <input
-                        value={editForm.activeDrivers}
-                        onChange={(event) =>
-                          setEditForm((current) => ({
-                            ...current,
-                            activeDrivers: event.target.value,
-                          }))
-                        }
-                        style={inputStyle(CANVAS_THEME)}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={CANVAS_THEME}
-                      label={t("tenants.form.monthlyBookings")}
-                    >
-                      <input
-                        value={editForm.monthlyBookings}
-                        onChange={(event) =>
-                          setEditForm((current) => ({
-                            ...current,
-                            monthlyBookings: event.target.value,
-                          }))
-                        }
-                        style={inputStyle(CANVAS_THEME)}
-                      />
-                    </CanvasField>
-                    <CanvasField
-                      theme={CANVAS_THEME}
-                      label={t("tenants.form.monthlyApiCalls")}
-                    >
-                      <input
-                        value={editForm.monthlyApiCalls}
-                        onChange={(event) =>
-                          setEditForm((current) => ({
-                            ...current,
-                            monthlyApiCalls: event.target.value,
-                          }))
-                        }
-                        style={inputStyle(CANVAS_THEME)}
-                      />
-                    </CanvasField>
-                  </div>
-
-                  <CanvasField
+          <div style={sectionStackStyle}>
+            <CanvasCard
+              theme={CANVAS_THEME}
+              title={governanceDetailTitle}
+              subtitle={governanceDetailSubtitle}
+            >
+              <div className="tenant-detail-secondary-grid">
+                <div style={sectionStackStyle}>
+                  <CanvasCard
                     theme={CANVAS_THEME}
-                    label={t("tenants.form.modules")}
+                    title={copy.overviewTitle}
+                    subtitle={copy.overviewSubtitle}
                   >
                     <div
                       style={{
                         display: "grid",
                         gridTemplateColumns:
-                          "repeat(auto-fit, minmax(160px, 1fr))",
-                        gap: 10,
+                          "repeat(auto-fit, minmax(180px, 1fr))",
+                        gap: 12,
+                        marginBottom: 16,
+                      }}
+                    >
+                      <CanvasKPI
+                        theme={CANVAS_THEME}
+                        label={locale === "en" ? "Enabled modules" : "啟用模組"}
+                        value={tenant.enabledModules.length}
+                        sub={listText(
+                          tenant.enabledModules.map(
+                            (moduleCode) => moduleLabels[moduleCode],
+                          ),
+                        )}
+                      />
+                      <CanvasKPI
+                        theme={CANVAS_THEME}
+                        label={
+                          locale === "en" ? "Monthly bookings" : "每月 bookings"
+                        }
+                        value={tenant.quotas.monthlyBookings.toLocaleString()}
+                        sub={`${tenant.quotas.activeDrivers.toLocaleString()} drivers · ${tenant.quotas.monthlyApiCalls.toLocaleString()} API`}
+                      />
+                      <CanvasKPI
+                        theme={CANVAS_THEME}
+                        label={
+                          locale === "en" ? "Role acknowledgements" : "角色確認"
+                        }
+                        value={`${acknowledgedRoles}/${tenant.bootstrapDefaults.roleDefaults.length}`}
+                        delta={`${requiredRoles} ${locale === "en" ? "required" : "必要"}`}
+                        deltaTone="neutral"
+                        sub={`${invitedRoles} ${locale === "en" ? "invited" : "已邀請"}`}
+                      />
+                      <CanvasKPI
+                        theme={CANVAS_THEME}
+                        label={
+                          locale === "en" ? "Approved gates" : "已通過 gate"
+                        }
+                        value={`${approvedGateCount}/${PLATFORM_TENANT_ROLLOUT_STAGES.length}`}
+                        delta={
+                          tenant.rollout.rollbackPrepared
+                            ? locale === "en"
+                              ? "rollback ready"
+                              : "rollback ready"
+                            : locale === "en"
+                              ? "rollback pending"
+                              : "rollback 待補"
+                        }
+                        deltaTone={
+                          tenant.rollout.rollbackPrepared ? "up" : "down"
+                        }
+                        hint={
+                          tenant.rollout.lastPromotedAt
+                            ? formatDateTime(tenant.rollout.lastPromotedAt)
+                            : undefined
+                        }
+                      />
+                    </div>
+                    <CanvasDL
+                      theme={CANVAS_THEME}
+                      cols={2}
+                      items={overviewItems}
+                    />
+                  </CanvasCard>
+
+                  <CanvasCard
+                    theme={CANVAS_THEME}
+                    title={copy.auditTitle}
+                    subtitle={copy.auditSubtitle}
+                    padding={0}
+                    actions={
+                      <CanvasBtn
+                        theme={CANVAS_THEME}
+                        variant="secondary"
+                        onClick={() => router.push("/audit")}
+                      >
+                        {copy.auditLedger}
+                      </CanvasBtn>
+                    }
+                  >
+                    {auditRows.length > 0 ? (
+                      <CanvasTable
+                        theme={CANVAS_THEME}
+                        dense
+                        columns={[
+                          {
+                            h: locale === "en" ? "Time" : "時間",
+                            k: "createdAt",
+                            w: 156,
+                            mono: true,
+                          },
+                          {
+                            h: locale === "en" ? "Module" : "模組",
+                            k: "moduleLabel",
+                            w: 150,
+                          },
+                          {
+                            h: locale === "en" ? "Action" : "動作",
+                            k: "actionLabel",
+                            w: 180,
+                          },
+                          {
+                            h: locale === "en" ? "Resource" : "資源",
+                            w: 220,
+                            r: (row: AuditRow) => (
+                              <div style={{ minWidth: 0 }}>
+                                <div
+                                  style={{
+                                    fontSize: 12.5,
+                                    color: CANVAS_THEME.text,
+                                  }}
+                                >
+                                  {row.resourceType}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: 11.5,
+                                    color: CANVAS_THEME.textDim,
+                                    fontFamily: CANVAS_THEME.monoFamily,
+                                  }}
+                                >
+                                  {row.resourceId}
+                                </div>
+                              </div>
+                            ),
+                          },
+                          {
+                            h: "REQUEST",
+                            k: "requestId",
+                            mono: true,
+                            w: 120,
+                          },
+                        ]}
+                        rows={auditRows}
+                      />
+                    ) : (
+                      <div style={{ padding: 16 }}>
+                        <CanvasBanner
+                          theme={CANVAS_THEME}
+                          tone="info"
+                          icon="warn"
+                          title={copy.auditTitle}
+                          body={copy.noAudit}
+                        />
+                      </div>
+                    )}
+                  </CanvasCard>
+                </div>
+
+                <div style={sectionStackStyle}>
+                  <CanvasCard
+                    theme={CANVAS_THEME}
+                    title={copy.modulesTitle}
+                    subtitle={copy.modulesSubtitle}
+                  >
+                    <CanvasDL
+                      theme={CANVAS_THEME}
+                      cols={2}
+                      items={moduleItems}
+                    />
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        marginTop: 16,
                       }}
                     >
                       {PLATFORM_TENANT_MODULES.map((moduleCode) => {
                         const enabled =
-                          editForm.enabledModules.includes(moduleCode);
+                          tenant.enabledModules.includes(moduleCode);
                         return (
-                          <label
+                          <CanvasPill
                             key={moduleCode}
-                            style={{
-                              display: "flex",
-                              alignItems: "flex-start",
-                              gap: 8,
-                              padding: "10px 12px",
-                              borderRadius: 8,
-                              border: `1px solid ${
-                                enabled
-                                  ? CANVAS_THEME.accentBorder
-                                  : CANVAS_THEME.border
-                              }`,
-                              background: enabled
-                                ? CANVAS_THEME.accentBg
-                                : CANVAS_THEME.surfaceLo,
-                              cursor: "pointer",
-                            }}
+                            theme={CANVAS_THEME}
+                            tone={enabled ? "success" : "neutral"}
+                            dot={enabled}
                           >
-                            <input
-                              type="checkbox"
-                              checked={enabled}
-                              onChange={() =>
-                                setEditForm((current) =>
-                                  toggleTenantModule(current, moduleCode),
-                                )
-                              }
-                            />
-                            <span style={{ minWidth: 0 }}>
-                              <div
-                                style={{
-                                  fontSize: 12.5,
-                                  color: CANVAS_THEME.text,
-                                  fontWeight: 600,
-                                }}
-                              >
-                                {moduleLabels[moduleCode]}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: 11.5,
-                                  color: CANVAS_THEME.textDim,
-                                  fontFamily: CANVAS_THEME.monoFamily,
-                                }}
-                              >
-                                {formatPlatformCodeLabel(locale, moduleCode)}
-                              </div>
-                            </span>
-                          </label>
+                            {moduleLabels[moduleCode]}
+                          </CanvasPill>
                         );
                       })}
                     </div>
-                  </CanvasField>
+                  </CanvasCard>
+
+                  <div className="tenant-detail-support-grid">
+                    <CanvasCard
+                      theme={CANVAS_THEME}
+                      title={copy.webhooksTitle}
+                      subtitle={copy.webhooksSubtitle}
+                    >
+                      <CanvasDL
+                        theme={CANVAS_THEME}
+                        cols={2}
+                        items={webhookItems}
+                      />
+                      <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
+                        {tenant.bootstrapDefaults.notificationSubscriptions
+                          .length > 0 ? (
+                          tenant.bootstrapDefaults.notificationSubscriptions.map(
+                            (subscription, index) => (
+                              <div
+                                key={`${subscription.channel}-${subscription.eventType}-${index}`}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 12,
+                                  padding: "10px 12px",
+                                  borderRadius: 8,
+                                  background: CANVAS_THEME.surfaceLo,
+                                  border: `1px solid ${CANVAS_THEME.border}`,
+                                }}
+                              >
+                                <div style={{ minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      fontSize: 12.5,
+                                      color: CANVAS_THEME.text,
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {subscription.channel}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: 11.5,
+                                      color: CANVAS_THEME.textDim,
+                                      fontFamily: CANVAS_THEME.monoFamily,
+                                    }}
+                                  >
+                                    {subscription.eventType}
+                                  </div>
+                                </div>
+                                <CanvasPill
+                                  theme={CANVAS_THEME}
+                                  tone={
+                                    subscription.enabled ? "info" : "neutral"
+                                  }
+                                  dot={subscription.enabled}
+                                >
+                                  {subscription.enabled
+                                    ? t("common.enabled")
+                                    : t("common.disabled")}
+                                </CanvasPill>
+                              </div>
+                            ),
+                          )
+                        ) : (
+                          <CanvasBanner
+                            theme={CANVAS_THEME}
+                            tone="warn"
+                            icon="warn"
+                            title={copy.webhooksTitle}
+                            body={copy.noSubscriptions}
+                          />
+                        )}
+                      </div>
+                    </CanvasCard>
+
+                    <CanvasCard
+                      theme={CANVAS_THEME}
+                      title={copy.billingTitle}
+                      subtitle={copy.billingSubtitle}
+                    >
+                      <CanvasDL
+                        theme={CANVAS_THEME}
+                        cols={2}
+                        items={billingItems}
+                      />
+                      <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
+                        {tenant.bootstrapDefaults.notificationSubscriptions
+                          .length > 0 ? (
+                          tenant.bootstrapDefaults.notificationSubscriptions.map(
+                            (subscription, index) => (
+                              <div
+                                key={`${subscription.eventType}-${subscription.channel}-${index}`}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 12,
+                                  padding: "10px 12px",
+                                  borderRadius: 8,
+                                  background: CANVAS_THEME.surfaceLo,
+                                  border: `1px solid ${CANVAS_THEME.border}`,
+                                }}
+                              >
+                                <div style={{ minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      fontSize: 12.5,
+                                      color: CANVAS_THEME.text,
+                                      fontWeight: 600,
+                                    }}
+                                  >
+                                    {subscription.eventType}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontSize: 11.5,
+                                      color: CANVAS_THEME.textDim,
+                                    }}
+                                  >
+                                    {subscription.channel}
+                                  </div>
+                                </div>
+                                <CanvasPill
+                                  theme={CANVAS_THEME}
+                                  tone={
+                                    subscription.enabled ? "success" : "neutral"
+                                  }
+                                  dot={subscription.enabled}
+                                >
+                                  {subscription.enabled
+                                    ? t("common.enabled")
+                                    : t("common.disabled")}
+                                </CanvasPill>
+                              </div>
+                            ),
+                          )
+                        ) : (
+                          <CanvasBanner
+                            theme={CANVAS_THEME}
+                            tone="warn"
+                            icon="warn"
+                            title={copy.billingTitle}
+                            body={copy.noSubscriptions}
+                          />
+                        )}
+                      </div>
+                    </CanvasCard>
+                  </div>
+                </div>
+              </div>
+            </CanvasCard>
+
+            <div className="tenant-detail-secondary-grid">
+              <div style={sectionStackStyle}>
+                <form onSubmit={handleSaveSettings}>
+                  <CanvasCard
+                    theme={CANVAS_THEME}
+                    title={locale === "en" ? "Tenant settings" : "租戶設定"}
+                    subtitle={
+                      locale === "en"
+                        ? "Identity, enabled modules, and quota allocations remain control-plane truth."
+                        : "租戶身分、啟用模組與配額配置仍以 control-plane truth 為準。"
+                    }
+                    actions={
+                      <button
+                        type="submit"
+                        style={buttonStyle(
+                          CANVAS_THEME,
+                          "primary",
+                          savingSettings,
+                        )}
+                        disabled={savingSettings || !editForm.name.trim()}
+                      >
+                        {savingSettings
+                          ? t("common.saving")
+                          : copy.saveSettings}
+                      </button>
+                    }
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(auto-fit, minmax(180px, 1fr))",
+                        gap: 12,
+                      }}
+                    >
+                      <CanvasField
+                        theme={CANVAS_THEME}
+                        label={t("tenants.form.name")}
+                        required
+                      >
+                        <input
+                          value={editForm.name}
+                          onChange={(event) =>
+                            setEditForm((current) => ({
+                              ...current,
+                              name: event.target.value,
+                            }))
+                          }
+                          style={inputStyle(CANVAS_THEME)}
+                        />
+                      </CanvasField>
+                      <CanvasField
+                        theme={CANVAS_THEME}
+                        label={t("tenants.form.activeDrivers")}
+                      >
+                        <input
+                          value={editForm.activeDrivers}
+                          onChange={(event) =>
+                            setEditForm((current) => ({
+                              ...current,
+                              activeDrivers: event.target.value,
+                            }))
+                          }
+                          style={inputStyle(CANVAS_THEME)}
+                        />
+                      </CanvasField>
+                      <CanvasField
+                        theme={CANVAS_THEME}
+                        label={t("tenants.form.monthlyBookings")}
+                      >
+                        <input
+                          value={editForm.monthlyBookings}
+                          onChange={(event) =>
+                            setEditForm((current) => ({
+                              ...current,
+                              monthlyBookings: event.target.value,
+                            }))
+                          }
+                          style={inputStyle(CANVAS_THEME)}
+                        />
+                      </CanvasField>
+                      <CanvasField
+                        theme={CANVAS_THEME}
+                        label={t("tenants.form.monthlyApiCalls")}
+                      >
+                        <input
+                          value={editForm.monthlyApiCalls}
+                          onChange={(event) =>
+                            setEditForm((current) => ({
+                              ...current,
+                              monthlyApiCalls: event.target.value,
+                            }))
+                          }
+                          style={inputStyle(CANVAS_THEME)}
+                        />
+                      </CanvasField>
+                    </div>
+
+                    <CanvasField
+                      theme={CANVAS_THEME}
+                      label={t("tenants.form.modules")}
+                    >
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fit, minmax(160px, 1fr))",
+                          gap: 10,
+                        }}
+                      >
+                        {PLATFORM_TENANT_MODULES.map((moduleCode) => {
+                          const enabled =
+                            editForm.enabledModules.includes(moduleCode);
+                          return (
+                            <label
+                              key={moduleCode}
+                              style={{
+                                display: "flex",
+                                alignItems: "flex-start",
+                                gap: 8,
+                                padding: "10px 12px",
+                                borderRadius: 8,
+                                border: `1px solid ${
+                                  enabled
+                                    ? CANVAS_THEME.accentBorder
+                                    : CANVAS_THEME.border
+                                }`,
+                                background: enabled
+                                  ? CANVAS_THEME.accentBg
+                                  : CANVAS_THEME.surfaceLo,
+                                cursor: "pointer",
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={enabled}
+                                onChange={() =>
+                                  setEditForm((current) =>
+                                    toggleTenantModule(current, moduleCode),
+                                  )
+                                }
+                              />
+                              <span style={{ minWidth: 0 }}>
+                                <div
+                                  style={{
+                                    fontSize: 12.5,
+                                    color: CANVAS_THEME.text,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {moduleLabels[moduleCode]}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: 11.5,
+                                    color: CANVAS_THEME.textDim,
+                                    fontFamily: CANVAS_THEME.monoFamily,
+                                  }}
+                                >
+                                  {formatPlatformCodeLabel(locale, moduleCode)}
+                                </div>
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </CanvasField>
+                  </CanvasCard>
+                </form>
+
+                <CanvasCard
+                  theme={CANVAS_THEME}
+                  title={copy.lifecycleTitle}
+                  subtitle={copy.lifecycleSubtitle}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      marginBottom: 12,
+                    }}
+                  >
+                    <CanvasPill
+                      theme={CANVAS_THEME}
+                      tone={toCanvasTone(tenantStatusTone(tenant.status))}
+                      dot
+                    >
+                      {formatPlatformCodeLabel(locale, tenant.status)}
+                    </CanvasPill>
+                    <CanvasPill
+                      theme={CANVAS_THEME}
+                      tone={
+                        tenant.rollout.rollbackPrepared ? "success" : "warn"
+                      }
+                      dot={tenant.rollout.rollbackPrepared}
+                    >
+                      {tenant.rollout.rollbackPrepared
+                        ? locale === "en"
+                          ? "Rollback prepared"
+                          : "Rollback 已備妥"
+                        : locale === "en"
+                          ? "Rollback pending"
+                          : "Rollback 待補"}
+                    </CanvasPill>
+                    <CanvasPill theme={CANVAS_THEME} tone="neutral">
+                      {copy.refresh}
+                    </CanvasPill>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <CanvasBtn
+                      theme={CANVAS_THEME}
+                      variant="secondary"
+                      onClick={() => {
+                        void loadTenant();
+                      }}
+                    >
+                      {copy.refresh}
+                    </CanvasBtn>
+                    {tenant.status === "active" ? (
+                      <CanvasBtn
+                        theme={CANVAS_THEME}
+                        variant="secondary"
+                        disabled={lifecycleAction === "suspend"}
+                        onClick={() => {
+                          void runLifecycle("suspend");
+                        }}
+                      >
+                        {lifecycleAction === "suspend"
+                          ? t("common.saving")
+                          : t("tenants.suspend")}
+                      </CanvasBtn>
+                    ) : (
+                      <CanvasBtn
+                        theme={CANVAS_THEME}
+                        variant="secondary"
+                        disabled={lifecycleAction === "activate"}
+                        onClick={() => {
+                          void runLifecycle("activate");
+                        }}
+                      >
+                        {lifecycleAction === "activate"
+                          ? t("common.saving")
+                          : t("tenants.activate")}
+                      </CanvasBtn>
+                    )}
+                    <CanvasBtn
+                      theme={CANVAS_THEME}
+                      variant="secondary"
+                      disabled={lifecycleAction === "rollback_hold"}
+                      onClick={() => {
+                        void runLifecycle("rollback_hold");
+                      }}
+                    >
+                      {lifecycleAction === "rollback_hold"
+                        ? t("common.saving")
+                        : t("tenants.rollbackHold")}
+                    </CanvasBtn>
+                    {PLATFORM_TENANT_ROLLOUT_STAGES.map((stage) => (
+                      <CanvasBtn
+                        key={stage}
+                        theme={CANVAS_THEME}
+                        variant="secondary"
+                        disabled={promotingStage === stage}
+                        onClick={() => {
+                          void promoteStage(stage);
+                        }}
+                      >
+                        {promotingStage === stage
+                          ? t("common.saving")
+                          : `${copy.promote} ${formatPlatformCodeLabel(locale, stage)}`}
+                      </CanvasBtn>
+                    ))}
+                  </div>
                 </CanvasCard>
-              </form>
+              </div>
 
               <form onSubmit={handleSaveOnboarding}>
                 <CanvasCard
@@ -2065,83 +2228,6 @@ export default function TenantDetailPage() {
                   </label>
                 </CanvasCard>
               </form>
-
-              <CanvasCard
-                theme={CANVAS_THEME}
-                title={copy.lifecycleTitle}
-                subtitle={copy.lifecycleSubtitle}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    marginBottom: 12,
-                  }}
-                >
-                  <CanvasPill
-                    theme={CANVAS_THEME}
-                    tone={toCanvasTone(tenantStatusTone(tenant.status))}
-                    dot
-                  >
-                    {formatPlatformCodeLabel(locale, tenant.status)}
-                  </CanvasPill>
-                  <CanvasPill
-                    theme={CANVAS_THEME}
-                    tone={tenant.rollout.rollbackPrepared ? "success" : "warn"}
-                    dot={tenant.rollout.rollbackPrepared}
-                  >
-                    {tenant.rollout.rollbackPrepared
-                      ? locale === "en"
-                        ? "Rollback prepared"
-                        : "Rollback 已備妥"
-                      : locale === "en"
-                        ? "Rollback pending"
-                        : "Rollback 待補"}
-                  </CanvasPill>
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {tenant.status === "active" ? (
-                    <CanvasBtn
-                      theme={CANVAS_THEME}
-                      variant="secondary"
-                      disabled={lifecycleAction === "suspend"}
-                      onClick={() => {
-                        void runLifecycle("suspend");
-                      }}
-                    >
-                      {lifecycleAction === "suspend"
-                        ? t("common.saving")
-                        : t("tenants.suspend")}
-                    </CanvasBtn>
-                  ) : (
-                    <CanvasBtn
-                      theme={CANVAS_THEME}
-                      variant="secondary"
-                      disabled={lifecycleAction === "activate"}
-                      onClick={() => {
-                        void runLifecycle("activate");
-                      }}
-                    >
-                      {lifecycleAction === "activate"
-                        ? t("common.saving")
-                        : t("tenants.activate")}
-                    </CanvasBtn>
-                  )}
-                  <CanvasBtn
-                    theme={CANVAS_THEME}
-                    variant="secondary"
-                    disabled={lifecycleAction === "rollback_hold"}
-                    onClick={() => {
-                      void runLifecycle("rollback_hold");
-                    }}
-                  >
-                    {lifecycleAction === "rollback_hold"
-                      ? t("common.saving")
-                      : t("tenants.rollbackHold")}
-                  </CanvasBtn>
-                </div>
-              </CanvasCard>
             </div>
           </div>
         </div>
