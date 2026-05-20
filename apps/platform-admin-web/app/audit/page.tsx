@@ -5,7 +5,14 @@
 
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   usePlatformAdminClient,
   formatDateTime,
@@ -22,8 +29,87 @@ import type {
   EvidenceLegalHoldRecord,
   EvidenceRetentionPolicyRecord,
 } from "@drts/contracts";
+import {
+  CanvasBanner,
+  CanvasBtn,
+  CanvasCard,
+  CanvasKPI,
+  CanvasPageHeader,
+  CanvasPill,
+  CanvasTable,
+  buildCanvasTheme,
+  type CanvasTableColumn,
+} from "@drts/ui-web";
 
 type TFn = (key: string, params?: Record<string, string | number>) => string;
+
+type TabKey = "log" | "policies" | "holds" | "exceptions";
+
+type AuditRow = AuditLogRecord & Record<string, unknown>;
+type PolicyRow = EvidenceRetentionPolicyRecord & Record<string, unknown>;
+type HoldRow = EvidenceLegalHoldRecord & Record<string, unknown>;
+type ExceptionRow = EvidenceDeletionExceptionRecord & Record<string, unknown>;
+
+const th = buildCanvasTheme({
+  surface: "platform",
+  density: "compact",
+});
+
+const pageBodyStyle: CSSProperties = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const kpiGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+  gap: 12,
+};
+
+const pillRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 8,
+};
+
+const filterRowStyle: CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  alignItems: "center",
+  gap: 16,
+};
+
+const filterLabelStyle: CSSProperties = {
+  fontSize: 11,
+  color: th.textMuted,
+  textTransform: "uppercase",
+  letterSpacing: 0.4,
+  marginRight: 4,
+};
+
+const pillButtonStyle: CSSProperties = {
+  background: "transparent",
+  border: 0,
+  padding: 0,
+  cursor: "pointer",
+  fontFamily: "inherit",
+};
+
+const emptyStateStyle: CSSProperties = {
+  padding: "32px 16px",
+  textAlign: "center",
+  color: th.textMuted,
+  fontSize: 12.5,
+};
+
+const detailGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  gap: 12,
+};
 
 export default function AuditPage() {
   const { t, locale } = useTranslation();
@@ -39,6 +125,7 @@ export default function AuditPage() {
   const [filterModule, setFilterModule] = useState<string>("");
   const [filterActorType, setFilterActorType] = useState<string>("");
   const [expandedAuditId, setExpandedAuditId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabKey>("log");
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -81,424 +168,648 @@ export default function AuditPage() {
     loadRecords();
   }, [loadRecords]);
 
-  const filtered = records.filter((r) => {
-    if (filterModule && r.moduleName !== filterModule) return false;
-    if (filterActorType && r.actorType !== filterActorType) return false;
-    return true;
-  });
+  const moduleCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of records) {
+      if (!r.moduleName) continue;
+      counts.set(r.moduleName, (counts.get(r.moduleName) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [records]);
 
-  const modules = [
-    ...new Set(records.map((r) => r.moduleName).filter(Boolean)),
-  ];
-  const actorTypes = [
-    ...new Set(records.map((r) => r.actorType).filter(Boolean)),
-  ];
-  const activeLegalHolds = legalHolds.filter(
-    (hold) => hold.status === "active",
-  );
-  const activeDeletionExceptions = deletionExceptions.filter(
-    (exception) => exception.status === "active",
-  );
-  const signedDownloadFamilies = policies.filter(
-    (policy) => policy.downloadControl?.mode === "signed_url",
+  const actorTypes = useMemo(
+    () => [...new Set(records.map((r) => r.actorType).filter(Boolean))],
+    [records],
   );
 
-  if (loading) return <div className="admin-empty">{t("audit.loading")}</div>;
+  const filtered = useMemo(
+    () =>
+      records.filter((r) => {
+        if (filterModule && r.moduleName !== filterModule) return false;
+        if (filterActorType && r.actorType !== filterActorType) return false;
+        return true;
+      }),
+    [records, filterModule, filterActorType],
+  );
+
+  const activeLegalHolds = useMemo(
+    () => legalHolds.filter((hold) => hold.status === "active"),
+    [legalHolds],
+  );
+  const activeDeletionExceptions = useMemo(
+    () => deletionExceptions.filter((e) => e.status === "active"),
+    [deletionExceptions],
+  );
+  const signedDownloadFamilies = useMemo(
+    () =>
+      policies.filter(
+        (policy) => policy.downloadControl?.mode === "signed_url",
+      ),
+    [policies],
+  );
+
+  const tabLabels: Record<TabKey, string> = {
+    log: locale === "en" ? "Audit log" : "Audit log",
+    policies: locale === "en" ? "Retention policies" : "Retention policies",
+    holds: locale === "en" ? "Legal holds" : "Legal holds",
+    exceptions: locale === "en" ? "Deletion exceptions" : "Deletion exceptions",
+  };
+  const tabKeys: TabKey[] = ["log", "policies", "holds", "exceptions"];
+  const tabs = tabKeys.map((key) => (
+    <button
+      key={key}
+      type="button"
+      onClick={() => setActiveTab(key)}
+      style={{
+        ...pillButtonStyle,
+        color: activeTab === key ? th.text : th.textMuted,
+      }}
+    >
+      {tabLabels[key]}
+    </button>
+  ));
+  const activeTabNode = tabs[tabKeys.indexOf(activeTab)];
+
+  const subtitle = loading
+    ? t("audit.loading")
+    : t("audit.subtitle", { count: records.length });
 
   return (
     <div>
-      <div className="admin-page-header">
-        <h1>{t("audit.title")}</h1>
-        <p>{t("audit.subtitle", { count: records.length })}</p>
+      <CanvasPageHeader
+        theme={th}
+        sticky={false}
+        title={t("audit.title")}
+        subtitle={subtitle}
+        tabs={tabs}
+        activeTab={activeTabNode}
+        actions={
+          <>
+            <CanvasBtn
+              theme={th}
+              variant="secondary"
+              size="sm"
+              icon="refresh"
+              onClick={() => void loadRecords()}
+            >
+              {t("common.refresh")}
+            </CanvasBtn>
+            <CanvasBtn
+              theme={th}
+              variant="secondary"
+              size="sm"
+              icon="export"
+              disabled
+            >
+              {locale === "en" ? "Export CSV" : "匯出 CSV"}
+            </CanvasBtn>
+          </>
+        }
+      />
+
+      <div style={pageBodyStyle}>
+        {error ? (
+          <CanvasBanner
+            theme={th}
+            tone="danger"
+            icon="warn"
+            title={`${getPlatformLabel(locale, "error")}: ${error}`}
+            body={
+              locale === "en"
+                ? "Failed to load audit and governance records."
+                : "稽核或治理資料載入失敗。"
+            }
+          />
+        ) : null}
+
+        <div style={kpiGridStyle}>
+          <CanvasKPI
+            theme={th}
+            label={t("audit.metrics.policyFamilies")}
+            value={String(policies.length)}
+          />
+          <CanvasKPI
+            theme={th}
+            label={t("audit.metrics.signedDownload")}
+            value={String(signedDownloadFamilies.length)}
+          />
+          <CanvasKPI
+            theme={th}
+            label={t("audit.metrics.activeHolds")}
+            value={String(activeLegalHolds.length)}
+          />
+          <CanvasKPI
+            theme={th}
+            label={t("audit.metrics.activeExceptions")}
+            value={String(activeDeletionExceptions.length)}
+          />
+        </div>
+
+        {activeTab === "log" ? (
+          <AuditLogPanel
+            t={t}
+            locale={locale}
+            loading={loading}
+            records={records}
+            filtered={filtered}
+            moduleCounts={moduleCounts}
+            actorTypes={actorTypes}
+            filterModule={filterModule}
+            filterActorType={filterActorType}
+            onFilterModule={setFilterModule}
+            onFilterActorType={setFilterActorType}
+            expandedAuditId={expandedAuditId}
+            onToggleExpand={(id) =>
+              setExpandedAuditId((current) => (current === id ? null : id))
+            }
+          />
+        ) : null}
+
+        {activeTab === "policies" ? (
+          <PoliciesPanel t={t} locale={locale} policies={policies} />
+        ) : null}
+
+        {activeTab === "holds" ? (
+          <HoldsPanel t={t} locale={locale} holds={activeLegalHolds} />
+        ) : null}
+
+        {activeTab === "exceptions" ? (
+          <ExceptionsPanel
+            t={t}
+            locale={locale}
+            exceptions={activeDeletionExceptions}
+          />
+        ) : null}
       </div>
+    </div>
+  );
+}
 
-      {error && (
-        <div
-          className="admin-card"
-          style={{ borderColor: "rgba(239,68,68,0.3)" }}
+function AuditLogPanel({
+  t,
+  locale,
+  loading,
+  records,
+  filtered,
+  moduleCounts,
+  actorTypes,
+  filterModule,
+  filterActorType,
+  onFilterModule,
+  onFilterActorType,
+  expandedAuditId,
+  onToggleExpand,
+}: {
+  t: TFn;
+  locale: "en" | "zh";
+  loading: boolean;
+  records: AuditLogRecord[];
+  filtered: AuditLogRecord[];
+  moduleCounts: Array<[string, number]>;
+  actorTypes: string[];
+  filterModule: string;
+  filterActorType: string;
+  onFilterModule: (value: string) => void;
+  onFilterActorType: (value: string) => void;
+  expandedAuditId: string | null;
+  onToggleExpand: (id: string) => void;
+}) {
+  const columns: CanvasTableColumn<AuditRow>[] = [
+    {
+      h: locale === "en" ? "WHEN" : "時間",
+      w: 170,
+      mono: true,
+      r: (row) => formatDateTime(row.createdAt) || "—",
+    },
+    {
+      h: locale === "en" ? "ACTOR TYPE" : "操作者類型",
+      w: 110,
+      mono: true,
+      r: (row) => (
+        <CanvasPill theme={th} tone="neutral">
+          {formatPlatformCodeLabel(locale, row.actorType)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: locale === "en" ? "ACTOR" : "操作者",
+      w: 220,
+      r: (row) => (
+        <span
+          style={{ color: th.text, fontFamily: th.monoFamily, fontSize: 11.5 }}
         >
-          <p style={{ color: "#dc2626", margin: 0 }}>
-            {getPlatformLabel(locale, "error")}: {error}
-          </p>
-        </div>
-      )}
-
-      <div className="admin-toolbar" style={{ flexWrap: "wrap", gap: 12 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <label
-            htmlFor="filter-module"
-            style={{ fontSize: 13, fontWeight: 500 }}
-          >
-            {t("audit.moduleLabel")}
-          </label>
-          <select
-            id="filter-module"
-            value={filterModule}
-            onChange={(e) => setFilterModule(e.target.value)}
-            style={{
-              padding: "6px 10px",
-              border: "1px solid #d1d5db",
-              borderRadius: 8,
-              fontSize: 13,
-            }}
-          >
-            <option value="">{t("common.all")}</option>
-            {modules.map((m) => (
-              <option key={m} value={m}>
-                {formatPlatformCodeLabel(locale, m)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <label
-            htmlFor="filter-actor"
-            style={{ fontSize: 13, fontWeight: 500 }}
-          >
-            {t("audit.actorLabel")}
-          </label>
-          <select
-            id="filter-actor"
-            value={filterActorType}
-            onChange={(e) => setFilterActorType(e.target.value)}
-            style={{
-              padding: "6px 10px",
-              border: "1px solid #d1d5db",
-              borderRadius: 8,
-              fontSize: 13,
-            }}
-          >
-            <option value="">{t("common.all")}</option>
-            {actorTypes.map((a) => (
-              <option key={a} value={a}>
-                {formatPlatformCodeLabel(locale, a)}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button
-          className="admin-btn admin-btn--secondary"
-          onClick={loadRecords}
-        >
-          {t("common.refresh")}
-        </button>
-      </div>
-
-      <div className="admin-card" style={{ marginBottom: 12 }}>
-        <span style={{ fontSize: 13, color: "#6b7280" }}>
-          {t("audit.showingOf", {
-            shown: filtered.length,
-            total: records.length,
-          })}
+          {row.actorId
+            ? truncate(row.actorId, 28)
+            : formatPlatformCodeLabel(locale, "system")}
         </span>
-      </div>
-
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 12,
-          marginBottom: 12,
-        }}
-      >
-        <AuditMetricCard
-          label={t("audit.metrics.policyFamilies")}
-          value={String(policies.length)}
-        />
-        <AuditMetricCard
-          label={t("audit.metrics.signedDownload")}
-          value={String(signedDownloadFamilies.length)}
-        />
-        <AuditMetricCard
-          label={t("audit.metrics.activeHolds")}
-          value={String(activeLegalHolds.length)}
-        />
-        <AuditMetricCard
-          label={t("audit.metrics.activeExceptions")}
-          value={String(activeDeletionExceptions.length)}
-        />
-      </div>
-
-      <div className="admin-card" style={{ marginBottom: 12 }}>
-        <div
+      ),
+    },
+    {
+      h: locale === "en" ? "MODULE" : "模組",
+      w: 140,
+      mono: true,
+      r: (row) => formatPlatformCodeLabel(locale, row.moduleName),
+    },
+    {
+      h: locale === "en" ? "ACTION" : "動作",
+      w: 180,
+      mono: true,
+      r: (row) => (
+        <span
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "baseline",
-            gap: 12,
-            marginBottom: 12,
-            flexWrap: "wrap",
+            color: th.accent,
+            fontFamily: th.monoFamily,
+            fontSize: 11,
           }}
         >
-          <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>
-              {t("audit.policies.title")}
-            </h2>
-            <p style={{ margin: "4px 0 0", color: "#6b7280", fontSize: 13 }}>
-              {t("audit.policies.subtitle")}
-            </p>
+          {formatPlatformCodeLabel(locale, row.actionName)}
+        </span>
+      ),
+    },
+    {
+      h: locale === "en" ? "RESOURCE" : "資源",
+      w: 200,
+      mono: true,
+      r: (row) => (
+        <span style={{ fontFamily: th.monoFamily, fontSize: 11.5 }}>
+          {formatPlatformCodeLabel(locale, row.resourceType) || "—"}
+          {row.resourceId ? `:${truncate(row.resourceId, 10)}` : ""}
+        </span>
+      ),
+    },
+    {
+      h: locale === "en" ? "TENANT" : "租戶",
+      w: 120,
+      mono: true,
+      r: (row) => row.tenantId ?? "—",
+    },
+    {
+      h: locale === "en" ? "REQUEST" : "請求",
+      w: 160,
+      mono: true,
+      r: (row) =>
+        row.requestId ? (
+          <span style={{ color: th.textMuted, fontSize: 11.5 }}>
+            {truncate(row.requestId, 18)}
+          </span>
+        ) : (
+          <span style={{ color: th.textDim }}>—</span>
+        ),
+    },
+    {
+      h: locale === "en" ? "DETAILS" : "詳情",
+      w: 110,
+      r: (row) =>
+        row.oldValuesSummary || row.newValuesSummary ? (
+          <CanvasBtn
+            theme={th}
+            variant="ghost"
+            size="xs"
+            onClick={() => onToggleExpand(row.auditId)}
+          >
+            {expandedAuditId === row.auditId
+              ? t("audit.collapse")
+              : t("audit.expand")}
+          </CanvasBtn>
+        ) : (
+          <span style={{ color: th.textDim, fontSize: 11.5 }}>—</span>
+        ),
+    },
+  ];
+
+  const allPillTone = !filterModule ? "accent" : "neutral";
+  const totalLabel = locale === "en" ? "All" : "全部";
+
+  return (
+    <>
+      <div style={pillRowStyle}>
+        <button
+          type="button"
+          onClick={() => onFilterModule("")}
+          style={pillButtonStyle}
+          aria-pressed={!filterModule}
+        >
+          <CanvasPill theme={th} tone={allPillTone} dot>
+            {`${totalLabel} ${records.length}`}
+          </CanvasPill>
+        </button>
+        {moduleCounts.map(([moduleName, count]) => {
+          const selected = filterModule === moduleName;
+          return (
+            <button
+              key={moduleName}
+              type="button"
+              onClick={() => onFilterModule(selected ? "" : moduleName)}
+              style={pillButtonStyle}
+              aria-pressed={selected}
+            >
+              <CanvasPill theme={th} tone={selected ? "accent" : "neutral"} dot>
+                {`${formatPlatformCodeLabel(locale, moduleName)} ${count}`}
+              </CanvasPill>
+            </button>
+          );
+        })}
+      </div>
+
+      {actorTypes.length > 0 ? (
+        <div style={filterRowStyle}>
+          <span style={filterLabelStyle}>{t("audit.actorLabel")}</span>
+          <div style={pillRowStyle}>
+            <button
+              type="button"
+              onClick={() => onFilterActorType("")}
+              style={pillButtonStyle}
+              aria-pressed={!filterActorType}
+            >
+              <CanvasPill
+                theme={th}
+                tone={!filterActorType ? "accent" : "neutral"}
+              >
+                {t("common.all")}
+              </CanvasPill>
+            </button>
+            {actorTypes.map((actorType) => {
+              const selected = filterActorType === actorType;
+              return (
+                <button
+                  key={actorType}
+                  type="button"
+                  onClick={() => onFilterActorType(selected ? "" : actorType)}
+                  style={pillButtonStyle}
+                  aria-pressed={selected}
+                >
+                  <CanvasPill theme={th} tone={selected ? "accent" : "neutral"}>
+                    {formatPlatformCodeLabel(locale, actorType)}
+                  </CanvasPill>
+                </button>
+              );
+            })}
           </div>
+          <span
+            style={{ marginLeft: "auto", fontSize: 12, color: th.textMuted }}
+          >
+            {t("audit.showingOf", {
+              shown: filtered.length,
+              total: records.length,
+            })}
+          </span>
         </div>
-        <div style={{ overflowX: "auto" }}>
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>{t("audit.policies.family")}</th>
-                <th>{t("audit.policies.authority")}</th>
-                <th>{t("audit.policies.retention")}</th>
-                <th>{t("audit.policies.download")}</th>
-                <th>{t("audit.policies.legalHold")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {policies.map((policy) => (
-                <tr key={policy.family}>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>
-                      {formatPlatformCodeLabel(locale, policy.family)}
-                    </div>
-                    <div style={{ fontSize: 12, color: "#6b7280" }}>
-                      {policy.description}
-                    </div>
-                  </td>
-                  <td>
-                    {formatPlatformCodeLabel(locale, policy.authorityModule)}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {policy.hotRetentionDays}d /{" "}
-                    {policy.archiveRetentionDays
-                      ? `${policy.archiveRetentionDays}d`
-                      : "—"}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {policy.downloadControl?.mode === "signed_url"
-                      ? t("audit.policies.signedDownloadTtl", {
-                          minutes: policy.downloadControl.ttlMinutes ?? 0,
-                        })
-                      : t("audit.policies.noDownload")}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {policy.legalHold.supported
-                      ? t("audit.policies.holdEnabled")
-                      : t("audit.policies.holdDisabled")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      ) : null}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: 12,
-          marginBottom: 12,
-        }}
-      >
-        <GovernanceTableCard
-          title={t("audit.holds.title")}
-          emptyLabel={t("audit.holds.empty")}
-          columns={[
-            t("audit.holds.family"),
-            t("audit.holds.subject"),
-            t("audit.holds.case"),
-            t("audit.holds.status"),
-          ]}
-          rows={activeLegalHolds.map((hold) => [
-            formatPlatformCodeLabel(locale, hold.family),
-            hold.subjectId,
-            hold.caseNumber,
-            formatPlatformCodeLabel(locale, hold.status),
-          ])}
-        />
-        <GovernanceTableCard
-          title={t("audit.exceptions.title")}
-          emptyLabel={t("audit.exceptions.empty")}
-          columns={[
-            t("audit.exceptions.family"),
-            t("audit.exceptions.subject"),
-            t("audit.exceptions.reason"),
-            t("audit.exceptions.expiresAt"),
-          ]}
-          rows={activeDeletionExceptions.map((exception) => [
-            formatPlatformCodeLabel(locale, exception.family),
-            exception.subjectId,
-            formatPlatformCodeLabel(locale, exception.reasonCode),
-            formatDateTime(exception.expiresAt),
-          ])}
-        />
-      </div>
-
-      {filtered.length === 0 ? (
-        <div className="admin-card admin-empty">
-          <p>{t("audit.empty")}</p>
-        </div>
-      ) : (
-        <div className="admin-card" style={{ overflowX: "auto" }}>
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>{getPlatformLabel(locale, "id")}</th>
-                <th>{t("audit.col.actor")}</th>
-                <th>{t("audit.col.module")}</th>
-                <th>{t("audit.col.action")}</th>
-                <th>{t("audit.col.resource")}</th>
-                <th>{t("audit.col.tenant")}</th>
-                <th>{t("audit.col.timestamp")}</th>
-                <th>{t("audit.col.details")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <React.Fragment key={r.auditId}>
-                  <tr>
-                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>
-                      {truncate(r.auditId, 12)}
-                    </td>
-                    <td>
-                      <div style={{ fontSize: 12 }}>
-                        <div>
-                          {truncate(
-                            r.actorId ||
-                              formatPlatformCodeLabel(locale, "system"),
-                            16,
-                          )}
-                        </div>
-                        <span
-                          className="admin-badge admin-badge--neutral"
-                          style={{ fontSize: 10 }}
-                        >
-                          {formatPlatformCodeLabel(locale, r.actorType)}
-                        </span>
-                      </div>
-                    </td>
-                    <td>{formatPlatformCodeLabel(locale, r.moduleName)}</td>
-                    <td>
-                      <span className="admin-badge admin-badge--info">
-                        {formatPlatformCodeLabel(locale, r.actionName)}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      {formatPlatformCodeLabel(locale, r.resourceType)}
-                      {r.resourceId ? `:${truncate(r.resourceId, 8)}` : ""}
-                    </td>
-                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>
-                      {r.tenantId || "—"}
-                    </td>
-                    <td style={{ fontSize: 12 }}>
-                      {formatDateTime(r.createdAt)}
-                    </td>
-                    <td>
-                      {r.oldValuesSummary || r.newValuesSummary ? (
-                        <button
-                          className="admin-btn admin-btn--secondary admin-btn--sm"
-                          type="button"
-                          onClick={() =>
-                            setExpandedAuditId((current) =>
-                              current === r.auditId ? null : r.auditId,
-                            )
-                          }
-                        >
-                          {expandedAuditId === r.auditId
-                            ? t("audit.collapse")
-                            : t("audit.expand")}
-                        </button>
-                      ) : (
-                        <span style={{ fontSize: 12, color: "#9ca3af" }}>
-                          —
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                  {expandedAuditId === r.auditId && (
-                    <tr>
-                      <td colSpan={8} style={{ background: "#fafafa" }}>
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns:
-                              "repeat(auto-fit, minmax(240px, 1fr))",
-                            gap: 12,
-                          }}
-                        >
-                          <AuditValueCard
-                            title={t("audit.oldValues")}
-                            payload={r.oldValuesSummary}
-                            t={t}
-                          />
-                          <AuditValueCard
-                            title={t("audit.newValues")}
-                            payload={r.newValuesSummary}
-                            t={t}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+      <CanvasCard theme={th} padding={0}>
+        {loading ? (
+          <div style={emptyStateStyle}>{t("audit.loading")}</div>
+        ) : filtered.length === 0 ? (
+          <div style={emptyStateStyle}>{t("audit.empty")}</div>
+        ) : (
+          <>
+            <CanvasTable<AuditRow>
+              theme={th}
+              columns={columns}
+              rows={filtered as AuditRow[]}
+            />
+            {expandedAuditId ? (
+              <ExpandedDetailRow
+                record={filtered.find((r) => r.auditId === expandedAuditId)}
+                t={t}
+              />
+            ) : null}
+          </>
+        )}
+      </CanvasCard>
+    </>
   );
 }
 
-function AuditMetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="admin-card">
-      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 24, fontWeight: 700 }}>{value}</div>
-    </div>
-  );
-}
-
-function GovernanceTableCard({
-  title,
-  columns,
-  rows,
-  emptyLabel,
+function ExpandedDetailRow({
+  record,
+  t,
 }: {
-  title: string;
-  columns: string[];
-  rows: string[][];
-  emptyLabel: string;
+  record: AuditLogRecord | undefined;
+  t: TFn;
 }) {
+  if (!record) return null;
   return (
-    <div className="admin-card">
-      <h2 style={{ marginTop: 0, marginBottom: 12, fontSize: 18 }}>{title}</h2>
-      {rows.length === 0 ? (
-        <p style={{ margin: 0, color: "#6b7280", fontSize: 13 }}>
-          {emptyLabel}
-        </p>
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table className="admin-table">
-            <thead>
-              <tr>
-                {columns.map((column) => (
-                  <th key={column}>{column}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row, index) => (
-                <tr key={`${title}-${index}`}>
-                  {row.map((cell, cellIndex) => (
-                    <td key={`${title}-${index}-${cellIndex}`}>{cell}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+    <div
+      style={{
+        padding: 14,
+        borderTop: `1px solid ${th.border}`,
+        background: th.surfaceLo,
+      }}
+    >
+      <div style={detailGridStyle}>
+        <AuditValueCard
+          title={t("audit.oldValues")}
+          payload={record.oldValuesSummary}
+          t={t}
+        />
+        <AuditValueCard
+          title={t("audit.newValues")}
+          payload={record.newValuesSummary}
+          t={t}
+        />
+      </div>
     </div>
+  );
+}
+
+function PoliciesPanel({
+  t,
+  locale,
+  policies,
+}: {
+  t: TFn;
+  locale: "en" | "zh";
+  policies: EvidenceRetentionPolicyRecord[];
+}) {
+  const columns: CanvasTableColumn<PolicyRow>[] = [
+    {
+      h: t("audit.policies.family"),
+      w: 220,
+      r: (row) => (
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={{ fontWeight: 600 }}>
+            {formatPlatformCodeLabel(locale, row.family)}
+          </span>
+          {row.description ? (
+            <span style={{ fontSize: 11.5, color: th.textMuted }}>
+              {row.description}
+            </span>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      h: t("audit.policies.authority"),
+      w: 160,
+      mono: true,
+      r: (row) => formatPlatformCodeLabel(locale, row.authorityModule),
+    },
+    {
+      h: t("audit.policies.retention"),
+      w: 140,
+      mono: true,
+      r: (row) =>
+        `${row.hotRetentionDays}d / ${
+          row.archiveRetentionDays ? `${row.archiveRetentionDays}d` : "—"
+        }`,
+    },
+    {
+      h: t("audit.policies.download"),
+      w: 200,
+      r: (row) =>
+        row.downloadControl?.mode === "signed_url" ? (
+          <CanvasPill theme={th} tone="info" dot>
+            {t("audit.policies.signedDownloadTtl", {
+              minutes: row.downloadControl.ttlMinutes ?? 0,
+            })}
+          </CanvasPill>
+        ) : (
+          <span style={{ color: th.textMuted, fontSize: 12 }}>
+            {t("audit.policies.noDownload")}
+          </span>
+        ),
+    },
+    {
+      h: t("audit.policies.legalHold"),
+      w: 140,
+      r: (row) => (
+        <CanvasPill
+          theme={th}
+          tone={row.legalHold.supported ? "success" : "neutral"}
+          dot
+        >
+          {row.legalHold.supported
+            ? t("audit.policies.holdEnabled")
+            : t("audit.policies.holdDisabled")}
+        </CanvasPill>
+      ),
+    },
+  ];
+
+  return (
+    <CanvasCard
+      theme={th}
+      title={t("audit.policies.title")}
+      subtitle={t("audit.policies.subtitle")}
+      padding={0}
+    >
+      {policies.length === 0 ? (
+        <div style={emptyStateStyle}>—</div>
+      ) : (
+        <CanvasTable<PolicyRow>
+          theme={th}
+          columns={columns}
+          rows={policies as PolicyRow[]}
+        />
+      )}
+    </CanvasCard>
+  );
+}
+
+function HoldsPanel({
+  t,
+  locale,
+  holds,
+}: {
+  t: TFn;
+  locale: "en" | "zh";
+  holds: EvidenceLegalHoldRecord[];
+}) {
+  const columns: CanvasTableColumn<HoldRow>[] = [
+    {
+      h: t("audit.holds.family"),
+      w: 180,
+      r: (row) => formatPlatformCodeLabel(locale, row.family),
+    },
+    {
+      h: t("audit.holds.subject"),
+      w: 200,
+      mono: true,
+      r: (row) => row.subjectId,
+    },
+    {
+      h: t("audit.holds.case"),
+      w: 180,
+      mono: true,
+      r: (row) => row.caseNumber,
+    },
+    {
+      h: t("audit.holds.status"),
+      w: 120,
+      r: (row) => (
+        <CanvasPill theme={th} tone="warn" dot>
+          {formatPlatformCodeLabel(locale, row.status)}
+        </CanvasPill>
+      ),
+    },
+  ];
+
+  return (
+    <CanvasCard theme={th} title={t("audit.holds.title")} padding={0}>
+      {holds.length === 0 ? (
+        <div style={emptyStateStyle}>{t("audit.holds.empty")}</div>
+      ) : (
+        <CanvasTable<HoldRow>
+          theme={th}
+          columns={columns}
+          rows={holds as HoldRow[]}
+        />
+      )}
+    </CanvasCard>
+  );
+}
+
+function ExceptionsPanel({
+  t,
+  locale,
+  exceptions,
+}: {
+  t: TFn;
+  locale: "en" | "zh";
+  exceptions: EvidenceDeletionExceptionRecord[];
+}) {
+  const columns: CanvasTableColumn<ExceptionRow>[] = [
+    {
+      h: t("audit.exceptions.family"),
+      w: 180,
+      r: (row) => formatPlatformCodeLabel(locale, row.family),
+    },
+    {
+      h: t("audit.exceptions.subject"),
+      w: 200,
+      mono: true,
+      r: (row) => row.subjectId,
+    },
+    {
+      h: t("audit.exceptions.reason"),
+      w: 200,
+      r: (row) => (
+        <CanvasPill theme={th} tone="info" dot>
+          {formatPlatformCodeLabel(locale, row.reasonCode)}
+        </CanvasPill>
+      ),
+    },
+    {
+      h: t("audit.exceptions.expiresAt"),
+      w: 180,
+      mono: true,
+      r: (row) => formatDateTime(row.expiresAt),
+    },
+  ];
+
+  return (
+    <CanvasCard theme={th} title={t("audit.exceptions.title")} padding={0}>
+      {exceptions.length === 0 ? (
+        <div style={emptyStateStyle}>{t("audit.exceptions.empty")}</div>
+      ) : (
+        <CanvasTable<ExceptionRow>
+          theme={th}
+          columns={columns}
+          rows={exceptions as ExceptionRow[]}
+        />
+      )}
+    </CanvasCard>
   );
 }
 
@@ -507,25 +818,29 @@ function AuditValueCard({
   payload,
   t,
 }: {
-  title: string;
+  title: ReactNode;
   payload: Record<string, unknown> | undefined;
   t: TFn;
 }) {
   return (
     <div
       style={{
-        border: "1px solid #e5e7eb",
-        borderRadius: 10,
+        border: `1px solid ${th.border}`,
+        borderRadius: 8,
         padding: 12,
-        background: "#fff",
+        background: th.surface,
       }}
     >
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>{title}</div>
+      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 12 }}>
+        {title}
+      </div>
       {payload ? (
         <pre
           style={{
             margin: 0,
-            fontSize: 12,
+            fontFamily: th.monoFamily,
+            fontSize: 11.5,
+            color: th.text,
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
           }}
@@ -533,7 +848,7 @@ function AuditValueCard({
           {JSON.stringify(payload, null, 2)}
         </pre>
       ) : (
-        <span style={{ fontSize: 12, color: "#9ca3af" }}>
+        <span style={{ fontSize: 11.5, color: th.textMuted }}>
           {t("common.noValues")}
         </span>
       )}
