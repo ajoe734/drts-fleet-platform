@@ -50,6 +50,8 @@ type PlacardFormState = {
 };
 
 type PublicInfoRow = PublicInfoVersionRecord & Record<string, unknown>;
+type PlacardRow = PlacardVersionRecord & Record<string, unknown>;
+type SwitchboardTab = "publicInfo" | "placards";
 
 const EMPTY_PUBLIC_INFO_FORM: CreatePublicInfoVersionCommand = {
   title: "",
@@ -79,14 +81,16 @@ const viewportStyle = {
 
 const pageBodyStyle = {
   display: "grid",
-  gap: 16,
+  gap: 20,
   padding: 24,
+  maxWidth: 1160,
+  margin: "0 auto",
 } satisfies CSSProperties;
 
 const splitLayoutStyle = {
   display: "flex",
   flexWrap: "wrap",
-  gap: 16,
+  gap: 20,
   alignItems: "start",
 } satisfies CSSProperties;
 
@@ -101,12 +105,62 @@ const sideColumnStyle = {
   flex: "1 1 340px",
   display: "grid",
   gap: 16,
-  minWidth: 300,
+  minWidth: 320,
 } satisfies CSSProperties;
 
 const cardStackStyle = {
   display: "grid",
   gap: 16,
+} satisfies CSSProperties;
+
+const tabRailStyle = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const placardCardPreviewStyle = {
+  display: "grid",
+  gap: 12,
+} satisfies CSSProperties;
+
+const previewActionRowStyle = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+} satisfies CSSProperties;
+
+const historyGridStyle = {
+  display: "grid",
+  gap: 12,
+} satisfies CSSProperties;
+
+const historyItemStyle = {
+  border: `1px solid ${theme.border}`,
+  borderRadius: 10,
+  padding: 12,
+  background: theme.bgRaised,
+  display: "grid",
+  gap: 6,
+} satisfies CSSProperties;
+
+const historyLabelStyle = {
+  fontSize: 11,
+  color: theme.textMuted,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+} satisfies CSSProperties;
+
+const historyValueStyle = {
+  fontSize: 13,
+  color: theme.text,
+  fontWeight: 600,
+} satisfies CSSProperties;
+
+const historyHintStyle = {
+  fontSize: 11.5,
+  color: theme.textMuted,
+  lineHeight: 1.45,
 } satisfies CSSProperties;
 
 const fieldGridStyle = {
@@ -179,6 +233,13 @@ const helperTextStyle = {
   fontSize: 11.5,
   color: theme.textMuted,
   lineHeight: 1.45,
+} satisfies CSSProperties;
+
+const richTextStyle = {
+  fontSize: 12.5,
+  color: theme.text,
+  lineHeight: 1.6,
+  whiteSpace: "pre-wrap",
 } satisfies CSSProperties;
 
 const mutedValueStyle = {
@@ -352,6 +413,7 @@ export default function SwitchboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [showPublicInfoForm, setShowPublicInfoForm] = useState(false);
   const [showPlacardForm, setShowPlacardForm] = useState(false);
+  const [activeTab, setActiveTab] = useState<SwitchboardTab>("publicInfo");
   const [publicInfoForm, setPublicInfoForm] = useState(EMPTY_PUBLIC_INFO_FORM);
   const [placardForm, setPlacardForm] = useState(EMPTY_PLACARD_FORM);
   const [creatingPublicInfo, setCreatingPublicInfo] = useState(false);
@@ -451,12 +513,13 @@ export default function SwitchboardPage() {
     selectedPublicInfoVersion,
   );
 
-  const headerTabs = [
-    locale === "en" ? "Versions" : "版本",
-    locale === "en" ? "Placards" : "牌貼",
-    locale === "en" ? "Public Contact" : "公開聯絡",
-    locale === "en" ? "History" : "歷史",
+  const tabItems = [
+    { key: "publicInfo" as const, label: t("switchboard.tab.publicInfo") },
+    { key: "placards" as const, label: t("switchboard.tab.placards") },
   ];
+
+  const activeTabLabel =
+    tabItems.find((tab) => tab.key === activeTab)?.label ?? tabItems[0].label;
 
   const copy =
     locale === "en"
@@ -499,10 +562,27 @@ export default function SwitchboardPage() {
           historyTitle: "History framing",
           historySubtitle:
             "Published versions keep immutable lineage while drafts remain operational.",
+          tabsTitle: "Switchboard lanes",
+          tabsSubtitle:
+            "Keep the primary review posture stable while operational forms live in dedicated tabs.",
+          placardTableTitle: "Placard lineage",
+          placardTableSubtitle:
+            "Generated outputs stay tied to public-info source versions and controlled downloads.",
+          publicContactTitle: "Public contact framing",
+          publicContactSubtitle:
+            "Preview the live disclosure copy before creating the next draft.",
+          publicContactSummary:
+            "Use the draft form to prepare the next rider-facing disclosure without breaking published lineage.",
+          historyCardTitle: "History framing",
+          historyCardSubtitle:
+            "Drafts remain editable; published versions stay traceable and immutable.",
           historyLiveDisclosure: "Live disclosure",
           historyCurrentPlacard: "Current placard",
           historyDraftPosture: "Draft posture",
           historySelectedSource: "Selected source",
+          historyPlacardSource: "Placard source posture",
+          downloadReady: "controlled download",
+          notAvailable: "not available",
         }
       : {
           breadcrumbParent: "車隊與合規",
@@ -539,10 +619,23 @@ export default function SwitchboardPage() {
           kpiTiedDetail: "來源狀態 = published",
           historyTitle: "History framing",
           historySubtitle: "已發布版本維持 immutable lineage，草稿則保留操作空間。",
+          tabsTitle: "Switchboard lanes",
+          tabsSubtitle: "主畫面維持審查姿態，操作表單則收在對應分頁。",
+          placardTableTitle: "牌貼沿革",
+          placardTableSubtitle: "生成成品需持續綁定來源版本與受控下載。",
+          publicContactTitle: "公開聯絡 framing",
+          publicContactSubtitle: "建立下一版草稿前，先檢查目前對乘客揭露的文案。",
+          publicContactSummary:
+            "以草稿表單準備下一版對外揭露，同時維持已發布版本的 lineage 不被破壞。",
+          historyCardTitle: "History framing",
+          historyCardSubtitle: "草稿可編輯；published 版本保留可追溯且不可變的沿革。",
           historyLiveDisclosure: "目前生效揭露",
           historyCurrentPlacard: "現行牌貼",
           historyDraftPosture: "草稿姿態",
           historySelectedSource: "目前來源版本",
+          historyPlacardSource: "牌貼來源姿態",
+          downloadReady: "受控下載",
+          notAvailable: "不可用",
         };
 
   async function handleCreatePublicInfo(event: FormEvent) {
@@ -977,6 +1070,83 @@ export default function SwitchboardPage() {
     </CanvasCard>
   );
 
+  const placardColumns = useMemo<CanvasTableColumn<PlacardRow>[]>(
+    () => [
+      {
+        h: t("switchboard.col.placardId"),
+        w: 180,
+        r: (placard) => (
+          <div style={stackedCellStyle}>
+            <span style={monoTextStyle}>{placard.versionCode}</span>
+            <span style={secondaryTextStyle}>{placard.placardVersionId}</span>
+          </div>
+        ),
+      },
+      {
+        h: t("switchboard.col.sourceVersion"),
+        w: 180,
+        r: (placard) => {
+          const sourceVersion = publicInfoById[placard.publicInfoVersionId];
+          return (
+            <div style={stackedCellStyle}>
+              <span style={monoTextStyle}>{placard.publicInfoVersionId}</span>
+              <span style={secondaryTextStyle}>
+                {sourceVersion?.title ?? "—"}
+              </span>
+            </div>
+          );
+        },
+      },
+      {
+        h: t("switchboard.col.template"),
+        w: 160,
+        r: (placard) => (
+          <div style={stackedCellStyle}>
+            <span style={monoTextStyle}>{placard.templateName}</span>
+            <span style={secondaryTextStyle}>
+              {placard.artifactFileId ?? copy.notAvailable}
+            </span>
+          </div>
+        ),
+      },
+      {
+        h: t("switchboard.col.tied"),
+        w: 120,
+        r: (placard) => {
+          const sourceVersion = publicInfoById[placard.publicInfoVersionId];
+          return (
+            <CanvasPill
+              theme={theme}
+              tone={sourceVersion?.status === "published" ? "success" : "warn"}
+              dot
+            >
+              {sourceVersion?.status === "published"
+                ? copy.downloadReady
+                : sourceVersion?.status ?? "draft"}
+            </CanvasPill>
+          );
+        },
+      },
+      {
+        h: getPlatformLabel(locale, "updated"),
+        w: 180,
+        r: (placard) => (
+          <div style={stackedCellStyle}>
+            <span style={monoTextStyle}>
+              {formatDateTime(placard.updatedAt)}
+            </span>
+            <span style={secondaryTextStyle}>
+              {placard.artifactExpiresAt
+                ? `${copy.downloadReady} · ${formatDateTime(placard.artifactExpiresAt)}`
+                : copy.notAvailable}
+            </span>
+          </div>
+        ),
+      },
+    ],
+    [copy.downloadReady, copy.notAvailable, locale, publicInfoById, t],
+  );
+
   const renderVersionsTable = () => (
     <CanvasCard
       theme={theme}
@@ -1003,6 +1173,154 @@ export default function SwitchboardPage() {
     </CanvasCard>
   );
 
+  const renderPlacardTable = () => (
+    <CanvasCard
+      theme={theme}
+      padding={0}
+      title={copy.placardTableTitle}
+      subtitle={copy.placardTableSubtitle}
+    >
+      {placards.length === 0 ? (
+        <div style={{ padding: 16 }}>
+          <p style={helperTextStyle}>{t("switchboard.noPlacards")}</p>
+        </div>
+      ) : (
+        <CanvasTable<PlacardRow>
+          theme={theme}
+          rows={placards}
+          columns={placardColumns}
+        />
+      )}
+    </CanvasCard>
+  );
+
+  const renderPublicContactPanel = () => (
+    <CanvasCard
+      theme={theme}
+      title={copy.publicContactTitle}
+      subtitle={copy.publicContactSubtitle}
+    >
+      <div style={cardStackStyle}>
+        <p style={helperTextStyle}>{copy.publicContactSummary}</p>
+        <CanvasDL
+          theme={theme}
+          cols={1}
+          items={[
+            {
+              k: t("switchboard.form.callPhone"),
+              v: livePublicInfoVersion?.callPhone ?? "—",
+              mono: true,
+            },
+            {
+              k: t("switchboard.form.complaintPhone"),
+              v: livePublicInfoVersion?.complaintPhone ?? "—",
+              mono: true,
+            },
+            {
+              k: t("switchboard.form.callRateText"),
+              v: (
+                <span style={richTextStyle}>
+                  {livePublicInfoVersion?.callRateText ?? t("switchboard.noRateText")}
+                </span>
+              ),
+            },
+            {
+              k: t("switchboard.form.fareText"),
+              v: (
+                <span style={richTextStyle}>
+                  {livePublicInfoVersion?.fareText ?? t("switchboard.noRateText")}
+                </span>
+              ),
+            },
+            {
+              k: t("switchboard.form.paymentMethodText"),
+              v: (
+                <span style={richTextStyle}>
+                  {livePublicInfoVersion?.paymentMethodText ?? "—"}
+                </span>
+              ),
+            },
+          ]}
+        />
+      </div>
+    </CanvasCard>
+  );
+
+  const renderHistoryPanel = () => (
+    <CanvasCard
+      theme={theme}
+      title={copy.historyCardTitle}
+      subtitle={copy.historyCardSubtitle}
+    >
+      <div style={historyGridStyle}>
+        <div style={historyItemStyle}>
+          <span style={historyLabelStyle}>{copy.historyLiveDisclosure}</span>
+          <span style={historyValueStyle}>
+            {livePublicInfoVersion?.versionId ?? "—"}
+          </span>
+          <span style={historyHintStyle}>
+            {livePublicInfoVersion
+              ? formatEffectiveRange(locale, livePublicInfoVersion)
+              : copy.noLiveVersion}
+          </span>
+        </div>
+        <div style={historyItemStyle}>
+          <span style={historyLabelStyle}>{copy.historyCurrentPlacard}</span>
+          <span style={historyValueStyle}>
+            {livePlacardVersion?.versionCode ?? "—"}
+          </span>
+          <span style={historyHintStyle}>
+            {livePlacardVersion?.templateName ?? copy.noLivePlacard}
+          </span>
+        </div>
+        <div style={historyItemStyle}>
+          <span style={historyLabelStyle}>{copy.historyDraftPosture}</span>
+          <span style={historyValueStyle}>
+            {latestDraftVersion?.versionId ?? "—"}
+          </span>
+          <span style={historyHintStyle}>
+            {latestDraftVersion
+              ? formatDateTime(latestDraftVersion.updatedAt)
+              : copy.noPublicInfo}
+          </span>
+        </div>
+        <div style={historyItemStyle}>
+          <span style={historyLabelStyle}>{copy.historyPlacardSource}</span>
+          <span style={historyValueStyle}>
+            {selectedPublicInfoVersion?.versionId ??
+              previewPublicInfoVersion?.versionId ??
+              "—"}
+          </span>
+          <span style={historyHintStyle}>
+            {getPlacardSourceSelectionHint(
+              selectedPublicInfoVersion ?? previewPublicInfoVersion,
+              locale,
+            )}
+          </span>
+        </div>
+      </div>
+    </CanvasCard>
+  );
+
+  const renderActiveTabPanel = () => {
+    if (activeTab === "placards") {
+      return (
+        <div style={cardStackStyle}>
+          {showPlacardForm ? renderPlacardForm() : null}
+          {renderPlacardTable()}
+        </div>
+      );
+    }
+
+    return (
+      <div style={cardStackStyle}>
+        {showPublicInfoForm ? renderPublicInfoForm() : null}
+        {renderPublicContactPanel()}
+        {renderHistoryPanel()}
+      </div>
+    );
+  };
+
   if (loading) {
     return <div style={loadingStateStyle}>{t("switchboard.loading")}</div>;
   }
@@ -1026,14 +1344,17 @@ export default function SwitchboardPage() {
             theme={theme}
             title={copy.title}
             subtitle={copy.subtitle}
-            tabs={headerTabs}
-            activeTab={headerTabs[0]}
+            tabs={tabItems.map((tab) => tab.label)}
+            activeTab={activeTabLabel}
             actions={
               <>
                 <CanvasBtn
                   theme={theme}
                   icon="plus"
-                  onClick={() => setShowPublicInfoForm((current) => !current)}
+                  onClick={() => {
+                    setActiveTab("publicInfo");
+                    setShowPublicInfoForm((current) => !current);
+                  }}
                 >
                   {showPublicInfoForm
                     ? t("switchboard.hidePublicInfoForm")
@@ -1106,7 +1427,6 @@ export default function SwitchboardPage() {
           <div style={splitLayoutStyle}>
             <div style={mainColumnStyle}>
               {renderVersionsTable()}
-              {showPublicInfoForm ? renderPublicInfoForm() : null}
             </div>
 
             <div style={sideColumnStyle}>
@@ -1116,7 +1436,7 @@ export default function SwitchboardPage() {
                 subtitle={copy.previewSubtitle}
               >
                 {previewPublicInfoVersion ? (
-                  <div style={cardStackStyle}>
+                  <div style={placardCardPreviewStyle}>
                     <div style={placardPreviewStyle}>
                       <strong style={{ textAlign: "center", fontSize: 13 }}>
                         {previewPublicInfoVersion.title}
@@ -1150,7 +1470,7 @@ export default function SwitchboardPage() {
                         {formatEffectiveRange(locale, previewPublicInfoVersion)})
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <div style={previewActionRowStyle}>
                       <CanvasBtn
                         theme={theme}
                         icon="copy"
@@ -1171,7 +1491,10 @@ export default function SwitchboardPage() {
                         theme={theme}
                         variant="primary"
                         icon="plus"
-                        onClick={() => setShowPlacardForm((current) => !current)}
+                        onClick={() => {
+                          setActiveTab("placards");
+                          setShowPlacardForm((current) => !current);
+                        }}
                       >
                         {showPlacardForm
                           ? t("switchboard.hidePlacardForm")
@@ -1231,9 +1554,30 @@ export default function SwitchboardPage() {
                   ]}
                 />
               </CanvasCard>
-              {showPlacardForm ? renderPlacardForm() : null}
             </div>
           </div>
+
+          <CanvasCard
+            theme={theme}
+            title={copy.tabsTitle}
+            subtitle={copy.tabsSubtitle}
+          >
+            <div style={cardStackStyle}>
+              <div style={tabRailStyle}>
+                {tabItems.map((tab) => (
+                  <CanvasBtn
+                    key={tab.key}
+                    theme={theme}
+                    variant={activeTab === tab.key ? "primary" : "secondary"}
+                    onClick={() => setActiveTab(tab.key)}
+                  >
+                    {tab.label}
+                  </CanvasBtn>
+                ))}
+              </div>
+              {renderActiveTabPanel()}
+            </div>
+          </CanvasCard>
         </div>
       </CanvasShell>
     </div>
