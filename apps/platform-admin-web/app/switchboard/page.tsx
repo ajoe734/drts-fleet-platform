@@ -127,6 +127,26 @@ const tabPanelStyle = {
   gap: 16,
 } satisfies CSSProperties;
 
+const headerActionGroupStyle = {
+  display: "grid",
+  gap: 10,
+  justifyItems: "end",
+} satisfies CSSProperties;
+
+const headerStatusRowStyle = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
+} satisfies CSSProperties;
+
+const headerCtaRowStyle = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
+} satisfies CSSProperties;
+
 const placardCardPreviewStyle = {
   display: "grid",
   gap: 12,
@@ -360,7 +380,12 @@ function buildPlatformNav(locale: string): CanvasShellNavItem[] {
     { key: "home", href: "/", label: labels.home, icon: "dashboard" },
     { key: "health", href: "/health", label: labels.health, icon: "health" },
     { divider: labels.tenantGroup },
-    { key: "tenants", href: "/tenants", label: labels.tenants, icon: "tenants" },
+    {
+      key: "tenants",
+      href: "/tenants",
+      label: labels.tenants,
+      icon: "tenants",
+    },
     {
       key: "partners",
       href: "/partners",
@@ -533,12 +558,17 @@ export default function SwitchboardPage() {
           pageTitle: "Version management",
           title: "Public Info & Placards",
           subtitle: "public info versioning · placard generation · publish",
+          headerStatusVersion:
+            locale === "en" ? "Public info tab" : "公開資訊分頁",
+          headerStatusPlacard: livePlacardVersion
+            ? `${livePlacardVersion.versionCode} live`
+            : "placard pending",
           bannerTitle: "公開揭露版本與牌貼沿革一起維護",
           bannerBody:
             "草稿、發布與牌貼生成都在同一頁被檢查，避免 rider disclosure 與實體貼紙脫鉤。",
           versionsTitle: "Public info versions",
           versionsSubtitle:
-            "Version · effective window · public contact · status",
+            "Version, effective window, public contact, and lifecycle stay tabled together on the primary review surface.",
           previewTitle: livePlacardVersion
             ? `Current placard (${livePlacardVersion.versionCode})`
             : "Current placard",
@@ -584,11 +614,16 @@ export default function SwitchboardPage() {
           pageTitle: "版本管理",
           title: "法定資訊與牌貼",
           subtitle: "public info versioning · placard generation · publish",
+          headerStatusVersion: "公開資訊分頁",
+          headerStatusPlacard: livePlacardVersion
+            ? `${livePlacardVersion.versionCode} live`
+            : "牌貼待生成",
           bannerTitle: "公開揭露版本與牌貼沿革一起維護",
           bannerBody:
             "草稿、發布與牌貼生成都在同一頁被檢查，避免 rider disclosure 與實體貼紙脫鉤。",
           versionsTitle: "Public info versions",
-          versionsSubtitle: "版本 · effective 區間 · 公開聯絡 · 狀態",
+          versionsSubtitle:
+            "版本、effective 區間、公開聯絡與狀態維持表格化，對齊 PA_Switchboard 的主畫面節奏。",
           previewTitle: livePlacardVersion
             ? `目前發行牌貼 (${livePlacardVersion.versionCode})`
             : "目前發行牌貼",
@@ -604,17 +639,21 @@ export default function SwitchboardPage() {
           generatedFrom: "本牌貼依",
           vehicleLine: "車輛編號 ARJ-2891 / 駕駛 林志偉",
           paymentPrefix: "支付",
-          historySubtitle: "已發布版本維持 immutable lineage，草稿則保留操作空間。",
+          historySubtitle:
+            "已發布版本維持 immutable lineage，草稿則保留操作空間。",
           tabsTitle: "Switchboard lanes",
-          tabsSubtitle: "主畫面維持審查姿態，新增、牌貼與歷史操作則收在對應分頁。",
+          tabsSubtitle:
+            "主畫面維持審查姿態，新增、牌貼與歷史操作則收在對應分頁。",
           placardTableTitle: "牌貼沿革",
           placardTableSubtitle: "生成成品需持續綁定來源版本與受控下載。",
           publicContactTitle: "公開聯絡 framing",
-          publicContactSubtitle: "建立下一版草稿前，先檢查目前對乘客揭露的文案。",
+          publicContactSubtitle:
+            "建立下一版草稿前，先檢查目前對乘客揭露的文案。",
           publicContactSummary:
             "以草稿表單準備下一版對外揭露，同時維持已發布版本的 lineage 不被破壞。",
           historyCardTitle: "History framing",
-          historyCardSubtitle: "草稿可編輯；published 版本保留可追溯且不可變的沿革。",
+          historyCardSubtitle:
+            "草稿可編輯；published 版本保留可追溯且不可變的沿革。",
           historyLiveDisclosure: "目前生效揭露",
           historyCurrentPlacard: "現行牌貼",
           historyDraftPosture: "草稿姿態",
@@ -754,7 +793,9 @@ export default function SwitchboardPage() {
         w: 180,
         r: (version) => (
           <div style={stackedCellStyle}>
-            <span style={monoTextStyle}>{formatDateTime(version.updatedAt)}</span>
+            <span style={monoTextStyle}>
+              {formatDateTime(version.updatedAt)}
+            </span>
             {version.status === "draft" ? (
               <div style={rowActionStyle}>
                 <CanvasBtn
@@ -852,7 +893,10 @@ export default function SwitchboardPage() {
               style={inputStyle(true)}
             />
           </CanvasField>
-          <CanvasField theme={theme} label={t("switchboard.form.effectiveFrom")}>
+          <CanvasField
+            theme={theme}
+            label={t("switchboard.form.effectiveFrom")}
+          >
             <input
               value={publicInfoForm.effectiveFrom ?? ""}
               onChange={(event) =>
@@ -952,7 +996,10 @@ export default function SwitchboardPage() {
     >
       <form onSubmit={handleGeneratePlacard} style={cardStackStyle}>
         <div style={fieldGridStyle}>
-          <CanvasField theme={theme} label={t("switchboard.form.sourceVersion")}>
+          <CanvasField
+            theme={theme}
+            label={t("switchboard.form.sourceVersion")}
+          >
             <select
               value={placardForm.publicInfoVersionId}
               onChange={(event) =>
@@ -1108,7 +1155,7 @@ export default function SwitchboardPage() {
             >
               {sourceVersion?.status === "published"
                 ? copy.downloadReady
-                : sourceVersion?.status ?? "draft"}
+                : (sourceVersion?.status ?? "draft")}
             </CanvasPill>
           );
         },
@@ -1206,7 +1253,8 @@ export default function SwitchboardPage() {
               k: t("switchboard.form.callRateText"),
               v: (
                 <span style={richTextStyle}>
-                  {livePublicInfoVersion?.callRateText ?? t("switchboard.noRateText")}
+                  {livePublicInfoVersion?.callRateText ??
+                    t("switchboard.noRateText")}
                 </span>
               ),
             },
@@ -1214,7 +1262,8 @@ export default function SwitchboardPage() {
               k: t("switchboard.form.fareText"),
               v: (
                 <span style={richTextStyle}>
-                  {livePublicInfoVersion?.fareText ?? t("switchboard.noRateText")}
+                  {livePublicInfoVersion?.fareText ??
+                    t("switchboard.noRateText")}
                 </span>
               ),
             },
@@ -1344,35 +1393,51 @@ export default function SwitchboardPage() {
             tabs={tabItems.map((tab) => tab.label)}
             activeTab={tabItems.find((tab) => tab.key === activeTab)?.label}
             actions={
-              <>
-                <CanvasBtn
-                  theme={theme}
-                  icon="plus"
-                  onClick={() => {
-                    setActiveTab("versions");
-                    setShowPublicInfoForm((current) => !current);
-                  }}
-                >
-                  {showPublicInfoForm
-                    ? t("switchboard.hidePublicInfoForm")
-                    : t("switchboard.createDraftVersion")}
-                </CanvasBtn>
-                <CanvasBtn
-                  theme={theme}
-                  variant="primary"
-                  icon="check"
-                  disabled={!latestDraftVersion || publishingVersionId != null}
-                  onClick={() =>
-                    latestDraftVersion
-                      ? void handlePublish(latestDraftVersion.versionId)
-                      : undefined
-                  }
-                >
-                  {publishingVersionId === latestDraftVersion?.versionId
-                    ? t("switchboard.publishing")
-                    : t("switchboard.publishDraft")}
-                </CanvasBtn>
-              </>
+              <div style={headerActionGroupStyle}>
+                <div style={headerStatusRowStyle}>
+                  <CanvasPill theme={theme} tone="warn" dot>
+                    {copy.headerStatusVersion}
+                  </CanvasPill>
+                  <CanvasPill
+                    theme={theme}
+                    tone={livePlacardVersion ? "success" : "neutral"}
+                    dot
+                  >
+                    {copy.headerStatusPlacard}
+                  </CanvasPill>
+                </div>
+                <div style={headerCtaRowStyle}>
+                  <CanvasBtn
+                    theme={theme}
+                    icon="plus"
+                    onClick={() => {
+                      setActiveTab("versions");
+                      setShowPublicInfoForm((current) => !current);
+                    }}
+                  >
+                    {showPublicInfoForm
+                      ? t("switchboard.hidePublicInfoForm")
+                      : t("switchboard.createDraftVersion")}
+                  </CanvasBtn>
+                  <CanvasBtn
+                    theme={theme}
+                    variant="primary"
+                    icon="check"
+                    disabled={
+                      !latestDraftVersion || publishingVersionId != null
+                    }
+                    onClick={() =>
+                      latestDraftVersion
+                        ? void handlePublish(latestDraftVersion.versionId)
+                        : undefined
+                    }
+                  >
+                    {publishingVersionId === latestDraftVersion?.versionId
+                      ? t("switchboard.publishing")
+                      : t("switchboard.publishDraft")}
+                  </CanvasBtn>
+                </div>
+              </div>
             }
           />
 
@@ -1434,9 +1499,7 @@ export default function SwitchboardPage() {
             </div>
 
             <div style={splitLayoutStyle}>
-              <div style={mainColumnStyle}>
-                {renderVersionsTable()}
-              </div>
+              <div style={mainColumnStyle}>{renderVersionsTable()}</div>
               <div style={sideColumnStyle}>
                 <div style={cardStackStyle}>
                   <CanvasCard
@@ -1475,8 +1538,13 @@ export default function SwitchboardPage() {
                             {previewPublicInfoVersion.paymentMethodText ?? "—"}
                           </div>
                           <div style={{ color: "#666" }}>
-                            {copy.generatedFrom} {previewPublicInfoVersion.versionId} (
-                            {formatEffectiveRange(locale, previewPublicInfoVersion)})
+                            {copy.generatedFrom}{" "}
+                            {previewPublicInfoVersion.versionId} (
+                            {formatEffectiveRange(
+                              locale,
+                              previewPublicInfoVersion,
+                            )}
+                            )
                           </div>
                         </div>
                         <div style={previewActionRowStyle}>
