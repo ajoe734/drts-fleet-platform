@@ -139,3 +139,21 @@ export type {
   WorkflowEmptyStateProps,
   WorkflowSplitLayoutProps,
 } from "./workflow-primitives";
+export {
+  CONSOLE_NAV,
+  OPS_NAV,
+  PLATFORM_NAV,
+  TENANT_NAV,
+  findConsoleNavItem,
+} from "./console-nav";
+export type {
+  ConsoleNavItem,
+  ConsoleNavSection,
+  ConsoleSurface,
+} from "./console-nav";
+export {
+  CANONICAL_FONT_FAMILY,
+  CANONICAL_MONO_FAMILY,
+  FONT_CSS_VARIABLES,
+  NEXT_FONT_CONFIG,
+} from "./fonts";
