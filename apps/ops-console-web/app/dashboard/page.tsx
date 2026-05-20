@@ -1690,11 +1690,10 @@ export default async function DashboardPage() {
           />
           <KPI
             theme={theme}
-            label={
-              locale === "en" ? "Dispatch-eligible drivers" : "可派司機"
-            }
+            label={t("dashboard.onlineDrivers", locale)}
             value={formatCompactNumber(dispatchEligibleDrivers)}
-            sub={
+            sub={t("dashboard.onlineDriversSub", locale)}
+            hint={
               locale === "en"
                 ? `${formatCompactNumber(operations.onlineDrivers)} on shift`
                 : `${formatCompactNumber(operations.onlineDrivers)} 在班`
@@ -1702,19 +1701,24 @@ export default async function DashboardPage() {
           />
           <KPI
             theme={theme}
-            label={locale === "en" ? "Stale location" : "位置失聯"}
-            value={formatCompactNumber(staleLocationDrivers)}
-            delta={staleLocationDelta}
-            deltaTone={staleLocationDrivers > 0 ? "down" : "neutral"}
-            sub={
-              locale === "en"
-                ? `${formatCompactNumber(
-                    observability.driverState.missingLocationDrivers,
-                  )} missing updates`
-                : `${formatCompactNumber(
-                    observability.driverState.missingLocationDrivers,
-                  )} 筆未更新`
+            label={t("dashboard.dispatchableVehicles", locale)}
+            value={formatCompactNumber(operations.dispatchableVehicles)}
+            delta={
+              staleLocationDrivers > 0
+                ? locale === "en"
+                  ? `${formatCompactNumber(staleLocationDrivers)} stale`
+                  : `${formatCompactNumber(staleLocationDrivers)} 筆 stale`
+                : undefined
             }
+            deltaTone={
+              staleLocationDrivers > 0 || operations.offlineVehicles > 0
+                ? "down"
+                : "neutral"
+            }
+            sub={t("dashboard.dispatchableVehiclesSub", locale, {
+              count: operations.offlineVehicles,
+            })}
+            hint={staleLocationDelta}
           />
           <KPI
             theme={theme}
