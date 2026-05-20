@@ -8,6 +8,7 @@ import type {
 } from "@drts/contracts";
 import {
   CanvasBanner,
+  CanvasBtn,
   CanvasCard,
   CanvasDL,
   CanvasKPI,
@@ -37,30 +38,13 @@ const pageBodyStyle: CSSProperties = {
   gap: 16,
 };
 
-const topRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
-  gap: 12,
-};
-
 const chipRowStyle: CSSProperties = {
   display: "flex",
   flexWrap: "wrap",
   gap: 8,
 };
 
-const actionRowStyle: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
-};
-
 const actionLinkStyle: CSSProperties = {
-  color: th.accent,
-  fontSize: 12.5,
-  fontWeight: 600,
   textDecoration: "none",
 };
 
@@ -86,17 +70,44 @@ const stackStyle: CSSProperties = {
 
 const stepperStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))",
+  gap: 12,
+};
+
+const stepItemStyle: CSSProperties = {
+  minWidth: 0,
+  display: "grid",
   gap: 10,
 };
 
-const stepCardStyle: CSSProperties = {
-  position: "relative",
-  minWidth: 0,
-  padding: "12px 12px 10px",
-  borderRadius: 10,
-  border: `1px solid ${th.border}`,
-  background: th.surfaceLo,
+const stepHeadStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "28px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 8,
+};
+
+const stepIndicatorStyle: CSSProperties = {
+  width: 28,
+  height: 28,
+  borderRadius: 999,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const stepRailStyle: CSSProperties = {
+  height: 2,
+  width: "100%",
+  borderRadius: 999,
+  alignSelf: "center",
+};
+
+const stepCopyStyle: CSSProperties = {
+  display: "grid",
+  gap: 4,
 };
 
 const timelineStyle: CSSProperties = {
@@ -137,6 +148,13 @@ const mutedCopyStyle: CSSProperties = {
 const sectionGapStyle: CSSProperties = {
   display: "flex",
   flexDirection: "column",
+  gap: 12,
+};
+
+const timelineHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
   gap: 12,
 };
 
@@ -525,34 +543,37 @@ export default async function BookingDetailPage({
         theme={th}
         title={`Booking ${booking.bookingId}`}
         subtitle={`${booking.businessDispatchSubtype} · ${booking.pickup.address} -> ${booking.dropoff.address}`}
+        actions={
+          <>
+            <Link href="/bookings" style={actionLinkStyle}>
+              <CanvasBtn theme={th} icon="ext" size="sm">
+                Back to bookings
+              </CanvasBtn>
+            </Link>
+            <Link href="/bookings/new" style={actionLinkStyle}>
+              <CanvasBtn theme={th} icon="copy" size="sm">
+                Duplicate as new
+              </CanvasBtn>
+            </Link>
+          </>
+        }
       />
 
       <div style={pageBodyStyle}>
-        <div style={topRowStyle}>
-          <div style={chipRowStyle}>
-            <CanvasPill
-              theme={th}
-              tone={getOrderPillTone(booking.orderStatus)}
-              dot
-            >
-              {booking.orderStatus}
-            </CanvasPill>
-            <CanvasPill theme={th} tone="neutral">
-              Booking {booking.status}
-            </CanvasPill>
-            <CanvasPill theme={th} tone={getSourcePillTone(booking)}>
-              {source.badge}
-            </CanvasPill>
-          </div>
-
-          <div style={actionRowStyle}>
-            <Link href="/bookings" style={actionLinkStyle}>
-              Back to bookings
-            </Link>
-            <Link href="/bookings/new" style={actionLinkStyle}>
-              Duplicate as new
-            </Link>
-          </div>
+        <div style={chipRowStyle}>
+          <CanvasPill
+            theme={th}
+            tone={getOrderPillTone(booking.orderStatus)}
+            dot
+          >
+            {booking.orderStatus}
+          </CanvasPill>
+          <CanvasPill theme={th} tone="neutral">
+            Booking {booking.status}
+          </CanvasPill>
+          <CanvasPill theme={th} tone={getSourcePillTone(booking)}>
+            {source.badge}
+          </CanvasPill>
         </div>
 
         {source.domain === "forwarded_authority" ? (
@@ -640,45 +661,51 @@ export default async function BookingDetailPage({
               subtitle="Stepper mirrors the published booking lifecycle without exposing dispatch-only internals."
             >
               <div style={stepperStyle}>
-                {lifecycleSteps.map((step) => {
+                {lifecycleSteps.map((step, index) => {
                   const tone = getStepTone(step.state);
                   return (
-                    <div
-                      key={step.id}
-                      style={{
-                        ...stepCardStyle,
-                        borderColor: tone.border,
-                        background: tone.background,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 8,
-                          marginBottom: 8,
-                        }}
-                      >
-                        <strong style={{ fontSize: 12.5, color: th.text }}>
-                          {step.title}
-                        </strong>
-                        <CanvasPill theme={th} tone="neutral">
-                          {tone.badge}
-                        </CanvasPill>
+                    <div key={step.id} style={stepItemStyle}>
+                      <div style={stepHeadStyle}>
+                        <span
+                          aria-hidden
+                          style={{
+                            ...stepIndicatorStyle,
+                            border: `2px solid ${tone.border}`,
+                            background:
+                              step.state === "upcoming"
+                                ? "transparent"
+                                : tone.border,
+                            color:
+                              step.state === "upcoming" ? tone.text : "#ffffff",
+                            boxShadow:
+                              step.state === "current"
+                                ? `0 0 0 4px ${tone.background}`
+                                : undefined,
+                          }}
+                        >
+                          {index + 1}
+                        </span>
+                        <div style={stepCopyStyle}>
+                          <strong style={{ fontSize: 12.5, color: th.text }}>
+                            {step.title}
+                          </strong>
+                          <CanvasPill theme={th} tone="neutral">
+                            {tone.badge}
+                          </CanvasPill>
+                        </div>
                       </div>
-                      <div
-                        style={{
-                          fontSize: 11.5,
-                          color: tone.text,
-                          fontWeight: 600,
-                          marginBottom: 6,
-                        }}
-                      >
-                        {step.state === "danger"
-                          ? "Terminal state"
-                          : "Lifecycle step"}
-                      </div>
+                      {index < lifecycleSteps.length - 1 ? (
+                        <span
+                          aria-hidden
+                          style={{
+                            ...stepRailStyle,
+                            background:
+                              step.state === "complete"
+                                ? tone.border
+                                : th.border,
+                          }}
+                        />
+                      ) : null}
                       <p style={{ ...mutedCopyStyle, margin: 0 }}>
                         {step.description}
                       </p>
@@ -723,15 +750,20 @@ export default async function BookingDetailPage({
                         ) : null}
                       </div>
                       <div style={sectionGapStyle}>
-                        <div style={tableCellStackStyle}>
-                          <strong style={{ fontSize: 12.5, color: th.text }}>
-                            {item.label}
-                          </strong>
-                          <span style={mutedCopyStyle}>
+                        <div style={timelineHeaderStyle}>
+                          <div style={tableCellStackStyle}>
+                            <strong style={{ fontSize: 12.5, color: th.text }}>
+                              {item.label}
+                            </strong>
+                            <span style={mutedCopyStyle}>
+                              Tenant-visible checkpoint
+                            </span>
+                          </div>
+                          <CanvasPill theme={th} tone="neutral">
                             {item.at
                               ? formatDateTime(item.at)
                               : "Not published"}
-                          </span>
+                          </CanvasPill>
                         </div>
                         <p style={{ ...mutedCopyStyle, margin: 0 }}>
                           {item.detail}
