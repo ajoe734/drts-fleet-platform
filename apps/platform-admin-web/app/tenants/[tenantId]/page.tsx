@@ -291,9 +291,9 @@ export default function TenantDetailPage() {
       setOnboardingForm(toTenantOnboardingFormState(record));
       setAuditRecords(
         (audit ?? [])
-          .filter((entry) => entry.tenantId === record.id)
+          .filter((entry: AuditLogRecord) => entry.tenantId === record.id)
           .sort(
-            (left, right) =>
+            (left: AuditLogRecord, right: AuditLogRecord) =>
               new Date(right.createdAt).getTime() -
               new Date(left.createdAt).getTime(),
           ),
