@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import React, { useEffect, useState, useTransition, useMemo } from "react";
-import { PageHeader } from "@drts/ui-web";
+import React, { useEffect, useMemo, useState, useTransition } from "react";
 import type {
   CreateReportJobCommand,
   FilingPackageDetailRecord,
@@ -21,12 +20,67 @@ import {
 } from "@drts/contracts";
 import { getOpsClient } from "@/lib/api-client";
 import { useTranslation } from "@/lib/i18n";
+import type { Locale } from "@/lib/translations";
+import { t as translate } from "@/lib/translations";
 import { formatOpsCodeLabel, getOpsLabel } from "@/lib/localized-labels";
+import {
+  CanvasBanner as Banner,
+  CanvasBtn as Btn,
+  CanvasCard as Card,
+  CanvasDL as DL,
+  CanvasField as Field,
+  CanvasKPI as KPI,
+  CanvasPageHeader as PageHeader,
+  CanvasPill as Pill,
+  CanvasShell as Shell,
+  CanvasTable as Table,
+  buildCanvasTheme,
+  type CanvasShellNavItem,
+  type CanvasTableColumn,
+} from "@drts/ui-web";
+
+type TabKey = "report_jobs" | "filing_packages" | "schedules";
+type CanvasTone = "accent" | "danger" | "info" | "neutral" | "success" | "warn";
 
 type JobPresetMetadata = {
   label: string;
   description: string;
 };
+
+type JobPreset = {
+  value: ReportJobType;
+  label: string;
+  description: string;
+  category: "Regulatory" | "Operational";
+};
+
+type JobTableRow = Record<string, unknown> & {
+  jobId: string;
+  kind: string;
+  period: string;
+  format: string;
+  status: string;
+  expires: string;
+  created: string;
+  _selected?: boolean;
+};
+
+type PackageTableRow = Record<string, unknown> & {
+  packageId: string;
+  kind: string;
+  status: string;
+  manifest: string;
+  items: string;
+  generated: string;
+  artifacts: string;
+  _selected?: boolean;
+};
+
+const theme = buildCanvasTheme({
+  surface: "ops",
+  dark: true,
+  density: "compact",
+});
 
 const REGULATORY_JOB_TYPE_SET = new Set<ReportJobType>(
   REGULATORY_REPORT_JOB_TYPES,
@@ -91,11 +145,50 @@ const JOB_PRESET_METADATA: Record<ReportJobType, JobPresetMetadata> = {
   },
 };
 
-const JOB_PRESETS = REPORT_JOB_TYPES.map((value) => ({
-  value,
-  ...JOB_PRESET_METADATA[value],
-  category: REGULATORY_JOB_TYPE_SET.has(value) ? "Regulatory" : "Operational",
-}));
+const JOB_PRESETS: JobPreset[] = REPORT_JOB_TYPES.map(
+  (value: ReportJobType) => ({
+    value,
+    ...JOB_PRESET_METADATA[value],
+    category: REGULATORY_JOB_TYPE_SET.has(value) ? "Regulatory" : "Operational",
+  }),
+);
+
+const pageStackStyle = {
+  padding: 24,
+  display: "flex",
+  flexDirection: "column" as const,
+  gap: 16,
+};
+
+const kpiGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+};
+
+const controlRowStyle = {
+  display: "flex",
+  flexWrap: "wrap" as const,
+  gap: 8,
+};
+
+const splitGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1.45fr) minmax(320px, 0.9fr)",
+  gap: 16,
+};
+
+const panelGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 12,
+};
+
+const formGridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 12,
+};
 
 function defaultClosedMonth() {
   const now = new Date();
@@ -136,12 +229,123 @@ function expiresSoon(value: string | null | undefined, hours = 12) {
   return expiresAt - Date.now() <= hours * 60 * 60 * 1000;
 }
 
-function copyText(locale: "en" | "zh", en: string, zh: string) {
+function copyText(locale: Locale, en: string, zh: string) {
   return locale === "zh" ? zh : en;
+}
+
+function statusTone(status: string): CanvasTone {
+  if (["completed", "ready", "immutable", "valid"].includes(status)) {
+    return "success";
+  }
+  if (["failed", "error", "expired"].includes(status)) {
+    return "danger";
+  }
+  if (["running", "processing", "active"].includes(status)) {
+    return "info";
+  }
+  if (["queued", "pending", "mutable"].includes(status)) {
+    return "warn";
+  }
+  return "neutral";
+}
+
+function buildShellNav(locale: Locale): CanvasShellNavItem[] {
+  return [
+    {
+      divider: locale === "en" ? "Workspaces" : "工作面",
+    },
+    {
+      key: "dashboard",
+      href: "/dashboard",
+      icon: "dashboard",
+      label: translate("nav.dashboard", locale),
+    },
+    {
+      divider: locale === "en" ? "Live Ops" : "即時派遣",
+    },
+    {
+      key: "dispatch",
+      href: "/dispatch",
+      icon: "dispatch",
+      label: translate("nav.dispatch", locale),
+      matchPaths: ["/dispatch"],
+    },
+    {
+      key: "callcenter",
+      href: "/callcenter",
+      icon: "callcenter",
+      label: translate("nav.callcenter", locale),
+    },
+    {
+      divider: locale === "en" ? "Casework" : "案件處理",
+    },
+    {
+      key: "complaints",
+      href: "/complaints",
+      icon: "complaints",
+      label: translate("nav.complaints", locale),
+    },
+    {
+      key: "incidents",
+      href: "/incidents",
+      icon: "incidents",
+      label: translate("nav.incidents", locale),
+      matchPaths: ["/incidents"],
+    },
+    {
+      divider: locale === "en" ? "Monitoring" : "營運監控",
+    },
+    {
+      key: "reports",
+      href: "/reports",
+      icon: "reports",
+      label: translate("nav.reports", locale),
+    },
+    {
+      key: "revenue",
+      href: "/revenue",
+      icon: "revenue",
+      label: translate("nav.revenue", locale),
+    },
+    {
+      key: "attendance",
+      href: "/attendance",
+      icon: "attendance",
+      label: translate("nav.attendance", locale),
+    },
+    {
+      divider: locale === "en" ? "Registry" : "主資料",
+    },
+    {
+      key: "drivers",
+      href: "/drivers",
+      icon: "fleet",
+      label: translate("nav.drivers", locale),
+    },
+    {
+      key: "vehicles",
+      href: "/vehicles",
+      icon: "vehicles",
+      label: translate("nav.vehicles", locale),
+    },
+    {
+      key: "contracts",
+      href: "/contracts",
+      icon: "contracts",
+      label: translate("nav.contracts", locale),
+    },
+    {
+      key: "feature-flags",
+      href: "/feature-flags",
+      icon: "flags",
+      label: translate("nav.featureFlags", locale),
+    },
+  ];
 }
 
 export default function ReportsPage() {
   const { t, locale } = useTranslation();
+  const [activeTab, setActiveTab] = useState<TabKey>("report_jobs");
   const [jobs, setJobs] = useState<ReportJobRecord[]>([]);
   const [packages, setPackages] = useState<FilingPackageListRecord[]>([]);
   const [jobDetail, setJobDetail] = useState<ReportJobDetailRecord | null>(
@@ -203,15 +407,6 @@ export default function ReportsPage() {
     }
   }
 
-  // FilingPackageListRecord does not carry scope metadata, so summarize by package type.
-  const packageTypeCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    packages.forEach((pkg) => {
-      counts[pkg.packageType] = (counts[pkg.packageType] || 0) + 1;
-    });
-    return counts;
-  }, [packages]);
-
   async function inspectReportJob(jobId: string) {
     setDetailLoadingKey(`job:${jobId}`);
     setError(null);
@@ -219,6 +414,7 @@ export default function ReportsPage() {
       const detail = await getOpsClient().getReportJob(jobId);
       setSelectedJobId(jobId);
       setJobDetail(detail);
+      setActiveTab("report_jobs");
     } catch (e) {
       setError(e instanceof Error ? e.message : t("common.unknown"));
     } finally {
@@ -233,6 +429,7 @@ export default function ReportsPage() {
       const detail = await getOpsClient().getFilingPackage(packageId);
       setSelectedPackageId(packageId);
       setPackageDetail(detail);
+      setActiveTab("filing_packages");
     } catch (e) {
       setError(e instanceof Error ? e.message : t("common.unknown"));
     } finally {
@@ -295,1190 +492,1032 @@ export default function ReportsPage() {
   const completedPackages = packages.filter(
     (pkg) => pkg.status === "completed",
   ).length;
-  const failedReports = jobs.filter((job) => job.status === "failed").length;
-  const runningReports = jobs.filter((job) => job.status === "running").length;
   const regulatoryJobs = jobs.filter((job) =>
     REGULATORY_JOB_TYPE_SET.has(job.jobType as ReportJobType),
   ).length;
   const expiringArtifacts = jobs.filter((job) =>
     expiresSoon(job.artifact?.expiresAt),
   ).length;
-  const immutablePackages = packages.filter(
-    (pkg) => pkg.immutable ?? true,
-  ).length;
   const activePresetCategory = jobCategory(jobType);
+  const activePreset = JOB_PRESET_METADATA[jobType];
+
+  const tabs = ["Report jobs", "Filing packages", "Schedules"];
+  const activeHeaderTab =
+    activeTab === "report_jobs"
+      ? tabs[0]
+      : activeTab === "filing_packages"
+        ? tabs[1]
+        : tabs[2];
+
+  const jobRows = useMemo<JobTableRow[]>(
+    () =>
+      jobs.map((job) => ({
+        jobId: job.jobId,
+        kind: t(`reports.type.${job.jobType}`),
+        period:
+          typeof job.filters.period === "string"
+            ? job.filters.period
+            : t("reports.detail.noFiltersShort"),
+        format: job.format,
+        status: formatOpsCodeLabel(locale, job.status),
+        expires: job.artifact?.expiresAt
+          ? formatDateTime(job.artifact.expiresAt)
+          : "—",
+        created: formatDateTime(job.createdAt),
+        _selected: selectedJobId === job.jobId,
+      })),
+    [jobs, locale, selectedJobId, t],
+  );
+
+  const packageRows = useMemo<PackageTableRow[]>(
+    () =>
+      packages.map((pkg) => ({
+        packageId: pkg.packageId,
+        kind: formatOpsCodeLabel(locale, pkg.packageType),
+        status: formatOpsCodeLabel(locale, pkg.status),
+        manifest: pkg.manifestHash ? shortHash(pkg.manifestHash) : "—",
+        items: String(pkg.items.length),
+        generated: formatDateTime(pkg.generatedAt),
+        artifacts:
+          pkg.artifactZipUrl || pkg.artifactPdfUrl
+            ? [
+                pkg.artifactZipUrl ? "ZIP" : null,
+                pkg.artifactPdfUrl ? "PDF" : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : "—",
+        _selected: selectedPackageId === pkg.packageId,
+      })),
+    [locale, packages, selectedPackageId],
+  );
+
+  const jobColumns: CanvasTableColumn<JobTableRow>[] = [
+    {
+      h: "JOB",
+      w: 132,
+      mono: true,
+      r: (row, index) => {
+        const job = jobs[index];
+        return (
+          <button
+            type="button"
+            onClick={() => void inspectReportJob(row.jobId)}
+            style={linkButtonStyle}
+          >
+            <span style={{ fontWeight: 700 }}>{row.jobId}</span>
+            <span style={subCopyStyle}>{t(`reports.type.${job.jobType}`)}</span>
+          </button>
+        );
+      },
+    },
+    { h: "KIND", k: "kind", w: 210 },
+    { h: "PERIOD", k: "period", w: 130, mono: true },
+    { h: "FORMAT", k: "format", w: 90, mono: true },
+    {
+      h: "STATUS",
+      w: 120,
+      r: (_row, index) => (
+        <Pill
+          theme={theme}
+          tone={statusTone(jobs[index]?.status ?? "pending")}
+          dot
+        >
+          {formatOpsCodeLabel(locale, jobs[index]?.status ?? "pending")}
+        </Pill>
+      ),
+    },
+    { h: "EXPIRES", k: "expires", w: 150, mono: true },
+    { h: "CREATED", k: "created", mono: true },
+  ];
+
+  const packageColumns: CanvasTableColumn<PackageTableRow>[] = [
+    {
+      h: "PACKAGE",
+      w: 132,
+      mono: true,
+      r: (row) => (
+        <button
+          type="button"
+          onClick={() => void inspectFilingPackage(row.packageId)}
+          style={linkButtonStyle}
+        >
+          <span style={{ fontWeight: 700 }}>{row.packageId}</span>
+          <span style={subCopyStyle}>{row.kind}</span>
+        </button>
+      ),
+    },
+    { h: "KIND", k: "kind", w: 180 },
+    {
+      h: "STATUS",
+      w: 120,
+      r: (_row, index) => (
+        <Pill
+          theme={theme}
+          tone={statusTone(packages[index]?.status ?? "pending")}
+          dot
+        >
+          {formatOpsCodeLabel(locale, packages[index]?.status ?? "pending")}
+        </Pill>
+      ),
+    },
+    { h: "MANIFEST", k: "manifest", w: 120, mono: true },
+    { h: "ITEMS", k: "items", w: 80, mono: true, align: "right" },
+    { h: "GENERATED", k: "generated", w: 180, mono: true },
+    { h: "ARTIFACTS", k: "artifacts", w: 110, mono: true },
+  ];
+
+  const currentJob = selectedJobId
+    ? (jobs.find((job) => job.jobId === selectedJobId) ?? null)
+    : null;
+  const currentPackage = selectedPackageId
+    ? (packages.find((pkg) => pkg.packageId === selectedPackageId) ?? null)
+    : null;
 
   return (
-    <>
-      <PageHeader title={t("reports.title")} subtitle={t("reports.subtitle")} />
-      <div>
-        {error && (
-          <div className="error-banner">
-            <strong>{getOpsLabel(locale, "error")}:</strong> {error}
-          </div>
-        )}
+    <Shell
+      theme={theme}
+      nav={buildShellNav(locale)}
+      active="reports"
+      breadcrumb={[copyText(locale, "Reports", "報表")]}
+    >
+      <PageHeader
+        theme={theme}
+        title={copyText(locale, "Reports", "報表")}
+        subtitle="report jobs · filing packages · signed artifact 短效 URL"
+        tabs={tabs}
+        activeTab={activeHeaderTab}
+        actions={
+          <>
+            <Btn theme={theme} icon="reports" onClick={() => void loadData()}>
+              {t("common.refresh")}
+            </Btn>
+            <Btn
+              theme={theme}
+              variant="primary"
+              icon="plus"
+              onClick={() =>
+                setActiveTab(
+                  activeTab === "filing_packages"
+                    ? "filing_packages"
+                    : "report_jobs",
+                )
+              }
+            >
+              {activeTab === "filing_packages"
+                ? t("reports.generateFiling")
+                : t("reports.form.createJob")}
+            </Btn>
+          </>
+        }
+      />
+      <div style={pageStackStyle}>
+        {error ? (
+          <Banner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={copyText(locale, "Report center error", "報表中心錯誤")}
+            body={error}
+          />
+        ) : null}
 
-        <section className="summary-grid">
+        {expiringArtifacts > 0 ? (
+          <Banner
+            theme={theme}
+            tone="info"
+            icon="reports"
+            title={copyText(
+              locale,
+              "Signed artifact URLs need attention",
+              "簽名產物網址需要留意",
+            )}
+            body={copyText(
+              locale,
+              `${expiringArtifacts} artifact URL(s) expire within 12 hours.`,
+              `${expiringArtifacts} 個產物網址將在 12 小時內到期。`,
+            )}
+          />
+        ) : null}
+
+        <div style={kpiGridStyle}>
+          <KPI
+            theme={theme}
+            label={t("reports.queuedJobs")}
+            value={queuedReports}
+            sub={t("reports.queuedJobsSub")}
+          />
+          <KPI
+            theme={theme}
+            label={t("reports.completedReports")}
+            value={completedReports}
+            sub={t("reports.completedReportsSub")}
+          />
+          <KPI
+            theme={theme}
+            label={t("reports.regulatoryJobs")}
+            value={regulatoryJobs}
+            sub={t("reports.regulatoryJobsSub")}
+          />
+          <KPI
+            theme={theme}
+            label={t("reports.artifactsReady")}
+            value={readyArtifacts + completedPackages}
+            sub={t("reports.artifactsReadySub")}
+          />
+        </div>
+
+        <div style={controlRowStyle}>
           {[
             {
-              label: t("reports.queuedJobs"),
-              value: queuedReports,
-              note: t("reports.queuedJobsSub"),
+              key: "report_jobs" as const,
+              label: `Report jobs ${jobs.length}`,
             },
             {
-              label: t("reports.completedReports"),
-              value: completedReports,
-              note: t("reports.completedReportsSub"),
+              key: "filing_packages" as const,
+              label: `Filing packages ${packages.length}`,
             },
             {
-              label: t("reports.regulatoryJobs"),
-              value: regulatoryJobs,
-              note: t("reports.regulatoryJobsSub"),
+              key: "schedules" as const,
+              label: copyText(locale, "Schedules", "排程"),
             },
-            {
-              label: t("reports.artifactsReady"),
-              value: readyArtifacts + completedPackages,
-              note: t("reports.artifactsReadySub"),
-            },
-            {
-              label: copyText(locale, "Expiring access", "即將過期的存取"),
-              value: expiringArtifacts,
-              note: copyText(
-                locale,
-                "Signed URLs expiring within 12 hours",
-                "12 小時內到期的簽名網址",
-              ),
-            },
-          ].map((card) => (
-            <div key={card.label} className="summary-card">
-              <span>{card.label}</span>
-              <strong>{card.value}</strong>
-              <small>{card.note}</small>
-            </div>
+          ].map((tab) => (
+            <Btn
+              key={tab.key}
+              theme={theme}
+              variant={activeTab === tab.key ? "primary" : "secondary"}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.label}
+            </Btn>
           ))}
-        </section>
+        </div>
 
-        {Object.keys(packageTypeCounts).length > 0 && (
-          <section className="summary-grid">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">Filing Packages by Type</p>
-                <h3>Filing Packages by Type</h3>
-              </div>
-            </div>
-            {Object.entries(packageTypeCounts).map(([packageType, count]) => (
-              <div key={packageType} className="summary-card">
-                <span>{formatOpsCodeLabel(locale, packageType)}</span>
-                <strong>{count}</strong>
-                <small>Filing Packages</small>
-              </div>
-            ))}
-          </section>
-        )}
+        {activeTab === "report_jobs" ? (
+          <div style={splitGridStyle}>
+            <Card
+              theme={theme}
+              padding={0}
+              title={copyText(locale, "Recent jobs", "近期工作")}
+              subtitle={t("reports.totalJobs", { count: jobs.length })}
+            >
+              {loading ? (
+                <div style={emptyStateStyle}>{t("reports.loadingJobs")}</div>
+              ) : jobs.length > 0 ? (
+                <Table theme={theme} columns={jobColumns} rows={jobRows} />
+              ) : (
+                <div style={emptyStateStyle}>{t("reports.noJobs")}</div>
+              )}
+            </Card>
 
-        <section className="detail-grid">
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">
-                  {copyText(locale, "Queue posture", "佇列狀態")}
-                </p>
-                <h3>
-                  {copyText(locale, "Report job supervision", "報表工作監控")}
-                </h3>
-              </div>
-            </div>
-            <div className="detail-card-grid">
-              {[
-                {
-                  label: copyText(locale, "Queued", "排隊中"),
-                  value: queuedReports,
-                  note: copyText(
-                    locale,
-                    "Waiting for worker pickup",
-                    "等待背景工作者接手",
-                  ),
-                },
-                {
-                  label: copyText(locale, "Running", "執行中"),
-                  value: runningReports,
-                  note: copyText(
-                    locale,
-                    "Background execution in progress",
-                    "背景執行中",
-                  ),
-                },
-                {
-                  label: copyText(locale, "Failed", "失敗"),
-                  value: failedReports,
-                  note: copyText(
-                    locale,
-                    "Needs operator review or rerun",
-                    "需要人工檢視或重新執行",
-                  ),
-                },
-              ].map((item) => (
-                <div key={item.label} className="detail-card">
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                  <small>{item.note}</small>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">
-                  {copyText(locale, "Access rules", "存取規則")}
-                </p>
-                <h3>
-                  {copyText(
-                    locale,
-                    "Artifact and filing controls",
-                    "產物與申報控制",
-                  )}
-                </h3>
-              </div>
-            </div>
-            <div className="detail-card-grid">
-              {[
-                {
-                  label: copyText(locale, "Immutable packages", "不可變申報包"),
-                  value: immutablePackages,
-                  note: copyText(
-                    locale,
-                    "Filing bundles stay append-only once generated",
-                    "申報包生成後維持不可變",
-                  ),
-                },
-                {
-                  label: copyText(locale, "Regulatory jobs", "監管類工作"),
-                  value: regulatoryJobs,
-                  note: copyText(
-                    locale,
-                    "Compliance-facing outputs under signed access",
-                    "面向合規的產物走簽名下載",
-                  ),
-                },
-                {
-                  label: copyText(locale, "Expiring URLs", "即將過期的網址"),
-                  value: expiringArtifacts,
-                  note: copyText(
-                    locale,
-                    "Refresh signed links before download handoff",
-                    "交付下載前請更新簽名連結",
-                  ),
-                },
-              ].map((item) => (
-                <div key={item.label} className="detail-card">
-                  <span>{item.label}</span>
-                  <strong>{item.value}</strong>
-                  <small>{item.note}</small>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="form-stack">
-          <form className="panel" onSubmit={handleReportSubmit}>
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("reports.createReportEyebrow")}</p>
-                <h3>{t("reports.backgroundExport")}</h3>
-              </div>
-              <span className="pill">
-                {t(`reports.category.${activePresetCategory.toLowerCase()}`)}
-              </span>
-            </div>
-            <div className="form-grid">
-              <label>
-                {t("reports.form.type")}
-                <select
-                  value={jobType}
-                  onChange={(event) =>
-                    setJobType(event.target.value as ReportJobType)
-                  }
-                >
-                  {JOB_PRESETS.map((preset) => (
-                    <option key={preset.value} value={preset.value}>
-                      {t(`reports.type.${preset.value}`)}
-                    </option>
-                  ))}
-                </select>
-                <small>
-                  {t(`reports.type.${jobType}.desc`)}{" "}
-                  {t("reports.categoryLabel", {
-                    value: t(
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <Card
+                theme={theme}
+                title={t("reports.createReportEyebrow")}
+                subtitle={t("reports.backgroundExport")}
+                actions={
+                  <Pill theme={theme} tone="accent">
+                    {t(
                       `reports.category.${activePresetCategory.toLowerCase()}`,
-                    ),
-                  })}
-                </small>
-              </label>
-              <label>
-                {t("reports.form.format")}
-                <select
-                  value={format}
-                  onChange={(event) =>
-                    setFormat(event.target.value as ReportOutputFormat)
-                  }
-                >
-                  {REPORT_OUTPUT_FORMATS.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t("reports.form.periodTag")}
-                <input
-                  value={periodLabel}
-                  onChange={(event) => setPeriodLabel(event.target.value)}
-                  placeholder={getOpsLabel(locale, "reportsPeriodExample")}
-                />
-              </label>
-              <label>
-                {t("reports.form.vehicleId")}
-                <input
-                  value={vehicleId}
-                  onChange={(event) => setVehicleId(event.target.value)}
-                  placeholder={t("reports.form.vehicleId")}
-                />
-              </label>
-            </div>
-            <div className="form-actions">
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={pending}
+                    )}
+                  </Pill>
+                }
               >
-                {pending
-                  ? t("reports.form.submitting")
-                  : t("reports.form.createJob")}
-              </button>
-              <button
-                className="btn"
-                type="button"
-                onClick={() => void loadData()}
+                <form onSubmit={handleReportSubmit}>
+                  <div style={formGridStyle}>
+                    <Field
+                      theme={theme}
+                      label={t("reports.form.type")}
+                      hint={`${t(`reports.type.${jobType}.desc`)} ${t(
+                        "reports.categoryLabel",
+                        {
+                          value: t(
+                            `reports.category.${activePresetCategory.toLowerCase()}`,
+                          ),
+                        },
+                      )}`}
+                    >
+                      <select
+                        value={jobType}
+                        onChange={(event) =>
+                          setJobType(event.target.value as ReportJobType)
+                        }
+                        style={inputStyle}
+                      >
+                        {JOB_PRESETS.map((preset: JobPreset) => (
+                          <option key={preset.value} value={preset.value}>
+                            {t(`reports.type.${preset.value}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field theme={theme} label={t("reports.form.format")}>
+                      <select
+                        value={format}
+                        onChange={(event) =>
+                          setFormat(event.target.value as ReportOutputFormat)
+                        }
+                        style={inputStyle}
+                      >
+                        {REPORT_OUTPUT_FORMATS.map(
+                          (value: ReportOutputFormat) => (
+                            <option key={value} value={value}>
+                              {value}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </Field>
+                    <Field theme={theme} label={t("reports.form.periodTag")}>
+                      <input
+                        value={periodLabel}
+                        onChange={(event) => setPeriodLabel(event.target.value)}
+                        placeholder={getOpsLabel(
+                          locale,
+                          "reportsPeriodExample",
+                        )}
+                        style={inputStyle}
+                      />
+                    </Field>
+                    <Field theme={theme} label={t("reports.form.vehicleId")}>
+                      <input
+                        value={vehicleId}
+                        onChange={(event) => setVehicleId(event.target.value)}
+                        placeholder={t("reports.form.vehicleId")}
+                        style={inputStyle}
+                      />
+                    </Field>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
+                    <button
+                      type="submit"
+                      style={primaryButtonStyle}
+                      disabled={pending}
+                    >
+                      {pending
+                        ? t("reports.form.submitting")
+                        : t("reports.form.createJob")}
+                    </button>
+                  </div>
+                </form>
+              </Card>
+
+              <Card
+                theme={theme}
+                title={t("reports.reportDetailEyebrow")}
+                subtitle={
+                  currentJob
+                    ? t(`reports.type.${currentJob.jobType}`)
+                    : t("reports.selectReportJob")
+                }
               >
-                {t("common.refresh")}
-              </button>
-            </div>
-          </form>
-
-          <form className="panel" onSubmit={handlePackageSubmit}>
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("reports.generateFiling")}</p>
-                <h3>{t("reports.immutableFiling")}</h3>
-              </div>
-              <span className="pill">{t("reports.complianceBundle")}</span>
-            </div>
-            <div className="form-grid">
-              <label>
-                {t("reports.form.packageType")}
-                <select
-                  value={packageType}
-                  onChange={(event) =>
-                    setPackageType(event.target.value as FilingPackageType)
-                  }
-                >
-                  {FILING_PACKAGE_TYPES.map((value) => (
-                    <option key={value} value={value}>
-                      {formatOpsCodeLabel(locale, value)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t("reports.form.filingMonth")}
-                <input
-                  value={packageMonth}
-                  onChange={(event) => setPackageMonth(event.target.value)}
-                  placeholder={getOpsLabel(locale, "reportsClosedMonthExample")}
-                />
-              </label>
-              <label>
-                {t("reports.form.scopeChannel")}
-                <input
-                  value={packageScope}
-                  onChange={(event) => setPackageScope(event.target.value)}
-                  placeholder={getOpsLabel(locale, "reportsRequestedByExample")}
-                />
-              </label>
-            </div>
-            <div className="form-actions">
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={pending}
-              >
-                {pending
-                  ? t("reports.form.submitting")
-                  : t("reports.form.generatePackage")}
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <section className="detail-grid">
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("reports.reportDetailEyebrow")}</p>
-                <h3>
-                  {jobDetail
-                    ? t(`reports.type.${jobDetail.jobType}`)
-                    : t("reports.selectReportJob")}
-                </h3>
-              </div>
-            </div>
-            {selectedJobId && detailLoadingKey === `job:${selectedJobId}` ? (
-              <p>{t("reports.loadingReportDetail")}</p>
-            ) : jobDetail ? (
-              <>
-                <div className="detail-stats">
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.status")}</span>
-                    <strong>
-                      {formatOpsCodeLabel(locale, jobDetail.status)}
-                    </strong>
-                    <small>
-                      {t(
-                        `reports.category.${jobCategory(jobDetail.jobType).toLowerCase()}`,
-                      )}
-                    </small>
+                {selectedJobId &&
+                detailLoadingKey === `job:${selectedJobId}` ? (
+                  <div style={emptyStateStyle}>
+                    {t("reports.loadingReportDetail")}
                   </div>
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.format")}</span>
-                    <strong>{jobDetail.format}</strong>
-                    <small>{jobDetail.jobId}</small>
-                  </div>
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.created")}</span>
-                    <strong>{formatDateTime(jobDetail.createdAt)}</strong>
-                    <small>
-                      {t("reports.detail.updated", {
-                        value: formatDateTime(jobDetail.updatedAt),
-                      })}
-                    </small>
-                  </div>
-                </div>
-
-                <div className="detail-section">
-                  <h4>{t("reports.detail.filters")}</h4>
-                  {Object.keys(jobDetail.filters).length > 0 ? (
-                    <pre className="filters-preview">
-                      {JSON.stringify(jobDetail.filters, null, 2)}
-                    </pre>
-                  ) : (
-                    <p className="cell-subcopy">
-                      {t("reports.detail.noFilters")}
-                    </p>
-                  )}
-                </div>
-
-                <div className="detail-section">
-                  <h4>{t("reports.detail.signedArtifact")}</h4>
-                  {jobDetail.artifact ? (
-                    <div className="detail-card-grid">
-                      <div className="detail-card">
-                        <span>{t("reports.detail.manifest")}</span>
-                        <strong>
-                          {shortHash(jobDetail.artifact.manifestHash)}
-                        </strong>
-                        <small>
-                          {jobDetail.artifact.downloadMetadata.keyId}
-                        </small>
+                ) : jobDetail ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 14,
+                    }}
+                  >
+                    <DL
+                      theme={theme}
+                      cols={2}
+                      items={[
+                        {
+                          label: t("reports.detail.status"),
+                          value: (
+                            <Pill
+                              theme={theme}
+                              tone={statusTone(jobDetail.status)}
+                              dot
+                            >
+                              {formatOpsCodeLabel(locale, jobDetail.status)}
+                            </Pill>
+                          ),
+                        },
+                        {
+                          label: t("reports.detail.format"),
+                          value: jobDetail.format,
+                          mono: true,
+                        },
+                        {
+                          label: t("reports.detail.created"),
+                          value: formatDateTime(jobDetail.createdAt),
+                          mono: true,
+                        },
+                        {
+                          label: t("reports.detail.updated", {
+                            value: "",
+                          })
+                            .replace(": ", "")
+                            .trim(),
+                          value: formatDateTime(jobDetail.updatedAt),
+                          mono: true,
+                        },
+                      ]}
+                    />
+                    <div>
+                      <div style={detailHeadingStyle}>
+                        {t("reports.detail.filters")}
                       </div>
-                      <div className="detail-card">
-                        <span>{t("reports.detail.expires")}</span>
-                        <strong>
-                          {formatDateTime(
-                            jobDetail.artifact.downloadMetadata.expiresAt,
-                          )}
-                        </strong>
-                        <small>{t("reports.detail.backendSignedUrl")}</small>
-                      </div>
-                      <div className="detail-card">
-                        <span>{t("reports.download")}</span>
-                        <a
-                          className="inline-link"
-                          href={jobDetail.artifact.downloadMetadata.downloadUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {t("reports.detail.openSignedArtifact")}
-                        </a>
-                        <small>
-                          {formatOpsCodeLabel(
-                            locale,
-                            jobDetail.artifact.artifactType,
-                          )}
-                        </small>
-                      </div>
+                      <pre style={jsonBlockStyle}>
+                        {Object.keys(jobDetail.filters).length > 0
+                          ? JSON.stringify(jobDetail.filters, null, 2)
+                          : t("reports.detail.noFilters")}
+                      </pre>
                     </div>
-                  ) : (
-                    <p className="cell-subcopy">
-                      {t("reports.detail.artifactPending")}
-                    </p>
-                  )}
-                </div>
-
-                {jobDetail.rows && jobDetail.rows.length > 0 ? (
-                  <div className="detail-section">
-                    <h4>{t("reports.detail.dispatchRows")}</h4>
-                    <table className="table compact-table">
-                      <thead>
-                        <tr>
-                          <th>{t("reports.col.order")}</th>
-                          <th>{t("reports.col.call")}</th>
-                          <th>{t("reports.col.recording")}</th>
-                          <th>{t("reports.col.missing")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {jobDetail.rows.map((row) => (
-                          <tr key={row.orderId}>
-                            <td>
-                              <div className="cell-title">{row.orderNo}</div>
-                              <div className="cell-subcopy">{row.orderId}</div>
-                            </td>
-                            <td>{row.callId ?? "—"}</td>
-                            <td>{row.recordingId ?? "—"}</td>
-                            <td>
-                              {row.missingRecording
-                                ? t("common.yes")
-                                : t("common.no")}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                    <div>
+                      <div style={detailHeadingStyle}>
+                        {t("reports.detail.signedArtifact")}
+                      </div>
+                      {jobDetail.artifact ? (
+                        <div style={panelGridStyle}>
+                          <InfoPanel
+                            label={t("reports.detail.manifest")}
+                            value={shortHash(jobDetail.artifact.manifestHash)}
+                            sub={jobDetail.artifact.downloadMetadata.keyId}
+                          />
+                          <InfoPanel
+                            label={t("reports.detail.expires")}
+                            value={formatDateTime(
+                              jobDetail.artifact.downloadMetadata.expiresAt,
+                            )}
+                            sub={t("reports.detail.backendSignedUrl")}
+                          />
+                          <InfoPanel
+                            label={t("reports.download")}
+                            value={
+                              <a
+                                href={
+                                  jobDetail.artifact.downloadMetadata
+                                    .downloadUrl
+                                }
+                                target="_blank"
+                                rel="noreferrer"
+                                style={anchorStyle}
+                              >
+                                {t("reports.detail.openSignedArtifact")}
+                              </a>
+                            }
+                            sub={formatOpsCodeLabel(
+                              locale,
+                              jobDetail.artifact.artifactType,
+                            )}
+                          />
+                        </div>
+                      ) : (
+                        <div style={emptyStateStyle}>
+                          {t("reports.detail.artifactPending")}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                ) : null}
-
-                {jobDetail.partnerRevenueRows &&
-                jobDetail.partnerRevenueRows.length > 0 ? (
-                  <div className="detail-section">
-                    <h4>{t("reports.detail.partnerRevenueRows")}</h4>
-                    <table className="table compact-table">
-                      <thead>
-                        <tr>
-                          <th>{t("reports.col.order")}</th>
-                          <th>{t("reports.col.partner")}</th>
-                          <th>{t("reports.col.eligibility")}</th>
-                          <th>{t("reports.col.benefit")}</th>
-                          <th>{t("reports.col.amount")}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {jobDetail.partnerRevenueRows.map((row) => (
-                          <tr key={row.orderId}>
-                            <td>
-                              <div className="cell-title">{row.orderNo}</div>
-                              <div className="cell-subcopy">
-                                {row.businessDispatchSubtype}
-                              </div>
-                            </td>
-                            <td>
-                              <div className="cell-title">{row.partnerId}</div>
-                              <div className="cell-subcopy">
-                                {row.partnerEntrySlug}
-                              </div>
-                            </td>
-                            <td>
-                              <div className="cell-title">
-                                {row.eligibilityVerificationId ?? "—"}
-                              </div>
-                              <div className="cell-subcopy">
-                                {row.issuerAuthorizationRef ?? "—"}
-                              </div>
-                            </td>
-                            <td>
-                              <div className="cell-title">
-                                {row.benefitReference ?? "—"}
-                              </div>
-                              <div className="cell-subcopy">
-                                {row.partnerProgramId ?? "—"}
-                              </div>
-                            </td>
-                            <td>
-                              {row.amount.currency}{" "}
-                              {(row.amount.amountMinor / 100).toFixed(0)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                ) : (
+                  <div style={emptyStateStyle}>
+                    {t("reports.detail.selectReportDetail")}
                   </div>
-                ) : null}
-              </>
-            ) : (
-              <p className="cell-subcopy">
-                {t("reports.detail.selectReportDetail")}
-              </p>
-            )}
+                )}
+              </Card>
+            </div>
           </div>
+        ) : null}
 
-          <div className="panel">
-            <div className="panel-head">
-              <div>
-                <p className="eyebrow">{t("reports.packageDetailEyebrow")}</p>
-                <h3>
-                  {packageDetail
+        {activeTab === "filing_packages" ? (
+          <div style={splitGridStyle}>
+            <Card
+              theme={theme}
+              padding={0}
+              title={t("reports.packageHistory")}
+              subtitle={t("reports.packagesGenerated", {
+                count: packages.length,
+              })}
+            >
+              {loading ? (
+                <div style={emptyStateStyle}>
+                  {t("reports.loadingPackages")}
+                </div>
+              ) : packages.length > 0 ? (
+                <Table
+                  theme={theme}
+                  columns={packageColumns}
+                  rows={packageRows}
+                />
+              ) : (
+                <div style={emptyStateStyle}>{t("reports.noPackages")}</div>
+              )}
+            </Card>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              <Card
+                theme={theme}
+                title={t("reports.generateFiling")}
+                subtitle={t("reports.immutableFiling")}
+                actions={
+                  <Pill theme={theme} tone="accent">
+                    {t("reports.complianceBundle")}
+                  </Pill>
+                }
+              >
+                <form onSubmit={handlePackageSubmit}>
+                  <div style={formGridStyle}>
+                    <Field theme={theme} label={t("reports.form.packageType")}>
+                      <select
+                        value={packageType}
+                        onChange={(event) =>
+                          setPackageType(
+                            event.target.value as FilingPackageType,
+                          )
+                        }
+                        style={inputStyle}
+                      >
+                        {FILING_PACKAGE_TYPES.map(
+                          (value: FilingPackageType) => (
+                            <option key={value} value={value}>
+                              {formatOpsCodeLabel(locale, value)}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </Field>
+                    <Field theme={theme} label={t("reports.form.filingMonth")}>
+                      <input
+                        value={packageMonth}
+                        onChange={(event) =>
+                          setPackageMonth(event.target.value)
+                        }
+                        placeholder={getOpsLabel(
+                          locale,
+                          "reportsClosedMonthExample",
+                        )}
+                        style={inputStyle}
+                      />
+                    </Field>
+                    <Field theme={theme} label={t("reports.form.scopeChannel")}>
+                      <input
+                        value={packageScope}
+                        onChange={(event) =>
+                          setPackageScope(event.target.value)
+                        }
+                        placeholder={getOpsLabel(
+                          locale,
+                          "reportsRequestedByExample",
+                        )}
+                        style={inputStyle}
+                      />
+                    </Field>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
+                    <button
+                      type="submit"
+                      style={primaryButtonStyle}
+                      disabled={pending}
+                    >
+                      {pending
+                        ? t("reports.form.submitting")
+                        : t("reports.form.generatePackage")}
+                    </button>
+                  </div>
+                </form>
+              </Card>
+
+              <Card
+                theme={theme}
+                title={t("reports.packageDetailEyebrow")}
+                subtitle={
+                  currentPackage
                     ? t("reports.packageManifest", {
                         type: formatOpsCodeLabel(
                           locale,
-                          packageDetail.packageType,
+                          currentPackage.packageType,
                         ),
                       })
-                    : t("reports.selectFilingPackage")}
-                </h3>
-              </div>
-            </div>
-            {selectedPackageId &&
-            detailLoadingKey === `package:${selectedPackageId}` ? (
-              <p>{t("reports.loadingPackageDetail")}</p>
-            ) : packageDetail ? (
-              <>
-                <div className="detail-stats">
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.status")}</span>
-                    <strong>
-                      {formatOpsCodeLabel(locale, packageDetail.status)}
-                    </strong>
-                    <small>
-                      {formatOpsCodeLabel(
-                        locale,
-                        packageDetail.immutable ? "immutable" : "mutable",
-                      )}
-                    </small>
+                    : t("reports.selectFilingPackage")
+                }
+              >
+                {selectedPackageId &&
+                detailLoadingKey === `package:${selectedPackageId}` ? (
+                  <div style={emptyStateStyle}>
+                    {t("reports.loadingPackageDetail")}
                   </div>
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.generated")}</span>
-                    <strong>{formatDateTime(packageDetail.generatedAt)}</strong>
-                    <small>{packageDetail.packageId}</small>
-                  </div>
-                  <div className="detail-stat">
-                    <span>{t("reports.detail.checksum")}</span>
-                    <strong>
-                      {shortHash(packageDetail.manifest?.checksum)}
-                    </strong>
-                    <small>
-                      {t("reports.detail.packageItems", {
-                        count: packageDetail.items.length,
-                      })}
-                    </small>
-                  </div>
-                </div>
-
-                <div className="detail-section">
-                  <h4>{t("reports.detail.signedDownloads")}</h4>
-                  {packageDetail.downloadMetadata ? (
-                    <div className="detail-card-grid">
-                      <div className="detail-card">
-                        <span>{t("reports.detail.zipBundle")}</span>
-                        <a
-                          className="inline-link"
-                          href={packageDetail.downloadMetadata.zip.downloadUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {t("reports.detail.openSignedZip")}
-                        </a>
-                        <small>
-                          {t("reports.detail.expiresAt", {
-                            value: formatDateTime(
-                              packageDetail.downloadMetadata.zip.expiresAt,
-                            ),
-                          })}
-                        </small>
-                      </div>
-                      <div className="detail-card">
-                        <span>{t("reports.detail.pdfBundle")}</span>
-                        <a
-                          className="inline-link"
-                          href={packageDetail.downloadMetadata.pdf.downloadUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {t("reports.detail.openSignedPdf")}
-                        </a>
-                        <small>
-                          {t("reports.detail.expiresAt", {
-                            value: formatDateTime(
-                              packageDetail.downloadMetadata.pdf.expiresAt,
-                            ),
-                          })}
-                        </small>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="cell-subcopy">
-                      {t("reports.detail.packagePending")}
-                    </p>
-                  )}
-                </div>
-
-                <div className="detail-section">
-                  <h4>{t("reports.detail.manifestEntries")}</h4>
-                  {packageDetail.manifest ? (
-                    <>
-                      <div className="manifest-summary">
-                        <span>
-                          {t("reports.detail.manifestId", {
-                            id: packageDetail.manifest.manifestId,
-                          })}
-                        </span>
-                        <span>
-                          {t("reports.detail.immutableEntries", {
-                            count: packageDetail.manifest.entryCount,
-                            suffix:
-                              packageDetail.manifest.entryCount === 1
-                                ? "entry"
-                                : "entries",
-                          })}
-                        </span>
-                        <span>
-                          {t("reports.detail.manifestGenerated", {
-                            value: formatDateTime(
-                              packageDetail.manifest.generatedAt,
-                            ),
-                          })}
-                        </span>
-                      </div>
-                      <table className="table compact-table">
-                        <thead>
-                          <tr>
-                            <th>{t("reports.col.item")}</th>
-                            <th>{t("reports.col.artifactCol")}</th>
-                            <th>{t("reports.col.manifestHash")}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {packageDetail.manifest.entries.map((entry) => (
-                            <tr key={entry.itemId}>
-                              <td>
-                                <div className="cell-title">
-                                  {formatOpsCodeLabel(locale, entry.itemType)}
-                                </div>
-                                <div className="cell-subcopy">
-                                  {entry.itemId}
-                                </div>
-                              </td>
-                              <td>{entry.artifactId}</td>
-                              <td>
-                                <code>{shortHash(entry.manifestHash)}</code>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </>
-                  ) : (
-                    <p className="cell-subcopy">
-                      {t("reports.detail.manifestPending")}
-                    </p>
-                  )}
-                </div>
-              </>
-            ) : (
-              <p className="cell-subcopy">
-                {t("reports.detail.selectPackageDetail")}
-              </p>
-            )}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">{t("reports.reportJobsEyebrow")}</p>
-              <h3>{t("reports.recentJobs")}</h3>
-            </div>
-            <span className="panel-note">
-              {t("reports.totalJobs", { count: jobs.length })}
-            </span>
-          </div>
-          {loading ? (
-            <p>{t("reports.loadingJobs")}</p>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t("reports.col.job")}</th>
-                  <th>{t("reports.col.category")}</th>
-                  <th>{t("reports.col.status")}</th>
-                  <th>{t("reports.col.filters")}</th>
-                  <th>{t("reports.col.artifact")}</th>
-                  <th>{copyText(locale, "Access", "存取")}</th>
-                  <th>{t("reports.col.actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.length > 0 ? (
-                  jobs.map((job) => (
-                    <tr key={job.jobId}>
-                      <td>
-                        <div className="cell-title">
-                          {t(`reports.type.${job.jobType}`)}
-                        </div>
-                        <div className="cell-subcopy">{job.jobId}</div>
-                        <div className="cell-subcopy">
-                          {formatDateTime(job.createdAt)} • {job.format}
-                        </div>
-                      </td>
-                      <td>
-                        {t(
-                          `reports.category.${jobCategory(job.jobType).toLowerCase()}`,
-                        )}
-                      </td>
-                      <td>
-                        <div>{formatOpsCodeLabel(locale, job.status)}</div>
-                        <div className="cell-subcopy">
-                          {t("reports.detail.updated", {
-                            value: formatDateTime(job.updatedAt),
-                          })}
-                        </div>
-                      </td>
-                      <td>
-                        {Object.keys(job.filters).length > 0 ? (
-                          <pre className="filters-preview">
-                            {JSON.stringify(job.filters, null, 2)}
-                          </pre>
-                        ) : (
-                          <span className="cell-subcopy">
-                            {t("reports.detail.noFiltersShort")}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {job.artifact ? (
-                          <div className="package-links">
-                            <a
-                              className="inline-link"
-                              href={job.artifact.downloadUrl}
-                              target="_blank"
-                              rel="noreferrer"
+                ) : packageDetail ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 14,
+                    }}
+                  >
+                    <DL
+                      theme={theme}
+                      cols={2}
+                      items={[
+                        {
+                          label: t("reports.detail.status"),
+                          value: (
+                            <Pill
+                              theme={theme}
+                              tone={statusTone(packageDetail.status)}
+                              dot
                             >
-                              {t("reports.downloadArtifact", {
-                                type: formatOpsCodeLabel(
-                                  locale,
-                                  job.artifact.artifactType,
+                              {formatOpsCodeLabel(locale, packageDetail.status)}
+                            </Pill>
+                          ),
+                        },
+                        {
+                          label: t("reports.detail.generated"),
+                          value: formatDateTime(packageDetail.generatedAt),
+                          mono: true,
+                        },
+                        {
+                          label: t("reports.detail.checksum"),
+                          value: shortHash(packageDetail.manifest?.checksum),
+                          mono: true,
+                        },
+                        {
+                          label: t("reports.detail.packageItems", {
+                            count: packageDetail.items.length,
+                          }),
+                          value: packageDetail.packageId,
+                          mono: true,
+                        },
+                      ]}
+                    />
+                    <div>
+                      <div style={detailHeadingStyle}>
+                        {t("reports.detail.signedDownloads")}
+                      </div>
+                      {packageDetail.downloadMetadata ? (
+                        <div style={panelGridStyle}>
+                          <InfoPanel
+                            label={t("reports.detail.zipBundle")}
+                            value={
+                              <a
+                                href={
+                                  packageDetail.downloadMetadata.zip.downloadUrl
+                                }
+                                target="_blank"
+                                rel="noreferrer"
+                                style={anchorStyle}
+                              >
+                                {t("reports.detail.openSignedZip")}
+                              </a>
+                            }
+                            sub={t("reports.detail.expiresAt", {
+                              value: formatDateTime(
+                                packageDetail.downloadMetadata.zip.expiresAt,
+                              ),
+                            })}
+                          />
+                          <InfoPanel
+                            label={t("reports.detail.pdfBundle")}
+                            value={
+                              <a
+                                href={
+                                  packageDetail.downloadMetadata.pdf.downloadUrl
+                                }
+                                target="_blank"
+                                rel="noreferrer"
+                                style={anchorStyle}
+                              >
+                                {t("reports.detail.openSignedPdf")}
+                              </a>
+                            }
+                            sub={t("reports.detail.expiresAt", {
+                              value: formatDateTime(
+                                packageDetail.downloadMetadata.pdf.expiresAt,
+                              ),
+                            })}
+                          />
+                        </div>
+                      ) : (
+                        <div style={emptyStateStyle}>
+                          {t("reports.detail.packagePending")}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <div style={detailHeadingStyle}>
+                        {t("reports.detail.manifestEntries")}
+                      </div>
+                      {packageDetail.manifest ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 10,
+                          }}
+                        >
+                          <div style={manifestMetaStyle}>
+                            <span>
+                              {t("reports.detail.manifestId", {
+                                id: packageDetail.manifest.manifestId,
+                              })}
+                            </span>
+                            <span>
+                              {t("reports.detail.immutableEntries", {
+                                count: packageDetail.manifest.entryCount,
+                                suffix:
+                                  packageDetail.manifest.entryCount === 1
+                                    ? "entry"
+                                    : "entries",
+                              })}
+                            </span>
+                            <span>
+                              {t("reports.detail.manifestGenerated", {
+                                value: formatDateTime(
+                                  packageDetail.manifest.generatedAt,
                                 ),
                               })}
-                            </a>
-                            <span className="cell-subcopy">
-                              {shortHash(job.artifact.manifestHash)}
                             </span>
                           </div>
-                        ) : (
-                          <span className="cell-subcopy">
-                            {t("reports.detail.pendingArtifact")}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {job.artifact ? (
-                          <div className="access-stack">
-                            <span
-                              className={
-                                expiresSoon(job.artifact.expiresAt)
-                                  ? "access-chip access-chip-warning"
-                                  : "access-chip"
-                              }
-                            >
-                              {copyText(locale, "Expires", "到期")}{" "}
-                              {formatDateTime(job.artifact.expiresAt)}
-                            </span>
-                            <span className="cell-subcopy">
-                              {copyText(
-                                locale,
-                                "Signed download only",
-                                "僅可透過簽名下載",
-                              )}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="cell-subcopy">
-                            {copyText(
-                              locale,
-                              "No signed URL yet",
-                              "尚未產生簽名網址",
+                          <div style={manifestListStyle}>
+                            {packageDetail.manifest.entries.map(
+                              (
+                                entry: NonNullable<
+                                  FilingPackageDetailRecord["manifest"]
+                                >["entries"][number],
+                              ) => (
+                                <div
+                                  key={entry.itemId}
+                                  style={manifestRowStyle}
+                                >
+                                  <div>
+                                    <div style={{ fontWeight: 600 }}>
+                                      {formatOpsCodeLabel(
+                                        locale,
+                                        entry.itemType,
+                                      )}
+                                    </div>
+                                    <div style={subCopyStyle}>
+                                      {entry.itemId}
+                                    </div>
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontFamily: theme.monoFamily,
+                                      fontSize: 11.5,
+                                    }}
+                                  >
+                                    {entry.artifactId}
+                                  </div>
+                                  <div
+                                    style={{
+                                      fontFamily: theme.monoFamily,
+                                      fontSize: 11.5,
+                                    }}
+                                  >
+                                    {shortHash(entry.manifestHash)}
+                                  </div>
+                                </div>
+                              ),
                             )}
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <button
-                          className="btn"
-                          type="button"
-                          onClick={() => void inspectReportJob(job.jobId)}
-                          disabled={detailLoadingKey === `job:${job.jobId}`}
-                        >
-                          {detailLoadingKey === `job:${job.jobId}`
-                            ? t("reports.loading")
-                            : t("reports.inspect")}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={emptyStateStyle}>
+                          {t("reports.detail.manifestPending")}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 ) : (
-                  <tr>
-                    <td colSpan={7}>{t("reports.noJobs")}</td>
-                  </tr>
+                  <div style={emptyStateStyle}>
+                    {t("reports.detail.selectPackageDetail")}
+                  </div>
                 )}
-              </tbody>
-            </table>
-          )}
-        </section>
-
-        <section className="panel">
-          <div className="panel-head">
-            <div>
-              <p className="eyebrow">{t("reports.filingPackagesEyebrow")}</p>
-              <h3>{t("reports.packageHistory")}</h3>
+              </Card>
             </div>
-            <span className="panel-note">
-              {t("reports.packagesGenerated", { count: packages.length })}
-            </span>
           </div>
-          {loading ? (
-            <p>{t("reports.loadingPackages")}</p>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t("reports.col.package")}</th>
-                  <th>{t("reports.col.status")}</th>
-                  <th>{t("reports.col.manifest")}</th>
-                  <th>{t("reports.col.items")}</th>
-                  <th>{t("reports.col.generated")}</th>
-                  <th>{t("reports.col.artifacts")}</th>
-                  <th>{copyText(locale, "Controls", "控制")}</th>
-                  <th>{t("reports.col.actions")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {packages.length > 0 ? (
-                  packages.map((pkg) => (
-                    <tr key={pkg.packageId}>
-                      <td>
-                        <div className="cell-title">
-                          {formatOpsCodeLabel(locale, pkg.packageType)}
-                        </div>
-                        <div className="cell-subcopy">{pkg.packageId}</div>
-                      </td>
-                      <td>
-                        <div>{formatOpsCodeLabel(locale, pkg.status)}</div>
-                        <div className="cell-subcopy">
-                          {formatOpsCodeLabel(
-                            locale,
-                            (pkg.immutable ?? true) ? "immutable" : "mutable",
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        {pkg.manifestHash ? (
-                          <code>{shortHash(pkg.manifestHash)}</code>
-                        ) : (
-                          <span className="cell-subcopy">
-                            {t("reports.pendingManifest")}
-                          </span>
-                        )}
-                      </td>
-                      <td>{pkg.items.length}</td>
-                      <td>{formatDateTime(pkg.generatedAt)}</td>
-                      <td>
-                        <div className="package-links">
-                          {pkg.artifactZipUrl ? (
-                            <a
-                              className="inline-link"
-                              href={pkg.artifactZipUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              ZIP
-                            </a>
-                          ) : null}
-                          {pkg.artifactPdfUrl ? (
-                            <a
-                              className="inline-link"
-                              href={pkg.artifactPdfUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              PDF
-                            </a>
-                          ) : null}
-                          {!pkg.artifactZipUrl && !pkg.artifactPdfUrl ? (
-                            <span className="cell-subcopy">
-                              {t("reports.detail.pendingArtifact")}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td>
-                        <div className="access-stack">
-                          <span className="access-chip">
-                            {copyText(
-                              locale,
-                              (pkg.immutable ?? true) ? "Immutable" : "Mutable",
-                              (pkg.immutable ?? true) ? "不可變" : "可變",
-                            )}
-                          </span>
-                          <span className="cell-subcopy">
-                            {pkg.artifactZipUrl || pkg.artifactPdfUrl
-                              ? copyText(
-                                  locale,
-                                  "Short-lived download surfaces",
-                                  "短時效下載介面",
-                                )
-                              : copyText(
-                                  locale,
-                                  "Awaiting signed package links",
-                                  "等待簽名申報包連結",
-                                )}
-                          </span>
-                        </div>
-                      </td>
-                      <td>
-                        <button
-                          className="btn"
-                          type="button"
-                          onClick={() =>
-                            void inspectFilingPackage(pkg.packageId)
-                          }
-                          disabled={
-                            detailLoadingKey === `package:${pkg.packageId}`
-                          }
-                        >
-                          {detailLoadingKey === `package:${pkg.packageId}`
-                            ? t("reports.loading")
-                            : t("reports.inspect")}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={8}>{t("reports.noPackages")}</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          )}
-        </section>
+        ) : null}
 
-        <div className="footer-links">
-          <Link className="route-link" href="/revenue">
-            <strong>{t("reports.revenueView")}</strong>{" "}
-            {t("reports.revenueViewSub")}
-          </Link>
-          <Link className="route-link" href="/dashboard">
-            <strong>{t("common.backToDashboard")}</strong>{" "}
-            {t("reports.backToDashboardSub")}
-          </Link>
-        </div>
-
-        <style jsx>{`
-          .summary-grid,
-          .form-grid,
-          .form-actions,
-          .footer-links,
-          .form-stack,
-          .detail-grid,
-          .detail-stats,
-          .detail-card-grid {
-            display: grid;
-            gap: 0.75rem;
-          }
-          .summary-grid {
-            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .form-grid,
-          .detail-stats,
-          .detail-card-grid {
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-          }
-          .detail-grid {
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            margin-bottom: 1rem;
-          }
-          .summary-card,
-          .panel,
-          .detail-stat,
-          .detail-card {
-            padding: 1rem;
-            border-radius: 1rem;
-            border: 1px solid #e2e8f0;
-            background: #fff;
-          }
-          .summary-card,
-          .detail-stat,
-          .detail-card {
-            background: #f8fafc;
-          }
-          .summary-card strong {
-            font-size: 1.4rem;
-          }
-          .panel-head {
-            display: flex;
-            justify-content: space-between;
-            gap: 1rem;
-            align-items: flex-start;
-            margin-bottom: 0.75rem;
-          }
-          .eyebrow,
-          .panel-note,
-          .cell-subcopy,
-          .detail-stat span,
-          .detail-card span {
-            color: #64748b;
-          }
-          .eyebrow {
-            margin: 0 0 0.25rem;
-            font-size: 0.75rem;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-          }
-          .pill {
-            display: inline-flex;
-            align-items: center;
-            border-radius: 999px;
-            border: 1px solid #cbd5e1;
-            padding: 0.3rem 0.7rem;
-            font-size: 0.75rem;
-            color: #334155;
-            background: #f8fafc;
-          }
-          label {
-            display: grid;
-            gap: 0.35rem;
-            color: #0f172a;
-          }
-          small {
-            color: #64748b;
-          }
-          input,
-          select {
-            width: 100%;
-            padding: 0.75rem 0.85rem;
-            border-radius: 0.8rem;
-            border: 1px solid #cbd5e1;
-          }
-          .btn {
-            padding: 0.65rem 0.85rem;
-            border-radius: 0.75rem;
-            border: 1px solid #cbd5e1;
-            background: white;
-            cursor: pointer;
-          }
-          .btn-primary {
-            background: #0f172a;
-            color: white;
-            border-color: #0f172a;
-          }
-          .table {
-            width: 100%;
-            border-collapse: collapse;
-          }
-          .table th,
-          .table td {
-            padding: 0.75rem;
-            border-top: 1px solid #e2e8f0;
-            text-align: left;
-            vertical-align: top;
-          }
-          .table th {
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 0.06em;
-            color: #475569;
-          }
-          .compact-table th,
-          .compact-table td {
-            padding: 0.6rem;
-          }
-          .cell-title {
-            font-weight: 600;
-          }
-          .filters-preview {
-            margin: 0;
-            padding: 0.5rem;
-            border-radius: 0.75rem;
-            background: #f8fafc;
-            font-size: 0.72rem;
-            overflow: auto;
-          }
-          .inline-link {
-            color: #2563eb;
-            text-decoration: none;
-          }
-          .package-links {
-            display: flex;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-            align-items: center;
-          }
-          .access-stack {
-            display: grid;
-            gap: 0.35rem;
-          }
-          .access-chip {
-            display: inline-flex;
-            width: fit-content;
-            padding: 0.2rem 0.55rem;
-            border-radius: 999px;
-            background: #eff6ff;
-            color: #1d4ed8;
-            font-size: 0.78rem;
-          }
-          .access-chip-warning {
-            background: #fff7ed;
-            color: #c2410c;
-          }
-          .error-banner {
-            margin-bottom: 1rem;
-            border-radius: 0.9rem;
-            padding: 0.85rem 1rem;
-            background: #fef2f2;
-            color: #b91c1c;
-          }
-          .detail-section {
-            display: grid;
-            gap: 0.75rem;
-            margin-top: 1rem;
-          }
-          .detail-section h4 {
-            margin: 0;
-            font-size: 0.95rem;
-            color: #0f172a;
-          }
-          .detail-stat,
-          .detail-card {
-            display: grid;
-            gap: 0.3rem;
-          }
-          .detail-stat strong,
-          .detail-card strong {
-            font-size: 1rem;
-            color: #0f172a;
-          }
-          .manifest-summary {
-            display: flex;
-            gap: 0.75rem;
-            flex-wrap: wrap;
-            font-size: 0.85rem;
-            color: #475569;
-          }
-        `}</style>
+        {activeTab === "schedules" ? (
+          <div style={splitGridStyle}>
+            <Card
+              theme={theme}
+              title={copyText(locale, "Schedule posture", "排程狀態")}
+              subtitle={copyText(
+                locale,
+                "Pre-flight controls for recurring report and filing runs.",
+                "定期報表與申報工作前置控制。",
+              )}
+            >
+              <div style={panelGridStyle}>
+                <InfoPanel
+                  label={t("reports.form.type")}
+                  value={t(`reports.type.${jobType}`)}
+                  sub={activePreset?.description ?? t("reports.adhocDesc")}
+                />
+                <InfoPanel
+                  label={t("reports.form.packageType")}
+                  value={formatOpsCodeLabel(locale, packageType)}
+                  sub={copyText(
+                    locale,
+                    "Immutable compliance bundle target",
+                    "不可變合規包目標",
+                  )}
+                />
+                <InfoPanel
+                  label={t("reports.form.filingMonth")}
+                  value={packageMonth}
+                  sub={copyText(locale, "Closed month", "結帳月份")}
+                />
+              </div>
+            </Card>
+            <Card
+              theme={theme}
+              title={copyText(locale, "Operator links", "操作捷徑")}
+              subtitle={copyText(
+                locale,
+                "Adjacent ops surfaces for review and follow-up.",
+                "相鄰營運頁面供檢視與後續處理。",
+              )}
+            >
+              <div
+                style={{ display: "flex", flexDirection: "column", gap: 10 }}
+              >
+                <Link href="/revenue" style={routeLinkStyle}>
+                  <strong>{t("reports.revenueView")}</strong>
+                  <span style={subCopyStyle}>
+                    {t("reports.revenueViewSub")}
+                  </span>
+                </Link>
+                <Link href="/dashboard" style={routeLinkStyle}>
+                  <strong>{t("common.backToDashboard")}</strong>
+                  <span style={subCopyStyle}>
+                    {t("reports.backToDashboardSub")}
+                  </span>
+                </Link>
+              </div>
+            </Card>
+          </div>
+        ) : null}
       </div>
-    </>
+    </Shell>
   );
 }
+
+function InfoPanel({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+}) {
+  return (
+    <div style={infoPanelStyle}>
+      <div style={infoPanelLabelStyle}>{label}</div>
+      <div style={infoPanelValueStyle}>{value}</div>
+      {sub ? <div style={subCopyStyle}>{sub}</div> : null}
+    </div>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  borderRadius: 7,
+  border: `1px solid ${theme.border}`,
+  background: theme.bgRaised,
+  color: theme.text,
+  padding: "8px 10px",
+  fontSize: 12.5,
+  fontFamily: theme.fontFamily,
+  outline: "none",
+};
+
+const primaryButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+  padding: "8px 14px",
+  height: 34,
+  fontSize: 13,
+  fontWeight: 500,
+  background: theme.accent,
+  color: "#fff",
+  border: `1px solid ${theme.accent}`,
+  borderRadius: 7,
+  cursor: "pointer",
+  fontFamily: theme.fontFamily,
+};
+
+const emptyStateStyle: React.CSSProperties = {
+  padding: "14px 16px",
+  color: theme.textMuted,
+  fontSize: 12.5,
+  lineHeight: 1.5,
+};
+
+const detailHeadingStyle: React.CSSProperties = {
+  marginBottom: 8,
+  fontSize: 11,
+  fontWeight: 700,
+  color: theme.textMuted,
+  textTransform: "uppercase",
+  letterSpacing: 0.5,
+};
+
+const jsonBlockStyle: React.CSSProperties = {
+  margin: 0,
+  padding: "10px 12px",
+  borderRadius: 8,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  color: theme.text,
+  fontSize: 11.5,
+  lineHeight: 1.5,
+  overflowX: "auto",
+  fontFamily: theme.monoFamily,
+};
+
+const infoPanelStyle: React.CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 8,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  display: "grid",
+  gap: 4,
+};
+
+const infoPanelLabelStyle: React.CSSProperties = {
+  fontSize: 10.5,
+  fontWeight: 700,
+  color: theme.textMuted,
+  textTransform: "uppercase",
+  letterSpacing: 0.45,
+};
+
+const infoPanelValueStyle: React.CSSProperties = {
+  color: theme.text,
+  fontSize: 12.5,
+  lineHeight: 1.4,
+};
+
+const subCopyStyle: React.CSSProperties = {
+  color: theme.textMuted,
+  fontSize: 11,
+  lineHeight: 1.4,
+};
+
+const linkButtonStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "flex-start",
+  gap: 2,
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  color: "inherit",
+  cursor: "pointer",
+  font: "inherit",
+};
+
+const anchorStyle: React.CSSProperties = {
+  color: theme.accent,
+  textDecoration: "none",
+};
+
+const manifestMetaStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "6px 12px",
+  color: theme.textMuted,
+  fontSize: 11.5,
+};
+
+const manifestListStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  border: `1px solid ${theme.border}`,
+  borderRadius: 8,
+  overflow: "hidden",
+};
+
+const manifestRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns:
+    "minmax(0, 1.2fr) minmax(120px, 0.8fr) minmax(120px, 0.8fr)",
+  gap: 12,
+  padding: "10px 12px",
+  borderTop: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  alignItems: "center",
+};
+
+const routeLinkStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 4,
+  padding: "12px 14px",
+  borderRadius: 8,
+  border: `1px solid ${theme.border}`,
+  background: theme.surfaceLo,
+  color: theme.text,
+  textDecoration: "none",
+};
